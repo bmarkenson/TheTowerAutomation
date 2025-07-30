@@ -6,6 +6,7 @@ import subprocess
 import random
 from datetime import datetime
 from utils.logger import log
+from core.adb_utils import adb_shell
 
 TAP_QUEUE = queue.Queue()
 LOCK = threading.Lock()
@@ -13,7 +14,7 @@ LOCK = threading.Lock()
 # Configuration
 KEEPALIVE_INTERVAL = 60  # seconds
 #ADB_DEVICE_ID = "192.168.1.171:5555"  # or leave blank if only one device
-ADB_DEVICE_ID = "ce06171664278137027e"
+ADB_DEVICE_ID = "07171JEC203290"
 
 def log_tap(x, y, label):
     log(f"TAP {label or ''} at ({x},{y})", level="ACTION")

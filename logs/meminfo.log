@@ -1,0 +1,50 @@
+[2025-07-28 17:22:51] ERROR: invalid literal for int() with base 10: '24964                          47296'
+[2025-07-28 17:24:03] PSS=698169 PrivateOther=387680 Graphics=143648 JavaHeap=24328 NativeHeap=73280
+[2025-07-28 17:34:04] PSS=735408 PrivateOther=386588 Graphics=143648 JavaHeap=58904 NativeHeap=74828
+[2025-07-28 17:34:51] PSS=698199 PrivateOther=386764 Graphics=143648 JavaHeap=22900 NativeHeap=73604 | MemFree=106496kB MemAvailable=1201672kB SwapFree=1490428kB SwapTotal=2097148kB
+[2025-07-28 17:44:51] PSS=703989 PrivateOther=390280 Graphics=143628 JavaHeap=24768 NativeHeap=73472 | MemFree=211236kB MemAvailable=1322000kB SwapFree=1473788kB SwapTotal=2097148kB
+[2025-07-28 17:54:52] PSS=700422 PrivateOther=380564 Graphics=143580 JavaHeap=30784 NativeHeap=73388 | MemFree=186488kB MemAvailable=1333688kB SwapFree=1463548kB SwapTotal=2097148kB
+[2025-07-28 18:04:52] PSS=709446 PrivateOther=388672 Graphics=143616 JavaHeap=35784 NativeHeap=73452 | MemFree=93124kB MemAvailable=1250592kB SwapFree=1529852kB SwapTotal=2097148kB
+[2025-07-29 04:26:38] PSS=815954 PrivateOther=351784 Graphics=164808 JavaHeap=57340 NativeHeap=78876 | MemFree=117548kB MemAvailable=944984kB SwapFree=1262588kB SwapTotal=2097148kB
+[2025-07-29 04:28:28] PSS=789789 PrivateOther=348676 Graphics=164808 JavaHeap=34400 NativeHeap=78912 | MemFree=105736kB MemAvailable=933604kB SwapFree=1262588kB SwapTotal=2097148kB
+[2025-07-29 04:38:29] PSS=780243 PrivateOther=349408 Graphics=164852 JavaHeap=24120 NativeHeap=78816 | MemFree=182152kB MemAvailable=1019700kB SwapFree=1262844kB SwapTotal=2097148kB
+[2025-07-29 04:48:30] PSS=788485 PrivateOther=340432 Graphics=164860 JavaHeap=40952 NativeHeap=79016 | MemFree=242556kB MemAvailable=1082456kB SwapFree=1259772kB SwapTotal=2097148kB
+[2025-07-29 04:58:30] PSS=783468 PrivateOther=344708 Graphics=164860 JavaHeap=31728 NativeHeap=78916 | MemFree=303000kB MemAvailable=1166248kB SwapFree=1260540kB SwapTotal=2097148kB
+[2025-07-29 05:08:31] PSS=772420 PrivateOther=342208 Graphics=164860 JavaHeap=22616 NativeHeap=78976 | MemFree=277848kB MemAvailable=1148832kB SwapFree=1225468kB SwapTotal=2097148kB
+[2025-07-29 05:18:31] PSS=770828 PrivateOther=342016 Graphics=164860 JavaHeap=24200 NativeHeap=78932 | MemFree=126772kB MemAvailable=1109520kB SwapFree=1237500kB SwapTotal=2097148kB
+[2025-07-29 05:28:32] PSS=786307 PrivateOther=344892 Graphics=164860 JavaHeap=37468 NativeHeap=78888 | MemFree=102476kB MemAvailable=1073208kB SwapFree=1230844kB SwapTotal=2097148kB
+[2025-07-29 05:38:32] PSS=772540 PrivateOther=344380 Graphics=164860 JavaHeap=24004 NativeHeap=78836 | MemFree=122848kB MemAvailable=1092580kB SwapFree=1233148kB SwapTotal=2097148kB
+[2025-07-29 05:48:33] PSS=789321 PrivateOther=344248 Graphics=164860 JavaHeap=40000 NativeHeap=78960 | MemFree=181748kB MemAvailable=1159372kB SwapFree=1196028kB SwapTotal=2097148kB
+[2025-07-29 05:58:33] PSS=785237 PrivateOther=348424 Graphics=164860 JavaHeap=31620 NativeHeap=78952 | MemFree=163592kB MemAvailable=1146012kB SwapFree=1197308kB SwapTotal=2097148kB
+[2025-07-29 06:08:34] PSS=792378 PrivateOther=354720 Graphics=165732 JavaHeap=32136 NativeHeap=78920 | MemFree=149316kB MemAvailable=1133664kB SwapFree=1209084kB SwapTotal=2097148kB
+[2025-07-29 06:18:35] PSS=775478 PrivateOther=340120 Graphics=165732 JavaHeap=30136 NativeHeap=78888 | MemFree=182856kB MemAvailable=1164680kB SwapFree=1208316kB SwapTotal=2097148kB
+[2025-07-29 06:28:35] PSS=771795 PrivateOther=342612 Graphics=165732 JavaHeap=24024 NativeHeap=78956 | MemFree=120544kB MemAvailable=1105220kB SwapFree=1210364kB SwapTotal=2097148kB
+[2025-07-29 06:38:36] PSS=781498 PrivateOther=343772 Graphics=165732 JavaHeap=32440 NativeHeap=78932 | MemFree=145772kB MemAvailable=1129004kB SwapFree=1212924kB SwapTotal=2097148kB
+[2025-07-29 06:48:36] PSS=787867 PrivateOther=342968 Graphics=165732 JavaHeap=39592 NativeHeap=79004 | MemFree=180320kB MemAvailable=1169416kB SwapFree=1206268kB SwapTotal=2097148kB
+[2025-07-29 06:58:36] PSS=773644 PrivateOther=345892 Graphics=165732 JavaHeap=22328 NativeHeap=79044 | MemFree=141716kB MemAvailable=1135480kB SwapFree=1160444kB SwapTotal=2097148kB
+[2025-07-29 07:08:37] PSS=781895 PrivateOther=346268 Graphics=165732 JavaHeap=31468 NativeHeap=79036 | MemFree=131328kB MemAvailable=1089156kB SwapFree=1176572kB SwapTotal=2097148kB
+[2025-07-29 07:18:37] PSS=775072 PrivateOther=343872 Graphics=165732 JavaHeap=27888 NativeHeap=79088 | MemFree=114608kB MemAvailable=1057876kB SwapFree=1183740kB SwapTotal=2097148kB
+[2025-07-29 07:28:38] PSS=772246 PrivateOther=346692 Graphics=165732 JavaHeap=21876 NativeHeap=79072 | MemFree=150328kB MemAvailable=1090304kB SwapFree=1196284kB SwapTotal=2097148kB
+[2025-07-29 07:38:38] PSS=776494 PrivateOther=340708 Graphics=165732 JavaHeap=32916 NativeHeap=78888 | MemFree=173936kB MemAvailable=1115120kB SwapFree=1196284kB SwapTotal=2097148kB
+[2025-07-29 07:48:39] PSS=785428 PrivateOther=345516 Graphics=165732 JavaHeap=36772 NativeHeap=79156 | MemFree=152348kB MemAvailable=1102060kB SwapFree=1193212kB SwapTotal=2097148kB
+[2025-07-29 07:58:39] PSS=770024 PrivateOther=345992 Graphics=165732 JavaHeap=21064 NativeHeap=79096 | MemFree=126536kB MemAvailable=1077672kB SwapFree=1144316kB SwapTotal=2097148kB
+[2025-07-29 08:08:40] PSS=784066 PrivateOther=341936 Graphics=165732 JavaHeap=39552 NativeHeap=79052 | MemFree=136372kB MemAvailable=1069032kB SwapFree=1162748kB SwapTotal=2097148kB
+[2025-07-29 08:18:40] PSS=766263 PrivateOther=344216 Graphics=165732 JavaHeap=21888 NativeHeap=78896 | MemFree=143452kB MemAvailable=1056844kB SwapFree=1198076kB SwapTotal=2097148kB
+[2025-07-29 08:28:41] PSS=758531 PrivateOther=334332 Graphics=165732 JavaHeap=24080 NativeHeap=78964 | MemFree=141288kB MemAvailable=1043180kB SwapFree=1106684kB SwapTotal=2097148kB
+[2025-07-29 08:38:41] PSS=771221 PrivateOther=339180 Graphics=165732 JavaHeap=32044 NativeHeap=78912 | MemFree=119272kB MemAvailable=1049340kB SwapFree=1068284kB SwapTotal=2097148kB
+[2025-07-29 08:48:42] PSS=788958 PrivateOther=342512 Graphics=165732 JavaHeap=47636 NativeHeap=78960 | MemFree=138992kB MemAvailable=974064kB SwapFree=1150972kB SwapTotal=2097148kB
+[2025-07-29 08:56:35] PSS=797961 PrivateOther=336036 Graphics=165736 JavaHeap=62724 NativeHeap=78976 | MemFree=181116kB MemAvailable=1019148kB SwapFree=1121276kB SwapTotal=2097148kB | Uptime=46051s BootCompleted=1 MaxTemp=-1.0°C
+[2025-07-29 09:01:28] PSS=784210 PrivateOther=338868 Graphics=165736 JavaHeap=46076 NativeHeap=78976 | MemFree=122304kB MemAvailable=958692kB SwapFree=1124092kB SwapTotal=2097148kB | Uptime=46345s BootCompleted=1 MaxTemp=-1.0°C
+[2025-07-29 09:11:29] PSS=772082 PrivateOther=335600 Graphics=165736 JavaHeap=38024 NativeHeap=79092 | MemFree=150968kB MemAvailable=969092kB SwapFree=1148156kB SwapTotal=2097148kB | Uptime=46945s BootCompleted=1 MaxTemp=-1.0°C
+[2025-07-29 09:21:29] PSS=761481 PrivateOther=338760 Graphics=165736 JavaHeap=23440 NativeHeap=78912 | MemFree=234052kB MemAvailable=1066888kB SwapFree=1147132kB SwapTotal=2097148kB | Uptime=47546s BootCompleted=1 MaxTemp=-1.0°C
+[2025-07-29 09:31:30] PSS=764279 PrivateOther=341592 Graphics=165736 JavaHeap=23876 NativeHeap=78880 | MemFree=192172kB MemAvailable=1025160kB SwapFree=1148668kB SwapTotal=2097148kB | Uptime=48147s BootCompleted=1 MaxTemp=-1.0°C
+[2025-07-29 09:41:31] PSS=765615 PrivateOther=339348 Graphics=165736 JavaHeap=27420 NativeHeap=78860 | MemFree=150792kB MemAvailable=987060kB SwapFree=1148924kB SwapTotal=2097148kB | Uptime=48747s BootCompleted=1 MaxTemp=-1.0°C
+[2025-07-29 09:51:31] PSS=769814 PrivateOther=341636 Graphics=165740 JavaHeap=31396 NativeHeap=78952 | MemFree=116968kB MemAvailable=950184kB SwapFree=1083644kB SwapTotal=2097148kB | Uptime=49348s BootCompleted=1 MaxTemp=-1.0°C
+[2025-07-29 10:01:32] PSS=756128 PrivateOther=340436 Graphics=165740 JavaHeap=19792 NativeHeap=78964 | MemFree=100328kB MemAvailable=906600kB SwapFree=1079548kB SwapTotal=2097148kB | Uptime=49948s BootCompleted=1 MaxTemp=-1.0°C
+[2025-07-29 10:11:33] PSS=761443 PrivateOther=344356 Graphics=165740 JavaHeap=21860 NativeHeap=79020 | MemFree=140096kB MemAvailable=944660kB SwapFree=1089532kB SwapTotal=2097148kB | Uptime=50549s BootCompleted=1 MaxTemp=-1.0°C
+[2025-07-29 10:21:33] PSS=795938 PrivateOther=338008 Graphics=165740 JavaHeap=62884 NativeHeap=78936 | MemFree=134064kB MemAvailable=926664kB SwapFree=1077756kB SwapTotal=2097148kB | Uptime=51150s BootCompleted=1 MaxTemp=-1.0°C
+[2025-07-29 10:31:34] PSS=800391 PrivateOther=342324 Graphics=165740 JavaHeap=62932 NativeHeap=78900 | MemFree=161120kB MemAvailable=969904kB SwapFree=1072400kB SwapTotal=2097148kB | Uptime=51751s BootCompleted=1 MaxTemp=-1.0°C
+[2025-07-29 10:41:35] PSS=756801 PrivateOther=340340 Graphics=165740 JavaHeap=21308 NativeHeap=78892 | MemFree=218004kB MemAvailable=1032976kB SwapFree=1075728kB SwapTotal=2097148kB | Uptime=52351s BootCompleted=1 MaxTemp=-1.0°C
+[2025-07-29 10:51:36] PSS=771815 PrivateOther=343244 Graphics=165740 JavaHeap=33012 NativeHeap=79108 | MemFree=131440kB MemAvailable=958280kB SwapFree=1072340kB SwapTotal=2097148kB | Uptime=52952s BootCompleted=1 MaxTemp=-1.0°C
+[2025-07-29 10:58:06] | MaxTemp=-1.0°C PSS=None PrivateOther=None Graphics=None JavaHeap=None NativeHeap=None | MemFree=NonekB MemAvailable=NonekB SwapFree=NonekB SwapTotal=NonekB | Uptime=-1s BootCompleted= MaxTemp=-1.0°C
+[2025-07-29 11:00:19] | MaxTemp=-1.0°C PSS=None PrivateOther=None Graphics=None JavaHeap=None NativeHeap=None | MemFree=NonekB MemAvailable=NonekB SwapFree=NonekB SwapTotal=NonekB | Uptime=-1s BootCompleted=

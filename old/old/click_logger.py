@@ -7,8 +7,7 @@ import json
 import os
 from pynput import mouse
 
-CLICKMAP_FILE = "clickmap.json"
-
+CLICKMAP_FILE = os.path.join(os.path.dirname(__file__), "clickmap.json")
 
 def get_android_screen_size():
     output = subprocess.check_output(['adb', 'shell', 'wm', 'size']).decode()
