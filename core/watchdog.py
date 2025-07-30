@@ -1,11 +1,7 @@
 import time
-from core.input_named import tap_named, load_clickmap
 from core.automation_state import AUTOMATION
 from core.adb_utils import adb_shell
 from utils.logger import log
-from core.ss_capture import capture_adb_screenshot
-from core.tap_dispatcher import tap
-from matchers.resume_screen import detect_resume_button
 
 GAME_PACKAGE = "com.TechTreeGames.TheTower"
 
@@ -25,38 +21,23 @@ def bring_to_foreground():
     time.sleep(5)
 
 def restart_game():
-    adb_shell(["monkey", "-p", GAME_PACKAGE, "-c", "android.intent.category.LAUNCHER", "1"])
-    log("[WATCHDOG] Sent monkey intent to start the game.", "INFO")
+    log("[WATCHDOG] Restarting game via monkey intent", "INFO")
 
-    clickmap = load_clickmap()
-
-    for attempt in range(15):
-        time.sleep(2)
-        screen = capture_adb_screenshot()
-        if screen is None:
-            continue
-
-        matched_name, confidence = detect_resume_button(screen)
-        if matched_name:
-            log(f"[WATCHDOG] Detected {matched_name} (conf {confidence:.2f})", "INFO")
-            tap_named(clickmap, matched_name)
-            break
-        else:
-            log("[WATCHDOG] No resume button match on this frame.", "DEBUG")
-        if matched_name:
-            log(f"[WATCHDOG] Detected {matched_name} (conf {confidence:.2f})", "INFO")
-            tap_named(clickmap, matched_name)
-            break
-    else:
-        log("[WATCHDOG] Resume button not found after restart. Manual intervention may be needed.", "WARN")
+    # Launch the game
+    adb_shell([
+        "monkey", "-p", GAME_PACKAGE,
+        "-c", "android.intent.category.LAUNCHER", "1"
+    ])
     time.sleep(5)
+
+    # Set state to unknown — main loop will detect screen state
+    from core.automation_state import AUTOMATION
+    AUTOMATION.set_state("UNKNOWN")
+
+    log("[WATCHDOG] Game launched — deferring to main loop for state detection", "INFO")
 
 def watchdog_process_check(interval=30):
     while True:
-        if AUTOMATION.get_state() != "RUNNING":
-            time.sleep(interval)
-            continue
-
         try:
             result = adb_shell(["pidof", GAME_PACKAGE], capture_output=True, check=False)
 

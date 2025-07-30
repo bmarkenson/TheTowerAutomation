@@ -1,10 +1,10 @@
-#!/usr/bin/env python3
+# coords/gesture_logger.py
 
 import os
 import time
 import json
 import subprocess
-import time
+import argparse
 from pynput import keyboard
 
 CLICKMAP_FILE = os.path.join(os.path.dirname(__file__), "clickmap.json")
@@ -12,7 +12,7 @@ pressed_keys = set()
 capturing = False
 start_pos = None
 start_time = None
-
+ENTRY_NAME = None
 
 def get_mouse_pos():
     out = subprocess.check_output(["xdotool", "getmouselocation", "--shell"]).decode()
@@ -100,7 +100,7 @@ def toggle_gesture_capture():
         start_pos = get_mouse_pos()
         start_time = time.time()
         capturing = True
-        print("[INFO] Gesture capture started. Perform your swipe or tap, then hit the hotkey again.")
+        print("[INFO] Gesture capture started. Perform swipe or tap, then hit 's' again.")
     else:
         end_pos = get_mouse_pos()
         end_time = time.time()
@@ -118,37 +118,47 @@ def process_gesture(start, end, duration_ms):
 
     dx = abs(start_android[0] - end_android[0])
     dy = abs(start_android[1] - end_android[1])
-    threshold = 10  # pixels of drift allowed before it's a swipe
+    threshold = 10
     is_swipe = dx > threshold or dy > threshold
 
     print(f"[INFO] {'Swipe' if is_swipe else 'Tap'} from {start_android} to {end_android}")
 
     try:
-        name = input("Enter name for this gesture (leave blank to skip): ").strip()
+        name = ENTRY_NAME or input("Enter name for this gesture (leave blank to skip): ").strip()
         if not name:
             return
-        if name in clickmap:
-            confirm = input(f"'{name}' exists. Overwrite? (y/N): ").lower()
-            if confirm != 'y':
-                return
+
+        if name not in clickmap:
+            clickmap[name] = {}
+
         if is_swipe:
-            clickmap[name] = {
+            clickmap[name]["swipe"] = {
                 "x1": start_android[0], "y1": start_android[1],
                 "x2": end_android[0],   "y2": end_android[1],
                 "duration_ms": duration_ms
             }
         else:
-            clickmap[name] = {
+            clickmap[name]["tap"] = {
                 "x": start_android[0],
                 "y": start_android[1]
             }
+
         save_clickmap(clickmap)
-        print(f"[INFO] Saved {name}")
+        print(f"[INFO] Gesture saved to '{name}'")
+
     except KeyboardInterrupt:
         print("\n[INFO] Gesture not saved.")
 
 def main():
-    print("[INFO] Launch scrcpy first with --window-title 'scrcpy-bridge'")
+    global ENTRY_NAME
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--name", help="Name of the clickmap entry to update")
+    args = parser.parse_args()
+
+    if args.name:
+        ENTRY_NAME = args.name
+
     print("[INFO] Press 's' to start and stop a gesture.")
     print("[INFO] Press Ctrl+C to exit.")
     with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
@@ -156,6 +166,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
 

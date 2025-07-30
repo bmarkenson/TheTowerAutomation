@@ -14,26 +14,56 @@ def load_clickmap():
         log(f"[ERROR] Failed to load clickmap: {e}", "FAIL")
         return {}
 
+# Shared helpers
+
+def resolve_named_point(entry):
+    """Return (x, y) from either flat or 'tap' nested format"""
+    if "x" in entry and "y" in entry:
+        return entry["x"], entry["y"]
+    elif "tap" in entry and "x" in entry["tap"] and "y" in entry["tap"]:
+        return entry["tap"]["x"], entry["tap"]["y"]
+    return None, None
+
+def resolve_named_swipe(entry):
+    """Return swipe dict from either flat or nested 'swipe' format"""
+    if all(k in entry for k in ("x1", "y1", "x2", "y2", "duration_ms")):
+        return entry
+    elif "swipe" in entry and all(k in entry["swipe"] for k in ("x1", "y1", "x2", "y2", "duration_ms")):
+        return entry["swipe"]
+    return None
+
+# Updated public functions
+
 def tap_named(clickmap, name):
     entry = clickmap.get(name)
-    if not entry or "x" not in entry or "y" not in entry:
-        log(f"[ERROR] Tap '{name}' not found or invalid in clickmap", "FAIL")
+    if not entry:
+        log(f"[ERROR] Tap '{name}' not found in clickmap", "FAIL")
         return
-    log(f"TAP {name} at ({entry['x']},{entry['y']})", "ACTION")
-    adb_shell(["input", "tap", str(entry["x"]), str(entry["y"])])
+
+    x, y = resolve_named_point(entry)
+    if x is None or y is None:
+        log(f"[ERROR] Tap '{name}' entry missing coordinates", "FAIL")
+        return
+
+    log(f"TAP {name} at ({x},{y})", "ACTION")
+    adb_shell(["input", "tap", str(x), str(y)])
 
 def swipe_named(clickmap, name):
     entry = clickmap.get(name)
-    if not entry or any(k not in entry for k in ("x1", "y1", "x2", "y2", "duration_ms")):
-        log(f"[ERROR] Swipe '{name}' not found or invalid in clickmap", "FAIL")
+    if not entry:
+        log(f"[ERROR] Swipe '{name}' not found in clickmap", "FAIL")
         return
-    log(f"SWIPE {name} ({entry['x1']},{entry['y1']})→({entry['x2']},{entry['y2']}) in {entry['duration_ms']}ms", "ACTION")
+
+    swipe = resolve_named_swipe(entry)
+    if swipe is None:
+        log(f"[ERROR] Swipe '{name}' entry missing swipe data", "FAIL")
+        return
+
+    log(f"SWIPE {name} ({swipe['x1']},{swipe['y1']})→({swipe['x2']},{swipe['y2']}) in {swipe['duration_ms']}ms", "ACTION")
     adb_shell([
         "input", "swipe",
-        str(entry["x1"]), str(entry["y1"]),
-        str(entry["x2"]), str(entry["y2"]),
-        str(entry["duration_ms"])
+        str(swipe["x1"]), str(swipe["y1"]),
+        str(swipe["x2"]), str(swipe["y2"]),
+        str(swipe["duration_ms"])
     ])
-    time.sleep(entry["duration_ms"] / 1000.0 + .25)
-
-
+    time.sleep(swipe["duration_ms"] / 1000.0 + .25)

@@ -64291,3 +64291,194 @@
 [ACTION 2025-07-30 02:42:50] TAP Floating gem at (547,948)
 [ACTION 2025-07-30 02:42:50] TAP Ad gem at (148,1143)
 [INFO 2025-07-30 02:42:54] Stopping tap loops.
+[INFO 2025-07-30 03:18:14] Starting main heartbeat loop.
+[WARN 2025-07-30 03:18:14] [WATCHDOG] Game is backgrounded. Bringing to foreground.
+[INFO 2025-07-30 03:18:16] [WATCHDOG] Sent monkey event to foreground game.
+[DEBUG 2025-07-30 03:18:19] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 03:18:19] Saved screenshot to screenshots/latest.png
+[MATCH 2025-07-30 03:46:55] [MATCH] Battle matched at (540, 1980) with confidence 1.000
+[INFO 2025-07-30 03:52:29] Starting main heartbeat loop.
+[WARN 2025-07-30 03:52:29] [WATCHDOG] Game is backgrounded. Bringing to foreground.
+[INFO 2025-07-30 03:52:30] [WATCHDOG] Sent monkey event to foreground game.
+[DEBUG 2025-07-30 03:52:33] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 03:52:33] Saved screenshot to screenshots/latest.png
+[MATCH 2025-07-30 03:52:33] [MATCH] Battle matched at (540, 1980) with confidence 1.000
+[STATE 2025-07-30 03:52:33] State change: RUNNING → HOME_SCREEN
+[INFO 2025-07-30 03:52:33] Detected HOME_SCREEN. Executing handler.
+[INFO 2025-07-30 03:52:33] [HOME] Handling HOME_SCREEN state
+[INFO 2025-07-30 03:52:33] [HOME] Auto-start enabled — tapping 'Battle' button
+[FAIL 2025-07-30 03:52:33] [ERROR] Tap 'Battle' not found or invalid in clickmap
+[DEBUG 2025-07-30 03:52:44] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 03:52:44] Saved screenshot to screenshots/latest.png
+[MATCH 2025-07-30 03:52:44] [MATCH] Battle matched at (540, 1980) with confidence 1.000
+[INFO 2025-07-30 03:52:44] Detected HOME_SCREEN. Executing handler.
+[INFO 2025-07-30 03:52:44] [HOME] Handling HOME_SCREEN state
+[INFO 2025-07-30 03:52:44] [HOME] Auto-start enabled — tapping 'Battle' button
+[FAIL 2025-07-30 03:52:44] [ERROR] Tap 'Battle' not found or invalid in clickmap
+[DEBUG 2025-07-30 03:58:36] AUTO_START_ENABLED = True
+[INFO 2025-07-30 03:58:36] Starting main heartbeat loop.
+[WARN 2025-07-30 03:58:37] [WATCHDOG] Game is backgrounded. Bringing to foreground.
+[INFO 2025-07-30 03:58:38] [WATCHDOG] Sent monkey event to foreground game.
+[DEBUG 2025-07-30 03:58:40] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 03:58:40] Saved screenshot to screenshots/latest.png
+[MATCH 2025-07-30 03:58:40] [MATCH] Battle matched at (540, 1980) with confidence 1.000
+[STATE 2025-07-30 03:58:40] State change: RUNNING → HOME_SCREEN
+[INFO 2025-07-30 03:58:40] Detected HOME_SCREEN. Executing handler.
+[INFO 2025-07-30 03:58:40] [HOME] Handling HOME_SCREEN state
+[INFO 2025-07-30 03:58:40] [HOME] Auto-start enabled — tapping 'Battle' button
+[FAIL 2025-07-30 03:58:40] [ERROR] Tap 'Battle' not found or invalid in clickmap
+[DEBUG 2025-07-30 04:03:54] AUTO_START_ENABLED = True
+[INFO 2025-07-30 04:03:54] Starting main heartbeat loop.
+[WARN 2025-07-30 04:03:55] [WATCHDOG] Game is backgrounded. Bringing to foreground.
+[INFO 2025-07-30 04:03:55] [WATCHDOG] Sent monkey event to foreground game.
+[DEBUG 2025-07-30 04:03:58] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:03:58] Saved screenshot to screenshots/latest.png
+[MATCH 2025-07-30 04:03:58] [MATCH] Battle matched at (540, 1980) with confidence 1.000
+[STATE 2025-07-30 04:03:58] State change: RUNNING → HOME_SCREEN
+[INFO 2025-07-30 04:03:58] Detected HOME_SCREEN. Executing handler.
+[INFO 2025-07-30 04:03:58] [HOME] Handling HOME_SCREEN state
+[INFO 2025-07-30 04:03:58] [HOME] Auto-start enabled — tapping 'Battle' button
+[ACTION 2025-07-30 04:03:58] TAP Battle at (533,1971)
+[DEBUG 2025-07-30 04:04:07] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:04:07] Saved screenshot to screenshots/latest.png
+[STATE 2025-07-30 04:04:07] State change: HOME_SCREEN → UNKNOWN
+[DEBUG 2025-07-30 04:04:14] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:04:14] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:04:22] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:04:22] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:04:29] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:04:29] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:04:36] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:04:37] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:04:44] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:04:44] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:04:51] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:04:51] Saved screenshot to screenshots/latest.png
+[ACTION 2025-07-30 04:04:55] KEEPALIVE swipe at (100,86)→(101,87)
+[DEBUG 2025-07-30 04:04:58] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:04:58] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:05:05] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:05:05] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:05:12] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:05:12] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:05:19] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:05:19] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:05:26] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:05:26] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:05:33] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:05:33] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:05:40] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:05:40] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:05:46] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:05:46] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:05:53] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:05:53] Saved screenshot to screenshots/latest.png
+[ACTION 2025-07-30 04:05:56] KEEPALIVE swipe at (52,85)→(53,86)
+[DEBUG 2025-07-30 04:06:00] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:06:00] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:06:06] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:06:06] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:06:13] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:06:13] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:06:19] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:06:19] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:06:26] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:06:26] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:06:47] AUTO_START_ENABLED = True
+[INFO 2025-07-30 04:06:47] Starting main heartbeat loop.
+[WARN 2025-07-30 04:06:47] [WATCHDOG] Game process not running. Restarting.
+[INFO 2025-07-30 04:06:48] [WATCHDOG] Sent monkey intent to start the game.
+[DEBUG 2025-07-30 04:06:49] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:06:49] Saved screenshot to screenshots/latest.png
+[STATE 2025-07-30 04:06:49] State change: RUNNING → UNKNOWN
+[DEBUG 2025-07-30 04:06:51] [WATCHDOG] No resume button match on this frame.
+[DEBUG 2025-07-30 04:06:56] [WATCHDOG] No resume button match on this frame.
+[DEBUG 2025-07-30 04:06:56] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:06:56] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:07:00] [WATCHDOG] No resume button match on this frame.
+[DEBUG 2025-07-30 04:07:03] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:07:03] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:07:04] [WATCHDOG] No resume button match on this frame.
+[DEBUG 2025-07-30 04:07:08] [WATCHDOG] No resume button match on this frame.
+[DEBUG 2025-07-30 04:07:11] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:07:11] Saved screenshot to screenshots/latest.png
+[MATCH 2025-07-30 04:07:11] [MATCH] Battle matched at (540, 1980) with confidence 1.000
+[STATE 2025-07-30 04:07:11] State change: UNKNOWN → HOME_SCREEN
+[INFO 2025-07-30 04:07:11] Detected HOME_SCREEN. Executing handler.
+[INFO 2025-07-30 04:07:11] [HOME] Handling HOME_SCREEN state
+[INFO 2025-07-30 04:07:11] [HOME] Auto-start enabled — tapping 'Battle' button
+[ACTION 2025-07-30 04:07:11] TAP Battle at (533,1971)
+[DEBUG 2025-07-30 04:36:42] AUTO_START_ENABLED = True
+[INFO 2025-07-30 04:36:42] Starting main heartbeat loop.
+[WARN 2025-07-30 04:36:43] [WATCHDOG] Game process not running. Restarting.
+[INFO 2025-07-30 04:36:43] [WATCHDOG] Sent monkey intent to start the game.
+[DEBUG 2025-07-30 04:36:43] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:36:44] Saved screenshot to screenshots/latest.png
+[STATE 2025-07-30 04:36:44] State change: RUNNING → UNKNOWN
+[DEBUG 2025-07-30 04:36:46] [WATCHDOG] No resume button match on this frame.
+[DEBUG 2025-07-30 04:36:50] [WATCHDOG] No resume button match on this frame.
+[DEBUG 2025-07-30 04:36:50] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:36:50] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:36:53] [WATCHDOG] No resume button match on this frame.
+[DEBUG 2025-07-30 04:36:57] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:36:57] Saved screenshot to screenshots/latest.png
+[MATCH 2025-07-30 04:36:57] [MATCH] Battle matched at (540, 1980) with confidence 1.000
+[STATE 2025-07-30 04:36:57] State change: UNKNOWN → HOME_SCREEN
+[INFO 2025-07-30 04:36:57] Detected HOME_SCREEN. Executing handler.
+[INFO 2025-07-30 04:36:57] [HOME] Handling HOME_SCREEN state
+[INFO 2025-07-30 04:36:57] [HOME] Auto-start enabled — tapping 'Battle' button
+[ACTION 2025-07-30 04:36:57] TAP Battle at (533,1971)
+[DEBUG 2025-07-30 04:36:58] [WATCHDOG] No resume button match on this frame.
+[DEBUG 2025-07-30 04:37:01] [WATCHDOG] No resume button match on this frame.
+[DEBUG 2025-07-30 04:37:04] [WATCHDOG] No resume button match on this frame.
+[DEBUG 2025-07-30 04:37:04] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:37:04] Saved screenshot to screenshots/latest.png
+[STATE 2025-07-30 04:37:04] State change: HOME_SCREEN → UNKNOWN
+[DEBUG 2025-07-30 04:37:07] [WATCHDOG] No resume button match on this frame.
+[DEBUG 2025-07-30 04:37:10] [WATCHDOG] No resume button match on this frame.
+[DEBUG 2025-07-30 04:37:10] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:37:10] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:37:13] [WATCHDOG] No resume button match on this frame.
+[DEBUG 2025-07-30 04:37:16] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:37:16] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:37:17] [WATCHDOG] No resume button match on this frame.
+[DEBUG 2025-07-30 04:37:21] [WATCHDOG] No resume button match on this frame.
+[DEBUG 2025-07-30 04:37:23] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:37:24] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:37:25] [WATCHDOG] No resume button match on this frame.
+[DEBUG 2025-07-30 04:37:29] [WATCHDOG] No resume button match on this frame.
+[DEBUG 2025-07-30 04:37:30] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:37:30] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:37:33] [WATCHDOG] No resume button match on this frame.
+[DEBUG 2025-07-30 04:37:37] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:37:37] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:37:38] [WATCHDOG] No resume button match on this frame.
+[WARN 2025-07-30 04:37:38] [WATCHDOG] Resume button not found after restart. Manual intervention may be needed.
+[ACTION 2025-07-30 04:37:43] KEEPALIVE swipe at (73,97)→(74,98)
+[DEBUG 2025-07-30 04:37:44] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:37:44] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:37:50] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:37:50] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:37:57] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:37:57] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:38:04] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:38:04] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:38:11] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:38:11] Saved screenshot to screenshots/latest.png
+[WARN 2025-07-30 04:38:13] [WATCHDOG] Game is backgrounded. Bringing to foreground.
+[INFO 2025-07-30 04:38:13] [WATCHDOG] Sent monkey event to foreground game.
+[DEBUG 2025-07-30 04:38:17] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:38:17] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:38:24] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:38:24] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:38:31] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:38:31] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:38:38] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:38:38] Saved screenshot to screenshots/latest.png
+[DEBUG 2025-07-30 04:42:40] AUTO_START_ENABLED = True
+[INFO 2025-07-30 04:42:40] Starting main heartbeat loop.
+[WARN 2025-07-30 04:42:40] [WATCHDOG] Game is backgrounded. Bringing to foreground.
+[INFO 2025-07-30 04:42:41] [WATCHDOG] Sent monkey event to foreground game.
+[DEBUG 2025-07-30 04:42:42] Captured screenshot: shape=(2340, 1080, 3)
+[DEBUG 2025-07-30 04:42:42] Saved screenshot to screenshots/latest.png
+[STATE 2025-07-30 04:42:42] State change: RUNNING → UNKNOWN

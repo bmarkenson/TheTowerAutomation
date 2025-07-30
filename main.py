@@ -1,3 +1,5 @@
+# main.py
+
 import threading
 import time
 from datetime import datetime
@@ -6,11 +8,21 @@ import cv2
 from core.watchdog import watchdog_process_check
 from core.ss_capture import capture_adb_screenshot
 from core.automation_state import AUTOMATION
-from core.state_detector import detect_state  # ← we’ll stub this first
+from core.state_detector import detect_state
 from handlers.game_over_handler import handle_game_over
+from handlers.home_screen_handler import handle_home_screen
 from utils.logger import log
+import argparse
 
 SCREENSHOT_PATH = "screenshots/latest.png"
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--no-restart", action="store_true", help="Disable auto restart on home screen")
+args = parser.parse_args()
+AUTO_START_ENABLED = not args.no_restart
+log(f"AUTO_START_ENABLED = {AUTO_START_ENABLED}", "DEBUG")
+
+AUTO_START_ENABLED = not args.no_restart
 
 def main():
     log("Starting main heartbeat loop.", level="INFO")
@@ -42,12 +54,13 @@ def main():
         if new_state == "GAME_OVER":
             log("Detected GAME OVER. Executing handler.", "INFO")
             handle_game_over()
+        elif new_state == "HOME_SCREEN":
+            log("Detected HOME_SCREEN. Executing handler.", "INFO")
+            handle_home_screen(restart_enabled=AUTO_START_ENABLED)
 
         time.sleep(5)
 
 if __name__ == "__main__":
     main()
-
-
 
 

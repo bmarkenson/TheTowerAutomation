@@ -46,10 +46,24 @@
   },
   "resume_battle": {
     "x": 276,
-    "y": 1884 
+    "y": 1884
   },
   "ad_gem": {
     "x": 148,
     "y": 1143
+  },
+  "Battle": {
+    "match_template": "Battle.png",
+    "match_region": {
+      "x": 274,
+      "y": 1870,
+      "w": 532,
+      "h": 220
+    },
+    "match_threshold": 0.9,
+    "tap": {
+      "x": 533,
+      "y": 1971
+    }
   }
 }

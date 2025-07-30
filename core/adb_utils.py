@@ -2,7 +2,8 @@
 
 import subprocess
 
-ADB_DEVICE_ID = "07171JEC203290"  # Or ""
+#ADB_DEVICE_ID = "07171JEC203290"  # Or ""
+ADB_DEVICE_ID = "192.168.1.163:5555"
 
 def adb_shell(cmd, capture_output=False, check=True):
     base_cmd = ["adb"]
