@@ -15,12 +15,24 @@ except Exception as e:
 def get_clickmap():
     return _clickmap
 
+def get_clickmap_path():
+    return CLICKMAP_FILE
+
 def get_click(name):
     try:
         tap = _clickmap[name]["tap"]
         return tap["x"], tap["y"]
     except (KeyError, TypeError):
         return None
+
+def save_clickmap(data=None):
+    if data is None:
+        data = _clickmap
+    tmp_path = CLICKMAP_FILE + ".tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(data, f, indent=2)
+    os.replace(tmp_path, CLICKMAP_FILE)
+    print("[INFO] Saved clickmap to", CLICKMAP_FILE)
 
 def get_swipe(name):
     try:

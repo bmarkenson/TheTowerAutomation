@@ -1,10 +1,12 @@
+#!/usr/bin/env python3
+
 import os
 import time
 import json
 import subprocess
 import argparse
-from pynput import keyboard
-from core.clickmap_access import get_clickmap
+from pynput import keyboard, mouse
+from core.clickmap_access import get_clickmap, save_clickmap
 
 clickmap = get_clickmap()
 ENTRY_NAME = None
@@ -41,6 +43,13 @@ def get_scrcpy_window_rect():
     h = int(next(l for l in geo.splitlines() if "Height" in l).split(":")[1])
     return (x, y, w, h)
 
+def activate_scrcpy_window():
+    try:
+        win_id = subprocess.check_output(["xdotool", "search", "--name", "scrcpy-bridge"]).decode().strip().splitlines()[0]
+        subprocess.run(["xdotool", "windowactivate", win_id])
+    except subprocess.CalledProcessError:
+        print("[WARN] Could not bring scrcpy window to front")
+
 def map_to_android(x, y, window_rect, android_size):
     win_x, win_y, win_w, win_h = window_rect
     android_w, android_h = android_size
@@ -68,22 +77,6 @@ def map_to_android(x, y, window_rect, android_size):
     mapped_y = int(rel_y_clamped * android_h)
     return mapped_x, mapped_y
 
-def load_clickmap():
-    if os.path.exists(clickmap):
-        try:
-            with open(clickmap, "r") as f:
-                return json.load(f)
-        except json.JSONDecodeError as e:
-            print(f"[ERROR] Failed to load clickmap: {e}")
-            return {}
-    return {}
-
-def save_clickmap(clickmap):
-    tmpfile = clickmap + ".tmp"
-    with open(tmpfile, "w") as f:
-        json.dump(clickmap, f, indent=2)
-    os.replace(tmpfile, clickmap)
-
 def start_capture():
     global capturing, start_pos, start_time
     start_pos = get_mouse_pos()
@@ -102,7 +95,7 @@ def complete_capture():
 def process_gesture(start, end, duration_ms):
     window_rect = get_scrcpy_window_rect()
     android_size = get_android_screen_size()
-    clickmap = load_clickmap()
+    clickmap = get_clickmap()
 
     start_android = map_to_android(*start, window_rect, android_size)
     end_android = map_to_android(*end, window_rect, android_size)
@@ -129,19 +122,23 @@ def process_gesture(start, end, duration_ms):
     save_clickmap(clickmap)
     print(f"[INFO] Gesture saved under '{name}'")
 
-    if ENTRY_NAME:
-        print("[INFO] Exiting after one gesture (implicit once-mode).")
-        exit()
-
-def on_press(key):
+def on_key_press(key):
     if isinstance(key, keyboard.KeyCode) and key.char and key.char.lower() == "s":
         if not capturing:
             start_capture()
         else:
             complete_capture()
 
-def on_release(key):
-    pass
+def on_mouse_click(x, y, button, pressed):
+    if not ENTRY_NAME:
+        return
+    global capturing
+    if pressed and not capturing:
+        start_capture()
+    elif not pressed and capturing:
+        complete_capture()
+        print("[INFO] Exiting after one gesture (implicit once-mode).")
+        return False  # stop listener
 
 def main():
     global ENTRY_NAME
@@ -151,14 +148,13 @@ def main():
     ENTRY_NAME = args.name
 
     if ENTRY_NAME:
-        print(f"[INFO] Recording gesture for '{ENTRY_NAME}'. Waiting for input...")
-        start_capture()
-        listener = keyboard.Listener(on_press=on_press, on_release=on_release)
-        listener.start()
-        listener.join()
+        print(f"[INFO] Recording gesture for '{ENTRY_NAME}'. Click to start and release to finish.")
+        activate_scrcpy_window()
+        with mouse.Listener(on_click=on_mouse_click) as listener:
+            listener.join()
     else:
         print("[INFO] Press 's' to start/stop gesture recording. Ctrl+C to quit.")
-        with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
+        with keyboard.Listener(on_press=on_key_press) as listener:
             listener.join()
 
 if __name__ == "__main__":

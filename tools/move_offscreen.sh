@@ -2,7 +2,7 @@
 
 TITLE="$1"
 X=${2:-100}
-Y=${3:--300}
+Y=${3:--500}
 
 if [ -z "$TITLE" ]; then
   echo "Usage: $0 <partial window title> [x] [y]"

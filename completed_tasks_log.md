@@ -14,6 +14,9 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   - `gesture_logger.py`, `tune_gesture.py` → `tools/`
   - `clickmap.json` → `config/`
   - `run_tune_gesture` → deleted (manual launch note)
+- Refactored tools/crop_region.py and main.py to use get_and_save_screenshot from ss_capture (centralizing save logic)
+- Updated tools/crop_region.py to correctly handle gesture logging (single click / swipe, then redraw window).  Also implemented scrolling within the crop window
+
 
 ---
 

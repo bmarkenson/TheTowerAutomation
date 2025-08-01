@@ -5,20 +5,13 @@ import time
 import json
 import subprocess
 import keyboard
-from core.clickmap_access import tap_now get_clickmap
+from core.clickmap_access import tap_now, get_clickmap, save_clickmap
 
 clickmap = get_clickmap()
 
 def load_clickmap():
     with open(clickmap, "r") as f:
         return json.load(f)
-
-def save_clickmap(data):
-    tmp = clickmap + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(data, f, indent=2)
-    os.replace(tmp, clickmap)
-    print("[INFO] Saved changes.")
 
 def run_adb_swipe(x1, y1, x2, y2, duration):
     subprocess.run([

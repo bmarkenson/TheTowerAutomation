@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # test/match_region_test.py
 
 import argparse
@@ -8,14 +9,6 @@ from utils.template_matcher import match_region
 from core.clickmap_access import get_clickmap
 
 clickmap = get_clickmap()
-
-
-def load_clickmap():
-    if os.path.exists(clickmap):
-        with open(clickmap, "r") as f:
-            return json.load(f)
-    return {}
-
 
 def main():
     parser = argparse.ArgumentParser(description="Test a single clickmap entry with template matching")
@@ -29,7 +22,6 @@ def main():
         print("[ERROR] Failed to load screenshot.")
         return
 
-    clickmap = load_clickmap()
     entry = clickmap.get(args.name)
     if not entry:
         print(f"[ERROR] No entry named '{args.name}' in clickmap.json")

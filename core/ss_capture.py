@@ -3,6 +3,8 @@ import numpy as np
 import cv2
 from utils.logger import log
 
+LATEST_SCREENSHOT="screenshots/latest.png"
+
 def capture_adb_screenshot():
     try:
         # Run adb to get screenshot data as raw PNG
@@ -29,6 +31,16 @@ def capture_adb_screenshot():
     except Exception as e:
         print(f"[Error] {e}", "ERROR")
     return None
+
+def capture_and_save_screenshot(path=LATEST_SCREENSHOT):
+    img = capture_adb_screenshot()
+    if img is not None:
+        import cv2
+        import os
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        cv2.imwrite(path, img)
+        log(f"Captured and saved screenshot: shape={img.shape}, path={path}", level="DEBUG")
+    return img
 
 if __name__ == "__main__":
     image = capture_adb_screenshot()

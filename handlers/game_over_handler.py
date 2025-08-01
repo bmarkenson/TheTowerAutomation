@@ -41,8 +41,8 @@ def handle_game_over():
     time.sleep(1.2)
 
     # Step 7: Save third More Stats screen
-    img_more2 = capture_adb_screenshot()
-    save_image(img_more2, f"{session_id}_more_stats_3")
+    img_more3 = capture_adb_screenshot()
+    save_image(img_more3, f"{session_id}_more_stats_3")
 
     tap_now("close_more_stats")
     time.sleep(1.2)

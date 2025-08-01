@@ -37,13 +37,6 @@ def validate_entry(name, entry):
 
 
 def main():
-    if not os.path.exists(clickmap):
-        print("[ERROR] clickmap.json not found")
-        return
-
-    with open(clickmap, "r") as f:
-        clickmap = json.load(f)
-
     total_errors = 0
     for name, entry in clickmap.items():
         errs = validate_entry(name, entry)

@@ -133,5 +133,127 @@
       "h": 62
     },
     "match_threshold": 0.9
+  },
+  "tap_to_return_bottom": {
+    "match_template": "tap_to_return_bottom.png",
+    "match_region": {
+      "x": 221,
+      "y": 2202,
+      "w": 396,
+      "h": 77
+    },
+    "match_threshold": 0.9,
+    "tap": {
+      "x": 577,
+      "y": 2233
+    }
+  },
+  "Daily_Free_Gems_Badge": {
+    "match_template": "Daily_Free_Gems_Badge.png",
+    "match_region": {
+      "x": 863,
+      "y": 153,
+      "w": 13,
+      "h": 18
+    },
+    "match_threshold": 0.9,
+    "tap": {
+      "x": 902,
+      "y": 245
+    }
+  },
+  "Claim_Daily_Gems": {
+    "match_template": "Claim_Daily_Gems.png",
+    "match_region": {
+      "x": 224,
+      "y": 2090,
+      "w": 200,
+      "h": 69
+    },
+    "match_threshold": 0.9,
+    "tap": {
+      "x": 331,
+      "y": 2123
+    }
+  },
+  "Daily_Gems_Claim_Skip": {
+    "match_template": "Daily_Gems_Claim_Skip.png",
+    "match_region": {
+      "x": 818,
+      "y": 230,
+      "w": 142,
+      "h": 62
+    },
+    "match_threshold": 0.9,
+    "tap": {
+      "x": 884,
+      "y": 298
+    }
+  },
+  "Attack_Speed": {
+    "match_template": "Attack_Speed.png",
+    "match_region": {
+      "x": 566,
+      "y": 1724,
+      "w": 135,
+      "h": 105
+    },
+    "match_threshold": 0.9,
+    "tap": {
+      "x": 909,
+      "y": 1755
+    }
+  },
+  "asdf": {
+    "match_template": "asdf.png",
+    "match_region": {
+      "x": 714,
+      "y": 923,
+      "w": 132,
+      "h": 267
+    },
+    "match_threshold": 0.9,
+    "tap": {
+      "x": 187,
+      "y": 842
+    }
+  },
+  "asdfff": {
+    "match_template": "asdfff.png",
+    "match_region": {
+      "x": 566,
+      "y": 437,
+      "w": 202,
+      "h": 391
+    },
+    "match_threshold": 0.9
+  },
+  "retw": {
+    "match_template": "retw.png",
+    "match_region": {
+      "x": 297,
+      "y": 596,
+      "w": 634,
+      "h": 504
+    },
+    "match_threshold": 0.9,
+    "tap": {
+      "x": 442,
+      "y": 575
+    }
+  },
+  "asdfrre": {
+    "match_template": "asdfrre.png",
+    "match_region": {
+      "x": 516,
+      "y": 469,
+      "w": 475,
+      "h": 353
+    },
+    "match_threshold": 0.9,
+    "tap": {
+      "x": 348,
+      "y": 515
+    }
   }
 }
