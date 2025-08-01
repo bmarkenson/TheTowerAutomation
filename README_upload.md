@@ -59,7 +59,7 @@ This archive contains the full source code for an ADB-based automation project t
 
 ## 🧠 First Steps After Extraction
 
-Start by loading:
+Start by loading and parsing:
 - `README_UPLOAD.md` (this file)
 - `PROJECT_SCOPE.md`
 - `ROADMAP.md`

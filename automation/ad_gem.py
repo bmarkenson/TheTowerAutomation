@@ -32,15 +32,10 @@ def tap_loop(x, y, interval, name):
         time.sleep(interval)
 
 def main():
-    # Start tap loop for "Ad gem"
-    thread_ad_gem = threading.Thread(
-        target=tap_loop, args=(AD_GEM_X, AD_GEM_Y, AD_GEM_INTERVAL, "Ad gem"), daemon=True)
-
     # Start tap loop for "Floating gem"
     thread_floating_gem = threading.Thread(
         target=tap_loop, args=(FLOATING_GEM_X, FLOATING_GEM_Y, FLOATING_GEM_INTERVAL, "Floating gem"), daemon=True)
 
-    thread_ad_gem.start()
     thread_floating_gem.start()
 
     log(f"Both tap loops running. Ctrl+C to stop.", "INFO")

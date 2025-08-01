@@ -18,10 +18,10 @@ def handle_game_over():
     save_image(img_game_stats, f"{session_id}_game_stats")
 
     # Step 2: Tap "More Stats"
-    tap_now("more_stats")
+    tap_now("util:more_stats")
     time.sleep(1.5)
 
-    swipe_now("goto_top")
+    swipe_now("util:goto_top")
     time.sleep(1.5)
 
     # Step 3: Save first More Stats screen
@@ -29,7 +29,7 @@ def handle_game_over():
     save_image(img_more1, f"{session_id}_more_stats_1")
 
     # Step 4: Scroll to next stats page
-    swipe_now("more_stats_pg2")
+    swipe_now("util:more_stats_pg2")
     time.sleep(1.2)
 
     # Step 5: Save second More Stats screen
@@ -37,14 +37,14 @@ def handle_game_over():
     save_image(img_more2, f"{session_id}_more_stats_2")
 
     # Step 6: Scroll to next stats page
-    swipe_now("more_stats_pg3")
+    swipe_now("util:more_stats_pg3")
     time.sleep(1.2)
 
     # Step 7: Save third More Stats screen
     img_more3 = capture_adb_screenshot()
     save_image(img_more3, f"{session_id}_more_stats_3")
 
-    tap_now("close_more_stats")
+    tap_now("button:close_more_stats")
     time.sleep(1.2)
 
     # Step 8: Retry or pause depending on mode
@@ -57,7 +57,7 @@ def handle_game_over():
         log("Mode = HOME (not implemented yet)", "INFO")
         # e.g., swipe to home button or tap a known area
     else:
-        tap_now("Retry")
+        tap_now("button:retry:game_over")
 
     time.sleep(2)
 

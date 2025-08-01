@@ -9,10 +9,11 @@ import cv2
 from core.watchdog import watchdog_process_check
 from core.ss_capture import capture_and_save_screenshot
 from core.automation_state import AUTOMATION
-from core.state_detector import detect_state
+from core.state_detector import detect_state_and_overlays
 from handlers.game_over_handler import handle_game_over
 from handlers.home_screen_handler import handle_home_screen
 from utils.logger import log
+from handlers.ad_gem_handler import handle_ad_gem
 import argparse
 
 SCREENSHOT_PATH = "screenshots/latest.png"
@@ -37,7 +38,9 @@ def main():
             continue
 
         # Detect current state from image
-        new_state = detect_state(img)
+        detection = detect_state_and_overlays(img)
+        new_state = detection["state"]
+        overlays = detection["overlays"]
         old_state = AUTOMATION.get_state()
         if new_state != old_state:
             log(f"State change: {old_state} → {new_state}", "STATE")
@@ -52,6 +55,8 @@ def main():
             handle_home_screen(restart_enabled=AUTO_START_ENABLED)
 
         time.sleep(5)
+        if "AD_GEMS_AVAILABLE" in overlays:
+            handle_ad_gem()
 
 if __name__ == "__main__":
     main()

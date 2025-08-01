@@ -4,7 +4,7 @@
 import argparse
 import os
 import cv2
-from core.state_detector import detect_state
+from core.state_detector import detect_state_and_overlays
 
 
 def main():
@@ -22,8 +22,9 @@ def main():
         print("[ERROR] Failed to load image.")
         return
 
-    state = detect_state(screen)
-    print(f"[TEST] Detected state: {state}")
+    result = detect_state_and_overlays(screen)
+    print(f"[TEST] Detected state: {result['state']}")
+    print(f"[TEST] Detected overlays: {result['overlays']}")
 
     # Optional: save a highlighted version (match drawing must be added inside detect_state for now)
     if args.highlight:

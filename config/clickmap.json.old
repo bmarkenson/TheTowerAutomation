@@ -1,0 +1,257 @@
+{
+  "more_stats": {
+    "match_template": "more_stats.png",
+    "match_region": {
+      "x": 182,
+      "y": 1176,
+      "w": 354,
+      "h": 138
+    },
+    "match_threshold": 0.9,
+    "tap": {
+      "x": 352,
+      "y": 1255
+    }
+  },
+  "Retry": {
+    "tap": {
+      "x": 313,
+      "y": 1641
+    }
+  },
+  "more_stats_pg2": {
+    "swipe": {
+      "x1": 588,
+      "y1": 1850,
+      "x2": 595,
+      "y2": 808,
+      "duration_ms": 1895
+    }
+  },
+  "more_stats_pg3": {
+    "swipe": {
+      "x1": 528,
+      "y1": 1799,
+      "x2": 380,
+      "y2": 723,
+      "duration_ms": 1148
+    }
+  },
+  "goto_top": {
+    "swipe": {
+      "x1": 533,
+      "y1": 741,
+      "x2": 596,
+      "y2": 1593,
+      "duration_ms": 104
+    }
+  },
+  "close_more_stats": {
+    "tap": {
+      "x": 890,
+      "y": 509
+    }
+  },
+  "Home": {
+    "tap": {
+      "x": 784,
+      "y": 1635
+    }
+  },
+  "floating_gem": {
+    "tap": {
+      "x": 527,
+      "y": 948
+    }
+  },
+  "resume_game": {
+    "tap": {
+      "x": 588,
+      "y": 1318
+    }
+  },
+  "resume_battle": {
+    "tap": {
+      "x": 276,
+      "y": 1884
+    }
+  },
+  "Battle": {
+    "match_template": "Battle.png",
+    "match_region": {
+      "x": 274,
+      "y": 1870,
+      "w": 532,
+      "h": 220
+    },
+    "match_threshold": 0.9,
+    "tap": {
+      "x": 533,
+      "y": 1971
+    }
+  },
+  "Wall_icon": {
+    "match_template": "wall_icon.png",
+    "match_region": {
+      "x": 3,
+      "y": 1334,
+      "w": 72,
+      "h": 55
+    },
+    "match_threshold": 0.9
+  },
+  "attack_menu": {
+    "match_template": "Attack.png",
+    "match_region": {
+      "x": 10,
+      "y": 1592,
+      "w": 513,
+      "h": 55
+    },
+    "match_threshold": 0.9
+  },
+  "Ad_Gem": {
+    "match_template": "Ad_Gem.png",
+    "match_region": {
+      "x": 26,
+      "y": 1059,
+      "w": 235,
+      "h": 129
+    },
+    "match_threshold": 0.9,
+    "tap": {
+      "x": 150,
+      "y": 1143
+    }
+  },
+  "game_over": {
+    "match_template": "game_over.png",
+    "match_region": {
+      "x": 320,
+      "y": 638,
+      "w": 206,
+      "h": 62
+    },
+    "match_threshold": 0.9
+  },
+  "tap_to_return_bottom": {
+    "match_template": "tap_to_return_bottom.png",
+    "match_region": {
+      "x": 221,
+      "y": 2202,
+      "w": 396,
+      "h": 77
+    },
+    "match_threshold": 0.9,
+    "tap": {
+      "x": 577,
+      "y": 2233
+    }
+  },
+  "Daily_Free_Gems_Badge": {
+    "match_template": "Daily_Free_Gems_Badge.png",
+    "match_region": {
+      "x": 863,
+      "y": 153,
+      "w": 13,
+      "h": 18
+    },
+    "match_threshold": 0.9,
+    "tap": {
+      "x": 902,
+      "y": 245
+    }
+  },
+  "Claim_Daily_Gems": {
+    "match_template": "Claim_Daily_Gems.png",
+    "match_region": {
+      "x": 224,
+      "y": 2090,
+      "w": 200,
+      "h": 69
+    },
+    "match_threshold": 0.9,
+    "tap": {
+      "x": 331,
+      "y": 2123
+    }
+  },
+  "Daily_Gems_Claim_Skip": {
+    "match_template": "Daily_Gems_Claim_Skip.png",
+    "match_region": {
+      "x": 818,
+      "y": 230,
+      "w": 142,
+      "h": 62
+    },
+    "match_threshold": 0.9,
+    "tap": {
+      "x": 884,
+      "y": 298
+    }
+  },
+  "Button_Attack_Speed": {
+    "match_template": "Attack_Speed.png",
+    "match_region": {
+      "x": 566,
+      "y": 1724,
+      "w": 135,
+      "h": 105
+    },
+    "match_threshold": 0.9,
+    "tap": {
+      "x": 909,
+      "y": 1755
+    }
+  },
+  "goto_attack": {
+    "match_template": "goto_attack.png",
+    "match_region": {
+      "x": 83,
+      "y": 2257,
+      "w": 97,
+      "h": 57
+    },
+    "match_threshold": 0.9
+  },
+  "goto_defense": {
+    "match_template": "goto_defense.png",
+    "match_region": {
+      "x": 360,
+      "y": 2259,
+      "w": 83,
+      "h": 58
+    },
+    "match_threshold": 0.9
+  },
+  "goto_utility": {
+    "match_template": "goto_utility.png",
+    "match_region": {
+      "x": 637,
+      "y": 2261,
+      "w": 71,
+      "h": 54
+    },
+    "match_threshold": 0.9
+  },
+  "goto_uw": {
+    "match_template": "goto_uw.png",
+    "match_region": {
+      "x": 895,
+      "y": 2261,
+      "w": 91,
+      "h": 61
+    },
+    "match_threshold": 0.9
+  },
+  "uw_menu": {
+    "match_template": "uw_menu.png",
+    "match_region": {
+      "x": 14,
+      "y": 1587,
+      "w": 108,
+      "h": 62
+    },
+    "match_threshold": 0.9
+  }
+}

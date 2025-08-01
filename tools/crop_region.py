@@ -129,6 +129,8 @@ def handle_mouse(event, x, y, flags, param):
         ask_gesture = input("Define a gesture for this region now? (Y/n): ").strip().lower()
         if ask_gesture in ("", "y", "yes"):
             launch_gesture_logger(name)
+        else:
+            reload_image()
 
 cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
 cv2.resizeWindow(window_name, viewport_width, viewport_height)
@@ -136,6 +138,8 @@ cv2.setMouseCallback(window_name, handle_mouse)
 
 print("[INFO] Click and drag to select region.")
 print("[INFO] Scroll with mouse wheel or ↑/↓ arrow keys. Press 'q' or ESC to quit.")
+print("[INFO] Press 'r' to reload screenshot at any time.")
+
 
 while True:
     top = scroll_offset
@@ -156,5 +160,7 @@ while True:
         scroll_offset = max(0, scroll_offset - scroll_step)
     elif key == 84:  # Down arrow
         scroll_offset = min(scroll_offset + scroll_step, img_height - viewport_height)
+    elif key == ord("r"):
+        reload_image()
 
 cv2.destroyAllWindows()

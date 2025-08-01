@@ -1,15 +1,38 @@
-static_states:
-  - key: game_over
-    map_to: GAME_OVER
-  - key: resume_game
-    map_to: RESUME_GAME
-  - key: resume_battle
-    map_to: RESUME_BATTLE
-  - key: Battle
-    map_to: HOME_SCREEN
-  - key: Running
-    map_to: RUNNING
+states:
+- name: GAME_OVER
+  type: primary
+  match_keys:
+  - state:game_over
 
-running_indicators:
-  - key: tower_ui
-  - key: upgrade_button
+- name: RESUME_GAME
+  type: primary
+  match_keys:
+  - button:resume_game
+
+- name: RESUME_BATTLE
+  type: primary
+  match_keys:
+  - button:resume_battle
+
+- name: HOME_SCREEN
+  type: primary
+  match_keys:
+  - button:battle:home_screen
+
+- name: RUNNING
+  type: running
+  match_keys:
+  - state:wall_icon:running
+  - state:attack_menu:running
+  - state:uw_menu:running
+
+overlays:
+- name: DAILY_GEMS_AVAILABLE
+  match_keys:
+  - overlay:daily_free_gems_badge
+
+- name: AD_GEMS_AVAILABLE
+  match_keys:
+  - overlay:claim_ad_gem
+
+

@@ -3,54 +3,48 @@
 from utils.template_matcher import match_region
 from utils.logger import log
 from core.clickmap_access import get_clickmap
+import yaml
+import os
 
-# Define which keys in the clickmap should be checked for state detection
-STATE_MATCH_KEYS = [
-    "game_over",
-    "resume_game",
-    "resume_battle",
-    "Battle"
-]
+STATE_DEF_PATH = os.path.join(os.path.dirname(__file__), "../config/state_definitions.yaml")
 
-# Keys that indicate active gameplay screen (RUNNING state)
-RUNNING_MATCH_KEYS = [
-    "tower_ui",
-    "upgrade_button"
-    # Add more keys here as needed
-]
+def load_state_definitions():
+    with open(STATE_DEF_PATH, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
 
-# Mapping match keys to semantic states
-STATE_MAP = {
-    "game_over": "GAME_OVER",
-    "resume_game": "RESUME_GAME",
-    "resume_battle": "RESUME_BATTLE",
-    "Battle": "HOME_SCREEN"
-}
+state_definitions = load_state_definitions()
+clickmap = get_clickmap()
 
-def detect_state(screen):
-    clickmap = get_clickmap()
+def detect_state_and_overlays(screen):
+    result = {"state": "UNKNOWN", "overlays": []}
 
-    # Check for known priority screen states
-    for key in STATE_MATCH_KEYS:
-        entry = clickmap.get(key)
-        if not entry:
-            continue
+    # Check primary and running states in order
+    for state in state_definitions.get("states", []):
+        state_name = state["name"]
+        match_keys = state.get("match_keys", [])
+        for key in match_keys:
+            entry = clickmap.get(key)
+            if not entry:
+                continue
+            pt, conf = match_region(screen, entry)
+            if pt:
+                log(f"[MATCH] State {state_name} via {key} at {pt} ({conf:.3f})", "MATCH")
+                result["state"] = state_name
+                break
+        if result["state"] != "UNKNOWN":
+            break
 
-        pt, conf = match_region(screen, entry)
-        if pt:
-            log(f"[MATCH] {key} matched at {pt} with confidence {conf:.3f}", "MATCH")
-            return STATE_MAP.get(key, key.upper())
+    # Check overlays (can be multiple)
+    for overlay in state_definitions.get("overlays", []):
+        overlay_name = overlay["name"]
+        for key in overlay.get("match_keys", []):
+            entry = clickmap.get(key)
+            if not entry:
+                continue
+            pt, conf = match_region(screen, entry)
+            if pt:
+                log(f"[MATCH] Overlay {overlay_name} via {key} at {pt} ({conf:.3f})", "DEBUG")
+                result["overlays"].append(overlay_name)
+                break
 
-    # Check for signs that game is actively running
-    for key in RUNNING_MATCH_KEYS:
-        entry = clickmap.get(key)
-        if not entry:
-            continue
-        pt, conf = match_region(screen, entry)
-        if pt:
-            log(f"[MATCH] {key} indicates active gameplay", "DEBUG")
-            return "RUNNING"
-
-    return "UNKNOWN"
-
-
+    return result

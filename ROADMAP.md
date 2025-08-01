@@ -18,6 +18,8 @@ This roadmap outlines current architectural goals, bugfixes, and planned feature
   - Return structured results with `state` and `overlays`
 - ⏳ [ ] Add confidence threshold logic (global or per-state optional).
 - ⏳ [ ] Support composite match logic (e.g. `all_of`, `any_of`).
+- 🔼 [ ] Enforce unified naming convention across clickmap and YAML (e.g., role__name). Build validator to detect drift and optionally suggest YAML stubs for new clickmap keys.
+
 
 ### Handler Architecture
 - 🔼 [ ] Convert function-based handlers into class-based handler modules.
@@ -57,6 +59,8 @@ This roadmap outlines current architectural goals, bugfixes, and planned feature
   - Handle varied scroll positions
 - ⏳ [ ] Create helper: `is_upgrade_available(name, screen) -> bool`
 - ⏳ [ ] Add priorities for upgrades (Damage > Coins > Speed, etc.)
+- 🔼 [ ] Implement upgrade detection system for scrollable upgrade panel. For each upgrade label, match its location in the scrollable area, then inspect the price box to the right. Only tap if the box is active (not dimmed) and not labeled "Max". Use pixel brightness and optional OCR to determine availability. Support scrolling if the upgrade is not visible. Build modular helpers: `is_upgrade_available()`, `find_scrollable_upgrade()`, and `tap_relative_to_label()`.
+
 
 - ⏳ [ ] Add scroll-aware matching system:
   - Track visible screen region or scroll index

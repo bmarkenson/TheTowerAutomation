@@ -9,7 +9,7 @@ def handle_home_screen(restart_enabled=True):
 
     if restart_enabled:
         log("[HOME] Auto-start enabled — tapping 'Battle' button", "INFO")
-        tap_now("Battle")
+        tap_now("button:battle:home_screen")
         time.sleep(2)
     else:
         log("[HOME] Auto-start disabled — waiting for manual start.", "INFO")
