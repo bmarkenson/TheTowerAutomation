@@ -2,8 +2,9 @@
 
 import os
 import json
+from core.clickmap_access import get_clickmap
 
-CLICKMAP_PATH = "coords/clickmap.json"
+clickmap = get_clickmap()
 TEMPLATE_DIR = "assets/match_templates"
 
 
@@ -36,11 +37,11 @@ def validate_entry(name, entry):
 
 
 def main():
-    if not os.path.exists(CLICKMAP_PATH):
+    if not os.path.exists(clickmap):
         print("[ERROR] clickmap.json not found")
         return
 
-    with open(CLICKMAP_PATH, "r") as f:
+    with open(clickmap, "r") as f:
         clickmap = json.load(f)
 
     total_errors = 0

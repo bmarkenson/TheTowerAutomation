@@ -1,3 +1,4 @@
+import re
 import time
 from core.automation_state import AUTOMATION
 from core.adb_utils import adb_shell
@@ -5,12 +6,29 @@ from utils.logger import log
 
 GAME_PACKAGE = "com.TechTreeGames.TheTower"
 
+_last_foreground_pkg = None
+
 def is_game_foregrounded():
-    result = adb_shell(["dumpsys", "window", "windows"], capture_output=True)
+    global _last_foreground_pkg
+    result = adb_shell(["dumpsys", "activity", "activities"], capture_output=True)
     if result is None or result.returncode != 0:
+        log("[WATCHDOG] Failed to query activity manager", level="WARN")
         return False
-    output = result.stdout.lower()
-    return "com.techtreegames.thetower" in output and "mcurrentfocus" in output
+
+    output = result.stdout
+    match = re.search(r"mCurrentFocus=Window\{.*?\s+(\S+)/(\S+)\}", output)
+    if match:
+        package = match.group(1)
+        if package != _last_foreground_pkg:
+            if _last_foreground_pkg is None:
+                log(f"[WATCHDOG] Started — current foreground app: {package}", level="DEBUG")
+            else:
+                log(f"[WATCHDOG] Resumed app: {package}", level="DEBUG")
+            _last_foreground_pkg = package
+        return package.lower() == GAME_PACKAGE.lower()
+
+    log("[WATCHDOG] Could not find mCurrentFocus", level="WARN")
+    return False
 
 def bring_to_foreground():
     adb_shell([

@@ -5,13 +5,14 @@ import json
 import os
 import cv2
 from utils.template_matcher import match_region
+from core.clickmap_access import get_clickmap
 
-CLICKMAP_PATH = "coords/clickmap.json"
+clickmap = get_clickmap()
 
 
 def load_clickmap():
-    if os.path.exists(CLICKMAP_PATH):
-        with open(CLICKMAP_PATH, "r") as f:
+    if os.path.exists(clickmap):
+        with open(clickmap, "r") as f:
             return json.load(f)
     return {}
 

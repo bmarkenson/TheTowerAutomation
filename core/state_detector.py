@@ -1,11 +1,8 @@
 # core/state_detector.py
 
-import json
-import os
 from utils.template_matcher import match_region
 from utils.logger import log
-
-CLICKMAP_FILE = "coords/clickmap.json"
+from core.clickmap_access import get_clickmap
 
 # Define which keys in the clickmap should be checked for state detection
 STATE_MATCH_KEYS = [
@@ -30,17 +27,8 @@ STATE_MAP = {
     "Battle": "HOME_SCREEN"
 }
 
-def load_clickmap():
-    if os.path.exists(CLICKMAP_FILE):
-        try:
-            with open(CLICKMAP_FILE, "r") as f:
-                return json.load(f)
-        except Exception as e:
-            log(f"[ERROR] Failed to load clickmap: {e}", level="FAIL")
-    return {}
-
 def detect_state(screen):
-    clickmap = load_clickmap()
+    clickmap = get_clickmap()
 
     # Check for known priority screen states
     for key in STATE_MATCH_KEYS:

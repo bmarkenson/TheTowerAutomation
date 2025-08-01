@@ -1,0 +1,15 @@
+static_states:
+  - key: game_over
+    map_to: GAME_OVER
+  - key: resume_game
+    map_to: RESUME_GAME
+  - key: resume_battle
+    map_to: RESUME_BATTLE
+  - key: Battle
+    map_to: HOME_SCREEN
+  - key: Running
+    map_to: RUNNING
+
+running_indicators:
+  - key: tower_ui
+  - key: upgrade_button

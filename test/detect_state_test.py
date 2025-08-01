@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # test/detect_state_test.py
 
 import argparse

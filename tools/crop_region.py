@@ -6,11 +6,12 @@ import sys
 import json
 import subprocess
 import time
+from core.clickmap_access import get_clickmap
 
 SOURCE_PATH = "screenshots/latest.png"
 TEMPLATE_DIR = "assets/match_templates"
-CLICKMAP_PATH = "coords/clickmap.json"
-GESTURE_LOGGER_PATH = "coords/gesture_logger.py"
+clickmap = get_clickmap()
+GESTURE_LOGGER_PATH = "tools/gesture_logger.py"
 SCRCPY_TITLE = "scrcpy-bridge"
 
 os.makedirs(TEMPLATE_DIR, exist_ok=True)
@@ -23,16 +24,16 @@ image = cv2.imread(SOURCE_PATH)
 clone = image.copy()
 
 def load_clickmap():
-    if os.path.exists(CLICKMAP_PATH):
-        with open(CLICKMAP_PATH, "r") as f:
+    if os.path.exists(clickmap):
+        with open(clickmap, "r") as f:
             return json.load(f)
     return {}
 
 def save_clickmap(data):
-    tmp = CLICKMAP_PATH + ".tmp"
+    tmp = clickmap + ".tmp"
     with open(tmp, "w") as f:
         json.dump(data, f, indent=2)
-    os.replace(tmp, CLICKMAP_PATH)
+    os.replace(tmp, clickmap)
 
 def ensure_scrcpy_running():
     try:

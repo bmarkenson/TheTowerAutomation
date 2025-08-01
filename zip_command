@@ -1,0 +1,1 @@
+zip -r /n/wd01/bgmqnap02/TheTower.zip . -x '*.venv*' '*.git*' '__pycache__/*' 'screenshots/matches/*' '*/__pycache__/*' 'old/*' 'logs/*'

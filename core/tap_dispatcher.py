@@ -13,8 +13,8 @@ LOCK = threading.Lock()
 
 # Configuration
 KEEPALIVE_INTERVAL = 60  # seconds
-#ADB_DEVICE_ID = "192.168.1.171:5555"  # or leave blank if only one device
-ADB_DEVICE_ID = "07171JEC203290"
+ADB_DEVICE_ID = "192.168.1.163:5555"  # or leave blank if only one device
+#ADB_DEVICE_ID = "07171JEC203290"
 
 def log_tap(x, y, label):
     log(f"TAP {label or ''} at ({x},{y})", level="ACTION")
