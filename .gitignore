@@ -19,3 +19,14 @@ htmlcov/
 
 # MacOS metadata
 .DS_Store
+
+# Screenshots
+screenshots/
+
+# Old code
+old/
+
+# logs
+logs/
+
+
