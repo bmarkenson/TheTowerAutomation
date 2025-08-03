@@ -16,82 +16,11 @@ GESTURE_LOGGER_PATH = "tools/gesture_logger.py"
 SCRCPY_TITLE = "scrcpy-bridge"
 window_name = "Crop Tool"
 
-os.makedirs(TEMPLATE_DIR, exist_ok=True)
-os.makedirs("coords", exist_ok=True)
-
-KNOWN_PREFIXES = {"label", "button", "overlay", "state", "util", "nav"}
+# Remembers the last-used region prefix across prompts
 _last_region_prefix = ""
 
-def prompt_roles(name):
-    if name.startswith("label:"):
-        suggested = ["label"]
-    elif name.startswith("button:"):
-        suggested = ["button", "tap"]
-    elif name.startswith("overlay:"):
-        suggested = ["overlay", "state"]
-    elif name.startswith("state:"):
-        suggested = ["state"]
-    elif name.startswith("nav:"):
-        suggested = ["tap", "button"]
-    elif name.startswith("util:"):
-        print(f"[?] The prefix 'util:' can refer to either a tap or a swipe.")
-        print(f"    Examples: open menu (tap), scroll down (swipe).")
-        user_input = input("    Enter roles manually (e.g., tap, swipe): ").strip()
-        roles = [r.strip() for r in user_input.split(",") if r.strip()]
-        return roles if roles else ["unknown"]
-    elif name.startswith("upgrade:"):
-        suggested = ["label"]
-    else:
-        suggested = ["unknown"]
-
-    default = ",".join(suggested)
-    user_input = input(f"Suggested roles for '{name}': [{default}] (edit or press Enter to accept): ")
-    if user_input.strip():
-        roles = [r.strip() for r in user_input.split(",")]
-    else:
-        roles = suggested
-    return roles
-
-def get_region_name(existing_clickmap_keys=None):
-    global _last_region_prefix
-
-    while True:
-        if not _last_region_prefix:
-            name = input("No prefix is set yet.\nEnter full name for this region (e.g. label:upgrade_damage): ").strip()
-            if not name:
-                print("[INFO] Skipped saving.")
-                return None
-            raw_input = None
-        else:
-            prompt = f"Suffix (e.g. upgrade_damage), full name, or Enter to skip:\n[using '{_last_region_prefix}:'] > "
-            raw_input = input(prompt).strip()
-            if not raw_input:
-                print("[INFO] Skipped saving.")
-                return None
-
-        if raw_input is None:
-            pass  # name already set
-        else:
-            maybe_prefix = raw_input.split(":")[0]
-            if maybe_prefix in KNOWN_PREFIXES:
-                name = raw_input
-            else:
-                name = f"{_last_region_prefix}:{raw_input}"
-
-        parts = name.split(":")
-        if len(parts) < 2 or not parts[0] or not parts[1]:
-            print("❌ Invalid format. Must be in the form 'prefix:suffix' with known prefix.")
-            continue
-        if parts[0] not in KNOWN_PREFIXES:
-            print(f"❌ Unknown prefix: '{parts[0]}'. Must be one of: {', '.join(sorted(KNOWN_PREFIXES))}")
-            continue
-        if existing_clickmap_keys and name in existing_clickmap_keys:
-            confirm = input(f"⚠️  '{name}' already exists. Overwrite? (y/N): ").strip().lower()
-            if confirm not in {"y", "yes"}:
-                continue
-
-        _last_region_prefix = parts[0]
-        return name
+os.makedirs(TEMPLATE_DIR, exist_ok=True)
+os.makedirs("coords", exist_ok=True)
 
 cropping = False
 start_point = None
@@ -110,6 +39,32 @@ try:
 except Exception as e:
     print("[WARN] Could not detect screen size reliably, using fallback 1920x1080:", e)
     screen_width, screen_height = 1920, 1080
+
+def prompt_roles(name):
+    if name.startswith("label:"):
+        suggested = ["label"]
+    elif name.startswith("button:"):
+        suggested = ["button", "tap"]
+    elif name.startswith("overlay:"):
+        suggested = ["overlay", "state"]
+    elif name.startswith("state:"):
+        suggested = ["state"]
+    elif name.startswith("util:"):
+        suggested = ["tap"]
+    elif name.startswith("nav:"):
+        suggested = ["tap", "button"]
+    elif name.startswith("upgrade:"):
+        suggested = ["label"]  # legacy or misnamed; treat as label
+    else:
+        suggested = ["unknown"]
+
+    default = ",".join(suggested)
+    user_input = input(f"Suggested roles for '{name}': [{default}] (edit or press Enter to accept): ")
+    if user_input.strip():
+        roles = [r.strip() for r in user_input.split(",")]
+    else:
+        roles = suggested
+    return roles
 
 def reload_image():
     global image, clone, img_height, img_width, scroll_offset
@@ -180,7 +135,15 @@ def handle_mouse(event, x, y, flags, param):
             print("[WARN] Empty crop. Try again.")
             return
 
-        name = get_region_name(existing_clickmap_keys=clickmap.keys())
+        # Inline-prefill the last-used prefix (e.g. 'label:')
+        global _last_region_prefix
+        default_prefix = f"{_last_region_prefix}:" if _last_region_prefix else ""
+        name = input(f"Enter a name for this region: {default_prefix}").strip()
+        name = default_prefix + name if name else default_prefix
+        
+        # Update stored prefix for the next prompt
+        if ":" in name:
+            _last_region_prefix = name.split(":")[0]
 
         if not name:
             print("[INFO] Skipped saving.")
@@ -200,6 +163,7 @@ def handle_mouse(event, x, y, flags, param):
         entry["roles"] = prompt_roles(name)
         clickmap[name] = entry
         save_clickmap(clickmap)
+
         print(f"[INFO] Clickmap entry saved for '{name}'")
 
         ask_gesture = input("Define a gesture for this region now? (Y/n): ").strip().lower()

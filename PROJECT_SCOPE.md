@@ -60,6 +60,10 @@
 
 ---
 
+### Extensibility Consideration
+
+While the current automation framework is purpose-built for *The Tower*, design and architectural decisions should strive to support future extensibility. This includes clean separation between game-specific assets (clickmaps, match templates, state definitions, handlers) and core engine logic, use of consistent naming conventions, modular handler dispatch, and human-readable configuration formats. The goal is to enable straightforward reuse or adaptation of this system for other games or visual automation tasks with minimal refactoring.
+
 ## 📎 Internal References
 
 - Input logic is governed by `core/input_policy.md`
