@@ -18,27 +18,36 @@ def get_clickmap():
 def get_clickmap_path():
     return CLICKMAP_FILE
 
-def get_click(name):
-    try:
-        tap = _clickmap[name]["tap"]
-        return tap["x"], tap["y"]
-    except (KeyError, TypeError):
-        return None
+def resolve_dot_path(dot_path, data=None):
+    parts = dot_path.split(".")
+    cur = data or _clickmap
+    for p in parts:
+        if isinstance(cur, dict) and p in cur:
+            cur = cur[p]
+        else:
+            return None
+    return cur
 
-def save_clickmap(data=None):
-    if data is None:
-        data = _clickmap
-    tmp_path = CLICKMAP_FILE + ".tmp"
-    with open(tmp_path, "w") as f:
-        json.dump(data, f, indent=2)
-    os.replace(tmp_path, CLICKMAP_FILE)
-    print("[INFO] Saved clickmap to", CLICKMAP_FILE)
+def get_click(name):
+    entry = resolve_dot_path(name)
+    log(f"[DEBUG] get_click: entry for {name} = {entry}", "DEBUG")
+    if not entry:
+        log(f"[DEBUG] get_click: resolve_dot_path failed for {name}", "WARN")
+        return None
+    if "tap" in entry:
+        tap = entry["tap"]
+        return tap["x"], tap["y"]
+    elif "match_region" in entry:
+        region = entry["match_region"]
+        x, y, w, h = map(int, (region["x"], region["y"], region["w"], region["h"]))
+        return x + w // 2, y + h // 2
+    return None
 
 def get_swipe(name):
-    try:
-        return _clickmap[name]["swipe"]
-    except (KeyError, TypeError):
+    entry = resolve_dot_path(name)
+    if not entry:
         return None
+    return entry.get("swipe")
 
 def has_click(name):
     return get_click(name) is not None
@@ -63,5 +72,38 @@ def swipe_now(name):
         ])
     else:
         log(f"[ERROR] swipe_now: No swipe data for '{name}'", "FAIL")
+
+def save_clickmap(data=None):
+    if data is None:
+        data = _clickmap
+    tmp_path = CLICKMAP_FILE + ".tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(data, f, indent=2)
+    os.replace(tmp_path, CLICKMAP_FILE)
+    print("[INFO] Saved clickmap to", CLICKMAP_FILE)
+
+def flatten_clickmap(data=None, prefix=""):
+    entries = {}
+    if data is None:
+        data = _clickmap
+    for key, value in data.items():
+        full_key = f"{prefix}.{key}" if prefix else key
+        if isinstance(value, dict):
+            entries.update(flatten_clickmap(value, full_key))
+        else:
+            entries[full_key] = value
+    return entries
+
+def get_entries_by_role(role):
+    results = {}
+    def _search(d, path=""):
+        for k, v in d.items():
+            new_path = f"{path}.{k}" if path else k
+            if isinstance(v, dict):
+                if "roles" in v and role in v["roles"]:
+                    results[new_path] = v
+                _search(v, new_path)
+    _search(_clickmap)
+    return results
 
 

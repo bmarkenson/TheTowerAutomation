@@ -6,7 +6,7 @@ import json
 import subprocess
 import argparse
 from pynput import keyboard, mouse
-from core.clickmap_access import get_clickmap, save_clickmap
+from core.clickmap_access import get_clickmap, save_clickmap, resolve_dot_path
 
 clickmap = get_clickmap()
 ENTRY_NAME = None
@@ -100,27 +100,44 @@ def process_gesture(start, end, duration_ms):
     start_android = map_to_android(*start, window_rect, android_size)
     end_android = map_to_android(*end, window_rect, android_size)
 
-    if ENTRY_NAME is None:
-        name = input("Enter gesture name: ").strip()
-    else:
-        name = ENTRY_NAME
-
-    entry = clickmap.get(name, {})
+    entry = resolve_dot_path(ENTRY_NAME)
+    if entry is None:
+        confirm = input(f"[WARN] Entry '{name}' does not exist in clickmap. Create new blind gesture entry? (y/N): ").strip().lower()
+        if confirm != 'y':
+            print("[INFO] Gesture not saved.")
+            return
+        # Attempt to insert into the clickmap
+        try:
+            group, key = name.split(".", 1)
+        except ValueError:
+            print("[ERROR] Invalid dot-path format. Expected 'group.key'")
+            return
+    
+        if group not in clickmap:
+            clickmap[group] = {}
+    
+        clickmap[group][key] = {
+            "roles": ["gesture"]
+        }
+        entry = clickmap[group][key]
 
     if start_android == end_android:
-        entry["tap"] = { "x": start_android[0], "y": start_android[1] }
-        print(f"[INFO] Recorded tap at {start_android}")
+        gesture_type = "tap"
+        new_gesture = { "x": start_android[0], "y": start_android[1] }
+        log_msg = f"[INFO] Recorded tap at {start_android}"
     else:
-        entry["swipe"] = {
+        gesture_type = "swipe"
+        new_gesture = {
             "x1": start_android[0], "y1": start_android[1],
-            "x2": end_android[0], "y2": end_android[1],
+            "x2": end_android[0],   "y2": end_android[1],
             "duration_ms": duration_ms
         }
-        print(f"[INFO] Recorded swipe from {start_android} to {end_android} in {duration_ms}ms")
+        log_msg = f"[INFO] Recorded swipe from {start_android} to {end_android} in {duration_ms}ms"
 
-    clickmap[name] = entry
+    entry[gesture_type] = new_gesture
     save_clickmap(clickmap)
-    print(f"[INFO] Gesture saved under '{name}'")
+    print(log_msg)
+    print(f"[INFO] Gesture saved under '{ENTRY_NAME}'")
 
 def on_key_press(key):
     if isinstance(key, keyboard.KeyCode) and key.char and key.char.lower() == "s":
@@ -143,7 +160,7 @@ def on_mouse_click(x, y, button, pressed):
 def main():
     global ENTRY_NAME
     parser = argparse.ArgumentParser()
-    parser.add_argument("--name", help="Name to assign to recorded gesture")
+    parser.add_argument("--name", help="dot_path to target")
     args = parser.parse_args()
     ENTRY_NAME = args.name
 

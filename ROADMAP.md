@@ -11,14 +11,9 @@ This roadmap outlines current architectural goals, bugfixes, and planned feature
 ## ⚙️ Architectural Refactors
 
 ### State Detection System
-- 🔼 [ ] Refactor `state_definitions` to YAML format.
-- 🔼 [ ] Add support for `overlays` in YAML (non-exclusive UI elements like ad gems, lab ready icons).
-- 🔼 [ ] Update `state_detector.py` to:
-  - Load YAML
-  - Return structured results with `state` and `overlays`
 - ⏳ [ ] Add confidence threshold logic (global or per-state optional).
 - ⏳ [ ] Support composite match logic (e.g. `all_of`, `any_of`).
-- 🔼 [ ] Enforce unified naming convention across clickmap and YAML (e.g., role__name). Build validator to detect drift and optionally suggest YAML stubs for new clickmap keys.
+-    [ ] Enforce unified naming convention across clickmap and YAML (e.g., role__name). Build validator to detect drift and optionally suggest YAML stubs for new clickmap keys.
 
 
 ### Handler Architecture
@@ -43,12 +38,8 @@ This roadmap outlines current architectural goals, bugfixes, and planned feature
 
 ## 📊 State Enhancements
 
-- 🔼 [ ] Improve "running indicators" logic:
-  - Support mutually exclusive UI elements for gameplay confirmation.
-- 🔼 [ ] Add overlay definition for `lab_ready` icon and corresponding handler.
 - 🔼 [ ] Add overlay and handler for claiming daily quests.
-- ⏳ [ ] Fix `handle_game_over` swipe/scroll logic (only if needed).
-
+- ⏳ [ ] Fix `handle_game_over` (currently blind tapping; migrate to match checking)
 ---
 
 ## 🔄 Upgrade & Scroll Systems
@@ -88,9 +79,7 @@ This roadmap outlines current architectural goals, bugfixes, and planned feature
 
 ## 🔄 Utilities and Testing
 
-- 🔼 [ ] Add `test_overlay_detection.py` to verify overlays independently.
 - ⏳ [ ] Add regression test for state transitions
-- 🔼 [ ] Improve clickmap tooling and schema validation
 - (low) Allow individual entry editing in the clickmap instead of always doing a full overwrite dump
 
 ---

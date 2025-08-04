@@ -1,38 +1,54 @@
 states:
-- name: GAME_OVER
-  type: primary
+- name: RUNNING
+  type: running
   match_keys:
-  - state:game_over
+  - indicators.attack_menu
+  - indicators.defense_menu
+  - indicators.uw_menu
+  - indicators.wall_icon
 
-- name: RESUME_GAME
-  type: primary
+- name: ATTACK_MENU
+  type: menu
   match_keys:
-  - button:resume_game
+  - indicators.attack_menu
 
-- name: RESUME_BATTLE
-  type: primary
+- name: DEFENSE_MENU
+  type: menu
   match_keys:
-  - button:resume_battle
+  - indicators.defense_menu
+
+- name: UW_MENU
+  type: menu
+  match_keys:
+  - indicators.uw_menu
 
 - name: HOME_SCREEN
   type: primary
   match_keys:
-  - button:battle:home_screen
+  - buttons.battle:home
 
-- name: RUNNING
-  type: running
+- name: RESUME_GAME
+  type: primary
   match_keys:
-  - state:wall_icon:running
-  - state:attack_menu:running
-  - state:uw_menu:running
+  - buttons.resume_game
+
+- name: RESUME_BATTLE
+  type: primary
+  match_keys:
+  - buttons.resume_battle
+
+- name: GAME_OVER
+  type: primary
+  match_keys:
+  - indicators.game_over
 
 overlays:
 - name: DAILY_GEMS_AVAILABLE
   match_keys:
-  - overlay:daily_free_gems_badge
+  - overlays.daily_free_gems_badge
 
 - name: AD_GEMS_AVAILABLE
   match_keys:
-  - overlay:claim_ad_gem
+  - overlays.claim_ad_gem
 
 

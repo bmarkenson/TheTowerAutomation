@@ -2,7 +2,7 @@
 
 from utils.template_matcher import match_region
 from utils.logger import log
-from core.clickmap_access import get_clickmap
+from core.clickmap_access import get_clickmap, resolve_dot_path
 import yaml
 import os
 
@@ -23,7 +23,7 @@ def detect_state_and_overlays(screen):
         state_name = state["name"]
         match_keys = state.get("match_keys", [])
         for key in match_keys:
-            entry = clickmap.get(key)
+            entry = resolve_dot_path(key)
             if not entry:
                 continue
             pt, conf = match_region(screen, entry)
@@ -38,7 +38,7 @@ def detect_state_and_overlays(screen):
     for overlay in state_definitions.get("overlays", []):
         overlay_name = overlay["name"]
         for key in overlay.get("match_keys", []):
-            entry = clickmap.get(key)
+            entry = resolve_dot_path(key)
             if not entry:
                 continue
             pt, conf = match_region(screen, entry)

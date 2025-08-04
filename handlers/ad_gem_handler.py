@@ -6,6 +6,6 @@ import time
 
 def handle_ad_gem():
     log("Handling AD_GEMS_AVAILABLE overlay", "ACTION")
-    tap_now("overlay:claim_ad_gem")
+    tap_now("overlays.claim_ad_gem")
     time.sleep(1)  # optional: let UI stabilize
 

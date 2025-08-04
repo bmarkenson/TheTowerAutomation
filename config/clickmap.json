@@ -1,4 +1,37 @@
 {
+  "_shared_match_regions": {
+    "upgrade_left": {
+      "x": 30,
+      "y": 1500,
+      "w": 480,
+      "h": 1400
+    },
+    "upgrade_right": {
+      "x": 550,
+      "y": 1500,
+      "w": 480,
+      "h": 1400
+    },
+    "floating_button": {
+      "x": 0,
+      "y": 1200,
+      "w": 1080,
+      "h": 200
+    },
+    "floating_gem_path": {
+      "match_template": "_shared_match_regions/floating_gem_path.png",
+      "match_region": {
+        "x": 177,
+        "y": 420,
+        "w": 737,
+        "h": 681
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "floating_gem_path"
+      ]
+    }
+  },
   "gesture_targets": {
     "goto_top": {
       "swipe": {
@@ -110,6 +143,19 @@
         "y": 1590,
         "w": 526,
         "h": 63
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "demon_mode_active": {
+      "match_template": "indicators/demon_mode_active.png",
+      "match_region": {
+        "x": 368,
+        "y": 1244,
+        "w": 61,
+        "h": 59
       },
       "match_threshold": 0.9,
       "roles": [
@@ -243,6 +289,19 @@
       "roles": [
         "navigation"
       ]
+    },
+    "toggle_menu": {
+      "match_template": "navigation/toggle_menu.png",
+      "match_region": {
+        "x": 981,
+        "y": 172,
+        "w": 74,
+        "h": 71
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "navigation"
+      ]
     }
   },
   "buttons": {
@@ -266,19 +325,19 @@
       ],
       "match_template": ""
     },
-      "more_stats:game_over": {
-        "match_template": "button/more_stats.png",
-        "match_threshold": 0.9,
-        "match_region": {
-          "x": 182,
-          "y": 1176,
-          "w": 354,
-          "h": 138
-        },
-        "roles": [
-          "button"
-        ]
+    "more_stats:game_over": {
+      "match_template": "button/more_stats.png",
+      "match_threshold": 0.9,
+      "match_region": {
+        "x": 182,
+        "y": 1176,
+        "w": 354,
+        "h": 138
       },
+      "roles": [
+        "button"
+      ]
+    },
     "home:game_over": {
       "tap": {
         "x": 784,
