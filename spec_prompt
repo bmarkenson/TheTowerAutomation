@@ -1,4 +1,4 @@
-I’m creating compact spec files for modules in my Python automation project.
+I’m creating compact spec files for modules in my Python automation project.  
 Your job:
 
     Parse each module I paste fully — find all public functions (and classes/methods).
@@ -7,7 +7,7 @@ Your job:
 
     Always output the spec wrapped in a heredoc so I can paste it directly to create a .py.md file in the same directory as the .py source.
 
-    We may edit modules as we go — if you see a safe, minimal improvement, propose it; if I agree, give a patch before generating the spec.
+    We may edit modules as we go — if you see a safe, minimal improvement, propose it; if I agree, give a patch before generating the spec.  Always recommend adding docstrings where appropriate
 
     One module per session — don’t rely on prior modules to remain in context.
 
@@ -123,3 +123,8 @@ Workflow for this session
     Then output the heredoc spec per the rules above.
 
     We move to the next module in a new session.
+
+
+Module:
+
+

@@ -1,25 +1,19 @@
 #!/usr/bin/env python3
-# core/previous_wave.py
+# utils/previous_wave.py
 
 import os
 import re
 import glob
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Optional
 
 import cv2
 import numpy as np
 
+from utils.ocr_utils import preprocess_binary, ocr_text
+
 _CUR_LINE_RE = re.compile(r'^\s*Wave\s+(\d{1,6})\b', re.IGNORECASE | re.MULTILINE)
 _HI_LINE_RE  = re.compile(r'^\s*Highest\s*Wave[: ]+\s*(\d{1,6})\b', re.IGNORECASE | re.MULTILINE)
-
-# Optional OCR backend — same pattern you used before
-try:
-    import pytesseract
-    _HAS_TESS = True
-except Exception:
-    _HAS_TESS = False
-
 
 # ---------- File selection ----------
 
@@ -45,30 +39,7 @@ def _latest_game_stats_image(matches_dir: str = "screenshots/matches") -> Option
     return with_ts[0][0]
 
 
-# ---------- OCR ----------
-
-def _preprocess_game_stats(img_bgr: np.ndarray) -> np.ndarray:
-    """Boost contrast and binarize to help OCR 'Wave 1234' text."""
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    gray = cv2.convertScaleAbs(gray, alpha=1.6, beta=0)
-    # Adaptive threshold, then invert so text tends to be dark on white
-    thr = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
-                                cv2.THRESH_BINARY, 35, 7)
-    bin_img = cv2.bitwise_not(thr)
-    # Light morphological close to connect strokes
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-    bin_img = cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, kernel, iterations=1)
-    return bin_img
-
-def _ocr_text(bin_img: np.ndarray) -> str:
-    if not _HAS_TESS:
-        return ""
-    rgb = cv2.cvtColor(bin_img, cv2.COLOR_GRAY2RGB)
-    # psm 6 = assume a block of text; allowing letters + digits
-    cfg = r"--psm 6"
-    return pytesseract.image_to_string(rgb, config=cfg)
-
-_WAVE_RE = re.compile(r"\bWave\s+(\d{1,6})\b", re.IGNORECASE)
+# ---------- Parsing ----------
 
 def _extract_current_and_highest(text: str):
     cur = None
@@ -86,9 +57,14 @@ def _extract_current_and_highest(text: str):
 
     return cur, hi
 
+
 # ---------- Public API ----------
 
 def get_previous_run_wave(matches_dir: str = "screenshots/matches") -> Optional[int]:
+    """
+    Load the latest 'GameYYYYMMDD_HHMM_game_stats.png' under matches_dir,
+    OCR the text, and return the parsed current Wave number (or None on failure).
+    """
     path = _latest_game_stats_image(matches_dir)
     if not path:
         return None
@@ -96,13 +72,24 @@ def get_previous_run_wave(matches_dir: str = "screenshots/matches") -> Optional[
     if img is None:
         return None
 
-    bin_img = _preprocess_game_stats(img)
-    text = _ocr_text(bin_img)
+    # Mirror the original preprocessing behavior (invert + slightly larger block/C)
+    bin_img = preprocess_binary(img, alpha=1.6, block=35, C=7, close=(2, 2), invert=True, choose_best=False)
+    text = ocr_text(bin_img, psm=6)
 
     cur, _hi = _extract_current_and_highest(text)
     return cur
 
-if __name__ == "__main__":
-    val = get_previous_run_wave()
+
+def main():
+    """CLI: prints previous run's wave; supports --matches-dir."""
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--matches-dir", default="screenshots/matches", help="Directory containing Game*_game_stats.png")
+    args = parser.parse_args()
+
+    val = get_previous_run_wave(matches_dir=args.matches_dir)
     print("Previous run wave:", "<none>" if val is None else val)
 
+
+if __name__ == "__main__":
+    main()

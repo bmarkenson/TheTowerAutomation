@@ -6,20 +6,21 @@ import json
 import subprocess
 import keyboard
 from core.clickmap_access import tap_now, get_clickmap, save_clickmap
+from core.adb_utils import adb_shell
 
-clickmap = get_clickmap()
 
 def load_clickmap():
-    with open(clickmap, "r") as f:
-        return json.load(f)
+    """Return the current in-memory clickmap dict from core.clickmap_access."""
+    return get_clickmap()
+
 
 def run_adb_swipe(x1, y1, x2, y2, duration):
-    subprocess.run([
-        "adb", "shell", "input", "swipe",
-        str(x1), str(y1), str(x2), str(y2), str(duration)
-    ])
+    """Inject a swipe via centralized adb_shell."""
+    adb_shell(["input", "swipe", str(x1), str(y1), str(x2), str(y2), str(duration)])
+
 
 def choose_gesture(clickmap):
+    """Interactively select a gesture entry (tap/swipe) from the clickmap."""
     print("Available gestures:")
     entries = list(clickmap.items())
     for idx, (key, val) in enumerate(entries, 1):
@@ -33,7 +34,9 @@ def choose_gesture(clickmap):
         except ValueError:
             continue
 
+
 def edit_swipe(name, swipe_entry):
+    """Keyboard UI to tweak x2/y2/duration for a swipe, replay, and save/back."""
     print(f"\nEditing: {name}")
     print_controls()
     while True:
@@ -53,7 +56,7 @@ def edit_swipe(name, swipe_entry):
         elif key == "right": swipe_entry["x2"] += 10
         elif key == "up": swipe_entry["y2"] -= 10
         elif key == "down": swipe_entry["y2"] += 10
-        elif key in ("+", "="): 
+        elif key in ("+", "="):
             swipe_entry["duration_ms"] += 100
         elif key in ("-", "\u2212", "minus"):
             swipe_entry["duration_ms"] = max(50, swipe_entry["duration_ms"] - 100)
@@ -72,7 +75,9 @@ def edit_swipe(name, swipe_entry):
             print("[INFO] Discarding changes and exiting.")
             exit()
 
+
 def run_tap(name):
+    """Small loop to replay a tap gesture by name or return/quit."""
     print(f"\nReady to tap: {name}")
     print("[r] Replay | [b] Back to gesture list | [q] Quit")
     while True:
@@ -87,14 +92,18 @@ def run_tap(name):
         elif k == "q":
             exit()
 
+
 def print_controls():
+    """Print keyboard controls for swipe tuning."""
     print("[←/→]: Adjust x2 | [↑/↓]: Adjust y2")
     print("[+/-]: Adjust duration (ms)")
     print("[r]: Replay gesture")
     print("[s]: Save and exit")
     print("[q]: Quit without saving\n")
 
+
 def main():
+    """Interactive gesture tuner: choose entries, tweak swipes, replay taps, save."""
     clickmap = load_clickmap()
 
     while True:
@@ -107,6 +116,7 @@ def main():
                 save_clickmap(clickmap)
         elif "tap" in entry:
             run_tap(name)
+
 
 if __name__ == "__main__":
     main()

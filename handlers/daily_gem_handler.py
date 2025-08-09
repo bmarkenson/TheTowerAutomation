@@ -1,7 +1,7 @@
 from core import tap_dispatcher
 from utils.logger import log
 from core.ss_capture import capture_adb_screenshot
-from core.automation_state import AUTOMATION
+from core.automation_state import AUTOMATION, ExecMode
 from core.clickmap_access import tap_now, swipe_now
 from core.label_tapper import tap_label_now
 import time
@@ -45,10 +45,10 @@ def handle_game_over():
     time.sleep(1.2)
 
     # Step 6: Decide next action based on mode
-    mode = AUTOMATION.get_mode()
+    mode = AUTOMATION.mode
     if mode == "WAIT":
         log("Pausing on Game Over — waiting for user signal.", "INFO")
-        while AUTOMATION.get_mode() == "WAIT":
+        while AUTOMATION.mode is ExecMode.WAIT:
             time.sleep(1)
     elif mode == "HOME":
         log("Mode = HOME (not implemented yet)", "INFO")
@@ -75,7 +75,7 @@ def _abort_handler(step, session_id):
     log(f"[ABORT] Game Over handler failed at: {step}", "ERROR")
     debug_img = capture_adb_screenshot()
     save_image(debug_img, f"{session_id}_ABORT_{step.replace(' ', '_')}")
-    AUTOMATION.set_mode("WAIT")
+    AUTOMATION.mode = ExecMode.WAIT
     return
 
 

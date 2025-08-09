@@ -1,13 +1,30 @@
 #!/usr/bin/env python3
-# tools/test_floating_buttons.py
+# test/detect_floating_buttons.py
 
-import cv2
-import os
+"""
+CLI test harness:
+- Captures a screen via ADB
+- Runs floating button detection
+- Prints human-readable matches
+
+Intended for quick manual verification. No JSON or tap actions here.
+"""
+
 from core.floating_button_detector import detect_floating_buttons
 from core.ss_capture import capture_adb_screenshot
-from core.clickmap_access import resolve_dot_path
+
 
 def main():
+    """
+    Capture the current screen and print detected floating buttons.
+
+    Returns: None (prints results only)
+    Side effects: Uses ADB to capture the screen; CPU-bound image matching.
+    Exit behavior:
+      - Prints an error and returns early if the screen capture fails.
+      - Prints a summary when no buttons are detected.
+      - Prints details for each detected button otherwise.
+    """
     print("[INFO] Capturing screen...")
     screen = capture_adb_screenshot()
     if screen is None:
@@ -26,6 +43,7 @@ def main():
         print(f"  confidence = {match['confidence']:.2f}")
         print(f"  match_region = {match['match_region']}")
         print(f"  tap_point = {match['tap_point']}")
+
 
 if __name__ == "__main__":
     main()

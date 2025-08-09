@@ -1,0 +1,12 @@
+$PROJECT_ROOT/tools/scrcpy_adb_input_bridge.py — Entrypoint
+tools.scrcpy_adb_input_bridge.ensure_scrcpy_window_rect(rect_source='top', diagnose=False, android_size=None) — Returns: (x, y, w, h) chosen from top/child/auto; Side effects: [log]; Errors: RuntimeError if the window cannot be found.
+tools.scrcpy_adb_input_bridge.get_android_screen_size() — Returns: (width, height) from capture_adb_screenshot(); Side effects: [adb][cv2]; Errors: RuntimeError if capture fails.
+tools.scrcpy_adb_input_bridge.get_scrcpy_window_rect(rect_source='top', diagnose=False, android_size=None) — Returns: (x, y, w, h) using the current selection policy; Side effects: [log]; Errors: RuntimeError if window cannot be found.
+tools.scrcpy_adb_input_bridge.map_to_android(x, y, window_rect, android_size) — Returns: (ax, ay) mapped Android coordinates with letterboxing handled; Side effects: None; Errors: None.
+tools.scrcpy_adb_input_bridge.send_tap(x, y) — Returns: action result (inject tap); Side effects: [adb][log]; Errors: CalledProcessError when ADB command fails (via adb_shell).
+tools.scrcpy_adb_input_bridge.send_swipe(x1, y1, x2, y2, duration_ms) — Returns: action result (inject swipe); Side effects: [adb][log]; Errors: CalledProcessError when ADB command fails (via adb_shell).
+tools.scrcpy_adb_input_bridge.get_pixel_color_at_android_coords(x, y) — Returns: (R, G, B) at Android coords or None on failure; Side effects: [adb][cv2][log]; Errors: Exceptions caught and logged; returns None.
+tools.scrcpy_adb_input_bridge.start_mouse_listener(android_size, args) — Returns: None (starts background listener thread); Side effects: [loop][adb][log]; Errors: Non-fatal logging on window lookup errors; emits JSON lines when --json-stream is set.
+tools.scrcpy_adb_input_bridge.launch_scrcpy() — Returns: None; Side effects: starts scrcpy subprocess titled "scrcpy-bridge"; [log]; Errors: OSError if spawn fails.
+tools.scrcpy_adb_input_bridge.cleanup_and_exit(signum=None, frame=None) — Returns: None; Side effects: [log]; Errors: None (best-effort terminate/kill of scrcpy).
+tools.scrcpy_adb_input_bridge.main() — Returns: action result (runs bridge until killed); Side effects: [loop][adb][log]; Errors: Process exits on SIGINT/SIGTERM; CLI: --json-stream emits "__GESTURE_JSON__{...}" lines for gestures; --rect-source {top,child,auto} selects rect policy (default top); --rect-diagnose prints candidate/AR info.

@@ -8,19 +8,35 @@ from core.state_detector import detect_state_and_overlays
 from core.ss_capture import capture_and_save_screenshot
 
 def main():
+    """
+    CLI test harness for state detection.
+
+    Flags:
+      --image PATH       Path to screenshot image (default: screenshots/latest.png).
+      --highlight        Save an annotated copy alongside the input (drawing must be implemented in detector).
+      --refresh          Capture a fresh screenshot to PATH before detection.
+
+    Returns:
+      Action result (prints detected state/overlays; optionally writes annotated image).
+
+    Errors:
+      Exits early if image file is missing or cannot be loaded.
+    """
     parser = argparse.ArgumentParser(description="Test state detection from screenshot")
     parser.add_argument("--image", default="screenshots/latest.png", help="Path to screenshot image")
     parser.add_argument("--highlight", action="store_true", help="Draw match region on output")
     parser.add_argument("--refresh", action="store_true", help="Capture new screenshot before running")
     args = parser.parse_args()
 
-    if not os.path.exists(args.image):
-        print(f"[ERROR] Image not found: {args.image}")
-        return
-
+    # Refresh first so it works even if the image doesn't exist yet.
     if args.refresh:
         print("[INFO] Capturing new screenshot...")
-        capture_and_save_screenshot()
+        capture_and_save_screenshot(args.image)
+
+    if not os.path.exists(args.image):
+        print(f("[ERROR] Image not found: {args.image}"))
+        return
+
     screen = cv2.imread(args.image)
     if screen is None:
         print("[ERROR] Failed to load image.")

@@ -6,15 +6,16 @@ import time
 from datetime import datetime
 import os
 import cv2
+import argparse
+
 from core.watchdog import watchdog_process_check
 from core.ss_capture import capture_and_save_screenshot
 from core.automation_state import AUTOMATION
 from core.state_detector import detect_state_and_overlays
 from handlers.game_over_handler import handle_game_over
 from handlers.home_screen_handler import handle_home_screen
+from handlers.ad_gem_handler import handle_ad_gem, stop_blind_gem_tapper
 from utils.logger import log
-from handlers.ad_gem_handler import handle_ad_gem
-import argparse
 
 SCREENSHOT_PATH = "screenshots/latest.png"
 
@@ -24,41 +25,47 @@ args = parser.parse_args()
 AUTO_START_ENABLED = not args.no_restart
 log(f"AUTO_START_ENABLED = {AUTO_START_ENABLED}", "DEBUG")
 
-AUTO_START_ENABLED = not args.no_restart
 
 def main():
     log("Starting main heartbeat loop.", level="INFO")
     threading.Thread(target=watchdog_process_check, daemon=True).start()
 
-    while True:
-        img = capture_and_save_screenshot()
-        if img is None:
-            log("Failed to capture screenshot.", level="FAIL")
-            time.sleep(2)
-            continue
+    last_ui_state = None
+    try:
+        while True:
+            img = capture_and_save_screenshot()
+            if img is None:
+                log("Failed to capture screenshot.", level="FAIL")
+                time.sleep(2)
+                continue
 
-        # Detect current state from image
-        detection = detect_state_and_overlays(img)
-        new_state = detection["state"]
-        overlays = detection["overlays"]
-        old_state = AUTOMATION.get_state()
-        if new_state != old_state:
-            log(f"State change: {old_state} → {new_state}", "STATE")
-            AUTOMATION.set_state(new_state)
+            # Detect current state from image
+            detection = detect_state_and_overlays(img)
+            new_state = detection["state"]           # e.g., "GAME_OVER", "HOME_SCREEN"
+            overlays = detection["overlays"]
 
-        # Handle known states
-        if new_state == "GAME_OVER":
-            log("Detected GAME OVER. Executing handler.", "INFO")
-            handle_game_over()
-        elif new_state == "HOME_SCREEN":
-            log("Detected HOME_SCREEN. Executing handler.", "INFO")
-            handle_home_screen(restart_enabled=AUTO_START_ENABLED)
+            if new_state != last_ui_state:
+                log(f"UI state change: {last_ui_state} → {new_state}", "STATE")
+                last_ui_state = new_state
 
-        time.sleep(5)
-        if "AD_GEMS_AVAILABLE" in overlays:
-            handle_ad_gem()
+            # Handle known states
+            if new_state == "GAME_OVER":
+                log("Detected GAME_OVER. Executing handler.", "INFO")
+                handle_game_over()
+            elif new_state == "HOME_SCREEN":
+                log("Detected HOME_SCREEN. Executing handler.", "INFO")
+                handle_home_screen(restart_enabled=AUTO_START_ENABLED)
+
+            if "AD_GEMS_AVAILABLE" in overlays:
+                handle_ad_gem()
+
+            time.sleep(5)  # Ctrl+C interrupts here immediately
+    except KeyboardInterrupt:
+        log("KeyboardInterrupt — shutting down.", "INFO")
+    finally:
+        stop_blind_gem_tapper()
+        log("Exited cleanly.", "INFO")
+
 
 if __name__ == "__main__":
     main()
-
-

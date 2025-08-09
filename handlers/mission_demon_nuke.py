@@ -1,5 +1,21 @@
 # handlers/mission_demon_nuke.py
 
+"""
+Mission: Demon Mode → Nuke → End Round → Retry.
+
+This module runs a mission sequence intended for testing or scripted play:
+1) Wait until the game is in RUNNING state.
+2) Wait for and tap the Demon Mode floating button.
+3) Wait a fixed duration to benefit from Demon Mode.
+4) Wait for and tap the Nuke floating button.
+5) Open the menu if needed, tap End Round, confirm, and tap Retry.
+
+Notes
+- Blocking loops: waits poll the screen until conditions are met; there are no timeouts.
+- Side effects: ADB screenshots, OpenCV detection, on-device taps, and logging.
+- Errors: Tap attempts inside the end-game sequence are guarded; failures are logged and the flow continues.
+"""
+
 import time
 from core.ss_capture import capture_and_save_screenshot
 from core.clickmap_access import tap_now
@@ -10,6 +26,21 @@ from utils.logger import log
 
 
 def run_demon_nuke_strategy():
+    """
+    Run the Demon-Mode-then-Nuke mission sequence and attempt an immediate restart.
+
+    Flow
+    - Poll for RUNNING state (2s interval).
+    - Poll for Demon Mode button, tap it (1s interval), then wait 10s.
+    - Poll for Nuke button, tap it (1s interval), then wait 5s.
+    - Ensure menu is open, tap End Round, confirm Yes, then tap Retry.
+
+    Returns
+    - None. Action-oriented procedure; logs progress and issues.
+
+    Side Effects
+    - [adb][cv2][fs][state][tap][log][loop]
+    """
     log("[MISSION] Starting Demon Mode -> Nuke -> Restart mission", "ACTION")
 
     # Step 1: Wait for RUNNING state
@@ -33,7 +64,7 @@ def run_demon_nuke_strategy():
         log("[MISSION] Waiting for Demon Mode button...", "DEBUG")
         time.sleep(1)
 
-    # Step 3: Wait ~30 seconds
+    # Step 3: Wait ~10 seconds
     log("[MISSION] Demon Mode activated. Waiting 10s...", "INFO")
     time.sleep(10)
 
@@ -50,7 +81,7 @@ def run_demon_nuke_strategy():
 
     # Step 5: Wait a bit more
     log("[MISSION] Nuke launched. Waiting 5s before restart...", "INFO")
-    time.sleep(1)
+    time.sleep(5)
 
     # Step 6: End game sequence
     screen = capture_and_save_screenshot()

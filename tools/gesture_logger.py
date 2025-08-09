@@ -13,6 +13,7 @@ from core.clickmap_access import (
     resolve_dot_path,
     interactive_get_dot_path,
 )
+from core.adb_utils import adb_shell
 
 
 JSON_PREFIX = "__GESTURE_JSON__"
@@ -101,20 +102,30 @@ class ScrcpyBridge:
 # -------------------- Utility actions --------------------
 
 def replay_gesture(gesture):
+    """
+    Inject a captured gesture via centralized ADB helper.
+
+    Args:
+        gesture (dict): {"type":"tap","x","y"} or
+                        {"type":"swipe","x1","y1","x2","y2","duration_ms"?}
+
+    Returns:
+        action result (side effects only)
+
+    Errors:
+        CalledProcessError when ADB command fails (via adb_shell).
+    """
     t = gesture.get("type")
     if t == "tap":
         x, y = gesture["x"], gesture["y"]
         print(f"[REPLAY] tap {x}, {y}")
-        subprocess.run(["adb", "shell", "input", "tap", str(x), str(y)])
+        adb_shell(["input", "tap", str(x), str(y)])
     elif t == "swipe":
         x1, y1 = gesture["x1"], gesture["y1"]
         x2, y2 = gesture["x2"], gesture["y2"]
         duration = gesture.get("duration_ms", 300)
         print(f"[REPLAY] swipe {x1},{y1} -> {x2},{y2} ({duration}ms)")
-        subprocess.run([
-            "adb", "shell", "input", "swipe",
-            str(x1), str(y1), str(x2), str(y2), str(duration)
-        ])
+        adb_shell(["input", "swipe", str(x1), str(y1), str(x2), str(y2), str(duration)])
     else:
         print(f"[REPLAY] Unsupported gesture type: {t}")
 
@@ -169,6 +180,13 @@ def record_and_save(bridge: ScrcpyBridge, dot_path: str):
 # -------------------- Main --------------------
 
 def main():
+    """
+    CLI entrypoint for recording gestures into the clickmap.
+
+    Flags:
+        --name <dot_path>  Save exactly one gesture under the given dot_path and exit.
+                           Without --name, runs interactive selection loop until Ctrl+C.
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument("--name", help="dot_path to save gesture under")
     args = parser.parse_args()

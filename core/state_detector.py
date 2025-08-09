@@ -2,7 +2,7 @@
 
 from utils.template_matcher import match_region
 from utils.logger import log
-from core.clickmap_access import get_clickmap, resolve_dot_path
+from core.clickmap_access import resolve_dot_path
 import yaml
 import os
 
@@ -13,7 +13,6 @@ def load_state_definitions():
         return yaml.safe_load(f)
 
 state_definitions = load_state_definitions()
-clickmap = get_clickmap()
 
 def detect_state_and_overlays(screen):
     result = {

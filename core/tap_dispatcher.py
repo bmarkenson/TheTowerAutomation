@@ -2,33 +2,24 @@
 import threading
 import queue
 import time
-import subprocess
 import random
-from datetime import datetime
 from utils.logger import log
 from core.adb_utils import adb_shell
 
 TAP_QUEUE = queue.Queue()
-LOCK = threading.Lock()
 
 # Configuration
 KEEPALIVE_INTERVAL = 60  # seconds
-ADB_DEVICE_ID = "192.168.1.163:5555"  # or leave blank if only one device
-#ADB_DEVICE_ID = "07171JEC203290"
+
 
 def log_tap(x, y, label):
     log(f"TAP {label or ''} at ({x},{y})", level="ACTION")
 
-def adb_shell(cmd):
-    base_cmd = ["adb"]
-    if ADB_DEVICE_ID:
-        base_cmd += ["-s", ADB_DEVICE_ID]
-    full_cmd = base_cmd + ["shell"] + cmd
-    subprocess.run(full_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 def tap(x, y, label=None):
     """Public function for scripts to submit tap requests."""
     TAP_QUEUE.put((x, y, label))
+
 
 def _tap_worker():
     last_keepalive = time.time()
@@ -49,13 +40,19 @@ def _tap_worker():
             log(f"KEEPALIVE swipe at ({x1},{y1})→({x2},{y2})", level="ACTION")
             last_keepalive = now
 
+
 # Start worker thread
 threading.Thread(target=_tap_worker, daemon=True).start()
 
-if __name__ == "__main__":
+
+def main():
     log("Tap dispatcher running. Press Ctrl+C to exit.", level="INFO")
     try:
         while True:
             time.sleep(10)
     except KeyboardInterrupt:
         print("Shutting down dispatcher.")
+
+
+if __name__ == "__main__":
+    main()

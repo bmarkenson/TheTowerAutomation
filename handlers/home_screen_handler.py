@@ -2,9 +2,31 @@
 
 import time
 from utils.logger import log
-from core.clickmap_access import tap_now, swipe_now
+from core.clickmap_access import tap_now
 
 def handle_home_screen(restart_enabled=True):
+    """
+    Handle the HOME_SCREEN state by optionally starting a battle.
+
+    Args:
+        restart_enabled (bool, optional):
+            When True (default), taps the 'Battle' button to auto-start gameplay.
+            When False, does nothing beyond logging (awaits manual start).
+
+    Returns:
+        None — handler effects only.
+
+    Side effects:
+        [tap] Taps the Battle button when restart_enabled=True.
+        [log] Emits INFO logs.
+        (Also sleeps ≈2s after tapping to allow UI to transition.)
+
+    Defaults:
+        restart_enabled=True; adds a ~2s pause after tapping when enabled.
+
+    Errors:
+        None material; tap failures (if any) are not explicitly handled here.
+    """
     log("[HOME] Handling HOME_SCREEN state", "INFO")
 
     if restart_enabled:

@@ -49,6 +49,12 @@ except Exception as e:
     screen_width, screen_height = 1920, 1080
 
 def reload_image():
+    """Capture a fresh screenshot, initialize globals (image/clone/img_w/h), reset scroll, and focus the window.
+
+    Inputs: none (uses ADB via capture_and_save_screenshot()).
+    Writes: updates globals image, clone, img_height, img_width; resets scroll_offset; saves screenshots/latest.png on disk.
+    Prompts: none (silent, except printed INFO).
+    """
     global image, clone, img_height, img_width, scroll_offset
     image = capture_and_save_screenshot()
     if image is None:
@@ -61,6 +67,7 @@ def reload_image():
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 def is_coords_only(dot_path: str) -> bool:
+    """Return True if the dot_path belongs to a coords-only group or prefix (no template to save)."""
     parts = dot_path.split(".")
     if not parts:
         return False
@@ -68,7 +75,27 @@ def is_coords_only(dot_path: str) -> bool:
         return True
     return any(dot_path == p or dot_path.startswith(p + ".") for p in COORDS_ONLY_PREFIXES)
 
+def _dot_path_exists(root: dict, dot_path: str) -> bool:
+    """Internal: check whether dot_path already exists in the clickmap dict."""
+    cur = root
+    for part in dot_path.split("."):
+        if not isinstance(cur, dict) or part not in cur:
+            return False
+        cur = cur[part]
+    return True
+
 def save_template_crop_and_entry(x1, y1, x2, y2):
+    """Persist a cropped region to disk and clickmap; optionally launch gesture logger.
+
+    Inputs: crop box (x1,y1,x2,y2) in screenshot coordinates.
+    Writes:
+      - For coords-only: stores match_region under the chosen dot_path in clickmap.json.
+      - For template-backed: writes PNG under assets/match_templates/<...>, and stores match_template/match_region/match_threshold[/roles].
+    Prompts:
+      - Dot-path selection.
+      - Overwrite confirmation if the key exists.
+      - For template-backed: threshold (default 0.90), roles, and optional gesture capture.
+    """
     global clickmap
 
     w, h = x2 - x1, y2 - y1
@@ -85,13 +112,21 @@ def save_template_crop_and_entry(x1, y1, x2, y2):
     if len(parts) < 2:
         print(f"[ERROR] Invalid dot-path key: '{dot_path}'")
         return
-    
+
     group = parts[0]
     key = parts[-1]
     subdir_parts = parts[1:-1]
 
     coordinate_only = is_coords_only(dot_path)
-    
+
+    # Overwrite confirmation
+    if _dot_path_exists(clickmap, dot_path):
+        resp = input(f"[WARN] '{dot_path}' exists. Overwrite? (y/N): ").strip().lower()
+        if resp not in ("y", "yes"):
+            print("[INFO] Skipping save (user declined overwrite).")
+            reload_image()
+            return
+
     if coordinate_only:
         entry = {
             "match_region": {"x": x1, "y": y1, "w": w, "h": h}
@@ -102,7 +137,7 @@ def save_template_crop_and_entry(x1, y1, x2, y2):
         # Skip gesture prompt for coords-only
         reload_image()
         return
-    
+
     if subdir_parts:
         template_subdir = os.path.join(*subdir_parts)
         template_dir = os.path.join(TEMPLATE_DIR, group, template_subdir)
@@ -115,7 +150,7 @@ def save_template_crop_and_entry(x1, y1, x2, y2):
     os.makedirs(template_dir, exist_ok=True)
     template_path = os.path.join(template_dir, f"{key}.png")
     cv2.imwrite(template_path, crop)
-    
+
     print(f"[INFO] Template saved: {template_path}")
 
     threshold_input = input(f"Enter match threshold (default {DEFAULT_THRESHOLD:.2f}): ").strip()
@@ -140,6 +175,12 @@ def save_template_crop_and_entry(x1, y1, x2, y2):
     reload_image()
 
 def handle_mouse(event, x, y, flags, param):
+    """Mouse callback: manages scroll with wheel, drag-selects a box, and triggers save on release.
+
+    Inputs: cv2 mouse event args.
+    Writes: may update globals (start_point, end_point, cropping, scroll_offset); may persist template/region on mouse up.
+    Prompts: as per save_template_crop_and_entry().
+    """
     global cropping, start_point, end_point, scroll_offset, image
     adjusted_y = y + scroll_offset
 
@@ -163,39 +204,43 @@ def handle_mouse(event, x, y, flags, param):
         x2, y2 = max(start_point[0], end_point[0]), max(start_point[1], end_point[1])
         save_template_crop_and_entry(x1, y1, x2, y2)
 
-# --- Main Loop ---
-reload_image()
-viewport_width = min(img_width, screen_width)
-viewport_height = min(img_height, screen_height - 100)
+def main():
+    # --- Main Loop ---
+    reload_image()
+    viewport_width = min(img_width, screen_width)
+    viewport_height = min(img_height, screen_height - 100)
 
-cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
-cv2.resizeWindow(WINDOW_NAME, viewport_width, viewport_height)
-cv2.setMouseCallback(WINDOW_NAME, handle_mouse)
+    cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(WINDOW_NAME, viewport_width, viewport_height)
+    cv2.setMouseCallback(WINDOW_NAME, handle_mouse)
 
-print("[INFO] Click and drag to select region.")
-print("[INFO] Scroll with mouse wheel or ↑/↓ arrow keys. Press 'q' or ESC to quit.")
-print("[INFO] Press 'r' to reload screenshot at any time.")
+    print("[INFO] Click and drag to select region.")
+    print("[INFO] Scroll with mouse wheel or ↑/↓ arrow keys. Press 'q' or ESC to quit.")
+    print("[INFO] Press 'r' to reload screenshot at any time.")
 
-while True:
-    top = scroll_offset
-    bottom = min(scroll_offset + viewport_height, img_height)
-    display = image[top:bottom].copy()
+    while True:
+        top = scroll_offset
+        bottom = min(scroll_offset + viewport_height, img_height)
+        display = image[top:bottom].copy()
 
-    if cropping and start_point and end_point:
-        sp = (start_point[0], start_point[1] - scroll_offset)
-        ep = (end_point[0], end_point[1] - scroll_offset)
-        cv2.rectangle(display, sp, ep, (0, 255, 0), 2)
+        if cropping and start_point and end_point:
+            sp = (start_point[0], start_point[1] - scroll_offset)
+            ep = (end_point[0], end_point[1] - scroll_offset)
+            cv2.rectangle(display, sp, ep, (0, 255, 0), 2)
 
-    cv2.imshow(WINDOW_NAME, display)
-    key = cv2.waitKey(20) & 0xFF
+        cv2.imshow(WINDOW_NAME, display)
+        key = cv2.waitKey(20) & 0xFF
 
-    if key == 27 or key == ord("q"):
-        break
-    elif key == 82:  # Up arrow
-        scroll_offset = max(0, scroll_offset - SCROLL_STEP)
-    elif key == 84:  # Down arrow
-        scroll_offset = min(scroll_offset + SCROLL_STEP, img_height - viewport_height)
-    elif key == ord("r"):
-        reload_image()
+        if key == 27 or key == ord("q"):
+            break
+        elif key == 82:  # Up arrow
+            scroll_offset = max(0, scroll_offset - SCROLL_STEP)
+        elif key == 84:  # Down arrow
+            scroll_offset = min(scroll_offset + SCROLL_STEP, img_height - viewport_height)
+        elif key == ord("r"):
+            reload_image()
 
-cv2.destroyAllWindows()
+    cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    main()
