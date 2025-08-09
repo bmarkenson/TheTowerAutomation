@@ -1,111 +1,42 @@
 #!/usr/bin/env python3
 # tools/crop_region.py
 
-# 📦 Imports
-import cv2
 import os
+import cv2
 import json
-import subprocess
 import time
-from core.clickmap_access import get_clickmap, save_clickmap
-from core.ss_capture import capture_and_save_screenshot
+import subprocess
 
-# 🗂 File and environment setup
+from core.ss_capture import capture_and_save_screenshot
+from core.clickmap_access import (
+    get_clickmap,
+    save_clickmap,
+    interactive_get_dot_path,
+    prompt_roles,
+    set_dot_path,
+)
+
+# Constants
 SOURCE_PATH = "screenshots/latest.png"
 TEMPLATE_DIR = "assets/match_templates"
-clickmap = get_clickmap()
 GESTURE_LOGGER_PATH = "tools/gesture_logger.py"
 SCRCPY_TITLE = "scrcpy-bridge"
-window_name = "Crop Tool"
+WINDOW_NAME = "Crop Tool"
+DEFAULT_THRESHOLD = 0.9
+SCROLL_STEP = 60
 
-# Ensure match template directory exists
-os.makedirs(TEMPLATE_DIR, exist_ok=True)
-
-# 🧠 Track last group used in region selection
-_last_region_group = None
-
-# 🏷 Role selection prompt based on top-level group
-def prompt_roles(group: str, key: str):
-    group = group.lower()
-    if group == "gesture_targets":
-        default = "gesture"
-    elif group == "upgrades":
-        default = "upgrade_label"
-    elif group == "util":
-        print(f"[?] Group '{group}' may refer to either a tap or a swipe.")
-        user_input = input("    Enter roles manually (e.g., tap, swipe): ").strip()
-        roles = [r.strip() for r in user_input.split(",") if r.strip()]
-        return roles if roles else ["unknown"]
-    else:
-        default = group.rstrip("s")  # Generic plural stripping
-
-    user_input = input(f"Suggested roles for `{group}:{key}`: [{default}] (edit or press Enter to accept): ").strip()
-    if user_input:
-        roles = [r.strip() for r in user_input.split(",")]
-    else:
-        roles = [default]
-
-    return roles
-
-# 🧭 Region name entry with schema awareness
-def get_region_name(clickmap):
-    global _last_region_group
-    top_level_keys = list(clickmap.keys())
-    existing_keys = {
-        f"{group}:{key}" for group in top_level_keys
-        for key in clickmap.get(group, {}).keys()
-    }
-
-    while True:
-        print("\nAvailable groups:")
-        for i, group in enumerate(top_level_keys):
-            marker = " (last used)" if group == _last_region_group else ""
-            print(f"  {i + 1}. {group}{marker}")
-
-        prompt = "[Enter] = reuse last, [q] = cancel, number or name of group: "
-        group_choice = input(prompt).strip().lower()
-
-        if group_choice == "q":
-            print("[INFO] Skipped saving.")
-            return None
-
-        if not group_choice:
-            if _last_region_group:
-                group = _last_region_group
-                print(f"[INFO] Reusing last group: {group}")
-            else:
-                print("❌ No group selected yet.")
-                continue
-        elif group_choice.isdigit() and 1 <= int(group_choice) <= len(top_level_keys):
-            group = top_level_keys[int(group_choice) - 1]
-        elif group_choice in top_level_keys:
-            group = group_choice
-        else:
-            print(f"❌ Invalid group. Choose one of: {', '.join(top_level_keys)}")
-            continue
-
-        suffix = input(f"Enter entry key for `{group}` (e.g. retry, attack_menu, claim_ad_gem): ").strip()
-        if not suffix:
-            print("[INFO] Skipped saving.")
-            return None
-
-        key = f"{group}:{suffix}"
-        if key in existing_keys:
-            confirm = input(f"⚠️  '{key}' already exists. Overwrite? (y/N): ").strip().lower()
-            if confirm not in {"y", "yes"}:
-                continue
-
-        _last_region_group = group
-        return key
-
-# 🌍 Global state for crop handling and viewport
+# Globals
+clickmap = get_clickmap()
 cropping = False
 start_point = None
 end_point = None
 scroll_offset = 0
-scroll_step = 60  # pixels per scroll
 
-# 🖥 Screen size detection
+# Regions that are coordinates-only (no template image saved)
+COORDS_ONLY_GROUPS = {"_shared_match_regions"}   # e.g., shared helpers for region_ref consumers
+COORDS_ONLY_PREFIXES = set()  # e.g., {"util.scroll_areas"} if needed later
+
+# Detect screen size
 try:
     import tkinter as tk
     root = tk.Tk()
@@ -114,10 +45,9 @@ try:
     screen_width = root.winfo_screenwidth()
     root.destroy()
 except Exception as e:
-    print("[WARN] Could not detect screen size reliably, using fallback 1920x1080:", e)
+    print("[WARN] Could not detect screen size. Defaulting to 1920x1080")
     screen_width, screen_height = 1920, 1080
 
-# 🔁 Reload and refresh working image
 def reload_image():
     global image, clone, img_height, img_width, scroll_offset
     image = capture_and_save_screenshot()
@@ -126,49 +56,97 @@ def reload_image():
     clone = image.copy()
     img_height, img_width = image.shape[:2]
     scroll_offset = 0
-    print("[INFO] Screenshot updated. Ready for next region.")
-    subprocess.run(["xdotool", "search", "--name", window_name, "windowactivate"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    print("[INFO] Screenshot updated.")
+    subprocess.run(["xdotool", "search", "--name", WINDOW_NAME, "windowactivate"],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-# Initial load
-reload_image()
-viewport_width = min(img_width, screen_width)
-viewport_height = min(img_height, screen_height - 100)
+def is_coords_only(dot_path: str) -> bool:
+    parts = dot_path.split(".")
+    if not parts:
+        return False
+    if parts[0] in COORDS_ONLY_GROUPS:
+        return True
+    return any(dot_path == p or dot_path.startswith(p + ".") for p in COORDS_ONLY_PREFIXES)
 
-# ✅ Ensure scrcpy is running
-def ensure_scrcpy_running():
-    try:
-        subprocess.run(["pgrep", "-f", SCRCPY_TITLE], check=True, stdout=subprocess.DEVNULL)
-    except subprocess.CalledProcessError:
-        print("[INFO] Starting scrcpy with window title override...")
-        subprocess.Popen(["scrcpy", "--window-title", SCRCPY_TITLE])
-        time.sleep(2)
+def save_template_crop_and_entry(x1, y1, x2, y2):
+    global clickmap
 
-# 🧙‍♂️ Bring scrcpy window to front
-def activate_scrcpy_window():
-    try:
-        win_id = subprocess.check_output(["xdotool", "search", "--name", SCRCPY_TITLE]).decode().strip().splitlines()[0]
-        subprocess.run(["xdotool", "windowactivate", win_id])
-    except subprocess.CalledProcessError:
-        print("[WARN] Could not bring scrcpy to front")
+    w, h = x2 - x1, y2 - y1
+    crop = clone[y1:y2, x1:x2]
+    if crop.size == 0:
+        print("[WARN] Empty crop. Try again.")
+        return
 
-# 🎯 Launch gesture recorder on saved region
-def launch_gesture_logger(group, key):
-    ensure_scrcpy_running()
-    activate_scrcpy_window()
-    dot_path = f"{group}.{key}"
-    subprocess.run(["python3", GESTURE_LOGGER_PATH, "--name", dot_path])
+    dot_path = interactive_get_dot_path(clickmap)
+    if dot_path is None:
+        return
+
+    parts = dot_path.split(".")
+    if len(parts) < 2:
+        print(f"[ERROR] Invalid dot-path key: '{dot_path}'")
+        return
+    
+    group = parts[0]
+    key = parts[-1]
+    subdir_parts = parts[1:-1]
+
+    coordinate_only = is_coords_only(dot_path)
+    
+    if coordinate_only:
+        entry = {
+            "match_region": {"x": x1, "y": y1, "w": w, "h": h}
+        }
+        set_dot_path(dot_path, entry, allow_overwrite=True)
+        save_clickmap(clickmap)
+        print(f"[INFO] (coords-only) Region saved for '{dot_path}' (no image/threshold/roles)")
+        # Skip gesture prompt for coords-only
+        reload_image()
+        return
+    
+    if subdir_parts:
+        template_subdir = os.path.join(*subdir_parts)
+        template_dir = os.path.join(TEMPLATE_DIR, group, template_subdir)
+        match_template = f"{group}/{template_subdir}/{key}.png"
+    else:
+        template_dir = os.path.join(TEMPLATE_DIR, group)
+        match_template = f"{group}/{key}.png"
+
+    # Save template image
+    os.makedirs(template_dir, exist_ok=True)
+    template_path = os.path.join(template_dir, f"{key}.png")
+    cv2.imwrite(template_path, crop)
+    
+    print(f"[INFO] Template saved: {template_path}")
+
+    threshold_input = input(f"Enter match threshold (default {DEFAULT_THRESHOLD:.2f}): ").strip()
+    threshold = float(threshold_input) if threshold_input else DEFAULT_THRESHOLD
+
+    roles = prompt_roles(group, key)
+    entry = {
+        "match_template": match_template,
+        "match_region": {"x": x1, "y": y1, "w": w, "h": h},
+        "match_threshold": threshold,
+        "roles": roles
+    }
+
+    set_dot_path(dot_path, entry, allow_overwrite=True)
+    save_clickmap(clickmap)
+    print(f"[INFO] Clickmap entry saved for '{dot_path}'")
+
+    ask_gesture = input("Define a gesture for this region now? (Y/n): ").strip().lower()
+    if ask_gesture in ("", "y", "yes"):
+        subprocess.run(["python3", GESTURE_LOGGER_PATH, "--name", dot_path])
+
     reload_image()
 
-# 🖱 Mouse handler for crop + scroll + save
 def handle_mouse(event, x, y, flags, param):
     global cropping, start_point, end_point, scroll_offset, image
+    adjusted_y = y + scroll_offset
 
     if event == cv2.EVENT_MOUSEWHEEL:
         direction = 1 if flags > 0 else -1
-        scroll_offset = min(max(0, scroll_offset - direction * scroll_step), img_height - viewport_height)
+        scroll_offset = min(max(0, scroll_offset - direction * SCROLL_STEP), img_height - viewport_height)
         return
-
-    adjusted_y = y + scroll_offset
 
     if event == cv2.EVENT_LBUTTONDOWN:
         start_point = (x, adjusted_y)
@@ -183,56 +161,16 @@ def handle_mouse(event, x, y, flags, param):
         cropping = False
         x1, y1 = min(start_point[0], end_point[0]), min(start_point[1], end_point[1])
         x2, y2 = max(start_point[0], end_point[0]), max(start_point[1], end_point[1])
-        w, h = x2 - x1, y2 - y1
+        save_template_crop_and_entry(x1, y1, x2, y2)
 
-        crop = clone[y1:y2, x1:x2]
-        if crop.size == 0:
-            print('[WARN] Empty crop. Try again.')
-            return
+# --- Main Loop ---
+reload_image()
+viewport_width = min(img_width, screen_width)
+viewport_height = min(img_height, screen_height - 100)
 
-        full_key = get_region_name(clickmap)
-        if not full_key:
-            print('[INFO] Skipped saving.')
-            return
-
-        try:
-            group, key = full_key.split(":", 1)
-        except ValueError:
-            print(f"[ERROR] Invalid key format returned by get_region_name(): '{full_key}'")
-            return
-
-        threshold_input = input('Enter match threshold (default 0.90): ').strip()
-        threshold = float(threshold_input) if threshold_input else 0.9
-
-        group_template_dir = os.path.join(TEMPLATE_DIR, group)
-        os.makedirs(group_template_dir, exist_ok=True)
-        template_path = os.path.join(group_template_dir, f"{key}.png")
-        cv2.imwrite(template_path, crop)
-        print(f'[INFO] Template saved: {template_path}')
-
-        if group not in clickmap:
-            clickmap[group] = {}
-
-        entry = clickmap[group].get(key, {})
-        entry['match_template'] = f"{group}/{key}.png"
-        entry['match_region'] = {'x': x1, 'y': y1, 'w': w, 'h': h}
-        entry['match_threshold'] = threshold
-        entry['roles'] = prompt_roles(group, key)
-        clickmap[group][key] = entry
-
-        save_clickmap(clickmap)
-        print(f"[INFO] Clickmap entry saved for '{group}:{key}'")
-
-        ask_gesture = input('Define a gesture for this region now? (Y/n): ').strip().lower()
-        if ask_gesture in ('', 'y', 'yes'):
-            launch_gesture_logger(group, key)
-        else:
-            reload_image()
-
-# 🖼 OpenCV display loop
-cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-cv2.resizeWindow(window_name, viewport_width, viewport_height)
-cv2.setMouseCallback(window_name, handle_mouse)
+cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+cv2.resizeWindow(WINDOW_NAME, viewport_width, viewport_height)
+cv2.setMouseCallback(WINDOW_NAME, handle_mouse)
 
 print("[INFO] Click and drag to select region.")
 print("[INFO] Scroll with mouse wheel or ↑/↓ arrow keys. Press 'q' or ESC to quit.")
@@ -248,18 +186,16 @@ while True:
         ep = (end_point[0], end_point[1] - scroll_offset)
         cv2.rectangle(display, sp, ep, (0, 255, 0), 2)
 
-    cv2.imshow(window_name, display)
+    cv2.imshow(WINDOW_NAME, display)
     key = cv2.waitKey(20) & 0xFF
 
     if key == 27 or key == ord("q"):
         break
     elif key == 82:  # Up arrow
-        scroll_offset = max(0, scroll_offset - scroll_step)
+        scroll_offset = max(0, scroll_offset - SCROLL_STEP)
     elif key == 84:  # Down arrow
-        scroll_offset = min(scroll_offset + scroll_step, img_height - viewport_height)
+        scroll_offset = min(scroll_offset + SCROLL_STEP, img_height - viewport_height)
     elif key == ord("r"):
         reload_image()
 
 cv2.destroyAllWindows()
-
-

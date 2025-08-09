@@ -16,9 +16,15 @@ state_definitions = load_state_definitions()
 clickmap = get_clickmap()
 
 def detect_state_and_overlays(screen):
-    result = {"state": "UNKNOWN", "overlays": []}
+    result = {
+        "state": "UNKNOWN",
+        "secondary_states": [],
+        "overlays": []
+    }
 
-    # Check primary and running states in order
+    matched_states = []
+
+    # Match all states
     for state in state_definitions.get("states", []):
         state_name = state["name"]
         match_keys = state.get("match_keys", [])
@@ -29,21 +35,34 @@ def detect_state_and_overlays(screen):
             pt, conf = match_region(screen, entry)
             if pt:
                 log(f"[MATCH] State {state_name} via {key} at {pt} ({conf:.3f})", "MATCH")
-                result["state"] = state_name
+                matched_states.append(state_name)
                 break
-        if result["state"] != "UNKNOWN":
-            break
 
-    # Check overlays (can be multiple)
+    # Classify into primary and secondary
+    for name in matched_states:
+        state_entry = next((s for s in state_definitions["states"] if s["name"] == name), None)
+        if not state_entry:
+            continue
+        state_type = state_entry.get("type", "unknown")
+
+        if state_type == "primary":
+            if result["state"] != "UNKNOWN":
+                raise RuntimeError(f"[ERROR] Multiple primary states matched: {result['state']} and {name}")
+            result["state"] = name
+        else:
+            result["secondary_states"].append(name)
+
+    # Match overlays (can be multiple)
     for overlay in state_definitions.get("overlays", []):
         overlay_name = overlay["name"]
         for key in overlay.get("match_keys", []):
             entry = resolve_dot_path(key)
             if not entry:
+                log(f"[WARN]     Could not resolve: {key}", "WARN")
                 continue
             pt, conf = match_region(screen, entry)
             if pt:
-                log(f"[MATCH] Overlay {overlay_name} via {key} at {pt} ({conf:.3f})", "DEBUG")
+                log(f"[MATCH] Overlay {overlay_name} via {key} at {pt} ({conf:.3f})", "MATCH")
                 result["overlays"].append(overlay_name)
                 break
 

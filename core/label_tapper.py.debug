@@ -1,0 +1,117 @@
+import cv2
+import numpy as np
+from core.ss_capture import capture_adb_screenshot
+from core.clickmap_access import get_clickmap, resolve_dot_path
+from core.adb_utils import adb_shell
+from utils.logger import log
+
+def resolve_region(entry, clickmap):
+    if "match_region" in entry:
+        return entry["match_region"]
+    elif "region_ref" in entry:
+        ref = entry["region_ref"]
+        shared = clickmap.get("_shared_match_regions", {})
+        if ref not in shared:
+            raise ValueError(f"Unknown region_ref '{ref}'")
+        return shared[ref]
+    else:
+        raise ValueError("No match_region or region_ref defined")
+
+def get_label_match(label_key: str, screenshot=None, return_meta=False):
+    """
+    Matches a label using its match_template and match_region or region_ref.
+    Returns (x, y, w, h) by default.
+    If return_meta=True, returns a dict with match + metadata.
+    """
+    cm = get_clickmap()
+    entry = resolve_dot_path(label_key)
+    if not entry:
+        raise ValueError(f"Label key '{label_key}' not found in clickmap")
+
+    template_path = f"assets/match_templates/{entry['match_template']}"
+    template = cv2.imread(template_path, cv2.IMREAD_GRAYSCALE)
+    if template is None:
+        raise FileNotFoundError(f"Template not found: {template_path}")
+
+    if screenshot is None:
+        screenshot = capture_adb_screenshot()
+        if screenshot is None:
+            raise RuntimeError("Failed to capture screenshot")
+        screenshot = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
+
+    region = resolve_region(entry, cm)
+    log(f"[DEBUG] {label_key}: using region {region}", "DEBUG")
+    region_img = screenshot[
+        region["y"]:region["y"] + region["h"],
+        region["x"]:region["x"] + region["w"]
+    ]
+
+    result = cv2.matchTemplate(region_img, template, cv2.TM_CCOEFF_NORMED)
+    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+    threshold = entry.get("match_threshold", 0.8)
+
+    log(f"[DEBUG] {label_key}: match score = {max_val:.4f} (threshold = {threshold})", "DEBUG")
+
+    if max_val < threshold:
+        log(f"[DEBUG] {label_key}: match below threshold — skipping", "DEBUG")
+        return None
+
+    top_left = (max_loc[0] + region["x"], max_loc[1] + region["y"])
+    match_rect = (*top_left, template.shape[1], template.shape[0])
+
+    if return_meta:
+        return {
+            "match": match_rect,
+            "score": max_val,
+            "entry": entry
+        }
+
+    return match_rect
+
+
+def tap_label_now(label_key: str):
+    """
+    Taps a label by matching its position and applying an optional offset.
+    Includes extensive debug logging for diagnosis.
+    """
+    log(f"[DEBUG] tap_label_now: BEGIN for {label_key}", "DEBUG")
+
+    try:
+        match = get_label_match(label_key)
+        if match is None:
+            log(f"[ERROR] tap_label_now: get_label_match returned None for {label_key}", "ERROR")
+            raise RuntimeError(f"Failed to match label: {label_key}")
+    except Exception as e:
+        log(f"[ERROR] tap_label_now: Exception during get_label_match: {e}", "ERROR")
+        raise
+
+    x, y, w, h = match
+    log(f"[DEBUG] tap_label_now: match_rect for {label_key} = ({x}, {y}, {w}, {h})", "DEBUG")
+
+    try:
+        cm = get_clickmap()
+        entry = resolve_dot_path(label_key)
+        offset = entry.get("tap_offset", None)
+    except Exception as e:
+        log(f"[ERROR] tap_label_now: Failed to resolve dot path or offset: {e}", "ERROR")
+        raise
+
+    if offset:
+        tap_x = x + offset["x"]
+        tap_y = y + offset["y"]
+        log(f"[DEBUG] tap_label_now: using offset {offset} -> final tap ({tap_x}, {tap_y})", "DEBUG")
+    else:
+        tap_x = x + w // 2
+        tap_y = y + h // 2
+        log(f"[DEBUG] tap_label_now: using center of match -> final tap ({tap_x}, {tap_y})", "DEBUG")
+
+    log(f"TAP_LABEL_NOW: {label_key} at ({tap_x},{tap_y})", "ACTION")
+
+    try:
+        adb_shell(["input", "tap", str(tap_x), str(tap_y)])
+    except Exception as e:
+        log(f"[ERROR] tap_label_now: adb_shell failed for {label_key}: {e}", "ERROR")
+        raise
+
+    log(f"[DEBUG] tap_label_now: COMPLETED for {label_key}", "DEBUG")
+

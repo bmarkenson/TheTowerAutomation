@@ -5,18 +5,22 @@ import argparse
 import os
 import cv2
 from core.state_detector import detect_state_and_overlays
-
+from core.ss_capture import capture_and_save_screenshot
 
 def main():
     parser = argparse.ArgumentParser(description="Test state detection from screenshot")
     parser.add_argument("--image", default="screenshots/latest.png", help="Path to screenshot image")
     parser.add_argument("--highlight", action="store_true", help="Draw match region on output")
+    parser.add_argument("--refresh", action="store_true", help="Capture new screenshot before running")
     args = parser.parse_args()
 
     if not os.path.exists(args.image):
         print(f"[ERROR] Image not found: {args.image}")
         return
 
+    if args.refresh:
+        print("[INFO] Capturing new screenshot...")
+        capture_and_save_screenshot()
     screen = cv2.imread(args.image)
     if screen is None:
         print("[ERROR] Failed to load image.")
@@ -24,6 +28,7 @@ def main():
 
     result = detect_state_and_overlays(screen)
     print(f"[TEST] Detected state: {result['state']}")
+    print(f"[TEST] Detected secondary states: {result['secondary_states']}")
     print(f"[TEST] Detected overlays: {result['overlays']}")
 
     # Optional: save a highlighted version (match drawing must be added inside detect_state for now)

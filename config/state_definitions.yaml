@@ -1,26 +1,12 @@
 states:
 - name: RUNNING
-  type: running
+  type: primary
   match_keys:
-  - indicators.attack_menu
-  - indicators.defense_menu
-  - indicators.uw_menu
-  - indicators.wall_icon
-
-- name: ATTACK_MENU
-  type: menu
-  match_keys:
-  - indicators.attack_menu
-
-- name: DEFENSE_MENU
-  type: menu
-  match_keys:
-  - indicators.defense_menu
-
-- name: UW_MENU
-  type: menu
-  match_keys:
-  - indicators.uw_menu
+  - indicators.menu_attack
+  - indicators.menu_defense
+  - indicators.menu_utility
+  - indicators.menu_uw
+  - indicators.cinematic_wall_icon
 
 - name: HOME_SCREEN
   type: primary
@@ -42,6 +28,31 @@ states:
   match_keys:
   - indicators.game_over
 
+- name: CINEMATIC_MODE
+  type: secondary
+  match_keys:
+  - indicators.cinematic_wall_icon
+
+- name: ATTACK_MENU
+  type: menu
+  match_keys:
+  - indicators.menu_attack
+
+- name: DEFENSE_MENU
+  type: menu
+  match_keys:
+  - indicators.menu_defense
+
+- name: UTILITY_MENU
+  type: menu
+  match_keys:
+  - indicators.menu_utility
+
+- name: UW_MENU
+  type: menu
+  match_keys:
+  - indicators.menu_uw
+
 overlays:
 - name: DAILY_GEMS_AVAILABLE
   match_keys:
@@ -49,6 +60,9 @@ overlays:
 
 - name: AD_GEMS_AVAILABLE
   match_keys:
-  - overlays.claim_ad_gem
+  - overlays.ad_gem
 
+- name: MENU_OPEN
+  match_keys:
+  - overlays.end_round
 

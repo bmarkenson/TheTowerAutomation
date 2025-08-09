@@ -1,0 +1,125 @@
+I’m creating compact spec files for modules in my Python automation project.
+Your job:
+
+    Parse each module I paste fully — find all public functions (and classes/methods).
+
+    Produce a compact spec per the rules below.
+
+    Always output the spec wrapped in a heredoc so I can paste it directly to create a .py.md file in the same directory as the .py source.
+
+    We may edit modules as we go — if you see a safe, minimal improvement, propose it; if I agree, give a patch before generating the spec.
+
+    One module per session — don’t rely on prior modules to remain in context.
+
+COMPACT SPEC — Goals
+
+    Map available functions without loading full source.
+
+    Reuse existing utilities (don’t reinvent).
+
+    Keep context small and high-signal: return meaning; side-effects only when useful.
+
+Output format (heredoc)
+
+When you give me the compact spec, wrap it exactly like this:
+
+cat > path/to/module.py.md << 'EOF'
+$PROJECT_ROOT/<path>/<module>.py — Library|Entrypoint
+<one line per function/class method per rules below>
+EOF
+
+    Filename in heredoc = same path as the .py file, but with .py.md extension.
+    Example:
+    $PROJECT_ROOT/automation/run_demon_mode.py → automation/run_demon_mode.py.md.
+
+Spec format (rules)
+
+    Header line
+
+$PROJECT_ROOT/<module>.py — Library|Entrypoint
+
+One line per callable (functions + public class methods):
+
+    package.module.func(arg1, arg2=default?) — Returns: <MEANING>; Side effects: [tags]; Errors: <conditions>
+
+    Returns = short semantic contract (what the caller uses). Include type only when it matters (e.g., “OpenCV BGR ndarray”, bytes vs str).
+
+    Side effects = short tags from glossary only when relevant.
+
+    Errors = include only if they materially affect callers.
+
+    If a callable has no useful return:
+    Returns: action result (side effects only) or Returns: None (no explicit return).
+
+    Defaults: include only behavior-critical defaults (timeouts, check=True, retries). Omit cosmetic ones.
+
+Scope policy
+
+    Include:
+
+        Public top-level functions.
+
+        Script entrypoints (main()), with note if CLI flags change behavior.
+
+        Public class methods.
+
+    Exclude:
+
+        Dunders and private helpers (_name) unless:
+
+            they are imported/used externally, or
+
+            they are the only way to perform an action that callers need.
+
+    Modules with no public callables: still output header + a line (no public functions).
+
+Classes
+
+    List public methods using the same one-line function format:
+    package.module.Class.method(args) — Returns: ...
+
+    If needed, you may include a single class line for context:
+    package.module.Class — Class: <short role>
+
+Errors (convention)
+
+    Phrase like:
+    Errors: CalledProcessError when check=True and exit≠0
+    or
+    Errors: KeyboardInterrupt stops loop; other exceptions logged and retried
+
+    Omit error text when non-material.
+
+Tags (glossary + hygiene)
+
+[adb]     — Executes device commands via ADB; may block; raises CalledProcessError when check=True and exit≠0.
+[cv2]     — Uses OpenCV; images are BGR ndarrays; template matching via cv2.matchTemplate.
+[fs]      — Reads/writes files on disk.
+[network] — Performs network I/O.
+[state]   — Evaluates UI/game state from screen content.
+[tap]     — Injects a tap/click on device/emulator.
+[swipe]   — Injects a swipe gesture on device/emulator.
+[log]     — Emits logs.
+[loop]    — Repeating/infinite loop until interrupted.
+
+    Tag hygiene:
+
+        Use [log] only when logging is meaningful to the contract (loops, retries, mission lifecycle), not for incidental debug prints.
+
+Entrypoints
+
+    If a file can run as a script, ensure it has a main() so the spec is consistent.
+
+    Note behavior-affecting CLI flags in the main() line.
+
+Workflow for this session
+
+    I paste a .py module.
+
+    You parse it, propose any surgical fix-ups (optional).
+
+    If I approve edits, give a small patch.
+
+    Then output the heredoc spec per the rules above.
+
+    We move to the next module in a new session.

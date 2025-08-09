@@ -1,96 +1,187 @@
 {
   "_shared_match_regions": {
-    "upgrade_left": {
-      "x": 30,
-      "y": 1500,
-      "w": 480,
-      "h": 1400
-    },
-    "upgrade_right": {
-      "x": 550,
-      "y": 1500,
-      "w": 480,
-      "h": 1400
-    },
-    "floating_button": {
-      "x": 0,
-      "y": 1200,
-      "w": 1080,
-      "h": 200
-    },
-    "floating_gem_path": {
-      "match_template": "_shared_match_regions/floating_gem_path.png",
+    "wave_number": {
       "match_region": {
-        "x": 177,
-        "y": 420,
-        "w": 737,
-        "h": 681
+        "x": 573,
+        "y": 1032,
+        "w": 247,
+        "h": 52
       },
-      "match_threshold": 0.9,
       "roles": [
-        "floating_gem_path"
+        "_shared_match_region"
+      ]
+    },
+    "upgrades_left": {
+      "match_region": {
+        "x": 26,
+        "y": 1253,
+        "w": 511,
+        "h": 542
+      },
+      "roles": [
+        "_shared_match_region"
+      ]
+    },
+    "upgrades_right": {
+      "match_region": {
+        "x": 546,
+        "y": 1248,
+        "w": 513,
+        "h": 549
+      },
+      "roles": [
+        "_shared_match_region"
+      ]
+    },
+    "floating_buttons": {
+      "match_region": {
+        "x": 18,
+        "y": 796,
+        "w": 655,
+        "h": 106
+      },
+      "roles": [
+        "_shared_match_region"
       ]
     }
   },
   "gesture_targets": {
-    "goto_top": {
-      "swipe": {
-        "x1": 533,
-        "y1": 741,
-        "x2": 596,
-        "y2": 1593,
-        "duration_ms": 104
-      },
+    "floating_gem_blind_tap": {
       "roles": [
         "gesture"
-      ]
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 542,
+        "y": 671
+      }
     },
-    "more_stats_pg2": {
-      "swipe": {
-        "x1": 588,
-        "y1": 1850,
-        "x2": 595,
-        "y2": 808,
-        "duration_ms": 1895
-      },
+    "goto_top:more_stats": {
       "roles": [
         "gesture"
-      ]
+      ],
+      "swipe": {
+        "type": "swipe",
+        "x1": 490,
+        "y1": 420,
+        "x2": 511,
+        "y2": 1457,
+        "duration_ms": 230
+      }
     },
-    "more_stats_pg3": {
-      "swipe": {
-        "x1": 528,
-        "y1": 1799,
-        "x2": 380,
-        "y2": 723,
-        "duration_ms": 1148
-      },
+    "goto_bottom:more_stats": {
       "roles": [
         "gesture"
-      ]
+      ],
+      "swipe": {
+        "type": "swipe",
+        "x1": 522,
+        "y1": 1650,
+        "x2": 497,
+        "y2": 526,
+        "duration_ms": 253
+      }
+    },
+    "goto_pg2:more_stats": {
+      "roles": [
+        "gesture"
+      ],
+      "swipe": {
+        "type": "swipe",
+        "x1": 526,
+        "y1": 1607,
+        "x2": 535,
+        "y2": 1106,
+        "duration_ms": 279
+      }
+    },
+    "goto_top:store": {
+      "roles": [
+        "gesture"
+      ],
+      "swipe": {
+        "type": "swipe",
+        "x1": 538,
+        "y1": 617,
+        "x2": 681,
+        "y2": 1552,
+        "duration_ms": 407
+      }
+    },
+    "goto_claim_free_gems:store": {
+      "roles": [
+        "gesture"
+      ],
+      "swipe": {
+        "type": "swipe",
+        "x1": 531,
+        "y1": 1458,
+        "x2": 554,
+        "y2": 1133,
+        "duration_ms": 618
+      }
     }
   },
   "indicators": {
-    "wall_icon": {
-      "match_template": "indicators/wall_icon.png",
+    "menu_attack": {
+      "match_template": "indicators/menu_attack.png",
       "match_region": {
-        "x": 3,
-        "y": 1334,
-        "w": 72,
-        "h": 55
+        "x": 16,
+        "y": 1169,
+        "w": 215,
+        "h": 65
       },
       "match_threshold": 0.9,
       "roles": [
         "indicator"
       ]
     },
-    "attack_menu": {
-      "match_template": "indicators/attack_menu.png",
+    "menu_defense": {
+      "match_template": "indicators/menu_defense.png",
       "match_region": {
-        "x": 10,
-        "y": 1592,
-        "w": 513,
-        "h": 55
+        "x": 22,
+        "y": 1177,
+        "w": 245,
+        "h": 52
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "menu_utility": {
+      "match_template": "indicators/menu_utility.png",
+      "match_region": {
+        "x": 19,
+        "y": 1175,
+        "w": 217,
+        "h": 52
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "menu_uw": {
+      "match_template": "indicators/menu_uw.png",
+      "match_region": {
+        "x": 18,
+        "y": 1167,
+        "w": 273,
+        "h": 73
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "end_round_menu": {
+      "match_template": "indicators/end_round_menu.png",
+      "match_region": {
+        "x": 370,
+        "y": 684,
+        "w": 338,
+        "h": 68
       },
       "match_threshold": 0.9,
       "roles": [
@@ -100,97 +191,116 @@
     "game_over": {
       "match_template": "indicators/game_over.png",
       "match_region": {
-        "x": 320,
-        "y": 638,
-        "w": 206,
-        "h": 62
+        "x": 325,
+        "y": 376,
+        "w": 427,
+        "h": 70
       },
       "match_threshold": 0.9,
       "roles": [
         "indicator"
       ]
     },
-    "uw_menu": {
-      "match_template": "indicators/uw_menu.png",
+    "more_stats": {
+      "match_template": "indicators/more_stats.png",
       "match_region": {
-        "x": 14,
-        "y": 1587,
-        "w": 108,
-        "h": 62
+        "x": 342,
+        "y": 232,
+        "w": 394,
+        "h": 71
       },
       "match_threshold": 0.9,
       "roles": [
         "indicator"
       ]
     },
-    "defense_menu": {
-      "match_template": "indicators/defense_menu.png",
+    "top:more_stats": {
+      "match_template": "indicators/top:more_stats.png",
       "match_region": {
-        "x": 18,
-        "y": 1590,
-        "w": 546,
-        "h": 57
+        "x": 415,
+        "y": 359,
+        "w": 240,
+        "h": 45
       },
       "match_threshold": 0.9,
       "roles": [
         "indicator"
       ]
     },
-    "utility_menu": {
-      "match_template": "indicators/utility_menu.png",
+    "bottom:more_stats": {
+      "match_template": "indicators/bottom:more_stats.png",
       "match_region": {
-        "x": 14,
-        "y": 1590,
-        "w": 526,
-        "h": 63
+        "x": 172,
+        "y": 1599,
+        "w": 238,
+        "h": 41
       },
       "match_threshold": 0.9,
       "roles": [
         "indicator"
       ]
     },
-    "demon_mode_active": {
-      "match_template": "indicators/demon_mode_active.png",
+    "pg2:more_stats": {
+      "match_template": "indicators/pg2:more_stats.png",
       "match_region": {
-        "x": 368,
-        "y": 1244,
-        "w": 61,
+        "x": 172,
+        "y": 340,
+        "w": 407,
+        "h": 42
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "cinematic_wall_icon": {
+      "match_template": "indicators/cinematic_wall_icon.png",
+      "match_region": {
+        "x": 12,
+        "y": 1591,
+        "w": 64,
         "h": 59
       },
       "match_threshold": 0.9,
       "roles": [
         "indicator"
       ]
-    }
-  },
-  "labels": {
-    "end_round": {
-      "match_template": "label/end_round.png",
+    },
+    "menu_store": {
+      "match_template": "indicators/menu_store.png",
       "match_region": {
-        "x": 880,
-        "y": 805,
-        "w": 160,
-        "h": 42
+        "x": 18,
+        "y": 102,
+        "w": 185,
+        "h": 56
       },
       "match_threshold": 0.9,
       "roles": [
-        "label"
+        "indicator"
       ]
     }
   },
   "overlays": {
-    "floating_gem": {
+    "ad_gem": {
+      "match_template": "overlays/ad_gem.png",
+      "match_region": {
+        "x": 24,
+        "y": 639,
+        "w": 239,
+        "h": 134
+      },
+      "match_threshold": 0.9,
       "roles": [
         "overlay"
       ]
     },
-    "claim_ad_gem": {
-      "match_template": "overlay/claim_ad_gem.png",
+    "end_round": {
+      "match_template": "overlays/end_round.png",
       "match_region": {
-        "x": 26,
-        "y": 1059,
-        "w": 235,
-        "h": 129
+        "x": 864,
+        "y": 646,
+        "w": 199,
+        "h": 78
       },
       "match_threshold": 0.9,
       "roles": [
@@ -198,12 +308,12 @@
       ]
     },
     "daily_free_gems_badge": {
-      "match_template": "overlay/daily_free_gems_badge.png",
+      "match_template": "overlays/daily_free_gems_badge.png",
       "match_region": {
-        "x": 863,
-        "y": 153,
-        "w": 13,
-        "h": 18
+        "x": 860,
+        "y": 15,
+        "w": 22,
+        "h": 29
       },
       "match_threshold": 0.9,
       "roles": [
@@ -212,39 +322,28 @@
     }
   },
   "floating_buttons": {
-    "demon_mode": {
-      "match_template": "floating_button/demon_mode.png",
-      "match_threshold": 0.9,
-      "roles": [
-        "floating_button"
-      ],
-      "region_ref": "floating_button"
-    },
-    "nuke": {
-      "match_template": "floating_button/nuke.png",
-      "match_threshold": 0.9,
-      "roles": [
-        "floating_button"
-      ],
-      "region_ref": "floating_button"
-    },
     "missile_barrage": {
-      "match_template": "floating_button/missile_barrage.png",
+      "match_template": "floating_buttons/missile_barrage.png",
+      "match_region": {
+        "x": 20,
+        "y": 803,
+        "w": 123,
+        "h": 91
+      },
       "match_threshold": 0.9,
       "roles": [
         "floating_button"
-      ],
-      "region_ref": "floating_button"
+      ]
     }
   },
   "navigation": {
     "goto_attack": {
       "match_template": "navigation/goto_attack.png",
       "match_region": {
-        "x": 83,
-        "y": 2257,
-        "w": 97,
-        "h": 57
+        "x": 93,
+        "y": 1831,
+        "w": 87,
+        "h": 66
       },
       "match_threshold": 0.9,
       "roles": [
@@ -254,10 +353,10 @@
     "goto_defense": {
       "match_template": "navigation/goto_defense.png",
       "match_region": {
-        "x": 360,
-        "y": 2259,
-        "w": 83,
-        "h": 58
+        "x": 365,
+        "y": 1841,
+        "w": 82,
+        "h": 55
       },
       "match_threshold": 0.9,
       "roles": [
@@ -267,10 +366,10 @@
     "goto_utility": {
       "match_template": "navigation/goto_utility.png",
       "match_region": {
-        "x": 637,
-        "y": 2261,
-        "w": 71,
-        "h": 54
+        "x": 629,
+        "y": 1832,
+        "w": 82,
+        "h": 70
       },
       "match_threshold": 0.9,
       "roles": [
@@ -280,23 +379,10 @@
     "goto_uw": {
       "match_template": "navigation/goto_uw.png",
       "match_region": {
-        "x": 895,
-        "y": 2261,
-        "w": 91,
-        "h": 61
-      },
-      "match_threshold": 0.9,
-      "roles": [
-        "navigation"
-      ]
-    },
-    "toggle_menu": {
-      "match_template": "navigation/toggle_menu.png",
-      "match_region": {
-        "x": 981,
-        "y": 172,
-        "w": 74,
-        "h": 71
+        "x": 897,
+        "y": 1836,
+        "w": 88,
+        "h": 70
       },
       "match_threshold": 0.9,
       "roles": [
@@ -305,717 +391,123 @@
     }
   },
   "buttons": {
-    "retry:game_over": {
-      "tap": {
-        "x": 313,
-        "y": 1641
+    "yes:end_round": {
+      "match_template": "buttons/yes:end_round.png",
+      "match_region": {
+        "x": 583,
+        "y": 1068,
+        "w": 280,
+        "h": 106
       },
+      "match_threshold": 0.9,
       "roles": [
         "button"
-      ],
-      "match_template": ""
+      ]
     },
-    "close_more_stats": {
-      "tap": {
-        "x": 890,
-        "y": 509
+    "no:end_round": {
+      "match_template": "buttons/no:end_round.png",
+      "match_region": {
+        "x": 208,
+        "y": 1072,
+        "w": 283,
+        "h": 108
       },
+      "match_threshold": 0.9,
       "roles": [
         "button"
-      ],
-      "match_template": ""
+      ]
     },
     "more_stats:game_over": {
-      "match_template": "button/more_stats.png",
-      "match_threshold": 0.9,
+      "match_template": "buttons/more_stats:game_over.png",
       "match_region": {
-        "x": 182,
-        "y": 1176,
-        "w": 354,
-        "h": 138
+        "x": 192,
+        "y": 1017,
+        "w": 337,
+        "h": 132
       },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
+    "retry:game_over": {
+      "match_template": "buttons/retry:game_over.png",
+      "match_region": {
+        "x": 80,
+        "y": 1394,
+        "w": 438,
+        "h": 143
+      },
+      "match_threshold": 0.9,
       "roles": [
         "button"
       ]
     },
     "home:game_over": {
-      "tap": {
-        "x": 784,
-        "y": 1635
-      },
-      "roles": [
-        "button"
-      ],
-      "match_template": ""
-    },
-    "resume_game": {
-      "tap": {
-        "x": 588,
-        "y": 1318
-      },
-      "roles": [
-        "button"
-      ],
-      "match_template": ""
-    },
-    "resume_battle": {
-      "tap": {
-        "x": 276,
-        "y": 1884
-      },
-      "roles": [
-        "button"
-      ],
-      "match_template": ""
-    },
-    "battle:home_screen": {
-      "match_template": "button/battle:home_screen.png",
+      "match_template": "buttons/home:game_over.png",
       "match_region": {
-        "x": 274,
-        "y": 1870,
-        "w": 532,
-        "h": 220
+        "x": 564,
+        "y": 1349,
+        "w": 429,
+        "h": 127
       },
       "match_threshold": 0.9,
-      "tap": {
-        "x": 533,
-        "y": 1971
-      },
-      "roles": [
-        "state",
-        "button"
-      ]
-    },
-    "tap_to_return_bottom": {
-      "match_template": "button/tap_to_return_bottom.png",
-      "match_region": {
-        "x": 221,
-        "y": 2202,
-        "w": 396,
-        "h": 77
-      },
-      "match_threshold": 0.9,
-      "tap": {
-        "x": 577,
-        "y": 2233
-      },
       "roles": [
         "button"
       ]
     },
-    "claim_daily_gems": {
-      "match_template": "button/claim_daily_gems.png",
+    "close:more_stats": {
+      "match_template": "buttons/close:more_stats.png",
       "match_region": {
-        "x": 224,
-        "y": 2090,
-        "w": 200,
-        "h": 69
+        "x": 865,
+        "y": 225,
+        "w": 80,
+        "h": 74
       },
       "match_threshold": 0.9,
-      "tap": {
-        "x": 331,
-        "y": 2123
-      },
       "roles": [
         "button"
       ]
     },
-    "daily_gems_claim_skip": {
-      "match_template": "button/daily_gems_claim_skip.png",
+    "open_shop": {
+      "match_template": "buttons/open_shop.png",
       "match_region": {
-        "x": 818,
-        "y": 230,
-        "w": 142,
-        "h": 62
+        "x": 864,
+        "y": 17,
+        "w": 90,
+        "h": 97
       },
       "match_threshold": 0.9,
-      "tap": {
-        "x": 884,
-        "y": 298
-      },
       "roles": [
         "button"
       ]
     },
-    "buy_multiplier_open": {
-      "roles": [
-        "button"
-      ],
-      "tap": {
-        "x": 970,
-        "y": 1620
-      },
-      "match_template": ""
-    },
-    "buy_multiplier_x1": {
-      "match_template": "button/buy_multiplier_x1.png",
+    "return_to_game": {
+      "match_template": "buttons/return_to_game.png",
       "match_region": {
-        "x": 806,
-        "y": 1599,
-        "w": 47,
-        "h": 37
+        "x": 227,
+        "y": 1786,
+        "w": 384,
+        "h": 76
       },
       "match_threshold": 0.9,
       "roles": [
         "button"
-      ],
-      "tap": null
-    },
-    "buy_multiplier_x5": {
-      "match_template": "button/buy_multiplier_x5.png",
-      "match_region": {
-        "x": 663,
-        "y": 1600,
-        "w": 53,
-        "h": 35
-      },
-      "match_threshold": 0.9,
-      "roles": [
-        "button"
-      ],
-      "tap": null
-    },
-    "buy_multiplier_x10": {
-      "match_template": "button/buy_multiplier_x10.png",
-      "match_region": {
-        "x": 521,
-        "y": 1600,
-        "w": 61,
-        "h": 36
-      },
-      "match_threshold": 0.9,
-      "roles": [
-        "button"
-      ],
-      "tap": null
-    },
-    "buy_multiplier_x100": {
-      "match_template": "button/buy_multiplier_x100.png",
-      "match_region": {
-        "x": 361,
-        "y": 1604,
-        "w": 98,
-        "h": 34
-      },
-      "match_threshold": 0.9,
-      "roles": [
-        "button"
-      ],
-      "tap": null
-    },
-    "buy_multiplier_max": {
-      "match_template": "button/buy_multiplier_max.png",
-      "match_region": {
-        "x": 232,
-        "y": 1598,
-        "w": 79,
-        "h": 37
-      },
-      "match_threshold": 0.9,
-      "roles": [
-        "button"
-      ],
-      "tap": null
+      ]
     }
   },
   "upgrades": {
     "attack": {
-      "left": {
-        "upgrade_damage": {
-          "match_template": "upgrades/attack/upgrade_damage.png",
-          "region_ref": "upgrade_left",
-          "menu": "attack",
-          "side": "left",
-          "order": 0,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_critical_chance": {
-          "match_template": "upgrades/attack/upgrade_critical_chance.png",
-          "region_ref": "upgrade_left",
-          "menu": "attack",
-          "side": "left",
-          "order": 1,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_range": {
-          "match_template": "upgrades/attack/upgrade_range.png",
-          "region_ref": "upgrade_left",
-          "menu": "attack",
-          "side": "left",
-          "order": 2,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_multishot_chance": {
-          "match_template": "upgrades/attack/upgrade_multishot_chance.png",
-          "region_ref": "upgrade_left",
-          "menu": "attack",
-          "side": "left",
-          "order": 3,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_rapid_fire_chance": {
-          "match_template": "upgrades/attack/upgrade_rapid_fire_chance.png",
-          "region_ref": "upgrade_left",
-          "menu": "attack",
-          "side": "left",
-          "order": 4,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_bounce_shot_chance": {
-          "match_template": "upgrades/attack/upgrade_bounce_shot_chance.png",
-          "region_ref": "upgrade_left",
-          "menu": "attack",
-          "side": "left",
-          "order": 5,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_bounce_shot_range": {
-          "match_template": "upgrades/attack/upgrade_bounce_shot_range.png",
-          "region_ref": "upgrade_left",
-          "menu": "attack",
-          "side": "left",
-          "order": 6,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_super_crit_mult": {
-          "match_template": "upgrades/attack/upgrade_super_crit_mult.png",
-          "region_ref": "upgrade_left",
-          "menu": "attack",
-          "side": "left",
-          "order": 7,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_rend_armor_mult": {
-          "match_template": "upgrades/attack/upgrade_rend_armor_mult.png",
-          "region_ref": "upgrade_left",
-          "menu": "attack",
-          "side": "left",
-          "order": 8,
-          "roles": [
-            "upgrade_label"
-          ]
-        }
-      },
-      "right": {
-        "upgrade_attack_speed": {
-          "match_template": "upgrades/attack/upgrade_attack_speed.png",
-          "region_ref": "upgrade_right",
-          "menu": "attack",
-          "side": "right",
-          "order": 0,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_critical_factor": {
-          "match_template": "upgrades/attack/upgrade_critical_factor.png",
-          "region_ref": "upgrade_right",
-          "menu": "attack",
-          "side": "right",
-          "order": 1,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_damage_per_meter": {
-          "match_template": "upgrades/attack/upgrade_damage_per_meter.png",
-          "region_ref": "upgrade_right",
-          "menu": "attack",
-          "side": "right",
-          "order": 2,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_multishot_targets": {
-          "match_template": "upgrades/attack/upgrade_multishot_targets.png",
-          "region_ref": "upgrade_right",
-          "menu": "attack",
-          "side": "right",
-          "order": 3,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_rapid_fire_duration": {
-          "match_template": "upgrades/attack/upgrade_rapid_fire_duration.png",
-          "region_ref": "upgrade_right",
-          "menu": "attack",
-          "side": "right",
-          "order": 4,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_bounce_shot_targets": {
-          "match_template": "upgrades/attack/upgrade_bounce_shot_targets.png",
-          "region_ref": "upgrade_right",
-          "menu": "attack",
-          "side": "right",
-          "order": 5,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_super_crit_chance": {
-          "match_template": "upgrades/attack/upgrade_super_crit_chance.png",
-          "region_ref": "upgrade_right",
-          "menu": "attack",
-          "side": "right",
-          "order": 6,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_rend_armor_chance": {
-          "match_template": "upgrades/attack/upgrade_rend_armor_chance.png",
-          "region_ref": "upgrade_right",
-          "menu": "attack",
-          "side": "right",
-          "order": 7,
-          "roles": [
-            "upgrade_label"
-          ]
-        }
-      }
+      "left": {},
+      "right": {}
     },
     "defense": {
-      "left": {
-        "upgrade_health": {
-          "match_template": "upgrades/defense/upgrade_health.png",
-          "region_ref": "upgrade_left",
-          "menu": "defense",
-          "side": "left",
-          "order": 0,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_defense": {
-          "match_template": "upgrades/defense/upgrade_defense.png",
-          "region_ref": "upgrade_left",
-          "menu": "defense",
-          "side": "left",
-          "order": 1,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_thorn_damage": {
-          "match_template": "upgrades/defense/upgrade_thorn_damage.png",
-          "region_ref": "upgrade_left",
-          "menu": "defense",
-          "side": "left",
-          "order": 2,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_knockback_chance": {
-          "match_template": "upgrades/defense/upgrade_knockback_chance.png",
-          "region_ref": "upgrade_left",
-          "menu": "defense",
-          "side": "left",
-          "order": 3,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_orb_speed": {
-          "match_template": "upgrades/defense/upgrade_orb_speed.png",
-          "region_ref": "upgrade_left",
-          "menu": "defense",
-          "side": "left",
-          "order": 4,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_shockwave_size": {
-          "match_template": "upgrades/defense/upgrade_shockwave_size.png",
-          "region_ref": "upgrade_left",
-          "menu": "defense",
-          "side": "left",
-          "order": 5,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_land_mine_chance": {
-          "match_template": "upgrades/defense/upgrade_land_mine_chance.png",
-          "region_ref": "upgrade_left",
-          "menu": "defense",
-          "side": "left",
-          "order": 6,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_land_mine_radius": {
-          "match_template": "upgrades/defense/upgrade_land_mine_radius.png",
-          "region_ref": "upgrade_left",
-          "menu": "defense",
-          "side": "left",
-          "order": 7,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_wall_health": {
-          "match_template": "upgrades/defense/upgrade_wall_health.png",
-          "region_ref": "upgrade_left",
-          "menu": "defense",
-          "side": "left",
-          "order": 8,
-          "roles": [
-            "upgrade_label"
-          ]
-        }
-      },
-      "right": {
-        "upgrade_health_regen": {
-          "match_template": "upgrades/defense/upgrade_health_regen.png",
-          "region_ref": "upgrade_right",
-          "menu": "defense",
-          "side": "right",
-          "order": 0,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_defense_absolute": {
-          "match_template": "upgrades/defense/upgrade_defense_absolute.png",
-          "region_ref": "upgrade_right",
-          "menu": "defense",
-          "side": "right",
-          "order": 1,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_lifesteal": {
-          "match_template": "upgrades/defense/upgrade_lifesteal.png",
-          "region_ref": "upgrade_right",
-          "menu": "defense",
-          "side": "right",
-          "order": 2,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_knockback_force": {
-          "match_template": "upgrades/defense/upgrade_knockback_force.png",
-          "region_ref": "upgrade_right",
-          "menu": "defense",
-          "side": "right",
-          "order": 3,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_orbs": {
-          "match_template": "upgrades/defense/upgrade_orbs.png",
-          "region_ref": "upgrade_right",
-          "menu": "defense",
-          "side": "right",
-          "order": 4,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_shockwave_frequency": {
-          "match_template": "upgrades/defense/upgrade_shockwave_frequency.png",
-          "region_ref": "upgrade_right",
-          "menu": "defense",
-          "side": "right",
-          "order": 5,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_land_mine_damage": {
-          "match_template": "upgrades/defense/upgrade_land_mine_damage.png",
-          "region_ref": "upgrade_right",
-          "menu": "defense",
-          "side": "right",
-          "order": 6,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_death_defy": {
-          "match_template": "upgrades/defense/upgrade_death_defy.png",
-          "region_ref": "upgrade_right",
-          "menu": "defense",
-          "side": "right",
-          "order": 7,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_wall_rebuild": {
-          "match_template": "upgrades/defense/upgrade_wall_rebuild.png",
-          "region_ref": "upgrade_right",
-          "menu": "defense",
-          "side": "right",
-          "order": 8,
-          "roles": [
-            "upgrade_label"
-          ]
-        }
-      }
+      "left": {},
+      "right": {}
     },
     "utility": {
-      "left": {
-        "upgrade_cash_bonus": {
-          "match_template": "upgrades/utility/upgrade_cash_bonus.png",
-          "region_ref": "upgrade_left",
-          "menu": "utility",
-          "side": "left",
-          "order": 0,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_coins_per_kill_bonus": {
-          "match_template": "upgrades/utility/upgrade_coins_per_kill_bonus.png",
-          "region_ref": "upgrade_left",
-          "menu": "utility",
-          "side": "left",
-          "order": 1,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_free_attack_upgrade": {
-          "match_template": "upgrades/utility/upgrade_free_attack_upgrade.png",
-          "region_ref": "upgrade_left",
-          "menu": "utility",
-          "side": "left",
-          "order": 2,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_free_utility_upgrade": {
-          "match_template": "upgrades/utility/upgrade_free_utility_upgrade.png",
-          "region_ref": "upgrade_left",
-          "menu": "utility",
-          "side": "left",
-          "order": 3,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_recovery_amount": {
-          "match_template": "upgrades/utility/upgrade_recovery_amount.png",
-          "region_ref": "upgrade_left",
-          "menu": "utility",
-          "side": "left",
-          "order": 4,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_package_chance": {
-          "match_template": "upgrades/utility/upgrade_package_chance.png",
-          "region_ref": "upgrade_left",
-          "menu": "utility",
-          "side": "left",
-          "order": 5,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_EHLS": {
-          "match_template": "upgrades/utility/upgrade_EHLS.png",
-          "region_ref": "upgrade_left",
-          "menu": "utility",
-          "side": "left",
-          "order": 6,
-          "roles": [
-            "upgrade_label"
-          ]
-        }
-      },
-      "right": {
-        "upgrade_cash_per_wave": {
-          "match_template": "upgrades/utility/upgrade_cash_per_wave.png",
-          "region_ref": "upgrade_right",
-          "menu": "utility",
-          "side": "right",
-          "order": 0,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_coins_per_wave": {
-          "match_template": "upgrades/utility/upgrade_coins_per_wave.png",
-          "region_ref": "upgrade_right",
-          "menu": "utility",
-          "side": "right",
-          "order": 1,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_free_defense_upgrade": {
-          "match_template": "upgrades/utility/upgrade_free_defense_upgrade.png",
-          "region_ref": "upgrade_right",
-          "menu": "utility",
-          "side": "right",
-          "order": 2,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_interest_per_wave": {
-          "match_template": "upgrades/utility/upgrade_interest_per_wave.png",
-          "region_ref": "upgrade_right",
-          "menu": "utility",
-          "side": "right",
-          "order": 3,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_max_recovery": {
-          "match_template": "upgrades/utility/upgrade_max_recovery.png",
-          "region_ref": "upgrade_right",
-          "menu": "utility",
-          "side": "right",
-          "order": 4,
-          "roles": [
-            "upgrade_label"
-          ]
-        },
-        "upgrade_EALS": {
-          "match_template": "upgrades/utility/upgrade_EALS.png",
-          "region_ref": "upgrade_right",
-          "menu": "utility",
-          "side": "right",
-          "order": 5,
-          "roles": [
-            "upgrade_label"
-          ]
-        }
-      }
+      "left": {},
+      "right": {}
     }
   }
 }
