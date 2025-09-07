@@ -1,0 +1,8 @@
+
+handlers/mission_demon_nuke.py
+handlers.mission_demon_nuke.MissionOutcome — Enum: outcomes for a single round (SUCCESS, TIMEOUT_* , UI_FLOW_FAILURE, ABORTED_BY_USER).
+handlers.mission_demon_nuke.MissionResult — Class: result for one round (outcome, details, elapsed_s, per-phase timings, errors).
+handlers.mission_demon_nuke.MissionConfig — Class: timeouts/intervals (RUNNING 60s, DEMON 45s, NUKE 45s; overall 240s), waits (10s post-Demon, 5s post-Nuke), verify_tap with up to 2 retries.
+handlers.mission_demon_nuke.CampaignResult — Class: aggregates for multi-round campaign (runs, successes, timeouts, ui_failures, aborted, total_elapsed_s, last_result, progress).
+handlers.mission_demon_nuke.run_demon_nuke_strategy(config=None, *, dry_run=False, on_event=None) — R: MissionResult (outcome enum + timings + errors); S: [adb][cv2][fs][state][tap][log]; Defaults: bounded waits (RUNNING 60s, Demon 45s, Nuke 45s), overall 240s cap, 10s after Demon, 5s after Nuke, verify tap with up to 2 retries; E: only programmer errors raise; user interrupt returns ABORTED_BY_USER.
+handlers.mission_demon_nuke.run_demon_nuke_campaign(config=None, *, max_runs=None, max_duration_s=None, sleep_between_runs_s=2.0, stopfile=None, progress_detector=None, until=None, on_event=None, dry_run=False) — R: CampaignResult (aggregated outcomes + last_result + optional progress); S: [adb][cv2][fs][state][tap][log][loop]; Defaults: repeats rounds until a bound/stop condition is met; E: only programmer errors raise; user interrupt sets aborted=True.

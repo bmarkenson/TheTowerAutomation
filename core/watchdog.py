@@ -1,3 +1,27 @@
+# core/watchdog.py
+"""
+Foreground/process watchdog for the game app.
+
+spec_legend:
+  r: Return value (shape & invariants)
+  s: Side effects (project tags like [adb][log][sleep][state][loop])
+  e: Errors/exceptions behavior
+  p: Parameter notes beyond the signature
+  notes: Usage guidance / invariants
+
+defaults:
+  game_package: com.TechTreeGames.TheTower
+  detection:
+    - Foreground app inferred via dumpsys window/windows → activity/activities
+    - Multiple textual patterns supported for broad Android/emu coverage
+  targeting: Uses core.adb_utils.adb_shell; device selection follows adb_utils precedence
+  logging: Foreground package changes are INFO/DEBUG; failures WARN/ERROR
+  sleep_delays:
+    - bring_to_foreground: ~5s, restart_game: ~6s
+  globals:
+    - _last_foreground_pkg caches last seen foreground for change logging only
+"""
+
 import re
 import time
 from core.automation_state import AUTOMATION, RunState
@@ -5,13 +29,34 @@ from core.adb_utils import adb_shell
 from utils.logger import log
 
 GAME_PACKAGE = "com.TechTreeGames.TheTower"
+"""
+spec:
+  name: GAME_PACKAGE
+  kind: const
+  r: Package name string used by monkey/force-stop checks.
+  notes:
+    - Override only if the target app id changes; other functions depend on it.
+"""
 
 _last_foreground_pkg = None
+"""
+spec:
+  name: _last_foreground_pkg
+  kind: module-global cache
+  r: str|None (last detected foreground package), used to suppress noisy logs.
+"""
+
 
 def _parse_pkg_from_text(text: str):
     """
-    Try several known patterns across Android versions/ROMs/emulators.
-    Returns package str or None.
+    spec:
+      name: _parse_pkg_from_text
+      signature: _parse_pkg_from_text(text:str) -> str|None
+      r: Package name if any pattern matches; else None.
+      s: none
+      e: none (pure function)
+      notes:
+        - Supports multiple dumpsys formats (mCurrentFocus, topResumedActivity, mResumedActivity, mFocusedApp).
     """
     if not text:
         return None
@@ -38,10 +83,19 @@ def _parse_pkg_from_text(text: str):
 
     return None
 
+
 def _get_foreground_package():
     """
-    Returns current foreground package or None if not determinable.
-    Tries multiple dumpsys surfaces for emulator/BlueStacks robustness.
+    spec:
+      name: _get_foreground_package
+      signature: _get_foreground_package() -> str|None
+      r: The currently foregrounded package name, or None if undetermined.
+      s: [adb]
+      e:
+        - Suppresses CalledProcessError by using check=False in adb_shell.
+        - Returns None on any non-zero exit or unparsable output.
+      notes:
+        - Tries dumpsys window windows first, then dumpsys activity activities.
     """
     # First try window service (often most reliable under emu)
     res = adb_shell(["dumpsys", "window", "windows"], capture_output=True, check=False)
@@ -59,10 +113,17 @@ def _get_foreground_package():
 
     return None
 
+
 def is_game_foregrounded():
     """
-    Returns True if GAME_PACKAGE is currently the foreground app, else False.
-    Logs foreground changes for observability.
+    spec:
+      name: is_game_foregrounded
+      signature: is_game_foregrounded() -> bool
+      r: True if GAME_PACKAGE is foreground; False otherwise.
+      s: [adb][log]
+      e: none (logs WARN when foreground cannot be determined)
+      notes:
+        - Logs any change in the detected foreground package since the last call.
     """
     global _last_foreground_pkg
     package = _get_foreground_package()
@@ -78,9 +139,17 @@ def is_game_foregrounded():
         log("[WATCHDOG] Could not determine foreground app", level="WARN")
         return False
 
+
 def bring_to_foreground():
     """
-    Attempts to bring GAME_PACKAGE to foreground via monkey intent.
+    spec:
+      name: bring_to_foreground
+      signature: bring_to_foreground() -> None
+      r: null
+      s: [adb][log][sleep]
+      e: none (uses check=False; best-effort)
+      notes:
+        - Sends a single monkey LAUNCHER intent for GAME_PACKAGE and waits ~5s.
     """
     adb_shell([
         "monkey", "-p", GAME_PACKAGE,
@@ -89,9 +158,18 @@ def bring_to_foreground():
     log("[WATCHDOG] Sent monkey event to foreground game.", "INFO")
     time.sleep(5)
 
+
 def restart_game():
     """
-    Force-stops GAME_PACKAGE and relaunches via monkey; sets automation state to UNKNOWN.
+    spec:
+      name: restart_game
+      signature: restart_game() -> None
+      r: null
+      s: [adb][state][log][sleep]
+      e: none (best-effort; uses check=False)
+      notes:
+        - Force-stops GAME_PACKAGE, relaunches via monkey, then sets AUTOMATION.state=UNKNOWN.
+        - Sleeps ~6s after relaunch to allow surface creation.
     """
     log("[WATCHDOG] Restarting game via monkey intent", "INFO")
 
@@ -111,10 +189,17 @@ def restart_game():
 
     log("[WATCHDOG] Game launched — deferring to main loop for state detection", "INFO")
 
+
 def _pid_running(package: str) -> bool:
     """
-    Emulator-safe process existence check.
-    Tries pidof, then falls back to ps -A matching.
+    spec:
+      name: _pid_running
+      signature: _pid_running(package:str) -> bool
+      r: True if a process with exact package name is running; else False.
+      s: [adb]
+      e: none (returns False on any adb failure)
+      notes:
+        - Uses pidof first; falls back to parsing `ps -A` and matching the final column exactly.
     """
     res = adb_shell(["pidof", package], capture_output=True, check=False)
     if res and res.returncode == 0 and res.stdout.strip():
@@ -130,9 +215,20 @@ def _pid_running(package: str) -> bool:
             return True
     return False
 
+
 def watchdog_process_check(interval=30):
     """
-    Supervisory loop: ensures process is running and foregrounded; restarts or foregrounds as needed.
+    spec:
+      name: watchdog_process_check
+      signature: watchdog_process_check(interval:int=30) -> None
+      r: null (infinite supervisory loop)
+      s: [adb][state][log][loop][sleep]
+      e:
+        - Catches and logs all Exceptions each cycle; continues looping.
+      p:
+        interval: Seconds between checks (≥1 recommended).
+      notes:
+        - Ensures the process is running and foregrounded; calls restart_game or bring_to_foreground as needed.
     """
     while True:
         try:

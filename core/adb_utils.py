@@ -34,6 +34,21 @@ def adb_shell(
     device_id: Optional[str] = None,
 ):
     """
+    ---
+    spec:
+      r: "subprocess.CompletedProcess | None"
+      s: ["adb"]
+      e:
+        - "Returns None on CalledProcessError or unexpected Exception (error printed)"
+      params:
+        cmd: "str or list[str]; string is shlex-split"
+        capture_output: "bool — when True, stdout/stderr captured (text=True)"
+        check: "bool — if True, non‑zero exit triggers CalledProcessError (caught)"
+        device_id: "str|None — explicit device; else env ADB_DEVICE; else module ADB_DEVICE_ID"
+      notes:
+        - "stdout/stderr suppressed when capture_output=False"
+        - "Uses 'adb -s <target> shell …'"
+    ---
     Run an ADB shell command.
 
     Args:
@@ -89,6 +104,18 @@ def screencap_png(
     check: bool = True,
 ) -> Optional[bytes]:
     """
+    ---
+    spec:
+      r: "bytes | None (PNG)"
+      s: ["adb"]
+      e:
+        - "Returns None on non-zero exit or invalid/empty data; error printed"
+      params:
+        device_id: "str|None — explicit device; else env ADB_DEVICE; else module ADB_DEVICE_ID"
+        check: "bool — if True, non‑zero exit raises CalledProcessError (caught)"
+      notes:
+        - "Uses 'adb exec-out screencap -p'"
+    ---
     Capture a screenshot via `adb exec-out screencap -p`.
 
     Args:

@@ -1,0 +1,6 @@
+
+core/label_tapper.py
+core.label_tapper.resolve_region(entry, clickmap) — R: region dict {x,y,w,h} from entry.match_region or shared region_ref; E: ValueError when region_ref unknown or no region defined.
+core.label_tapper.get_label_match(label_key, screenshot=None, return_meta=False) — R: (x,y,w,h) match in screen coords (or dict with metadata when return_meta=True); S: [adb] when screenshot is captured; E: ValueError when label missing, region out of bounds, or match below threshold (default 0.90); FileNotFoundError when template missing; RuntimeError when screenshot capture fails. [cv2][state]
+core.label_tapper.tap_label_now(label_key) — R: True on tap injected, False on match/capture/template failure; S: [tap][adb][log]; E: non-material to callers (handled internally).
+core.label_tapper.is_visible(label_key, screenshot=None) — R: True if label matches threshold (default 0.90), else False; S: [adb] when screenshot is captured; E: non-material (internal ValueError handling). [cv2][state]

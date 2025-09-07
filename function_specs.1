@@ -1,0 +1,799 @@
+# Function Specs — Rebuild (single source of truth)
+
+> Purpose: precise, compact API map regenerated **from code**. Keep this doc updated module‑by‑module as we proceed.
+
+---
+
+## core/adb\_utils.py
+
+### adb\_shell(cmd, capture\_output=False, check=True, device\_id=None)
+
+— **R:** `subprocess.CompletedProcess | None`
+— **S:** `[adb][log]`
+— **E:** *None* (errors handled/logged; returns `None` on failure)
+— **Blocks:** **Yes** (`subprocess.run`); may block on device/ADB
+— **Config:** Device targeting precedence → `device_id` arg > env **`ADB_DEVICE`** > module constant **`ADB_DEVICE_ID`**; requires `adb` in `PATH`.
+— **Notes:**
+
+* If `capture_output=False`, stdout/stderr are suppressed (sent to `DEVNULL`).
+* If `capture_output=True`, text mode is used; `stdout`/`stderr` strings are available on the returned `CompletedProcess`.
+* `check=True` causes internal `CalledProcessError`, which is **caught**; function prints a brief error and returns `None` (no exception propagates).
+
+### screencap\_png(device\_id=None, check=True) -> Optional\[bytes]
+
+— **R:** `bytes | None` (PNG bytes)
+— **S:** `[adb][log]`
+— **E:** *None* (errors handled/logged; returns `None` on failure)
+— **Blocks:** **Yes** (`subprocess.run`)
+— **Config:** Same targeting precedence as above; runs `adb [-s <target>] exec-out screencap -p`.
+— **Notes:** Returns raw PNG bytes only; decoding/image handling is performed in higher‑level modules (e.g., `core/ss_capture.py`).
+
+---
+
+## core/ss\_capture.py
+
+**Module constants**
+
+* `LATEST_SCREENSHOT = "screenshots/latest.png"`
+
+### capture\_adb\_screenshot() -> Optional\[numpy.ndarray]
+
+— **R:** `numpy.ndarray` (BGR) | `None`
+— **S:** `[adb][cv2][log]`
+— **E:** *None* (exceptions caught and logged; returns `None` on failure)
+— **Blocks:** **Yes** (ADB exec + decode)
+— **Config:** Uses `core.adb_utils.screencap_png()`; validates PNG magic bytes; decodes via `cv2.imdecode` to **BGR**.
+— **Notes:** Logs `[ADB Error]` when PNG bytes are empty; logs `[Error]` for invalid PNG or decode failure.
+
+### capture\_and\_save\_screenshot(path=LATEST\_SCREENSHOT, \*, log\_capture: bool=True) -> Optional\[numpy.ndarray]
+
+— **R:** `numpy.ndarray` (BGR) | `None`
+— **S:** `[adb][cv2][fs][log]`
+— **E:** *None* (propagates none; returns `None` if capture fails)
+— **Blocks:** **Yes** (ADB exec + disk write)
+— **Config:** Creates parent directories for `path` if needed; writes image with `cv2.imwrite` (PNG if extension `*.png`).
+— **Notes:** When `log_capture` is `False`, suppresses post‑save debug log.
+
+### main() -> None
+
+— **R:** `None`
+— **S:** `[adb][cv2][log][io]`
+— **E:** *None* (errors handled through return checks)
+— **Blocks:** **Yes** (GUI window + `cv2.waitKey(0)`)
+— **CLI:** *(none)*
+— **Notes:** Logs captured shape; resizes for display if height > 2048 using `INTER_AREA`; shows window, waits for key, then destroys windows.
+
+---
+
+## core/clickmap\_access.py
+
+**Module init & constants**
+
+* `CLICKMAP_FILE = os.path.join(os.path.dirname(__file__), "../config/clickmap.json")`
+* On import: attempts to load JSON into in‑memory `_clickmap` (mutable). On failure logs `FAIL` and sets `_clickmap={}`.
+* `_last_region_group: Optional[str]` used by interactive helper to remember last group.
+
+### get\_clickmap() -> dict\[str, Any]
+
+— **R:** mutable reference to in‑memory clickmap
+— **S:** *(none)*
+— **E:** *(none)*
+
+### get\_clickmap\_path() -> str
+
+— **R:** filesystem path to clickmap JSON (resolved relative to module dir)
+— **S:** *(none)*
+— **E:** *(none)*
+
+### resolve\_dot\_path(dot\_path, data=None) -> Any | None
+
+— **R:** value at dot‑separated path, or `None` if any segment missing
+— **S:** *(none)*
+— **E:** *(none)*
+— **Notes:** Keys may contain `:`; dot‑splitting is on `.` only.
+
+### dot\_path\_exists(dot\_path, data=None) -> bool
+
+— **R:** `True` iff `resolve_dot_path(...)` returns non‑`None`
+— **S:** *(none)*
+— **E:** *(none)*
+
+### set\_dot\_path(dot\_path, value, \*, allow\_overwrite: bool=False) -> None
+
+— **R:** `None`
+— **S:** modifies in‑memory `_clickmap`
+— **E:** `KeyError` if final key exists and `allow_overwrite=False`; `ValueError` if path traverses non‑dict
+
+### interactive\_get\_dot\_path(clickmap) -> str | None
+
+— **R:** dot‑path string or `None` if cancelled
+— **S:** `[io]` (TTY input/output); may modify provided `clickmap` by creating new top‑level group; updates `_last_region_group`
+— **E:** *(none)*
+— **Notes:**
+
+* Presents existing top‑level groups; supports creating a new group.
+* Special flow for `upgrades`: prompts for `category ∈ {attack, defense, utility}`, `side ∈ {left, right}`, and `label` (validated); returns `"upgrades.<category>.<side>.<label>"`.
+* Generic groups return `"<group>.<suffix>"`.
+
+### prompt\_roles(group: str, key: str) -> list\[str]
+
+— **R:** list of role strings
+— **S:** `[io]`
+— **E:** *(none)*
+— **Notes:** Defaults — `gesture_targets→["gesture"]`, `upgrades→["upgrade_label"]`, `util→(prompt user)`, else `group.rstrip("s")`.
+
+### get\_click(name: str) -> tuple\[int, int] | None
+
+— **R:** `(x, y)` coordinates or `None`
+— **S:** `[log]`
+— **E:** *(none)*
+— **Notes:**
+
+* Prefers explicit `tap` coords if present; otherwise centers `match_region`.
+* Logs a warning if the dot‑path cannot be resolved.
+
+### get\_swipe(name: str) -> dict\[str, int] | None
+
+— **R:** swipe dict `{x1,y1,x2,y2,duration_ms}` or `None`
+— **S:** *(none)*
+— **E:** *(none)*
+
+### has\_click(name: str) -> bool
+
+— **R:** `True` iff `get_click(name)` resolved to coordinates
+— **S:** *(none)*
+— **E:** *(none)*
+
+### tap\_now(name: str) -> None
+
+— **R:** `None`
+— **S:** `[adb][log]` (issues `adb shell input tap x y`)
+— **E:** *(none)* (ADB errors are handled inside `adb_shell` and do not propagate)
+— **Notes:** Logs `ACTION` with coordinates; logs `FAIL` if coordinates unavailable.
+
+### swipe\_now(name: str) -> None
+
+— **R:** `None`
+— **S:** `[adb][log]` (issues `adb shell input swipe x1 y1 x2 y2 duration_ms`)
+— **E:** *(none)*
+— **Notes:** Logs `ACTION` with endpoints and duration; logs `FAIL` if swipe config missing.
+
+### save\_clickmap(data=None) -> None
+
+— **R:** `None`
+— **S:** `[fs][log]` (writes temp JSON then atomic `os.replace`; prints an `[INFO]` line)
+— **E:** *(unraised in code path)* — exceptions would propagate if write/replace fails (no try/except here)
+— **Notes:** UTF‑8, `indent=2`, `ensure_ascii=False`.
+
+### flatten\_clickmap(data=None, prefix: str="") -> dict\[str, Any]
+
+— **R:** flat mapping of `dot_path → leaf value`
+— **S:** *(none)*
+— **E:** *(none)*
+— **Notes:** Recurses; dictionary leaves are expanded; non‑dict leaves are recorded.
+
+### get\_entries\_by\_role(role: str) -> dict\[str, dict\[str, Any]]
+
+— **R:** mapping of `dot_path → entry` where entry contains `roles` and `role ∈ roles`
+— **S:** *(none)*
+— **E:** *(none)*
+— **Notes:** Searches the current in‑memory `_clickmap` recursively.
+
+---
+
+## core/label\_tapper.py
+
+### \_normalize\_region(r) -> dict\[x\:int, y\:int, w\:int, h\:int]
+
+— **R:** normalized region dict `{x,y,w,h}`
+— **S:** *(none)*
+— **E:** `ValueError` on unsupported format
+— **Notes:** Accepts `{x,y,w,h}`, `{left,top,width,height}`, or 4‑tuple/list; also unwraps `{match_region: {...}}`.
+
+### resolve\_region(entry: dict, clickmap: dict) -> dict\[x\:int, y\:int, w\:int, h\:int]
+
+— **R:** normalized region dict
+— **S:** *(none)*
+— **E:** `ValueError` if `region_ref` unknown or if neither `match_region` nor `region_ref` is provided
+— **Config:** Resolves `region_ref` against `clickmap["_shared_match_regions"]`.
+
+### \_load\_template(name: str) -> numpy.ndarray | None
+
+— **R:** grayscale template image or `None` if file missing
+— **S:** `[cv2]`
+— **E:** *(none)* (relies on `cv2.imread` returning `None` on failure)
+— **Notes:** `@lru_cache(maxsize=128)`; loads from `assets/match_templates/<name>`.
+
+### get\_label\_match(label\_key: str, screenshot=None, return\_meta=False)
+
+— **R:** `(x:int, y:int, w:int, h:int)` **or** dict `{"x","y","w","h","menu","region_ref","order","match_score"}` when `return_meta=True`
+— **S:** `[cv2][adb]` (ADB only if `screenshot is None`)
+— **E:** `ValueError` (missing label key; region OOB; threshold fail), `FileNotFoundError` (template missing), `RuntimeError` (ADB capture failed)
+— **Blocks:** **Yes** (ADB capture path)
+— **Config:**
+
+* Looks up `entry = resolve_dot_path(label_key)` in clickmap.
+* Uses `entry["match_template"]`; threshold `entry.get("match_threshold", 0.9)`.
+* Region from `match_region` or `_shared_match_regions[region_ref]` (clamped to image bounds).
+  — **Notes:** Converts screenshot to grayscale only when needed; uses `cv2.TM_CCOEFF_NORMED` over the specified region.
+
+### tap\_label\_now(label\_key: str) -> bool
+
+— **R:** `True` on tap issued; `False` on match failure
+— **S:** `[tap][adb][log]`
+— **E:** *(none)* (catches `ValueError`/`FileNotFoundError`/`RuntimeError` from matcher; ADB errors suppressed by `adb_shell`)
+— **Blocks:** **Yes** (ADB)
+— **Config:** Optional `entry["tap_offset"] = {"x":int,"y":int}` shifts tap from bbox center.
+— **Notes:** Logs `ACTION` with coordinates; warns and returns `False` if matching fails.
+
+### is\_visible(label\_key: str, screenshot=None) -> bool
+
+— **R:** `True` if match succeeds; `False` if a **`ValueError`** is raised by matcher
+— **S:** `[cv2][adb]*` (ADB only if `screenshot is None` and match attempt proceeds)
+— **E:** **Propagates** `FileNotFoundError` and `RuntimeError` (only `ValueError` is caught)
+— **Blocks:** **Yes** on ADB path
+— **Notes (quirk):** Unlike `tap_label_now`, this only catches `ValueError`; missing template or capture failure will **raise**.
+
+### \_get\_shared\_upgrade\_region(side: str) -> tuple\[int,int,int,int]
+
+— **R:** `(x,y,w,h)`
+— **S:** *(none)*
+— **E:** `RuntimeError` if `_shared_match_regions.upgrades_<side>` is missing/invalid
+— **Config:** Reads `config/clickmap.json` via `resolve_dot_path`.
+
+### swipe\_relative\_in\_region(region, start\_frac=(0.50,0.82), end\_frac=(0.50,0.25), duration\_ms=260) -> None
+
+— **R:** `None`
+— **S:** `[swipe][adb][log]`
+— **E:** *(none)* (ADB errors suppressed by `adb_shell`)
+— **Notes:** Insets region by max(12px, 1.2% of min dimension); logs `ACTION`; computes absolute coords from fractional positions.
+
+### page\_column(side: str, direction: str, strength: str = "page", duration\_ms: int = 260) -> None
+
+— **R:** `None`
+— **S:** `[swipe][adb][log]`
+— **E:** `ValueError` on invalid args; `RuntimeError` bubbling from `_get_shared_upgrade_region`
+— **Notes:**
+
+* `side ∈ {left,right}`; `direction ∈ {up,down}`; `strength ∈ {page,micro}`.
+* "page" ≈ 75% height move; "micro" ≈ 10% range (fine control).
+* Uses shared upgrades column region; sends one relative swipe accordingly.
+
+**Caveats / gotchas**
+
+* `is_visible()` catches **only** `ValueError` → template absence or ADB capture failure will raise; callers should either pre‑load templates or broaden exception handling if they expect `False` instead of an exception.
+* All ADB paths rely on `adb_shell`’s non‑raising behavior (returns `None` on failure).
+
+---
+
+## core/state\_detector.py
+
+**Module constants & globals**
+
+* `STATE_DEF_PATH = ../config/state_definitions.yaml`
+* `state_definitions = load_state_definitions()` — **loaded at import time** (exceptions propagate on import)
+* `clickmap = get_clickmap()` — loaded at import; currently unused within this module
+
+### load\_state\_definitions() -> dict
+
+— **R:** parsed YAML dict
+— **S:** `[fs]`
+— **E:** `FileNotFoundError`, `yaml.YAMLError` (propagate)
+— **Blocks:** No
+— **Config:** Reads `STATE_DEF_PATH` with UTF‑8; uses `yaml.safe_load`.
+
+### detect\_state\_and\_overlays(screen, \*, log\_matches: bool=False) -> dict
+
+— **R:** `{"state": str, "secondary_states": list[str], "overlays": list[str], "menu": str|None}`
+— **S:** `[state][log][cv2]*` (OpenCV used indirectly via matchers)
+— **E:** `RuntimeError` if **multiple primary** states match
+— **Blocks:** No (pure compute; relies on provided `screen`)
+— **Config/Dependencies:**
+
+* **States:** iterates `state_definitions["states"]`; for each state, tests `match_keys` via `core.matcher.get_match(key, screenshot=screen)`.
+* **Overlays:** iterates `state_definitions["overlays"]`; for each `match_keys`, resolves entry and calls `utils.template_matcher.match_region(screen, entry)`.
+* **Key resolution:** `core.clickmap_access.resolve_dot_path(key)`; warns if unresolved or if an entry lacks `match_template`.
+* **Menu selection:** among matched `type: menu` states, chooses **first in YAML order**; warns if multiple menus matched.
+  — **Notes:**
+* Primary state: exactly **one** allowed; if >1, raises.
+* Non‑primary, non‑menu matches are accumulated into `secondary_states`.
+* Overlays: appends overlay name once per overlay definition when any key matches; multiple overlays may co‑exist.
+* When `log_matches=True`, logs `MATCH` lines with key, location, and confidence for both states and overlays.
+
+---
+
+## core/automation\_state.py
+
+### Enums
+
+* **RunState(str, Enum)**: `{RUNNING, PAUSED, STOPPED, UNKNOWN}`
+* **ExecMode(str, Enum)**: `{RETRY, WAIT, HOME}`
+
+### AutomationControl
+
+Thread‑safe holder for run state and execution mode.
+
+**Constructor**
+
+* `__init__()` → initializes `self._lock: threading.Lock`, `self._state = RunState.RUNNING`, `self._mode = ExecMode.RETRY`.
+
+**Properties**
+
+* `state -> RunState`
+  — **R:** current `RunState`
+  — **S:** `[state][thread]` (acquires lock for read)
+  — **E:** *(none)*
+  — **Notes:** Getter returns a snapshot under lock.
+
+* `state = value: RunState | str`
+  — **R:** `None`
+  — **S:** `[state][thread]` (acquires lock for write)
+  — **E:** `ValueError` if string not in `RunState`; `TypeError` if neither `RunState` nor `str`
+  — **Notes:** Coerces strings via `RunState(value)`; atomic set under lock.
+
+* `mode -> ExecMode`
+  — **R:** current `ExecMode`
+  — **S:** `[state][thread]`
+  — **E:** *(none)*
+
+* `mode = value: ExecMode | str`
+  — **R:** `None`
+  — **S:** `[state][thread]`
+  — **E:** `ValueError` if string not in `ExecMode`; `TypeError` if neither `ExecMode` nor `str`
+  — **Notes:** Coerces strings via `ExecMode(value)`; atomic set under lock.
+
+**Singleton**
+
+* `AUTOMATION = AutomationControl()` — module‑level instance for shared access.
+
+**Behavioral notes**
+
+* Uses a simple mutex; no wait/notify or signaling primitives. For cooperative cancel or pause signals, pair with `threading.Event` elsewhere.
+* Lock scope is minimal (per‑property read/write); operations are non‑blocking under normal conditions.
+
+---
+
+## core/tap\_dispatcher.py
+
+**Module objects & behavior**
+
+* `TAP_QUEUE = queue.Queue()` — unbounded FIFO of `(x, y, label, log_it)` items (accepts legacy 3‑tuples `(x,y,label)`).
+* **Import side‑effect:** spawns daemon thread `Thread(target=_tap_worker, daemon=True).start()`.
+
+### log\_tap(x: int, y: int, label: str|None) -> None
+
+— **R:** `None`
+— **S:** `[log]` (level=`ACTION`)
+— **E:** *(none)*
+
+### tap(x: int, y: int, label: str|None=None, \*, log\_it: bool=True) -> None
+
+— **R:** `None`
+— **S:** `[thread][io]` (enqueues to `TAP_QUEUE`)
+— **E:** *(none)*
+— **Notes:** Public API for submitting tap requests; caller returns immediately.
+
+### \_tap\_worker() -> None
+
+— **R:** `None`
+— **S:** `[tap][adb][log][loop][sleep][thread]`
+— **E:** *(none)* (ADB failures suppressed by `adb_shell`)
+— **Behavior:**
+
+* Loops forever; `TAP_QUEUE.get(timeout=1)` to poll.
+* Dequeues item; if 3‑tuple, assumes `log_it=True`. Issues `adb shell input tap x y`.
+* Calls `log_tap` iff `log_it` is `True`.
+
+### main() -> None
+
+— **R:** `None`
+— **S:** `[log][loop][sleep]`
+— **E:** *(none)* (prints message on `KeyboardInterrupt` and returns)
+— **CLI:** *(none)*
+— **Notes:** Keeps process alive; does **not** submit taps by itself.
+
+**Caveats / notes**
+
+* **Daemon thread at import:** any script importing this module will start the worker thread automatically.
+* **Unbounded queue:** `queue.Queue()` has no `maxsize`; sustained producers can increase memory usage.
+* **ADB error handling:** relies on `adb_shell` behavior (returns `None` on failure, no exception propagation).
+
+---
+
+## core/watchdog.py
+
+**Module constants & globals**
+
+* `GAME_PACKAGE = "com.TechTreeGames.TheTower"`
+* `_last_foreground_pkg = None` — used to log foreground app changes
+
+### \_parse\_pkg\_from\_text(text: str) -> str | None
+
+— **R:** foreground package name or `None`
+— **S:** *(none)*
+— **E:** *(none)*
+— **Notes:** Tries multiple regex patterns (`mCurrentFocus`, `topResumedActivity`, `mResumedActivity`, `mFocusedApp`) to support varied Android/ROM outputs.
+
+### \_get\_foreground\_package() -> str | None
+
+— **R:** current foreground package or `None`
+— **S:** `[adb]`
+— **E:** *(none)* (relies on `adb_shell` non‑raising behavior)
+— **Notes:** Queries `dumpsys window windows` first, falls back to `dumpsys activity activities`; parses via `_parse_pkg_from_text`.
+
+### is\_game\_foregrounded() -> bool
+
+— **R:** `True` if `GAME_PACKAGE` is foreground; `False` otherwise
+— **S:** `[adb][log]`
+— **E:** *(none)*
+— **Notes:** Logs when the detected foreground package changes (DEBUG). Warns when foreground cannot be determined.
+
+### bring\_to\_foreground() -> None
+
+— **R:** `None`
+— **S:** `[adb][log][sleep]`
+— **E:** *(none)*
+— **Notes:** Sends `monkey -p <pkg> -c android.intent.category.LAUNCHER 1`; sleeps \~5s to allow UI to surface.
+
+### restart\_game() -> None
+
+— **R:** `None`
+— **S:** `[adb][state][log][sleep]`
+— **E:** *(none)*
+— **Notes:** `am force-stop <pkg>` then `monkey ...` relaunch; sleeps \~6s; sets `AUTOMATION.state = RunState.UNKNOWN` so the main loop re‑detects state.
+
+### \_pid\_running(package: str) -> bool
+
+— **R:** `True` if a process for `package` exists; `False` otherwise
+— **S:** `[adb]`
+— **E:** *(none)*
+— **Notes:** Uses `pidof` first; falls back to `ps -A` and exact package match on the last column to avoid substring false positives.
+
+### watchdog\_process\_check(interval: int = 30) -> None
+
+— **R:** `None`
+— **S:** `[adb][state][log][loop][sleep]`
+— **E:** *(none)* (internal `try/except` logs and continues on any exception)
+— **Behavior:**
+
+* Infinite loop: checks if process is running and foregrounded.
+* If process missing → logs WARN and calls `restart_game()`.
+* If backgrounded → logs WARN and calls `bring_to_foreground()`.
+* Sleeps `interval` seconds between iterations.
+
+**Caveats / notes**
+
+* Depends on `adb_shell` not raising; failures simply lead to `None`/non‑zero return analysis.
+* Foreground detection relies on `dumpsys` output formats which may vary; multiple regex patterns mitigate this.
+
+---
+
+## core/floating\_button\_detector.py
+
+### tap\_floating\_button(name: str, buttons: list\[dict]) -> bool
+
+— **R:** `True` if a tap was issued for a matching button; `False` otherwise
+— **S:** `[tap][adb][log]`
+— **E:** *(none)* (ADB errors suppressed by `adb_shell`)
+— **Blocks:** **Yes** (ADB)
+— **Notes:** Expects `buttons` items shaped like `{ "name": str, "tap_point": {"x": int, "y": int}, ... }`.
+
+### detect\_floating\_buttons(screen) -> list\[dict]
+
+— **R:** list of button dicts, each like:
+
+```
+{
+  "name": str,
+  "match_region": {"x": int, "y": int, "w": int, "h": int},
+  "confidence": float,
+  "tap_point": {"x": int, "y": int}
+}
+```
+
+— **S:** `[cv2][fs][state][log]`
+— **E:** *(none)* — per‑entry exceptions are caught and logged; partial results returned
+— **Notes:**
+
+* Retrieves candidates via `get_entries_by_role("floating_button")` (from clickmap).
+* Uses `utils.template_matcher.match_region(screen, entry)`; if no match (`pt is None`), logs DEBUG with confidence and skips.
+* Validates template file existence and readability at `assets/match_templates/<match_template>`; logs and skips if missing/unreadable.
+* Computes `match_region` as top‑left `pt` with template width/height; `tap_point` is region center.
+
+---
+
+## core/matcher.py
+
+**Purpose**
+Centralized, clickmap‑backed template matching. Public API: `get_match()`; internal: `_match_entry()`; extra heuristic: `detect_floating_gem_square()`.
+
+### \_match\_entry(screenshot, entry: dict, template\_dir: str = "assets/match\_templates") -> tuple\[tuple\[int,int] | None, float]
+
+— **R:** `((x:int, y:int), confidence:float)` if `max_val ≥ threshold`; else `(None, confidence)`
+— **S:** `[cv2][fs]`
+— **E:** `FileNotFoundError` (template missing), `ValueError` (template failed to load), `cv2.error` (invalid images); **entry without region/template → returns `(None, 0.0)`**
+— **Blocks:** No (CPU‑bound)
+— **Config / Inputs:**
+
+* Entry must provide `match_template` and either `match_region` or `region_ref` (resolved via `_shared_match_regions.<name>.match_region`).
+* Supports optional `match_threshold: float` (default **0.9**) and `match_padding: int` (default **12px**).
+  — **Algorithm:**
+* Build template path under `template_dir`; load with `cv2.imread` (color).
+* Expand the search region by `match_padding`, clamp to screen bounds; extract ROI.
+* Run `cv2.matchTemplate(ROI, template, cv2.TM_CCOEFF_NORMED)`; pick `max_val`/`max_loc`.
+* If `max_val ≥ threshold`, return **center point** of the matched template `(x_center, y_center)` and confidence.
+
+### get\_match(dot\_path: str, \*, screenshot, template\_dir: str = "assets/match\_templates") -> tuple\[tuple\[int,int] | None, float]
+
+— **R:** `((x,y), confidence)` or `(None, confidence)`
+— **S:** `[cv2][fs]`
+— **E:** Propagates exceptions from `_match_entry` (e.g., `FileNotFoundError`, `ValueError`, `cv2.error`) when the entry is present but invalid; if the dot‑path is missing, returns `(None, 0.0)`.
+— **Notes:** Resolves the clickmap entry via `resolve_dot_path(dot_path)` then defers to `_match_entry`.
+
+### detect\_floating\_gem\_square(screenshot, region: dict\[str,int], debug: bool=False) -> bool
+
+— **R:** `True` if a roughly square **magenta** contour is detected within `region`; else `False`
+— **S:** `[cv2]` and, when `debug=True`, additionally `[fs][log]` (writes `debug_floating_gem_square.png`, logs diagnostics)
+— **E:** *(none)* (errors are not raised explicitly)
+— **Algorithm:**
+
+* Extract ROI; convert to HSV; threshold magenta (`H∈[140,170], S∈[100,255], V∈[100,255]`).
+* Find external contours; filter by area ≥150 and 4‑sided approx with aspect ratio \~1 (`0.8–1.2`).
+* On first qualifying contour, optionally draw/save debug image (if `debug=True`) and return `True`; otherwise return `False`.
+
+---
+
+## core/scan\_upgrades.py
+
+**Notes**
+
+* File header mentions `tools/scan_upgrades.py`, but this module resides under `core/`.
+* Utilities to find/scroll upgrade labels and sample the adjacent cost/value box.
+
+**Tunables**
+
+* `POST_SWIPE_SLEEP = 0.35`
+* `EDGE_EPSILON = 0.004`
+* `COST_BOX_OFFSET = {"left": (300,20,210,80), "right": (300,20,210,80)}` — `(dx,dy,w,h)` relative to label bbox top‑left.
+
+### \_get\_column\_region(column: str) -> tuple\[int,int,int,int]
+
+— **R:** `(x,y,w,h)` for `_shared_match_regions.upgrades_<column>`
+— **S:** *(none)*
+— **E:** `RuntimeError` if missing/invalid shared region
+— **Config:** Reads from `config/clickmap.json` via `resolve_dot_path`.
+
+### \_crop(img: numpy.ndarray, rect: tuple\[int,int,int,int]) -> numpy.ndarray
+
+— **R:** ROI copy of `img[y:y+h, x:x+w]`
+— **S:** *(none)*
+— **E:** *(none)*
+
+### \_roi\_change\_ratio(a: numpy.ndarray, b: numpy.ndarray) -> float
+
+— **R:** mean absolute grayscale difference normalized to `[0,1]`
+— **S:** `[cv2]`
+— **E:** *(none)* — resizes to min common size when shapes differ
+
+### \_page(side: str, direction: str, settle: float = POST\_SWIPE\_SLEEP) -> None
+
+— **R:** `None`
+— **S:** `[swipe][adb][log][sleep]` (delegates to `label_tapper.page_column(..., strength="page")` then sleeps)
+— **E:** Propagates `ValueError`/`RuntimeError` from `page_column`
+
+### scroll\_to\_top(side: str = "left", max\_swipes: int = 12) -> bool
+
+— **R:** `True` if further upward swipes cease to change the column ROI (`change < EDGE_EPSILON`); else `False`
+— **S:** `[adb][cv2][swipe][sleep]`
+— **E:** `RuntimeError` if initial screenshot is `None`; `RuntimeError` from `_get_column_region`; may propagate from `_page`
+— **Algorithm:** Capture, crop column ROI; iteratively page **up**, measure ROI change (`_roi_change_ratio`); stop when below `EDGE_EPSILON`.
+
+### \_resolve\_upgrade\_keys(side: str) -> list\[str]
+
+— **R:** Sorted dot‑paths under `upgrades.attack.<side>` that look like matchable entries (have `match_template`/`region_ref`/`match_region`)
+— **S:** *(none)*
+— **E:** *(none)*
+
+### find\_label\_or\_scroll(label\_key: str, side: str, max\_pages: int = 25) -> tuple\[int,int,int,int] | None
+
+— **R:** Label bbox `(x,y,w,h)` if found; else `None`
+— **S:** `[cv2][adb][swipe][sleep][log]*`
+— **E:** **Propagates** `ValueError` (threshold fail/missing key), `FileNotFoundError` (template), `RuntimeError` (capture) from `get_label_match`; may propagate from `_page`
+— **Algorithm:** Tries `get_label_match` each page; if not found, pages **down** and repeats up to `max_pages`.
+
+### cost\_box\_from\_label\_bbox(label\_bbox: tuple\[int,int,int,int], side: str) -> tuple\[int,int,int,int]
+
+— **R:** Cost/value ROI `(x,y,w,h)` derived from label bbox + `COST_BOX_OFFSET[side]`
+— **S:** *(none)*
+— **E:** `KeyError` if `side` not in `COST_BOX_OFFSET`
+
+### sample\_cost\_color(img: numpy.ndarray, rect: tuple\[int,int,int,int]) -> dict\[str,float]
+
+— **R:** Mean HSV dict `{"H": float, "S": float, "V": float}` for the ROI
+— **S:** `[cv2]`
+— **E:** *(none)*
+
+### main() -> None
+
+— **R:** `None`
+— **S:** `[adb][cv2][fs][log][sleep][swipe]`
+— **E:** **Uncaught** exceptions may propagate from `scroll_to_top`/`find_label_or_scroll`
+— **Behavior:** Scrolls to top, seeks a hard‑coded label, captures screenshot, computes cost box stats, draws rectangles, writes `screenshots/upgrade_debug.png`.
+
+**Caveats / gotchas**
+
+* `find_label_or_scroll()` assumes `get_label_match()` returns a falsy value when not found, but the matcher **raises `ValueError` on threshold failure**. As written, the loop will **raise on first miss** and never scroll. Either wrap the call in `try/except ValueError` (treat as “not found yet”) or adjust matcher semantics for this use‑case.
+
+---
+
+## handlers/ad\_gem\_handler.py
+
+**Globals & coordination**
+
+* `_blind_tapper_active = threading.Event()` — indicates a tapper is running (non‑reentrant guard)
+* `_blind_tapper_stop = threading.Event()` — cooperative cancel signal for the tapper
+
+### \_blind\_floating\_gem\_tapper(duration: int|float = 20, interval: int|float = 1, stop\_event: threading.Event|None = None) -> None
+
+— **R:** `None`
+— **S:** `[tap][log][loop][sleep][signal]`
+— **E:** *(none)* (per‑tap exceptions are caught and logged; function guarantees cleanup)
+— **Behavior:**
+
+* Validates `duration>0`, clamps `interval` to `≥0.1s`.
+* Resolves coords via `get_click("gesture_targets.floating_gem_blind_tap")`; exits early if missing.
+* Loops until `duration` elapsed or `stop_event.is_set()`; enqueues taps via `tap_dispatcher.tap(..., log_it=False)`.
+* Sleeps in **50ms chunks** to respond quickly to `stop_event`.
+* On exit, logs summary, clears `_blind_tapper_active` and `stop_event`.
+
+### start\_blind\_gem\_tapper(duration: int|float = 20, interval: int|float = 1, blocking: bool = False) -> None
+
+— **R:** `None`
+— **S:** `[thread][tap][log][signal]`
+— **E:** *(none)*
+— **Behavior / Notes:**
+
+* Validates args; no‑op if a tapper is already active.
+* Requires a configured blind‑tap coordinate (`gesture_targets.floating_gem_blind_tap`).
+* Sets `_blind_tapper_active` and clears `_blind_tapper_stop`.
+* If `blocking=True`: runs `_blind_floating_gem_tapper(...)` in current thread.
+* If `blocking=False`: starts a **non‑daemon** thread (so it keeps the process alive until it finishes).
+
+### stop\_blind\_gem\_tapper() -> bool
+
+— **R:** `True` if a running tapper was signaled to stop; `False` otherwise
+— **S:** `[signal]`
+— **E:** *(none)*
+— **Notes:** Sets `_blind_tapper_stop` only; the tapper clears both flags on exit.
+
+### handle\_ad\_gem() -> None
+
+— **R:** `None`
+— **S:** `[tap][thread][log][sleep][adb]`
+— **E:** *(none)*
+— **Behavior:**
+
+1. Starts the blind tapper in background for `20s @ 1s` (if not already running).
+2. Calls `tap_label_now("overlays.ad_gem")` to collect.
+3. Sleeps `1s` before returning.
+
+**Caveats / gotchas**
+
+* The background thread is **non‑daemon**. If your main program exits while the tapper is running, the process will wait for the thread to finish (intended to avoid premature exit).
+* Blind taps go through `tap_dispatcher` (queued taps); `tap_label_now` performs an immediate ADB tap gated by a visual match.
+
+---
+
+## handlers/daily\_gem\_handler.py
+
+### handle\_daily\_gem() -> None
+
+— **R:** `None`
+— **S:** `[tap][adb][cv2][fs][log][sleep]`
+— **E:** *(none)* (uses boolean returns from `tap_label_now`; failures call `_abort_handler` and return)
+— **Workflow:**
+
+1. Create session id (`_make_session_id`) and log start.
+2. `tap_label_now("navigation.goto_store")`; on failure → `_abort_handler("Goto Store", session_id)`.
+3. `swipe_now("gesture_targets.goto_top:store")`; sleep `1.5s`.
+4. Capture screenshot and `save_image(..., f"{session_id}_store_top")`.
+5. `swipe_now("gesture_targets.goto_claim_daily_gems:store")`; sleep `3s`; capture & save with tag `"{session_id}claim_daily_gems"`.
+6. Tap `buttons.claim_daily_gems`; tap `buttons.skip:claim_daily_gems`; tap `buttons.return_to_game`; each guarded with abort on failure; sleeps `1.2s` between steps.
+   — **Notes:** Emits a bare `print("Handling")` alongside logs; depends on clickmap keys existing.
+
+### \_make\_session\_id() -> str
+
+— **R:** session id like `"GameYYYYMMDD_HHMM"`
+— **S:** *(none)*
+— **E:** *(none)*
+
+### save\_image(img, tag: str) -> None
+
+— **R:** `None`
+— **S:** `[cv2][fs][log]` (writes `screenshots/matches/<tag>.png`)
+— **E:** *(none explicit)* — does not check `img is None`; `cv2.imwrite` failure return value is ignored
+— **Notes:** Creates parent directory; logs `INFO` with saved path.
+
+### \_abort\_handler(step: str, session\_id: str) -> None
+
+— **R:** `None`
+— **S:** `[log][cv2][fs]` (logs error; captures a screenshot and saves it via `save_image` with an `_ABORT_...` tag)
+— **E:** *(none explicit)* — same caveat re: image `None`
+
+**Caveats / improvement opportunities**
+
+* `save_image` does not guard against `img is None`; consider early‑returning with a WARN or checking `cv2.imwrite` return value.
+* The tag `f"{session_id}claim_daily_gems"` lacks an underscore; likely intended `f"{session_id}_claim_daily_gems"`.
+* Mixed output (`print` + `log`) — consider using `log` only for consistency.
+
+---
+
+## handlers/game\_over\_handler.py
+
+### handle\_game\_over() -> None
+
+— **R:** `None`
+— **S:** `[adb][cv2][fs][tap][swipe][log][sleep][loop][state]`
+— **E:** *(none)* — failures of visual taps lead to early return via `_abort_handler`
+— **Workflow:**
+
+1. Capture and save initial game‑over stats (`..._game_stats`).
+2. Tap `buttons.more_stats:game_over`; on failure → `_abort_handler("Tap More Stats", session_id)`.
+3. `swipe_now("gesture_targets.goto_top:more_stats")`, sleep `1.5s`, capture/save `..._more_stats_1`.
+4. `swipe_now("gesture_targets.goto_pg2:more_stats")`, sleep `1.2s`, capture/save `..._more_stats_2`.
+5. `swipe_now("gesture_targets.goto_bottom:more_stats")`, sleep `1.2s`, capture/save `..._more_stats_3`.
+6. Tap `buttons.close:more_stats`; on failure → `_abort_handler("Close More Stats", session_id)`.
+7. Decide next action by `AUTOMATION.mode`:
+
+   * `ExecMode.WAIT` → log and **loop** (sleep 1s) while mode remains `WAIT`.
+   * `ExecMode.HOME` → log and return.
+   * Else → tap `buttons.retry:game_over`; on failure → `_abort_handler("Retry Game", session_id)`.
+8. Final sleep `2s` and return.
+   — **Notes:** Relies on clickmap keys existing; uses `tap_label_now` (visual‑match‑gated) and `swipe_now` (absolute gesture entries).
+
+### \_make\_session\_id() -> str
+
+— **R:** session id like `"GameYYYYMMDD_%H%M"`
+— **S:** *(none)*
+— **E:** *(none)*
+
+### save\_image(img, tag: str) -> None
+
+— **R:** `None`
+— **S:** `[cv2][fs][log]`
+— **E:** *(none)*
+— **Behavior:** If `img is None`, logs `WARN` and returns. Otherwise writes `screenshots/matches/<tag>.png` and logs `INFO`.
+
+### \_abort\_handler(step: str, session\_id: str) -> None
+
+— **R:** `None`
+— **S:** `[adb][cv2][fs][log][state]`
+— **E:** *(none)*
+— **Behavior:** Logs error, captures a debug screenshot, saves to `..._ABORT_<step>`, and sets `AUTOMATION.mode = ExecMode.WAIT` to pause automation.
+
+**Caveats / notes**
+
+* The WAIT loop uses identity comparison (`is`) against `ExecMode.WAIT`; this is valid for Enum singletons.
+* Import includes `tap_now` but the function uses `tap_label_now` and `swipe_now`; `tap_now` is not used here.
+
+---
+
+## handlers/home\_screen\_handler.py
+
+### handle\_home\_screen(restart\_enabled: bool = True) -> None
+
+— **R:** `None`
+— **S:** `[tap][log][sleep]`
+— **E:** *(none)* (tap failures are handled by trying an alternate button; no abort path here)
+— **Behavior:**
+
+* Logs handling of `HOME_SCREEN`.
+* If `restart_enabled=True` (default):
+
+  * Attempts `tap_label_now("buttons.battle:home")`; if that returns `False`, attempts `tap_label_now("buttons.resume_battle:home")`.
+  * Sleeps `~2s` to allow UI transition.
+* Else: logs that auto‑start is disabled and returns.
+  — **Notes:** `tap_now` is imported but not used in this function; all taps are visual‑match gated via `tap_label_now`.
+
+---
+

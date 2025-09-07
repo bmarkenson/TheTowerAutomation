@@ -1,0 +1,5 @@
+
+handlers/ad_gem_handler.py
+handlers.ad_gem_handler.start_blind_gem_tapper(duration=20, interval=1, blocking=False) — R: None; S: [thread][tap][log]; Notes: non-reentrant via _blind_tapper_active; validates duration/interval; resolves click 'gesture_targets.floating_gem_blind_tap' before starting; blocking runs in caller thread; non-blocking spawns non-daemon thread with cooperative cancel; E: None raised (invalid inputs or missing coords are logged and function returns).
+handlers.ad_gem_handler.stop_blind_gem_tapper() — R: True if a running tapper was signaled to stop; False otherwise; S: [signal][log]; Notes: sets internal stop Event checked by worker for fast shutdown; E: None.
+handlers.ad_gem_handler.handle_ad_gem() — R: None; S: [tap][thread][log][sleep]; Workflow: ensures background blind tapper (20s @ 1s) is running, taps 'overlays.ad_gem', waits 1s; E: None raised (failures logged).

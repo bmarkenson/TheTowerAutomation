@@ -56,11 +56,17 @@ def _blind_floating_gem_tapper(duration=20, interval=1, stop_event=None):
     x, y = coords
     label = "floating_gem_blind_tap"
 
+    start_ts = time.time()
+    taps = 0
+    log(f"Floating gem tapping initiated (duration={duration}s, interval={interval}s)", "ACTION")
+
     end_time = time.time() + duration
     try:
         while time.time() < end_time and not stop_event.is_set():
             try:
-                tap(x, y, label=label)
+                # Quiet path: suppress per-tap logging at the dispatcher
+                tap(x, y, label=label, log_it=False)
+                taps += 1
             except Exception as e:
                 log(f"[ERROR] Blind gem tapper tap() failed: {e!r}", "ERROR")
                 break
@@ -69,6 +75,8 @@ def _blind_floating_gem_tapper(duration=20, interval=1, stop_event=None):
             while not stop_event.is_set() and time.time() < target:
                 time.sleep(min(0.05, target - time.time()))
     finally:
+        elapsed = int(time.time() - start_ts)
+        log(f"Floating gem tapping finished (taps={taps}, elapsed≈{elapsed}s)", "ACTION")
         _blind_tapper_active.clear()
         stop_event.clear()
 

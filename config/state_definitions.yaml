@@ -2,6 +2,7 @@ states:
 - name: RUNNING
   type: primary
   match_keys:
+  - indicators.tournament
   - indicators.menu_attack
   - indicators.menu_defense
   - indicators.menu_utility
@@ -11,22 +12,17 @@ states:
 - name: HOME_SCREEN
   type: primary
   match_keys:
-  - buttons.battle:home
-
-- name: RESUME_GAME
-  type: primary
-  match_keys:
-  - buttons.resume_game
-
-- name: RESUME_BATTLE
-  type: primary
-  match_keys:
-  - buttons.resume_battle
+  - indicators.home_screen
 
 - name: GAME_OVER
   type: primary
   match_keys:
   - indicators.game_over
+
+- name: TOURNAMENT
+  type: secondary
+  match_keys:
+  - indicators.tournament
 
 - name: CINEMATIC_MODE
   type: secondary

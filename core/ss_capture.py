@@ -8,6 +8,18 @@ LATEST_SCREENSHOT = "screenshots/latest.png"
 
 def capture_adb_screenshot():
     """
+    ---
+    spec:
+      r: "np.ndarray | None (BGR)"
+      s: ["adb", "cv2", "log"]
+      e:
+        - "Returns None on capture or decode failure; logs ERROR"
+      params: {}
+      notes:
+        - "Uses core.adb_utils.screencap_png() → PNG bytes"
+        - "Validates PNG signature before decode"
+        - "Decodes via cv2.imdecode to BGR ndarray"
+    ---
     Capture a screenshot from the connected ADB device/emulator and decode to an OpenCV BGR image.
 
     Returns:
@@ -34,12 +46,28 @@ def capture_adb_screenshot():
         log(f"[Error] {e}", "ERROR")
         return None
 
-def capture_and_save_screenshot(path=LATEST_SCREENSHOT):
+
+def capture_and_save_screenshot(path=LATEST_SCREENSHOT, *, log_capture: bool = True):
     """
+    ---
+    spec:
+      r: "np.ndarray | None (BGR)"
+      s: ["adb", "cv2", "fs", "log"]
+      e:
+        - "Returns None if capture fails"
+        - "OSError may propagate from os.makedirs/cv2.imwrite on filesystem errors"
+      params:
+        path: "str — output PNG path (parents created)"
+        log_capture: "bool — when False, suppress DEBUG log after save"
+      notes:
+        - "Delegates capture to capture_adb_screenshot()"
+        - "Writes PNG to disk if capture succeeds"
+    ---
     Capture a screenshot and save it to disk.
 
     Args:
         path: Output PNG path; parent directories will be created if needed.
+        log_capture (bool): When False, suppress the debug log after saving.
 
     Returns:
         np.ndarray (BGR) on success, or None on failure.
@@ -48,10 +76,25 @@ def capture_and_save_screenshot(path=LATEST_SCREENSHOT):
     if img is not None:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         cv2.imwrite(path, img)
-        log(f"Captured and saved screenshot: shape={img.shape}, path={path}", level="DEBUG")
+        if log_capture:
+            log(f"Captured and saved screenshot: shape={img.shape}, path={path}", level="DEBUG")
     return img
 
+
 def main():
+    """
+    ---
+    spec:
+      r: "None"
+      s: ["adb", "cv2", "log"]
+      e: []
+      params: {}
+      notes:
+        - "Utility viewer: captures, logs size, optionally resizes to fit height≈2048, displays via cv2.imshow"
+        - "Blocks on key; closes window afterward"
+    ---
+    CLI/display helper: capture once, log size, show a window for inspection.
+    """
     image = capture_adb_screenshot()
     if image is not None:
         log(f"[Info] Screenshot shape: {image.shape}", "INFO")
@@ -71,7 +114,6 @@ def main():
     else:
         log("Failed to capture or decode screenshot", "ERROR")
 
+
 if __name__ == "__main__":
     main()
-
-

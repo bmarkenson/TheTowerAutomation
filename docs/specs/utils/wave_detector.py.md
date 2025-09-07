@@ -1,0 +1,6 @@
+
+utils/wave_detector.py
+utils.wave_detector.detect_wave_number_from_image(img_bgr, dot_path="_shared_match_regions.wave_number", debug_out=None) — R: (wave_number:int|None, confidence:float[-1..100]) after OCR of the configured on-screen region; S: [cv2][fs]; Defaults: writes preprocessed crop to debug_out if provided; E: KeyError when clickmap region missing/malformed; ValueError when crop bbox invalid.
+utils.wave_detector.detect_wave_number(dot_path="_shared_match_regions.wave_number", debug_out=None) — R: (wave_number:int|None, confidence:float[-1..100]) by capturing a fresh ADB screenshot then delegating to detect_wave_number_from_image; S: [adb][cv2][fs]; E: RuntimeError when screenshot capture fails; KeyError/ValueError propagate from region lookup/cropping.
+utils.wave_detector.get_wave_number(dot_path="_shared_match_regions.wave_number") — R: wave_number:int|None for convenience workflows; S: [adb][cv2]; E: RuntimeError/KeyError/ValueError propagate from detect_wave_number.
+utils.wave_detector.main() — R: action result (CLI output only); S: [adb][cv2][fs]; CLI flags: --dot-path, --debug-out; E: same as detect_wave_number; exits after printing result.

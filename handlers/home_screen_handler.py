@@ -3,6 +3,8 @@
 import time
 from utils.logger import log
 from core.clickmap_access import tap_now
+from core.label_tapper import tap_label_now
+
 
 def handle_home_screen(restart_enabled=True):
     """
@@ -31,7 +33,8 @@ def handle_home_screen(restart_enabled=True):
 
     if restart_enabled:
         log("[HOME] Auto-start enabled — tapping 'Battle' button", "INFO")
-        tap_now("button:battle:home_screen")
+        if not tap_label_now("buttons.battle:home"):
+            tap_label_now("buttons.resume_battle:home")
         time.sleep(2)
     else:
         log("[HOME] Auto-start disabled — waiting for manual start.", "INFO")

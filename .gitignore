@@ -29,4 +29,5 @@ old/
 # logs
 logs/
 
-
+# tmp
+tmp/

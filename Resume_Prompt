@@ -1,5 +1,5 @@
-Name this chat "Automation Project (continued).  I've uploaded TheTower.zip.  
-Please extract, parse and follow all of the instructions in README_UPLOAD.txt.  Tell me what the instructions are and that you've followed them.
-Also fully load and parse PROJECT_SCOPE.md and ROADMAP.md 
-Summarize the highlights of those for me so that I know you understand the full context.
+I've uploaded TheTower.zip.  
+Please extract, parse and follow all of the instructions in README_upload.md.  Tell me what the instructions are and that you've followed them.
+Part of the instruction is to read TheTowerAPIindex.yaml.  Report a list of the function definitions indexed in that file so that I know you understand the API.
+
 

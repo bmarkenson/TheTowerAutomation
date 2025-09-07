@@ -16,7 +16,6 @@ This archive contains the full source code for an ADB-based automation project t
   - `matchers/`: Template matching logic (OpenCV)
   - `assets/`: PNGs used for screen detection
   - `automation/`: Legacy; being deprecated
-  - `coords/`: Legacy; contains gesture and region info (migrating out)
   - `config/`: For static settings or clickmaps (destination for some migrations)
   - `screenshots/`: Captured screenshots (live + archive)
   - `tools/`: Utility scripts used outside `main.py`
@@ -63,6 +62,7 @@ Start by loading and parsing:
 - `README_UPLOAD.md` (this file)
 - `PROJECT_SCOPE.md`
 - `ROADMAP.md`
+ 
 
 All other modules can be loaded on demand. 
 

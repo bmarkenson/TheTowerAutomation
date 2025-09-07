@@ -1,0 +1,177 @@
+adb_shell → strict-by-default refactor plan
+Objectives
+
+    Make ADB failures explicit at the low level (adb_shell, screencap_png) when check=True.
+
+    Preserve current “soft-fail” semantics in higher layers (tap/send/capture return False/None).
+
+    Standardize logging via utils.logger.log (no print), reduce ambiguity in specs.
+
+Final API contracts (target state)
+core.adb_utils.adb_shell(cmd, *, capture_output=False, check=True, device_id=None)
+
+    On success: returns subprocess.CompletedProcess (stdout only if capture_output=True).
+
+    On non-zero exit:
+
+        if check=True: raises subprocess.CalledProcessError
+
+        if check=False: returns CompletedProcess with non-zero .returncode
+
+    Never returns None unless programmer error (e.g., misuse) causes an unexpected exception; unexpected exceptions propagate.
+
+core.adb_utils.screencap_png(device_id=None, check=True)
+
+    On success: bytes (PNG).
+
+    On non-zero exit:
+
+        if check=True: raises CalledProcessError
+
+        if check=False: returns b"" (or None) — pick one and document. (Recommend None for consistency.)
+
+    Unexpected exceptions propagate.
+
+Design decisions
+
+    Strict low level, soft edges: let core ADB utilities raise; catch-and-translate only at “action boundaries”:
+
+        core/clickmap_access.tap_now / swipe_now → return False on ADB failure.
+
+        tools/scrcpy_adb_input_bridge.send_tap / send_swipe → return False.
+
+        core/ss_capture.capture_adb_screenshot → return None if screencap_png fails.
+
+    Logging: replace print in adb layer with utils.logger.log(..., "ERROR") only when check=False (when we’re not raising). When check=True, let callers decide logging.
+
+    Device targeting precedence remains: device_id > env ADB_DEVICE > ADB_DEVICE_ID.
+
+Phased rollout
+Phase 0 — Inventory (30–45 min)
+
+    Grep for usage:
+
+        grep -R "adb_shell(" -n
+
+        grep -R "screencap_png(" -n
+
+    Categorize call sites:
+
+        Edge sites (tap/swipe/capture wrappers) → will add try/except.
+
+        Tools/CLIs (ok to hard-fail) → keep check=True and let exceptions bubble.
+
+        Loops/handlers → prefer edges to swallow; inner calls should not silently swallow.
+
+Phase 1 — Implement strict adb layer (surgical)
+
+    core/adb_utils.py
+
+        Remove broad try/except that returns None.
+
+        Keep check semantics pure (let subprocess.run raise when check=True).
+
+        If capture_output=False, continue discarding stdout/stderr by default (unchanged).
+
+        Swap any remaining print for log() only when handling check=False scenarios (rare).
+
+    Update spec: E: CalledProcessError when check=True; unexpected exceptions propagate.
+
+Phase 2 — Absorb at edges (tiny guards)
+
+    core/clickmap_access.py
+
+        tap_now / swipe_now:
+
+        try:
+            adb_shell([...], check=True)
+            return True
+        except subprocess.CalledProcessError as e:
+            log(f"ADB tap failed: {e}", "ERROR")
+            return False
+
+    tools/scrcpy_adb_input_bridge.py
+
+        send_tap / send_swipe: same pattern; return False on failure.
+
+    core/ss_capture.py
+
+        Wrap screencap_png(check=True); on exception: log(..., "ERROR"); return None.
+
+Phase 3 — Update tools/tests (behavior unchanged)
+
+    CLIs that should hard-fail (e.g., tune_gesture when ADB broken): leave as-is; let exception propagate → process exits non-zero.
+
+    Tests that assumed None on failure at inner layers should now test at the edge function (e.g., tap_now returns False, capture_adb_screenshot returns None).
+
+Phase 4 — Spec + legend alignment
+
+    Legend keeps: [adb] … raises CalledProcessError when check=True.
+
+    Update lines that currently say “returns None on CalledProcessError” (they won’t anymore).
+
+    Edge functions explicitly note: E: caught; returns False (or None) to preserve current contracts.
+
+Quick hit list (likely edits, 10–20 lines total)
+
+    core/adb_utils.py (remove catch/return None; use log only in check=False paths if needed)
+
+    core/clickmap_access.py: tap_now, swipe_now try/except
+
+    tools/scrcpy_adb_input_bridge.py: send_tap, send_swipe try/except
+
+    core/ss_capture.py: wrap screencap_png
+
+    Optional: convert any remaining print related to ADB failures → log
+
+Testing plan (fast)
+
+    Unit-ish (manual OK):
+
+        Break ADB (e.g., wrong device): verify:
+
+            tap_now(...) → False, logged error, process continues.
+
+            capture_adb_screenshot() → None, logged error, no exception.
+
+            tune_gesture tap on broken ADB → exits with non-zero (if you choose to propagate).
+
+    Mission loop:
+
+        Cause transient ADB failure mid-run; confirm outer loop catches and retries without crash.
+
+    Watchdog:
+
+        Ensure restart/foreground calls still behave; add log line on caught ADB failure.
+
+Telemetry & safety (optional but helpful)
+
+    Add a tiny counter in utils/logger or a simple module-level to tally ADB failures per minute; print a warning if > N/min (helps detect flapping cables/tunnels).
+
+    Feature flag for rollback:
+
+        Env: ADB_STRICT=0|1 (default 1 after rollout). If 0, wrap subprocess.run in a catch and return None (legacy behavior) — easy kill switch.
+
+Documentation/spec updates (single pass)
+
+    Legend: keep strict semantics.
+
+    core/adb_utils.py.md: update to raising behavior.
+
+    Edge specs:
+
+        tap_now/swipe_now: E: CalledProcessError caught; returns False; logs ERROR
+
+        send_tap/send_swipe: same
+
+        capture_adb_screenshot: E: CalledProcessError caught; returns None; logs ERROR
+
+Migration effort estimate
+
+    Code changes: ~30–60 lines across 4 files.
+
+    Tests/CLIs: minor; mostly unaffected if you rely on edges.
+
+    Risk: low with edge guards; rollback via ADB_STRICT=0 if you add the flag.
+
+If you want, I can draft the exact surgical patches (full-file outputs, no unrelated changes) for those four files and the updated .py.md specs, but you said Option B for now—so I’ll park the patches and keep this in the roadmap.

@@ -1,0 +1,9 @@
+
+handlers/mission_demon_mode.py
+handlers.mission_demon_mode.MissionOutcome — Enum: outcomes for a single round (SUCCESS, TIMEOUT_WAITING_FOR_RUNNING, TIMEOUT_WAITING_FOR_DEMON, UI_FLOW_FAILURE, ABORTED_BY_USER).
+handlers.mission_demon_mode.MissionResult — Class: result for one round (outcome, details, elapsed_s, per-phase timings, errors).
+handlers.mission_demon_mode.MissionConfig — Class: timeouts/intervals (RUNNING 60s, DEMON 45s; overall 240s), wait (post-Demon 75s legacy default), verify_tap with up to 2 retries.
+handlers.mission_demon_mode.CampaignResult — Class: aggregates for multi-round campaign (runs, successes, timeouts_running, timeouts_demon, ui_failures, aborted, total_elapsed_s, last_result, progress).
+handlers.mission_demon_mode.run_demon_mode_strategy(config=None, *, dry_run=False, on_event=None) — R: MissionResult (outcome enum + timings + errors); S: [adb][cv2][fs][state][tap][log]; Defaults: bounded waits (RUNNING 60s, Demon 45s), overall 240s cap, post-Demon 75s wait, verify tap with up to 2 retries; E: only programmer errors raise; user interrupt returns ABORTED_BY_USER.
+handlers.mission_demon_mode.run_demon_mode_campaign(config=None, *, max_runs=None, max_duration_s=None, sleep_between_runs_s=2.0, stopfile=None, progress_detector=None, until=None, on_event=None, dry_run=False) — R: CampaignResult (aggregated outcomes + last_result + optional progress); S: [adb][cv2][fs][state][tap][log][loop]; Defaults: repeats rounds until a bound/stop condition is met; E: only programmer errors raise; user interrupt sets aborted=True.
+handlers.mission_demon_mode.run_demon_mode(wait_seconds=75) — R: action result (back-compat wrapper; delegates to run_demon_mode_strategy and discards result); S: [adb][cv2][fs][state][tap][log]; Defaults: post-Demon wait 75s.

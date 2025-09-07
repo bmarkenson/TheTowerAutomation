@@ -2,14 +2,11 @@
   "_shared_match_regions": {
     "wave_number": {
       "match_region": {
-        "x": 573,
-        "y": 1032,
-        "w": 247,
+        "x": 562,
+        "y": 1034,
+        "w": 309,
         "h": 52
-      },
-      "roles": [
-        "_shared_match_region"
-      ]
+      }
     },
     "upgrades_left": {
       "match_region": {
@@ -35,14 +32,62 @@
     },
     "floating_buttons": {
       "match_region": {
-        "x": 18,
-        "y": 796,
-        "w": 655,
-        "h": 106
+        "x": 7,
+        "y": 790,
+        "w": 908,
+        "h": 113
       },
       "roles": [
         "_shared_match_region"
       ]
+    },
+    "claim_daily_gems": {
+      "match_region": {
+        "x": 19,
+        "y": 1131,
+        "w": 380,
+        "h": 605
+      }
+    },
+    "ad_gem_region": {
+      "match_region": {
+        "x": 11,
+        "y": 616,
+        "w": 272,
+        "h": 286
+      }
+    },
+    "coins": {
+      "match_region": {
+        "x": 94,
+        "y": 109,
+        "w": 204,
+        "h": 64
+      }
+    },
+    "wave_number_digits": {
+      "match_region": {
+        "x": 701,
+        "y": 1032,
+        "w": 154,
+        "h": 54
+      }
+    },
+    "more_stats:game_over": {
+      "match_region": {
+        "x": 160,
+        "y": 825,
+        "w": 427,
+        "h": 474
+      }
+    },
+    "retry:game_over": {
+      "match_region": {
+        "x": 60,
+        "y": 1138,
+        "w": 488,
+        "h": 575
+      }
     }
   },
   "gesture_targets": {
@@ -108,7 +153,7 @@
         "duration_ms": 407
       }
     },
-    "goto_claim_free_gems:store": {
+    "goto_claim_daily_gems:store": {
       "roles": [
         "gesture"
       ],
@@ -182,19 +227,6 @@
         "y": 684,
         "w": 338,
         "h": 68
-      },
-      "match_threshold": 0.9,
-      "roles": [
-        "indicator"
-      ]
-    },
-    "game_over": {
-      "match_template": "indicators/game_over.png",
-      "match_region": {
-        "x": 325,
-        "y": 376,
-        "w": 427,
-        "h": 70
       },
       "match_threshold": 0.9,
       "roles": [
@@ -278,17 +310,64 @@
       "roles": [
         "indicator"
       ]
+    },
+    "game_over": {
+      "match_template": "indicators/game_over.png",
+      "match_region": {
+        "x": 328,
+        "y": 429,
+        "w": 422,
+        "h": 64
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "tournament": {
+      "match_template": "indicators/tournament.png",
+      "match_region": {
+        "x": 559,
+        "y": 990,
+        "w": 49,
+        "h": 50
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "game_restarted": {
+      "match_template": "indicators/game_restarted.png",
+      "match_region": {
+        "x": 319,
+        "y": 544,
+        "w": 449,
+        "h": 71
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "home_screen": {
+      "match_template": "indicators/home_screen.png",
+      "match_region": {
+        "x": 322,
+        "y": 215,
+        "w": 439,
+        "h": 97
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
     }
   },
   "overlays": {
     "ad_gem": {
       "match_template": "overlays/ad_gem.png",
-      "match_region": {
-        "x": 24,
-        "y": 639,
-        "w": 239,
-        "h": 134
-      },
+      "region_ref": "ad_gem_region",
       "match_threshold": 0.9,
       "roles": [
         "overlay"
@@ -319,21 +398,45 @@
       "roles": [
         "overlay"
       ]
-    }
-  },
-  "floating_buttons": {
-    "missile_barrage": {
-      "match_template": "floating_buttons/missile_barrage.png",
+    },
+    "claim_ad_gem:home": {
+      "match_template": "overlays/claim_ad_gem:home.png",
       "match_region": {
-        "x": 20,
-        "y": 803,
-        "w": 123,
-        "h": 91
+        "x": 26,
+        "y": 191,
+        "w": 222,
+        "h": 121
       },
       "match_threshold": 0.9,
       "roles": [
-        "floating_button"
+        "overlay"
       ]
+    }
+  },
+  "floating_buttons": {
+    "demon_mode": {
+      "match_template": "floating_buttons/demon_mode.png",
+      "match_threshold": 0.9,
+      "roles": [
+        "floating_buttons"
+      ],
+      "region_ref": "floating_buttons"
+    },
+    "nuke": {
+      "match_template": "floating_buttons/nuke.png",
+      "match_threshold": 0.9,
+      "roles": [
+        "floating_buttons"
+      ],
+      "region_ref": "floating_buttons"
+    },
+    "missile_barrage": {
+      "match_template": "floating_buttons/missile_barrage.png",
+      "match_threshold": 0.9,
+      "roles": [
+        "floating_buttons"
+      ],
+      "region_ref": "floating_buttons"
     }
   },
   "navigation": {
@@ -388,6 +491,19 @@
       "roles": [
         "navigation"
       ]
+    },
+    "goto_store": {
+      "match_template": "navigation/goto_store.png",
+      "match_region": {
+        "x": 888,
+        "y": 19,
+        "w": 57,
+        "h": 86
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "navigation"
+      ]
     }
   },
   "buttons": {
@@ -419,12 +535,7 @@
     },
     "more_stats:game_over": {
       "match_template": "buttons/more_stats:game_over.png",
-      "match_region": {
-        "x": 192,
-        "y": 1017,
-        "w": 337,
-        "h": 132
-      },
+      "region_ref": "more_stats:game_over",
       "match_threshold": 0.9,
       "roles": [
         "button"
@@ -432,12 +543,7 @@
     },
     "retry:game_over": {
       "match_template": "buttons/retry:game_over.png",
-      "match_region": {
-        "x": 80,
-        "y": 1394,
-        "w": 438,
-        "h": 143
-      },
+      "region_ref": "retry:game_over",
       "match_threshold": 0.9,
       "roles": [
         "button"
@@ -494,11 +600,124 @@
       "roles": [
         "button"
       ]
+    },
+    "claim_daily_gems": {
+      "match_template": "buttons/claim_daily_gems.png",
+      "region_ref": "claim_daily_gems",
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
+    "skip:claim_daily_gems": {
+      "match_template": "buttons/skip:claim_daily_gems.png",
+      "match_region": {
+        "x": 778,
+        "y": 6,
+        "w": 243,
+        "h": 94
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
+    "resume_game:game_restarted": {
+      "match_template": "buttons/resume_game:game_restarted.png",
+      "match_region": {
+        "x": 594,
+        "y": 1122,
+        "w": 254,
+        "h": 118
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
+    "end_run:game_restarted": {
+      "match_template": "buttons/end_run:game_restarted.png",
+      "match_region": {
+        "x": 225,
+        "y": 1127,
+        "w": 273,
+        "h": 110
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
+    "resume_battle:home": {
+      "match_template": "buttons/resume_battle:home.png",
+      "match_region": {
+        "x": 291,
+        "y": 1470,
+        "w": 499,
+        "h": 177
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
+    "claim_ad_gem:home": {
+      "match_template": "buttons/claim_ad_gem:home.png",
+      "match_region": {
+        "x": 25,
+        "y": 194,
+        "w": 218,
+        "h": 114
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
+    "battle:home": {
+      "match_template": "buttons/battle:home.png",
+      "match_region": {
+        "x": 291,
+        "y": 1469,
+        "w": 495,
+        "h": 180
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
+    "coin_toggle": {
+      "match_template": "buttons/coin_toggle.png",
+      "match_region": {
+        "x": 13,
+        "y": 104,
+        "w": 71,
+        "h": 69
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
     }
   },
   "upgrades": {
     "attack": {
-      "left": {},
+      "left": {
+        "damage": {
+          "match_template": "upgrades/attack/left/damage.png",
+          "match_region": {
+            "x": 33,
+            "y": 1256,
+            "w": 257,
+            "h": 194
+          },
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        }
+      },
       "right": {}
     },
     "defense": {

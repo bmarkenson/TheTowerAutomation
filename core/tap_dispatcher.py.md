@@ -1,4 +1,4 @@
-$PROJECT_ROOT/core/tap_dispatcher.py — Library
-core.tap_dispatcher.log_tap(x, y, label) — Returns: None; Side effects: [log]
-core.tap_dispatcher.tap(x, y, label=None) — Returns: enqueues a device tap to be executed by the background worker thread; Side effects: [tap], [log]
-core.tap_dispatcher.main() — Returns: None; Side effects: [loop], [log]; Notes: long-running dispatcher process; Ctrl+C to exit
+core/tap_dispatcher.py
+core.tap_dispatcher.log_tap(x, y, label) — R: None; S: [log]
+core.tap_dispatcher.tap(x, y, label=None) — R: enqueues a device tap to be executed by the background worker thread; S: [tap], [log]
+core.tap_dispatcher.main() — R: None; S: [loop], [log]; Notes: long-running dispatcher process; Ctrl+C to exit

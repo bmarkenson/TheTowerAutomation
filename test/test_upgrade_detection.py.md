@@ -1,4 +1,4 @@
-$PROJECT_ROOT/test/test_upgrade_detection.py — Entrypoint
-test.test_upgrade_detection.classify_color(bgr) — Returns: one of {"maxed","upgradeable","unaffordable"} based on average(B,G,R) thresholds (MAXED_RANGE, UPGRADEABLE_RANGE); Side effects: none; Errors: none.
-test.test_upgrade_detection.detect_upgrades(screen, keys) — Returns: dict mapping each key→{status, confidence[, tap_point, avg_color]} where status ∈ {"maxed","upgradeable","unaffordable","not visible","clickmap entry missing","sample_oob"}; Side effects: [cv2] draws a small green rectangle on the sampled color location; Errors: none (out-of-bounds sampling reported as status="sample_oob" instead of raising).
-test.test_upgrade_detection.main([image_path]) — Returns: action result (UI preview + printed results); Side effects: [fs][cv2]; Errors: returns 1 if image load fails. CLI: optional image path overrides screenshots/latest.png.
+test/test_upgrade_detection.py
+test.test_upgrade_detection.classify_color(bgr) — R: one of {"maxed","upgradeable","unaffordable"} based on average(B,G,R) thresholds (MAXED_RANGE, UPGRADEABLE_RANGE); S: none; E: none.
+test.test_upgrade_detection.detect_upgrades(screen, keys) — R: dict mapping each key→{status, confidence[, tap_point, avg_color]} where status ∈ {"maxed","upgradeable","unaffordable","not visible","clickmap entry missing","sample_oob"}; S: [cv2] draws a small green rectangle on the sampled color location; E: none (out-of-bounds sampling reported as status="sample_oob" instead of raising).
+test.test_upgrade_detection.main([image_path]) — R: action result (UI preview + printed results); S: [fs][cv2]; E: returns 1 if image load fails. CLI: optional image path overrides screenshots/latest.png.

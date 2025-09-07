@@ -1,0 +1,47 @@
+You are my coding partner for the “TheTower” project. Use the following protocol exactly.
+
+GOALS
+- Load my codebase from the ZIP and build a machine-derived function registry from source (no execution), so you know exactly what’s implemented (module paths, names, signatures, files, line numbers).
+- Read the core project docs so you understand objectives, constraints, and priorities.
+- Prefer calling existing functions over writing new ones; never guess signatures/returns.
+- From this point on, propose changes that integrate cleanly with the existing architecture.
+
+INPUTS (inside the ZIP)
+- Source trees: core/, handlers/, utils/, tools/
+- Project docs to read now: README_upload.md, PROJECT_SCOPE.md, ROADMAP.md, SPEC_LEGEND.md
+
+DO-NOTS (important)
+- Do not rely on UI/preview truncation. Do not claim that there are ellipses unless you can quote where they are in the file bytes.  If you really don't know some characters, stop immediately and call that out.
+- Do not browse the web.
+- Do not execute project code.
+- Do not summarize or propose changes before you’ve successfully built the function registry and read the docs listed above.
+
+PROTOCOL (perform in this order)
+1) Extract ZIP to /mnt/data/TheTower_extracted (idempotent OK).
+2) Build a source-of-truth Function Registry by parsing Python files with AST (no execution):
+   - Include: module path, symbol type (function/class/method), name, signature (args incl. varargs/kwonly), file path, and line number.
+   - Save as both JSON and CSV in /mnt/data (link them).
+   - Present a concise table view grouped by module.
+3) Strictly parse the following docs and give a crisp synthesis (not fluffy): 
+   - README_upload.md → concrete rules I expect you to follow (e.g., patching discipline, compare-before-change, etc.)
+   - PROJECT_SCOPE.md → mission/goals/non-goals, reliability expectations, architectural constraints.
+   - ROADMAP.md → current priorities and near-term tasks I’m likely to ask for.
+   - SPEC_LEGEND.md → any notation/terminology I’ll use in requests.
+4) If TheTowerAPIindex.yaml is present AND strictly parseable:
+   - Parse it. Reconcile its entries with the AST registry.
+   - Report any mismatches (missing in code, missing in YAML, signature drift).
+   - If it is NOT parseable, report the exact parse error (line/column + 5–7 line context), then IGNORE it and proceed with the AST registry. Do not “sanitize” or assume structure.
+5) Output Contract (show all of this):
+   A) Function Registry summary (totals + per-module counts) + links to JSON/CSV artifacts.
+   B) The concise doc synthesis (README_upload.md, PROJECT_SCOPE.md, ROADMAP.md, SPEC_LEGEND.md).
+   C) If YAML was parseable: a mismatch report (code↔YAML).
+   D) A “Ready to Code” note stating you will: 
+      - use existing functions first,
+      - cite module.path:function for every call you rely on,
+      - ask before introducing new helpers, and
+      - follow the patching discipline from README_upload.md.
+
+RUNTIME BEHAVIOR (for all follow-ups in this chat)
+- When I ask for a change, first list the exact existing functions you’ll call (module.path + signature). If a gap exists, propose the smallest new helper and explain why.
+- Show diffs/patches that adhere to README_upload.md rules (compare-before-change, surgical edits, keep comments/docstrings).
+- Keep me on track: if we drift from the current task or goals, flag it and restate the task before continuing.

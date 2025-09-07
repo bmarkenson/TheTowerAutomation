@@ -16,15 +16,50 @@ except Exception as e:
 _last_region_group: Optional[str] = None
 
 def get_clickmap() -> Dict[str, Any]:
-    """Return the in-memory clickmap dict (mutable reference)."""
+    """
+    ---
+    spec:
+      r: "dict[str, Any] (mutable reference)"
+      s: []
+      e: []
+      params: {}
+      notes:
+        - "Backed by module-global _clickmap loaded at import time"
+        - "Mutations affect in-memory state; persist via save_clickmap()"
+    ---
+    Return the in-memory clickmap dict (mutable reference).
+    """
     return _clickmap
 
 def get_clickmap_path() -> str:
-    """Return absolute filesystem path to the clickmap JSON file."""
+    """
+    ---
+    spec:
+      r: "str (absolute path)"
+      s: []
+      e: []
+      params: {}
+      notes:
+        - "Resolves to utils/config/clickmap.json relative to this module"
+    ---
+    Return absolute filesystem path to the clickmap JSON file.
+    """
     return CLICKMAP_FILE
 
 def resolve_dot_path(dot_path: str, data: Optional[Mapping[str, Any]] = None) -> Any:
-    """Resolve and return the value at a dot-separated path in the provided mapping
+    """
+    ---
+    spec:
+      r: "Any | None"
+      s: []
+      e: []
+      params:
+        dot_path: "str — nested keys separated by '.' (colons ':' are part of keys)"
+        data: "mapping | None — optional root mapping; defaults to global clickmap"
+      notes:
+        - "Returns None if any segment is missing or a non-dict is traversed"
+    ---
+    Resolve and return the value at a dot-separated path in the provided mapping
     (or the global clickmap). Return None if any segment is missing.
     """
     parts = dot_path.split(".")
@@ -37,11 +72,39 @@ def resolve_dot_path(dot_path: str, data: Optional[Mapping[str, Any]] = None) ->
     return cur
 
 def dot_path_exists(dot_path: str, data: Optional[Mapping[str, Any]] = None) -> bool:
-    """True if resolve_dot_path finds a non-None value; False otherwise."""
+    """
+    ---
+    spec:
+      r: "bool"
+      s: []
+      e: []
+      params:
+        dot_path: "str"
+        data: "mapping | None"
+      notes:
+        - "Thin wrapper over resolve_dot_path()"
+    ---
+    True if resolve_dot_path finds a non-None value; False otherwise.
+    """
     return resolve_dot_path(dot_path, data) is not None
 
 def set_dot_path(dot_path: str, value: Any, allow_overwrite: bool = False) -> None:
-    """Set value at dot-separated path in the global clickmap.
+    """
+    ---
+    spec:
+      r: "None"
+      s: []
+      e:
+        - "KeyError if final key exists and allow_overwrite is False"
+        - "ValueError if path traverses a non-dict element"
+      params:
+        dot_path: "str"
+        value: "Any"
+        allow_overwrite: "bool — default False"
+      notes:
+        - "Creates intermediate dicts as needed; does not persist to disk"
+    ---
+    Set value at dot-separated path in the global clickmap.
     Creates intermediate dicts as needed.
     Raises KeyError on existing final key unless allow_overwrite=True.
     Raises ValueError if path traverses a non-dict.
@@ -62,6 +125,16 @@ def set_dot_path(dot_path: str, value: Any, allow_overwrite: bool = False) -> No
 
 def _valid_group_name(name: str) -> bool:
     """
+    ---
+    spec:
+      r: "bool"
+      s: []
+      e: []
+      params:
+        name: "str"
+      notes:
+        - "Internal helper used by interactive flows"
+    ---
     Keep this simple and predictable:
     - start with letter or underscore
     - then letters, digits, or underscores
@@ -76,9 +149,22 @@ def _valid_group_name(name: str) -> bool:
     return True
 
 def interactive_get_dot_path(clickmap: Dict[str, Any]) -> Optional[str]:
-    """Interactive helper to choose/create a top-level group and enter an entry key.
-    Returns 'group.suffix' or the specialized upgrades path, or None if the user cancels.
-    Updates _last_region_group when selection is made. (I/O via input/print)
+    """
+    ---
+    spec:
+      r: "str | None"
+      s: ["fs?", "stdio"]
+      e: []
+      params:
+        clickmap: "dict[str, Any] — working mapping to display/update"
+      notes:
+        - "Interactive console UI; updates _last_region_group on selection"
+        - "Special-cases 'upgrades' group for nested category/side/label"
+        - "Returns dot-path string or None on cancel"
+    ---
+    Interactive helper to choose/create a top-level group and enter an entry key.
+    Returns 'group.suffix' for generic groups, or 'upgrades.<category>.<side>.<label>' for upgrades,
+    or None if the user cancels. Updates _last_region_group when selection is made. (I/O via input/print)
     """
     global _last_region_group
     top_level_keys = list(clickmap.keys())
@@ -113,7 +199,7 @@ def interactive_get_dot_path(clickmap: Dict[str, Any]) -> Optional[str]:
                 print("❌ Invalid group name.")
                 continue
             if new_group in top_level_keys:
-                print("ℹ️   That group already exists; selecting it.")
+                print("ℹ️    That group already exists; selecting it.")
                 group = new_group
             else:
                 confirm = input(f"Create new group '{new_group}'? (Y/n): ").strip().lower()
@@ -152,7 +238,12 @@ def interactive_get_dot_path(clickmap: Dict[str, Any]) -> Optional[str]:
                 print("[ERROR] Invalid upgrade side.")
                 continue
 
-            return f"{group}.{subgroup}.{side}"
+            label = input("Enter upgrade label key (e.g., damage, attack_speed): ").strip()
+            if not _valid_group_name(label):
+                print("❌ Invalid label key. Use letters/digits/underscore; start with letter/_")
+                continue
+
+            return f"{group}.{subgroup}.{side}.{label}"
 
         # Generic suffix
         suffix = input(f"Enter entry key for `{group}` (e.g., retry, attack_menu, claim_ad_gem): ").strip()
@@ -163,7 +254,21 @@ def interactive_get_dot_path(clickmap: Dict[str, Any]) -> Optional[str]:
         return f"{group}.{suffix}"
 
 def prompt_roles(group: str, key: str) -> List[str]:
-    """Suggest roles for a (group, key) and allow interactive override."""
+    """
+    ---
+    spec:
+      r: "list[str]"
+      s: ["stdio"]
+      e: []
+      params:
+        group: "str"
+        key: "str"
+      notes:
+        - "Suggests a role based on group; user can override via input"
+        - "Returns [default] if user presses Enter"
+    ---
+    Suggest roles for a (group, key) and allow interactive override.
+    """
     group = group.lower()
     if group == "gesture_targets":
         default = "gesture"
@@ -184,7 +289,19 @@ def prompt_roles(group: str, key: str) -> List[str]:
     return roles
 
 def get_click(name: str) -> Optional[Tuple[int, int]]:
-    """Return (x, y) for a named entry. Prefers explicit 'tap' coords; falls
+    """
+    ---
+    spec:
+      r: "tuple[int,int] | None"
+      s: ["log?"]
+      e: []
+      params:
+        name: "str — dot-path to entry"
+      notes:
+        - "Prefers explicit 'tap' coords; falls back to center of 'match_region'"
+        - "Logs WARN if dot-path cannot be resolved"
+    ---
+    Return (x, y) for a named entry. Prefers explicit 'tap' coords; falls
     back to the center of 'match_region'. Returns None if unresolved.
     Note: does not perform any device I/O.
     """
@@ -202,18 +319,55 @@ def get_click(name: str) -> Optional[Tuple[int, int]]:
     return None
 
 def get_swipe(name: str) -> Optional[Dict[str, int]]:
-    """Return a swipe dict {x1,y1,x2,y2,duration_ms} for a named entry, or None."""
+    """
+    ---
+    spec:
+      r: "dict[str,int] | None"
+      s: []
+      e: []
+      params:
+        name: "str"
+      notes:
+        - "Returns stored swipe params {x1,y1,x2,y2,duration_ms} or None"
+    ---
+    Return a swipe dict {x1,y1,x2,y2,duration_ms} for a named entry, or None.
+    """
     entry = resolve_dot_path(name)
     if not entry:
         return None
     return entry.get("swipe")
 
 def has_click(name: str) -> bool:
-    """True if get_click(name) resolves to coordinates."""
+    """
+    ---
+    spec:
+      r: "bool"
+      s: ["log?"]
+      e: []
+      params:
+        name: "str"
+      notes:
+        - "Delegates to get_click(); may log WARN if unresolved"
+    ---
+    True if get_click(name) resolves to coordinates.
+    """
     return get_click(name) is not None
 
 def tap_now(name: str) -> None:
-    """Issue an ADB tap at the resolved coordinates for 'name'. Logs action."""
+    """
+    ---
+    spec:
+      r: "None"
+      s: ["adb", "log"]
+      e:
+        - "No exception on ADB failures; adb_shell() handles errors and returns None"
+      params:
+        name: "str"
+      notes:
+        - "Logs ACTION on success; logs FAIL if coordinates unavailable"
+    ---
+    Issue an ADB tap at the resolved coordinates for 'name'. Logs action.
+    """
     pos = get_click(name)
     if pos:
         log(f"TAP_NOW: {name} at {pos}", "ACTION")
@@ -222,10 +376,24 @@ def tap_now(name: str) -> None:
         log(f"[ERROR] tap_now: No coordinates for '{name}'", "FAIL")
 
 def swipe_now(name: str) -> None:
-    """Issue an ADB swipe for 'name' using stored swipe parameters. Logs action."""
+    """
+    ---
+    spec:
+      r: "None"
+      s: ["adb", "log"]
+      e:
+        - "No exception on ADB failures; adb_shell() handles errors and returns None"
+      params:
+        name: "str"
+      notes:
+        - "Uses stored swipe parameters under entry['swipe']"
+        - "Logs FAIL if swipe data missing"
+    ---
+    Issue an ADB swipe for 'name' using stored swipe parameters. Logs action.
+    """
     swipe = get_swipe(name)
     if swipe:
-        log(f"SWIPE_NOW: {name} ({swipe['x1']},{swipe['y1']})→({swipe['x2']},{swipe['y2']}) in {swipe['duration_ms']}ms", "ACTION")
+        log(f"SWIPE_NOW: {name} ({swipe['x1']},{swipe['y1']})→({swipe['x2']},{swipe['x2']}) in {swipe['duration_ms']}ms", "ACTION")
         adb_shell([
             "input", "swipe",
             str(swipe["x1"]), str(swipe["y1"]),
@@ -236,7 +404,20 @@ def swipe_now(name: str) -> None:
         log(f"[ERROR] swipe_now: No swipe data for '{name}'", "FAIL")
 
 def save_clickmap(data: Optional[Dict[str, Any]] = None) -> None:
-    """Persist the clickmap (or provided dict) to disk atomically as UTF-8 JSON."""
+    """
+    ---
+    spec:
+      r: "None"
+      s: ["fs"]
+      e:
+        - "OSError/IOError may propagate on write/replace errors"
+      params:
+        data: "dict[str, Any] | None — defaults to global _clickmap"
+      notes:
+        - "Writes UTF-8 JSON atomically via temp file + os.replace"
+    ---
+    Persist the clickmap (or provided dict) to disk atomically as UTF-8 JSON.
+    """
     if data is None:
         data = _clickmap
     tmp_path = CLICKMAP_FILE + ".tmp"
@@ -246,7 +427,20 @@ def save_clickmap(data: Optional[Dict[str, Any]] = None) -> None:
     print("[INFO] Saved clickmap to", CLICKMAP_FILE)
 
 def flatten_clickmap(data: Optional[Dict[str, Any]] = None, prefix: str = "") -> Dict[str, Any]:
-    """Return a flat mapping of dot-path → leaf value for the clickmap (or provided dict)."""
+    """
+    ---
+    spec:
+      r: "dict[str, Any] — flat dot-path → leaf value"
+      s: []
+      e: []
+      params:
+        data: "dict[str, Any] | None — defaults to global _clickmap"
+        prefix: "str — optional path prefix"
+      notes:
+        - "Recurses into dicts; leaves non-dict values at their full dot-path"
+    ---
+    Return a flat mapping of dot-path → leaf value for the clickmap (or provided dict).
+    """
     entries: Dict[str, Any] = {}
     if data is None:
         data = _clickmap
@@ -259,7 +453,19 @@ def flatten_clickmap(data: Optional[Dict[str, Any]] = None, prefix: str = "") ->
     return entries
 
 def get_entries_by_role(role: str) -> Dict[str, Dict[str, Any]]:
-    """Return a dict of entries (dot-path → entry) whose 'roles' includes the given role."""
+    """
+    ---
+    spec:
+      r: "dict[str, dict] — dot-path → entry with matching role"
+      s: []
+      e: []
+      params:
+        role: "str — role name to filter by (must be present in entry['roles'])"
+      notes:
+        - "Searches entire clickmap for dicts containing 'roles' with the given role"
+    ---
+    Return a dict of entries (dot-path → entry) whose 'roles' includes the given role.
+    """
     results: Dict[str, Dict[str, Any]] = {}
     def _search(d: Dict[str, Any], path: str = "") -> None:
         for k, v in d.items():
