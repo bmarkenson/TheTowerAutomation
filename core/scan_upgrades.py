@@ -12,8 +12,9 @@ import numpy as np
 
 from utils.logger import log
 from core.ss_capture import capture_adb_screenshot
-from core.clickmap_access import resolve_dot_path
-from core.label_tapper import get_label_match, page_column  # <-- adaptive scroll
+from core.clickmap_access import resolve_dot_path, get_clickmap
+from core.label_tapper import get_label_match, page_column, tap_label_now  # <-- adaptive scroll + tap
+from core.matcher import get_match
 
 # --- Tunables -----------------------------------------------------------------
 
@@ -37,6 +38,54 @@ def _get_column_region(column: str) -> Tuple[int, int, int, int]:
         raise RuntimeError(f"Missing shared region: {dot}")
     r = entry["match_region"]
     return int(r["x"]), int(r["y"]), int(r["w"]), int(r["h"])
+
+# ----------------------- Menu helpers ----------------------------------------
+
+MENU_INDICATORS = {
+    "attack": "indicators.menu_attack",
+    "defense": "indicators.menu_defense",
+    "utility": "indicators.menu_utility",
+    "uw": "indicators.menu_uw",
+}
+
+NAVIGATE_TO = {
+    "attack": "navigation.goto_attack",
+    "defense": "navigation.goto_defense",
+    "utility": "navigation.goto_utility",
+    "uw": "navigation.goto_uw",
+}
+
+
+def ensure_menu(category: str, retries: int = 2, settle: float = 0.5) -> bool:
+    """Ensure the requested upgrades menu is active.
+
+    Returns True when the indicator is detected; taps the navigation button up to
+    `retries` times otherwise.
+    """
+    category = (category or "").lower()
+    if category not in MENU_INDICATORS:
+        raise ValueError(f"Unknown category '{category}' (expected attack|defense|utility|uw)")
+
+    indicator = MENU_INDICATORS[category]
+    nav_key = NAVIGATE_TO.get(category)
+
+    screen = capture_adb_screenshot()
+    if screen is None:
+        raise RuntimeError("Failed to capture screenshot")
+    pt, conf = get_match(indicator, screenshot=screen)
+    if pt is not None:
+        return True
+
+    for _ in range(max(1, retries)):
+        tap_label_now(nav_key)
+        time.sleep(settle)
+        screen = capture_adb_screenshot()
+        if screen is None:
+            continue
+        pt, conf = get_match(indicator, screenshot=screen)
+        if pt is not None:
+            return True
+    return False
 
 
 def _crop(img: np.ndarray, rect: Tuple[int, int, int, int]) -> np.ndarray:
@@ -92,17 +141,74 @@ def _resolve_upgrade_keys(side: str) -> List[str]:
     return sorted(keys)
 
 
+def _key_exists(category: str, side: str, name: str) -> bool:
+    cm = get_clickmap()
+    node = resolve_dot_path(f"upgrades.{category}.{side}", cm) or {}
+    return isinstance(node, dict) and name in node
+
+
+def derive_key(category: Optional[str], side: Optional[str], name: str) -> Tuple[str, str, str]:
+    """Return (key, resolved_side, category). If side is None, prefer the side that contains the name.
+
+    Raises ValueError if the entry doesn't exist in the clickmap.
+    """
+    category = (category or "").lower()
+    if category and side:
+        side_l = side.lower()
+        key = f"upgrades.{category}.{side_l}.{name}"
+        if resolve_dot_path(key) is None:
+            raise ValueError(f"Clickmap entry not found: {key}")
+        return key, side_l, category
+    candidates_cat = [category] if category else ["attack", "defense", "utility", "uw"]
+    for cat in candidates_cat:
+        for s in ((side.lower(),) if side else ("left", "right")):
+            if _key_exists(cat, s, name):
+                return f"upgrades.{cat}.{s}.{name}", s, cat
+    if category:
+        raise ValueError(f"Clickmap entry not found for upgrades.{category}.<left|right>.{name}")
+    raise ValueError(f"Clickmap entry not found for any category: <attack|defense|utility|uw>.<left|right>.{name}")
+
+
 def find_label_or_scroll(
     label_key: str,
     side: str,
     max_pages: int = 25,
 ) -> Optional[Tuple[int, int, int, int]]:
     for _ in range(max_pages):
-        bbox = get_label_match(label_key, screenshot=None, return_meta=False)
+        try:
+            bbox = get_label_match(label_key, screenshot=None, return_meta=False)
+        except (ValueError, FileNotFoundError, RuntimeError):
+            bbox = None
         if bbox:
             return bbox
         _page(side, "down")
     return None
+
+
+def find_upgrade(category: Optional[str], name: str, side: Optional[str] = None, max_pages: int = 30) -> Optional[Tuple[int, int, int, int]]:
+    """Find an upgrade label by category/name (and side if provided), scrolling as needed.
+
+    Returns (x,y,w,h) of the label on success, else None.
+    """
+    key, resolved_side, _ = derive_key(category, side, name)
+    return find_label_or_scroll(key, resolved_side, max_pages=max_pages)
+
+
+def goto_and_find_upgrade(category: Optional[str], side: Optional[str], name: str, max_pages: int = 30) -> Optional[Tuple[int, int, int, int]]:
+    """High-level wrapper:
+    - Ensure the correct upgrades menu is active
+    - Scroll to top of the appropriate column
+    - Find the upgrade label by scrolling down
+    Returns label bbox or None.
+    """
+    # Resolve full key first so we know category/side even if they were omitted
+    key, resolved_side, resolved_category = derive_key(category, side, name)
+    ok = ensure_menu(resolved_category)
+    if not ok:
+        log(f"ensure_menu({resolved_category}) failed", "WARN")
+    if not scroll_to_top(resolved_side):
+        log("scroll_to_top did not reach a stable top; continuing", "WARN")
+    return find_label_or_scroll(key, resolved_side, max_pages=max_pages)
 
 
 def cost_box_from_label_bbox(label_bbox: Tuple[int, int, int, int], side: str) -> Tuple[int, int, int, int]:

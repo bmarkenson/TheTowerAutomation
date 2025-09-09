@@ -17,7 +17,9 @@ from handlers.home_screen_handler import handle_home_screen
 from handlers.ad_gem_handler import handle_ad_gem, stop_blind_gem_tapper
 from handlers.daily_gem_handler import handle_daily_gem
 from utils.logger import log
-from utils.wave_detector import get_wave_number_from_image, set_wave_hint  # <-- added set_wave_hint
+from utils.wave_detector import detect_wave_number_from_image, set_wave_hint  # use detect_* for conf + debug
+from utils.coin_detector import get_coins_from_image, format_compact_decimal
+from core.clickmap_access import get_clickmap, resolve_dot_path
 
 SCREENSHOT_PATH = "screenshots/latest.png"
 
@@ -27,6 +29,10 @@ parser.add_argument("--match-trace", action="store_true", help="Emit per-frame m
 parser.add_argument("--status-interval", type=int, default=60, help="Seconds between status summaries (0=disable)")
 parser.add_argument("--reset-wave-hint", action="store_true",
                     help="Reset the wave OCR monotonic/time-weighted hint at startup")  # <-- new flag
+parser.add_argument("--save-wave-samples", default=None,
+                    help="Directory to save per-status wave samples: raw frame (and bin winner). Filename encodes wave.")
+parser.add_argument("--coins-log", default=None,
+                    help="Optional CSV to append coins/min samples: time_iso,epoch,wave,coins_decimal,conf,pretty")
 args = parser.parse_args()
 AUTO_START_ENABLED = not args.no_restart
 STATUS_INTERVAL = max(0, args.status_interval)
@@ -107,13 +113,69 @@ def main():
             now = time.time()
             if STATUS_INTERVAL and (now - last_status_ts >= STATUS_INTERVAL):
                 wave = None
+                wave_conf = -1.0
+                coins_val = None
+                coins_conf = -1.0
                 if new_state == "RUNNING":
-                    wave = get_wave_number_from_image(img)  # reuse current frame
+                    # Reuse current frame; also save winner bin if we're writing samples
+                    debug_out = None
+                    if args.save_wave_samples:
+                        os.makedirs(args.save_wave_samples, exist_ok=True)
+                        # debug_out path finalized after wave_str; use a temp first
+                        debug_out = os.path.join(args.save_wave_samples, "_tmp_bin.png")
+                    wave, wave_conf = detect_wave_number_from_image(img, debug_out=debug_out)
+                    # Coins/min OCR
+                    try:
+                        coins_val, coins_conf = get_coins_from_image(img)
+                    except Exception:
+                        coins_val, coins_conf = None, -1.0
                 wave_str = str(wave) if wave is not None else "—"
+                coins_str = format_compact_decimal(coins_val) if coins_val is not None else "—"
                 menu_str = menu or "—"
                 sec_str = ", ".join(sorted(secondary)) if secondary else "—"
                 ovl_str = ", ".join(sorted(overlays)) if overlays else "—"
-                log(f"[STATUS] State={new_state} | Wave={wave_str} | Menu={menu_str} | Secondary=[{sec_str}] | Overlays=[{ovl_str}]", "INFO")
+                log(f"[STATUS] State={new_state} | Wave={wave_str} | Coins/min={coins_str} | Menu={menu_str} | Secondary=[{sec_str}] | Overlays=[{ovl_str}]", "INFO")
+                # Optionally persist the actual input image alongside a debug note
+                if args.save_wave_samples:
+                    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+                    base = f"{ts}_wave-{wave_str}"
+                    img_path = os.path.join(args.save_wave_samples, base + ".png")
+                    note_path = os.path.join(args.save_wave_samples, base + ".txt")
+                    cv2.imwrite(img_path, img)
+                    try:
+                        with open(note_path, "w", encoding="utf-8") as f:
+                            f.write(f"state={new_state}\nmenu={menu_str}\nsecondary={sec_str}\noverlays={ovl_str}\nwave={wave_str}\nconf={wave_conf:.1f}\ncoins={coins_str}\ncoins_conf={coins_conf:.1f}\n")
+                    except Exception:
+                        pass
+                # Append coins sample for graphing
+                if args.coins_log:
+                    try:
+                        os.makedirs(os.path.dirname(args.coins_log) or '.', exist_ok=True)
+                        ts_iso = datetime.now().isoformat(timespec='seconds')
+                        epoch = int(now)
+                        with open(args.coins_log, 'a', encoding='utf-8') as f:
+                            if f.tell() == 0:
+                                f.write("time_iso,epoch,wave,coins_decimal,conf,pretty\n")
+                            coins_decimal = str(coins_val) if coins_val is not None else ""
+                            f.write(f"{ts_iso},{epoch},{wave_str},{coins_decimal},{coins_conf:.1f},{coins_str}\n")
+                    except Exception:
+                        pass
+                    # Save ROI overlay for the wave-number region (red box)
+                    try:
+                        overlay = img.copy()
+                        cm = get_clickmap()
+                        entry = resolve_dot_path("_shared_match_regions.wave_number", cm) or {}
+                        mr = entry.get("match_region") if isinstance(entry, dict) else None
+                        if mr:
+                            x, y, w, h = int(mr.get("x",0)), int(mr.get("y",0)), int(mr.get("w",0)), int(mr.get("h",0))
+                            cv2.rectangle(overlay, (x,y), (x+w, y+h), (0,0,255), 2)
+                        cv2.imwrite(os.path.join(args.save_wave_samples, base + "_overlay.png"), overlay)
+                    except Exception:
+                        pass
+                    # If we wrote a temp bin image above, rename it to align with this sample
+                    tmp_bin = os.path.join(args.save_wave_samples, "_tmp_bin.png")
+                    if os.path.exists(tmp_bin):
+                        os.replace(tmp_bin, os.path.join(args.save_wave_samples, base + "_bin.png"))
                 last_status_ts = now
 
             # Handle known states

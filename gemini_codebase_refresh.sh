@@ -1,0 +1,1 @@
+for f in $(find . -name "*.py" | grep -v .git | grep -v .venv); do echo "----------$f----------------------" >> gemini_full_project.txt; echo $f >> gemini_full_project.txt; cat $f >> gemini_full_project.txt; done

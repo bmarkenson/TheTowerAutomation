@@ -62,9 +62,11 @@ FALLBACK_LABEL_WIDTH_FRAC = 0.64
 
 DEFAULT_THRESHOLD = 0.90
 DEFAULT_ROLES     = ["upgrade_label"]
+SIM_MATCH_THRESHOLD = 0.72  # fallback name inference via template similarity (tuned)
 
 # Edge detection when paging
 EDGE_EPSILON = 0.004
+Y_SEEN_DELTA = 12  # px tolerance to de-dup rows across pages by Y position
 
 # Only keep rows fully visible inside the ORIGINAL column ROI
 VISIBLE_MARGIN_PX = 0
@@ -78,6 +80,92 @@ def _slugify(text: str) -> str:
     text = re.sub(r"[^a-z0-9]+", "_", text)
     text = re.sub(r"_+", "_", text).strip("_")
     return text or "unknown"
+
+def _all_known_slugs_for_category(category: str) -> List[str]:
+    """Collect existing label slugs for a category from assets folders.
+    This helps name new crops when OCR is noisy.
+    """
+    base = Path("assets/match_templates/upgrades") / category
+    slugs: set = set()
+    for side in ("left", "right"):
+        d = base / side
+        if d.is_dir():
+            for p in d.glob("*.png"):
+                slugs.add(p.stem.lower())
+    return sorted(slugs)
+
+def _infer_slug_by_similarity(label_img: np.ndarray, category: str) -> Optional[str]:
+    """Try to infer a canonical slug by comparing the crop to existing templates.
+    Returns slug or None if no sufficiently strong match is found.
+    """
+    known = _all_known_slugs_for_category(category)
+    if not known:
+        return None
+
+    # Prepare candidate list of (slug, template_img)
+    candidates: List[Tuple[str, np.ndarray]] = []
+    base = Path("assets/match_templates/upgrades") / category
+    for side in ("left", "right"):
+        d = base / side
+        for slug in known:
+            p = d / f"{slug}.png"
+            if p.exists():
+                tpl = cv2.imread(str(p), cv2.IMREAD_GRAYSCALE)
+                if tpl is not None:
+                    candidates.append((slug, tpl))
+
+    if not candidates:
+        return None
+
+    # Ensure working grayscale for crop
+    crop = label_img
+    if crop.ndim == 3:
+        crop = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+
+    best_slug: Optional[str] = None
+    best_score: float = -1.0
+    for slug, tpl in candidates:
+        h, w = tpl.shape[:2]
+        # Resize crop to template size for direct similarity
+        resized = cv2.resize(crop, (w, h), interpolation=cv2.INTER_AREA)
+        res = cv2.matchTemplate(resized, tpl, cv2.TM_CCOEFF_NORMED)
+        _minv, maxv, _minl, _maxl = cv2.minMaxLoc(res)
+        if maxv > best_score:
+            best_score = maxv
+            best_slug = slug
+
+    if best_score >= SIM_MATCH_THRESHOLD:
+        return best_slug
+    return None
+
+def _canonical_slug_from_keywords(raw: str, category: str) -> Optional[str]:
+    """Map noisy OCR text to a canonical slug using keyword rules."""
+    t = raw.lower()
+    letters = re.sub(r"[^a-z]+", " ", t)
+    # Helpers
+    has = lambda *ws: all(w in letters for w in ws)
+
+    if category == "attack":
+        # Left column
+        if has("bounce", "range"): return "bounce_shot_range"
+        if has("bounce", "chance"): return "bounce_shot_chance"
+        if has("rapid", "chance"):  return "rapid_fire_chance"
+        if has("multi", "chance"):  return "multishot_chance"
+        if has("critical", "chance"):return "critical_chance"
+        if has("rend", "armor") and ("mult" in letters or "multi" in letters): return "rend_armor_mult"
+        if has("damage") and "per" not in letters: return "damage"
+        if has("range") and "bounce" not in letters: return "range"
+        # Right column
+        if has("attack", "speed"): return "attack_speed"
+        if has("critical", "factor"): return "critical_factor"
+        if has("damage", "per", "meter"): return "damage_per_meter"
+        if has("multi", "targets"): return "multishot_targets"
+        if has("rapid", "duration"): return "rapid_fire_duration"
+        if has("bounce", "targets"): return "bounce_shot_targets"
+        if has("super", "crit", "chance"): return "super_crit_chance"
+        if has("super", "crit") and ("mult" in letters or "multiplier" in letters): return "super_crit_mult"
+        if has("rend", "armor", "chance"): return "rend_armor_chance"
+    return None
 
 def _read_shared_region(dot_key: str) -> Tuple[int, int, int, int]:
     entry = resolve_dot_path(dot_key)
@@ -100,6 +188,51 @@ def _roi_change_ratio(a: np.ndarray, b: np.ndarray) -> float:
     b_g = cv2.cvtColor(b, cv2.COLOR_BGR2GRAY)
     diff = cv2.absdiff(a_g, b_g)
     return float(diff.mean()) / 255.0
+
+def _visible_row_tops(img: np.ndarray, side: str) -> List[int]:
+    """Return Y positions of fully visible rows inside the shared upgrades column."""
+    x0,y0,w0,h0 = _read_shared_region(LEFT_SHARED_KEY if side=="left" else RIGHT_SHARED_KEY)
+    Hs, Ws = img.shape[:2]
+    x = x0
+    y = max(0, y0 - DETECT_PAD_PX)
+    w = w0
+    h = min(h0 + 2*DETECT_PAD_PX, Hs - y)
+    col_roi_ext = _crop(img, (x,y,w,h))
+    rows_local = _detect_row_rects(col_roi_ext)
+    rows_full = [(x+rx, y+ry, rw, rh) for (rx,ry,rw,rh) in rows_local]
+    def _fully_visible(r):
+        rx, ry, rw, rh = r
+        return (ry >= y0 + VISIBLE_MARGIN_PX) and (ry + rh <= y0 + h0 - VISIBLE_MARGIN_PX)
+    rows_full = [r for r in rows_full if _fully_visible(r)]
+    if rows_full:
+        med_h = float(np.median([rh for (_,_,_,rh) in rows_full]))
+        rows_full = [r for r in rows_full if r[3] >= MIN_HEIGHT_FRAC_OF_MEDIAN * med_h]
+    return [r[1] for r in rows_full]
+
+def _visible_row_label_hashes(img: np.ndarray, side: str) -> List[Tuple[int,int]]:
+    """Compute (aHash,dHash) for label crops of fully visible rows in the column."""
+    x0,y0,w0,h0 = _read_shared_region(LEFT_SHARED_KEY if side=="left" else RIGHT_SHARED_KEY)
+    Hs, Ws = img.shape[:2]
+    x = x0
+    y = max(0, y0 - DETECT_PAD_PX)
+    w = w0
+    h = min(h0 + 2*DETECT_PAD_PX, Hs - y)
+    col_roi_ext = _crop(img, (x,y,w,h))
+    rows_local = _detect_row_rects(col_roi_ext)
+    rows_full = [(x+rx, y+ry, rw, rh) for (rx,ry,rw,rh) in rows_local]
+    def _fully_visible(r):
+        rx, ry, rw, rh = r
+        return (ry >= y0 + VISIBLE_MARGIN_PX) and (ry + rh <= y0 + h0 - VISIBLE_MARGIN_PX)
+    rows_full = [r for r in rows_full if _fully_visible(r)]
+    if rows_full:
+        med_h = float(np.median([rh for (_,_,_,rh) in rows_full]))
+        rows_full = [r for r in rows_full if r[3] >= MIN_HEIGHT_FRAC_OF_MEDIAN * med_h]
+    hashes: List[Tuple[int,int]] = []
+    for r in rows_full:
+        label_rect, _panel_rect, _ = _compute_label_and_panel(r, img)
+        label_img = _crop(img, label_rect)
+        hashes.append((_ahash64(label_img), _dhash64(label_img)))
+    return hashes
 
 def scroll_to_edge(column: str, to_top: bool, max_swipes: int = 16) -> bool:
     rect = _read_shared_region(LEFT_SHARED_KEY if column=="left" else RIGHT_SHARED_KEY)
@@ -274,6 +407,31 @@ def _save_img(path: Path, img: np.ndarray) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(path), img)
 
+def _ahash64(img: np.ndarray) -> int:
+    """Average-hash (8x8 -> 64-bit) robust to small crop/lighting changes."""
+    g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
+    small = cv2.resize(g, (8, 8), interpolation=cv2.INTER_AREA)
+    mean = float(small.mean())
+    bits = (small > mean).astype(np.uint8).flatten()
+    val = 0
+    for b in bits:
+        val = (val << 1) | int(b)
+    return val
+
+def _hamming(a: int, b: int) -> int:
+    return (a ^ b).bit_count()
+
+def _dhash64(img: np.ndarray) -> int:
+    """Difference-hash (horizontal, 8x8 -> 64-bit). Captures structure differences."""
+    g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
+    # Resize to 9x8 so we can compare adjacent columns
+    small = cv2.resize(g, (9, 8), interpolation=cv2.INTER_AREA)
+    diff = (small[:, 1:] > small[:, :-1]).astype(np.uint8).flatten()
+    val = 0
+    for b in diff:
+        val = (val << 1) | int(b)
+    return val
+
 def _write_clickmap_entry(category: str, side: str, slug: str, template_rel: str) -> None:
     dot_path = f"upgrades.{category}.{side}.{slug}"
     entry = {
@@ -289,7 +447,11 @@ def _write_clickmap_entry(category: str, side: str, slug: str, template_rel: str
 def process_visible_page(img: np.ndarray, column: str, category: str,
                          seen_slugs: set, write: bool,
                          page_idx: int, review_dir: Path,
-                         save_overlay_img: Optional[np.ndarray]) -> int:
+                         save_overlay_img: Optional[np.ndarray],
+                         order_list: Optional[List[str]] = None,
+                         seq_idx: int = 0,
+                         seen_rows_y: Optional[List[int]] = None,
+                         seen_hashes: Optional[List[Tuple[int,int]]] = None) -> Tuple[int, int]:
     """Process current visible rows; returns number of new labels written."""
     # Original column ROI (used for visibility test)
     x0,y0,w0,h0 = _read_shared_region(LEFT_SHARED_KEY if column=="left" else RIGHT_SHARED_KEY)
@@ -319,18 +481,38 @@ def process_visible_page(img: np.ndarray, column: str, category: str,
         rows_full = [r for r in rows_full if r[3] >= MIN_HEIGHT_FRAC_OF_MEDIAN * med_h]
 
     new_count = 0
+    if seen_rows_y is None:
+        seen_rows_y = []
+    if seen_hashes is None:
+        seen_hashes = []
     manifest_path = review_dir / "manifest.jsonl"
     with open(manifest_path, "a", encoding="utf-8") as mf:
         for r_idx, row_full in enumerate(rows_full):
+            ry_global = row_full[1]
             label_rect, panel_rect, split_x_abs = _compute_label_and_panel(row_full, img)
 
             row_img   = _crop(img, row_full)
             label_img = _crop(img, label_rect)
             panel_img = _crop(img, panel_rect) if panel_rect else None
 
-            pre = preprocess_binary(label_img)
-            raw = (ocr_text(pre) or "").strip()
-            slug = _slugify(raw)
+            if order_list and seq_idx < len(order_list):
+                slug = order_list[seq_idx]
+                raw = "<order>"
+            else:
+                pre = preprocess_binary(label_img)
+                raw = (ocr_text(pre) or "").strip()
+                slug = _slugify(raw)
+                # Trim common OCR noise suffixes like trailing _e/_ee/_eee, _el
+                slug = re.sub(r"_(e|l){1,8}$", "", slug)
+                # Heuristics: try keyword mapping first, then template similarity
+                if slug == "unknown" or len(re.sub(r"[^a-z]", "", slug)) < 3 or re.fullmatch(r"e+", slug) or slug.endswith("_eeeeeeee"):
+                    kw = _canonical_slug_from_keywords(raw, category)
+                    if kw:
+                        slug = kw
+                    else:
+                        inferred = _infer_slug_by_similarity(label_img, category)
+                        if inferred:
+                            slug = inferred
             pretty_slug = slug if re.search(r"[a-z0-9]", slug) else "unknown"
 
             y_hint = row_full[1]
@@ -372,11 +554,21 @@ def process_visible_page(img: np.ndarray, column: str, category: str,
             }
             _manifest_write(mf, rec)
 
-            if not slug or len(re.sub(r"[^a-z]", "", slug)) < 3:
-                log(f"[DRY-RUN] Would write {template_rel}", "INFO"); new_count += 1
+            # If still not confident about naming, do not commit a bad filename.
+            if (not order_list) and (not slug or slug == "unknown" or len(re.sub(r"[^a-z]", "", slug)) < 3):
+                log(f"[SKIP] Unreliable slug -> {template_rel}. Leaving as review-only.", "WARN"); new_count += 1
                 continue
             if slug in seen_slugs and write:
                 log(f"Duplicate slug in run, skipping write: {slug}", "WARN")
+                if order_list and seq_idx < len(order_list):
+                    seq_idx += 1
+                continue
+
+            # Content-level dedup across pages to avoid overlap repeats
+            a_sig = _ahash64(label_img)
+            d_sig = _dhash64(label_img)
+            # Duplicate only if BOTH aHash and dHash are very close to some prior capture
+            if any((_hamming(a_sig, a0) <= 4 and _hamming(d_sig, d0) <= 8) for (a0, d0) in seen_hashes):
                 continue
 
             if write:
@@ -389,8 +581,16 @@ def process_visible_page(img: np.ndarray, column: str, category: str,
                 log(f"[DRY-RUN] Would write {template_rel}", "INFO")
 
             seen_slugs.add(slug)
+            seen_rows_y.append(ry_global)
+            seen_hashes.append((a_sig, d_sig))
+            if order_list and seq_idx < len(order_list):
+                seq_idx += 1
+            # In order mode, do NOT break here — process all remaining fully
+            # visible, unique rows in this same frame before swiping. This
+            # allows capturing two (or more) fully visible boxes without an
+            # unnecessary scroll between them. seq_idx advances per write.
 
-    return new_count
+    return new_count, seq_idx
 
 # --- Main ---------------------------------------------------------------------
 
@@ -400,6 +600,12 @@ def main():
     ap.add_argument("--side", choices=["left","right"], required=True)
     ap.add_argument("--commit", action="store_true", help="Write templates and clickmap (default dry-run).")
     ap.add_argument("--pages", type=int, default=40, help="Max pages to scan.")
+    ap.add_argument("--step", choices=["micro","page"], default="micro", help="Swipe strength between scans (default: micro)")
+    ap.add_argument("--micro-tries", type=int, default=3, help="How many micro swipes to try before a page swipe fallback (order mode)")
+    ap.add_argument("--order", default=None,
+                    help="Comma-separated list of canonical slugs to assign in order (skips OCR). Example: 'bounce_shot_range,bounce_shot_chance,...'")
+    ap.add_argument("--order-file", default=None,
+                    help="Path to JSON file with {\"attack\":{\"left\":[..],\"right\":[..]}, ...}. When provided, overrides --order.")
     ap.add_argument("--from-top", action="store_true", help="Scroll to top before scanning.")
     ap.add_argument("--debug", action="store_true", help="Also save page overlay images with rectangles.")
     ap.add_argument("--review-dir", default=None, help="Directory to dump review images & manifest.")
@@ -408,6 +614,19 @@ def main():
     side = args.side
     category = args.category
     write = args.commit
+    # Determine optional order-based naming list
+    order_list = None
+    if args.order_file:
+        try:
+            import json as _json
+            with open(args.order_file, "r", encoding="utf-8") as f:
+                mapping = _json.load(f)
+            order_list = (mapping.get(category, {}) or {}).get(side)
+        except Exception as e:
+            log(f"[WARN] Failed to read --order-file: {e}", "WARN")
+            order_list = None
+    elif args.order:
+        order_list = [s.strip() for s in args.order.split(',') if s.strip()]
 
     review_dir = _init_review_dir(args.review_dir, category, side)
     log(f"Review dump → {review_dir}", "INFO")
@@ -418,6 +637,9 @@ def main():
 
     seen: set = set()
     total_new = 0
+    seq_idx = 0  # next index into order_list when provided
+    seen_rows_y: List[int] = []  # track processed row Y positions across pages
+    seen_hashes: List[int] = []  # track label content across pages (aHash list)
 
     for page_idx in range(args.pages):
         img = capture_adb_screenshot()
@@ -428,24 +650,60 @@ def main():
             continue
 
         overlay = img.copy() if args.debug else None
-        wrote = process_visible_page(img, side, category, seen, write, page_idx, review_dir, overlay)
+        wrote, seq_idx = process_visible_page(img, side, category, seen, write, page_idx, review_dir, overlay, order_list, seq_idx, seen_rows_y, seen_hashes)
         total_new += wrote
+
+        if order_list and seq_idx >= len(order_list):
+            log("Completed order list; stopping early.", "INFO")
+            break
 
         if args.debug:
             out = review_dir / f"page_overlay_p{page_idx:02d}.png"
             _save_img(out, overlay)
             log(f"Saved page overlay: {out}", "INFO")
 
-        # Edge detection after paging
+        # After processing, keep swiping until a truly new row appears (order mode)
         rect = _read_shared_region(LEFT_SHARED_KEY if side=="left" else RIGHT_SHARED_KEY)
-        before = _crop(img, rect)
-        page_column(side, "down", strength="micro" if page_idx == 0 else "page")
-        time.sleep(POST_SWIPE_SLEEP)
-        after_img = capture_adb_screenshot()
-        if after_img is None:
+        before_img = _crop(img, rect)
+        before_tops = _visible_row_tops(img, side)
+        attempts = 0
+        # Try a few micro swipes to coax the next row fully into view, then escalate
+        max_attempts = (args.micro_tries if order_list else 1)
+        while attempts < max_attempts:
+            page_column(side, "down", strength=args.step)
+            time.sleep(POST_SWIPE_SLEEP)
+            probe = capture_adb_screenshot()
+            if probe is None:
+                attempts += 1
+                continue
+            after_img = _crop(probe, rect)
+            # If content changed and at least one new row Y appeared, break
+            changed = _roi_change_ratio(before_img, after_img) >= EDGE_EPSILON
+            tops = _visible_row_tops(probe, side)
+            # New if any visible row hash is not similar to previously seen hashes
+            row_hashes = _visible_row_label_hashes(probe, side)
+            # New when there exists a row whose (aHash,dHash) pair is not close to any prior
+            def _is_new(pair):
+                return all(not (_hamming(pair[0], a0) <= 4 and _hamming(pair[1], d0) <= 8) for (a0,d0) in seen_hashes)
+            has_new = any(_is_new(p) for p in row_hashes)
+            # Stop as soon as content actually changed; the next outer loop will
+            # process any newly visible rows. This avoids over-swiping past
+            # frames where a new row is already fully visible but hashes were
+            # judged too similar.
+            if changed:
+                img = probe
+                break
+            attempts += 1
+        else:
+            # Fallback: one page-sized swipe if micro didn’t move content
+            if args.step == "micro":
+                page_column(side, "down", strength="page")
+                time.sleep(POST_SWIPE_SLEEP)
+        after_frame = capture_adb_screenshot()
+        if after_frame is None:
             continue
-        after = _crop(after_img, rect)
-        if _roi_change_ratio(before, after) < EDGE_EPSILON:
+        after_crop = _crop(after_frame, rect)
+        if _roi_change_ratio(before_img, after_crop) < EDGE_EPSILON:
             log("Reached bottom of list.", "INFO")
             break
 

@@ -13,11 +13,13 @@ from core.ss_capture import capture_adb_screenshot
 from core.clickmap_access import resolve_dot_path, get_clickmap
 from utils.ocr_utils import ocr_number_with_fallback
 
-# ROIs: digits-only first, full label as fallback
-PRIMARY_DOT_PATH = "_shared_match_regions.wave_number_digits"
-FALLBACK_DOT_PATH = "_shared_match_regions.wave_number"
+# ROIs: use the full label region as primary (more stable across UIs)
+# The previous digits-only ROI appears misaligned in some setups.
+PRIMARY_DOT_PATH = "_shared_match_regions.wave_number"
+FALLBACK_DOT_PATH = ""  # disabled by default; can be overridden via args
 
 # Preferences & limits
+# Keep conservative ceiling to avoid selecting spurious large OCR reads
 _DEFAULT_MAX_VALUE = 20000         # hard ceiling on accepted wave values
 _DEFAULT_RATE_PER_MIN = 10.0       # expected waves per minute
 _DEFAULT_TOLERANCE = 20            # ±window around expected
@@ -133,16 +135,31 @@ def _save_overlay(img_bgr: np.ndarray, dot_path: str, out_path: str) -> None:
 def _fast_variants_from_crop(crop_bgr: np.ndarray) -> List[Tuple[str, np.ndarray]]:
     """
     Minimal & reliable set:
+      - White-mask isolation (digits are bright on dark)
       - Otsu + small close (2x2) at 1.0x and 1.8x
       - Both polarities
     """
+    variants: List[Tuple[str, np.ndarray]] = []
+
+    # 1) White mask via HSV: low saturation, high value
+    try:
+        hsv = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv, (0, 0, 200), (180, 60, 255))
+        k = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k, iterations=1)
+        variants.append(("white_mask_x1.0", mask))
+        up = cv2.resize(mask, None, fx=1.8, fy=1.8, interpolation=cv2.INTER_CUBIC)
+        variants.append(("white_mask_x1.8", up))
+    except Exception:
+        pass
+
+    # 2) Otsu baseline + polarity flip
     gray = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2GRAY)
     gray = cv2.convertScaleAbs(gray, alpha=1.6, beta=0)  # contrast boost
     _t, thr = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     k = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
     base = cv2.morphologyEx(thr, cv2.MORPH_CLOSE, k, iterations=1)
 
-    variants: List[Tuple[str, np.ndarray]] = []
     for pol_name, img in (("otsu_close", base), ("otsu_close_inv", cv2.bitwise_not(base))):
         variants.append((f"{pol_name}_x1.0", img))
         up = cv2.resize(img, None, fx=1.8, fy=1.8, interpolation=cv2.INTER_CUBIC)
@@ -162,7 +179,7 @@ def _score(
     Score candidates for max() selection.
 
     Returns tuple ordered by importance:
-      (valid_flag, proximity_bucket, confidence, proximity_tiebreak, digits_len)
+      (valid_flag, proximity_bucket, digits_len, confidence, proximity_tiebreak)
 
     - Discards decreases: if last_wave is set and val < last_wave -> invalid.
     - valid_flag = 1 if val is not None and val < max_value else 0.
@@ -174,14 +191,17 @@ def _score(
     - proximity_tiebreak: higher is better; uses -abs(val - expected) (0 if expected is None).
     - digits_len: prefer more digits as a final tie-break to avoid single-digit misreads.
     """
+    # Baseline (None) should outrank any invalid candidate but lose to any valid one.
+    # Use valid_flag tiers: 2 = valid, 1 = none/baseline, 0 = invalid.
     if val is None:
-        return (0, 0, -1.0, -1e9, 0)
+        return (1, 0, 0, -1.0, -1e9)
 
     # Monotonic: never go down
     if last_wave is not None and val < last_wave:
-        return (0, 0, -1.0, -1e9, 0)
+        return (0, 0, 0, -1.0, -1e9)
 
-    valid_flag = 1 if val < max_value else 0
+    # Only values strictly below max_value are considered valid.
+    valid_flag = 2 if val < max_value else 0
 
     if expected is None:
         prox_bucket = 1  # neutral
@@ -197,7 +217,35 @@ def _score(
         prox_tb = -float(delta)
 
     digits_len = len(str(val))
-    return (valid_flag, prox_bucket, float(conf), prox_tb, digits_len)
+
+    # Dynamic minimum digits: avoid latching onto a lone '2' when the true wave is in the thousands.
+    # Prefer more digits based on expected/last_wave scale; if below threshold, demote to baseline tier.
+    scale_hint: Optional[float] = None
+    try:
+        if expected is not None:
+            scale_hint = float(expected)
+    except Exception:
+        scale_hint = None
+    if scale_hint is None and last_wave is not None:
+        try:
+            scale_hint = float(last_wave)
+        except Exception:
+            scale_hint = None
+
+    if scale_hint is not None:
+        if scale_hint >= 1000:
+            min_digits = 4
+        elif scale_hint >= 100:
+            min_digits = 3
+        elif scale_hint >= 10:
+            min_digits = 2
+        else:
+            min_digits = 1
+        if digits_len < min_digits:
+            valid_flag = min(valid_flag, 1)
+            prox_bucket = min(prox_bucket, 0)
+
+    return (valid_flag, prox_bucket, digits_len, float(conf), prox_tb)
 
 def _detect_quick(
     img_bgr: np.ndarray,
@@ -218,6 +266,12 @@ def _detect_quick(
         return None, -1.0, None, None
 
     crop = _crop(img_bgr, bbox)
+    if verbose:
+        try:
+            h, w = crop.shape[:2]
+            print(f"[FAST] dot_path={dot_path} bbox={bbox} crop={w}x{h}")
+        except Exception:
+            pass
     best_val, best_conf, best_tag, best_img = None, -1.0, None, None
     best_score = _score(None, -1.0, last_wave=last_wave, expected=expected, tolerance=tolerance, max_value=max_value)
 
@@ -383,9 +437,10 @@ def detect_wave_number_from_image(
     used = primary_dot_path
 
     # Fast: fallback
-    if val is None and fallback_dot_path:
+    if (val is None or (val is not None and len(str(val)) <= 2)) and fallback_dot_path:
         if verbose:
-            print(f"[DEBUG] Primary ROI {primary_dot_path} failed -> trying fallback {fallback_dot_path}")
+            reason = "failed" if val is None else f"too-short({val})"
+            print(f"[DEBUG] Primary ROI {primary_dot_path} {reason} -> trying fallback {fallback_dot_path}")
         val, conf, _tag, best_img = _detect_quick(
             img_bgr,
             fallback_dot_path,
@@ -419,6 +474,49 @@ def detect_wave_number_from_image(
     # Save winner image if requested
     if debug_out and best_img is not None:
         cv2.imwrite(debug_out, best_img)
+
+    # Plausibility gate: avoid poisoning hint with an outlier
+    if val is not None and last_wave is not None and _LAST_WAVE_TS is not None:
+        dt_min = max(0.0, (now - _LAST_WAVE_TS) / 60.0)
+        # Near expected within ±2*tolerance considered safe
+        near = True if expected is None else (abs(val - expected) <= 2 * tolerance)
+        # Cap huge upward jumps unless confidence is very high
+        allowed_inc = 3.0 * rate_per_min * dt_min + (2 * tolerance)
+        massive_jump = (val - last_wave) > allowed_inc
+        low_conf = conf < 60.0
+        too_short = (last_wave >= 1000 and len(str(val)) < 4) or (100 <= last_wave < 1000 and len(str(val)) < 3)
+        suspicious = (not near and (massive_jump or low_conf)) or too_short
+        if suspicious:
+            # Try a heavy sweep on both ROIs before falling back to last_wave
+            hv_best = (None, -1.0, None, None)
+            for roi in (primary_dot_path, fallback_dot_path):
+                hv_val, hv_conf, _hv_tag, hv_img = _detect_heavy(
+                    img_bgr,
+                    roi,
+                    verbose=verbose,
+                    dump_dir=dump_dir,
+                    debug_out=debug_out,
+                    last_wave=last_wave,
+                    expected=expected,
+                    tolerance=tolerance,
+                    max_value=max_value,
+                )
+                if _score(hv_val, hv_conf, last_wave=last_wave, expected=expected, tolerance=tolerance, max_value=max_value) > \
+                   _score(*hv_best[:2], last_wave=last_wave, expected=expected, tolerance=tolerance, max_value=max_value):
+                    hv_best = (hv_val, hv_conf, roi, hv_img)
+
+            hv_val, hv_conf, hv_used, hv_img = hv_best
+            # Only accept heavy result if it isn't suspicious under the same gate
+            if hv_val is not None:
+                hv_near = True if expected is None else (abs(hv_val - expected) <= 2 * tolerance)
+                hv_massive_jump = (hv_val - last_wave) > allowed_inc
+                hv_too_short = (last_wave >= 1000 and len(str(hv_val)) < 4) or (100 <= last_wave < 1000 and len(str(hv_val)) < 3)
+                hv_suspicious = (not hv_near and (hv_massive_jump or hv_conf < 60.0)) or hv_too_short
+                if not hv_suspicious:
+                    val, conf = hv_val, hv_conf
+                    best_img = hv_img if hv_img is not None else best_img
+                else:
+                    return (last_wave, conf)
 
     # Update hint on success (monotonic already enforced in scoring)
     if val is not None:

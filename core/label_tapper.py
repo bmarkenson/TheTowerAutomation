@@ -209,7 +209,13 @@ def tap_label_now(label_key: str) -> bool:
         return False
 
     entry = resolve_dot_path(label_key)
+    # Prefer explicit per-entry offset. If missing and this is an upgrade label,
+    # fall back to a sensible default that targets the right cost box.
     offset = entry.get("tap_offset", None)
+    if offset is None:
+        roles = entry.get("roles") or []
+        if isinstance(roles, list) and "upgrade_label" in roles:
+            offset = {"x": 405, "y": 60}
 
     tap_x = x + offset["x"] if offset else x + w // 2
     tap_y = y + offset["y"] if offset else y + h // 2

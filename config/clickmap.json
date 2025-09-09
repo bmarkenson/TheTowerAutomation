@@ -65,14 +65,6 @@
         "h": 64
       }
     },
-    "wave_number_digits": {
-      "match_region": {
-        "x": 701,
-        "y": 1032,
-        "w": 154,
-        "h": 54
-      }
-    },
     "more_stats:game_over": {
       "match_region": {
         "x": 160,
@@ -314,10 +306,10 @@
     "game_over": {
       "match_template": "indicators/game_over.png",
       "match_region": {
-        "x": 328,
-        "y": 429,
-        "w": 422,
-        "h": 64
+        "x": 326,
+        "y": 369,
+        "w": 433,
+        "h": 81
       },
       "match_threshold": 0.9,
       "roles": [
@@ -699,6 +691,19 @@
       "roles": [
         "button"
       ]
+    },
+    "save_stats:game_over": {
+      "match_template": "buttons/save_stats:game_over.png",
+      "match_region": {
+        "x": 880,
+        "y": 1609,
+        "w": 57,
+        "h": 53
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
     }
   },
   "upgrades": {
@@ -706,11 +711,74 @@
       "left": {
         "damage": {
           "match_template": "upgrades/attack/left/damage.png",
-          "match_region": {
-            "x": 33,
-            "y": 1256,
-            "w": 257,
-            "h": 194
+          "region_ref": "upgrades_left",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "critical_chance": {
+          "match_template": "upgrades/attack/left/critical_chance.png",
+          "region_ref": "upgrades_left",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "range": {
+          "match_template": "upgrades/attack/left/range.png",
+          "region_ref": "upgrades_left",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "multishot_chance": {
+          "match_template": "upgrades/attack/left/multishot_chance.png",
+          "region_ref": "upgrades_left",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "rapid_fire_chance": {
+          "match_template": "upgrades/attack/left/rapid_fire_chance.png",
+          "region_ref": "upgrades_left",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "bounce_shot_chance": {
+          "match_template": "upgrades/attack/left/bounce_shot_chance.png",
+          "region_ref": "upgrades_left",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "bounce_shot_range": {
+          "match_template": "upgrades/attack/left/bounce_shot_range.png",
+          "region_ref": "upgrades_left",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "super_crit_mult": {
+          "match_template": "upgrades/attack/left/super_crit_mult.png",
+          "region_ref": "upgrades_left",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "rend_armor_mult": {
+          "match_template": "upgrades/attack/left/rend_armor_mult.png",
+          "region_ref": "upgrades_left",
+          "tap_offset": {
+            "x": 405,
+            "y": 60
           },
           "match_threshold": 0.9,
           "roles": [
@@ -718,15 +786,332 @@
           ]
         }
       },
-      "right": {}
+      "right": {
+        "attack_speed": {
+          "match_template": "upgrades/attack/right/attack_speed.png",
+          "region_ref": "upgrades_right",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "critical_factor": {
+          "match_template": "upgrades/attack/right/critical_factor.png",
+          "region_ref": "upgrades_right",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "damage_per_meter": {
+          "match_template": "upgrades/attack/right/damage_per_meter.png",
+          "region_ref": "upgrades_right",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "multishot_targets": {
+          "match_template": "upgrades/attack/right/multishot_targets.png",
+          "region_ref": "upgrades_right",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "rapid_fire_duration": {
+          "match_template": "upgrades/attack/right/rapid_fire_duration.png",
+          "region_ref": "upgrades_right",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "bounce_shot_targets": {
+          "match_template": "upgrades/attack/right/bounce_shot_targets.png",
+          "region_ref": "upgrades_right",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "super_crit_chance": {
+          "match_template": "upgrades/attack/right/super_crit_chance.png",
+          "region_ref": "upgrades_right",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "rend_armor_chance": {
+          "match_template": "upgrades/attack/right/rend_armor_chance.png",
+          "region_ref": "upgrades_right",
+          "match_threshold": 0.85,
+          "roles": [
+            "upgrade_label"
+          ]
+        }
+      }
     },
     "defense": {
-      "left": {},
-      "right": {}
+      "left": {
+        "health": {
+          "match_template": "upgrades/defense/left/health.png",
+          "region_ref": "upgrades_left",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "defense_percent": {
+          "match_template": "upgrades/defense/left/defense_percent.png",
+          "region_ref": "upgrades_left",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "thorn_damage": {
+          "match_template": "upgrades/defense/left/thorn_damage.png",
+          "region_ref": "upgrades_left",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "knockback_chance": {
+          "match_template": "upgrades/defense/left/knockback_chance.png",
+          "region_ref": "upgrades_left",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "orb_speed": {
+          "match_template": "upgrades/defense/left/orb_speed.png",
+          "region_ref": "upgrades_left",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "shockwave_size": {
+          "match_template": "upgrades/defense/left/shockwave_size.png",
+          "region_ref": "upgrades_left",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "land_mine_chance": {
+          "match_template": "upgrades/defense/left/land_mine_chance.png",
+          "region_ref": "upgrades_left",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "land_mine_radius": {
+          "match_template": "upgrades/defense/left/land_mine_radius.png",
+          "region_ref": "upgrades_left",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "wall_health": {
+          "match_template": "upgrades/defense/left/wall_health.png",
+          "region_ref": "upgrades_left",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        }
+      },
+      "right": {
+        "health_regen": {
+          "match_template": "upgrades/defense/right/health_regen.png",
+          "region_ref": "upgrades_right",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "defense_absolute": {
+          "match_template": "upgrades/defense/right/defense_absolute.png",
+          "region_ref": "upgrades_right",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "lifesteal": {
+          "match_template": "upgrades/defense/right/lifesteal.png",
+          "region_ref": "upgrades_right",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "knockback_force": {
+          "match_template": "upgrades/defense/right/knockback_force.png",
+          "region_ref": "upgrades_right",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "orbs": {
+          "match_template": "upgrades/defense/right/orbs.png",
+          "region_ref": "upgrades_right",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "shockwave_frequency": {
+          "match_template": "upgrades/defense/right/shockwave_frequency.png",
+          "region_ref": "upgrades_right",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "land_mine_damage": {
+          "match_template": "upgrades/defense/right/land_mine_damage.png",
+          "region_ref": "upgrades_right",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "death_defy": {
+          "match_template": "upgrades/defense/right/death_defy.png",
+          "region_ref": "upgrades_right",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "wall_rebuild": {
+          "match_template": "upgrades/defense/right/wall_rebuild.png",
+          "region_ref": "upgrades_right",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        }
+      }
     },
     "utility": {
-      "left": {},
-      "right": {}
+      "left": {
+        "cash_bonus": {
+          "match_template": "upgrades/utility/left/cash_bonus.png",
+          "region_ref": "upgrades_left",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "coins_per_kill_bonus": {
+          "match_template": "upgrades/utility/left/coins_per_kill_bonus.png",
+          "region_ref": "upgrades_left",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "free_attack_upgrade": {
+          "match_template": "upgrades/utility/left/free_attack_upgrade.png",
+          "region_ref": "upgrades_left",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "free_utility_upgrade": {
+          "match_template": "upgrades/utility/left/free_utility_upgrade.png",
+          "region_ref": "upgrades_left",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "package_chance": {
+          "match_template": "upgrades/utility/left/package_chance.png",
+          "region_ref": "upgrades_left",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "EHLS": {
+          "match_template": "upgrades/utility/left/EHLS.png",
+          "region_ref": "upgrades_left",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "recovery_amount": {
+          "match_template": "upgrades/utility/left/recovery_amount.png",
+          "region_ref": "upgrades_left",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        }
+      },
+      "right": {
+        "cash_per_wave": {
+          "match_template": "upgrades/utility/right/cash_per_wave.png",
+          "region_ref": "upgrades_right",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "coins_per_wave": {
+          "match_template": "upgrades/utility/right/coins_per_wave.png",
+          "region_ref": "upgrades_right",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "free_defense_upgrade": {
+          "match_template": "upgrades/utility/right/free_defense_upgrade.png",
+          "region_ref": "upgrades_right",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "interest_per_wave": {
+          "match_template": "upgrades/utility/right/interest_per_wave.png",
+          "region_ref": "upgrades_right",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "max_recovery": {
+          "match_template": "upgrades/utility/right/max_recovery.png",
+          "region_ref": "upgrades_right",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        },
+        "EALS": {
+          "match_template": "upgrades/utility/right/EALS.png",
+          "region_ref": "upgrades_right",
+          "match_threshold": 0.9,
+          "roles": [
+            "upgrade_label"
+          ]
+        }
+      }
     }
   }
 }

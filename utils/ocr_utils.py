@@ -192,10 +192,20 @@ def ocr_number_with_fallback(
         if best_val is not None:
             return best_val, best_conf, best_raw
 
-    # B) digits-only, best token
-    val, conf, raw_digits = ocr_digits(bin_img, psm=psm_digits, combine="best")
-    if val is not None:
-        return val, conf, raw_digits
+    # B) digits-only. Try both strategies and prefer longer results.
+    best_val, best_conf, best_raw = ocr_digits(bin_img, psm=psm_digits, combine="best")
+    concat_val, concat_conf, concat_raw = ocr_digits(bin_img, psm=psm_digits, combine="concat")
+
+    if best_val is not None and concat_val is not None:
+        # Prefer more digits; tie-break by confidence.
+        if len(str(concat_val)) > len(str(best_val)):
+            return concat_val, concat_conf, concat_raw
+        else:
+            return best_val, best_conf, best_raw
+    elif best_val is not None:
+        return best_val, best_conf, best_raw
+    elif concat_val is not None:
+        return concat_val, concat_conf, concat_raw
 
     # C) plain text OCR, regex first integer
     txt = ocr_text(bin_img, psm=psm_text) or ""

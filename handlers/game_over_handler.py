@@ -3,7 +3,10 @@ from utils.logger import log
 from core.ss_capture import capture_adb_screenshot
 from core.automation_state import AUTOMATION, ExecMode
 from core.clickmap_access import tap_now, swipe_now
+from core.adb_utils import adb_shell
 from core.label_tapper import tap_label_now
+from utils.wave_detector import set_wave_hint
+# Note: OCR fallback for More Stats is currently disabled; keeping imports out.
 import time
 import os
 import cv2
@@ -67,13 +70,16 @@ def handle_game_over():
     time.sleep(1.2)
     save_image(capture_adb_screenshot(), f"{session_id}_more_stats_3")
 
-    # Step 5: Close More Stats
+    # Step 5: Attempt to capture stats text (clipboard first, then OCR fallback)
+    _save_stats_text(session_id)
+
+    # Step 6: Close More Stats
     if not tap_label_now("buttons.close:more_stats"):
         return _abort_handler("Close More Stats", session_id)
 
     time.sleep(1.2)
 
-    # Step 6: Decide next action based on mode
+    # Step 7: Decide next action based on mode
     mode = AUTOMATION.mode
     if mode == ExecMode.WAIT:
         log("Pausing on Game Over — waiting for user signal.", "INFO")
@@ -85,8 +91,48 @@ def handle_game_over():
     else:
         if not tap_label_now("buttons.retry:game_over"):
             return _abort_handler("Retry Game", session_id)
+        # After a successful retry the wave counter resets to 1; reset the hint.
+        set_wave_hint(1)
+        log("[WAVE] Reset wave hint to 1 after game restart", "INFO")
 
     time.sleep(2)
+
+def _save_stats_text(session_id: str) -> None:
+    """
+    On the More Stats screen, tap the save-stats button to copy text to the
+    clipboard, then read the clipboard and write it to a file next to the
+    screenshots for this session.
+    """
+    # Disabled: save-stats tap and clipboard capture are unreliable with
+    # host-clipboard emulators (e.g., BlueStacks on Windows). Skipping.
+    log("[MORE_STATS] save-stats capture disabled.", "INFO")
+    return
+
+    # Try to read clipboard via standard ADB command (Android 10+)
+    res = adb_shell(["cmd", "clipboard", "get"], capture_output=True, check=False)
+    text = None
+    if res and res.stdout is not None:
+        out = res.stdout.strip()
+        if out and out.lower() not in {"(null)", "null", "no primary clip"}:
+            text = out
+
+    path = os.path.join("screenshots", "matches", f"{session_id}_more_stats.txt")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    if not text:
+        # OCR fallback disabled for now (clipboard may be on host OS in emulators).
+        log("[MORE_STATS] Clipboard empty; OCR fallback disabled — skipping stats text capture.", "WARN")
+        text = None
+
+    if text:
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+            log(f"[CAPTURE] Saved More Stats text: {path}", "INFO")
+        except Exception as e:
+            log(f"[ERROR] Failed to write stats text: {e}", "ERROR")
+    else:
+        log("[MORE_STATS] No stats text captured via clipboard or OCR.", "WARN")
 
 def _make_session_id():
     """

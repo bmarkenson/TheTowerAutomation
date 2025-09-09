@@ -52,6 +52,10 @@ def parse_compact_number(text: str) -> Optional[Decimal]:
     # Keep only allowed characters, normalize spaces/commas
     s = "".join(ch for ch in text if _ALLOWED_CHARS_RE.match(ch))
     s = s.replace(",", "").replace("$", "").strip()
+    # Drop leading currency/label letters like 'C' or 'Coins'
+    s = re.sub(r"^[A-Za-z]+\s*", "", s)
+    # Drop trailing '/min' or similar units
+    s = re.sub(r"/\s*min\b.*$", "", s, flags=re.IGNORECASE)
 
     # Extract number and optional suffix
     # Examples: "862.28M", "3.43 T", "203.43T"
@@ -124,7 +128,7 @@ def _ocr_coins_bin(bin_img) -> Tuple[Optional[Decimal], float, str]:
     return value, avg_conf, raw
 
 def get_coins_from_image(img_bgr,
-                         dot_path: str = "_shared_match_regions.coins_text",
+                         dot_path: str = "_shared_match_regions.coins",
                          debug_out: Optional[str] = None) -> Tuple[Optional[Decimal], float]:
     """
     Crop the coin region from the given image and OCR it into a Decimal.

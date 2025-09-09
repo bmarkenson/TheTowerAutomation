@@ -93,7 +93,8 @@ def ensure_scrcpy_window_rect(rect_source='top', diagnose=False, android_size=No
     global SCRCPY_WIN_ID, SCRCPY_WIN_RECT
 
     def _ensure_id():
-        nonlocal SCRCPY_WIN_ID
+        # Use module-level binding; this is not an enclosing-function local.
+        global SCRCPY_WIN_ID
         if SCRCPY_WIN_ID is None:
             SCRCPY_WIN_ID = _lookup_scrcpy_window_id()
             if SCRCPY_WIN_ID is None:

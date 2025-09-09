@@ -2,6 +2,7 @@
 # tools/crop_region.py
 
 import os
+import argparse
 import cv2
 import json
 import time
@@ -33,6 +34,9 @@ end_point = None
 scroll_offset = 0
 viewport_height = 0  # set in main()
 viewport_width = 0   # set in main()
+LAUNCHER_WINDOW_ID = None  # window id of the terminal/launcher captured at startup
+OVERWRITE_ALWAYS = False   # set via CLI flag --overwrite / -y
+IMAGE_PATH_OVERRIDE = None  # set via CLI --image; if None, falls back to SOURCE_PATH
 
 # Regions that are coordinates-only (no template image saved)
 COORDS_ONLY_GROUPS = {"_shared_match_regions"}   # e.g., shared helpers for region_ref consumers
@@ -58,9 +62,22 @@ def reload_image():
     Prompts: none (silent, except printed INFO).
     """
     global image, clone, img_height, img_width, scroll_offset
-    image = capture_and_save_screenshot()
-    if image is None:
-        raise RuntimeError("[ERROR] Could not capture screenshot.")
+    # If an image path is provided (or default latest.png), load from disk.
+    # Fallback to ADB capture if the file is missing or unreadable.
+    img = None
+    img_path = IMAGE_PATH_OVERRIDE or SOURCE_PATH
+    try:
+        if img_path and os.path.exists(img_path):
+            img = cv2.imread(img_path)
+    except Exception:
+        img = None
+
+    if img is None:
+        # Try capturing via ADB as a fallback and use the returned BGR image.
+        img = capture_and_save_screenshot()
+    if img is None:
+        raise RuntimeError("[ERROR] Could not load image or capture screenshot.")
+    image = img
     clone = image.copy()
     img_height, img_width = image.shape[:2]
     scroll_offset = 0
@@ -79,6 +96,58 @@ def is_coords_only(dot_path: str) -> bool:
     if parts[0] in COORDS_ONLY_GROUPS:
         return True
     return any(dot_path == p or dot_path.startswith(p + ".") for p in COORDS_ONLY_PREFIXES)
+
+def _upgrade_side_from_path(dot_path: str):
+    """If this is an upgrades label path, return side ("left"|"right") else None.
+
+    Expected dot-path format for upgrades: upgrades.<category>.<side>.<name>
+    """
+    parts = dot_path.split(".")
+    if len(parts) >= 4 and parts[0] == "upgrades" and parts[2] in ("left", "right"):
+        return parts[2]
+    return None
+
+def foreground_terminal_window():
+    """Attempt to focus the terminal window that launched this script.
+
+    Priority:
+    1) Use captured launcher window id from startup
+    2) Use WINDOWID from environment (common in X11 terminals)
+    3) Use parent PID to find a window via xdotool
+    """
+    global LAUNCHER_WINDOW_ID
+    try:
+        if LAUNCHER_WINDOW_ID:
+            subprocess.run(["xdotool", "windowactivate", str(LAUNCHER_WINDOW_ID)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return
+        win_id = os.environ.get("WINDOWID")
+        if win_id:
+            subprocess.run(["xdotool", "windowactivate", str(win_id)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return
+        ppid = os.getppid()
+        # Try visible windows for parent PID
+        res = subprocess.run([
+            "xdotool", "search", "--pid", str(ppid), "--onlyvisible"
+        ], capture_output=True, text=True)
+        out = res.stdout.strip().splitlines()
+        if out:
+            subprocess.run(["xdotool", "windowactivate", out[0]],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+def detect_launcher_window():
+    """Capture the active window at startup to bring it back for prompts."""
+    global LAUNCHER_WINDOW_ID
+    try:
+        res = subprocess.run(["xdotool", "getactivewindow"], capture_output=True, text=True)
+        win = res.stdout.strip()
+        if win:
+            LAUNCHER_WINDOW_ID = win
+    except Exception:
+        LAUNCHER_WINDOW_ID = None
 
 def _dot_path_exists(root: dict, dot_path: str) -> bool:
     """Internal: check whether dot_path already exists in the clickmap dict."""
@@ -109,6 +178,9 @@ def save_template_crop_and_entry(x1, y1, x2, y2):
         print("[WARN] Empty crop. Try again.")
         return
 
+    # Bring terminal to foreground for interactive prompts
+    foreground_terminal_window()
+
     dot_path = interactive_get_dot_path(clickmap)
     if dot_path is None:
         return
@@ -126,11 +198,14 @@ def save_template_crop_and_entry(x1, y1, x2, y2):
 
     # Overwrite confirmation
     if _dot_path_exists(clickmap, dot_path):
-        resp = input(f"[WARN] '{dot_path}' exists. Overwrite? (y/N): ").strip().lower()
-        if resp not in ("y", "yes"):
-            print("[INFO] Skipping save (user declined overwrite).")
-            reload_image()
-            return
+        if OVERWRITE_ALWAYS:
+            print(f"[INFO] --overwrite set. Replacing existing entry '{dot_path}'.")
+        else:
+            resp = input(f"[WARN] '{dot_path}' exists. Overwrite? (y/N): ").strip().lower()
+            if resp not in ("y", "yes"):
+                print("[INFO] Skipping save (user declined overwrite).")
+                reload_image()
+                return
 
     if coordinate_only:
         entry = {
@@ -162,20 +237,37 @@ def save_template_crop_and_entry(x1, y1, x2, y2):
     threshold = float(threshold_input) if threshold_input else DEFAULT_THRESHOLD
 
     roles = prompt_roles(group, key)
-    entry = {
-        "match_template": match_template,
-        "match_region": {"x": x1, "y": y1, "w": w, "h": h},
-        "match_threshold": threshold,
-        "roles": roles
-    }
+
+    # Special-case: Upgrades menu labels should reference a shared region and NOT store match_region.
+    upgrade_side = _upgrade_side_from_path(dot_path)
+    if upgrade_side:
+        region_ref = f"upgrades_{upgrade_side}"
+        entry = {
+            "match_template": match_template,
+            "region_ref": region_ref,
+            "match_threshold": threshold,
+            "roles": roles,
+        }
+        print(f"[INFO] Detected upgrades label. Using region_ref='{region_ref}' and omitting match_region.")
+    else:
+        entry = {
+            "match_template": match_template,
+            "match_region": {"x": x1, "y": y1, "w": w, "h": h},
+            "match_threshold": threshold,
+            "roles": roles
+        }
 
     set_dot_path(dot_path, entry, allow_overwrite=True)
     save_clickmap(clickmap)
     print(f"[INFO] Clickmap entry saved for '{dot_path}'")
 
-    ask_gesture = input("Define a gesture for this region now? (Y/n): ").strip().lower()
-    if ask_gesture in ("", "y", "yes"):
-        subprocess.run(["python3", GESTURE_LOGGER_PATH, "--name", dot_path])
+    # Skip gesture definition for upgrades entries
+    if upgrade_side:
+        print("[INFO] Upgrades entry detected; skipping gesture definition.")
+    else:
+        ask_gesture = input("Define a gesture for this region now? (Y/n): ").strip().lower()
+        if ask_gesture in ("", "y", "yes"):
+            subprocess.run(["python3", GESTURE_LOGGER_PATH, "--name", dot_path])
 
     reload_image()
 
@@ -211,9 +303,22 @@ def handle_mouse(event, x, y, flags, param):
         x2, y2 = max(start_point[0], end_point[0]), max(start_point[1], end_point[1])
         save_template_crop_and_entry(x1, y1, x2, y2)
 
+def parse_args():
+    p = argparse.ArgumentParser(description="Crop a region and save to clickmap + template.")
+    p.add_argument("--overwrite", "-y", action="store_true", help="Overwrite existing clickmap entry without prompt.")
+    p.add_argument("--image", default=SOURCE_PATH,
+                   help="Path to source image to open (default: screenshots/latest.png). If missing, falls back to ADB capture.")
+    return p.parse_args()
+
 def main():
-    global scroll_offset, viewport_height, viewport_width
+    global scroll_offset, viewport_height, viewport_width, OVERWRITE_ALWAYS
     # --- Main Loop ---
+    # Capture the current active window (likely the terminal) for later prompts
+    args = parse_args()
+    OVERWRITE_ALWAYS = args.overwrite
+    global IMAGE_PATH_OVERRIDE
+    IMAGE_PATH_OVERRIDE = args.image
+    detect_launcher_window()
     reload_image()
     viewport_width = min(img_width, screen_width)
     viewport_height = min(img_height, screen_height - 100)
@@ -252,5 +357,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
