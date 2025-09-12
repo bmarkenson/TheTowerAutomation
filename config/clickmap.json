@@ -61,7 +61,7 @@
       "match_region": {
         "x": 94,
         "y": 109,
-        "w": 204,
+        "w": 240,
         "h": 64
       }
     },
@@ -79,6 +79,14 @@
         "y": 1138,
         "w": 488,
         "h": 575
+      }
+    },
+    "game_over": {
+      "match_region": {
+        "x": 311,
+        "y": 307,
+        "w": 479,
+        "h": 312
       }
     }
   },
@@ -305,12 +313,7 @@
     },
     "game_over": {
       "match_template": "indicators/game_over.png",
-      "match_region": {
-        "x": 326,
-        "y": 369,
-        "w": 433,
-        "h": 81
-      },
+      "region_ref": "game_over",
       "match_threshold": 0.9,
       "roles": [
         "indicator"

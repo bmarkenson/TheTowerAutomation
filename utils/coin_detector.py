@@ -26,7 +26,8 @@ _SUFFIX = {
     # Add more if the game goes beyond (e.g., 's' for sextillion, etc.)
 }
 
-_ALLOWED_CHARS_RE = re.compile(r"[0-9\.\,\s\$\w]+")
+# Allow per-character filter to keep '/', so '/min' survives until we strip it
+_ALLOWED_CHARS_RE = re.compile(r"[0-9\.\,\s\$\w/]+")
 
 def _get_bbox(dot_path: str) -> Tuple[int, int, int, int]:
     cm = get_clickmap()
@@ -41,6 +42,14 @@ def _crop(img, bbox):
     H, W = img.shape[:2]
     return img[max(0,y):min(y+h,H), max(0,x):min(x+w,W)]
 
+def _white_mask(crop_bgr: np.ndarray) -> np.ndarray:
+    """Isolate bright, low-saturation digits on dark header background."""
+    hsv = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, (0, 0, 200), (180, 60, 255))
+    k = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k, iterations=1)
+    return mask
+
 def parse_compact_number(text: str) -> Optional[Decimal]:
     """
     Parse strings like: "$862.28M", "862.28M", "862,280,000", "3.43T", "3.43 Q"
@@ -54,8 +63,8 @@ def parse_compact_number(text: str) -> Optional[Decimal]:
     s = s.replace(",", "").replace("$", "").strip()
     # Drop leading currency/label letters like 'C' or 'Coins'
     s = re.sub(r"^[A-Za-z]+\s*", "", s)
-    # Drop trailing '/min' or similar units
-    s = re.sub(r"/\s*min\b.*$", "", s, flags=re.IGNORECASE)
+    # Drop trailing '/min' or slightly truncated variants (e.g., '/mi' when cropped)
+    s = re.sub(r"/\s*m(?:in)?\b.*$", "", s, flags=re.IGNORECASE)
 
     # Extract number and optional suffix
     # Examples: "862.28M", "3.43 T", "203.43T"
@@ -88,9 +97,9 @@ def format_compact_decimal(value: Decimal) -> str:
     for suf, mult in [("Q", Decimal("1e15")), ("T", Decimal("1e12")), ("B", Decimal("1e9")), ("M", Decimal("1e6")), ("K", Decimal("1e3"))]:
         if abs_val >= mult:
             out = (value / mult).quantize(Decimal("0.01"))
-            return f"${out}{suf}"
+            return f"{out}{suf}"
     out = value.quantize(Decimal("0.01"))
-    return f"${out}"
+    return f"{out}"
 
 def _ocr_coins_bin(bin_img) -> Tuple[Optional[Decimal], float, str]:
     """
@@ -127,21 +136,56 @@ def _ocr_coins_bin(bin_img) -> Tuple[Optional[Decimal], float, str]:
     avg_conf = float(np.mean(kept_conf)) if kept_conf else -1.0
     return value, avg_conf, raw
 
-def get_coins_from_image(img_bgr,
-                         dot_path: str = "_shared_match_regions.coins",
-                         debug_out: Optional[str] = None) -> Tuple[Optional[Decimal], float]:
+def detect_coins_from_image(img_bgr,
+                            dot_path: str = "_shared_match_regions.coins",
+                            debug_out: Optional[str] = None) -> Tuple[Optional[Decimal], float, bool]:
     """
-    Crop the coin region from the given image and OCR it into a Decimal.
-    Returns (value, avg_conf). avg_conf = -1.0 if unavailable.
+    OCR coins/min using a robust white-mask binarization.
+    Returns (Decimal value, confidence, has_min_token).
+
+    Strategy: white mask at 1.0x and 1.8x; choose the candidate that parses,
+    preferring one that contains '/m(in)?'. Tie-break by confidence.
     """
     bbox = _get_bbox(dot_path)
     crop = _crop(img_bgr, bbox)
 
-    # Reuse your OCR preprocessing
-    bin_img = preprocess_binary(crop, alpha=1.6, block=31, C=5, close=(2, 2), invert=False, choose_best=True)
+    candidates: list[Tuple[Optional[Decimal], float, str, np.ndarray]] = []
+    try:
+        wm = _white_mask(crop)
+        v, c, raw = _ocr_coins_bin(wm)
+        candidates.append((v, c, raw or "", wm))
+        # upscale variant for clarity
+        up = cv2.resize(wm, None, fx=1.8, fy=1.8, interpolation=cv2.INTER_CUBIC)
+        v2, c2, raw2 = _ocr_coins_bin(up)
+        candidates.append((v2, c2, raw2 or "", up))
+    except Exception:
+        pass
 
-    if debug_out:
-        cv2.imwrite(debug_out, bin_img)
+    if not candidates:
+        return None, -1.0, False
 
-    val, conf, _raw = _ocr_coins_bin(bin_img)
+    def has_min(raw: str) -> bool:
+        return bool(re.search(r"/\s*m(?:in)?", (raw or "").lower()))
+
+    # Pick best: require parsed value; prefer one with '/min'; tie-break by conf
+    valid = [(v, c, raw, bimg) for (v, c, raw, bimg) in candidates if v is not None]
+    if not valid:
+        # fall back to best confidence raw even if parse failed
+        best = max(candidates, key=lambda t: (has_min(t[2]), t[1]))
+        return best[0], best[1], has_min(best[2])
+
+    best = max(valid, key=lambda t: (has_min(t[2]), t[1]))
+
+    # Optionally save the chosen bin image
+    if debug_out and isinstance(best[3], np.ndarray):
+        cv2.imwrite(debug_out, best[3])
+
+    return best[0], best[1], has_min(best[2])
+
+
+def get_coins_from_image(img_bgr,
+                         dot_path: str = "_shared_match_regions.coins",
+                         debug_out: Optional[str] = None) -> Tuple[Optional[Decimal], float]:
+    """Back-compat wrapper: returns (value, confidence)."""
+    val, conf, _has_min = detect_coins_from_image(img_bgr, dot_path=dot_path, debug_out=debug_out)
     return val, conf

@@ -18,7 +18,8 @@ from handlers.ad_gem_handler import handle_ad_gem, stop_blind_gem_tapper
 from handlers.daily_gem_handler import handle_daily_gem
 from utils.logger import log
 from utils.wave_detector import detect_wave_number_from_image, set_wave_hint  # use detect_* for conf + debug
-from utils.coin_detector import get_coins_from_image, format_compact_decimal
+from utils.coin_detector import get_coins_from_image, detect_coins_from_image, format_compact_decimal
+from core.label_tapper import tap_label_now
 from core.clickmap_access import get_clickmap, resolve_dot_path
 
 SCREENSHOT_PATH = "screenshots/latest.png"
@@ -31,8 +32,10 @@ parser.add_argument("--reset-wave-hint", action="store_true",
                     help="Reset the wave OCR monotonic/time-weighted hint at startup")  # <-- new flag
 parser.add_argument("--save-wave-samples", default=None,
                     help="Directory to save per-status wave samples: raw frame (and bin winner). Filename encodes wave.")
-parser.add_argument("--coins-log", default=None,
-                    help="Optional CSV to append coins/min samples: time_iso,epoch,wave,coins_decimal,conf,pretty")
+parser.add_argument("--coins-log", default="logs/coins_per_min.csv",
+                    help="CSV path to append coins/min samples (default: logs/coins_per_min.csv)")
+parser.add_argument("--no-coins-log", action="store_true",
+                    help="Disable coins/min CSV logging")
 args = parser.parse_args()
 AUTO_START_ENABLED = not args.no_restart
 STATUS_INTERVAL = max(0, args.status_interval)
@@ -53,6 +56,25 @@ def main():
     last_menu = None              # str|None (mutually exclusive)
     last_overlays = None          # set[str]
     last_status_ts = 0.0
+    # Resolve coins log path (default enabled unless --no-coins-log). We generate
+    # a per-run file using a session id, and rotate it after GAME_OVER restarts.
+    def _make_coins_log_path(session_id: str) -> str:
+        base = args.coins_log or "logs/coins_per_min.csv"
+        # If base looks like a CSV file, inject the session id before extension.
+        root, ext = os.path.splitext(base)
+        if ext.lower() == ".csv":
+            directory = os.path.dirname(root) or "."
+            name = os.path.basename(root)
+            path = os.path.join(directory, f"{name}_{session_id}.csv")
+        else:
+            # Treat base as a directory; create a default filename
+            directory = base
+            path = os.path.join(directory, f"coins_{session_id}.csv")
+        return path
+
+    coins_session_id = datetime.now().strftime("%Y%m%d-%H%M%S")
+    coins_log_path = None if args.no_coins_log else _make_coins_log_path(coins_session_id)
+
     try:
         while True:
             img = capture_and_save_screenshot(log_capture=False)
@@ -124,9 +146,16 @@ def main():
                         # debug_out path finalized after wave_str; use a temp first
                         debug_out = os.path.join(args.save_wave_samples, "_tmp_bin.png")
                     wave, wave_conf = detect_wave_number_from_image(img, debug_out=debug_out)
-                    # Coins/min OCR
+                    # Coins/min OCR with per-min toggle if needed
                     try:
-                        coins_val, coins_conf = get_coins_from_image(img)
+                        coins_val, coins_conf, has_min = detect_coins_from_image(img)
+                        if not has_min:
+                            # Attempt one toggle to switch display, then re-capture once
+                            tap_label_now("buttons.coin_toggle")
+                            time.sleep(0.6)
+                            img2 = capture_and_save_screenshot(log_capture=False)
+                            if img2 is not None:
+                                coins_val, coins_conf, has_min = detect_coins_from_image(img2)
                     except Exception:
                         coins_val, coins_conf = None, -1.0
                 wave_str = str(wave) if wave is not None else "—"
@@ -147,20 +176,8 @@ def main():
                             f.write(f"state={new_state}\nmenu={menu_str}\nsecondary={sec_str}\noverlays={ovl_str}\nwave={wave_str}\nconf={wave_conf:.1f}\ncoins={coins_str}\ncoins_conf={coins_conf:.1f}\n")
                     except Exception:
                         pass
-                # Append coins sample for graphing
-                if args.coins_log:
-                    try:
-                        os.makedirs(os.path.dirname(args.coins_log) or '.', exist_ok=True)
-                        ts_iso = datetime.now().isoformat(timespec='seconds')
-                        epoch = int(now)
-                        with open(args.coins_log, 'a', encoding='utf-8') as f:
-                            if f.tell() == 0:
-                                f.write("time_iso,epoch,wave,coins_decimal,conf,pretty\n")
-                            coins_decimal = str(coins_val) if coins_val is not None else ""
-                            f.write(f"{ts_iso},{epoch},{wave_str},{coins_decimal},{coins_conf:.1f},{coins_str}\n")
-                    except Exception:
-                        pass
-                    # Save ROI overlay for the wave-number region (red box)
+                # Save ROI overlay and rename bin image if sample saving enabled
+                if args.save_wave_samples:
                     try:
                         overlay = img.copy()
                         cm = get_clickmap()
@@ -176,12 +193,31 @@ def main():
                     tmp_bin = os.path.join(args.save_wave_samples, "_tmp_bin.png")
                     if os.path.exists(tmp_bin):
                         os.replace(tmp_bin, os.path.join(args.save_wave_samples, base + "_bin.png"))
+
+                # Append coins sample for graphing
+                if coins_log_path:
+                    try:
+                        os.makedirs(os.path.dirname(coins_log_path) or '.', exist_ok=True)
+                        ts_iso = datetime.now().isoformat(timespec='seconds')
+                        epoch = int(now)
+                        with open(coins_log_path, 'a', encoding='utf-8') as f:
+                            if f.tell() == 0:
+                                f.write("time_iso,epoch,wave,coins_decimal,conf,pretty\n")
+                            coins_decimal = str(coins_val) if coins_val is not None else ""
+                            f.write(f"{ts_iso},{epoch},{wave_str},{coins_decimal},{coins_conf:.1f},{coins_str}\n")
+                    except Exception:
+                        pass
                 last_status_ts = now
 
             # Handle known states
             if new_state == "GAME_OVER":
                 log("Detected GAME_OVER. Executing handler.", "INFO")
                 handle_game_over()
+                # Rotate coins log for the new run segment
+                if not args.no_coins_log:
+                    coins_session_id = datetime.now().strftime("%Y%m%d-%H%M%S")
+                    coins_log_path = _make_coins_log_path(coins_session_id)
+                    log(f"[COINS] Started new coins log: {coins_log_path}", "INFO")
             elif new_state == "HOME_SCREEN":
                 log("Detected HOME_SCREEN. Executing handler.", "INFO")
                 handle_home_screen(restart_enabled=AUTO_START_ENABLED)
