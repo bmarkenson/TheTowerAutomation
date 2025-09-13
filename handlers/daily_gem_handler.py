@@ -1,6 +1,6 @@
 from utils.logger import log
 from core.ss_capture import capture_adb_screenshot
-from core.automation_state import AUTOMATION
+from core.run_state import AUTOMATION
 from core.clickmap_access import tap_now, swipe_now
 from core.label_tapper import tap_label_now
 import time
@@ -63,5 +63,4 @@ def _abort_handler(step, session_id):
     debug_img = capture_adb_screenshot()
     save_image(debug_img, f"{session_id}_ABORT_{step.replace(' ', '_')}")
     return
-
 

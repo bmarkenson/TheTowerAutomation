@@ -23,6 +23,9 @@ htmlcov/
 # Screenshots
 screenshots/
 
+# Out
+out/
+
 # Old code
 old/
 

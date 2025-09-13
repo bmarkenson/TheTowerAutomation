@@ -3,7 +3,7 @@
 
 import traceback
 from handlers.game_over_handler import handle_game_over
-from core.automation_state import AUTOMATION, ExecMode
+from core.run_state import AUTOMATION, ExecMode
 from utils.logger import log
 
 

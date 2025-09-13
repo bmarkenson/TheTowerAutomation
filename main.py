@@ -8,11 +8,11 @@ import os
 import cv2
 import argparse
 from decimal import Decimal
-import json
+import json  # kept for other modules if needed (supervisor now handles control file)
 
-from core.watchdog import watchdog_process_check
+from core.watchdog import watchdog_process_check, ensure_adb_connected
 from core.ss_capture import capture_and_save_screenshot
-from core.automation_state import AUTOMATION
+from core.run_state import AUTOMATION
 from core.state_detector import detect_state_and_overlays
 from handlers.game_over_handler import handle_game_over
 from handlers.home_screen_handler import handle_home_screen
@@ -22,7 +22,7 @@ from utils.logger import log
 from utils.wave_detector import detect_wave_number_from_image, set_wave_hint  # use detect_* for conf + debug
 from utils.coin_detector import get_coins_from_image, detect_coins_from_image, format_compact_decimal
 from core.label_tapper import tap_label_now, is_visible
-from core.matcher import get_match as _get_match
+from core.automation_supervisor import AutomationSupervisor
 from core.clickmap_access import get_clickmap, resolve_dot_path
 
 SCREENSHOT_PATH = "screenshots/latest.png"
@@ -64,6 +64,10 @@ if args.reset_wave_hint:
 
 def main():
     log("Starting main heartbeat loop.", level="INFO")
+    # Try to establish ADB connectivity upfront to avoid first-capture failures
+    if ensure_adb_connected():
+        time.sleep(2)
+    # Start watchdog after initial connect to avoid duplicate connect logs
     threading.Thread(target=watchdog_process_check, daemon=True).start()
 
     last_ui_state = None
@@ -71,15 +75,7 @@ def main():
     last_menu = None              # str|None (mutually exclusive)
     last_overlays = None          # set[str]
     last_status_ts = 0.0
-    # Coins/min toggle debounce state
-    last_coins_toggle_ts = 0.0
-    coins_has_min_miss = 0
-    COINS_TOGGLE_COOLDOWN = 15.0
-    COINS_CONF_FLOOR = 60.0
-    # Coins plausibility gate state (guard against absurd jumps)
-    last_coins_val = None  # Decimal|None
-    COINS_MAX_JUMP_FACTOR = 8.0      # reject increases >8x unless confidence is very high
-    COINS_JUMP_CONF_FLOOR = 90.0     # override threshold: accept big jumps at very high confidence
+    # Supervisor encapsulates control-file, pause/auto-resume, coins logic, auto-return
     # Resolve coins log path (default enabled unless --no-coins-log). We generate
     # a per-run file using a session id, and rotate it after GAME_OVER restarts.
     def _make_coins_log_path(session_id: str) -> str:
@@ -103,64 +99,37 @@ def main():
     AUTO_RETURN_ENABLED = not args.no_auto_return
     AUTO_RETURN_SECS = max(0, int(args.auto_return_minutes)) * 60
 
-    # Control file state tracking
-    ctrl_path = args.control_file
-    last_applied_state = None
-    last_applied_mode = None
-    paused_since_ts = None
-    # Return-to-Game tracking
-    rtg_visible_since_ts = None
+    sup = AutomationSupervisor(
+        control_file=args.control_file,
+        auto_resume_secs=AUTO_RESUME_SECS,
+        auto_resume_enabled=AUTO_RESUME_ENABLED,
+        auto_return_secs=AUTO_RETURN_SECS,
+        auto_return_enabled=AUTO_RETURN_ENABLED,
+        auto_return_conf_threshold=0.85,
+        coins_toggle_cooldown=15.0,
+        coins_conf_floor=60.0,
+        coins_max_jump_factor=8.0,
+        coins_jump_conf_floor=90.0,
+    )
 
-    def _load_and_apply_control():
-        nonlocal last_applied_state, last_applied_mode, paused_since_ts
-        try:
-            if not os.path.exists(ctrl_path):
-                return
-            with open(ctrl_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            st = (data.get("state") or "").upper()
-            md = (data.get("mode") or "").upper()
-            # Apply state if valid
-            if st in {"RUNNING", "PAUSED", "STOPPED"} and st != last_applied_state:
-                try:
-                    AUTOMATION.state = st
-                    log(f"[CTRL] State set to {st} via control file", "INFO")
-                    last_applied_state = st
-                    if st == "PAUSED":
-                        paused_since_ts = time.time()
-                        stop_blind_gem_tapper()
-                    else:
-                        paused_since_ts = None
-                except Exception:
-                    pass
-            # Apply mode if valid
-            if md in {"RETRY", "WAIT", "HOME"} and md != last_applied_mode:
-                try:
-                    AUTOMATION.mode = md
-                    log(f"[CTRL] Mode set to {md} via control file", "INFO")
-                    last_applied_mode = md
-                except Exception:
-                    pass
-        except Exception:
-            pass
+    # (control file + auto-resume now handled by AutomationSupervisor)
 
     try:
         while True:
             img = capture_and_save_screenshot(log_capture=False)
             if img is None:
-                log("Failed to capture screenshot.", level="FAIL")
-                time.sleep(2)
-                continue
+                # One-shot reconnect attempt to avoid per-loop adb checks
+                if ensure_adb_connected():
+                    time.sleep(1)
+                    img = capture_and_save_screenshot(log_capture=False)
+                if img is None:
+                    log("Failed to capture screenshot.", level="FAIL")
+                    time.sleep(2)
+                    continue
 
             # Apply external control (pause/mode) and auto-resume if needed
-            _load_and_apply_control()
-            is_paused = (str(AUTOMATION.state) == "RunState.PAUSED") or (getattr(AUTOMATION, 'state', None) == 'PAUSED')
-            if AUTO_RESUME_ENABLED and is_paused and paused_since_ts is not None:
-                if (time.time() - paused_since_ts) >= AUTO_RESUME_SECS:
-                    AUTOMATION.state = "RUNNING"
-                    is_paused = False
-                    paused_since_ts = None
-                    log("[CTRL] Auto-resume: State=RUNNING after pause timeout", "INFO")
+            sup.apply_control()
+            is_paused = sup.is_paused
 
             # Detect current state from image
             detection = detect_state_and_overlays(img, log_matches=args.match_trace)
@@ -235,44 +204,13 @@ def main():
                             coins_debug_tmp = os.path.join(args.save_coin_samples, "_tmp_coin_bin.png")
 
                         coins_val, coins_conf, has_min = detect_coins_from_image(img, debug_out=coins_debug_tmp)
-                        # Plausibility gate: ignore improbable multi‑X jumps unless confidence is very high
-                        coins_eff = coins_val
-                        try:
-                            if last_coins_val is not None and coins_val is not None and last_coins_val > 0:
-                                ratio = (coins_val / last_coins_val)
-                                if ratio > Decimal(str(COINS_MAX_JUMP_FACTOR)) and coins_conf < COINS_JUMP_CONF_FLOOR:
-                                    log(f"[COINS] Ignoring implausible jump {format_compact_decimal(last_coins_val)} → {format_compact_decimal(coins_val)} (×{ratio:.2f}, conf={coins_conf:.1f})", "WARN")
-                                    coins_eff = last_coins_val
-                        except Exception:
-                            coins_eff = coins_val
-                        # Only perform UI toggling logic if not paused
-                        if not is_paused:
-                            now_ts = time.time()
-                            if has_min:
-                                coins_has_min_miss = 0
-                            else:
-                                # Count only confident misses
-                                if coins_conf >= COINS_CONF_FLOOR:
-                                    coins_has_min_miss += 1
-                                # Toggle only after two consecutive confident misses and cooldown
-                                if coins_has_min_miss >= 2 and (now_ts - last_coins_toggle_ts) >= COINS_TOGGLE_COOLDOWN:
-                                    tap_label_now("buttons.coin_toggle")
-                                    last_coins_toggle_ts = now_ts
-                                    coins_has_min_miss = 0
-                                    time.sleep(0.6)
-                                    img2 = capture_and_save_screenshot(log_capture=False)
-                                    if img2 is not None:
-                                        coins_val, coins_conf, has_min = detect_coins_from_image(img2, debug_out=coins_debug_tmp)
-                                        # Re-apply plausibility after re-capture
-                                        coins_eff = coins_val
-                                        try:
-                                            if last_coins_val is not None and coins_val is not None and last_coins_val > 0:
-                                                ratio = (coins_val / last_coins_val)
-                                                if ratio > Decimal(str(COINS_MAX_JUMP_FACTOR)) and coins_conf < COINS_JUMP_CONF_FLOOR:
-                                                    log(f"[COINS] Ignoring implausible jump {format_compact_decimal(last_coins_val)} → {format_compact_decimal(coins_val)} (×{ratio:.2f}, conf={coins_conf:.1f})", "WARN")
-                                                    coins_eff = last_coins_val
-                                        except Exception:
-                                            pass
+                        coins_val, coins_conf, has_min, coins_eff = sup.process_coins(
+                            img,
+                            coins_val,
+                            coins_conf,
+                            has_min,
+                            debug_out=coins_debug_tmp,
+                        )
                     except Exception:
                         coins_val, coins_conf = None, -1.0
                         coins_eff = None
@@ -282,15 +220,9 @@ def main():
                 menu_str = menu or "—"
                 sec_str = ", ".join(sorted(secondary)) if secondary else "—"
                 ovl_str = ", ".join(sorted(overlays)) if overlays else "—"
-                # Compact automation hint: append '/PAUSED' to UI state when automation is paused
-                state_str = f"{new_state}/PAUSED" if 'is_paused' in locals() and is_paused else new_state
+                # Compact automation hint: append '/PAUSED' when automation is paused
+                state_str = sup.format_state(new_state)
                 log(f"[STATUS] State={state_str} | Wave={wave_str} | Coins/min={coins_str} | Menu={menu_str} | Secondary=[{sec_str}] | Overlays=[{ovl_str}]", "INFO")
-                # Update last accepted coins value
-                try:
-                    if coins_eff is not None:
-                        last_coins_val = coins_eff
-                except Exception:
-                    pass
                 # Optionally persist the actual input image alongside a debug note
                 if args.save_wave_samples:
                     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -368,51 +300,8 @@ def main():
                         pass
                 last_status_ts = now
 
-            # Auto Return-to-Game: if the button is persistently visible while not RUNNING, tap it
-            if AUTO_RETURN_ENABLED and not is_paused and new_state != "RUNNING":
-                try:
-                    # Primary visibility via label_tapper; fallback to matcher with a slightly softer threshold
-                    visible = is_visible("buttons.return_to_game", screenshot=img)
-                    if not visible:
-                        try:
-                            pt, conf = _get_match("buttons.return_to_game", screenshot=img)
-                            visible = bool(pt) and (conf >= 0.85)
-                            if visible:
-                                log(f"[AUTO] Return-to-Game matched via fallback (conf={conf:.2f})", "DEBUG")
-                        except Exception:
-                            visible = False
-
-                    if visible:
-                        if rtg_visible_since_ts is None:
-                            rtg_visible_since_ts = time.time()
-                            mins = (AUTO_RETURN_SECS // 60) if AUTO_RETURN_SECS > 0 else 0
-                            log(f"[AUTO] Return-to-Game detected; starting timer ({mins}m)", "INFO")
-                        elif (time.time() - rtg_visible_since_ts) >= AUTO_RETURN_SECS > 0:
-                            elapsed = int(time.time() - rtg_visible_since_ts)
-                            log(f"[AUTO] Return-to-Game visible for {elapsed}s — tapping now.", "ACTION")
-                            tap_label_now("buttons.return_to_game")
-                            rtg_visible_since_ts = None
-                    else:
-                        if rtg_visible_since_ts is not None:
-                            elapsed = int(time.time() - rtg_visible_since_ts)
-                            log(f"[AUTO] Return-to-Game disappeared before threshold — cancelling timer (after {elapsed}s)", "INFO")
-                            rtg_visible_since_ts = None
-                except Exception:
-                    # On any error, reset and continue
-                    rtg_visible_since_ts = None
-
-            # If auto-return timer was running but UI transitioned (e.g., user pressed it manually), cancel and log once
-            if rtg_visible_since_ts is not None and (new_state == "RUNNING" or is_paused or not AUTO_RETURN_ENABLED):
-                try:
-                    elapsed = int(time.time() - rtg_visible_since_ts)
-                except Exception:
-                    elapsed = 0
-                reason = (
-                    "state RUNNING" if new_state == "RUNNING" else
-                    "paused/disabled"
-                )
-                log(f"[AUTO] Return-to-Game timer cancelled due to {reason} (after {elapsed}s)", "INFO")
-                rtg_visible_since_ts = None
+            # Auto Return-to-Game
+            sup.auto_return_check(img, new_state)
 
             # Handle known states (skip actions while paused)
             if not is_paused:

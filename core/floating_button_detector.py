@@ -75,7 +75,11 @@ def detect_floating_buttons(screen):
         - Missing/unreadable template files are logged and skipped; detection continues for others.
     """
     results = []
-    floating_buttons = get_entries_by_role("floating_button")
+    # Tolerate both role spellings: "floating_button" and "floating_buttons"
+    floating_buttons = {}
+    for role in ("floating_button", "floating_buttons"):
+        for k, v in get_entries_by_role(role).items():
+            floating_buttons[k] = v
 
     for name, entry in floating_buttons.items():
         try:

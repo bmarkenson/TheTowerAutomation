@@ -98,17 +98,24 @@ def parse_compact_number(text: str) -> Optional[Decimal]:
 
 def format_compact_decimal(value: Decimal) -> str:
     """
-    Format a Decimal back into a compact string with suffix.
+    Format a Decimal into a compact string with suffix, keeping up to 2 decimals
+    but dropping trailing ".00" (e.g., 862.28M, 1T, 987.5K, 123).
     """
     if value is None:
         return "—"
+
+    def _fmt_2dp_trim(d: Decimal) -> str:
+        s = str(d.quantize(Decimal("0.01")))
+        if "." in s:
+            s = s.rstrip("0").rstrip(".")
+        return s
+
     abs_val = value.copy_abs()
     for suf, mult in [("Q", Decimal("1e15")), ("T", Decimal("1e12")), ("B", Decimal("1e9")), ("M", Decimal("1e6")), ("K", Decimal("1e3"))]:
         if abs_val >= mult:
-            out = (value / mult).quantize(Decimal("0.01"))
-            return f"{out}{suf}"
-    out = value.quantize(Decimal("0.01"))
-    return f"{out}"
+            out = (value / mult)
+            return f"{_fmt_2dp_trim(out)}{suf}"
+    return _fmt_2dp_trim(value)
 
 def _ocr_coins_bin(bin_img) -> Tuple[Optional[Decimal], float, str]:
     """

@@ -22,10 +22,12 @@ defaults:
     - _last_foreground_pkg caches last seen foreground for change logging only
 """
 
+import os
 import re
 import time
-from core.automation_state import AUTOMATION, RunState
-from core.adb_utils import adb_shell
+import subprocess
+from core.run_state import AUTOMATION, RunState
+from core.adb_utils import adb_shell, ADB_DEVICE_ID
 from utils.logger import log
 
 GAME_PACKAGE = "com.TechTreeGames.TheTower"
@@ -184,7 +186,7 @@ def restart_game():
     time.sleep(6)
 
     # Set state to unknown — main loop will detect screen state
-    from core.automation_state import AUTOMATION, RunState
+    from core.run_state import AUTOMATION, RunState
     AUTOMATION.state = RunState.UNKNOWN
 
     log("[WATCHDOG] Game launched — deferring to main loop for state detection", "INFO")
@@ -216,6 +218,54 @@ def _pid_running(package: str) -> bool:
     return False
 
 
+def _adb_target() -> str:
+    return os.getenv("ADB_DEVICE") or ADB_DEVICE_ID or ""
+
+
+def _adb_is_connected(target: str) -> bool:
+    try:
+        res = subprocess.run(["adb", "devices"], capture_output=True, text=True, check=False)
+        if res.returncode != 0 or not res.stdout:
+            return False
+        for line in res.stdout.splitlines()[1:]:  # skip header
+            parts = line.split()
+            if len(parts) >= 2 and parts[0] == target and parts[1].lower() == "device":
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def _adb_connect(target: str) -> bool:
+    # Only attempt TCP/IP connect targets like host:port
+    if not target or ":" not in target:
+        return False
+    try:
+        res = subprocess.run(["adb", "connect", target], capture_output=True, text=True, check=False)
+        out = (res.stdout or "") + (res.stderr or "")
+        low = out.lower()
+        if "connected to" in low or "already connected to" in low:
+            return True
+        return False
+    except Exception:
+        return False
+
+
+def ensure_adb_connected() -> bool:
+    """Best-effort: ensure the configured ADB target is connected. Returns True on success."""
+    target = _adb_target()
+    if not target:
+        return True  # nothing to do
+    if _adb_is_connected(target):
+        return True
+    log(f"[WATCHDOG] ADB target not connected ({target}). Attempting adb connect.", "WARN")
+    if _adb_connect(target):
+        log(f"[WATCHDOG] adb connect {target}: success", "INFO")
+        return True
+    log(f"[WATCHDOG] adb connect {target}: failed", "WARN")
+    return False
+
+
 def watchdog_process_check(interval=30):
     """
     spec:
@@ -232,6 +282,10 @@ def watchdog_process_check(interval=30):
     """
     while True:
         try:
+            # Ensure ADB connectivity to target (best-effort)
+            if ensure_adb_connected():
+                time.sleep(2)
+
             pid_running = _pid_running(GAME_PACKAGE)
             foregrounded = is_game_foregrounded()
 

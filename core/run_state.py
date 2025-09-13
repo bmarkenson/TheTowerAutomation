@@ -1,4 +1,4 @@
-# core/automation_state.py
+# core/run_state.py
 """
 Thread-safe automation run/mode state.
 
@@ -164,3 +164,4 @@ spec:
     - Handlers/loops read and set this.
     - Treat as process-local singleton; do not recreate per thread.
 """
+

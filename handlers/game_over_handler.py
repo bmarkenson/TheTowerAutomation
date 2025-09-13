@@ -1,7 +1,7 @@
 # handlers/game_over_handler.py
 from utils.logger import log
 from core.ss_capture import capture_adb_screenshot
-from core.automation_state import AUTOMATION, ExecMode
+from core.run_state import AUTOMATION, ExecMode
 from core.clickmap_access import tap_now, swipe_now
 from core.adb_utils import adb_shell
 from core.label_tapper import tap_label_now
