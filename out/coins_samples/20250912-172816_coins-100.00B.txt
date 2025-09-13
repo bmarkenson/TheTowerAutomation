@@ -1,0 +1,7 @@
+state=RUNNING
+menu=UTILITY_MENU
+secondary=—
+overlays=AD_GEMS_AVAILABLE, MENU_OPEN
+coins=100.00B
+coins_conf=92.0
+has_min=yes

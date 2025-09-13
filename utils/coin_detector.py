@@ -53,6 +53,9 @@ def _white_mask(crop_bgr: np.ndarray) -> np.ndarray:
 def parse_compact_number(text: str) -> Optional[Decimal]:
     """
     Parse strings like: "$862.28M", "862.28M", "862,280,000", "3.43T", "3.43 Q"
+    Robust to OCR artifacts where "/min" becomes "min" or partially truncated ("/mi").
+    Also scans the whole string and chooses the best numeric token with optional suffix.
+
     Returns Decimal or None if parse fails.
     """
     if not text:
@@ -63,29 +66,35 @@ def parse_compact_number(text: str) -> Optional[Decimal]:
     s = s.replace(",", "").replace("$", "").strip()
     # Drop leading currency/label letters like 'C' or 'Coins'
     s = re.sub(r"^[A-Za-z]+\s*", "", s)
-    # Drop trailing '/min' or slightly truncated variants (e.g., '/mi' when cropped)
-    s = re.sub(r"/\s*m(?:in)?\b.*$", "", s, flags=re.IGNORECASE)
+    # Drop trailing '/min' or 'min' (with or without slash; tolerate '/mi')
+    s = re.sub(r"(?:/\s*)?m(?:in)?\b.*$", "", s, flags=re.IGNORECASE)
 
-    # Extract number and optional suffix
-    # Examples: "862.28M", "3.43 T", "203.43T"
-    m = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z])?$", s)
-    if not m:
+    # Extract all occurrences of number + optional one-letter suffix anywhere in the string
+    matches = list(re.finditer(r"([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z])?", s))
+    if not matches:
         return None
 
-    num_s = m.group(1)
-    suf = m.group(2) if m.group(2) is not None else ""
+    # Choose best: prefer longer numeric token; tie-break by known suffix (K/M/B/T/Q/q)
+    best_num, best_suf = None, ""
+    for m in matches:
+        num_s = m.group(1)
+        suf = (m.group(2) or "").strip()
+        if (
+            best_num is None
+            or len(num_s) > len(best_num)
+            or (len(num_s) == len(best_num) and bool(_SUFFIX.get(suf)) and not _SUFFIX.get(best_suf))
+        ):
+            best_num, best_suf = num_s, suf
+
     try:
-        base = Decimal(num_s)
+        base = Decimal(best_num)
     except Exception:
         return None
 
-    if not suf:
+    if not best_suf:
         return base
-    mult = _SUFFIX.get(suf, None)
-    if mult is None:
-        # Unknown suffix -> treat as plain number
-        return base
-    return base * mult
+    mult = _SUFFIX.get(best_suf)
+    return base if mult is None else base * mult
 
 def format_compact_decimal(value: Decimal) -> str:
     """
@@ -158,6 +167,11 @@ def detect_coins_from_image(img_bgr,
         up = cv2.resize(wm, None, fx=1.8, fy=1.8, interpolation=cv2.INTER_CUBIC)
         v2, c2, raw2 = _ocr_coins_bin(up)
         candidates.append((v2, c2, raw2 or "", up))
+        # slight dilation to reconnect thin strokes (low-risk extra candidate)
+        k = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+        wm_dil = cv2.dilate(wm, k, iterations=1)
+        v3, c3, raw3 = _ocr_coins_bin(wm_dil)
+        candidates.append((v3, c3, raw3 or "", wm_dil))
     except Exception:
         pass
 
