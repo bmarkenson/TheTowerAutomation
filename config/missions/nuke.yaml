@@ -1,0 +1,24 @@
+meta:
+  name: nuke
+  version: 1
+
+vars:
+  accrue_seconds: 20     # time to accrue enemies before firing
+  post_nuke_delay: 5     # seconds to wait after firing before ending round
+  nuke_fired: false      # per-run flag
+
+per_run_reset:
+  - nuke_fired
+
+rules:
+  # Fire Nuke once per run after accrue_seconds, when the button is visible
+  - when:
+      state: RUNNING
+      elapsed_secs: ">= 20"
+      floating_visible: "floating_buttons.nuke"
+      assert: "!nuke_fired"
+    do:
+      - { type: fire_floating, name: floating_buttons.nuke }
+      - { type: set, var: nuke_fired, value: true }
+      - { type: sleep, ms: 5000 }
+      - { type: restart_run }

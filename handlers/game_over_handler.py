@@ -11,7 +11,7 @@ import time
 import os
 import cv2
 
-def handle_game_over():
+def handle_game_over(*, capture_stats: bool = True):
     """
     Handle the GAME OVER flow: capture stats, close stats, and retry or pause.
 
@@ -45,39 +45,42 @@ def handle_game_over():
     session_id = _make_session_id()
     log(f"Handling GAME OVER — Session: {session_id}", "INFO")
 
-    # Save first screen
-    img_game_stats = capture_adb_screenshot()
-    save_image(img_game_stats, f"{session_id}_game_stats")
+    if capture_stats:
+        # Save first screen
+        img_game_stats = capture_adb_screenshot()
+        save_image(img_game_stats, f"{session_id}_game_stats")
 
-    # Step 1: Tap "More Stats"
-    if not tap_label_now("buttons.more_stats:game_over"):
-        return _abort_handler("Tap More Stats", session_id)
+        # Step 1: Tap "More Stats"
+        if not tap_label_now("buttons.more_stats:game_over"):
+            return _abort_handler("Tap More Stats", session_id)
 
-    time.sleep(1.5)
+        time.sleep(1.5)
 
-    # Step 2: Swipe to top and capture
-    swipe_now("gesture_targets.goto_top:more_stats")
-    time.sleep(1.5)
-    save_image(capture_adb_screenshot(), f"{session_id}_more_stats_1")
+        # Step 2: Swipe to top and capture
+        swipe_now("gesture_targets.goto_top:more_stats")
+        time.sleep(1.5)
+        save_image(capture_adb_screenshot(), f"{session_id}_more_stats_1")
 
-    # Step 3: Swipe to page 2 and capture
-    swipe_now("gesture_targets.goto_pg2:more_stats")
-    time.sleep(1.2)
-    save_image(capture_adb_screenshot(), f"{session_id}_more_stats_2")
+        # Step 3: Swipe to page 2 and capture
+        swipe_now("gesture_targets.goto_pg2:more_stats")
+        time.sleep(1.2)
+        save_image(capture_adb_screenshot(), f"{session_id}_more_stats_2")
 
-    # Step 4: Swipe to bottom and capture
-    swipe_now("gesture_targets.goto_bottom:more_stats")
-    time.sleep(1.2)
-    save_image(capture_adb_screenshot(), f"{session_id}_more_stats_3")
+        # Step 4: Swipe to bottom and capture
+        swipe_now("gesture_targets.goto_bottom:more_stats")
+        time.sleep(1.2)
+        save_image(capture_adb_screenshot(), f"{session_id}_more_stats_3")
 
-    # Step 5: Attempt to capture stats text (clipboard first, then OCR fallback)
-    _save_stats_text(session_id)
+        # Step 5: Attempt to capture stats text (clipboard first, then OCR fallback)
+        _save_stats_text(session_id)
 
-    # Step 6: Close More Stats
-    if not tap_label_now("buttons.close:more_stats"):
-        return _abort_handler("Close More Stats", session_id)
+        # Step 6: Close More Stats
+        if not tap_label_now("buttons.close:more_stats"):
+            return _abort_handler("Close More Stats", session_id)
 
-    time.sleep(1.2)
+        time.sleep(1.2)
+    else:
+        log("[GAME_OVER] Fast mode enabled — skipping More Stats capture.", "INFO")
 
     # Step 7: Decide next action based on mode
     mode = AUTOMATION.mode

@@ -24,6 +24,10 @@ from utils.coin_detector import get_coins_from_image, detect_coins_from_image, f
 from core.label_tapper import tap_label_now, is_visible
 from core.automation_supervisor import AutomationSupervisor
 from core.clickmap_access import get_clickmap, resolve_dot_path
+from automation.missions.manager import MissionManager
+from automation.missions import get_mission
+from automation.strategies import get_strategy
+from automation.missions.yaml_mission import YamlMission
 
 SCREENSHOT_PATH = "screenshots/latest.png"
 
@@ -51,6 +55,15 @@ parser.add_argument("--no-auto-resume", action="store_true",
                     help="Disable automatic resume from PAUSED after timeout")
 parser.add_argument("--auto-resume-minutes", type=int, default=15,
                     help="Minutes to auto-resume from PAUSED (default: 15)")
+parser.add_argument("--fast-game-over", action="store_true",
+                    help="Skip More Stats capture on GAME_OVER (default: enabled when --mission != none)")
+parser.add_argument("--full-game-over", action="store_true",
+                    help="Force capture of More Stats on GAME_OVER even when a mission is active")
+parser.add_argument("--mission", default="none", help="Mission to run (none|demon_nuke|nuke|demon_mode)")
+parser.add_argument("--strategy", default="none", help="Run-time strategy (none|aggressive|coins|safe)")
+parser.add_argument("--mission-config", default=None, help="Path to YAML mission config (overrides --mission)")
+parser.add_argument("--strategy-config", default=None, help="Path to YAML strategy config (reserved)")
+parser.add_argument("--wait-on-start", action="store_true", help="Start with ExecMode=WAIT (pause auto progression)")
 args = parser.parse_args()
 AUTO_START_ENABLED = not args.no_restart
 STATUS_INTERVAL = max(0, args.status_interval)
@@ -69,6 +82,14 @@ def main():
         time.sleep(2)
     # Start watchdog after initial connect to avoid duplicate connect logs
     threading.Thread(target=watchdog_process_check, daemon=True).start()
+    # Apply startup wait mode if requested
+    if args.wait_on_start:
+        try:
+            from core.run_state import ExecMode
+            AUTOMATION.mode = ExecMode.WAIT
+            log("[CTRL] Startup flag: ExecMode set to WAIT", "INFO")
+        except Exception:
+            pass
 
     last_ui_state = None
     last_secondary_states = None  # set[str] (non-menu only)
@@ -111,6 +132,22 @@ def main():
         coins_max_jump_factor=8.0,
         coins_jump_conf_floor=90.0,
     )
+    # Mission/Strategy (optional; default to no-ops to avoid behavior changes)
+    if args.mission_config:
+        try:
+            mission = YamlMission.from_file(args.mission_config)
+            log(f"[MISSION] Loaded YAML mission from {args.mission_config}", "INFO")
+        except Exception as e:
+            log(f"[MISSION] Failed to load YAML mission: {e}", "ERROR")
+            mission = get_mission(args.mission)
+    else:
+        mission = get_mission(args.mission)
+    strategy = get_strategy(args.strategy)
+    mission_mgr = MissionManager(mission, strategy)
+    mission_mgr.start()
+    # Decide default behavior for game-over capture: fast by default when a mission is active
+    MISSION_ACTIVE = bool((args.mission and args.mission.lower() != "none") or args.mission_config)
+    FAST_GAME_OVER = args.fast_game_over or (MISSION_ACTIVE and not args.full_game_over)
 
     # (control file + auto-resume now handled by AutomationSupervisor)
 
@@ -137,6 +174,19 @@ def main():
             menu = detection.get("menu") or None     # 'ATTACK_MENU', etc., or None
             secondary = set(detection.get("secondary_states") or [])  # already excludes menu
             overlays = set(detection.get("overlays") or [])
+            # Auto-pause when tournament detected
+            if "TOURNAMENT" in secondary:
+                try:
+                    from core.run_state import ExecMode
+                    if AUTOMATION.mode != ExecMode.WAIT:
+                        AUTOMATION.mode = ExecMode.WAIT
+                        log("[CTRL] Tournament detected — ExecMode set to WAIT", "INFO")
+                except Exception:
+                    pass
+
+            # Mission manager signals and per-frame hooks (non-invasive)
+            mission_mgr.maybe_run_start(detection)
+            mission_mgr.on_state(detection)
 
             # Primary state change
             if new_state != last_ui_state:
@@ -303,11 +353,16 @@ def main():
             # Auto Return-to-Game
             sup.auto_return_check(img, new_state)
 
+            # Mission/Strategy tick (execute only when not paused; executor lives inside)
+            if not is_paused:
+                mission_mgr.tick(img, detection)
+
             # Handle known states (skip actions while paused)
             if not is_paused:
                 if new_state == "GAME_OVER":
                     log("Detected GAME_OVER. Executing handler.", "INFO")
-                    handle_game_over()
+                    handle_game_over(capture_stats=(not FAST_GAME_OVER))
+                    mission_mgr.on_game_over()
                     # Rotate coins log for the new run segment
                     if not args.no_coins_log:
                         coins_session_id = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -316,6 +371,7 @@ def main():
                 elif new_state == "HOME_SCREEN":
                     log("Detected HOME_SCREEN. Executing handler.", "INFO")
                     handle_home_screen(restart_enabled=AUTO_START_ENABLED)
+                    mission_mgr.on_home()
 
                 if "AD_GEMS_AVAILABLE" in overlays:
                     handle_ad_gem()

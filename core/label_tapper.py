@@ -125,6 +125,7 @@ def get_label_match(label_key: str, screenshot=None, return_meta=False):
     entry = resolve_dot_path(label_key)
     if not entry:
         raise ValueError(f"Label key '{label_key}' not found in clickmap")
+        raise KeyError(f"Label key '{label_key}' not found in clickmap")
 
     template = _load_template(entry["match_template"])
     if template is None:
@@ -139,7 +140,8 @@ def get_label_match(label_key: str, screenshot=None, return_meta=False):
 
     # Convert to grayscale only when needed
     if screenshot is not None and getattr(screenshot, "ndim", None) == 3:
-        screenshot = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
+      if screenshot.ndim == 3:
+          screenshot = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
 
     cm = get_clickmap()
     region = resolve_region(entry, cm)
@@ -166,6 +168,7 @@ def get_label_match(label_key: str, screenshot=None, return_meta=False):
 
     if max_val < entry.get("match_threshold", 0.9):
         raise ValueError(f"Match for {label_key} failed threshold: {max_val:.2f}")
+        return None # Return None on threshold fail instead of raising
 
     match_x = x + max_loc[0]
     match_y = y + max_loc[1]
@@ -205,6 +208,11 @@ def tap_label_now(label_key: str) -> bool:
     try:
         x, y, w, h = get_label_match(label_key)
     except (ValueError, FileNotFoundError, RuntimeError) as e:
+        bbox = get_label_match(label_key)
+        if not bbox:
+            return False
+        x, y, w, h = bbox
+    except (KeyError, FileNotFoundError, RuntimeError) as e:
         log(f"[SKIP] tap_label_now failed for {label_key}: {e}", "WARN")
         return False
 
@@ -243,6 +251,8 @@ def is_visible(label_key: str, screenshot=None) -> bool:
         get_label_match(label_key, screenshot=screenshot)
         return True
     except ValueError:
+        return get_label_match(label_key, screenshot=screenshot) is not None
+    except (KeyError, FileNotFoundError, RuntimeError):
         return False
 
 
