@@ -112,7 +112,7 @@ def _manifest_entry(menu: Optional[str], label: str) -> Tuple[str, int, str]:
     raise ValueError(f"Label '{label}' not found in manifest menu '{menu}'")
 
 
-def _perform_swipe(direction: str) -> None:
+def _perform_swipe(direction: str, extended: bool = False) -> None:
     entry = resolve_dot_path("_shared_match_regions.upgrade_menu_area")
     if not entry or "match_region" not in entry:
         raise RuntimeError("upgrade_menu_area region missing from clickmap")
@@ -124,11 +124,19 @@ def _perform_swipe(direction: str) -> None:
 
     start_x = x + w // 2
     if direction == "towards_top":
-        start_y = y + int(h * 0.32)
-        end_y = y + int(h * 0.62)
+        if extended:
+            start_ratio, end_ratio = 0.24, 0.76
+        else:
+            start_ratio, end_ratio = 0.32, 0.62
+        start_y = y + int(h * start_ratio)
+        end_y = y + int(h * end_ratio)
     elif direction == "towards_bottom":
-        start_y = y + int(h * 0.68)
-        end_y = y + int(h * 0.38)
+        if extended:
+            start_ratio, end_ratio = 0.76, 0.24
+        else:
+            start_ratio, end_ratio = 0.68, 0.38
+        start_y = y + int(h * start_ratio)
+        end_y = y + int(h * end_ratio)
     else:
         raise ValueError(f"Unknown scroll direction '{direction}'")
 
@@ -174,7 +182,7 @@ def find_upgrade(
     max_scrolls: int = _MAX_SCROLL_ATTEMPTS,
     capture_fn: Callable[[], Optional[np.ndarray]] = capture_adb_screenshot,
     sleep_fn: Callable[[float], None] = time.sleep,
-    swipe_fn: Callable[[str], None] = _perform_swipe,
+    swipe_fn: Callable[[str, bool], None] = _perform_swipe,
     ensure_menu: bool = True,
 ) -> Optional[UpgradeSearchResult]:
     """Locate a specific upgrade tile by menu/label, scrolling as needed.
@@ -199,6 +207,8 @@ def find_upgrade(
 
     last_state: Optional[Tuple[int, ...]] = None
     last_direction: Optional[str] = None
+
+    repeat_count = 0
 
     for attempt in range(max_scrolls + 1):
         boxes_by_col = detect_visible_boxes(screenshot, menu=menu_key)
@@ -246,8 +256,21 @@ def find_upgrade(
 
         state_key = tuple(visible_indices)
         if state_key and last_state == state_key and last_direction == direction:
-            log("[UPGRADE_NAV] No progress after scrolling; aborting", "WARN")
-            break
+            repeat_count += 1
+            if repeat_count > 1:
+                log("[UPGRADE_NAV] No progress after extended scrolling; aborting", "WARN")
+                break
+            swipe_fn(direction, True)
+            sleep_fn(_SCROLL_SETTLE_SEC)
+            screenshot = capture_fn()
+            if screenshot is None:
+                screenshot = capture_fn()
+                if screenshot is None:
+                    raise RuntimeError("Failed to capture screenshot after scrolling")
+            last_state = state_key
+            last_direction = direction
+            continue
+        repeat_count = 0
 
         # If we're trying to move down and already have the bottom-most entries, stop.
         if (
@@ -264,7 +287,7 @@ def find_upgrade(
         last_state = state_key if state_key else None
         last_direction = direction
 
-        swipe_fn(direction)
+        swipe_fn(direction, False)
         sleep_fn(_SCROLL_SETTLE_SEC)
         screenshot = capture_fn()
         if screenshot is None:
