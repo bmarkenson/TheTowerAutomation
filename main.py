@@ -21,7 +21,6 @@ from handlers.daily_gem_handler import handle_daily_gem
 from utils.logger import log
 from utils.wave_detector import detect_wave_number_from_image, set_wave_hint  # use detect_* for conf + debug
 from utils.coin_detector import get_coins_from_image, detect_coins_from_image, format_compact_decimal
-from core.label_tapper import tap_label_now, is_visible
 from core.automation_supervisor import AutomationSupervisor
 from core.clickmap_access import get_clickmap, resolve_dot_path
 from automation.missions.manager import MissionManager

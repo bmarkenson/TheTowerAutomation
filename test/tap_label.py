@@ -7,7 +7,7 @@ Usage:
   test/tap_label.py indicators.menu_attack --refresh
 
 Notes:
-  - Uses core.label_tapper.tap_label_now(key) which performs matching
+  - Uses core.tap.tap_if_visible(key) which performs matching
     inside the configured region and issues an ADB tap on success.
   - Optionally captures a fresh screenshot first with --refresh.
   - Returns JSON-like output describing the attempt.
@@ -20,7 +20,7 @@ import time
 
 from core.clickmap_access import resolve_dot_path
 from core.ss_capture import capture_and_save_screenshot
-from core.label_tapper import tap_label_now
+from core.tap import tap_if_visible
 
 
 def main() -> int:
@@ -47,7 +47,7 @@ def main() -> int:
     success = False
     while attempts < max(1, args.retries) and not success:
         attempts += 1
-        success = tap_label_now(args.key)
+        success = tap_if_visible(args.key, retries=0)
         if success:
             break
         if attempts < args.retries:
@@ -63,4 +63,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

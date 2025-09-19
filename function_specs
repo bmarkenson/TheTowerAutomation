@@ -217,22 +217,13 @@
 * Region from `match_region` or `_shared_match_regions[region_ref]` (clamped to image bounds).
   — **Notes:** Converts screenshot to grayscale only when needed; uses `cv2.TM_CCOEFF_NORMED` over the specified region.
 
-### tap\_label\_now(label\_key: str) -> bool
-
-— **R:** `True` on tap issued; `False` on match failure
-— **S:** `[tap][adb][log]`
-— **E:** *(none)* (catches `ValueError`/`FileNotFoundError`/`RuntimeError` from matcher; ADB errors suppressed by `adb_shell`)
-— **Blocks:** **Yes** (ADB)
-— **Config:** Optional `entry["tap_offset"] = {"x":int,"y":int}` shifts tap from bbox center.
-— **Notes:** Logs `ACTION` with coordinates; warns and returns `False` if matching fails.
-
 ### is\_visible(label\_key: str, screenshot=None) -> bool
 
 — **R:** `True` if match succeeds; `False` if a **`ValueError`** is raised by matcher
 — **S:** `[cv2][adb]*` (ADB only if `screenshot is None` and match attempt proceeds)
 — **E:** **Propagates** `FileNotFoundError` and `RuntimeError` (only `ValueError` is caught)
 — **Blocks:** **Yes** on ADB path
-— **Notes (quirk):** Unlike `tap_label_now`, this only catches `ValueError`; missing template or capture failure will **raise**.
+— **Notes (quirk):** Intentionally only catches `ValueError`; missing template or capture failure will **raise** (callers needing graceful handling should use `safe_tap`).
 
 ### \_get\_shared\_upgrade\_region(side: str) -> tuple\[int,int,int,int]
 

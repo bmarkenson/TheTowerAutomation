@@ -14,6 +14,7 @@ except Exception as e:
     _clickmap = {}
 
 _last_region_group: Optional[str] = None
+_tap_now_deprecation_warned: bool = False
 
 def get_clickmap() -> Dict[str, Any]:
     """
@@ -368,6 +369,11 @@ def tap_now(name: str) -> None:
     ---
     Issue an ADB tap at the resolved coordinates for 'name'. Logs action.
     """
+    global _tap_now_deprecation_warned
+    if not _tap_now_deprecation_warned:
+        log("[DEPRECATED] tap_now(): prefer core.tap.safe_tap(...), e.g. tap_if_visible() for visible taps", "WARN")
+        _tap_now_deprecation_warned = True
+
     pos = get_click(name)
     if pos:
         log(f"TAP_NOW: {name} at {pos}", "ACTION")

@@ -4,7 +4,8 @@ import threading
 import time
 from core.tap_dispatcher import tap
 from core.clickmap_access import get_click
-from core.label_tapper import tap_label_now
+from core.tap import safe_tap
+from core.label_tapper import is_visible
 from utils.logger import log
 
 _blind_tapper_active = threading.Event()
@@ -174,5 +175,35 @@ def handle_ad_gem():
     """
     log("Handling AD_GEMS_AVAILABLE overlay", "ACTION")
     start_blind_gem_tapper(duration=20, interval=1, blocking=False)
-    tap_label_now("overlays.ad_gem")
+
+    overlay_key = "overlays.ad_gem"
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        # Skip if overlay has already disappeared (manual tap, etc.)
+        if not is_visible(overlay_key):
+            log("[AD_GEM] Overlay not visible; skipping tap", "INFO")
+            break
+
+        tapped = safe_tap(
+            overlay_key,
+            require_visible=True,
+            retries=1,
+            retry_delay=0.4,
+            dispatch='now',
+            allow_fallback=(attempt > 1),
+        )
+        if not tapped:
+            log("[AD_GEM] Failed to tap overlay (match missing)", "WARN")
+            break
+
+        # Give UI a moment to dismiss overlay
+        time.sleep(0.5)
+        if not is_visible(overlay_key):
+            break
+
+        log("[AD_GEM] Overlay still visible after tap — retrying", "WARN")
+        time.sleep(0.4)
+    else:
+        log("[AD_GEM] Overlay persisted after multiple tap attempts", "ERROR")
+
     time.sleep(1)

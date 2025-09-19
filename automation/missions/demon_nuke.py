@@ -4,7 +4,6 @@ import time
 from typing import Dict, Any, List
 from utils.logger import log
 from .base import BaseMission, MissionContext
-from core.floating_button_detector import detect_floating_buttons
 
 
 class DemonNukeMission(BaseMission):
@@ -31,10 +30,10 @@ class DemonNukeMission(BaseMission):
 
         # Step 1: Fire demon if not yet fired and available
         if not d.get("fired"):
-            buttons = detect_floating_buttons(screen)
-            if any(b["name"] == "floating_buttons.demon_mode" for b in buttons):
+            action = self._fire_floating_if_visible(screen, "floating_buttons.demon_mode")
+            if action:
                 log("[MISSION demon_nuke] Firing Demon Mode", "ACTION")
-                actions.append({"type": "fire_floating", "name": "floating_buttons.demon_mode"})
+                actions.append(action)
                 d["fired"] = True
                 d["active_until"] = time.time() + self.demon_duration
                 ctx.data["demon"] = d
@@ -46,10 +45,10 @@ class DemonNukeMission(BaseMission):
             now = time.time()
             # Wait until we're within margin window
             if active_until > 0 and now >= (active_until - self.nuke_margin):
-                buttons = detect_floating_buttons(screen)
-                if any(b["name"] == "floating_buttons.nuke" for b in buttons):
+                action = self._fire_floating_if_visible(screen, "floating_buttons.nuke")
+                if action:
                     log("[MISSION demon_nuke] Firing Nuke near end of Demon Mode", "ACTION")
-                    actions.append({"type": "fire_floating", "name": "floating_buttons.nuke"})
+                    actions.append(action)
                     n["fired"] = True
                     ctx.data["nuke"] = n
                     if self.post_nuke_delay:

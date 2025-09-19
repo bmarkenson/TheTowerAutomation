@@ -1,19 +1,18 @@
-# README_UPLOAD.md
+# README_codex.md
 
-This archive contains the full source code for an ADB-based automation project targeting the Android game "The Tower: Idle Tower Defense".
+This is a README file specifically for ChatGPT Codex to explain the automation project targeting the Android game "The Tower: Idle Tower Defense".
 
 ---
 
 ## 📦 Instructions for ChatGPT
 
-- Index the directory structure and core source files.
 - The project follows a modular Python layout:
   - `main.py`: Main loop (entry point)
   - `core/`: Core utilities (tap handling, ADB, state detection)
   - `handlers/`: State-specific logic modules
   - `matchers/`: Template matching logic (OpenCV)
   - `assets/`: PNGs used for screen detection
-  - `automation/`: Legacy; being deprecated
+  - `automation/`: Mission and Strategy automation
   - `config/`: For static settings or clickmaps (destination for some migrations)
   - `screenshots/`: Captured screenshots (live + archive)
   - `tools/`: Utility scripts used outside `main.py`
@@ -49,7 +48,6 @@ This archive contains the full source code for an ADB-based automation project t
 
 ## ⚠️ Caution on Refactors
 
-- When making changes to the codebase, **compare against the extracted version** to ensure no functionality is lost or regressed.
 - Avoid proposing rewrites without fully understanding how the change may impact other modules or architectural constraints (e.g., tap handling, state detection, watchdog coordination, overlays).
 
 ---

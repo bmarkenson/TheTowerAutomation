@@ -42,11 +42,10 @@ class NukeMission(BaseMission):
             return None
 
         # Fire Nuke when available (only mark fired if button present)
-        from core.floating_button_detector import detect_floating_buttons
-        buttons = detect_floating_buttons(screen)
-        if any(b["name"] == "floating_buttons.nuke" for b in buttons):
+        action = self._fire_floating_if_visible(screen, "floating_buttons.nuke")
+        if action:
             log("[MISSION nuke] Accrual complete; firing Nuke", "ACTION")
-            actions.append({"type": "fire_floating", "name": "floating_buttons.nuke"})
+            actions.append(action)
             st["fired"] = True
             ctx.data["nuke"] = st
         else:

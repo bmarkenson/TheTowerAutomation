@@ -2,8 +2,7 @@
 
 import time
 from utils.logger import log
-from core.clickmap_access import tap_now
-from core.label_tapper import tap_label_now
+from core.tap import tap_if_visible
 
 
 def handle_home_screen(restart_enabled=True):
@@ -33,8 +32,9 @@ def handle_home_screen(restart_enabled=True):
 
     if restart_enabled:
         log("[HOME] Auto-start enabled — tapping 'Battle' button", "INFO")
-        if not tap_label_now("buttons.battle:home"):
-            tap_label_now("buttons.resume_battle:home")
+        if not tap_if_visible("buttons.battle:home", retries=1):
+            if not tap_if_visible("buttons.resume_battle:home", retries=1):
+                log("[HOME] Battle/Resume buttons not visible; leaving handler", "WARN")
         time.sleep(2)
     else:
         log("[HOME] Auto-start disabled — waiting for manual start.", "INFO")

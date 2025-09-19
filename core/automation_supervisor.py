@@ -28,7 +28,8 @@ from typing import Optional, Tuple
 
 from utils.logger import log
 from core.run_state import AUTOMATION
-from core.label_tapper import tap_label_now, is_visible
+from core.tap import tap_if_visible
+from core.label_tapper import is_visible
 from core.matcher import get_match as _get_match
 from core.ss_capture import capture_and_save_screenshot
 from utils.coin_detector import detect_coins_from_image, format_compact_decimal
@@ -167,7 +168,7 @@ class AutomationSupervisor:
                 if coins_conf >= self.coins_conf_floor:
                     self._coins_has_min_miss += 1
                 if self._coins_has_min_miss >= 2 and (now_ts - self._last_coins_toggle_ts) >= self.coins_toggle_cooldown:
-                    tap_label_now("buttons.coin_toggle")
+                    tap_if_visible("buttons.coin_toggle", retries=1)
                     self._last_coins_toggle_ts = now_ts
                     self._coins_has_min_miss = 0
                     time.sleep(0.6)
@@ -223,7 +224,7 @@ class AutomationSupervisor:
                 elif (time.time() - self._rtg_visible_since_ts) >= self.auto_return_secs > 0:
                     elapsed = int(time.time() - self._rtg_visible_since_ts)
                     log(f"[AUTO] Return-to-Game visible for {elapsed}s — tapping now.", "ACTION")
-                    tap_label_now("buttons.return_to_game")
+                    tap_if_visible("buttons.return_to_game", retries=1)
                     self._rtg_visible_since_ts = None
             else:
                 if self._rtg_visible_since_ts is not None:

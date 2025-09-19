@@ -3,7 +3,7 @@
 import argparse
 import sys
 from core.clickmap_access import resolve_dot_path, tap_now, swipe_now
-from core.label_tapper import tap_label_now
+from core.tap import tap_if_visible
 from utils.logger import log
 
 
@@ -12,7 +12,7 @@ def run_gesture(dot_path):
     Execute a single gesture defined in clickmap.json.
 
     Resolution order:
-      1) If entry has "match_template": use visual tap via tap_label_now(dot_path).
+      1) If entry has "match_template": use visual tap via tap_if_visible(dot_path).
       2) Else if entry has "tap": perform static tap via tap_now(dot_path).
       3) Else if entry has "swipe": perform swipe via swipe_now(dot_path).
       4) Otherwise: log an error.
@@ -41,9 +41,9 @@ def run_gesture(dot_path):
     # 1. Try visual tap if match_template is defined
     if "match_template" in entry:
         log(f"[INFO] Using visual matcher for: {dot_path}", "DEBUG")
-        success = tap_label_now(dot_path)
+        success = tap_if_visible(dot_path)
         if not success:
-            log(f"[ERROR] tap_label_now failed for: {dot_path}", "FAIL")
+            log(f"[ERROR] tap_if_visible failed for: {dot_path}", "FAIL")
             return False
         return True
 

@@ -8,8 +8,8 @@ CORE GOALS (ranked)
 2) Visual state awareness (analyze screen before acting; no blind macros).
 3) Reliable input injection with correct path:
    - tap_dispatcher for queued/periodic/low-prio taps
-   - tap_now/swipe_now for immediate feedback-gated actions
-   - tap_label_now for label-relative taps
+   - safe_tap / tap_if_visible / tap_blind for canonical taps (immediate by default, optional queue)
+   - swipe_now for explicit swipe gestures
 4) Manual override safe: pause/resume; don’t fight scrcpy/manual input.
 5) Minimal stack + modularity (clean separation: core/ handlers/ config/ assets/ tools/; reusable beyond this game).
 
@@ -52,7 +52,7 @@ Always prefer to use existing functions rather than re-implementing, if possible
 
 # Non-negotiable rules
 - Never propose blind macros. All input is visual-state-aware.
-- Use tap paths correctly: tap_dispatcher for queued/periodic; tap_now/swipe_now for immediate feedback-gated; tap_label_now for label-relative taps.
+- Use tap paths correctly: tap_dispatcher for queued/periodic; safe_tap/tap_if_visible/tap_blind for taps; swipe_now for explicit swipes.
 - Respect watchdog, pause/resume, and handler conditions.
 
 # Modules (R=return, S=side effects, E=errors, CLI flags)
@@ -84,7 +84,6 @@ core/floating_button_detector.py
 core/label_tapper.py
 - resolve_region(entry, clickmap) — R dict; E ValueError on bad region_ref.
 - get_label_match(label_key, screenshot=None, return_meta=False) — R bbox|meta; S [adb].
-- tap_label_now(label_key) — R bool; S [tap][adb][log].
 - is_visible(label_key, screenshot=None) — R bool; S [adb].
 
 core/ss_capture.py
@@ -212,8 +211,10 @@ utils/*
 
 ### Tap semantics
 
-- `tap_label_now(key)`: tap the **center of the matched bbox** for `key`. No offsets in `clickmap.json`; any offsets live in code/YAML.
-- Path discipline: `tap_dispatcher` = queued/periodic; `tap_now`/`swipe_now` = immediate feedback-gated; `tap_label_now` = label-relative.
+- `safe_tap(name, ...)`: canonical tap helper. Uses label matching by default (`require_visible=True`), supports retries, optional queuing (`dispatch='queue'`), and blind fallback via `allow_fallback=True`.
+- `tap_if_visible(name, ...)`: convenience wrapper for `safe_tap(..., require_visible=True, allow_fallback=False)`; taps the **center of the matched bbox** (or `tap_offset` when provided/role implies it).
+- `tap_blind(name, ...)`: wrapper for `safe_tap(..., require_visible=False)` when a clickmap entry only has static coordinates.
+- Path discipline: `tap_dispatcher` = queued/periodic; `safe_tap` family = immediate taps (optionally queued); `swipe_now` = explicit swipes.
 
 ### `config/state_definitions.yaml` — shape & tiny examples
 
@@ -251,5 +252,3 @@ overlays:
 
 - Exactly **one** primary state per frame; multiple primaries ⇒ raise.  0 primaries -> UNKNOWN
 - Overlays: zero to many may co-exist.
-
-

@@ -217,22 +217,13 @@
 * Region from `match_region` or `_shared_match_regions[region_ref]` (clamped to image bounds).
   — **Notes:** Converts screenshot to grayscale only when needed; uses `cv2.TM_CCOEFF_NORMED` over the specified region.
 
-### tap\_label\_now(label\_key: str) -> bool
-
-— **R:** `True` on tap issued; `False` on match failure
-— **S:** `[tap][adb][log]`
-— **E:** *(none)* (catches `ValueError`/`FileNotFoundError`/`RuntimeError` from matcher; ADB errors suppressed by `adb_shell`)
-— **Blocks:** **Yes** (ADB)
-— **Config:** Optional `entry["tap_offset"] = {"x":int,"y":int}` shifts tap from bbox center.
-— **Notes:** Logs `ACTION` with coordinates; warns and returns `False` if matching fails.
-
 ### is\_visible(label\_key: str, screenshot=None) -> bool
 
 — **R:** `True` if match succeeds; `False` if a **`ValueError`** is raised by matcher
 — **S:** `[cv2][adb]*` (ADB only if `screenshot is None` and match attempt proceeds)
 — **E:** **Propagates** `FileNotFoundError` and `RuntimeError` (only `ValueError` is caught)
 — **Blocks:** **Yes** on ADB path
-— **Notes (quirk):** Unlike `tap_label_now`, this only catches `ValueError`; missing template or capture failure will **raise**.
+— **Notes (quirk):** Intentionally only catches `ValueError`; missing template or capture failure will **raise** (use `safe_tap` helpers for graceful failure semantics).
 
 ### \_get\_shared\_upgrade\_region(side: str) -> tuple\[int,int,int,int]
 
@@ -674,13 +665,13 @@ Centralized, clickmap‑backed template matching. Public API: `get_match()`; int
 — **Behavior:**
 
 1. Starts the blind tapper in background for `20s @ 1s` (if not already running).
-2. Calls `tap_label_now("overlays.ad_gem")` to collect.
+2. Calls `tap_if_visible("overlays.ad_gem")` to collect; logs and returns early if not visible.
 3. Sleeps `1s` before returning.
 
 **Caveats / gotchas**
 
 * The background thread is **non‑daemon**. If your main program exits while the tapper is running, the process will wait for the thread to finish (intended to avoid premature exit).
-* Blind taps go through `tap_dispatcher` (queued taps); `tap_label_now` performs an immediate ADB tap gated by a visual match.
+* Blind taps go through `tap_dispatcher` (queued taps); `tap_if_visible` (via `safe_tap`) performs an immediate visibility-gated tap.
 
 ---
 
@@ -690,15 +681,15 @@ Centralized, clickmap‑backed template matching. Public API: `get_match()`; int
 
 — **R:** `None`
 — **S:** `[tap][adb][cv2][fs][log][sleep]`
-— **E:** *(none)* (uses boolean returns from `tap_label_now`; failures call `_abort_handler` and return)
+— **E:** *(none)* (uses boolean returns from `tap_if_visible`; failures call `_abort_handler` and return)
 — **Workflow:**
 
 1. Create session id (`_make_session_id`) and log start.
-2. `tap_label_now("navigation.goto_store")`; on failure → `_abort_handler("Goto Store", session_id)`.
+2. `tap_if_visible("navigation.goto_store", retries=1)`; on failure → `_abort_handler("Goto Store", session_id)`.
 3. `swipe_now("gesture_targets.goto_top:store")`; sleep `1.5s`.
 4. Capture screenshot and `save_image(..., f"{session_id}_store_top")`.
 5. `swipe_now("gesture_targets.goto_claim_daily_gems:store")`; sleep `3s`; capture & save with tag `"{session_id}claim_daily_gems"`.
-6. Tap `buttons.claim_daily_gems`; tap `buttons.skip:claim_daily_gems`; tap `buttons.return_to_game`; each guarded with abort on failure; sleeps `1.2s` between steps.
+6. Tap `buttons.claim_daily_gems`; tap `buttons.skip:claim_daily_gems`; tap `buttons.return_to_game` using `tap_if_visible(..., retries=1)`; each guarded with abort on failure; sleeps `1.2s` between steps.
    — **Notes:** Emits a bare `print("Handling")` alongside logs; depends on clickmap keys existing.
 
 ### \_make\_session\_id() -> str
@@ -749,7 +740,7 @@ Centralized, clickmap‑backed template matching. Public API: `get_match()`; int
    * `ExecMode.HOME` → log and return.
    * Else → tap `buttons.retry:game_over`; on failure → `_abort_handler("Retry Game", session_id)`.
 8. Final sleep `2s` and return.
-   — **Notes:** Relies on clickmap keys existing; uses `tap_label_now` (visual‑match‑gated) and `swipe_now` (absolute gesture entries).
+   — **Notes:** Relies on clickmap keys existing; uses `tap_if_visible` (visual-match-gated via `safe_tap`) and `swipe_now` (absolute gesture entries).
 
 ### \_make\_session\_id() -> str
 
@@ -774,7 +765,7 @@ Centralized, clickmap‑backed template matching. Public API: `get_match()`; int
 **Caveats / notes**
 
 * The WAIT loop uses identity comparison (`is`) against `ExecMode.WAIT`; this is valid for Enum singletons.
-* Import includes `tap_now` but the function uses `tap_label_now` and `swipe_now`; `tap_now` is not used here.
+* Import includes `tap_now` but the function uses `tap_if_visible` and `swipe_now`; `tap_now` is not used here.
 
 ---
 
@@ -790,10 +781,9 @@ Centralized, clickmap‑backed template matching. Public API: `get_match()`; int
 * Logs handling of `HOME_SCREEN`.
 * If `restart_enabled=True` (default):
 
-  * Attempts `tap_label_now("buttons.battle:home")`; if that returns `False`, attempts `tap_label_now("buttons.resume_battle:home")`.
+  * Attempts `tap_if_visible("buttons.battle:home", retries=1)`; if that returns `False`, attempts `tap_if_visible("buttons.resume_battle:home", retries=1)`.
   * Sleeps `~2s` to allow UI transition.
 * Else: logs that auto‑start is disabled and returns.
-  — **Notes:** `tap_now` is imported but not used in this function; all taps are visual‑match gated via `tap_label_now`.
+  — **Notes:** `tap_now` is imported but not used in this function; all taps are visual-match gated via `tap_if_visible`.
 
 ---
-

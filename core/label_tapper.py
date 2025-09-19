@@ -125,7 +125,6 @@ def get_label_match(label_key: str, screenshot=None, return_meta=False):
     entry = resolve_dot_path(label_key)
     if not entry:
         raise ValueError(f"Label key '{label_key}' not found in clickmap")
-        raise KeyError(f"Label key '{label_key}' not found in clickmap")
 
     template = _load_template(entry["match_template"])
     if template is None:
@@ -140,8 +139,7 @@ def get_label_match(label_key: str, screenshot=None, return_meta=False):
 
     # Convert to grayscale only when needed
     if screenshot is not None and getattr(screenshot, "ndim", None) == 3:
-      if screenshot.ndim == 3:
-          screenshot = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
+        screenshot = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
 
     cm = get_clickmap()
     region = resolve_region(entry, cm)
@@ -168,7 +166,6 @@ def get_label_match(label_key: str, screenshot=None, return_meta=False):
 
     if max_val < entry.get("match_threshold", 0.9):
         raise ValueError(f"Match for {label_key} failed threshold: {max_val:.2f}")
-        return None # Return None on threshold fail instead of raising
 
     match_x = x + max_loc[0]
     match_y = y + max_loc[1]
@@ -188,71 +185,12 @@ def get_label_match(label_key: str, screenshot=None, return_meta=False):
     return (match_x, match_y, tw, th)
 
 
-def tap_label_now(label_key: str) -> bool:
-    """
-    ---
-    spec:
-      r: "bool — True if tap issued, else False"
-      s: ["adb", "log"]
-      e: []
-      params:
-        label_key: "str"
-      notes:
-        - "Catches ValueError/FileNotFoundError/RuntimeError from get_label_match and returns False"
-        - "Supports optional entry.tap_offset {x,y}"
-        - "Taps center of matched bbox when no offset"
-    ---
-    Taps a label if it can be visually matched.
-    Returns True if the tap succeeded, False otherwise.
-    """
-    try:
-        x, y, w, h = get_label_match(label_key)
-    except (ValueError, FileNotFoundError, RuntimeError) as e:
-        bbox = get_label_match(label_key)
-        if not bbox:
-            return False
-        x, y, w, h = bbox
-    except (KeyError, FileNotFoundError, RuntimeError) as e:
-        log(f"[SKIP] tap_label_now failed for {label_key}: {e}", "WARN")
-        return False
-
-    entry = resolve_dot_path(label_key)
-    # Prefer explicit per-entry offset. If missing and this is an upgrade label,
-    # fall back to a sensible default that targets the right cost box.
-    offset = entry.get("tap_offset", None)
-    if offset is None:
-        roles = entry.get("roles") or []
-        if isinstance(roles, list) and "upgrade_label" in roles:
-            offset = {"x": 405, "y": 60}
-
-    tap_x = x + offset["x"] if offset else x + w // 2
-    tap_y = y + offset["y"] if offset else y + h // 2
-
-    log(f"TAP_LABEL_NOW: {label_key} at ({tap_x},{tap_y})", "ACTION")
-    adb_shell(["input", "tap", str(tap_x), str(tap_y)])
-    return True
-
-
 def is_visible(label_key: str, screenshot=None) -> bool:
-    """
-    ---
-    spec:
-      r: "bool"
-      s: ["adb?"]
-      e: []
-      params:
-        label_key: "str"
-        screenshot: "ndarray|None"
-      notes:
-        - "Returns True when get_label_match succeeds, else False (ValueError path)"
-    ---
-    """
+    """Return True if label is matched above threshold; else False."""
     try:
         get_label_match(label_key, screenshot=screenshot)
         return True
-    except ValueError:
-        return get_label_match(label_key, screenshot=screenshot) is not None
-    except (KeyError, FileNotFoundError, RuntimeError):
+    except (ValueError, KeyError, FileNotFoundError, RuntimeError):
         return False
 
 

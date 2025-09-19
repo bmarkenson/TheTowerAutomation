@@ -1,0 +1,85 @@
+{
+  "upgrades": {
+    "attack": {
+      "left": [
+        "Damage",
+        "Critical Chance",
+        "Range",
+        "Multishot Chance",
+        "Rapid Fire Chance",
+        "Bounce Shot Chance",
+        "Bounce Shot Range",
+        "Super Crit Mult",
+        "Rend Armor Mult"
+      ],
+      "right": [
+        "Attack Speed",
+        "Critical Factor",
+        "Damage Per Meter",
+        "Multishot Targets",
+        "Rapid Fire Duration",
+        "Bounce Shot Targets",
+        "Super Crit Chance",
+        "Rend Armor Chance"
+      ]
+    },
+    "defense": {
+      "left": [
+        "Health",
+        "Defense Percent",
+        "Thorn Damage",
+        "Knockback Chance",
+        "Orb Speed",
+        "Shockwave Size",
+        "Land Mine Chance",
+        "Land Mine Radius",
+        "Wall Health"
+      ],
+      "right": [
+        "Health Regen",
+        "Defense Absolute",
+        "Lifesteal",
+        "Knockback Force",
+        "Orbs",
+        "Shockwave Frequency",
+        "Land Mine Damage",
+        "Death Defy",
+        "Wall Rebuild"
+      ]
+    },
+    "utility": {
+      "left": [
+        "Cash Bonus",
+        "Coins Per Kill Bonus",
+        "Free Attack Upgrade",
+        "Free Utility Upgrade",
+        "Package Chance",
+        "EHLS",
+        "Recovery Amount"
+      ],
+      "right": [
+        "Cash Per Wave",
+        "Coins Per Wave",
+        "Free Defense Upgrade",
+        "Interest Per Wave",
+        "Max Recovery",
+        "EALS"
+      ]
+    },
+    "ultimate weapons": {
+      "left": [
+        "Chain Lightning",
+        "Death Wave",
+        "Inner Land Mines",
+        "Poison Swamp",
+        "Spotlight"
+      ],
+      "right": [
+        "Smart Missiles",
+        "Chrono Field",
+        "Golden Tower",
+        "Black Hole"
+      ]
+    }
+  }
+}

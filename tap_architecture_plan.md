@@ -30,24 +30,23 @@
 ---
 
 ### `core/label_tapper.py`
-**New tap entry point for static/dynamic labels:**
+**Responsibilities:**
+- `get_label_match()` / `is_visible()` for template-driven detection
+- Region normalization helpers
+- No direct tap injection (pure matching logic)
+
+### `core/tap.py`
+**Unified tap entry point:**
 
 ```python
-def tap_label_if_visible(name: str, screen) -> bool:
-    """Match label from screen and tap if found. Returns True if tapped."""
+safe_tap(name, *, require_visible=True, retries=0, retry_delay=0.5,
+         dispatch='now', allow_fallback=False, screenshot=None)
 ```
 
-**Floating button support:**
-```python
-def tap_floating_button(name: str, match_results) -> bool:
-    """Tap a floating button if it exists in a prior detect_floating_buttons() call."""
-```
-
-**Optional fallback:**
-```python
-def tap_label_now(name: str):
-    """Taps label after confirming visibility. Raises if not visible."""
-```
+Helpers:
+- `tap_if_visible(name, ...)` — visibility-gated tap
+- `tap_blind(name, ...)` — blind tap via clickmap coordinates
+- Centralized logging, offset handling, retry policy, fallback path
 
 ---
 
@@ -72,12 +71,7 @@ tap_now("foo.bar")
 Becomes:
 
 ```python
-tap_label_if_visible("foo.bar", screen)
-```
-
-Or:
-```python
-tap_label_now("foo.bar")
+tap_if_visible("foo.bar")
 ```
 
 Or:
@@ -90,5 +84,5 @@ tap(x, y, label)  # async, visibility-assumed
 ## 💪 Migration Plan (Future)
 
 1. Move tap logic out of `clickmap_access.py`
-2. Refactor handlers to use `tap_label_if_visible()` or `tap_label_now()`
+2. Route handlers through `core.tap` helpers (`tap_if_visible`, `tap_blind`, `safe_tap`)
 3. Add logging, retries, and fallback handling to tap stack

@@ -1,8 +1,7 @@
 from utils.logger import log
 from core.ss_capture import capture_adb_screenshot
-from core.run_state import AUTOMATION
-from core.clickmap_access import tap_now, swipe_now
-from core.label_tapper import tap_label_now
+from core.clickmap_access import swipe_now
+from core.tap import tap_if_visible
 import time
 import os
 import cv2
@@ -13,7 +12,7 @@ def handle_daily_gem():
     log(f"Handling DAILY AD GEM — Session: {session_id}", "INFO")
 
     # Tap into Store
-    if not tap_label_now("navigation.goto_store"):
+    if not tap_if_visible("navigation.goto_store", retries=1):
         return _abort_handler("Goto Store", session_id)
     time.sleep(1.2)
 
@@ -32,17 +31,17 @@ def handle_daily_gem():
     save_image(capture_adb_screenshot(), f"{session_id}claim_daily_gems")
 
     # Claim Daily Gem
-    if not tap_label_now("buttons.claim_daily_gems"):
+    if not tap_if_visible("buttons.claim_daily_gems", retries=1):
         return _abort_handler("Claim_daily_gems", session_id)
     time.sleep(1.2)
 
     # Skip
-    if not tap_label_now("buttons.skip:claim_daily_gems"):
+    if not tap_if_visible("buttons.skip:claim_daily_gems", retries=1):
         return _abort_handler("Skip Claim_daily_gems", session_id)
     time.sleep(1.2)
 
     # Return to Game
-    if not tap_label_now("buttons.return_to_game"):
+    if not tap_if_visible("buttons.return_to_game", retries=1):
         return _abort_handler("Return to Game", session_id)
     time.sleep(1.2)
 
@@ -63,4 +62,3 @@ def _abort_handler(step, session_id):
     debug_img = capture_adb_screenshot()
     save_image(debug_img, f"{session_id}_ABORT_{step.replace(' ', '_')}")
     return
-

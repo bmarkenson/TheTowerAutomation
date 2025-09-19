@@ -1,175 +1,279 @@
-# test/test_upgrade_detection.py
 #!/usr/bin/env python3
+from __future__ import annotations
 
-import cv2
-import numpy as np
+import argparse
+import json
 import os
 import sys
+from typing import Dict, Optional, Sequence, Tuple
 
-sys.path.append(".")  # so core/, utils/ etc. work if run from root
+import cv2
 
-from utils.template_matcher import match_region
-from core.clickmap_access import resolve_dot_path
-from core.ss_capture import capture_and_save_screenshot
+if "." not in sys.path:
+    sys.path.append(".")
+
+from core.upgrade_box_detector import annotate_boxes, detect_visible_boxes
+
+_EXPECTED_COUNTS: Dict[str, Tuple[int, int]] = {
+    "upgrade_test.png": (2, 1),
+    "upgrade_test_defense.png": (2, 2),
+    "upgrade_utils_test.png": (2, 2),
+    "upgrade_test_partial.png": (2, 2),
+    "upgrade_test_bottom.png": (2, 2),
+    "upgrade_test_attack.png": (2, 2),
+    "upgrade_ocr_test.png": (2, 1),
+    "uw_test.png": (2, 1),
+}
+
+_EXPECTED_LABELS: Dict[str, Dict[str, Sequence[str]]] = {
+    "upgrade_ocr_test.png": {
+        "left": ["Package Chance", "Enemy Health Level Skip"],
+        "right": ["Enemy Attack Level Skip"],
+    },
+    "uw_test.png": {
+        "left": ["Poison Swamp", "Spotlight"],
+        "right": ["Black Hole"],
+    }
+}
+
+_EXPECTED_AFFORDABILITY: Dict[str, Dict[str, Sequence[str]]] = {
+    "upgrade_ocr_test.png": {
+        "left": ["maxed", "unaffordable"],
+        "right": ["affordable"],
+    }
+}
+
+_EXPECTED_TOGGLES: Dict[str, Dict[str, Sequence[Dict[str, str]]]] = {
+    "uw_test.png": {
+        "left": [
+            {"primary": "on"},
+            {"primary": "on", "missiles": "off"},
+        ],
+        "right": [
+            {"primary": "on"},
+        ],
+    }
+}
 
 
-# ---- Behavior-critical constants (were magic numbers) ----
-OFFSET_X = 220        # horizontal offset from match point to sample the color box
-OFFSET_Y = 40         # vertical offset from match point to sample the color box
-SAMPLE_HALF = 10      # half-size of the sampled square region (total = 2*SAMPLE_HALF)
-MAXED_RANGE = (45, 50)         # inclusive BGR average range considered "maxed"
-UPGRADEABLE_RANGE = (57, 60)   # inclusive BGR average range considered "upgradeable"
+def _run_single(image_path: str, annotate_path: Optional[str], menu: Optional[str]) -> int:
+    if image_path.lower() == "adb":
+        from core.ss_capture import capture_adb_screenshot
 
-
-def classify_color(bgr):
-    """
-    Classify upgrade affordance by average BGR brightness.
-
-    Args:
-        bgr (array-like): A (B, G, R) triple or ndarray representing average color.
-
-    Returns:
-        str: One of {"maxed", "upgradeable", "unaffordable"} based on avg thresholds.
-    """
-    b, g, r = bgr
-    avg = (b + g + r) / 3
-    print(f"[CLASSIFY] avg={avg:.1f} from BGR={bgr}")
-
-    if MAXED_RANGE[0] <= avg <= MAXED_RANGE[1]:
-        return "maxed"
-    elif UPGRADEABLE_RANGE[0] <= avg <= UPGRADEABLE_RANGE[1]:
-        return "upgradeable"
+        screenshot = capture_adb_screenshot()
+        if screenshot is None:
+            print(json.dumps({"error": "failed to capture screenshot"}))
+            return 2
     else:
-        return "unaffordable"
+        screenshot = cv2.imread(image_path)
+        if screenshot is None:
+            print(json.dumps({"error": f"failed to read {image_path}"}))
+            return 2
 
+    boxes = detect_visible_boxes(screenshot, menu=menu)
+    payload_columns = {}
 
-def detect_upgrades(screen, keys):
-    """
-    Detect upgrade buttons and classify their affordability by sampling a nearby color box.
+    print("Detection summary:")
+    for column, box_list in boxes.items():
+        print(f"  {column}: {len(box_list)} box(es)")
+        column_payload = []
+        for idx, box in enumerate(box_list, start=1):
+            rect_info = f"x={box.rect[0]}, y={box.rect[1]}, w={box.rect[2]}, h={box.rect[3]}"
+            label = box.text or ""
+            raw = box.raw_text if box.raw_text and box.raw_text != label else None
+            label_info = f" text='{label}'" if label else ""
+            if raw:
+                label_info += f" raw='{box.raw_text}'"
+            if box.confidence >= 0:
+                label_info += f" (conf={box.confidence:.1f})"
+            if box.match_score is not None:
+                label_info += f" match={box.match_score:.2f}"
+            if box.affordability:
+                label_info += f" status={box.affordability}"
+            if box.toggles:
+                toggle_desc = ", ".join(f"{k}={v}" for k, v in box.toggles.items())
+                label_info += f" toggles({toggle_desc})"
+            print(f"    #{idx}: {rect_info}{label_info}")
 
-    For each key (dot_path) in `keys`:
-      - Resolve clickmap entry.
-      - Template match to find the UI element.
-      - Sample a small color region at (match_point + OFFSET_X/Y).
-      - Classify via `classify_color`.
-      - Draw a small green rectangle over the sampled area (in-place on `screen`).
+            entry = {"rect": box.rect}
+            if box.text:
+                entry["text"] = box.text
+            if box.confidence >= 0:
+                entry["confidence"] = box.confidence
+            if box.raw_text and box.raw_text != box.text:
+                entry["raw_text"] = box.raw_text
+            if box.match_score is not None:
+                entry["match_score"] = box.match_score
+            if box.affordability:
+                entry["affordability"] = box.affordability
+            if box.affordability_metrics:
+                entry["affordability_metrics"] = box.affordability_metrics
+            if box.toggles:
+                entry["toggles"] = box.toggles
+            if box.toggle_metrics:
+                entry["toggle_metrics"] = box.toggle_metrics
+            column_payload.append(entry)
+        payload_columns[column] = column_payload
 
-    Args:
-        screen (np.ndarray): BGR screenshot image.
-        keys (list[str]): Dot-path keys to check.
+    payload = {"columns": payload_columns}
 
-    Returns:
-        dict: key -> status dict. Example on visible:
-              {
-                "status": "upgradeable" | "maxed" | "unaffordable",
-                "confidence": float,
-                "tap_point": (x, y),
-                "avg_color": [B, G, R]
-              }
-              If not visible / errors:
-              {
-                "status": "not visible" | "clickmap entry missing" | "sample_oob",
-                "confidence": float? (if matched),
-              }
-    """
-    results = {}
-    h, w = screen.shape[:2]
+    print(json.dumps(payload))
 
-    for key in keys:
-        entry = resolve_dot_path(key)
-        if not entry:
-            results[key] = {"status": "clickmap entry missing"}
-            continue
+    if annotate_path:
+        all_boxes = [box for rows in boxes.values() for box in rows]
+        annotated = annotate_boxes(screenshot, all_boxes)
+        cv2.imwrite(annotate_path, annotated)
 
-        match_point, confidence = match_region(screen, entry)
-        if match_point:
-            x, y = match_point
-
-            color_x = x + OFFSET_X
-            color_y = y + OFFSET_Y
-
-            # Bounds-check the sampled region to avoid IndexError
-            x0 = color_x - SAMPLE_HALF
-            x1 = color_x + SAMPLE_HALF
-            y0 = color_y - SAMPLE_HALF
-            y1 = color_y + SAMPLE_HALF
-
-            if x0 < 0 or y0 < 0 or x1 > w or y1 > h:
-                # Do not crash; report out-of-bounds to caller
-                results[key] = {
-                    "status": "sample_oob",
-                    "confidence": round(confidence, 3),
-                    "tap_point": (x, y)
-                }
-                continue
-
-            color_region = screen[y0:y1, x0:x1]
-            avg = color_region.mean(axis=(0, 1))
-
-            # Visual marker for debugging
-            cv2.rectangle(
-                screen,  # image
-                (color_x - 5, color_y - 5),
-                (color_x + 5, color_y + 5),
-                (0, 255, 0),  # green box
-                2  # thickness
-            )
-
-            avg_color = avg.astype(int).tolist()
-            status = classify_color(avg)
-            print(f"[DEBUG] {key} → avg={(avg_color[0] + avg_color[1] + avg_color[2]) / 3:.1f}  raw={avg_color} → {status}")
-
-            results[key] = {
-                "status": status,
-                "confidence": round(confidence, 3),
-                "tap_point": (x, y),
-                "avg_color": avg_color
-            }
-        else:
-            results[key] = {
-                "status": "not visible",
-                "confidence": round(confidence, 3)
-            }
-
-    return results
-
-
-def main(argv=None):
-    """
-    Script entrypoint.
-
-    Behavior:
-      - Loads image from CLI arg or defaults to 'screenshots/latest.png'.
-      - Runs detect_upgrades on four hardcoded upgrade keys.
-      - Prints results and shows an OpenCV window with the debug overlay.
-
-    CLI:
-      test_upgrade_detection.py [image_path]
-    """
-    argv = argv if argv is not None else sys.argv[1:]
-
-    # Default image path
-    img_path = argv[0] if len(argv) >= 1 else "screenshots/latest.png"
-    screen = cv2.imread(img_path)
-    if screen is None:
-        print(f"[ERROR] Failed to load image: {img_path}")
-        return 1
-
-    keys = [
-        "upgrades.attack.left.upgrade_super_crit_mult",
-        "upgrades.attack.right.upgrade_super_crit_chance",
-        "upgrades.attack.left.upgrade_rend_armor_mult",
-        "upgrades.attack.right.upgrade_rend_armor_chance"
-    ]
-
-    results = detect_upgrades(screen, keys)
-    for key, info in results.items():
-        print(f"{key}: {info}")
-
-    cv2.imshow("Debug Overlay", screen)
-    cv2.waitKey(0)  # Waits for a keypress
-    cv2.destroyAllWindows()
     return 0
+
+
+def _run_verification() -> int:
+    base_dir = "screenshots"
+    mismatches = []
+    results = {}
+
+    for name, (expected_left, expected_right) in _EXPECTED_COUNTS.items():
+        path = os.path.join(base_dir, name)
+        image = cv2.imread(path)
+        if image is None:
+            print(json.dumps({"error": f"failed to read {path}"}))
+            return 2
+
+        detected = detect_visible_boxes(image)
+        actual_left = len(detected["left"])
+        actual_right = len(detected["right"])
+
+        has_error = False
+        result_entry = {
+            "expected": {"left": expected_left, "right": expected_right},
+            "actual": {"left": actual_left, "right": actual_right},
+        }
+
+        counts_ok = actual_left == expected_left and actual_right == expected_right
+        if not counts_ok:
+            has_error = True
+
+        expected_labels = _EXPECTED_LABELS.get(name)
+        if expected_labels:
+            actual_labels = {
+                column: [box.text or "" for box in detected[column]]
+                for column in ("left", "right")
+            }
+            result_entry["labels"] = {
+                "expected": expected_labels,
+                "actual": actual_labels,
+            }
+
+            for column, expected_values in expected_labels.items():
+                if actual_labels.get(column, []) != list(expected_values):
+                    has_error = True
+                    break
+
+        expected_affordability = _EXPECTED_AFFORDABILITY.get(name)
+        if expected_affordability:
+            actual_affordability = {
+                column: [
+                    box.affordability
+                    for box in detected[column]
+                    if box.affordability
+                ]
+                for column in ("left", "right")
+            }
+            result_entry["affordability"] = {
+                "expected": expected_affordability,
+                "actual": actual_affordability,
+            }
+
+            for column, expected_values in expected_affordability.items():
+                if actual_affordability.get(column, []) != list(expected_values):
+                    has_error = True
+                    break
+
+        expected_toggles = _EXPECTED_TOGGLES.get(name)
+        if expected_toggles:
+            actual_toggles = {
+                column: [box.toggles or {} for box in detected[column]]
+                for column in ("left", "right")
+            }
+            result_entry["toggles"] = {
+                "expected": expected_toggles,
+                "actual": actual_toggles,
+            }
+
+            for column, expected_values in expected_toggles.items():
+                if actual_toggles.get(column, []) != list(expected_values):
+                    has_error = True
+                    break
+
+        results[name] = result_entry
+
+        if has_error:
+            mismatches.append(name)
+
+    payload = {"ok": not mismatches, "results": results}
+    print("Verification results:")
+    for name, info in results.items():
+        exp_left = info["expected"]["left"]
+        exp_right = info["expected"]["right"]
+        act_left = info["actual"]["left"]
+        act_right = info["actual"]["right"]
+        counts_ok = exp_left == act_left and exp_right == act_right
+        label_status = "n/a"
+        if "labels" in info:
+            expected_labels = info["labels"]["expected"]
+            actual_labels = info["labels"]["actual"]
+            label_status = "OK" if expected_labels == actual_labels else "FAIL"
+        affordability_status = "n/a"
+        if "affordability" in info:
+            expected_aff = info["affordability"]["expected"]
+            actual_aff = info["affordability"]["actual"]
+            affordability_status = "OK" if expected_aff == actual_aff else "FAIL"
+        toggle_status = "n/a"
+        if "toggles" in info:
+            expected_toggle = info["toggles"]["expected"]
+            actual_toggle = info["toggles"]["actual"]
+            toggle_status = "OK" if expected_toggle == actual_toggle else "FAIL"
+
+        status = "PASS" if all(
+            flag in ("OK", "n/a")
+            for flag in (label_status, affordability_status, toggle_status)
+        ) and counts_ok else "FAIL"
+        message = (
+            f"  {name}: {status}"
+            f" (left expected={exp_left}, actual={act_left};"
+            f" right expected={exp_right}, actual={act_right})"
+        )
+        if label_status != "n/a":
+            message += f" labels={label_status}"
+        if affordability_status != "n/a":
+            message += f" afford={affordability_status}"
+        if toggle_status != "n/a":
+            message += f" toggles={toggle_status}"
+        print(message)
+
+    print(json.dumps(payload))
+    return 0 if not mismatches else 1
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description="Detect visible upgrade boxes")
+    parser.add_argument("--image", default="screenshots/latest.png", help="Screenshot path or 'adb'")
+    parser.add_argument("--annotate", help="Optional output path for annotated image")
+    parser.add_argument("--menu", help="Optional upgrade menu context (attack/defense/utility)")
+    parser.add_argument(
+        "--verify-all",
+        action="store_true",
+        help="Run detection against the known sample set and verify expected counts",
+    )
+    args = parser.parse_args(argv)
+
+    if args.verify_all:
+        if args.annotate:
+            print(json.dumps({"error": "--annotate is not supported with --verify-all"}))
+            return 2
+        return _run_verification()
+
+    return _run_single(args.image, args.annotate, args.menu)
 
 
 if __name__ == "__main__":

@@ -18,10 +18,9 @@ Notes
 
 import time
 from core.ss_capture import capture_and_save_screenshot
-from core.clickmap_access import tap_now
 from core.floating_button_detector import detect_floating_buttons, tap_floating_button
 from core.state_detector import detect_state_and_overlays
-from core.label_tapper import tap_label_now
+from core.tap import tap_if_visible, safe_tap
 from utils.logger import log
 
 
@@ -75,26 +74,19 @@ def run_nuke_strategy():
     result = detect_state_and_overlays(screen)
     if "MENU_OPEN" not in result["overlays"]:
         log("[MISSION] Menu is closed — opening it", "DEBUG")
-        tap_now("overlays.toggle_menu")
+        if not safe_tap("overlays.toggle_menu", require_visible=False, dispatch='now'):
+            log("[MISSION] Toggle menu tap failed (blind fallback)", "WARN")
         time.sleep(1)
 
-    try:
-        tap_label_now("overlays.end_round")
-    except Exception as e:
-        log(f"[MISSION] Failed to tap End Round: {e}", "WARN")
+    if not tap_if_visible("overlays.end_round", retries=1):
+        log("[MISSION] Failed to tap End Round", "WARN")
     time.sleep(1)
 
-    try:
-        screen = capture_and_save_screenshot()
-        tap_label_now("buttons.yes:end_round")
-    except Exception as e:
-        log(f"[MISSION] Confirm Yes not visible: {e}", "WARN")
+    if not tap_if_visible("buttons.yes:end_round", retries=1):
+        log("[MISSION] Confirm Yes not visible", "WARN")
     time.sleep(1)
 
-    try:
-        screen = capture_and_save_screenshot()
-        tap_label_now("buttons.retry:game_over")
-    except Exception as e:
-        log(f"[MISSION] Retry button not visible: {e}", "WARN")
+    if not tap_if_visible("buttons.retry:game_over", retries=1):
+        log("[MISSION] Retry button not visible", "WARN")
 
     log("[MISSION] Demon-Nuke strategy complete", "SUCCESS")

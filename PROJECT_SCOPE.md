@@ -16,8 +16,8 @@
 - **Reliable input injection**
   - Uses dual-path tap system:
     - `tap_dispatcher` for queued, low-priority, and periodic input
-    - `tap_now()` / `swipe_now()` for immediate, feedback-dependent blind taps/swipes
-    - `tap_label_now` for dynamic generation of tap coordinates based on location of label
+    - `safe_tap()` / `tap_if_visible()` for canonical taps (immediate by default, with retries and optional queuing)
+    - `swipe_now()` for direct swipe injection when needed
 - **Manual override**
   - Automation can be paused or bypassed for scrcpy / Bluestacks manual interaction.
 - **Minimal tech stack**
@@ -33,7 +33,7 @@
 - Implemented states: `GAME_OVER`, `HOME_SCREEN`, `RUNNING`, `RESUME_GAME`
 - Initial support for overlays (e.g. floating gem, ad_gem) under active development
 - Handler modules: `handle_game_over`, `handle_home_screen`, and others (function-based, migrating to class-based)
-- Tap injection split between `tap_dispatcher` (background taps) and `tap_now` / `swipe_now` / `tap_label_now` (immediate)
+- Tap injection split between `tap_dispatcher` (background taps) and the unified helpers in `core/tap.py` for immediate actions (`safe_tap`, `tap_if_visible`, `tap_blind`)
 - Watchdog monitors for backgrounded app, restarts or re-foregrounds game if needed
 - Tools: `crop_region.py`, `gesture_logger.py`, `tune_gesture.py`
 - Resource monitoring: `log_meminfo.py` logs memory/thermal stats and logcat data
@@ -72,4 +72,3 @@ While the current automation framework is purpose-built for *The Tower*, design 
 - Gesture data and one-off tooling lives in `tools/`
 - clickmap schema detailed by `config/clickmap_schema.md`
 - state_definitions schema in `config/state_definitions_schema.md`
-

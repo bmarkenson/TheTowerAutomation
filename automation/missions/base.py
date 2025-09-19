@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 import time
+from core.floating_button_detector import detect_floating_buttons
 
 
 @dataclass
@@ -44,3 +45,13 @@ class BaseMission:
 
     def is_complete(self, ctx: MissionContext) -> bool:
         return False
+
+    def _fire_floating_if_visible(self, screen, button_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Helper to detect a floating button and return a 'fire_floating' action if it's visible.
+        Returns the action dictionary on success, otherwise None.
+        """
+        buttons = detect_floating_buttons(screen)
+        if any(b["name"] == button_name for b in buttons):
+            return {"type": "fire_floating", "name": button_name}
+        return None

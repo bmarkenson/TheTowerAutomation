@@ -4,7 +4,6 @@ import time
 from typing import Dict, Any, List
 from utils.logger import log
 from .base import BaseMission, MissionContext
-from core.floating_button_detector import detect_floating_buttons
 
 
 class DemonModeMission(BaseMission):
@@ -23,16 +22,12 @@ class DemonModeMission(BaseMission):
             return None
         st = ctx.data.get("demon") or {}
         if not st.get("fired"):
-            # Only fire when the button is available on screen
-            buttons = detect_floating_buttons(screen)
-            if any(b["name"] == "floating_buttons.demon_mode" for b in buttons):
+            action = self._fire_floating_if_visible(screen, "floating_buttons.demon_mode")
+            if action:
                 log("[MISSION demon] Firing Demon Mode", "ACTION")
                 st["fired"] = True
                 st["active_until"] = time.time() + self.duration_seconds
                 ctx.data["demon"] = st
-                return [{"type": "fire_floating", "name": "floating_buttons.demon_mode"}]
-            else:
-                return None
+                return [action]
         # Already fired: nothing else to do in this basic mission
         return None
-

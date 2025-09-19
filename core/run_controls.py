@@ -4,8 +4,8 @@ import time
 from utils.logger import log
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
-from core.clickmap_access import tap_now
-from core.label_tapper import tap_label_now, is_visible
+from core.tap import tap_if_visible, safe_tap
+from core.label_tapper import is_visible
 
 
 def ensure_menu_open(timeout_s: float = 5.0) -> bool:
@@ -24,23 +24,20 @@ def ensure_menu_open(timeout_s: float = 5.0) -> bool:
         if "MENU_OPEN" in (det.get("overlays") or []):
             return True
         # Try an explicit menu toggle first (restored in clickmap under navigation)
-        if tap_label_now("navigation.toggle_menu"):
+        if tap_if_visible("navigation.toggle_menu", retries=1):
             time.sleep(0.6)
             # recheck next loop
             continue
         # Fallback to dot-path direct tap if label match fails
-        try:
-            tap_now("navigation.toggle_menu")
+        if safe_tap("navigation.toggle_menu", require_visible=False, dispatch='now'):
             time.sleep(0.6)
             continue
-        except Exception:
-            pass
         # Try tapping End Round label directly; some UIs accept it even if not open
-        if tap_label_now("overlays.end_round"):
+        if tap_if_visible("overlays.end_round", retries=1):
             time.sleep(0.6)
             return True
         # Nudge UI: tap a bottom nav (attack) to stabilize, then retry
-        tap_now("navigation.goto_attack")
+        safe_tap("navigation.goto_attack", require_visible=False, dispatch='now')
         time.sleep(0.6)
     return False
 
@@ -56,9 +53,9 @@ def restart_run(timeout_s: float = 12.0) -> bool:
     if not ensure_menu_open(timeout_s=timeout_s / 2):
         log("[RESTART] Failed to open menu; proceeding to attempt End Round", "WARN")
     # Tap End Round and confirm
-    ok = tap_label_now("overlays.end_round")
+    ok = tap_if_visible("overlays.end_round", retries=1)
     time.sleep(0.6)
-    ok_yes = tap_label_now("buttons.yes:end_round")
+    ok_yes = tap_if_visible("buttons.yes:end_round", retries=1)
     if not ok and not ok_yes:
         log("[RESTART] End Round/Yes taps may not have been accepted", "WARN")
     return True

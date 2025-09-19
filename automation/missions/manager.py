@@ -75,23 +75,20 @@ class MissionManager:
                 log(f"[MISSION] tick error: {e}", "ERROR")
 
         # Strategy actions only when RUNNING
+        strategy_actions = []
         if detection.get("state") == "RUNNING" and self.strategy:
             try:
-                actions = self.strategy.tick(self.ctx, screen, detection)
+                sa = self.strategy.tick(self.ctx, screen, detection)
+                if sa:
+                    strategy_actions = list(sa)
             except Exception as e:
                 log(f"[STRATEGY] tick error: {e}", "ERROR")
-                actions = []
+
+        # Combine and execute all actions
+        all_actions = mission_actions + strategy_actions
+        if all_actions:
             try:
-                # Run mission actions first, then strategy actions
-                if mission_actions:
-                    execute_actions(screen, mission_actions)
-                execute_actions(screen, actions)
+                # Mission actions run first, then strategy actions
+                execute_actions(screen, all_actions)
             except Exception as e:
                 log(f"[EXEC] error: {e}", "ERROR")
-        else:
-            # If not RUNNING but mission produced actions (rare), still allow
-            if mission_actions:
-                try:
-                    execute_actions(screen, mission_actions)
-                except Exception as e:
-                    log(f"[EXEC] error: {e}", "ERROR")

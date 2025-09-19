@@ -6,7 +6,18 @@ This document defines the expected behavior, purpose, and constraints around inp
 
 ## 🔧 Input Injection Overview
 
-There are **two distinct input paths** for injecting taps or swipes into the Android game:
+There are **two distinct input paths** for injecting taps or swipes into the Android game, with a new unified helper for visibility-aware taps:
+
+### 0. `safe_tap()` (new canonical helper)
+- **Module:** `core/tap.py`
+- **Functions:** `safe_tap`, `tap_if_visible`, `tap_blind`
+- **Purpose:**
+  - Normalize tap behavior: visibility-first by default, optional retries, consistent logging
+  - Route to immediate or queued path via `dispatch='now'|'queue'`
+- **Examples:**
+  - `tap_if_visible("buttons.retry:game_over", retries=1)`
+  - `safe_tap("navigation.goto_store", require_visible=True, dispatch='now')`
+  - `tap_blind("gesture_targets.floating_gem_blind_tap", dispatch='queue')`
 
 ### 1. `tap_dispatcher`
 - **Function:** `tap(x, y, label=None)`
@@ -39,7 +50,7 @@ There are **two distinct input paths** for injecting taps or swipes into the And
 ## 🚫 DO NOT
 
 - ❌ Mix both systems in the same handler without clear intent
-- ❌ Use `tap_now()` for routine clicks — prefer `tap()`
+- ❌ Use `tap_now()` for routine clicks — prefer `safe_tap()` or `tap()` as appropriate
 - ❌ Call `adb` directly outside these wrappers
 - ❌ Fire multiple tap paths concurrently on different threads without conflict management
 
@@ -47,8 +58,10 @@ There are **two distinct input paths** for injecting taps or swipes into the And
 
 ## ✅ DO
 
-- ✅ Use `tap_dispatcher.tap()` for background taps, keepalives, low-urgency triggers
-- ✅ Use `tap_now()` / `swipe_now()` for state transitions, modal dismissals, or cases needing screen response
+- ✅ Use `tap_if_visible()`/`safe_tap(require_visible=True)` for state transitions and modal dismissals
+- ✅ Use `tap_dispatcher.tap()` or `tap_blind()` for background taps, keepalives, low-urgency triggers
+- ✅ Use `swipe_now()` for immediate swipes that are part of a controlled flow
+- ✅ Always confirm screen state before issuing immediate tap
 - ✅ Always confirm screen state before issuing immediate tap
 - ✅ Log input events meaningfully (label, position, type)
 
@@ -60,17 +73,18 @@ There are **two distinct input paths** for injecting taps or swipes into the And
 ```python
 # OK — queued
 from core.tap_dispatcher import tap
-
 tap(100, 200, label="keepalive")
 ```
 
 ### Example 2: Game Over Dismiss Button
 ```python
-# OK — immediate
-from core.clickmap_access import tap_now
+# Preferred — immediate, visibility-gated with retry
+from core.tap import tap_if_visible
+tap_if_visible("buttons.retry:game_over", retries=1)
 
-if match_region("game_over_button"):
-    tap_now("game_over_button")
+# Alternative — strict immediate without retry
+from core.tap import safe_tap
+safe_tap("buttons.retry:game_over", require_visible=True, dispatch='now')
 ```
 
 ---

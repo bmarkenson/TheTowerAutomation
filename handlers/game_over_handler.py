@@ -4,7 +4,7 @@ from core.ss_capture import capture_adb_screenshot
 from core.run_state import AUTOMATION, ExecMode
 from core.clickmap_access import tap_now, swipe_now
 from core.adb_utils import adb_shell
-from core.label_tapper import tap_label_now
+from core.tap import tap_if_visible
 from utils.wave_detector import set_wave_hint
 # Note: OCR fallback for More Stats is currently disabled; keeping imports out.
 import time
@@ -51,7 +51,7 @@ def handle_game_over(*, capture_stats: bool = True):
         save_image(img_game_stats, f"{session_id}_game_stats")
 
         # Step 1: Tap "More Stats"
-        if not tap_label_now("buttons.more_stats:game_over"):
+        if not tap_if_visible("buttons.more_stats:game_over", retries=1):
             return _abort_handler("Tap More Stats", session_id)
 
         time.sleep(1.5)
@@ -75,7 +75,7 @@ def handle_game_over(*, capture_stats: bool = True):
         _save_stats_text(session_id)
 
         # Step 6: Close More Stats
-        if not tap_label_now("buttons.close:more_stats"):
+        if not tap_if_visible("buttons.close:more_stats", retries=1):
             return _abort_handler("Close More Stats", session_id)
 
         time.sleep(1.2)
@@ -92,7 +92,7 @@ def handle_game_over(*, capture_stats: bool = True):
         log("Mode = HOME (not implemented yet)", "INFO")
         return  # Exit cleanly
     else:
-        if not tap_label_now("buttons.retry:game_over"):
+        if not tap_if_visible("buttons.retry:game_over", retries=1):
             return _abort_handler("Retry Game", session_id)
         # After a successful retry the wave counter resets to 1; reset the hint.
         set_wave_hint(1)

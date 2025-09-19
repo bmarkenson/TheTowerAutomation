@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Iterable, Dict, Any
 from utils.logger import log
-from core.label_tapper import tap_label_now
+from core.tap import tap_if_visible
 from core.floating_button_detector import detect_floating_buttons, tap_floating_button
 from core.run_controls import restart_run
 
@@ -29,7 +29,7 @@ def execute_actions(screen, actions: Iterable[Dict[str, Any]]) -> None:
             if t == "tap_label":
                 key = act.get("key")
                 if key:
-                    tap_label_now(key)
+                    tap_if_visible(key)
             elif t == "restart_run":
                 restart_run()
             elif t == "fire_floating":

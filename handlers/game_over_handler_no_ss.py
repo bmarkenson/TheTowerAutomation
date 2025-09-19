@@ -2,8 +2,7 @@
 from utils.logger import log
 from core.ss_capture import capture_adb_screenshot
 from core.run_state import AUTOMATION, ExecMode
-from core.clickmap_access import tap_now, swipe_now
-from core.label_tapper import tap_label_now
+from core.tap import tap_if_visible
 import time
 import os
 import cv2
@@ -42,7 +41,7 @@ def handle_game_over():
     session_id = _make_session_id()
     log(f"Handling GAME OVER — Session: {session_id}", "INFO")
 
-    if not tap_label_now("buttons.retry:game_over"):
+    if not tap_if_visible("buttons.retry:game_over", retries=1):
         return _abort_handler("Retry Game", session_id)
 
     time.sleep(2)

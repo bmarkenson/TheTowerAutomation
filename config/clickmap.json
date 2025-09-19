@@ -88,6 +88,14 @@
         "w": 479,
         "h": 312
       }
+    },
+    "upgrade_menu_area": {
+      "match_region": {
+        "x": 4,
+        "y": 1155,
+        "w": 1055,
+        "h": 662
+      }
     }
   },
   "gesture_targets": {
@@ -716,6 +724,20 @@
         "w": 57,
         "h": 53
       },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
+    "uw_toggle_to_off": {
+      "match_template": "buttons/uw_toggle_to_off.png",
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
+    "uw_toggle_to_on": {
+      "match_template": "buttons/uw_toggle_to_on.png",
       "match_threshold": 0.9,
       "roles": [
         "button"
