@@ -8,11 +8,13 @@ import sys
 from typing import Dict, Optional, Sequence, Tuple
 
 import cv2
+import numpy as np
 
 if "." not in sys.path:
     sys.path.append(".")
 
 from core.upgrade_box_detector import annotate_boxes, detect_visible_boxes
+from core.upgrade_navigation import find_upgrade
 
 _EXPECTED_COUNTS: Dict[str, Tuple[int, int]] = {
     "upgrade_test.png": (2, 1),
@@ -265,7 +267,62 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         action="store_true",
         help="Run detection against the known sample set and verify expected counts",
     )
+    parser.add_argument(
+        "--find-upgrade",
+        help="Locate an upgrade by name using optional scrolling (menu inferred if omitted)",
+    )
+    parser.add_argument(
+        "--max-scrolls",
+        type=int,
+        default=12,
+        help="Maximum scroll attempts when using --find-upgrade",
+    )
     args = parser.parse_args(argv)
+
+    if args.find_upgrade:
+        if args.image.lower() != "adb":
+            screenshot = cv2.imread(args.image)
+            if screenshot is None:
+                print(json.dumps({"error": f"failed to read {args.image}"}))
+                return 2
+
+            def capture_stub() -> Optional[np.ndarray]:
+                return screenshot
+
+            result = find_upgrade(
+                args.menu,
+                args.find_upgrade,
+                max_scrolls=0,
+                capture_fn=capture_stub,
+                ensure_menu=False,
+                swipe_fn=lambda _: None,
+                sleep_fn=lambda _: None,
+            )
+        else:
+            result = find_upgrade(
+                args.menu,
+                args.find_upgrade,
+                max_scrolls=args.max_scrolls,
+            )
+
+        if result is None:
+            print(json.dumps({"result": None, "error": "upgrade not found"}))
+            return 1
+
+        payload = {
+            "menu": result.menu,
+            "column": result.column,
+            "index": result.index,
+            "label": result.label,
+            "box": {
+                "rect": result.box.rect,
+                "text": result.box.text,
+                "affordability": result.box.affordability,
+                "toggles": result.box.toggles,
+            },
+        }
+        print(json.dumps(payload))
+        return 0
 
     if args.verify_all:
         if args.annotate:
