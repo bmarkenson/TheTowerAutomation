@@ -55,6 +55,9 @@ class UpgradeSearchResult:
     label: str
     box: UpgradeBox
     screenshot: np.ndarray
+    purchase_attempted: bool = False
+    purchase_sent: bool = False
+    purchase_reason: Optional[str] = None
 
 
 _MENU_ALIAS = {
@@ -196,6 +199,88 @@ def _ensure_menu(menu: str, *, capture_fn: Callable[[], Optional[np.ndarray]], m
     return screenshot
 
 
+def _purchase_tap_coords(rect: Tuple[int, int, int, int]) -> Tuple[int, int]:
+    x, y, w, h = rect
+    if w <= 0 or h <= 0:
+        raise ValueError("Invalid upgrade box dimensions for tap")
+
+    tap_x = x + min(w - 12, max(28, int(w * 0.78)))
+    tap_y = y + min(h - 12, max(24, int(h * 0.68)))
+    return tap_x, tap_y
+
+
+def _verify_target_box(
+    *,
+    menu: str,
+    column: str,
+    target_text: str,
+    reference_rect: Tuple[int, int, int, int],
+    capture_fn: Callable[[], Optional[np.ndarray]],
+    fallback_screenshot: np.ndarray,
+) -> Tuple[UpgradeBox, np.ndarray]:
+    """Reconfirm the target upgrade is still visible before tapping."""
+    attempts: List[Optional[np.ndarray]] = [capture_fn(), fallback_screenshot]
+
+    for shot in attempts:
+        if shot is None:
+            continue
+        boxes_by_col = detect_visible_boxes(shot, menu=menu)
+        for candidate in boxes_by_col.get(column, []):
+            if (candidate.text or "").lower() != target_text:
+                continue
+            cx, cy, cw, ch = candidate.rect
+            rx, ry, rw, rh = reference_rect
+            if abs(cx - rx) <= 20 and abs(cy - ry) <= 20:
+                return candidate, shot
+
+    raise RuntimeError("Unable to confirm target upgrade before purchase tap")
+
+
+def _validate_cost_crop(image: np.ndarray, tap_x: int, tap_y: int, rect: Tuple[int, int, int, int]) -> None:
+    crop_w = max(60, min(rect[2] // 2, 160))
+    crop_h = max(50, min(rect[3] // 2, 120))
+    crop_x = max(0, tap_x - crop_w // 2)
+    crop_y = max(0, tap_y - crop_h // 2)
+    crop = image[crop_y : crop_y + crop_h, crop_x : crop_x + crop_w]
+
+    if crop.size == 0:
+        raise RuntimeError("Purchase tap validation failed: empty crop")
+
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    val = hsv[:, :, 2]
+    if float(val.mean()) < 40:
+        raise RuntimeError("Purchase tap validation failed: area too dark")
+
+
+def _tap_purchase_area(
+    box: UpgradeBox,
+    *,
+    menu: str,
+    column: str,
+    target_text: str,
+    capture_fn: Callable[[], Optional[np.ndarray]],
+    fallback_screenshot: np.ndarray,
+) -> None:
+    confirmed_box, image = _verify_target_box(
+        menu=menu,
+        column=column,
+        target_text=target_text,
+        reference_rect=box.rect,
+        capture_fn=capture_fn,
+        fallback_screenshot=fallback_screenshot,
+    )
+
+    tap_x, tap_y = _purchase_tap_coords(confirmed_box.rect)
+    _validate_cost_crop(image, tap_x, tap_y, confirmed_box.rect)
+
+    log(
+        f"[UPGRADE_NAV] Tapping purchase area at ({tap_x},{tap_y}) for '{confirmed_box.text or 'unknown'}'",
+        "ACTION",
+    )
+
+    adb_shell(["input", "tap", str(tap_x), str(tap_y)])
+
+
 def _select_span(
     direction: str,
     visible_indices: List[int],
@@ -229,6 +314,7 @@ def find_upgrade(
     sleep_fn: Callable[[float], None] = time.sleep,
     swipe_fn: Callable[[str, SwipeSpan], None] = _perform_swipe,
     ensure_menu: bool = True,
+    attempt_purchase: bool = False,
 ) -> Optional[UpgradeSearchResult]:
     """Locate a specific upgrade tile by menu/label, scrolling as needed.
 
@@ -273,6 +359,41 @@ def find_upgrade(
                 match_box = box
 
         if match_box is not None:
+            purchase_attempted = False
+            purchase_sent = False
+            purchase_reason: Optional[str] = None
+
+            if attempt_purchase:
+                purchase_attempted = True
+                if menu_key == "ultimate weapons":
+                    purchase_reason = "menu_has_toggles"
+                else:
+                    status = match_box.affordability or "unknown"
+                    if status == "affordable":
+                        try:
+                            _tap_purchase_area(
+                                match_box,
+                                menu=menu_key,
+                                column=column,
+                                target_text=target_label_norm,
+                                capture_fn=capture_fn,
+                                fallback_screenshot=screenshot,
+                            )
+                            purchase_sent = True
+                            purchase_reason = "tapped_cost_panel"
+                        except Exception as exc:
+                            purchase_reason = f"tap_failed:{exc}"
+                            log(
+                                f"[UPGRADE_NAV] Purchase tap failed for '{match_box.text}': {exc}",
+                                "WARN",
+                            )
+                    else:
+                        purchase_reason = f"status={status}"
+                        log(
+                            f"[UPGRADE_NAV] Skipping purchase for '{match_box.text}' (status={status})",
+                            "INFO",
+                        )
+
             return UpgradeSearchResult(
                 menu=menu_key,
                 column=column,
@@ -280,6 +401,9 @@ def find_upgrade(
                 label=manifest[column][target_index],
                 box=match_box,
                 screenshot=screenshot,
+                purchase_attempted=purchase_attempted,
+                purchase_sent=purchase_sent,
+                purchase_reason=purchase_reason,
             )
 
         if attempt >= max_scrolls:

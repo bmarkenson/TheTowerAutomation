@@ -101,6 +101,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         default=12,
         help="Maximum scroll attempts when using --find-upgrade",
     )
+    parser.add_argument(
+        "--buy-if-affordable",
+        action="store_true",
+        help="Attempt to tap the upgrade's purchase area when it is affordable",
+    )
     args = parser.parse_args(argv)
 
     if args.find_upgrade:
@@ -112,6 +117,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             args.menu,
             args.find_upgrade,
             max_scrolls=args.max_scrolls,
+            attempt_purchase=args.buy_if_affordable,
         )
 
         if result is None:
@@ -128,6 +134,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "text": result.box.text,
                 "affordability": result.box.affordability,
                 "toggles": result.box.toggles,
+            },
+            "purchase": {
+                "attempted": result.purchase_attempted,
+                "sent": result.purchase_sent,
+                "reason": result.purchase_reason,
             },
         }
         print(json.dumps(payload))
