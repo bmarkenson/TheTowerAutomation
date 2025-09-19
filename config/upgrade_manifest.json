@@ -53,9 +53,10 @@
         "Coins Per Kill Bonus",
         "Free Attack Upgrade",
         "Free Utility Upgrade",
+        "Recovery Amount",
         "Package Chance",
-        "Enemy Health Level Skip",
-        "Recovery Amount"
+        "Enemy Health Level Skip"
+
       ],
       "right": [
         "Cash Per Wave",

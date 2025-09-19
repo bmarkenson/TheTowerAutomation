@@ -4,6 +4,7 @@ import time
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Literal
 
 import cv2  # type: ignore
 import numpy as np  # type: ignore
@@ -19,6 +20,31 @@ from utils.logger import log
 # Default timing constants
 _SCROLL_SETTLE_SEC = 0.45
 _MAX_SCROLL_ATTEMPTS = 12
+
+SwipeSpan = Literal["micro", "short", "medium", "long", "extended"]
+
+_SWIPE_PROFILES: Dict[SwipeSpan, Dict[str, Tuple[float, float]]] = {
+    "micro": {
+        "towards_top": (0.46, 0.54),
+        "towards_bottom": (0.54, 0.46),
+    },
+    "short": {
+        "towards_top": (0.42, 0.58),
+        "towards_bottom": (0.58, 0.42),
+    },
+    "medium": {
+        "towards_top": (0.36, 0.64),
+        "towards_bottom": (0.64, 0.36),
+    },
+    "long": {
+        "towards_top": (0.32, 0.68),
+        "towards_bottom": (0.68, 0.32),
+    },
+    "extended": {
+        "towards_top": (0.28, 0.72),
+        "towards_bottom": (0.72, 0.28),
+    },
+}
 
 
 @dataclass
@@ -112,7 +138,7 @@ def _manifest_entry(menu: Optional[str], label: str) -> Tuple[str, int, str]:
     raise ValueError(f"Label '{label}' not found in manifest menu '{menu}'")
 
 
-def _perform_swipe(direction: str, extended: bool = False) -> None:
+def _perform_swipe(direction: str, span: SwipeSpan = "short") -> None:
     entry = resolve_dot_path("_shared_match_regions.upgrade_menu_area")
     if not entry or "match_region" not in entry:
         raise RuntimeError("upgrade_menu_area region missing from clickmap")
@@ -122,23 +148,18 @@ def _perform_swipe(direction: str, extended: bool = False) -> None:
     w = int(region["w"])
     h = int(region["h"])
 
-    start_x = x + w // 2
-    if direction == "towards_top":
-        if extended:
-            start_ratio, end_ratio = 0.24, 0.76
-        else:
-            start_ratio, end_ratio = 0.32, 0.62
-        start_y = y + int(h * start_ratio)
-        end_y = y + int(h * end_ratio)
-    elif direction == "towards_bottom":
-        if extended:
-            start_ratio, end_ratio = 0.76, 0.24
-        else:
-            start_ratio, end_ratio = 0.68, 0.38
-        start_y = y + int(h * start_ratio)
-        end_y = y + int(h * end_ratio)
-    else:
+    profile = _SWIPE_PROFILES.get(span)
+    if profile is None or direction not in profile:
+        raise ValueError(f"Unsupported swipe configuration: direction={direction}, span={span}")
+
+    start_ratio, end_ratio = profile[direction]
+
+    if direction not in ("towards_top", "towards_bottom"):
         raise ValueError(f"Unknown scroll direction '{direction}'")
+
+    start_x = x + w // 2
+    start_y = y + int(h * start_ratio)
+    end_y = y + int(h * end_ratio)
 
     adb_shell([
         "input",
@@ -175,6 +196,30 @@ def _ensure_menu(menu: str, *, capture_fn: Callable[[], Optional[np.ndarray]], m
     return screenshot
 
 
+def _select_span(
+    direction: str,
+    visible_indices: List[int],
+    target_index: int,
+) -> SwipeSpan:
+    if not visible_indices:
+        return "long"
+
+    if direction == "towards_top":
+        distance = visible_indices[0] - target_index
+    else:
+        distance = target_index - visible_indices[-1]
+
+    distance = max(distance, 0)
+
+    if distance <= 1:
+        return "micro"
+    if distance <= 2:
+        return "short"
+    if distance <= 4:
+        return "medium"
+    return "long"
+
+
 def find_upgrade(
     menu: Optional[str],
     label: str,
@@ -182,7 +227,7 @@ def find_upgrade(
     max_scrolls: int = _MAX_SCROLL_ATTEMPTS,
     capture_fn: Callable[[], Optional[np.ndarray]] = capture_adb_screenshot,
     sleep_fn: Callable[[float], None] = time.sleep,
-    swipe_fn: Callable[[str, bool], None] = _perform_swipe,
+    swipe_fn: Callable[[str, SwipeSpan], None] = _perform_swipe,
     ensure_menu: bool = True,
 ) -> Optional[UpgradeSearchResult]:
     """Locate a specific upgrade tile by menu/label, scrolling as needed.
@@ -257,20 +302,34 @@ def find_upgrade(
         state_key = tuple(visible_indices)
         if state_key and last_state == state_key and last_direction == direction:
             repeat_count += 1
-            if repeat_count > 1:
-                log("[UPGRADE_NAV] No progress after extended scrolling; aborting", "WARN")
-                break
-            swipe_fn(direction, True)
-            sleep_fn(_SCROLL_SETTLE_SEC)
-            screenshot = capture_fn()
-            if screenshot is None:
+
+            at_bottom = (
+                direction == "towards_bottom"
+                and visible_indices
+                and visible_indices[-1] == len(manifest[column]) - 1
+            )
+            at_top = (
+                direction == "towards_top"
+                and visible_indices
+                and visible_indices[0] == 0
+            )
+
+            if not (at_bottom or at_top) and repeat_count <= 3:
+                swipe_fn(direction, "extended")
+                sleep_fn(_SCROLL_SETTLE_SEC)
                 screenshot = capture_fn()
                 if screenshot is None:
-                    raise RuntimeError("Failed to capture screenshot after scrolling")
-            last_state = state_key
-            last_direction = direction
-            continue
-        repeat_count = 0
+                    screenshot = capture_fn()
+                    if screenshot is None:
+                        raise RuntimeError("Failed to capture screenshot after scrolling")
+                last_state = state_key
+                last_direction = direction
+                continue
+
+            log("[UPGRADE_NAV] No progress after scrolling; aborting", "WARN")
+            break
+        else:
+            repeat_count = 0
 
         # If we're trying to move down and already have the bottom-most entries, stop.
         if (
@@ -287,7 +346,8 @@ def find_upgrade(
         last_state = state_key if state_key else None
         last_direction = direction
 
-        swipe_fn(direction, False)
+        span = _select_span(direction, visible_indices, target_index)
+        swipe_fn(direction, span)
         sleep_fn(_SCROLL_SETTLE_SEC)
         screenshot = capture_fn()
         if screenshot is None:
