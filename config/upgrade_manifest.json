@@ -54,7 +54,7 @@
         "Free Attack Upgrade",
         "Free Utility Upgrade",
         "Package Chance",
-        "EHLS",
+        "Enemy Health Level Skip",
         "Recovery Amount"
       ],
       "right": [
@@ -63,7 +63,7 @@
         "Free Defense Upgrade",
         "Interest Per Wave",
         "Max Recovery",
-        "EALS"
+        "Enemy Attack Level Skip"
       ]
     },
     "ultimate weapons": {

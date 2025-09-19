@@ -8,7 +8,6 @@ import sys
 from typing import Dict, Optional, Sequence, Tuple
 
 import cv2
-import numpy as np
 
 if "." not in sys.path:
     sys.path.append(".")
@@ -259,7 +258,7 @@ def _run_verification() -> int:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Detect visible upgrade boxes")
-    parser.add_argument("--image", default="screenshots/latest.png", help="Screenshot path or 'adb'")
+    parser.add_argument("--image", default="adb", help="Screenshot path or 'adb'")
     parser.add_argument("--annotate", help="Optional output path for annotated image")
     parser.add_argument("--menu", help="Optional upgrade menu context (attack/defense/utility)")
     parser.add_argument(
@@ -281,29 +280,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if args.find_upgrade:
         if args.image.lower() != "adb":
-            screenshot = cv2.imread(args.image)
-            if screenshot is None:
-                print(json.dumps({"error": f"failed to read {args.image}"}))
-                return 2
+            print(json.dumps({"error": "--find-upgrade requires live capture; use --image adb"}))
+            return 2
 
-            def capture_stub() -> Optional[np.ndarray]:
-                return screenshot
-
-            result = find_upgrade(
-                args.menu,
-                args.find_upgrade,
-                max_scrolls=0,
-                capture_fn=capture_stub,
-                ensure_menu=False,
-                swipe_fn=lambda _: None,
-                sleep_fn=lambda _: None,
-            )
-        else:
-            result = find_upgrade(
-                args.menu,
-                args.find_upgrade,
-                max_scrolls=args.max_scrolls,
-            )
+        result = find_upgrade(
+            args.menu,
+            args.find_upgrade,
+            max_scrolls=args.max_scrolls,
+        )
 
         if result is None:
             print(json.dumps({"result": None, "error": "upgrade not found"}))

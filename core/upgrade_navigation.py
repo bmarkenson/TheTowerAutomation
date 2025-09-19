@@ -124,11 +124,11 @@ def _perform_swipe(direction: str) -> None:
 
     start_x = x + w // 2
     if direction == "towards_top":
-        start_y = y + int(h * 0.75)
-        end_y = y + int(h * 0.25)
+        start_y = y + int(h * 0.32)
+        end_y = y + int(h * 0.62)
     elif direction == "towards_bottom":
-        start_y = y + int(h * 0.25)
-        end_y = y + int(h * 0.75)
+        start_y = y + int(h * 0.68)
+        end_y = y + int(h * 0.38)
     else:
         raise ValueError(f"Unknown scroll direction '{direction}'")
 
@@ -197,7 +197,8 @@ def find_upgrade(
     if screenshot is None:
         raise RuntimeError("Unable to capture screenshot for upgrade navigation")
 
-    seen_states: set[Tuple[str, ...]] = set()
+    last_state: Optional[Tuple[int, ...]] = None
+    last_direction: Optional[str] = None
 
     for attempt in range(max_scrolls + 1):
         boxes_by_col = detect_visible_boxes(screenshot, menu=menu_key)
@@ -215,13 +216,6 @@ def find_upgrade(
             visible_indices.append(idx)
             if box.text.lower() == target_label_norm:
                 match_box = box
-
-        state_key = tuple(str(idx) for idx in visible_indices)
-        if state_key:
-            if state_key in seen_states and attempt > 0:
-                log("[UPGRADE_NAV] Scroll appears stuck; aborting search", "WARN")
-                return None
-            seen_states.add(state_key)
 
         if match_box is not None:
             return UpgradeSearchResult(
@@ -247,8 +241,28 @@ def find_upgrade(
                 break
             direction = "towards_bottom"
         else:
-            # target index between visible but not matched: might be OCR mismatch
+            mid = visible_indices[0] + (visible_indices[-1] - visible_indices[0]) // 2
+            direction = "towards_top" if target_index <= mid else "towards_bottom"
+
+        state_key = tuple(visible_indices)
+        if state_key and last_state == state_key and last_direction == direction:
+            log("[UPGRADE_NAV] No progress after scrolling; aborting", "WARN")
             break
+
+        # If we're trying to move down and already have the bottom-most entries, stop.
+        if (
+            direction == "towards_bottom"
+            and visible_indices
+            and visible_indices[-1] == len(manifest[column]) - 1
+        ):
+            break
+
+        # Likewise for moving up at the very top.
+        if direction == "towards_top" and visible_indices and visible_indices[0] == 0:
+            break
+
+        last_state = state_key if state_key else None
+        last_direction = direction
 
         swipe_fn(direction)
         sleep_fn(_SCROLL_SETTLE_SEC)
