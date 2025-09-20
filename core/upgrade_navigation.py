@@ -15,6 +15,11 @@ from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
 from core.tap import safe_tap
 from core.upgrade_box_detector import UpgradeBox, detect_visible_boxes
+from core.upgrade_buy_quantity import (
+    BuyQuantity,
+    ensure_buy_quantity,
+    detect_current_buy_quantity,
+)
 from utils.logger import log
 
 # Default timing constants
@@ -58,6 +63,7 @@ class UpgradeSearchResult:
     purchase_attempted: bool = False
     purchase_sent: bool = False
     purchase_reason: Optional[str] = None
+    buy_quantity: Optional[BuyQuantity] = None
 
 
 _MENU_ALIAS = {
@@ -305,6 +311,55 @@ def _select_span(
     return "long"
 
 
+def apply_menu_buy_quantities(
+    menu_quantities: Dict[str, BuyQuantity],
+    *,
+    capture_fn: Callable[[], Optional[np.ndarray]] = capture_adb_screenshot,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> Dict[str, BuyQuantity]:
+    if not menu_quantities:
+        return {}
+
+    results: Dict[str, BuyQuantity] = {}
+
+    for menu_name, quantity in menu_quantities.items():
+        menu_key = _normalize_menu(menu_name)
+        if menu_key is None or menu_key not in _MENU_NAV:
+            raise ValueError(f"Unsupported menu '{menu_name}'")
+
+        screenshot = _ensure_menu(menu_key, capture_fn=capture_fn)
+        if screenshot is None:
+            screenshot = capture_fn()
+        if screenshot is None:
+            raise RuntimeError(f"Unable to capture screenshot for menu '{menu_key}'")
+
+        try:
+            screenshot = ensure_buy_quantity(
+                quantity,
+                screenshot=screenshot,
+                capture_fn=capture_fn,
+                sleep_fn=sleep_fn,
+            )
+        except Exception as exc:
+            log(
+                f"[UPGRADE_NAV] Failed to set buy quantity '{quantity}' on menu '{menu_key}': {exc}",
+                "WARN",
+            )
+            raise
+
+        confirmed = detect_current_buy_quantity(screenshot=screenshot)
+        if confirmed is None:
+            log(
+                f"[UPGRADE_NAV] Unable to confirm buy quantity visually; assuming '{quantity}'",
+                "WARN",
+            )
+            confirmed = quantity
+        results[menu_key] = confirmed
+        sleep_fn(0.15)
+
+    return results
+
+
 def find_upgrade(
     menu: Optional[str],
     label: str,
@@ -315,6 +370,8 @@ def find_upgrade(
     swipe_fn: Callable[[str, SwipeSpan], None] = _perform_swipe,
     ensure_menu: bool = True,
     attempt_purchase: bool = False,
+    menu_buy_quantities: Optional[Dict[str, BuyQuantity]] = None,
+    purchase_quantity: Optional[BuyQuantity] = None,
 ) -> Optional[UpgradeSearchResult]:
     """Locate a specific upgrade tile by menu/label, scrolling as needed.
 
@@ -340,6 +397,23 @@ def find_upgrade(
     last_direction: Optional[str] = None
 
     repeat_count = 0
+
+    desired_quantity: Optional[str] = None
+    if purchase_quantity:
+        desired_quantity = purchase_quantity
+    elif menu_buy_quantities and menu_key in menu_buy_quantities:
+        desired_quantity = menu_buy_quantities[menu_key]
+
+    if desired_quantity:
+        try:
+            screenshot = ensure_buy_quantity(
+                desired_quantity,
+                screenshot=screenshot,
+                capture_fn=capture_fn,
+                sleep_fn=sleep_fn,
+            )
+        except Exception as exc:
+            log(f"[UPGRADE_NAV] Failed to set buy quantity '{desired_quantity}': {exc}", "WARN")
 
     for attempt in range(max_scrolls + 1):
         boxes_by_col = detect_visible_boxes(screenshot, menu=menu_key)
@@ -404,6 +478,7 @@ def find_upgrade(
                 purchase_attempted=purchase_attempted,
                 purchase_sent=purchase_sent,
                 purchase_reason=purchase_reason,
+                buy_quantity=desired_quantity,
             )
 
         if attempt >= max_scrolls:
@@ -482,4 +557,4 @@ def find_upgrade(
     return None
 
 
-__all__ = ["UpgradeSearchResult", "find_upgrade"]
+__all__ = ["UpgradeSearchResult", "find_upgrade", "apply_menu_buy_quantities"]

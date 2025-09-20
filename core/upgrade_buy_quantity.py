@@ -1,0 +1,265 @@
+from __future__ import annotations
+
+import difflib
+import time
+from typing import Callable, Dict, Optional, Tuple
+from typing import Literal, cast
+
+import cv2  # type: ignore
+import numpy as np  # type: ignore
+
+from core.adb_utils import adb_shell
+from core.clickmap_access import resolve_dot_path
+from core.ss_capture import capture_adb_screenshot
+from utils.logger import log
+from utils.ocr_utils import preprocess_binary, ocr_text_and_conf
+from pathlib import Path
+
+BuyQuantity = Literal["max", "x100", "x10", "x5", "x1"]
+
+
+_BUY_ALLOWED = {"max", "x100", "x10", "x5", "x1"}
+_BUTTON_CENTER_X_RATIOS: Dict[str, Tuple[float, ...]] = {
+    "max": (0.2559, 0.9227),
+    "x100": (0.3886,),
+    "x10": (0.5213,),
+    "x5": (0.6540,),
+    "x1": (0.7867,),
+}
+_BUTTON_ROW_CENTER_Y_RATIO = 0.075
+_COLLAPSED_CENTER_X_RATIO = 0.9227
+_COLLAPSED_CENTER_Y_RATIO = 0.073
+_BUY_COLLAPSED_TOP_RATIO = 0.02
+_BUY_COLLAPSED_BOTTOM_RATIO = 0.13
+_BUY_COLLAPSED_RIGHT_RATIO = 0.97
+_BUY_COLLAPSED_WIDTH_RATIO = 0.22
+_OCR_KERNEL = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+_DEBUG_DIR = Path("debug/buy_quantity")
+
+
+def _save_debug(image: np.ndarray, name: str) -> None:
+    try:
+        _DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(_DEBUG_DIR / name), image)
+    except Exception:
+        pass
+
+
+def _upgrade_area_rect() -> Tuple[int, int, int, int]:
+    entry = resolve_dot_path("_shared_match_regions.upgrade_menu_area")
+    if not entry or "match_region" not in entry:
+        raise RuntimeError("upgrade_menu_area region missing from clickmap")
+    region = entry["match_region"]
+    return int(region["x"]), int(region["y"]), int(region["w"]), int(region["h"])
+
+
+def _normalize_quantity(value: str) -> str:
+    if not value:
+        raise ValueError("Empty quantity value")
+    cleaned = value.strip().lower().replace("×", "x")
+    allowed_chars = []
+    for ch in cleaned:
+        if ch.isalnum() or ch == "x":
+            allowed_chars.append(ch)
+    cleaned = "".join(allowed_chars)
+
+    substitutions = {
+        "mx": "max",
+        "ma": "max",
+        "maxx": "max",
+        "maax": "max",
+        "x1o": "x10",
+    }
+    if cleaned in substitutions:
+        cleaned = substitutions[cleaned]
+
+    cleaned = (
+        cleaned.replace("l", "1")
+        .replace("i", "1")
+        .replace("o", "0")
+        .replace("q", "0")
+        .replace("d", "0")
+        .replace("s", "5")
+    )
+    if cleaned == "mx":
+        cleaned = "max"
+    if cleaned not in _BUY_ALLOWED:
+        # try small corrections
+        cleaned = cleaned.replace("l", "1").replace("o", "0")
+        if cleaned not in _BUY_ALLOWED:
+            best = max(
+                _BUY_ALLOWED,
+                key=lambda candidate: difflib.SequenceMatcher(None, candidate, cleaned).ratio(),
+            )
+            cleaned = best
+    return cast(BuyQuantity, cleaned)
+
+
+def _collapsed_center(rect: Tuple[int, int, int, int]) -> Tuple[int, int]:
+    x, y, w, h = rect
+    return (
+        x + int(w * _COLLAPSED_CENTER_X_RATIO),
+        y + int(h * _COLLAPSED_CENTER_Y_RATIO),
+    )
+
+
+def _expanded_centers(rect: Tuple[int, int, int, int], quantity: BuyQuantity) -> Tuple[Tuple[int, int], ...]:
+    ratios = _BUTTON_CENTER_X_RATIOS.get(quantity)
+    if ratios is None:
+        raise ValueError(f"Unsupported quantity '{quantity}'")
+    x, y, w, h = rect
+    centers = []
+    for ratio in ratios:
+        centers.append(
+            (
+                x + int(w * ratio),
+                y + int(h * _BUTTON_ROW_CENTER_Y_RATIO),
+            )
+        )
+    return tuple(centers)
+
+
+def _tap_point(point: Tuple[int, int]) -> None:
+    x, y = point
+    adb_shell(["input", "tap", str(int(x)), str(int(y))])
+
+
+def _read_collapsed_quantity(
+    image: np.ndarray,
+    *,
+    expected: Optional[BuyQuantity] = None,
+) -> Optional[BuyQuantity]:
+    x, y, w, h = _upgrade_area_rect()
+    top = y + int(h * _BUY_COLLAPSED_TOP_RATIO)
+    bottom = y + int(h * _BUY_COLLAPSED_BOTTOM_RATIO)
+    right = x + int(w * _BUY_COLLAPSED_RIGHT_RATIO)
+    left = right - int(w * _BUY_COLLAPSED_WIDTH_RATIO)
+    if bottom <= top or right <= left:
+        return None
+
+    crop = image[top:bottom, left:right]
+    if crop.size == 0:
+        return None
+
+    scale = 3.0
+    enlarged = cv2.resize(crop, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+    hsv = cv2.cvtColor(enlarged, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, (0, 0, 200), (180, 70, 255))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, _OCR_KERNEL, iterations=1)
+
+    # Convert to BGR for reuse with existing OCR helper
+    mask_bgr = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+    bin_img = preprocess_binary(mask_bgr, alpha=1.0, block=15, C=2, close=(3, 3), choose_best=False)
+
+    whitelist_default = "MAXx105"
+    config_extra_default = f"--oem 3 -c tessedit_char_whitelist={whitelist_default}"
+
+    text, _ = ocr_text_and_conf(bin_img, psm=7, config_extra=config_extra_default)
+    cleaned = text.replace("\n", "").strip()
+    if cleaned and len(cleaned) >= 2:
+        normalized = _normalize_quantity(cleaned)
+        if normalized in _BUY_ALLOWED:
+            return cast(BuyQuantity, normalized)
+
+    # Targeted fallback when we expect a specific quantity
+    if expected:
+        whitelist_expected = {
+            "max": "MAX",
+            "x1": "x1",
+            "x5": "x5",
+            "x10": "x10",
+            "x100": "x100",
+        }[expected]
+        config_expected = f"--oem 3 -c tessedit_char_whitelist={whitelist_expected}"
+
+        text_expected, _ = ocr_text_and_conf(bin_img, psm=7, config_extra=config_expected)
+        cleaned_expected = text_expected.replace("\n", "").strip()
+        if not cleaned_expected or len(cleaned_expected) < 2:
+            raw_text, _ = ocr_text_and_conf(crop, psm=7, config_extra=config_expected)
+            cleaned_expected = raw_text.replace("\n", "").strip()
+
+        if cleaned_expected and len(cleaned_expected) >= 2:
+            normalized = _normalize_quantity(cleaned_expected)
+            if normalized == expected:
+                return normalized
+
+    return None
+
+
+def detect_current_buy_quantity(
+    screenshot: Optional[np.ndarray] = None,
+    *,
+    capture_fn: Callable[[], Optional[np.ndarray]] = capture_adb_screenshot,
+) -> Optional[BuyQuantity]:
+    image = screenshot if screenshot is not None else capture_fn()
+    if image is None:
+        return None
+    return _read_collapsed_quantity(image)
+
+
+def ensure_buy_quantity(
+    quantity: str,
+    *,
+    screenshot: Optional[np.ndarray] = None,
+    capture_fn: Callable[[], Optional[np.ndarray]] = capture_adb_screenshot,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    max_attempts: int = 5,
+) -> np.ndarray:
+    target = _normalize_quantity(quantity)
+
+    current = screenshot if screenshot is not None else capture_fn()
+    if current is None:
+        raise RuntimeError("Unable to capture screen for buy quantity adjustment")
+
+    area_rect = _upgrade_area_rect()
+    collapsed_point = _collapsed_center(area_rect)
+
+    for attempt in range(max_attempts):
+        current_quantity = _read_collapsed_quantity(current, expected=target)
+        if current_quantity == target:
+            return current
+
+        log(
+            f"[UPGRADE_BUY] Adjusting quantity to '{target}' (attempt {attempt + 1})",
+            "MATCH",
+        )
+
+        # Open the selector and choose the desired option.
+        _tap_point(collapsed_point)
+        sleep_fn(0.35)
+
+        centers = _expanded_centers(area_rect, target)
+        last_capture: Optional[np.ndarray] = None
+        for idx, target_point in enumerate(centers):
+            _tap_point(target_point)
+            sleep_fn(0.4)
+
+            for verify in range(3):
+                current = capture_fn()
+                if current is None:
+                    raise RuntimeError("Failed to capture screen after selecting quantity")
+                last_capture = current
+                final_quantity = _read_collapsed_quantity(current, expected=target)
+                if final_quantity == target:
+                    return current
+                if final_quantity is not None and final_quantity != target:
+                    _save_debug(
+                        current,
+                        f"mismatch_{target}_attempt{attempt+1}_point{idx}_verify{verify}.png",
+                    )
+                    break
+                sleep_fn(0.15)
+
+            if idx < len(centers) - 1:
+                # Reopen the selector before trying the alternate button.
+                _tap_point(collapsed_point)
+                sleep_fn(0.35)
+        else:
+            # If no center returned success, capture the last state for inspection.
+            if last_capture is not None:
+                _save_debug(last_capture, f"failure_{target}_attempt{attempt+1}.png")
+
+    raise RuntimeError(f"Unable to set buy quantity to '{target}' after {max_attempts} attempts")
+
+
+__all__ = ["BuyQuantity", "detect_current_buy_quantity", "ensure_buy_quantity"]

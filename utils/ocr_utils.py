@@ -63,14 +63,22 @@ def ocr_text(bin_img: np.ndarray, *, psm: int = 6) -> str:
     return pytesseract.image_to_string(rgb, config=cfg)
 
 
-def ocr_text_and_conf(bin_img: np.ndarray, *, psm: int = 7) -> Tuple[str, float]:
+def ocr_text_and_conf(
+    bin_img: np.ndarray,
+    *,
+    psm: int = 7,
+    config_extra: Optional[str] = None,
+) -> Tuple[str, float]:
     """
     OCR text and return (joined_text, avg_conf). avg_conf=-1.0 if unavailable.
     """
     if not _HAS_TESS:
         return "", -1.0
     rgb = _to_rgb(bin_img)
-    data = pytesseract.image_to_data(rgb, config=f"--psm {psm}", output_type=pytesseract.Output.DICT)
+    cfg = f"--psm {psm}"
+    if config_extra:
+        cfg = f"{cfg} {config_extra}".strip()
+    data = pytesseract.image_to_data(rgb, config=cfg, output_type=pytesseract.Output.DICT)
     toks = data.get("text", [])
     confs = data.get("conf", [])
     kept, kconf = [], []

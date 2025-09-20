@@ -3,36 +3,42 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import sys
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Optional
 
-import cv2
-
-if "." not in sys.path:
-    sys.path.append(".")
+import cv2  # type: ignore
 
 from core.upgrade_box_detector import annotate_boxes, detect_visible_boxes
-from core.upgrade_navigation import find_upgrade
+from tools.cli.capture_utils import prepare_capture_recorder
 
 
-def _run_single(image_path: str, annotate_path: Optional[str], menu: Optional[str]) -> int:
+def _load_screenshot(image_path: str, capture_fn=None):
     if image_path.lower() == "adb":
-        from core.ss_capture import capture_adb_screenshot
+        if capture_fn is None:
+            from core.ss_capture import capture_adb_screenshot
 
-        screenshot = capture_adb_screenshot()
+            capture_fn = capture_adb_screenshot
+        screenshot = capture_fn()
         if screenshot is None:
-            print(json.dumps({"error": "failed to capture screenshot"}))
-            return 2
-    else:
-        screenshot = cv2.imread(image_path)
-        if screenshot is None:
-            print(json.dumps({"error": f"failed to read {image_path}"}))
-            return 2
+            raise RuntimeError("failed to capture screenshot")
+        return screenshot
 
+    screenshot = cv2.imread(image_path)
+    if screenshot is None:
+        raise RuntimeError(f"failed to read {image_path}")
+    return screenshot
+
+
+def run_detection(
+    *,
+    image_path: str,
+    menu: Optional[str],
+    annotate_path: Optional[str],
+    capture_fn=None,
+) -> dict:
+    screenshot = _load_screenshot(image_path, capture_fn=capture_fn)
     boxes = detect_visible_boxes(screenshot, menu=menu)
-    payload_columns = {}
 
+    payload_columns = {}
     print("Detection summary:")
     for column, box_list in boxes.items():
         print(f"  {column}: {len(box_list)} box(es)")
@@ -77,75 +83,41 @@ def _run_single(image_path: str, annotate_path: Optional[str], menu: Optional[st
 
     payload = {"columns": payload_columns}
 
-    print(json.dumps(payload))
-
     if annotate_path:
         all_boxes = [box for rows in boxes.values() for box in rows]
         annotated = annotate_boxes(screenshot, all_boxes)
         cv2.imwrite(annotate_path, annotated)
 
-    return 0
+    return payload
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+
+def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Detect visible upgrade boxes")
     parser.add_argument("--image", default="adb", help="Screenshot path or 'adb'")
+    parser.add_argument("--menu", help="Optional upgrade menu context")
     parser.add_argument("--annotate", help="Optional output path for annotated image")
-    parser.add_argument("--menu", help="Optional upgrade menu context (attack/defense/utility)")
-    parser.add_argument(
-        "--find-upgrade",
-        help="Locate an upgrade by name using optional scrolling (menu inferred if omitted)",
-    )
-    parser.add_argument(
-        "--max-scrolls",
-        type=int,
-        default=12,
-        help="Maximum scroll attempts when using --find-upgrade",
-    )
-    parser.add_argument(
-        "--buy-if-affordable",
-        action="store_true",
-        help="Attempt to tap the upgrade's purchase area when it is affordable",
-    )
+    parser.add_argument("--save-captures", help="Directory to save captured screenshots")
     args = parser.parse_args(argv)
 
-    if args.find_upgrade:
-        if args.image.lower() != "adb":
-            print(json.dumps({"error": "--find-upgrade requires live capture; use --image adb"}))
-            return 2
+    capture_fn = prepare_capture_recorder(args.save_captures)
 
-        result = find_upgrade(
-            args.menu,
-            args.find_upgrade,
-            max_scrolls=args.max_scrolls,
-            attempt_purchase=args.buy_if_affordable,
+    try:
+        payload = run_detection(
+            image_path=args.image,
+            menu=args.menu,
+            annotate_path=args.annotate,
+            capture_fn=capture_fn,
         )
+    except Exception as exc:
+        print(json.dumps({"error": str(exc)}))
+        return 2
 
-        if result is None:
-            print(json.dumps({"result": None, "error": "upgrade not found"}))
-            return 1
-
-        payload = {
-            "menu": result.menu,
-            "column": result.column,
-            "index": result.index,
-            "label": result.label,
-            "box": {
-                "rect": result.box.rect,
-                "text": result.box.text,
-                "affordability": result.box.affordability,
-                "toggles": result.box.toggles,
-            },
-            "purchase": {
-                "attempted": result.purchase_attempted,
-                "sent": result.purchase_sent,
-                "reason": result.purchase_reason,
-            },
-        }
-        print(json.dumps(payload))
-        return 0
-
-    return _run_single(args.image, args.annotate, args.menu)
+    print(json.dumps(payload))
+    return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+__all__ = ["main", "run_detection"]
