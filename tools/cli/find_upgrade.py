@@ -37,6 +37,8 @@ def main(argv=None) -> int:
     parser.add_argument("--save-captures", help="Directory to save captured screenshots")
     args = parser.parse_args(argv)
 
+    capture_fn = prepare_capture_recorder(args.save_captures)
+
     try:
         menu_quantities = _parse_menu_quantities(args.menu_quantity)
         find_kwargs = {}

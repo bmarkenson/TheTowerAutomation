@@ -70,6 +70,7 @@ class AutomationSupervisor:
         self._last_coins_toggle_ts: float = 0.0
         self._coins_has_min_miss: int = 0
         self._last_coins_val: Optional[Decimal] = None
+        self._coins_ignore_plausibility_once: bool = False
 
         self._rtg_visible_since_ts: Optional[float] = None
 
@@ -130,8 +131,16 @@ class AutomationSupervisor:
     def _apply_plausibility(self, coins_val: Optional[Decimal], coins_conf: float) -> Optional[Decimal]:
         coins_eff = coins_val
         try:
-            if self._last_coins_val is not None and coins_val is not None and self._last_coins_val > 0:
-                ratio = (coins_val / self._last_coins_val)
+            if self._coins_ignore_plausibility_once:
+                self._coins_ignore_plausibility_once = False
+                return coins_eff
+            if (
+                self._last_coins_val is not None
+                and coins_val is not None
+                and self._last_coins_val > 0
+                and coins_val > 0
+            ):
+                ratio = coins_val / self._last_coins_val
                 if ratio > self.coins_max_jump_factor and coins_conf < self.coins_jump_conf_floor:
                     log(
                         f"[COINS] Ignoring implausible jump {format_compact_decimal(self._last_coins_val)} → {format_compact_decimal(coins_val)} "
@@ -139,6 +148,15 @@ class AutomationSupervisor:
                         "WARN",
                     )
                     coins_eff = self._last_coins_val
+                else:
+                    drop_factor = self._last_coins_val / coins_val
+                    if drop_factor > self.coins_max_jump_factor:
+                        log(
+                            f"[COINS] Ignoring implausible drop {format_compact_decimal(self._last_coins_val)} → {format_compact_decimal(coins_val)} "
+                            f"(÷{drop_factor:.2f}, conf={coins_conf:.1f})",
+                            "WARN",
+                        )
+                        coins_eff = self._last_coins_val
         except Exception:
             pass
         return coins_eff
@@ -160,29 +178,59 @@ class AutomationSupervisor:
         # Plausibility first
         coins_eff = self._apply_plausibility(coins_val, coins_conf)
 
+        if not has_min:
+            # When '/min' is missing, stick with the last trusted coins/min value (if any)
+            if self._last_coins_val is not None:
+                coins_eff = self._last_coins_val
+            else:
+                coins_eff = None
+
         if not self.is_paused:
             now_ts = time.time()
             if has_min:
                 self._coins_has_min_miss = 0
             else:
-                if coins_conf >= self.coins_conf_floor:
+                ratio = None
+                if (
+                    coins_val is not None
+                    and self._last_coins_val is not None
+                    and self._last_coins_val > 0
+                ):
+                    try:
+                        ratio = (coins_val / self._last_coins_val) if coins_val > 0 else None
+                    except Exception:
+                        ratio = None
+
+                if coins_val is not None or coins_conf >= self.coins_conf_floor:
                     self._coins_has_min_miss += 1
-                if self._coins_has_min_miss >= 2 and (now_ts - self._last_coins_toggle_ts) >= self.coins_toggle_cooldown:
-                    tap_if_visible("buttons.coin_toggle", retries=1)
-                    self._last_coins_toggle_ts = now_ts
-                    self._coins_has_min_miss = 0
-                    time.sleep(0.6)
-                    img2 = capture_and_save_screenshot(log_capture=False)
-                    if img2 is not None:
-                        try:
-                            coins_val, coins_conf, has_min = detect_coins_from_image(img2, debug_out=debug_out)
-                            coins_eff = self._apply_plausibility(coins_val, coins_conf)
-                        except Exception:
-                            pass
+
+                should_toggle = False
+                toggle_reason = ""
+                if ratio is not None and ratio >= self.coins_max_jump_factor:
+                    should_toggle = True
+                    toggle_reason = f"ratio={ratio:.2f}"
+                elif self._coins_has_min_miss >= 2:
+                    should_toggle = True
+                    toggle_reason = f"miss_count={self._coins_has_min_miss}"
+
+                if should_toggle and (now_ts - self._last_coins_toggle_ts) >= self.coins_toggle_cooldown:
+                    log(f"[COINS] Auto-toggle coin display ({toggle_reason or 'missing /min'})", "INFO")
+                    if tap_if_visible("buttons.coin_toggle", retries=1):
+                        self._last_coins_toggle_ts = now_ts
+                        self._coins_has_min_miss = 0
+                        self._coins_ignore_plausibility_once = True
+                        time.sleep(0.6)
+                        img2 = capture_and_save_screenshot(log_capture=False)
+                        if img2 is not None:
+                            try:
+                                coins_val, coins_conf, has_min = detect_coins_from_image(img2, debug_out=debug_out)
+                                coins_eff = self._apply_plausibility(coins_val, coins_conf)
+                            except Exception:
+                                pass
 
         # Update accepted last value
         try:
-            if coins_eff is not None:
+            if coins_eff is not None and has_min:
                 self._last_coins_val = coins_eff
         except Exception:
             pass

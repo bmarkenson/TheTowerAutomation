@@ -373,9 +373,12 @@ def find_upgrade(
     menu_buy_quantities: Optional[Dict[str, BuyQuantity]] = None,
     purchase_quantity: Optional[BuyQuantity] = None,
 ) -> Optional[UpgradeSearchResult]:
-    """Locate a specific upgrade tile by menu/label, scrolling as needed.
+    """Locate ``label`` within ``menu`` and optionally purchase it.
 
-    Returns an UpgradeSearchResult with the matching UpgradeBox, or None if not found.
+    The search captures live screenshots, scrolls the upgrade pane, and returns
+    metadata about the first match.  When ``purchase_quantity`` is supplied the
+    function temporarily switches the selector to that quantity, restores the
+    previous value before returning, and records the value used in the result.
     """
     column, target_index, resolved_menu = _manifest_entry(menu, label)
 
@@ -398,13 +401,18 @@ def find_upgrade(
 
     repeat_count = 0
 
-    desired_quantity: Optional[str] = None
+    desired_quantity: Optional[BuyQuantity] = None
+    restore_quantity: Optional[BuyQuantity] = None
     if purchase_quantity:
         desired_quantity = purchase_quantity
     elif menu_buy_quantities and menu_key in menu_buy_quantities:
         desired_quantity = menu_buy_quantities[menu_key]
 
     if desired_quantity:
+        original_quantity = detect_current_buy_quantity(screenshot=screenshot)
+        if purchase_quantity and original_quantity and original_quantity != desired_quantity:
+            restore_quantity = original_quantity
+
         try:
             screenshot = ensure_buy_quantity(
                 desired_quantity,
@@ -415,144 +423,158 @@ def find_upgrade(
         except Exception as exc:
             log(f"[UPGRADE_NAV] Failed to set buy quantity '{desired_quantity}': {exc}", "WARN")
 
-    for attempt in range(max_scrolls + 1):
-        boxes_by_col = detect_visible_boxes(screenshot, menu=menu_key)
-        visible_boxes = boxes_by_col.get(column, [])
-        visible_indices: List[int] = []
-        match_box: Optional[UpgradeBox] = None
+    try:
+        for attempt in range(max_scrolls + 1):
+            boxes_by_col = detect_visible_boxes(screenshot, menu=menu_key)
+            visible_boxes = boxes_by_col.get(column, [])
+            visible_indices: List[int] = []
+            match_box: Optional[UpgradeBox] = None
 
-        for box in visible_boxes:
-            if not box.text:
-                continue
-            try:
-                idx = manifest[column].index(box.text)
-            except ValueError:
-                continue
-            visible_indices.append(idx)
-            if box.text.lower() == target_label_norm:
-                match_box = box
+            for box in visible_boxes:
+                if not box.text:
+                    continue
+                try:
+                    idx = manifest[column].index(box.text)
+                except ValueError:
+                    continue
+                visible_indices.append(idx)
+                if box.text.lower() == target_label_norm:
+                    match_box = box
 
-        if match_box is not None:
-            purchase_attempted = False
-            purchase_sent = False
-            purchase_reason: Optional[str] = None
+            if match_box is not None:
+                purchase_attempted = False
+                purchase_sent = False
+                purchase_reason: Optional[str] = None
 
-            if attempt_purchase:
-                purchase_attempted = True
-                if menu_key == "ultimate weapons":
-                    purchase_reason = "menu_has_toggles"
-                else:
-                    status = match_box.affordability or "unknown"
-                    if status == "affordable":
-                        try:
-                            _tap_purchase_area(
-                                match_box,
-                                menu=menu_key,
-                                column=column,
-                                target_text=target_label_norm,
-                                capture_fn=capture_fn,
-                                fallback_screenshot=screenshot,
-                            )
-                            purchase_sent = True
-                            purchase_reason = "tapped_cost_panel"
-                        except Exception as exc:
-                            purchase_reason = f"tap_failed:{exc}"
-                            log(
-                                f"[UPGRADE_NAV] Purchase tap failed for '{match_box.text}': {exc}",
-                                "WARN",
-                            )
+                if attempt_purchase:
+                    purchase_attempted = True
+                    if menu_key == "ultimate weapons":
+                        purchase_reason = "menu_has_toggles"
                     else:
-                        purchase_reason = f"status={status}"
-                        log(
-                            f"[UPGRADE_NAV] Skipping purchase for '{match_box.text}' (status={status})",
-                            "INFO",
-                        )
+                        status = match_box.affordability or "unknown"
+                        if status == "affordable":
+                            try:
+                                _tap_purchase_area(
+                                    match_box,
+                                    menu=menu_key,
+                                    column=column,
+                                    target_text=target_label_norm,
+                                    capture_fn=capture_fn,
+                                    fallback_screenshot=screenshot,
+                                )
+                                purchase_sent = True
+                                purchase_reason = "tapped_cost_panel"
+                            except Exception as exc:
+                                purchase_reason = f"tap_failed:{exc}"
+                                log(
+                                    f"[UPGRADE_NAV] Purchase tap failed for '{match_box.text}': {exc}",
+                                    "WARN",
+                                )
+                        else:
+                            purchase_reason = f"status={status}"
+                            log(
+                                f"[UPGRADE_NAV] Skipping purchase for '{match_box.text}' (status={status})",
+                                "INFO",
+                            )
 
-            return UpgradeSearchResult(
-                menu=menu_key,
-                column=column,
-                index=target_index,
-                label=manifest[column][target_index],
-                box=match_box,
-                screenshot=screenshot,
-                purchase_attempted=purchase_attempted,
-                purchase_sent=purchase_sent,
-                purchase_reason=purchase_reason,
-                buy_quantity=desired_quantity,
-            )
+                return UpgradeSearchResult(
+                    menu=menu_key,
+                    column=column,
+                    index=target_index,
+                    label=manifest[column][target_index],
+                    box=match_box,
+                    screenshot=screenshot,
+                    purchase_attempted=purchase_attempted,
+                    purchase_sent=purchase_sent,
+                    purchase_reason=purchase_reason,
+                    buy_quantity=desired_quantity,
+                )
 
-        if attempt >= max_scrolls:
-            break
-
-        if not visible_indices:
-            direction = "towards_bottom"
-        elif target_index < visible_indices[0]:
-            if visible_indices[0] == 0:
+            if attempt >= max_scrolls:
                 break
-            direction = "towards_top"
-        elif target_index > visible_indices[-1]:
-            if visible_indices[-1] == len(manifest[column]) - 1:
+
+            if not visible_indices:
+                direction = "towards_bottom"
+            elif target_index < visible_indices[0]:
+                if visible_indices[0] == 0:
+                    break
+                direction = "towards_top"
+            elif target_index > visible_indices[-1]:
+                if visible_indices[-1] == len(manifest[column]) - 1:
+                    break
+                direction = "towards_bottom"
+            else:
+                mid = visible_indices[0] + (visible_indices[-1] - visible_indices[0]) // 2
+                direction = "towards_top" if target_index <= mid else "towards_bottom"
+
+            state_key = tuple(visible_indices)
+            if state_key and last_state == state_key and last_direction == direction:
+                repeat_count += 1
+
+                at_bottom = (
+                    direction == "towards_bottom"
+                    and visible_indices
+                    and visible_indices[-1] == len(manifest[column]) - 1
+                )
+                at_top = (
+                    direction == "towards_top"
+                    and visible_indices
+                    and visible_indices[0] == 0
+                )
+
+                if not (at_bottom or at_top) and repeat_count <= 3:
+                    swipe_fn(direction, "extended")
+                    sleep_fn(_SCROLL_SETTLE_SEC)
+                    screenshot = capture_fn()
+                    if screenshot is None:
+                        screenshot = capture_fn()
+                        if screenshot is None:
+                            raise RuntimeError("Failed to capture screenshot after scrolling")
+                    last_state = state_key
+                    last_direction = direction
+                    continue
+
+                log("[UPGRADE_NAV] No progress after scrolling; aborting", "WARN")
                 break
-            direction = "towards_bottom"
-        else:
-            mid = visible_indices[0] + (visible_indices[-1] - visible_indices[0]) // 2
-            direction = "towards_top" if target_index <= mid else "towards_bottom"
+            else:
+                repeat_count = 0
 
-        state_key = tuple(visible_indices)
-        if state_key and last_state == state_key and last_direction == direction:
-            repeat_count += 1
-
-            at_bottom = (
+            # If we're trying to move down and already have the bottom-most entries, stop.
+            if (
                 direction == "towards_bottom"
                 and visible_indices
                 and visible_indices[-1] == len(manifest[column]) - 1
-            )
-            at_top = (
-                direction == "towards_top"
-                and visible_indices
-                and visible_indices[0] == 0
-            )
+            ):
+                break
 
-            if not (at_bottom or at_top) and repeat_count <= 3:
-                swipe_fn(direction, "extended")
-                sleep_fn(_SCROLL_SETTLE_SEC)
-                screenshot = capture_fn()
-                if screenshot is None:
-                    screenshot = capture_fn()
-                    if screenshot is None:
-                        raise RuntimeError("Failed to capture screenshot after scrolling")
-                last_state = state_key
-                last_direction = direction
-                continue
+            # Likewise for moving up at the very top.
+            if direction == "towards_top" and visible_indices and visible_indices[0] == 0:
+                break
 
-            log("[UPGRADE_NAV] No progress after scrolling; aborting", "WARN")
-            break
-        else:
-            repeat_count = 0
+            last_state = state_key if state_key else None
+            last_direction = direction
 
-        # If we're trying to move down and already have the bottom-most entries, stop.
-        if (
-            direction == "towards_bottom"
-            and visible_indices
-            and visible_indices[-1] == len(manifest[column]) - 1
-        ):
-            break
-
-        # Likewise for moving up at the very top.
-        if direction == "towards_top" and visible_indices and visible_indices[0] == 0:
-            break
-
-        last_state = state_key if state_key else None
-        last_direction = direction
-
-        span = _select_span(direction, visible_indices, target_index)
-        swipe_fn(direction, span)
-        sleep_fn(_SCROLL_SETTLE_SEC)
-        screenshot = capture_fn()
-        if screenshot is None:
+            span = _select_span(direction, visible_indices, target_index)
+            swipe_fn(direction, span)
+            sleep_fn(_SCROLL_SETTLE_SEC)
             screenshot = capture_fn()
             if screenshot is None:
-                raise RuntimeError("Failed to capture screenshot after scrolling")
+                screenshot = capture_fn()
+                if screenshot is None:
+                    raise RuntimeError("Failed to capture screenshot after scrolling")
+    finally:
+        if restore_quantity:
+            try:
+                ensure_buy_quantity(
+                    restore_quantity,
+                    capture_fn=capture_fn,
+                    sleep_fn=sleep_fn,
+                )
+            except Exception as exc:
+                log(
+                    f"[UPGRADE_NAV] Failed to restore buy quantity '{restore_quantity}': {exc}",
+                    "WARN",
+                )
 
     return None
 

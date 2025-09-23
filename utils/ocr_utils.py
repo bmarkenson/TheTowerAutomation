@@ -1,5 +1,5 @@
 # utils/ocr_utils.py
-from typing import Optional, Tuple
+from typing import Callable, List, Optional, Tuple, Union
 import cv2
 import numpy as np
 import re
@@ -68,12 +68,17 @@ def ocr_text_and_conf(
     *,
     psm: int = 7,
     config_extra: Optional[str] = None,
-) -> Tuple[str, float]:
+    token_filter: Optional[Callable[[str], bool]] = None,
+    return_tokens: bool = False,
+) -> Union[Tuple[str, float], Tuple[str, float, List[str], List[float]]]:
     """
     OCR text and return (joined_text, avg_conf). avg_conf=-1.0 if unavailable.
+
+    token_filter: optional predicate applied per token; tokens failing the filter are dropped.
+    return_tokens: when True, also return the kept tokens and confidences.
     """
     if not _HAS_TESS:
-        return "", -1.0
+        return ("", -1.0, [], []) if return_tokens else ("", -1.0)
     rgb = _to_rgb(bin_img)
     cfg = f"--psm {psm}"
     if config_extra:
@@ -81,19 +86,24 @@ def ocr_text_and_conf(
     data = pytesseract.image_to_data(rgb, config=cfg, output_type=pytesseract.Output.DICT)
     toks = data.get("text", [])
     confs = data.get("conf", [])
-    kept, kconf = [], []
-    for t, c in zip(toks, confs):
+    kept: List[str] = []
+    kept_conf: List[float] = []
+    for t, c in zip(toks or [], confs or []):
         if not t:
+            continue
+        if token_filter is not None and not token_filter(t):
             continue
         kept.append(t)
         try:
             fc = float(c)
             if fc >= 0:
-                kconf.append(fc)
+                kept_conf.append(fc)
         except Exception:
             pass
     txt = " ".join(kept).strip()
-    avg_conf = float(np.mean(kconf)) if kconf else -1.0
+    avg_conf = float(np.mean(kept_conf)) if kept_conf else -1.0
+    if return_tokens:
+        return txt, avg_conf, kept, kept_conf
     return txt, avg_conf
 
 

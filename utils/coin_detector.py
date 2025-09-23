@@ -2,7 +2,7 @@
 # utils/coin_detector.py
 
 from __future__ import annotations
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 from decimal import Decimal, getcontext
 import re
 
@@ -10,7 +10,7 @@ import cv2
 import numpy as np
 
 from core.clickmap_access import resolve_dot_path, get_clickmap
-from utils.ocr_utils import preprocess_binary
+from utils.ocr_utils import ocr_text_and_conf
 
 # Use enough precision for big idle numbers
 getcontext().prec = 28
@@ -21,9 +21,9 @@ _SUFFIX = {
     "M": Decimal("1e6"),
     "B": Decimal("1e9"),
     "T": Decimal("1e12"),
-    "q": Decimal("1e15"),   # some UIs use 'q' or 'Q' for quadrillion
-    "Q": Decimal("1e15"),
-    # Add more if the game goes beyond (e.g., 's' for sextillion, etc.)
+    "q": Decimal("1e15"),   # quadrillion
+    "Q": Decimal("1e18"),   # quintillion
+    # Extend as the game introduces larger magnitudes (e.g., sextillion)
 }
 
 # Allow per-character filter to keep '/', so '/min' survives until we strip it
@@ -111,46 +111,47 @@ def format_compact_decimal(value: Decimal) -> str:
         return s
 
     abs_val = value.copy_abs()
-    for suf, mult in [("Q", Decimal("1e15")), ("T", Decimal("1e12")), ("B", Decimal("1e9")), ("M", Decimal("1e6")), ("K", Decimal("1e3"))]:
+    for suf, mult in [
+        ("Q", Decimal("1e18")),
+        ("q", Decimal("1e15")),
+        ("T", Decimal("1e12")),
+        ("B", Decimal("1e9")),
+        ("M", Decimal("1e6")),
+        ("K", Decimal("1e3")),
+    ]:
         if abs_val >= mult:
             out = (value / mult)
             return f"{_fmt_2dp_trim(out)}{suf}"
     return _fmt_2dp_trim(value)
 
-def _ocr_coins_bin(bin_img) -> Tuple[Optional[Decimal], float, str]:
-    """
-    Use Tesseract word boxes to get a reasonable confidence and join tokens.
-    We avoid strict whitelists so unit letters (M/B/T) survive.
-    """
-    try:
-        import pytesseract
-    except Exception:
-        return None, -1.0, ""
+_SUFFIX_KEYS = {k.upper() for k in _SUFFIX.keys()}
 
-    rgb = cv2.cvtColor(bin_img, cv2.COLOR_GRAY2RGB)
-    data = pytesseract.image_to_data(rgb, config="--psm 7", output_type=pytesseract.Output.DICT)
 
-    toks = data.get("text", [])
-    confs = data.get("conf", [])
-    # Keep tokens that contain allowed chars (digits, letters for suffix)
-    kept = []
-    kept_conf = []
-    for t, c in zip(toks, confs):
-        if not t:
-            continue
-        if _ALLOWED_CHARS_RE.fullmatch(t):
-            kept.append(t)
-            try:
-                fc = float(c)
-                if fc >= 0:
-                    kept_conf.append(fc)
-            except Exception:
-                pass
+def is_coin_token(token: str) -> bool:
+    return bool(_ALLOWED_CHARS_RE.fullmatch(token))
 
-    raw = " ".join(kept).strip()
+
+def _has_coin_suffix(raw: str, tokens: List[str]) -> bool:
+    if raw and re.search(r"([0-9]+(?:\.[0-9]+)?)\s*([kmbtq])\b", raw, re.IGNORECASE):
+        return True
+    for tok in tokens:
+        norm = tok.strip().replace("/", "")
+        if len(norm) == 1 and norm.upper() in _SUFFIX_KEYS:
+            return True
+    return False
+
+
+def _ocr_coins_bin(bin_img) -> Tuple[Optional[Decimal], float, str, bool]:
+    """Run OCR on a binarized coin crop and parse to Decimal."""
+    raw, avg_conf, tokens, _ = ocr_text_and_conf(
+        bin_img,
+        psm=7,
+        token_filter=is_coin_token,
+        return_tokens=True,
+    )
     value = parse_compact_number(raw)
-    avg_conf = float(np.mean(kept_conf)) if kept_conf else -1.0
-    return value, avg_conf, raw
+    has_suffix = _has_coin_suffix(raw, tokens)
+    return value, avg_conf, raw, has_suffix
 
 def detect_coins_from_image(img_bgr,
                             dot_path: str = "_shared_match_regions.coins",
@@ -165,20 +166,20 @@ def detect_coins_from_image(img_bgr,
     bbox = _get_bbox(dot_path)
     crop = _crop(img_bgr, bbox)
 
-    candidates: list[Tuple[Optional[Decimal], float, str, np.ndarray]] = []
+    candidates: list[Tuple[Optional[Decimal], float, str, np.ndarray, bool]] = []
     try:
         wm = _white_mask(crop)
-        v, c, raw = _ocr_coins_bin(wm)
-        candidates.append((v, c, raw or "", wm))
+        v, c, raw, suf = _ocr_coins_bin(wm)
+        candidates.append((v, c, raw or "", wm, suf))
         # upscale variant for clarity
         up = cv2.resize(wm, None, fx=1.8, fy=1.8, interpolation=cv2.INTER_CUBIC)
-        v2, c2, raw2 = _ocr_coins_bin(up)
-        candidates.append((v2, c2, raw2 or "", up))
+        v2, c2, raw2, suf2 = _ocr_coins_bin(up)
+        candidates.append((v2, c2, raw2 or "", up, suf2))
         # slight dilation to reconnect thin strokes (low-risk extra candidate)
         k = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
         wm_dil = cv2.dilate(wm, k, iterations=1)
-        v3, c3, raw3 = _ocr_coins_bin(wm_dil)
-        candidates.append((v3, c3, raw3 or "", wm_dil))
+        v3, c3, raw3, suf3 = _ocr_coins_bin(wm_dil)
+        candidates.append((v3, c3, raw3 or "", wm_dil, suf3))
     except Exception:
         pass
 
@@ -189,13 +190,13 @@ def detect_coins_from_image(img_bgr,
         return bool(re.search(r"/\s*m(?:in)?", (raw or "").lower()))
 
     # Pick best: require parsed value; prefer one with '/min'; tie-break by conf
-    valid = [(v, c, raw, bimg) for (v, c, raw, bimg) in candidates if v is not None]
+    valid = [(v, c, raw, bimg, suf) for (v, c, raw, bimg, suf) in candidates if v is not None]
     if not valid:
         # fall back to best confidence raw even if parse failed
-        best = max(candidates, key=lambda t: (has_min(t[2]), t[1]))
+        best = max(candidates, key=lambda t: (has_min(t[2]), t[4], t[1]))
         return best[0], best[1], has_min(best[2])
 
-    best = max(valid, key=lambda t: (has_min(t[2]), t[1]))
+    best = max(valid, key=lambda t: (has_min(t[2]), t[4], t[1]))
 
     # Optionally save the chosen bin image
     if debug_out and isinstance(best[3], np.ndarray):
