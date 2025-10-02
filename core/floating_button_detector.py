@@ -13,15 +13,26 @@ Notes:
 - Confidence thresholds are carried by clickmap entries (default handled upstream).
 """
 
+from __future__ import annotations
+
 import os
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional
+
 import cv2
+from numpy.typing import NDArray
+
 from utils.template_matcher import match_region
 from core.clickmap_access import get_entries_by_role
 from utils.logger import log
 from core.adb_utils import adb_shell
 
 
-def tap_floating_button(name, buttons):
+Frame = NDArray[Any]
+_TEMPLATE_ROOT = Path("assets/match_templates")
+
+
+def tap_floating_button(name: str, buttons: Iterable[Dict[str, Any]]) -> bool:
     """
     Tap a previously-detected floating button by name.
 
@@ -39,16 +50,20 @@ def tap_floating_button(name, buttons):
     Returns:
         True if a tap was issued; False if no matching button was present.
     """
-    for b in buttons:
-        if b["name"] == name:
-            x, y = b["tap_point"]["x"], b["tap_point"]["y"]
+    for button in buttons:
+        if button.get("name") == name:
+            tap_point = button.get("tap_point") or {}
+            try:
+                x, y = int(tap_point["x"]), int(tap_point["y"])
+            except Exception:
+                continue
             log(f"TAP_FLOATING: {name} at ({x},{y})", "ACTION")
             adb_shell(["input", "tap", str(x), str(y)])
             return True
     return False
 
 
-def detect_floating_buttons(screen):
+def detect_floating_buttons(screen: Frame) -> List[Dict[str, Any]]:
     """
     Detect all configured floating buttons in the given screen image.
 
@@ -76,7 +91,7 @@ def detect_floating_buttons(screen):
     """
     results = []
     # Tolerate both role spellings: "floating_button" and "floating_buttons"
-    floating_buttons = {}
+    floating_buttons: Dict[str, Dict[str, Any]] = {}
     for role in ("floating_button", "floating_buttons"):
         for k, v in get_entries_by_role(role).items():
             floating_buttons[k] = v
@@ -91,16 +106,20 @@ def detect_floating_buttons(screen):
                 log(f"{name} not matched (conf={conf:.2f})", "DEBUG")
                 continue
 
-            template_path = entry["match_template"]
-            template_path_full = os.path.join("assets/match_templates", template_path)
-
-            if not os.path.exists(template_path_full):
-                log(f"Template file missing: {template_path}", "ERROR")
+            template_rel = entry.get("match_template")
+            if not template_rel:
+                log(f"Template path missing for floating button {name}", "WARN")
                 continue
 
-            template = cv2.imread(template_path_full)
+            template_path = _TEMPLATE_ROOT / template_rel
+
+            if not template_path.exists():
+                log(f"Template file missing: {template_rel}", "ERROR")
+                continue
+
+            template = cv2.imread(str(template_path))
             if template is None:
-                log(f"Template failed to load (cv2.imread returned None): {template_path}", "ERROR")
+                log(f"Template failed to load (cv2.imread returned None): {template_rel}", "ERROR")
                 continue
 
             h, w = template.shape[:2]

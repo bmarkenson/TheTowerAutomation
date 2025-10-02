@@ -1,7 +1,0 @@
-state=UNKNOWN
-menu=—
-secondary=—
-overlays=—
-coins=96.70B
-coins_conf=-1.0
-has_min=yes

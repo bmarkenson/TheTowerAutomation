@@ -1,2 +1,0 @@
-Codex write test file.
-If you can see this, file writes work.

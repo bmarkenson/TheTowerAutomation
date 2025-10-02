@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-from typing import Optional, Dict, Any
-from utils.logger import log
+from typing import Any, Dict, Iterable, List, Optional
+
+from utils.logger import log, log_mission
 from automation.missions.base import BaseMission, MissionContext
 from automation.strategies.base import BaseStrategy
 from core.action_executor import execute_actions
+
+
+Detection = Dict[str, Any]
 
 
 class MissionManager:
@@ -14,81 +18,129 @@ class MissionManager:
         self.ctx = MissionContext()
         self._started = False
         self._last_state = None
+        self._mission_was_complete = False
+        self._run_started = False
 
     def start(self) -> None:
         if self._started:
             return
         if self.mission:
             self.mission.on_start(self.ctx)
+            try:
+                self._mission_was_complete = bool(self.mission.is_complete(self.ctx))
+            except Exception:
+                self._mission_was_complete = False
         if self.strategy:
             self.strategy.on_start(self.ctx)
         self._started = True
 
-    def maybe_run_start(self, detection: Dict[str, Any]) -> None:
+    def maybe_run_start(self, detection: Detection) -> None:
         state = detection.get("state")
-        if self._last_state != "RUNNING" and state == "RUNNING":
-            if self.mission:
-                self.mission.on_run_start(self.ctx)
-            if self.strategy:
-                self.strategy.on_run_start(self.ctx)
+        if state == "RUNNING":
+            if not self._run_started:
+                if self.mission:
+                    self.mission.on_run_start(self.ctx)
+                    try:
+                        self._mission_was_complete = bool(self.mission.is_complete(self.ctx))
+                    except Exception:
+                        self._mission_was_complete = False
+                if self.strategy:
+                    self.strategy.on_run_start(self.ctx)
+            self._run_started = True
+        else:
+            if state in {"GAME_OVER", "HOME"}:
+                self._run_started = False
         self._last_state = state
 
-    def handle_overlays(self, detection: Dict[str, Any]) -> None:
+    def handle_overlays(self, detection: Detection) -> None:
         if not self.mission:
             return
         for name in (detection.get("overlays") or []):
             try:
                 self.mission.on_overlay(self.ctx, name)
             except Exception:
-                pass
+                log(f"[MISSION] overlay handler error for {name}", "ERROR")
 
-    def on_state(self, detection: Dict[str, Any]) -> None:
+    def on_state(self, detection: Detection) -> None:
         if self.mission:
             try:
                 self.mission.on_state(self.ctx, detection)
             except Exception:
-                pass
+                log("[MISSION] on_state handler error", "ERROR")
 
     def on_home(self) -> None:
         if self.mission:
             try:
                 self.mission.on_home(self.ctx)
             except Exception:
-                pass
+                log("[MISSION] on_home handler error", "ERROR")
 
     def on_game_over(self) -> None:
         if self.mission:
             try:
                 self.mission.on_game_over(self.ctx)
             except Exception:
-                pass
+                log("[MISSION] on_game_over handler error", "ERROR")
+        if self.strategy:
+            try:
+                self.strategy.on_game_over(self.ctx)
+            except Exception:
+                log("[STRATEGY] on_game_over handler error", "ERROR")
 
-    def tick(self, screen, detection: Dict[str, Any]) -> None:
-        # Mission level tick (timers/sequencing)
-        mission_actions = []
+    def tick(self, screen, detection: Detection) -> None:
+        state = detection.get("state")
+        self.ctx.data["last_detection_state"] = state
+        self.ctx.data["last_detection"] = detection
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        mv["last_detection_state"] = state
+
+        mission_actions: List[Any] = []
+        mission_complete = not bool(self.mission)
         if self.mission:
             try:
-                ma = self.mission.tick(self.ctx, screen, detection)
-                if ma:
-                    mission_actions = list(ma)
-            except Exception as e:
-                log(f"[MISSION] tick error: {e}", "ERROR")
-
-        # Strategy actions only when RUNNING
-        strategy_actions = []
-        if detection.get("state") == "RUNNING" and self.strategy:
+                mission_actions = _materialize_actions(self.mission.tick(self.ctx, screen, detection))
+            except Exception as exc:
+                log(f"[MISSION] tick error: {exc}", "ERROR")
             try:
-                sa = self.strategy.tick(self.ctx, screen, detection)
-                if sa:
-                    strategy_actions = list(sa)
-            except Exception as e:
-                log(f"[STRATEGY] tick error: {e}", "ERROR")
+                mission_complete = bool(self.mission.is_complete(self.ctx))
+            except Exception as exc:
+                log(f"[MISSION] is_complete error: {exc}", "ERROR")
+                mission_complete = False
 
-        # Combine and execute all actions
-        all_actions = mission_actions + strategy_actions
-        if all_actions:
+            if mission_complete and not self._mission_was_complete:
+                log_mission("mission complete; switching to strategy")
+
+            self._mission_was_complete = mission_complete
+        else:
+            self._mission_was_complete = True
+
+        strategy_actions: List[Any] = []
+        if (
+            detection.get("state") == "RUNNING"
+            and self.strategy
+            and (not self.mission or mission_complete)
+        ):
             try:
-                # Mission actions run first, then strategy actions
-                execute_actions(screen, all_actions)
-            except Exception as e:
-                log(f"[EXEC] error: {e}", "ERROR")
+                strategy_actions = _materialize_actions(self.strategy.tick(self.ctx, screen, detection))
+            except Exception as exc:
+                log(f"[STRATEGY] tick error: {exc}", "ERROR")
+
+        # Mark strategy actions for downstream gating
+        for act in strategy_actions:
+            if isinstance(act, dict):
+                act.setdefault("_strategy", True)
+
+        if mission_actions or strategy_actions:
+            try:
+                execute_actions(screen, mission_actions + strategy_actions, self.ctx)
+            except Exception as exc:
+                log(f"[EXEC] error: {exc}", "ERROR")
+
+
+def _materialize_actions(actions: Optional[Iterable[Any]]) -> List[Any]:
+    if not actions:
+        return []
+    try:
+        return list(actions)
+    except TypeError:
+        return [actions]

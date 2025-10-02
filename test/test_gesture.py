@@ -2,8 +2,8 @@
 
 import argparse
 import sys
-from core.clickmap_access import resolve_dot_path, tap_now, swipe_now
-from core.tap import tap_if_visible
+from core.clickmap_access import resolve_dot_path
+from core.input import tap_if_visible, tap_now, swipe_now
 from utils.logger import log
 
 

@@ -1,6 +1,8 @@
 # utils/logger.py
 from __future__ import annotations
 
+"""Minimal logging helpers shared across the automation runtime."""
+
 from datetime import datetime
 import os
 from typing import Optional
@@ -16,6 +18,7 @@ def set_mission_log_path(path: Optional[str]) -> None:
 
 
 def _write_entry(entry: str, *, extra_path: Optional[str] = None) -> None:
+    """Append a log entry to the primary log and optional extra path."""
     os.makedirs("logs", exist_ok=True)
     with open("logs/actions.log", "a", encoding="utf-8") as f:
         f.write(entry + "\n")
@@ -25,7 +28,7 @@ def _write_entry(entry: str, *, extra_path: Optional[str] = None) -> None:
             extra.write(entry + "\n")
 
 
-def log(msg, level="INFO", *, extra_path: Optional[str] = None):
+def log(msg: str, level: str = "INFO", *, extra_path: Optional[str] = None) -> None:
     """
     Write a timestamped log entry to stdout and append to logs/actions.log.
 

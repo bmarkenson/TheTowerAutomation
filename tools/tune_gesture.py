@@ -5,7 +5,8 @@ import time
 import json
 import subprocess
 import keyboard
-from core.clickmap_access import tap_now, get_clickmap, save_clickmap
+from core.clickmap_access import get_clickmap, save_clickmap
+from core.input import tap_now
 from core.adb_utils import adb_shell
 
 

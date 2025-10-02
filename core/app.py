@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+"""Primary application orchestration loop for the automation runtime."""
+
 import threading
 import time
 from typing import Optional, Dict, Any, Set
+
+import numpy as np
+from numpy.typing import NDArray
 
 from utils.logger import log, set_mission_log_path
 from core.watchdog import watchdog_process_check, ensure_adb_connected
@@ -20,6 +25,9 @@ from handlers.game_over_handler import handle_game_over
 from handlers.home_screen_handler import handle_home_screen
 from handlers.ad_gem_handler import handle_ad_gem, stop_blind_gem_tapper
 from handlers.daily_gem_handler import handle_daily_gem
+
+
+Frame = NDArray[np.uint8]
 
 
 class App:
@@ -40,8 +48,9 @@ class App:
             coins_max_jump_factor=config.coins_max_jump_factor,
             coins_jump_conf_floor=config.coins_jump_conf_floor,
         )
+        self._supervisor.schedule_total_snapshot("startup")
 
-        self._mission_mgr = MissionManager(self._load_mission(config), get_strategy(config.strategy_name))
+        self._mission_mgr = MissionManager(self._load_mission(config), self._load_strategy(config))
         self._mission_mgr.start()
 
         self._state_tracker = StateChangeTracker()
@@ -126,7 +135,8 @@ class App:
             stop_blind_gem_tapper()
             log("Exited cleanly.", "INFO")
 
-    def _capture_frame(self):
+    def _capture_frame(self) -> Optional[Frame]:
+        """Capture a new frame from the device, retrying once if ADB reconnects."""
         img = capture_and_save_screenshot(log_capture=False)
         if img is None:
             if ensure_adb_connected():
@@ -139,10 +149,12 @@ class App:
         return img
 
     def _handle_primary_states(self, new_state: str, overlays: Set[str]) -> None:
+        """Dispatch handlers for top-level UI states and overlay-driven events."""
         if new_state == "GAME_OVER":
             log("Detected GAME_OVER. Executing handler.", "INFO")
             handle_game_over(capture_stats=(not self._fast_game_over))
             self._mission_mgr.on_game_over()
+            self._supervisor.record_run_restart()
             new_path = self._status_reporter.rotate_coins_log()
             if new_path:
                 log(f"[COINS] Started new coins log: {new_path}", "INFO")
@@ -157,6 +169,7 @@ class App:
             handle_daily_gem()
 
     def _normalise_detection(self, detection: Dict[str, Any]) -> tuple[str, Optional[str], Set[str], Set[str]]:
+        """Normalise detector output, ensuring deterministic container types."""
         state = detection.get("state") or "UNKNOWN"
         menu = detection.get("menu") or None
         secondary = set(detection.get("secondary_states") or [])
@@ -164,6 +177,7 @@ class App:
         return state, menu, secondary, overlays
 
     def _load_mission(self, config: AppConfig):
+        """Initialise the mission configuration based on CLI options."""
         if config.mission_config_path:
             try:
                 mission = YamlMission.from_file(config.mission_config_path)
@@ -172,6 +186,19 @@ class App:
             except Exception as exc:
                 log(f"[MISSION] Failed to load YAML mission: {exc}", "ERROR")
         return get_mission(config.mission_name)
+
+    def _load_strategy(self, config: AppConfig):
+        """Initialise the strategy configuration (YAML overrides name)."""
+        if config.strategy_config_path:
+            try:
+                from automation.strategies.yaml_strategy import YamlStrategy
+
+                strat = YamlStrategy.from_file(config.strategy_config_path)
+                log(f"[STRATEGY] Loaded YAML strategy from {config.strategy_config_path}", "INFO")
+                return strat
+            except Exception as exc:
+                log(f"[STRATEGY] Failed to load YAML strategy: {exc}", "ERROR")
+        return get_strategy(config.strategy_name)
 
 
 __all__ = ["App"]

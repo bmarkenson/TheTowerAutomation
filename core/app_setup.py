@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Utilities for parsing CLI arguments and building the app configuration."""
+
 import argparse
 from dataclasses import dataclass
 from typing import Optional, Sequence
@@ -15,6 +17,7 @@ DEFAULT_COINS_JUMP_CONF_FLOOR = 90.0
 
 @dataclass
 class AppConfig:
+    """Configuration values consumed by the runtime `App`."""
     auto_start_enabled: bool
     status_interval: int
     reset_wave_hint: bool
@@ -44,7 +47,9 @@ class AppConfig:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser()
+    """Create the argument parser that drives the CLI interface."""
+
+    parser = argparse.ArgumentParser(description="Automation runtime controller")
     parser.add_argument("--no-restart", action="store_true", help="Disable auto restart on home screen")
     parser.add_argument("--match-trace", action="store_true", help="Emit per-frame match logs from detector")
     parser.add_argument("--status-interval", type=int, default=60, help="Seconds between status summaries (0=disable)")
@@ -83,11 +88,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+    """Parse CLI arguments into an argparse namespace."""
+
     parser = build_arg_parser()
     return parser.parse_args(argv)
 
 
 def config_from_args(args: argparse.Namespace) -> AppConfig:
+    """Convert parsed CLI arguments to an `AppConfig` dataclass."""
+
     auto_resume_secs = max(0, int(args.auto_resume_minutes)) * 60
     auto_return_secs = max(0, int(args.auto_return_minutes)) * 60
     coins_log_base = args.coins_log or DEFAULT_COINS_LOG_PATH

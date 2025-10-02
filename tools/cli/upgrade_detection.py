@@ -59,6 +59,12 @@ def run_detection(
             if box.toggles:
                 toggle_desc = ", ".join(f"{k}={v}" for k, v in box.toggles.items())
                 label_info += f" toggles({toggle_desc})"
+            if box.toggle_metrics:
+                metric_desc = ", ".join(
+                    f"{name}:br={metrics.get('bright_ratio', 0):.2f} val={metrics.get('mean_val', 0):.0f}"
+                    for name, metrics in box.toggle_metrics.items()
+                )
+                label_info += f" metrics({metric_desc})"
             print(f"    #{idx}: {rect_info}{label_info}")
 
             entry = {"rect": box.rect}

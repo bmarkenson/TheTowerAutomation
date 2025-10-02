@@ -1,23 +1,33 @@
 from __future__ import annotations
 
-from typing import Dict, Any, List
+from typing import Any, Dict, List, MutableSet
+
+from automation.missions.base import MissionContext
+
+
+Action = Dict[str, Any]
 
 
 class BaseStrategy:
+    """Common interface for runtime strategies layered on top of missions."""
+
     name = "base"
 
     def __init__(self) -> None:
-        # Per-run caches (e.g., skip_upgrades)
-        self.skip_upgrades = set()
+        self.skip_upgrades: MutableSet[str] = set()
 
-    def on_start(self, ctx) -> None:
-        pass
+    def on_start(self, ctx: MissionContext) -> None:
+        """Called once when the strategy is initialised."""
 
-    def on_run_start(self, ctx) -> None:
-        # Reset per-run caches
+    def on_run_start(self, ctx: MissionContext) -> None:
+        """Called when the automation loop transitions into RUNNING."""
+
         self.skip_upgrades.clear()
 
-    def tick(self, ctx, screen, detection: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Return a list of actions for the executor. Default: no actions."""
+    def tick(self, ctx: MissionContext, screen, detection: Dict[str, Any]) -> List[Action]:
+        """Return executor actions for the current frame. Default: no-op."""
+
         return []
 
+    def on_game_over(self, ctx: MissionContext) -> None:
+        """Optional hook when GAME_OVER is handled."""

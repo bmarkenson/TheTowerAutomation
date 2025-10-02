@@ -1,13 +1,25 @@
 #!/usr/bin/env python3
-import os
-import numpy as np
+"""ADB screenshot helpers."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Optional
+
 import cv2
+import numpy as np
+from numpy.typing import NDArray
+
 from utils.logger import log
 from core.adb_utils import screencap_png
 
-LATEST_SCREENSHOT = "screenshots/latest.png"
 
-def capture_adb_screenshot():
+Frame = NDArray[np.uint8]
+
+LATEST_SCREENSHOT = Path("screenshots/latest.png")
+
+
+def capture_adb_screenshot() -> Optional[Frame]:
     """
     ---
     spec:
@@ -29,7 +41,7 @@ def capture_adb_screenshot():
     try:
         png_data = screencap_png()
         if not png_data:
-            log("[ADB Error] Empty screenshot data", "ERROR")
+            log("[ADB] Empty screenshot data", "ERROR")
             return None
 
         if not png_data.startswith(b'\x89PNG\r\n\x1a\n'):
@@ -44,11 +56,11 @@ def capture_adb_screenshot():
         return img
 
     except Exception as e:
-        log(f"[Error] {e}", "ERROR")
+        log(f"[ADB] Screenshot capture failed: {e}", "ERROR")
         return None
 
 
-def capture_and_save_screenshot(path=LATEST_SCREENSHOT, *, log_capture: bool = True):
+def capture_and_save_screenshot(path: Path | str = LATEST_SCREENSHOT, *, log_capture: bool = True) -> Optional[Frame]:
     """
     ---
     spec:
@@ -73,12 +85,13 @@ def capture_and_save_screenshot(path=LATEST_SCREENSHOT, *, log_capture: bool = T
     Returns:
         np.ndarray (BGR) on success, or None on failure.
     """
+    target = Path(path)
     img = capture_adb_screenshot()
     if img is not None:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        cv2.imwrite(path, img)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(target), img)
         if log_capture:
-            log(f"Captured and saved screenshot: shape={img.shape}, path={path}", level="DEBUG")
+            log(f"Captured screenshot: shape={img.shape}, path={target}", level="DEBUG")
     return img
 
 

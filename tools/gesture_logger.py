@@ -11,8 +11,8 @@ from core.clickmap_access import (
     get_clickmap,
     save_clickmap,
     resolve_dot_path,
-    interactive_get_dot_path,
 )
+from tools.clickmap_editor import interactive_get_dot_path
 from core.adb_utils import adb_shell
 
 

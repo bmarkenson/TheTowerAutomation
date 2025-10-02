@@ -1,0 +1,66 @@
+meta:
+  name: blender
+  version: 1
+settings:
+  cooldown_sec: 20
+  ultimate_refresh_sec: 300
+  initial_buy_quantities:
+    attack: max
+    defense: max
+    utility: max
+phases:
+  - name: baseline
+    on_run_start: true
+    sequence:
+      - menu: utility
+        label: Free Utility Upgrade
+      - menu: utility
+        label: Free Attack Upgrade
+      - menu: utility
+        label: Free Defense Upgrade
+      - menu: attack
+        label: Attack Speed
+      - menu: attack
+        label: Critical Chance
+      - menu: attack
+        label: Critical Factor
+      - menu: attack
+        label: Range
+      - menu: attack
+        label: Damage Per Meter
+      - menu: attack
+        label: Multishot Chance
+      - menu: attack
+        label: Rapid Fire Chance
+      - menu: attack
+        label: Bounce Shot Chance
+      - menu: attack
+        label: Bounce Shot Range
+      - menu: defense
+        label: Knockback Chance
+      - menu: defense
+        label: Orb Speed
+      - menu: defense
+        label: Orbs
+      - menu: defense
+        label: Shockwave Size
+      - menu: defense
+        label: Land Mine Chance
+      - menu: defense
+        label: Land Mine Radius
+      - menu: defense
+        label: Land Mine Damage
+      - menu: defense
+        label: Health
+      - menu: defense
+        label: Wall Health
+      - menu: utility
+        label: Enemy Attack Level Skip
+      - menu: utility
+        label: Enemy Health Level Skip
+      - menu: attack
+        label: Rend Armor Chance
+      - menu: attack
+        label: Rend Armor Mult
+      - menu: attack
+        label: Damage

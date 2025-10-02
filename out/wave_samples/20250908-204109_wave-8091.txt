@@ -1,6 +1,0 @@
-state=RUNNING
-menu=ATTACK_MENU
-secondary=—
-overlays=MENU_OPEN
-wave=8091
-conf=96.0

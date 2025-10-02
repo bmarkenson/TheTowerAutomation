@@ -1,7 +1,0 @@
-state=RUNNING
-menu=UTILITY_MENU
-secondary=—
-overlays=MENU_OPEN
-coins=97.40B
-coins_conf=89.0
-has_min=yes

@@ -20,7 +20,7 @@ import time
 
 from core.clickmap_access import resolve_dot_path
 from core.ss_capture import capture_and_save_screenshot
-from core.tap import tap_if_visible
+from core.input import tap_if_visible
 
 
 def main() -> int:

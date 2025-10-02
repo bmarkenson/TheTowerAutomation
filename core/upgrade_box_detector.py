@@ -54,10 +54,11 @@ _MENU_ALIASES = {
     "uw_menu": "ultimate weapons",
     "ultimate weapons": "ultimate weapons",
 }
-_ULTIMATE_TOGGLE_BRIGHT_RATIO = 0.22
-_ULTIMATE_TOGGLE_VAL_THRESHOLD = 118.0
-_ULTIMATE_SECONDARY_BRIGHT_RATIO = 0.25
-_ULTIMATE_SECONDARY_VAL_THRESHOLD = 118.0
+ULTIMATE_PRIMARY_TOGGLE_REGION = ((0.05, 0.23), (0.67, 0.92))
+ULTIMATE_SECONDARY_TOGGLE_REGION = ((0.42, 0.60), (0.67, 0.92))
+ULTIMATE_TOGGLE_SAT_THRESHOLD = 120.0
+ULTIMATE_TOGGLE_SAT_RATIO_THRESHOLD = 0.75
+_ULTIMATE_TOGGLE_BRIGHT_VALUE = 170
 
 
 def _get_column_rect(column: str) -> Tuple[int, int, int, int]:
@@ -374,6 +375,72 @@ def _evaluate_affordability(image: np.ndarray, rect: Tuple[int, int, int, int]) 
     return "unaffordable", metrics
 
 
+def _extract_relative_region(
+    image: np.ndarray,
+    rect: Tuple[int, int, int, int],
+    x_bounds: Tuple[float, float],
+    y_bounds: Tuple[float, float],
+) -> Optional[np.ndarray]:
+    x, y, w, h = rect
+    if w <= 0 or h <= 0:
+        return None
+
+    img_h, img_w = image.shape[:2]
+
+    def _clamp(value: int, minimum: int, maximum: int) -> int:
+        return max(minimum, min(value, maximum))
+
+    start_x = x + int(round(w * x_bounds[0]))
+    end_x = x + int(round(w * x_bounds[1]))
+    start_y = y + int(round(h * y_bounds[0]))
+    end_y = y + int(round(h * y_bounds[1]))
+
+    start_x = _clamp(start_x, 0, img_w - 1)
+    end_x = _clamp(end_x, 0, img_w)
+    start_y = _clamp(start_y, 0, img_h - 1)
+    end_y = _clamp(end_y, 0, img_h)
+
+    if end_x <= start_x:
+        end_x = _clamp(start_x + 4, start_x + 1, img_w)
+    if end_y <= start_y:
+        end_y = _clamp(start_y + 4, start_y + 1, img_h)
+
+    if end_x <= start_x or end_y <= start_y:
+        return None
+
+    return image[start_y:end_y, start_x:end_x]
+
+
+def _classify_toggle_region(
+    region: np.ndarray,
+) -> Tuple[str, Dict[str, float]]:
+    hsv = cv2.cvtColor(region, cv2.COLOR_BGR2HSV)
+    sat = hsv[:, :, 1].astype(np.float32)
+    val = hsv[:, :, 2].astype(np.float32)
+
+    bright_mask = val > _ULTIMATE_TOGGLE_BRIGHT_VALUE
+    sat_mask = sat > ULTIMATE_TOGGLE_SAT_THRESHOLD
+
+    mean_val = float(val.mean()) if val.size else 0.0
+    mean_sat = float(sat.mean()) if sat.size else 0.0
+    bright_ratio = float(bright_mask.mean()) if bright_mask.size else 0.0
+    sat_ratio = float(sat_mask.mean()) if sat_mask.size else 0.0
+
+    metrics = {
+        "mean_val": mean_val,
+        "mean_sat": mean_sat,
+        "bright_ratio": bright_ratio,
+        "sat_ratio": sat_ratio,
+    }
+
+    is_on = (
+        mean_sat >= ULTIMATE_TOGGLE_SAT_THRESHOLD
+        or sat_ratio >= ULTIMATE_TOGGLE_SAT_RATIO_THRESHOLD
+    )
+
+    return ("on" if is_on else "off"), metrics
+
+
 def _evaluate_ultimate_switches(
     image: np.ndarray,
     rect: Tuple[int, int, int, int],
@@ -384,48 +451,28 @@ def _evaluate_ultimate_switches(
     toggles: Dict[str, str] = {}
     metrics: Dict[str, Dict[str, float]] = {}
 
-    primary_region = image[
-        y + int(h * 0.78) : y + int(h * 0.98),
-        x + int(w * 0.06) : x + int(w * 0.33),
-    ]
-    if primary_region.size:
-        hsv = cv2.cvtColor(primary_region, cv2.COLOR_BGR2HSV)
-        val = hsv[:, :, 2].astype(np.float32)
-        bright_mask = val > 170
-        mean_val = float(val.mean()) if val.size else 0.0
-        bright_ratio = float(bright_mask.mean()) if bright_mask.size else 0.0
-        metrics["primary"] = {
-            "mean_val": mean_val,
-            "bright_ratio": bright_ratio,
-        }
-        toggles["primary"] = (
-            "on"
-            if bright_ratio >= _ULTIMATE_TOGGLE_BRIGHT_RATIO
-            or mean_val >= _ULTIMATE_TOGGLE_VAL_THRESHOLD
-            else "off"
-        )
+    primary_region = _extract_relative_region(
+        image,
+        rect,
+        ULTIMATE_PRIMARY_TOGGLE_REGION[0],
+        ULTIMATE_PRIMARY_TOGGLE_REGION[1],
+    )
+    if primary_region is not None and primary_region.size:
+        state, primary_metrics = _classify_toggle_region(primary_region)
+        metrics["primary"] = primary_metrics
+        toggles["primary"] = state
 
     if label and label.lower() == "spotlight":
-        missiles_region = image[
-            y + int(h * 0.78) : y + int(h * 0.92),
-            x + int(w * 0.50) : x + int(w * 0.68),
-        ]
-        if missiles_region.size:
-            hsv = cv2.cvtColor(missiles_region, cv2.COLOR_BGR2HSV)
-            val = hsv[:, :, 2].astype(np.float32)
-            bright_mask = val > 170
-            mean_val = float(val.mean()) if val.size else 0.0
-            bright_ratio = float(bright_mask.mean()) if bright_mask.size else 0.0
-            metrics["missiles"] = {
-                "mean_val": mean_val,
-                "bright_ratio": bright_ratio,
-            }
-            toggles["missiles"] = (
-                "on"
-                if bright_ratio >= _ULTIMATE_SECONDARY_BRIGHT_RATIO
-                or mean_val >= _ULTIMATE_SECONDARY_VAL_THRESHOLD
-                else "off"
-            )
+        missiles_region = _extract_relative_region(
+            image,
+            rect,
+            ULTIMATE_SECONDARY_TOGGLE_REGION[0],
+            ULTIMATE_SECONDARY_TOGGLE_REGION[1],
+        )
+        if missiles_region is not None and missiles_region.size:
+            state, missiles_metrics = _classify_toggle_region(missiles_region)
+            metrics["missiles"] = missiles_metrics
+            toggles["missiles"] = state
 
     return toggles, metrics
 

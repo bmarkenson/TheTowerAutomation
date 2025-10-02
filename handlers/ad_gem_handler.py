@@ -4,7 +4,7 @@ import threading
 import time
 from core.tap_dispatcher import tap
 from core.clickmap_access import get_click
-from core.tap import safe_tap
+from core.input import safe_tap
 from core.label_tapper import is_visible
 from utils.logger import log
 

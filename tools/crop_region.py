@@ -9,13 +9,8 @@ import time
 import subprocess
 
 from core.ss_capture import capture_and_save_screenshot
-from core.clickmap_access import (
-    get_clickmap,
-    save_clickmap,
-    interactive_get_dot_path,
-    prompt_roles,
-    set_dot_path,
-)
+from core.clickmap_access import get_clickmap, save_clickmap, set_dot_path
+from tools.clickmap_editor import interactive_get_dot_path, prompt_roles
 
 # Constants
 SOURCE_PATH = "screenshots/latest.png"

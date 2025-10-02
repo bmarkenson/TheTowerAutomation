@@ -2,9 +2,8 @@
 from utils.logger import log
 from core.ss_capture import capture_adb_screenshot
 from core.run_state import AUTOMATION, ExecMode
-from core.clickmap_access import tap_now, swipe_now
+from core.input import tap_if_visible, tap_now, swipe_now
 from core.adb_utils import adb_shell
-from core.tap import tap_if_visible
 from utils.wave_detector import set_wave_hint
 # Note: OCR fallback for More Stats is currently disabled; keeping imports out.
 import time
@@ -44,6 +43,10 @@ def handle_game_over(*, capture_stats: bool = True):
     """
     session_id = _make_session_id()
     log(f"Handling GAME OVER — Session: {session_id}", "INFO")
+
+    # Clear the monotonic wave hint immediately so fresh runs accept wave 1 detections.
+    set_wave_hint(None)
+    log("[WAVE] Cleared wave hint on game over", "INFO")
 
     if capture_stats:
         # Save first screen

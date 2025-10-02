@@ -20,19 +20,44 @@ Public usage (simplified):
 
 from __future__ import annotations
 
-import os
 import json
 import time
+from dataclasses import dataclass
 from decimal import Decimal
-from typing import Optional, Tuple
+from pathlib import Path
+from typing import Dict, Optional, Tuple
+
+import numpy as np
+from numpy.typing import NDArray
 
 from utils.logger import log
 from core.run_state import AUTOMATION
-from core.tap import tap_if_visible
+from core.input import tap_if_visible
 from core.label_tapper import is_visible
 from core.matcher import get_match as _get_match
 from core.ss_capture import capture_and_save_screenshot
 from utils.coin_detector import detect_coins_from_image, format_compact_decimal
+
+
+Frame = NDArray[np.uint8]
+
+
+@dataclass
+class CoinsTotalSnapshot:
+    value: Decimal
+    confidence: float
+    timestamp: float
+    reason: str
+    image: Optional[Frame]
+    previous_value: Optional[Decimal]
+    previous_timestamp: Optional[float]
+    previous_run_start_value: Optional[Decimal]
+    previous_run_start_timestamp: Optional[float]
+    session_start_value: Optional[Decimal]
+    session_start_timestamp: Optional[float]
+
+_ALLOWED_STATES = {"RUNNING", "PAUSED", "STOPPED"}
+_ALLOWED_MODES = {"RETRY", "WAIT", "HOME"}
 
 
 class AutomationSupervisor:
@@ -50,7 +75,7 @@ class AutomationSupervisor:
         coins_max_jump_factor: float = 8.0,
         coins_jump_conf_floor: float = 90.0,
     ) -> None:
-        self.control_file = control_file
+        self.control_file = Path(control_file)
         self.auto_resume_secs = max(0, int(auto_resume_secs))
         self.auto_resume_enabled = bool(auto_resume_enabled)
         self.auto_return_secs = max(0, int(auto_return_secs))
@@ -72,6 +97,15 @@ class AutomationSupervisor:
         self._last_coins_val: Optional[Decimal] = None
         self._coins_ignore_plausibility_once: bool = False
 
+        self._coins_pending_total_reason: Optional[str] = None
+        self._coins_next_hourly_check_ts: Optional[float] = None
+        self._coins_last_total: Optional[Decimal] = None
+        self._coins_last_total_ts: Optional[float] = None
+        self._coins_total_session_start: Optional[Decimal] = None
+        self._coins_total_session_start_ts: Optional[float] = None
+        self._coins_run_start_total: Optional[Decimal] = None
+        self._coins_run_start_ts: Optional[float] = None
+
         self._rtg_visible_since_ts: Optional[float] = None
 
     # ------------------------- control / pause -------------------------------
@@ -82,50 +116,169 @@ class AutomationSupervisor:
 
     def apply_control(self) -> None:
         """Poll the control file, apply state/mode, and auto-resume if needed."""
-        # Control file
-        try:
-            if os.path.exists(self.control_file):
-                data = {}
-                try:
-                    with open(self.control_file, "r", encoding="utf-8") as f:
-                        data = json.load(f) or {}
-                except Exception:
-                    data = {}
-                st = (data.get("state") or "").upper()
-                md = (data.get("mode") or "").upper()
-                if st in {"RUNNING", "PAUSED", "STOPPED"} and st != self._last_applied_state:
-                    try:
-                        AUTOMATION.state = st
-                        log(f"[CTRL] State set to {st} via control file", "INFO")
-                        self._last_applied_state = st
-                        if st == "PAUSED":
-                            self._paused_since_ts = time.time()
-                        else:
-                            self._paused_since_ts = None
-                    except Exception:
-                        pass
-                if md in {"RETRY", "WAIT", "HOME"} and md != self._last_applied_mode:
-                    try:
-                        AUTOMATION.mode = md
-                        log(f"[CTRL] Mode set to {md} via control file", "INFO")
-                        self._last_applied_mode = md
-                    except Exception:
-                        pass
-        except Exception:
-            pass
 
-        # Auto-resume from paused
-        try:
-            if self.auto_resume_enabled and self.is_paused and self._paused_since_ts is not None:
-                if (time.time() - self._paused_since_ts) >= self.auto_resume_secs > 0:
-                    AUTOMATION.state = "RUNNING"
-                    self._paused_since_ts = None
-                    log("[CTRL] Auto-resume: State=RUNNING after pause timeout", "INFO")
-        except Exception:
-            pass
+        directives = self._load_control_directive()
+        if directives:
+            self._apply_state(directives.get("state"))
+            self._apply_mode(directives.get("mode"))
+
+        self._auto_resume_if_needed()
 
     def format_state(self, ui_state: str) -> str:
         return f"{ui_state}/PAUSED" if self.is_paused else ui_state
+
+    # --------------------- coins: total snapshots --------------------------
+    def schedule_total_snapshot(self, reason: str = "scheduled") -> None:
+        self._coins_pending_total_reason = reason
+
+    def record_run_restart(self) -> None:
+        self.schedule_total_snapshot("run_restart")
+
+    def should_capture_total(self, now: Optional[float] = None) -> bool:
+        if self._coins_pending_total_reason:
+            return True
+        if self._coins_next_hourly_check_ts is None:
+            return False
+        ts = time.time() if now is None else float(now)
+        return ts >= self._coins_next_hourly_check_ts
+
+    def _capture_coins_frame(self) -> Optional[Frame]:
+        try:
+            return capture_and_save_screenshot(log_capture=False)
+        except Exception:
+            return None
+
+    def _detect_coins_from_frame(
+        self, frame: Optional[Frame], debug_out: Optional[str] = None
+    ) -> Tuple[Optional[Decimal], float, bool]:
+        if frame is None:
+            return None, -1.0, False
+        try:
+            val, conf, has_min = detect_coins_from_image(frame, debug_out=debug_out)
+            return val, conf, has_min
+        except Exception:
+            return None, -1.0, False
+
+    def _toggle_for_total(self) -> Tuple[Optional[Decimal], float, Optional[Frame], int]:
+        toggles = 0
+        if not tap_if_visible("buttons.coin_toggle", retries=1):
+            log("[COINS] Failed to toggle coin display for total snapshot", "WARN")
+            return None, -1.0, None, toggles
+
+        toggles = 1
+        total_val: Optional[Decimal] = None
+        total_conf = -1.0
+        total_img: Optional[Frame] = None
+
+        for _ in range(3):
+            time.sleep(0.4)
+            frame = self._capture_coins_frame()
+            if frame is None:
+                continue
+            val, conf, has_min = self._detect_coins_from_frame(frame)
+            if val is not None and not has_min:
+                total_val, total_conf, total_img = val, conf, frame
+                break
+
+        if total_img is None:
+            log("[COINS] Unable to read total coins after toggle", "WARN")
+            if tap_if_visible("buttons.coin_toggle", retries=1):
+                toggles += 1
+                time.sleep(0.4)
+            return None, -1.0, None, toggles
+
+        return total_val, total_conf, total_img, toggles
+
+    def capture_total_snapshot(
+        self,
+        *,
+        current_img: Optional[Frame],
+        current_value: Optional[Decimal],
+        current_confidence: float,
+        current_has_min: bool,
+        debug_out: Optional[str] = None,
+    ) -> Tuple[Optional[CoinsTotalSnapshot], Optional[Tuple[Optional[Decimal], float, bool]]]:
+        now = time.time()
+        reason = self._coins_pending_total_reason or "hourly"
+
+        prev_value = self._coins_last_total
+        prev_ts = self._coins_last_total_ts
+        prev_run_start_val = self._coins_run_start_total
+        prev_run_start_ts = self._coins_run_start_ts
+
+        total_val: Optional[Decimal] = None
+        total_conf = -1.0
+        total_img: Optional[Frame] = None
+        toggles = 0
+
+        if not current_has_min and current_img is not None and current_value is not None:
+            total_val = current_value
+            total_conf = current_confidence
+            total_img = current_img
+            toggles = 0
+        else:
+            total_val, total_conf, total_img, toggles = self._toggle_for_total()
+            if total_val is None or total_img is None:
+                return None, None
+
+        restore_toggle = 1 if (toggles % 2 == 1 or not current_has_min) else 0
+        per_min_frame: Optional[Frame] = None
+
+        if restore_toggle:
+            if tap_if_visible("buttons.coin_toggle", retries=1):
+                toggles += 1
+                time.sleep(0.4)
+                per_min_frame = self._capture_coins_frame()
+            else:
+                log("[COINS] Failed to restore coins/min display after total snapshot", "WARN")
+        else:
+            per_min_frame = self._capture_coins_frame()
+
+        per_min_val, per_min_conf, per_min_has_min = self._detect_coins_from_frame(
+            per_min_frame, debug_out=debug_out
+        )
+
+        if per_min_has_min:
+            self._coins_has_min_miss = 0
+        else:
+            log("[COINS] Post-snapshot detection missing '/min'; downstream toggle may retry", "WARN")
+
+        if restore_toggle or toggles > 0:
+            self._coins_ignore_plausibility_once = True
+            self._last_coins_toggle_ts = now
+
+        if total_val is None:
+            # Keep pending reason so we retry on next cycle.
+            return None, (per_min_val, per_min_conf, per_min_has_min)
+
+        if self._coins_total_session_start is None:
+            self._coins_total_session_start = total_val
+            self._coins_total_session_start_ts = now
+
+        snapshot = CoinsTotalSnapshot(
+            value=total_val,
+            confidence=total_conf,
+            timestamp=now,
+            reason=reason,
+            image=total_img,
+            previous_value=prev_value,
+            previous_timestamp=prev_ts,
+            previous_run_start_value=prev_run_start_val,
+            previous_run_start_timestamp=prev_run_start_ts,
+            session_start_value=self._coins_total_session_start,
+            session_start_timestamp=self._coins_total_session_start_ts,
+        )
+
+        self._coins_last_total = total_val
+        self._coins_last_total_ts = now
+        self._coins_pending_total_reason = None
+        self._coins_next_hourly_check_ts = now + 3600.0
+
+        if reason in {"startup", "run_restart"}:
+            self._coins_run_start_total = total_val
+            self._coins_run_start_ts = now
+
+        return snapshot, (per_min_val, per_min_conf, per_min_has_min)
 
     # --------------------- coins: toggle + plausibility ----------------------
     def _apply_plausibility(self, coins_val: Optional[Decimal], coins_conf: float) -> Optional[Decimal]:
@@ -163,7 +316,7 @@ class AutomationSupervisor:
 
     def process_coins(
         self,
-        img,
+        img: Frame,
         coins_val: Optional[Decimal],
         coins_conf: float,
         has_min: bool,
@@ -238,7 +391,7 @@ class AutomationSupervisor:
         return coins_val, coins_conf, has_min, coins_eff
 
     # ------------------------- auto return-to-game ---------------------------
-    def auto_return_check(self, img, ui_state: str) -> None:
+    def auto_return_check(self, img: Frame, ui_state: str) -> None:
         if not self.auto_return_enabled or self.is_paused or ui_state == "RUNNING":
             # If timer was running but conditions no longer hold, cancel
             if self._rtg_visible_since_ts is not None:
@@ -282,14 +435,68 @@ class AutomationSupervisor:
         except Exception:
             self._rtg_visible_since_ts = None
 
+    # ------------------------------ helpers ---------------------------------
+    def _load_control_directive(self) -> Dict[str, str]:
+        if not self.control_file.exists():
+            return {}
+        try:
+            with self.control_file.open("r", encoding="utf-8") as handle:
+                data = json.load(handle) or {}
+        except (OSError, json.JSONDecodeError) as exc:
+            log(f"[CTRL] Failed reading control file: {exc}", "WARN")
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _apply_state(self, state: Optional[str]) -> None:
+        if not state:
+            return
+        normalized = state.upper()
+        if normalized not in _ALLOWED_STATES or normalized == self._last_applied_state:
+            return
+        try:
+            AUTOMATION.state = normalized
+            log(f"[CTRL] State set to {normalized} via control file", "INFO")
+            self._last_applied_state = normalized
+            self._paused_since_ts = time.time() if normalized == "PAUSED" else None
+        except Exception as exc:
+            log(f"[CTRL] Failed to set state={normalized}: {exc}", "WARN")
+
+    def _apply_mode(self, mode: Optional[str]) -> None:
+        if not mode:
+            return
+        normalized = mode.upper()
+        if normalized not in _ALLOWED_MODES or normalized == self._last_applied_mode:
+            return
+        try:
+            AUTOMATION.mode = normalized
+            log(f"[CTRL] Mode set to {normalized} via control file", "INFO")
+            self._last_applied_mode = normalized
+        except Exception as exc:
+            log(f"[CTRL] Failed to set mode={normalized}: {exc}", "WARN")
+
+    def _auto_resume_if_needed(self) -> None:
+        if not self.auto_resume_enabled or self.auto_resume_secs <= 0:
+            return
+        if not self.is_paused or self._paused_since_ts is None:
+            return
+        try:
+            if (time.time() - self._paused_since_ts) >= self.auto_resume_secs:
+                AUTOMATION.state = "RUNNING"
+                self._paused_since_ts = None
+                log("[CTRL] Auto-resume: State=RUNNING after pause timeout", "INFO")
+                self._last_applied_state = "RUNNING"
+        except Exception as exc:
+            log(f"[CTRL] Auto-resume failed: {exc}", "WARN")
+
 # Re-exports for convenience
 try:
     from core.run_state import RunState, ExecMode
     __all__ = [
         "AutomationSupervisor",
+        "CoinsTotalSnapshot",
         "AUTOMATION",
         "RunState",
         "ExecMode",
     ]
 except Exception:
-    __all__ = ["AutomationSupervisor", "AUTOMATION"]
+    __all__ = ["AutomationSupervisor", "CoinsTotalSnapshot", "AUTOMATION"]

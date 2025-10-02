@@ -3,13 +3,17 @@
 
 from __future__ import annotations
 
+import sys
+from typing import Sequence
+
 from utils.logger import log
 from utils.wave_detector import set_wave_hint
 from core.app_setup import parse_args, config_from_args
 from core.app import App
 
 
-def main(argv=None) -> None:
+def main(argv: Sequence[str] | None = None) -> int:
+    """Parse CLI args, build config, and run the app."""
     args = parse_args(argv)
     config = config_from_args(args)
 
@@ -19,9 +23,17 @@ def main(argv=None) -> None:
         set_wave_hint(None)
         log("[WAVE] Reset wave hint at startup", "DEBUG")
 
-    app = App(config)
-    app.run()
+    try:
+        app = App(config)
+        app.run()
+        return 0
+    except KeyboardInterrupt:
+        log("Interrupted by user (Ctrl+C)", "INFO")
+        return 130
+    except Exception as exc:  # pragma: no cover - fatal logging only
+        log(f"Fatal error: {exc}", "ERROR")
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

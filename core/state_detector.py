@@ -27,17 +27,33 @@ defaults:
     - Overlays: 0..N may co-exist
 """
 
+from __future__ import annotations
+
+import os
+from functools import lru_cache
+from typing import Any, Dict, List, Optional, TypedDict
+
+import numpy as np
+import yaml
+
 from utils.template_matcher import match_region
 from utils.logger import log
-from core.clickmap_access import resolve_dot_path, get_clickmap
+from core.clickmap_access import get_clickmap, resolve_dot_path
 from core.matcher import get_match
-import yaml
-import os
 
 STATE_DEF_PATH = os.path.join(os.path.dirname(__file__), "../config/state_definitions.yaml")
 
 
-def load_state_definitions():
+class StateDetectionResult(TypedDict):
+    """Typed structure returned by :func:`detect_state_and_overlays`."""
+
+    state: str
+    secondary_states: List[str]
+    overlays: List[str]
+    menu: Optional[str]
+
+
+def load_state_definitions(path: str = STATE_DEF_PATH) -> Dict[str, Any]:
     """
     spec:
       name: load_state_definitions
@@ -50,22 +66,44 @@ def load_state_definitions():
       notes:
         - Caller treats the structure as authoritative for state/menu/overlay rules
     """
-    with open(STATE_DEF_PATH, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    with open(path, "r", encoding="utf-8") as fh:
+        return yaml.safe_load(fh)
 
 
-state_definitions = load_state_definitions()
-clickmap = get_clickmap()
+state_definitions: Dict[str, Any] = load_state_definitions()
+get_clickmap()
 
 
-def detect_state_and_overlays(screen, *, log_matches: bool = False):
+def reload_state_definitions(path: str = STATE_DEF_PATH) -> Dict[str, Any]:
+    """Reload state definitions from disk and clear cached clickmap lookups."""
+
+    global state_definitions
+    state_definitions = load_state_definitions(path)
+    _resolve_dot_path_cached.cache_clear()
+    return state_definitions
+
+
+@lru_cache(maxsize=256)
+def _resolve_dot_path_cached(dot_path: str) -> Optional[Dict[str, Any]]:
+    """Memoized access to clickmap entries to avoid repeated lookups per frame."""
+
+    return resolve_dot_path(dot_path)
+
+
+def detect_state_and_overlays(
+    screen: np.ndarray,
+    *,
+    log_matches: bool = False,
+    state_defs: Optional[Dict[str, Any]] = None,
+) -> StateDetectionResult:
     """
     spec:
       name: detect_state_and_overlays
-      signature: detect_state_and_overlays(screen, *, log_matches: bool = False) -> dict
+      signature: detect_state_and_overlays(screen, *, log_matches: bool = False, state_defs: Optional[dict] = None) -> dict
       p:
         screen: BGR ndarray (full screen capture)
         log_matches: emit MATCH logs for debugging if True
+        state_defs: optional pre-loaded definitions, useful for tests
       r:
         dict with keys:
           state: str  # one of primary names or "UNKNOWN"
@@ -81,7 +119,13 @@ def detect_state_and_overlays(screen, *, log_matches: bool = False):
         - Unresolved clickmap keys are WARN-logged and skipped
         - If no primary matches, state remains "UNKNOWN"
     """
-    result = {
+    definitions = state_defs or state_definitions
+    states_config: List[Dict[str, Any]] = definitions.get("states", [])
+    overlays_config: List[Dict[str, Any]] = definitions.get("overlays", [])
+
+    state_lookup = {entry.get("name"): entry for entry in states_config if entry.get("name")}
+
+    result: StateDetectionResult = {
         "state": "UNKNOWN",
         "secondary_states": [],
         "overlays": [],
@@ -91,18 +135,20 @@ def detect_state_and_overlays(screen, *, log_matches: bool = False):
     matched_states = []
 
     # Match all states
-    for state in state_definitions.get("states", []):
-        state_name = state["name"]
+    for state in states_config:
+        state_name = state.get("name")
+        if not state_name:
+            continue
         match_keys = state.get("match_keys", [])
         for key in match_keys:
-            entry = resolve_dot_path(key)
+            entry = _resolve_dot_path_cached(key)
             if not entry:
                 log(f"[WARN] Unresolved key: {key}", "WARN")
                 continue
-            pt, conf = get_match(key, screenshot=screen)
             if "match_template" not in entry:
                 log(f"[WARN] No match_template for {key}; template matcher will always fail", "WARN")
                 continue
+            pt, conf = get_match(key, screenshot=screen)
             if pt:
                 if log_matches:
                     log(f"[MATCH] State {state_name} via {key} at {pt} ({conf:.3f})", "MATCH")
@@ -113,7 +159,7 @@ def detect_state_and_overlays(screen, *, log_matches: bool = False):
     menu_candidates_in_order = []  # preserve YAML order for priority
     for name in matched_states:
         # find the state entry (by name) in YAML
-        state_entry = next((s for s in state_definitions["states"] if s["name"] == name), None)
+        state_entry = state_lookup.get(name)
         if not state_entry:
             continue
         state_type = state_entry.get("type", "unknown")
@@ -134,10 +180,12 @@ def detect_state_and_overlays(screen, *, log_matches: bool = False):
             log(f"[WARN] Multiple menus matched {menu_candidates_in_order} -> chose '{result['menu']}' (YAML order priority)", "WARN")
 
     # Match overlays (can be multiple)
-    for overlay in state_definitions.get("overlays", []):
-        overlay_name = overlay["name"]
+    for overlay in overlays_config:
+        overlay_name = overlay.get("name")
+        if not overlay_name:
+            continue
         for key in overlay.get("match_keys", []):
-            entry = resolve_dot_path(key)
+            entry = _resolve_dot_path_cached(key)
             if not entry:
                 log(f"[WARN]     Could not resolve: {key}", "WARN")
                 continue

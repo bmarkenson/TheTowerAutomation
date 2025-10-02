@@ -1,7 +1,6 @@
 from utils.logger import log
 from core.ss_capture import capture_adb_screenshot
-from core.clickmap_access import swipe_now
-from core.tap import tap_if_visible
+from core.input import tap_if_visible, swipe_now
 import time
 import os
 import cv2

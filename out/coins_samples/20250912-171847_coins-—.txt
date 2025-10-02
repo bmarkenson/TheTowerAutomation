@@ -1,7 +1,0 @@
-state=RUNNING
-menu=UTILITY_MENU
-secondary=—
-overlays=MENU_OPEN
-coins=—
-coins_conf=-1.0
-has_min=no

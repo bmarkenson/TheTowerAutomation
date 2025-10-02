@@ -1,0 +1,6823 @@
+meta:
+  name: orbdevo
+  version: 1
+vars:
+  current_phase: early
+  quantities_initialized: false
+  completed: false
+  ultimate_checked: false
+  last_upgrade_label: ''
+  last_upgrade_reason: ''
+  last_upgrade_sent: false
+  last_upgrade_maxed_after: false
+  last_upgrade_menu: ''
+  last_upgrade_ts: 0
+  ultimate_targets: []
+  stage_early: 0
+  maxed_wall_health: false
+  maxed_enemy_attack_level_skip: false
+  maxed_enemy_health_level_skip: false
+  maxed_rend_armor_chance: false
+  maxed_rend_armor_mult: false
+  stage_late: 0
+  maxed_free_utility_upgrade: false
+  maxed_free_attack_upgrade: false
+  maxed_free_defense_upgrade: false
+  maxed_attack_speed: false
+  maxed_critical_chance: false
+  maxed_critical_factor: false
+  maxed_range: false
+  maxed_damage_per_meter: false
+  maxed_multishot_chance: false
+  maxed_rapid_fire_chance: false
+  maxed_bounce_shot_chance: false
+  maxed_bounce_shot_range: false
+  maxed_knockback_chance: false
+  maxed_orb_speed: false
+  maxed_orbs: false
+  maxed_shockwave_size: false
+  maxed_land_mine_chance: false
+  maxed_land_mine_radius: false
+  maxed_land_mine_damage: false
+  maxed_health: false
+  maxed_enemy_attack_level_skip_2: false
+  maxed_enemy_health_level_skip_2: false
+  maxed_rend_armor_chance_2: false
+  maxed_rend_armor_mult_2: false
+  maxed_super_crit_mult: false
+  maxed_damage: false
+per_run_reset:
+- completed
+- last_upgrade_maxed_after
+- last_upgrade_sent
+- maxed_attack_speed
+- maxed_bounce_shot_chance
+- maxed_bounce_shot_range
+- maxed_critical_chance
+- maxed_critical_factor
+- maxed_damage
+- maxed_damage_per_meter
+- maxed_enemy_attack_level_skip
+- maxed_enemy_attack_level_skip_2
+- maxed_enemy_health_level_skip
+- maxed_enemy_health_level_skip_2
+- maxed_free_attack_upgrade
+- maxed_free_defense_upgrade
+- maxed_free_utility_upgrade
+- maxed_health
+- maxed_knockback_chance
+- maxed_land_mine_chance
+- maxed_land_mine_damage
+- maxed_land_mine_radius
+- maxed_multishot_chance
+- maxed_orb_speed
+- maxed_orbs
+- maxed_range
+- maxed_rapid_fire_chance
+- maxed_rend_armor_chance
+- maxed_rend_armor_chance_2
+- maxed_rend_armor_mult
+- maxed_rend_armor_mult_2
+- maxed_shockwave_size
+- maxed_super_crit_mult
+- maxed_wall_health
+- quantities_initialized
+- stage_early
+- stage_late
+- ultimate_checked
+rules:
+- name: game_over_reset
+  when:
+    state: GAME_OVER
+  do:
+  - type: set
+    var: current_phase
+    value: early
+  - type: set
+    var: quantities_initialized
+    value: false
+  - type: set
+    var: completed
+    value: false
+  - type: set
+    var: ultimate_checked
+    value: false
+  - type: set
+    var: ultimate_targets
+    value: []
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+  - type: set
+    var: stage_early
+    value: 0
+  - type: set
+    var: stage_late
+    value: 0
+  - type: set
+    var: maxed_wall_health
+    value: false
+  - type: set
+    var: maxed_enemy_attack_level_skip
+    value: false
+  - type: set
+    var: maxed_enemy_health_level_skip
+    value: false
+  - type: set
+    var: maxed_rend_armor_chance
+    value: false
+  - type: set
+    var: maxed_rend_armor_mult
+    value: false
+  - type: set
+    var: maxed_free_utility_upgrade
+    value: false
+  - type: set
+    var: maxed_free_attack_upgrade
+    value: false
+  - type: set
+    var: maxed_free_defense_upgrade
+    value: false
+  - type: set
+    var: maxed_attack_speed
+    value: false
+  - type: set
+    var: maxed_critical_chance
+    value: false
+  - type: set
+    var: maxed_critical_factor
+    value: false
+  - type: set
+    var: maxed_range
+    value: false
+  - type: set
+    var: maxed_damage_per_meter
+    value: false
+  - type: set
+    var: maxed_multishot_chance
+    value: false
+  - type: set
+    var: maxed_rapid_fire_chance
+    value: false
+  - type: set
+    var: maxed_bounce_shot_chance
+    value: false
+  - type: set
+    var: maxed_bounce_shot_range
+    value: false
+  - type: set
+    var: maxed_knockback_chance
+    value: false
+  - type: set
+    var: maxed_orb_speed
+    value: false
+  - type: set
+    var: maxed_orbs
+    value: false
+  - type: set
+    var: maxed_shockwave_size
+    value: false
+  - type: set
+    var: maxed_land_mine_chance
+    value: false
+  - type: set
+    var: maxed_land_mine_radius
+    value: false
+  - type: set
+    var: maxed_land_mine_damage
+    value: false
+  - type: set
+    var: maxed_health
+    value: false
+  - type: set
+    var: maxed_enemy_attack_level_skip_2
+    value: false
+  - type: set
+    var: maxed_enemy_health_level_skip_2
+    value: false
+  - type: set
+    var: maxed_rend_armor_chance_2
+    value: false
+  - type: set
+    var: maxed_rend_armor_mult_2
+    value: false
+  - type: set
+    var: maxed_super_crit_mult
+    value: false
+  - type: set
+    var: maxed_damage
+    value: false
+- name: phase_select_early
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase != early
+  do:
+  - type: set
+    var: current_phase
+    value: early
+  - type: set
+    var: stage_early
+    value: 0
+  - type: set
+    var: ultimate_checked
+    value: false
+  - type: set
+    var: ultimate_targets
+    value:
+    - label: Chain Lightning
+      toggles:
+        primary: false
+    - label: Death Wave
+      toggles:
+        primary: true
+    - label: Inner Land Mines
+      toggles:
+        primary: false
+    - label: Poison Swamp
+      toggles:
+        primary: false
+    - label: Spotlight
+      toggles:
+        primary: true
+        missiles: false
+    - label: Smart Missiles
+      toggles:
+        primary: false
+    - label: Chrono Field
+      toggles:
+        primary: true
+    - label: Golden Tower
+      toggles:
+        primary: true
+    - label: Black Hole
+      toggles:
+        primary: true
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: phase_select_late
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase != late
+  do:
+  - type: set
+    var: current_phase
+    value: late
+  - type: set
+    var: stage_late
+    value: 0
+  - type: set
+    var: ultimate_checked
+    value: false
+  - type: set
+    var: ultimate_targets
+    value:
+    - label: Chain Lightning
+      toggles:
+        primary: true
+    - label: Death Wave
+      toggles:
+        primary: true
+    - label: Inner Land Mines
+      toggles:
+        primary: true
+    - label: Poison Swamp
+      toggles:
+        primary: true
+    - label: Spotlight
+      toggles:
+        primary: true
+        missiles: true
+    - label: Smart Missiles
+      toggles:
+        primary: true
+    - label: Chrono Field
+      toggles:
+        primary: true
+    - label: Golden Tower
+      toggles:
+        primary: true
+    - label: Black Hole
+      toggles:
+        primary: true
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: init_buy_quantities
+  when:
+    state: RUNNING
+    assert:
+    - '!quantities_initialized'
+    - '!completed'
+  do:
+  - type: upgrade_set_buy_quantities
+    attack: max
+    defense: max
+    utility: max
+  - type: set
+    var: quantities_initialized
+    value: true
+- name: ensure_ultimate_on_early
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 0
+    - '!ultimate_checked'
+  do:
+  - type: ultimate_ensure_state
+    targets:
+    - label: Chain Lightning
+      toggles:
+        primary: false
+    - label: Death Wave
+      toggles:
+        primary: true
+    - label: Inner Land Mines
+      toggles:
+        primary: false
+    - label: Poison Swamp
+      toggles:
+        primary: false
+    - label: Spotlight
+      toggles:
+        primary: true
+        missiles: false
+    - label: Smart Missiles
+      toggles:
+        primary: false
+    - label: Chrono Field
+      toggles:
+        primary: true
+    - label: Golden Tower
+      toggles:
+        primary: true
+    - label: Black Hole
+      toggles:
+        primary: true
+  - type: set
+    var: ultimate_checked
+    value: true
+- name: skip_early_00_wall_health_known
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 0
+    - maxed_wall_health
+  do:
+  - type: set
+    var: stage_early
+    value: 1
+- name: skip_early_00_wall_health_detected
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 0
+    upgrade_maxed:
+      menu: defense
+      label: Wall Health
+  do:
+  - type: set
+    var: maxed_wall_health
+    value: true
+  - type: set
+    var: stage_early
+    value: 1
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_early_00_wall_health_sent_maxed
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 0
+    - last_upgrade_label == Wall Health
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_wall_health
+    value: true
+  - type: set
+    var: stage_early
+    value: 1
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_early_00_wall_health_sent_not_maxed
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 0
+    - last_upgrade_label == Wall Health
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_wall_health
+    value: false
+  - type: set
+    var: stage_early
+    value: 1
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_early_00_wall_health_unaffordable
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 0
+    - last_upgrade_label == Wall Health
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_wall_health
+    value: false
+  - type: set
+    var: stage_early
+    value: 1
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_early_00_wall_health_maxed
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 0
+    - last_upgrade_label == Wall Health
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_wall_health
+    value: true
+  - type: set
+    var: stage_early
+    value: 1
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_early_00_wall_health
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 0
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: defense
+    label: Wall Health
+- name: skip_early_01_enemy_attack_level_skip_known
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 1
+    - maxed_enemy_attack_level_skip
+  do:
+  - type: set
+    var: stage_early
+    value: 2
+- name: skip_early_01_enemy_attack_level_skip_detected
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 1
+    upgrade_maxed:
+      menu: utility
+      label: Enemy Attack Level Skip
+  do:
+  - type: set
+    var: maxed_enemy_attack_level_skip
+    value: true
+  - type: set
+    var: stage_early
+    value: 2
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_early_01_enemy_attack_level_skip_sent_maxed
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 1
+    - last_upgrade_label == Enemy Attack Level Skip
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_enemy_attack_level_skip
+    value: true
+  - type: set
+    var: stage_early
+    value: 2
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_early_01_enemy_attack_level_skip_sent_not_maxed
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 1
+    - last_upgrade_label == Enemy Attack Level Skip
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_enemy_attack_level_skip
+    value: false
+  - type: set
+    var: stage_early
+    value: 2
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_early_01_enemy_attack_level_skip_unaffordable
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 1
+    - last_upgrade_label == Enemy Attack Level Skip
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_enemy_attack_level_skip
+    value: false
+  - type: set
+    var: stage_early
+    value: 2
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_early_01_enemy_attack_level_skip_maxed
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 1
+    - last_upgrade_label == Enemy Attack Level Skip
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_enemy_attack_level_skip
+    value: true
+  - type: set
+    var: stage_early
+    value: 2
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_early_01_enemy_attack_level_skip
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 1
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: utility
+    label: Enemy Attack Level Skip
+- name: skip_early_02_enemy_health_level_skip_known
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 2
+    - maxed_enemy_health_level_skip
+  do:
+  - type: set
+    var: stage_early
+    value: 3
+- name: skip_early_02_enemy_health_level_skip_detected
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 2
+    upgrade_maxed:
+      menu: utility
+      label: Enemy Health Level Skip
+  do:
+  - type: set
+    var: maxed_enemy_health_level_skip
+    value: true
+  - type: set
+    var: stage_early
+    value: 3
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_early_02_enemy_health_level_skip_sent_maxed
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 2
+    - last_upgrade_label == Enemy Health Level Skip
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_enemy_health_level_skip
+    value: true
+  - type: set
+    var: stage_early
+    value: 3
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_early_02_enemy_health_level_skip_sent_not_maxed
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 2
+    - last_upgrade_label == Enemy Health Level Skip
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_enemy_health_level_skip
+    value: false
+  - type: set
+    var: stage_early
+    value: 3
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_early_02_enemy_health_level_skip_unaffordable
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 2
+    - last_upgrade_label == Enemy Health Level Skip
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_enemy_health_level_skip
+    value: false
+  - type: set
+    var: stage_early
+    value: 3
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_early_02_enemy_health_level_skip_maxed
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 2
+    - last_upgrade_label == Enemy Health Level Skip
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_enemy_health_level_skip
+    value: true
+  - type: set
+    var: stage_early
+    value: 3
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_early_02_enemy_health_level_skip
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 2
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: utility
+    label: Enemy Health Level Skip
+- name: skip_early_03_rend_armor_chance_known
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 3
+    - maxed_rend_armor_chance
+  do:
+  - type: set
+    var: stage_early
+    value: 4
+- name: skip_early_03_rend_armor_chance_detected
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 3
+    upgrade_maxed:
+      menu: attack
+      label: Rend Armor Chance
+  do:
+  - type: set
+    var: maxed_rend_armor_chance
+    value: true
+  - type: set
+    var: stage_early
+    value: 4
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_early_03_rend_armor_chance_sent_maxed
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 3
+    - last_upgrade_label == Rend Armor Chance
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_rend_armor_chance
+    value: true
+  - type: set
+    var: stage_early
+    value: 4
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_early_03_rend_armor_chance_sent_not_maxed
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 3
+    - last_upgrade_label == Rend Armor Chance
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_rend_armor_chance
+    value: false
+  - type: set
+    var: stage_early
+    value: 4
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_early_03_rend_armor_chance_unaffordable
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 3
+    - last_upgrade_label == Rend Armor Chance
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_rend_armor_chance
+    value: false
+  - type: set
+    var: stage_early
+    value: 4
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_early_03_rend_armor_chance_maxed
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 3
+    - last_upgrade_label == Rend Armor Chance
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_rend_armor_chance
+    value: true
+  - type: set
+    var: stage_early
+    value: 4
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_early_03_rend_armor_chance
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 3
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: attack
+    label: Rend Armor Chance
+- name: skip_early_04_rend_armor_mult_known
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 4
+    - maxed_rend_armor_mult
+  do:
+  - type: set
+    var: stage_early
+    value: 0
+  - type: set
+    var: ultimate_checked
+    value: false
+- name: skip_early_04_rend_armor_mult_detected
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 4
+    upgrade_maxed:
+      menu: attack
+      label: Rend Armor Mult
+  do:
+  - type: set
+    var: maxed_rend_armor_mult
+    value: true
+  - type: set
+    var: stage_early
+    value: 0
+  - type: set
+    var: ultimate_checked
+    value: false
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_early_04_rend_armor_mult_sent_maxed
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 4
+    - last_upgrade_label == Rend Armor Mult
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_rend_armor_mult
+    value: true
+  - type: set
+    var: stage_early
+    value: 0
+  - type: set
+    var: ultimate_checked
+    value: false
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_early_04_rend_armor_mult_sent_not_maxed
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 4
+    - last_upgrade_label == Rend Armor Mult
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_rend_armor_mult
+    value: false
+  - type: set
+    var: stage_early
+    value: 0
+  - type: set
+    var: ultimate_checked
+    value: false
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_early_04_rend_armor_mult_unaffordable
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 4
+    - last_upgrade_label == Rend Armor Mult
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_rend_armor_mult
+    value: false
+  - type: set
+    var: stage_early
+    value: 0
+  - type: set
+    var: ultimate_checked
+    value: false
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_early_04_rend_armor_mult_maxed
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 4
+    - last_upgrade_label == Rend Armor Mult
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_rend_armor_mult
+    value: true
+  - type: set
+    var: stage_early
+    value: 0
+  - type: set
+    var: ultimate_checked
+    value: false
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_early_04_rend_armor_mult
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - current_phase == early
+    - stage_early == 4
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: attack
+    label: Rend Armor Mult
+- name: ensure_ultimate_on_late
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 0
+    - '!ultimate_checked'
+  do:
+  - type: ultimate_ensure_state
+    targets:
+    - label: Chain Lightning
+      toggles:
+        primary: true
+    - label: Death Wave
+      toggles:
+        primary: true
+    - label: Inner Land Mines
+      toggles:
+        primary: true
+    - label: Poison Swamp
+      toggles:
+        primary: true
+    - label: Spotlight
+      toggles:
+        primary: true
+        missiles: true
+    - label: Smart Missiles
+      toggles:
+        primary: true
+    - label: Chrono Field
+      toggles:
+        primary: true
+    - label: Golden Tower
+      toggles:
+        primary: true
+    - label: Black Hole
+      toggles:
+        primary: true
+  - type: set
+    var: ultimate_checked
+    value: true
+- name: skip_late_00_free_utility_upgrade_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 0
+    - maxed_free_utility_upgrade
+  do:
+  - type: set
+    var: stage_late
+    value: 1
+- name: skip_late_00_free_utility_upgrade_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 0
+    upgrade_maxed:
+      menu: utility
+      label: Free Utility Upgrade
+  do:
+  - type: set
+    var: maxed_free_utility_upgrade
+    value: true
+  - type: set
+    var: stage_late
+    value: 1
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_00_free_utility_upgrade_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 0
+    - last_upgrade_label == Free Utility Upgrade
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_free_utility_upgrade
+    value: true
+  - type: set
+    var: stage_late
+    value: 1
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_00_free_utility_upgrade_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 0
+    - last_upgrade_label == Free Utility Upgrade
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_free_utility_upgrade
+    value: false
+  - type: set
+    var: stage_late
+    value: 1
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_00_free_utility_upgrade_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 0
+    - last_upgrade_label == Free Utility Upgrade
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_free_utility_upgrade
+    value: false
+  - type: set
+    var: stage_late
+    value: 1
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_00_free_utility_upgrade_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 0
+    - last_upgrade_label == Free Utility Upgrade
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_free_utility_upgrade
+    value: true
+  - type: set
+    var: stage_late
+    value: 1
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_00_free_utility_upgrade
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 0
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: utility
+    label: Free Utility Upgrade
+- name: skip_late_01_free_attack_upgrade_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 1
+    - maxed_free_attack_upgrade
+  do:
+  - type: set
+    var: stage_late
+    value: 2
+- name: skip_late_01_free_attack_upgrade_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 1
+    upgrade_maxed:
+      menu: utility
+      label: Free Attack Upgrade
+  do:
+  - type: set
+    var: maxed_free_attack_upgrade
+    value: true
+  - type: set
+    var: stage_late
+    value: 2
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_01_free_attack_upgrade_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 1
+    - last_upgrade_label == Free Attack Upgrade
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_free_attack_upgrade
+    value: true
+  - type: set
+    var: stage_late
+    value: 2
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_01_free_attack_upgrade_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 1
+    - last_upgrade_label == Free Attack Upgrade
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_free_attack_upgrade
+    value: false
+  - type: set
+    var: stage_late
+    value: 2
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_01_free_attack_upgrade_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 1
+    - last_upgrade_label == Free Attack Upgrade
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_free_attack_upgrade
+    value: false
+  - type: set
+    var: stage_late
+    value: 2
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_01_free_attack_upgrade_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 1
+    - last_upgrade_label == Free Attack Upgrade
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_free_attack_upgrade
+    value: true
+  - type: set
+    var: stage_late
+    value: 2
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_01_free_attack_upgrade
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 1
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: utility
+    label: Free Attack Upgrade
+- name: skip_late_02_free_defense_upgrade_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 2
+    - maxed_free_defense_upgrade
+  do:
+  - type: set
+    var: stage_late
+    value: 3
+- name: skip_late_02_free_defense_upgrade_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 2
+    upgrade_maxed:
+      menu: utility
+      label: Free Defense Upgrade
+  do:
+  - type: set
+    var: maxed_free_defense_upgrade
+    value: true
+  - type: set
+    var: stage_late
+    value: 3
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_02_free_defense_upgrade_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 2
+    - last_upgrade_label == Free Defense Upgrade
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_free_defense_upgrade
+    value: true
+  - type: set
+    var: stage_late
+    value: 3
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_02_free_defense_upgrade_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 2
+    - last_upgrade_label == Free Defense Upgrade
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_free_defense_upgrade
+    value: false
+  - type: set
+    var: stage_late
+    value: 3
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_02_free_defense_upgrade_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 2
+    - last_upgrade_label == Free Defense Upgrade
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_free_defense_upgrade
+    value: false
+  - type: set
+    var: stage_late
+    value: 3
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_02_free_defense_upgrade_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 2
+    - last_upgrade_label == Free Defense Upgrade
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_free_defense_upgrade
+    value: true
+  - type: set
+    var: stage_late
+    value: 3
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_02_free_defense_upgrade
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 2
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: utility
+    label: Free Defense Upgrade
+- name: skip_late_03_attack_speed_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 3
+    - maxed_attack_speed
+  do:
+  - type: set
+    var: stage_late
+    value: 4
+- name: skip_late_03_attack_speed_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 3
+    upgrade_maxed:
+      menu: attack
+      label: Attack Speed
+  do:
+  - type: set
+    var: maxed_attack_speed
+    value: true
+  - type: set
+    var: stage_late
+    value: 4
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_03_attack_speed_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 3
+    - last_upgrade_label == Attack Speed
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_attack_speed
+    value: true
+  - type: set
+    var: stage_late
+    value: 4
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_03_attack_speed_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 3
+    - last_upgrade_label == Attack Speed
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_attack_speed
+    value: false
+  - type: set
+    var: stage_late
+    value: 4
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_03_attack_speed_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 3
+    - last_upgrade_label == Attack Speed
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_attack_speed
+    value: false
+  - type: set
+    var: stage_late
+    value: 4
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_03_attack_speed_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 3
+    - last_upgrade_label == Attack Speed
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_attack_speed
+    value: true
+  - type: set
+    var: stage_late
+    value: 4
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_03_attack_speed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 3
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: attack
+    label: Attack Speed
+- name: skip_late_04_critical_chance_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 4
+    - maxed_critical_chance
+  do:
+  - type: set
+    var: stage_late
+    value: 5
+- name: skip_late_04_critical_chance_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 4
+    upgrade_maxed:
+      menu: attack
+      label: Critical Chance
+  do:
+  - type: set
+    var: maxed_critical_chance
+    value: true
+  - type: set
+    var: stage_late
+    value: 5
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_04_critical_chance_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 4
+    - last_upgrade_label == Critical Chance
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_critical_chance
+    value: true
+  - type: set
+    var: stage_late
+    value: 5
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_04_critical_chance_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 4
+    - last_upgrade_label == Critical Chance
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_critical_chance
+    value: false
+  - type: set
+    var: stage_late
+    value: 5
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_04_critical_chance_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 4
+    - last_upgrade_label == Critical Chance
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_critical_chance
+    value: false
+  - type: set
+    var: stage_late
+    value: 5
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_04_critical_chance_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 4
+    - last_upgrade_label == Critical Chance
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_critical_chance
+    value: true
+  - type: set
+    var: stage_late
+    value: 5
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_04_critical_chance
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 4
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: attack
+    label: Critical Chance
+- name: skip_late_05_critical_factor_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 5
+    - maxed_critical_factor
+  do:
+  - type: set
+    var: stage_late
+    value: 6
+- name: skip_late_05_critical_factor_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 5
+    upgrade_maxed:
+      menu: attack
+      label: Critical Factor
+  do:
+  - type: set
+    var: maxed_critical_factor
+    value: true
+  - type: set
+    var: stage_late
+    value: 6
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_05_critical_factor_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 5
+    - last_upgrade_label == Critical Factor
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_critical_factor
+    value: true
+  - type: set
+    var: stage_late
+    value: 6
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_05_critical_factor_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 5
+    - last_upgrade_label == Critical Factor
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_critical_factor
+    value: false
+  - type: set
+    var: stage_late
+    value: 6
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_05_critical_factor_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 5
+    - last_upgrade_label == Critical Factor
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_critical_factor
+    value: false
+  - type: set
+    var: stage_late
+    value: 6
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_05_critical_factor_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 5
+    - last_upgrade_label == Critical Factor
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_critical_factor
+    value: true
+  - type: set
+    var: stage_late
+    value: 6
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_05_critical_factor
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 5
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: attack
+    label: Critical Factor
+- name: skip_late_06_range_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 6
+    - maxed_range
+  do:
+  - type: set
+    var: stage_late
+    value: 7
+- name: skip_late_06_range_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 6
+    upgrade_maxed:
+      menu: attack
+      label: Range
+  do:
+  - type: set
+    var: maxed_range
+    value: true
+  - type: set
+    var: stage_late
+    value: 7
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_06_range_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 6
+    - last_upgrade_label == Range
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_range
+    value: true
+  - type: set
+    var: stage_late
+    value: 7
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_06_range_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 6
+    - last_upgrade_label == Range
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_range
+    value: false
+  - type: set
+    var: stage_late
+    value: 7
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_06_range_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 6
+    - last_upgrade_label == Range
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_range
+    value: false
+  - type: set
+    var: stage_late
+    value: 7
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_06_range_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 6
+    - last_upgrade_label == Range
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_range
+    value: true
+  - type: set
+    var: stage_late
+    value: 7
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_06_range
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 6
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: attack
+    label: Range
+- name: skip_late_07_damage_per_meter_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 7
+    - maxed_damage_per_meter
+  do:
+  - type: set
+    var: stage_late
+    value: 8
+- name: skip_late_07_damage_per_meter_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 7
+    upgrade_maxed:
+      menu: attack
+      label: Damage Per Meter
+  do:
+  - type: set
+    var: maxed_damage_per_meter
+    value: true
+  - type: set
+    var: stage_late
+    value: 8
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_07_damage_per_meter_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 7
+    - last_upgrade_label == Damage Per Meter
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_damage_per_meter
+    value: true
+  - type: set
+    var: stage_late
+    value: 8
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_07_damage_per_meter_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 7
+    - last_upgrade_label == Damage Per Meter
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_damage_per_meter
+    value: false
+  - type: set
+    var: stage_late
+    value: 8
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_07_damage_per_meter_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 7
+    - last_upgrade_label == Damage Per Meter
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_damage_per_meter
+    value: false
+  - type: set
+    var: stage_late
+    value: 8
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_07_damage_per_meter_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 7
+    - last_upgrade_label == Damage Per Meter
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_damage_per_meter
+    value: true
+  - type: set
+    var: stage_late
+    value: 8
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_07_damage_per_meter
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 7
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: attack
+    label: Damage Per Meter
+- name: skip_late_08_multishot_chance_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 8
+    - maxed_multishot_chance
+  do:
+  - type: set
+    var: stage_late
+    value: 9
+- name: skip_late_08_multishot_chance_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 8
+    upgrade_maxed:
+      menu: attack
+      label: Multishot Chance
+  do:
+  - type: set
+    var: maxed_multishot_chance
+    value: true
+  - type: set
+    var: stage_late
+    value: 9
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_08_multishot_chance_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 8
+    - last_upgrade_label == Multishot Chance
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_multishot_chance
+    value: true
+  - type: set
+    var: stage_late
+    value: 9
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_08_multishot_chance_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 8
+    - last_upgrade_label == Multishot Chance
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_multishot_chance
+    value: false
+  - type: set
+    var: stage_late
+    value: 9
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_08_multishot_chance_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 8
+    - last_upgrade_label == Multishot Chance
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_multishot_chance
+    value: false
+  - type: set
+    var: stage_late
+    value: 9
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_08_multishot_chance_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 8
+    - last_upgrade_label == Multishot Chance
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_multishot_chance
+    value: true
+  - type: set
+    var: stage_late
+    value: 9
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_08_multishot_chance
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 8
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: attack
+    label: Multishot Chance
+- name: skip_late_09_rapid_fire_chance_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 9
+    - maxed_rapid_fire_chance
+  do:
+  - type: set
+    var: stage_late
+    value: 10
+- name: skip_late_09_rapid_fire_chance_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 9
+    upgrade_maxed:
+      menu: attack
+      label: Rapid Fire Chance
+  do:
+  - type: set
+    var: maxed_rapid_fire_chance
+    value: true
+  - type: set
+    var: stage_late
+    value: 10
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_09_rapid_fire_chance_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 9
+    - last_upgrade_label == Rapid Fire Chance
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_rapid_fire_chance
+    value: true
+  - type: set
+    var: stage_late
+    value: 10
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_09_rapid_fire_chance_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 9
+    - last_upgrade_label == Rapid Fire Chance
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_rapid_fire_chance
+    value: false
+  - type: set
+    var: stage_late
+    value: 10
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_09_rapid_fire_chance_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 9
+    - last_upgrade_label == Rapid Fire Chance
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_rapid_fire_chance
+    value: false
+  - type: set
+    var: stage_late
+    value: 10
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_09_rapid_fire_chance_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 9
+    - last_upgrade_label == Rapid Fire Chance
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_rapid_fire_chance
+    value: true
+  - type: set
+    var: stage_late
+    value: 10
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_09_rapid_fire_chance
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 9
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: attack
+    label: Rapid Fire Chance
+- name: skip_late_10_bounce_shot_chance_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 10
+    - maxed_bounce_shot_chance
+  do:
+  - type: set
+    var: stage_late
+    value: 11
+- name: skip_late_10_bounce_shot_chance_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 10
+    upgrade_maxed:
+      menu: attack
+      label: Bounce Shot Chance
+  do:
+  - type: set
+    var: maxed_bounce_shot_chance
+    value: true
+  - type: set
+    var: stage_late
+    value: 11
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_10_bounce_shot_chance_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 10
+    - last_upgrade_label == Bounce Shot Chance
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_bounce_shot_chance
+    value: true
+  - type: set
+    var: stage_late
+    value: 11
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_10_bounce_shot_chance_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 10
+    - last_upgrade_label == Bounce Shot Chance
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_bounce_shot_chance
+    value: false
+  - type: set
+    var: stage_late
+    value: 11
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_10_bounce_shot_chance_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 10
+    - last_upgrade_label == Bounce Shot Chance
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_bounce_shot_chance
+    value: false
+  - type: set
+    var: stage_late
+    value: 11
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_10_bounce_shot_chance_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 10
+    - last_upgrade_label == Bounce Shot Chance
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_bounce_shot_chance
+    value: true
+  - type: set
+    var: stage_late
+    value: 11
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_10_bounce_shot_chance
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 10
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: attack
+    label: Bounce Shot Chance
+- name: skip_late_11_bounce_shot_range_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 11
+    - maxed_bounce_shot_range
+  do:
+  - type: set
+    var: stage_late
+    value: 12
+- name: skip_late_11_bounce_shot_range_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 11
+    upgrade_maxed:
+      menu: attack
+      label: Bounce Shot Range
+  do:
+  - type: set
+    var: maxed_bounce_shot_range
+    value: true
+  - type: set
+    var: stage_late
+    value: 12
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_11_bounce_shot_range_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 11
+    - last_upgrade_label == Bounce Shot Range
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_bounce_shot_range
+    value: true
+  - type: set
+    var: stage_late
+    value: 12
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_11_bounce_shot_range_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 11
+    - last_upgrade_label == Bounce Shot Range
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_bounce_shot_range
+    value: false
+  - type: set
+    var: stage_late
+    value: 12
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_11_bounce_shot_range_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 11
+    - last_upgrade_label == Bounce Shot Range
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_bounce_shot_range
+    value: false
+  - type: set
+    var: stage_late
+    value: 12
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_11_bounce_shot_range_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 11
+    - last_upgrade_label == Bounce Shot Range
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_bounce_shot_range
+    value: true
+  - type: set
+    var: stage_late
+    value: 12
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_11_bounce_shot_range
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 11
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: attack
+    label: Bounce Shot Range
+- name: skip_late_12_knockback_chance_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 12
+    - maxed_knockback_chance
+  do:
+  - type: set
+    var: stage_late
+    value: 13
+- name: skip_late_12_knockback_chance_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 12
+    upgrade_maxed:
+      menu: defense
+      label: Knockback Chance
+  do:
+  - type: set
+    var: maxed_knockback_chance
+    value: true
+  - type: set
+    var: stage_late
+    value: 13
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_12_knockback_chance_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 12
+    - last_upgrade_label == Knockback Chance
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_knockback_chance
+    value: true
+  - type: set
+    var: stage_late
+    value: 13
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_12_knockback_chance_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 12
+    - last_upgrade_label == Knockback Chance
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_knockback_chance
+    value: false
+  - type: set
+    var: stage_late
+    value: 13
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_12_knockback_chance_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 12
+    - last_upgrade_label == Knockback Chance
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_knockback_chance
+    value: false
+  - type: set
+    var: stage_late
+    value: 13
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_12_knockback_chance_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 12
+    - last_upgrade_label == Knockback Chance
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_knockback_chance
+    value: true
+  - type: set
+    var: stage_late
+    value: 13
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_12_knockback_chance
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 12
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: defense
+    label: Knockback Chance
+- name: skip_late_13_orb_speed_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 13
+    - maxed_orb_speed
+  do:
+  - type: set
+    var: stage_late
+    value: 14
+- name: skip_late_13_orb_speed_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 13
+    upgrade_maxed:
+      menu: defense
+      label: Orb Speed
+  do:
+  - type: set
+    var: maxed_orb_speed
+    value: true
+  - type: set
+    var: stage_late
+    value: 14
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_13_orb_speed_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 13
+    - last_upgrade_label == Orb Speed
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_orb_speed
+    value: true
+  - type: set
+    var: stage_late
+    value: 14
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_13_orb_speed_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 13
+    - last_upgrade_label == Orb Speed
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_orb_speed
+    value: false
+  - type: set
+    var: stage_late
+    value: 14
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_13_orb_speed_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 13
+    - last_upgrade_label == Orb Speed
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_orb_speed
+    value: false
+  - type: set
+    var: stage_late
+    value: 14
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_13_orb_speed_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 13
+    - last_upgrade_label == Orb Speed
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_orb_speed
+    value: true
+  - type: set
+    var: stage_late
+    value: 14
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_13_orb_speed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 13
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: defense
+    label: Orb Speed
+- name: skip_late_14_orbs_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 14
+    - maxed_orbs
+  do:
+  - type: set
+    var: stage_late
+    value: 15
+- name: skip_late_14_orbs_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 14
+    upgrade_maxed:
+      menu: defense
+      label: Orbs
+  do:
+  - type: set
+    var: maxed_orbs
+    value: true
+  - type: set
+    var: stage_late
+    value: 15
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_14_orbs_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 14
+    - last_upgrade_label == Orbs
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_orbs
+    value: true
+  - type: set
+    var: stage_late
+    value: 15
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_14_orbs_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 14
+    - last_upgrade_label == Orbs
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_orbs
+    value: false
+  - type: set
+    var: stage_late
+    value: 15
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_14_orbs_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 14
+    - last_upgrade_label == Orbs
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_orbs
+    value: false
+  - type: set
+    var: stage_late
+    value: 15
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_14_orbs_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 14
+    - last_upgrade_label == Orbs
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_orbs
+    value: true
+  - type: set
+    var: stage_late
+    value: 15
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_14_orbs
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 14
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: defense
+    label: Orbs
+- name: skip_late_15_shockwave_size_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 15
+    - maxed_shockwave_size
+  do:
+  - type: set
+    var: stage_late
+    value: 16
+- name: skip_late_15_shockwave_size_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 15
+    upgrade_maxed:
+      menu: defense
+      label: Shockwave Size
+  do:
+  - type: set
+    var: maxed_shockwave_size
+    value: true
+  - type: set
+    var: stage_late
+    value: 16
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_15_shockwave_size_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 15
+    - last_upgrade_label == Shockwave Size
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_shockwave_size
+    value: true
+  - type: set
+    var: stage_late
+    value: 16
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_15_shockwave_size_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 15
+    - last_upgrade_label == Shockwave Size
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_shockwave_size
+    value: false
+  - type: set
+    var: stage_late
+    value: 16
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_15_shockwave_size_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 15
+    - last_upgrade_label == Shockwave Size
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_shockwave_size
+    value: false
+  - type: set
+    var: stage_late
+    value: 16
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_15_shockwave_size_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 15
+    - last_upgrade_label == Shockwave Size
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_shockwave_size
+    value: true
+  - type: set
+    var: stage_late
+    value: 16
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_15_shockwave_size
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 15
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: defense
+    label: Shockwave Size
+- name: skip_late_16_land_mine_chance_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 16
+    - maxed_land_mine_chance
+  do:
+  - type: set
+    var: stage_late
+    value: 17
+- name: skip_late_16_land_mine_chance_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 16
+    upgrade_maxed:
+      menu: defense
+      label: Land Mine Chance
+  do:
+  - type: set
+    var: maxed_land_mine_chance
+    value: true
+  - type: set
+    var: stage_late
+    value: 17
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_16_land_mine_chance_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 16
+    - last_upgrade_label == Land Mine Chance
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_land_mine_chance
+    value: true
+  - type: set
+    var: stage_late
+    value: 17
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_16_land_mine_chance_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 16
+    - last_upgrade_label == Land Mine Chance
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_land_mine_chance
+    value: false
+  - type: set
+    var: stage_late
+    value: 17
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_16_land_mine_chance_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 16
+    - last_upgrade_label == Land Mine Chance
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_land_mine_chance
+    value: false
+  - type: set
+    var: stage_late
+    value: 17
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_16_land_mine_chance_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 16
+    - last_upgrade_label == Land Mine Chance
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_land_mine_chance
+    value: true
+  - type: set
+    var: stage_late
+    value: 17
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_16_land_mine_chance
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 16
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: defense
+    label: Land Mine Chance
+- name: skip_late_17_land_mine_radius_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 17
+    - maxed_land_mine_radius
+  do:
+  - type: set
+    var: stage_late
+    value: 18
+- name: skip_late_17_land_mine_radius_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 17
+    upgrade_maxed:
+      menu: defense
+      label: Land Mine Radius
+  do:
+  - type: set
+    var: maxed_land_mine_radius
+    value: true
+  - type: set
+    var: stage_late
+    value: 18
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_17_land_mine_radius_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 17
+    - last_upgrade_label == Land Mine Radius
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_land_mine_radius
+    value: true
+  - type: set
+    var: stage_late
+    value: 18
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_17_land_mine_radius_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 17
+    - last_upgrade_label == Land Mine Radius
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_land_mine_radius
+    value: false
+  - type: set
+    var: stage_late
+    value: 18
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_17_land_mine_radius_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 17
+    - last_upgrade_label == Land Mine Radius
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_land_mine_radius
+    value: false
+  - type: set
+    var: stage_late
+    value: 18
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_17_land_mine_radius_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 17
+    - last_upgrade_label == Land Mine Radius
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_land_mine_radius
+    value: true
+  - type: set
+    var: stage_late
+    value: 18
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_17_land_mine_radius
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 17
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: defense
+    label: Land Mine Radius
+- name: skip_late_18_land_mine_damage_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 18
+    - maxed_land_mine_damage
+  do:
+  - type: set
+    var: stage_late
+    value: 19
+- name: skip_late_18_land_mine_damage_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 18
+    upgrade_maxed:
+      menu: defense
+      label: Land Mine Damage
+  do:
+  - type: set
+    var: maxed_land_mine_damage
+    value: true
+  - type: set
+    var: stage_late
+    value: 19
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_18_land_mine_damage_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 18
+    - last_upgrade_label == Land Mine Damage
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_land_mine_damage
+    value: true
+  - type: set
+    var: stage_late
+    value: 19
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_18_land_mine_damage_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 18
+    - last_upgrade_label == Land Mine Damage
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_land_mine_damage
+    value: false
+  - type: set
+    var: stage_late
+    value: 19
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_18_land_mine_damage_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 18
+    - last_upgrade_label == Land Mine Damage
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_land_mine_damage
+    value: false
+  - type: set
+    var: stage_late
+    value: 19
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_18_land_mine_damage_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 18
+    - last_upgrade_label == Land Mine Damage
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_land_mine_damage
+    value: true
+  - type: set
+    var: stage_late
+    value: 19
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_18_land_mine_damage
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 18
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: defense
+    label: Land Mine Damage
+- name: skip_late_19_health_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 19
+    - maxed_health
+  do:
+  - type: set
+    var: stage_late
+    value: 20
+- name: skip_late_19_health_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 19
+    upgrade_maxed:
+      menu: defense
+      label: Health
+  do:
+  - type: set
+    var: maxed_health
+    value: true
+  - type: set
+    var: stage_late
+    value: 20
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_19_health_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 19
+    - last_upgrade_label == Health
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_health
+    value: true
+  - type: set
+    var: stage_late
+    value: 20
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_19_health_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 19
+    - last_upgrade_label == Health
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_health
+    value: false
+  - type: set
+    var: stage_late
+    value: 20
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_19_health_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 19
+    - last_upgrade_label == Health
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_health
+    value: false
+  - type: set
+    var: stage_late
+    value: 20
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_19_health_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 19
+    - last_upgrade_label == Health
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_health
+    value: true
+  - type: set
+    var: stage_late
+    value: 20
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_19_health
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 19
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: defense
+    label: Health
+- name: skip_late_20_enemy_attack_level_skip_2_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 20
+    - maxed_enemy_attack_level_skip_2
+  do:
+  - type: set
+    var: stage_late
+    value: 21
+- name: skip_late_20_enemy_attack_level_skip_2_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 20
+    upgrade_maxed:
+      menu: utility
+      label: Enemy Attack Level Skip
+  do:
+  - type: set
+    var: maxed_enemy_attack_level_skip_2
+    value: true
+  - type: set
+    var: stage_late
+    value: 21
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_20_enemy_attack_level_skip_2_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 20
+    - last_upgrade_label == Enemy Attack Level Skip
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_enemy_attack_level_skip_2
+    value: true
+  - type: set
+    var: stage_late
+    value: 21
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_20_enemy_attack_level_skip_2_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 20
+    - last_upgrade_label == Enemy Attack Level Skip
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_enemy_attack_level_skip_2
+    value: false
+  - type: set
+    var: stage_late
+    value: 21
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_20_enemy_attack_level_skip_2_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 20
+    - last_upgrade_label == Enemy Attack Level Skip
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_enemy_attack_level_skip_2
+    value: false
+  - type: set
+    var: stage_late
+    value: 21
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_20_enemy_attack_level_skip_2_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 20
+    - last_upgrade_label == Enemy Attack Level Skip
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_enemy_attack_level_skip_2
+    value: true
+  - type: set
+    var: stage_late
+    value: 21
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_20_enemy_attack_level_skip_2
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 20
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: utility
+    label: Enemy Attack Level Skip
+- name: skip_late_21_enemy_health_level_skip_2_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 21
+    - maxed_enemy_health_level_skip_2
+  do:
+  - type: set
+    var: stage_late
+    value: 22
+- name: skip_late_21_enemy_health_level_skip_2_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 21
+    upgrade_maxed:
+      menu: utility
+      label: Enemy Health Level Skip
+  do:
+  - type: set
+    var: maxed_enemy_health_level_skip_2
+    value: true
+  - type: set
+    var: stage_late
+    value: 22
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_21_enemy_health_level_skip_2_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 21
+    - last_upgrade_label == Enemy Health Level Skip
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_enemy_health_level_skip_2
+    value: true
+  - type: set
+    var: stage_late
+    value: 22
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_21_enemy_health_level_skip_2_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 21
+    - last_upgrade_label == Enemy Health Level Skip
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_enemy_health_level_skip_2
+    value: false
+  - type: set
+    var: stage_late
+    value: 22
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_21_enemy_health_level_skip_2_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 21
+    - last_upgrade_label == Enemy Health Level Skip
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_enemy_health_level_skip_2
+    value: false
+  - type: set
+    var: stage_late
+    value: 22
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_21_enemy_health_level_skip_2_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 21
+    - last_upgrade_label == Enemy Health Level Skip
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_enemy_health_level_skip_2
+    value: true
+  - type: set
+    var: stage_late
+    value: 22
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_21_enemy_health_level_skip_2
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 21
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: utility
+    label: Enemy Health Level Skip
+- name: skip_late_22_rend_armor_chance_2_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 22
+    - maxed_rend_armor_chance_2
+  do:
+  - type: set
+    var: stage_late
+    value: 23
+- name: skip_late_22_rend_armor_chance_2_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 22
+    upgrade_maxed:
+      menu: attack
+      label: Rend Armor Chance
+  do:
+  - type: set
+    var: maxed_rend_armor_chance_2
+    value: true
+  - type: set
+    var: stage_late
+    value: 23
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_22_rend_armor_chance_2_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 22
+    - last_upgrade_label == Rend Armor Chance
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_rend_armor_chance_2
+    value: true
+  - type: set
+    var: stage_late
+    value: 23
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_22_rend_armor_chance_2_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 22
+    - last_upgrade_label == Rend Armor Chance
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_rend_armor_chance_2
+    value: false
+  - type: set
+    var: stage_late
+    value: 23
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_22_rend_armor_chance_2_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 22
+    - last_upgrade_label == Rend Armor Chance
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_rend_armor_chance_2
+    value: false
+  - type: set
+    var: stage_late
+    value: 23
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_22_rend_armor_chance_2_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 22
+    - last_upgrade_label == Rend Armor Chance
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_rend_armor_chance_2
+    value: true
+  - type: set
+    var: stage_late
+    value: 23
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_22_rend_armor_chance_2
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 22
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: attack
+    label: Rend Armor Chance
+- name: skip_late_23_rend_armor_mult_2_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 23
+    - maxed_rend_armor_mult_2
+  do:
+  - type: set
+    var: stage_late
+    value: 24
+- name: skip_late_23_rend_armor_mult_2_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 23
+    upgrade_maxed:
+      menu: attack
+      label: Rend Armor Mult
+  do:
+  - type: set
+    var: maxed_rend_armor_mult_2
+    value: true
+  - type: set
+    var: stage_late
+    value: 24
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_23_rend_armor_mult_2_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 23
+    - last_upgrade_label == Rend Armor Mult
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_rend_armor_mult_2
+    value: true
+  - type: set
+    var: stage_late
+    value: 24
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_23_rend_armor_mult_2_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 23
+    - last_upgrade_label == Rend Armor Mult
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_rend_armor_mult_2
+    value: false
+  - type: set
+    var: stage_late
+    value: 24
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_23_rend_armor_mult_2_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 23
+    - last_upgrade_label == Rend Armor Mult
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_rend_armor_mult_2
+    value: false
+  - type: set
+    var: stage_late
+    value: 24
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_23_rend_armor_mult_2_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 23
+    - last_upgrade_label == Rend Armor Mult
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_rend_armor_mult_2
+    value: true
+  - type: set
+    var: stage_late
+    value: 24
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_23_rend_armor_mult_2
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 23
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: attack
+    label: Rend Armor Mult
+- name: skip_late_24_super_crit_mult_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 24
+    - maxed_super_crit_mult
+  do:
+  - type: set
+    var: stage_late
+    value: 25
+- name: skip_late_24_super_crit_mult_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 24
+    upgrade_maxed:
+      menu: attack
+      label: Super Crit Mult
+  do:
+  - type: set
+    var: maxed_super_crit_mult
+    value: true
+  - type: set
+    var: stage_late
+    value: 25
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_24_super_crit_mult_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 24
+    - last_upgrade_label == Super Crit Mult
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_super_crit_mult
+    value: true
+  - type: set
+    var: stage_late
+    value: 25
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_24_super_crit_mult_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 24
+    - last_upgrade_label == Super Crit Mult
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_super_crit_mult
+    value: false
+  - type: set
+    var: stage_late
+    value: 25
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_24_super_crit_mult_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 24
+    - last_upgrade_label == Super Crit Mult
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_super_crit_mult
+    value: false
+  - type: set
+    var: stage_late
+    value: 25
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_24_super_crit_mult_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 24
+    - last_upgrade_label == Super Crit Mult
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_super_crit_mult
+    value: true
+  - type: set
+    var: stage_late
+    value: 25
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_24_super_crit_mult
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 24
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: attack
+    label: Super Crit Mult
+- name: skip_late_25_damage_known
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 25
+    - maxed_damage
+  do:
+  - type: set
+    var: stage_late
+    value: 0
+  - type: set
+    var: ultimate_checked
+    value: false
+- name: skip_late_25_damage_detected
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 25
+    upgrade_maxed:
+      menu: attack
+      label: Damage
+  do:
+  - type: set
+    var: maxed_damage
+    value: true
+  - type: set
+    var: stage_late
+    value: 0
+  - type: set
+    var: ultimate_checked
+    value: false
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_25_damage_sent_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 25
+    - last_upgrade_label == Damage
+    - last_upgrade_sent
+    - last_upgrade_maxed_after
+  do:
+  - type: set
+    var: maxed_damage
+    value: true
+  - type: set
+    var: stage_late
+    value: 0
+  - type: set
+    var: ultimate_checked
+    value: false
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_25_damage_sent_not_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 25
+    - last_upgrade_label == Damage
+    - last_upgrade_sent
+    - '!last_upgrade_maxed_after'
+  do:
+  - type: set
+    var: maxed_damage
+    value: false
+  - type: set
+    var: stage_late
+    value: 0
+  - type: set
+    var: ultimate_checked
+    value: false
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_25_damage_unaffordable
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 25
+    - last_upgrade_label == Damage
+    - last_upgrade_reason == status=unaffordable
+  do:
+  - type: set
+    var: maxed_damage
+    value: false
+  - type: set
+    var: stage_late
+    value: 0
+  - type: set
+    var: ultimate_checked
+    value: false
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: advance_late_25_damage_maxed
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 25
+    - last_upgrade_label == Damage
+    - last_upgrade_reason == status=maxed
+  do:
+  - type: set
+    var: maxed_damage
+    value: true
+  - type: set
+    var: stage_late
+    value: 0
+  - type: set
+    var: ultimate_checked
+    value: false
+  - type: set
+    var: last_upgrade_label
+    value: ''
+  - type: set
+    var: last_upgrade_reason
+    value: ''
+  - type: set
+    var: last_upgrade_sent
+    value: false
+  - type: set
+    var: last_upgrade_maxed_after
+    value: false
+  - type: set
+    var: last_upgrade_menu
+    value: ''
+  - type: set
+    var: last_upgrade_ts
+    value: 0
+- name: buy_late_25_damage
+  when:
+    state: RUNNING
+    wave: '>= 6400'
+    assert:
+    - '!completed'
+    - current_phase == late
+    - stage_late == 25
+  cooldown_sec: 20.0
+  do:
+  - type: upgrade_purchase
+    menu: attack
+    label: Damage
+- name: finish_if_all_maxed
+  when:
+    state: RUNNING
+    assert:
+    - '!completed'
+    - ultimate_checked
+    - maxed_wall_health
+    - maxed_enemy_attack_level_skip
+    - maxed_enemy_health_level_skip
+    - maxed_rend_armor_chance
+    - maxed_rend_armor_mult
+    - maxed_free_utility_upgrade
+    - maxed_free_attack_upgrade
+    - maxed_free_defense_upgrade
+    - maxed_attack_speed
+    - maxed_critical_chance
+    - maxed_critical_factor
+    - maxed_range
+    - maxed_damage_per_meter
+    - maxed_multishot_chance
+    - maxed_rapid_fire_chance
+    - maxed_bounce_shot_chance
+    - maxed_bounce_shot_range
+    - maxed_knockback_chance
+    - maxed_orb_speed
+    - maxed_orbs
+    - maxed_shockwave_size
+    - maxed_land_mine_chance
+    - maxed_land_mine_radius
+    - maxed_land_mine_damage
+    - maxed_health
+    - maxed_enemy_attack_level_skip_2
+    - maxed_enemy_health_level_skip_2
+    - maxed_rend_armor_chance_2
+    - maxed_rend_armor_mult_2
+    - maxed_super_crit_mult
+    - maxed_damage
+  do:
+  - type: set
+    var: completed
+    value: true
+  - type: set
+    var: current_phase
+    value: ''

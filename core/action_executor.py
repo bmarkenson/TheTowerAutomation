@@ -15,34 +15,181 @@ Future: extend with swipe/page actions or convert to dataclasses.
 
 from __future__ import annotations
 
-from typing import Iterable, Dict, Any
-from utils.logger import log
-from core.tap import tap_if_visible
+import re
+import time
+from typing import Any, Dict, Iterable, Optional
+
+from utils.logger import log, log_mission
+from core.input import tap_if_visible
 from core.floating_button_detector import detect_floating_buttons, tap_floating_button
 from core.run_controls import restart_run
+from core.upgrade_navigation import (
+    apply_menu_buy_quantities,
+    ensure_ultimate_state,
+    ensure_ultimate_toggles_on,  # legacy alias
+    find_upgrade,
+)
+from core.upgrade_buy_quantity import BuyQuantity
+from automation.missions.base import MissionContext
 
 
-def execute_actions(screen, actions: Iterable[Dict[str, Any]]) -> None:
+Action = Dict[str, Any]
+
+
+def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionContext] = None) -> None:
+    mv = None
+    if ctx is not None:
+        mv = ctx.data.setdefault("mission_vars", {})
     for act in actions or []:
         try:
             t = (act or {}).get("type")
+            is_strategy_action = bool((act or {}).get("_strategy"))
+            if is_strategy_action and isinstance(act, dict):
+                act.pop("_strategy", None)
+
+            last_state = mv.get("last_detection_state") if mv is not None else None
+
             if t == "tap_label":
+                if is_strategy_action and last_state != "RUNNING":
+                    log_mission(
+                        f"[EXEC] Skip tap_label while state={last_state}",
+                        "DEBUG",
+                    )
+                    continue
                 key = act.get("key")
                 if key:
                     tap_if_visible(key)
             elif t == "restart_run":
+                if is_strategy_action and last_state != "RUNNING":
+                    log_mission(
+                        f"[EXEC] Skip restart_run while state={last_state}",
+                        "DEBUG",
+                    )
+                    continue
                 restart_run()
             elif t == "fire_floating":
+                if is_strategy_action and last_state != "RUNNING":
+                    log_mission(
+                        f"[EXEC] Skip fire_floating while state={last_state}",
+                        "DEBUG",
+                    )
+                    continue
                 name = act.get("name")
                 if name:
                     buttons = detect_floating_buttons(screen)
                     if not tap_floating_button(name, buttons):
                         log(f"[EXEC] Floating button not present: {name}", "DEBUG")
             elif t == "sleep":
-                import time
                 ms = int(act.get("ms", 0))
-                time.sleep(max(0, ms) / 1000.0)
+                _sleep_ms(ms)
+            elif t == "upgrade_set_buy_quantities":
+                if is_strategy_action and last_state != "RUNNING":
+                    log_mission(
+                        f"[EXEC] Skip upgrade_set_buy_quantities while state={last_state}",
+                        "DEBUG",
+                    )
+                    continue
+                menus = {}
+                for k in ("attack", "defense", "utility"):
+                    v = (act.get(k) or "").strip().lower()
+                    if v:
+                        if v in {"max", "x100", "x10", "x5", "x1"}:
+                            menus[k] = v  # type: ignore[assignment]
+                        else:
+                            log_mission(f"[EXEC] Invalid buy quantity '{v}' for {k}", "WARN")
+                if menus:
+                    apply_menu_buy_quantities(menus)  # type: ignore[arg-type]
+            elif t == "upgrade_purchase":
+                if is_strategy_action and last_state != "RUNNING":
+                    log_mission(
+                        f"[EXEC] Skip upgrade_purchase while state={last_state}",
+                        "DEBUG",
+                    )
+                    continue
+                label = act.get("label")
+                menu = act.get("menu")
+                quantity: Optional[BuyQuantity] = None
+                qv = (act.get("quantity") or "").strip().lower()
+                if qv in {"max", "x100", "x10", "x5", "x1"}:
+                    quantity = qv  # type: ignore[assignment]
+                if not label or not menu:
+                    log_mission(f"[EXEC] upgrade_purchase missing label/menu: {act}", "WARN")
+                else:
+                    res = find_upgrade(menu, label, attempt_purchase=True, purchase_quantity=quantity)
+                    sent = bool(res and res.purchase_sent)
+                    reason = (res.purchase_reason if res else None) or "unknown"
+                    maxed_after = bool(res and res.post_purchase_maxed)
+                    if reason.startswith("status=maxed"):
+                        maxed_after = True
+                    if mv is not None:
+                        mv["last_upgrade_label"] = label
+                        mv["last_upgrade_menu"] = menu
+                        mv["last_upgrade_sent"] = sent
+                        mv["last_upgrade_reason"] = reason
+                        mv["last_upgrade_maxed_after"] = maxed_after
+                        mv["last_upgrade_ts"] = time.time()
+                        slug = _slugify_label(label)
+                        if slug:
+                            key = f"maxed_{slug}"
+                            if reason == "status=maxed" or maxed_after:
+                                mv[key] = True
+                            elif sent or reason == "status=unaffordable":
+                                mv[key] = False
+                    log_level = "INFO"
+                    if not sent and reason.startswith("status="):
+                        log_level = "DEBUG"
+                    log_mission(
+                        (
+                            f"[EXEC] upgrade_purchase label='{label}' menu='{menu}' "
+                            f"sent={sent} reason={reason} maxed_after={maxed_after}"
+                        ),
+                        log_level,
+                    )
+            elif t in {"ultimate_set_all_on", "ultimate_ensure_state"}:
+                if is_strategy_action and last_state != "RUNNING":
+                    log_mission(
+                        f"[EXEC] Skip {t} while state={last_state}",
+                        "DEBUG",
+                    )
+                    continue
+                now = time.time()
+                targets = None
+                if isinstance(act, dict):
+                    targets = act.get("targets")
+                if mv is not None:
+                    next_ts = float(mv.get("ultimate_next_check_ts") or 0.0)
+                    if now < next_ts:
+                        mv["ultimate_checked"] = True
+                        log_mission(
+                            f"[ULTIMATE] Skip toggle sweep (next check in {int(next_ts - now)}s)",
+                            "DEBUG",
+                        )
+                        continue
+                    if targets is None:
+                        prefs = mv.get("ultimate_targets")
+                        if isinstance(prefs, list):
+                            targets = prefs
+                ensure_ultimate_state(target_prefs=targets)
+                if mv is not None:
+                    mv["ultimate_checked"] = True
+                    mv["ultimate_next_check_ts"] = now + 300.0
+                    mv["ultimate_last_checked_ts"] = now
+                    if isinstance(targets, list):
+                        mv["ultimate_targets"] = targets
             else:
                 log(f"[EXEC] Unknown action: {act}", "WARN")
         except Exception as e:
             log(f"[EXEC] Exception during action {act}: {e}", "ERROR")
+
+
+def _sleep_ms(milliseconds: int) -> None:
+    if milliseconds <= 0:
+        return
+    from time import sleep
+
+    sleep(milliseconds / 1000.0)
+
+
+def _slugify_label(label: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")
+    return slug

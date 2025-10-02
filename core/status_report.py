@@ -6,16 +6,25 @@ from __future__ import annotations
 
 import os
 import time
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Set
+from decimal import Decimal
+from functools import lru_cache
+from pathlib import Path
+from typing import Iterable, Optional, Set, Tuple
 
 import cv2
+import numpy as np
+from numpy.typing import NDArray
 
 from utils.logger import log
 from utils.wave_detector import detect_wave_number_from_image
 from utils.coin_detector import detect_coins_from_image, format_compact_decimal
 from core.clickmap_access import get_clickmap, resolve_dot_path
-from core.automation_supervisor import AutomationSupervisor
+from core.automation_supervisor import AutomationSupervisor, CoinsTotalSnapshot
+
+
+Frame = NDArray[np.uint8]
 
 
 class StateChangeTracker:
@@ -66,6 +75,14 @@ class StateChangeTracker:
         self._last_overlays = set(overlays)
 
 
+@dataclass
+class SamplePaths:
+    base_path: Path
+    note_path: Path
+    overlay_path: Path
+    tmp_bin: Optional[Path]
+
+
 class StatusReporter:
     """Periodic RUNNING-state heartbeat with OCR samples and CSV logging."""
 
@@ -81,8 +98,8 @@ class StatusReporter:
     ) -> None:
         self._interval = max(0, int(interval_secs))
         self._supervisor = supervisor
-        self._save_wave_samples = save_wave_samples
-        self._save_coin_samples = save_coin_samples
+        self._save_wave_samples = Path(save_wave_samples) if save_wave_samples else None
+        self._save_coin_samples = Path(save_coin_samples) if save_coin_samples else None
         self._coins_log_enabled = coins_log_enabled
         self._coins_log_base = coins_log_base
 
@@ -91,6 +108,12 @@ class StatusReporter:
         self._coins_log_path: Optional[str] = None
         if self._coins_log_enabled:
             self._coins_log_path = self._make_coins_log_path(self._coins_session_id)
+
+        self._coins_last_total_value: Optional[Decimal] = None
+        self._coins_last_total_ts: Optional[float] = None
+        self._coins_last_total_str: Optional[str] = None
+        self._coins_hourly_rate: Optional[Decimal] = None
+        self._coins_last_run_gain: Optional[Decimal] = None
 
     @property
     def coins_log_path(self) -> Optional[str]:
@@ -106,7 +129,7 @@ class StatusReporter:
     def maybe_report(
         self,
         *,
-        img,
+        img: Frame,
         ui_state: str,
         menu: Optional[str],
         secondary: Set[str],
@@ -126,30 +149,51 @@ class StatusReporter:
         coins_conf = -1.0
         coins_eff = None
         has_min = False
+        total_snapshot: Optional[CoinsTotalSnapshot] = None
+        coins_debug_tmp: Optional[Path] = None
+        per_min_refresh: Optional[Tuple[Optional[Decimal], float, bool]] = None
 
         if ui_state == "RUNNING":
-            debug_out = None
-            if self._save_wave_samples:
-                os.makedirs(self._save_wave_samples, exist_ok=True)
-                debug_out = os.path.join(self._save_wave_samples, "_tmp_bin.png")
-            wave, wave_conf = detect_wave_number_from_image(img, debug_out=debug_out)
+            debug_out = self._prepare_tmp_path(self._save_wave_samples, "_tmp_bin.png")
+            wave, wave_conf = detect_wave_number_from_image(img, debug_out=str(debug_out) if debug_out else None)
 
             try:
-                coins_debug_tmp = None
-                if self._save_coin_samples:
-                    os.makedirs(self._save_coin_samples, exist_ok=True)
-                    coins_debug_tmp = os.path.join(self._save_coin_samples, "_tmp_coin_bin.png")
+                coins_debug_tmp = self._prepare_tmp_path(self._save_coin_samples, "_tmp_coin_bin.png")
 
-                coins_val, coins_conf, has_min = detect_coins_from_image(img, debug_out=coins_debug_tmp)
+                coins_val, coins_conf, has_min = detect_coins_from_image(
+                    img, debug_out=str(coins_debug_tmp) if coins_debug_tmp else None
+                )
+
+                if self._supervisor.should_capture_total(now):
+                    total_snapshot, per_min_refresh = self._supervisor.capture_total_snapshot(
+                        current_img=img,
+                        current_value=coins_val,
+                        current_confidence=coins_conf,
+                        current_has_min=has_min,
+                        debug_out=str(coins_debug_tmp) if coins_debug_tmp else None,
+                    )
+                    if per_min_refresh is not None:
+                        coins_val, coins_conf, has_min = per_min_refresh
+
                 coins_val, coins_conf, has_min, coins_eff = self._supervisor.process_coins(
                     img,
                     coins_val,
                     coins_conf,
                     has_min,
-                    debug_out=coins_debug_tmp,
+                    debug_out=str(coins_debug_tmp) if coins_debug_tmp else None,
                 )
             except Exception:
                 coins_val, coins_conf, coins_eff = None, -1.0, None
+                total_snapshot = None
+
+        if total_snapshot is not None:
+            self._handle_total_snapshot(
+                total_snapshot,
+                ui_state=ui_state,
+                menu=menu,
+                secondary=secondary,
+                overlays=overlays,
+            )
 
         wave_str = str(wave) if wave is not None else "—"
         coins_str = format_compact_decimal(coins_eff) if coins_eff is not None else "—"
@@ -165,91 +209,37 @@ class StatusReporter:
         )
 
         if self._save_wave_samples:
-            try:
-                ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-                base = f"{ts}_wave-{wave_str}"
-                img_path = os.path.join(self._save_wave_samples, base + ".png")
-                note_path = os.path.join(self._save_wave_samples, base + ".txt")
-                cv2.imwrite(img_path, img)
-                try:
-                    with open(note_path, "w", encoding="utf-8") as handle:
-                        note_contents = (
-                            f"state={ui_state}\n"
-                            f"menu={menu_str}\n"
-                            f"secondary={sec_str}\n"
-                            f"overlays={ovl_str}\n"
-                            f"wave={wave_str}\n"
-                            f"conf={wave_conf:.1f}\n"
-                            f"coins={coins_str}\n"
-                            f"coins_conf={coins_conf:.1f}\n"
-                        )
-                        handle.write(note_contents)
-                except Exception:
-                    pass
-
-                try:
-                    overlay = img.copy()
-                    cm = get_clickmap()
-                    entry = resolve_dot_path("_shared_match_regions.wave_number", cm) or {}
-                    match_region = entry.get("match_region") if isinstance(entry, dict) else None
-                    if match_region:
-                        x = int(match_region.get("x", 0))
-                        y = int(match_region.get("y", 0))
-                        w = int(match_region.get("w", 0))
-                        h = int(match_region.get("h", 0))
-                        cv2.rectangle(overlay, (x, y), (x + w, y + h), (0, 0, 255), 2)
-                    cv2.imwrite(os.path.join(self._save_wave_samples, base + "_overlay.png"), overlay)
-                except Exception:
-                    pass
-
-                tmp_bin = os.path.join(self._save_wave_samples, "_tmp_bin.png")
-                if os.path.exists(tmp_bin):
-                    os.replace(tmp_bin, os.path.join(self._save_wave_samples, base + "_bin.png"))
-            except Exception:
-                pass
+            self._persist_sample(
+                img=img,
+                paths=self._build_sample_paths(self._save_wave_samples, f"wave-{wave_str}"),
+                overlay_paths=[("_shared_match_regions.wave_number", (0, 0, 255))],
+                note_lines=[
+                    f"state={ui_state}",
+                    f"menu={menu_str}",
+                    f"secondary={sec_str}",
+                    f"overlays={ovl_str}",
+                    f"wave={wave_str}",
+                    f"conf={wave_conf:.1f}",
+                    f"coins={coins_str}",
+                    f"coins_conf={coins_conf:.1f}",
+                ],
+            )
 
         if self._save_coin_samples:
-            try:
-                ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-                base = f"{ts}_coins-{coins_str}"
-                img_path = os.path.join(self._save_coin_samples, base + ".png")
-                note_path = os.path.join(self._save_coin_samples, base + ".txt")
-                cv2.imwrite(img_path, img)
-                try:
-                    with open(note_path, "w", encoding="utf-8") as handle:
-                        note_contents = (
-                            f"state={ui_state}\n"
-                            f"menu={menu_str}\n"
-                            f"secondary={sec_str}\n"
-                            f"overlays={ovl_str}\n"
-                            f"coins={coins_str}\n"
-                            f"coins_conf={coins_conf:.1f}\n"
-                            f"has_min={'yes' if has_min else 'no'}\n"
-                        )
-                        handle.write(note_contents)
-                except Exception:
-                    pass
-
-                try:
-                    overlay = img.copy()
-                    cm = get_clickmap()
-                    entry = resolve_dot_path("_shared_match_regions.coins", cm) or {}
-                    match_region = entry.get("match_region") if isinstance(entry, dict) else None
-                    if match_region:
-                        x = int(match_region.get("x", 0))
-                        y = int(match_region.get("y", 0))
-                        w = int(match_region.get("w", 0))
-                        h = int(match_region.get("h", 0))
-                        cv2.rectangle(overlay, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                    cv2.imwrite(os.path.join(self._save_coin_samples, base + "_overlay.png"), overlay)
-                except Exception:
-                    pass
-
-                tmp_coin = os.path.join(self._save_coin_samples, "_tmp_coin_bin.png")
-                if os.path.exists(tmp_coin):
-                    os.replace(tmp_coin, os.path.join(self._save_coin_samples, base + "_bin.png"))
-            except Exception:
-                pass
+            self._persist_sample(
+                img=img,
+                paths=self._build_sample_paths(self._save_coin_samples, f"coins-{coins_str}"),
+                overlay_paths=[("_shared_match_regions.coins", (0, 255, 0))],
+                note_lines=[
+                    f"state={ui_state}",
+                    f"menu={menu_str}",
+                    f"secondary={sec_str}",
+                    f"overlays={ovl_str}",
+                    f"coins={coins_str}",
+                    f"coins_conf={coins_conf:.1f}",
+                    f"has_min={'yes' if has_min else 'no'}",
+                ],
+            )
 
         if self._coins_log_path:
             try:
@@ -268,6 +258,100 @@ class StatusReporter:
 
         self._last_status_ts = now
 
+    def _handle_total_snapshot(
+        self,
+        snapshot: CoinsTotalSnapshot,
+        *,
+        ui_state: str,
+        menu: Optional[str],
+        secondary: Set[str],
+        overlays: Set[str],
+    ) -> None:
+        self._coins_last_total_value = snapshot.value
+        self._coins_last_total_ts = snapshot.timestamp
+        self._coins_last_total_str = format_compact_decimal(snapshot.value)
+
+        delta_prev: Optional[Decimal] = None
+        delta_hours: Optional[float] = None
+        coins_hr: Optional[Decimal] = None
+
+        if snapshot.previous_value is not None and snapshot.previous_timestamp is not None:
+            delta_prev = snapshot.value - snapshot.previous_value
+            dt_seconds = snapshot.timestamp - snapshot.previous_timestamp
+            if dt_seconds > 0:
+                delta_hours = dt_seconds / 3600.0
+                try:
+                    hours_decimal = Decimal(str(dt_seconds)) / Decimal("3600")
+                    if hours_decimal > 0:
+                        coins_hr = delta_prev / hours_decimal
+                except Exception:
+                    coins_hr = None
+
+        self._coins_hourly_rate = coins_hr
+
+        run_gain: Optional[Decimal] = None
+        if snapshot.previous_run_start_value is not None:
+            run_gain = snapshot.value - snapshot.previous_run_start_value
+        self._coins_last_run_gain = run_gain
+
+        def _fmt_signed(val: Optional[Decimal]) -> str:
+            if val is None:
+                return "—"
+            sign = "+" if val >= 0 else "-"
+            return f"{sign}{format_compact_decimal(val.copy_abs())}"
+
+        report_total = snapshot.reason in {"startup", "hourly"}
+        report_rate = snapshot.reason == "hourly" and coins_hr is not None
+
+        if report_total:
+            total_parts = [f"Total={self._coins_last_total_str}"]
+            if run_gain is not None:
+                total_parts.append(f"RunΔ={_fmt_signed(run_gain)}")
+            if delta_prev is not None and delta_hours is not None and snapshot.reason == "hourly":
+                total_parts.append(f"Δprev={_fmt_signed(delta_prev)} over {delta_hours:.2f}h")
+            log(f"[STATUS] " + " | ".join(total_parts), "INFO")
+
+        if report_rate and delta_hours is not None:
+            rate_str = format_compact_decimal(coins_hr)
+            log(
+                f"[STATUS] Coins/hr≈{rate_str} over {delta_hours:.2f}h",
+                "INFO",
+            )
+
+        if snapshot.reason not in {"startup", "hourly"}:
+            parts = [f"Total={self._coins_last_total_str}"]
+            if run_gain is not None:
+                parts.append(f"RunΔ={_fmt_signed(run_gain)}")
+            log(
+                f"[COINS] Total snapshot ({snapshot.reason}) — " + " | ".join(parts),
+                "INFO",
+            )
+
+        if self._save_coin_samples and snapshot.image is not None:
+            menu_str = menu or "—"
+            sec_str = ", ".join(sorted(secondary)) if secondary else "—"
+            ovl_str = ", ".join(sorted(overlays)) if overlays else "—"
+            descriptor = f"total-{snapshot.reason}-{self._coins_last_total_str}"
+            try:
+                self._persist_sample(
+                    img=snapshot.image,
+                    paths=self._build_sample_paths(self._save_coin_samples, descriptor),
+                    overlay_paths=[("_shared_match_regions.coins", (0, 255, 0))],
+                    note_lines=[
+                        f"state={ui_state}",
+                        f"menu={menu_str}",
+                        f"secondary={sec_str}",
+                        f"overlays={ovl_str}",
+                        f"reason={snapshot.reason}",
+                        f"total={self._coins_last_total_str}",
+                        f"delta_prev={_fmt_signed(delta_prev)}",
+                        f"coins_hr={format_compact_decimal(coins_hr) if coins_hr is not None else '—'}",
+                        f"run_gain={_fmt_signed(run_gain)}",
+                    ],
+                )
+            except Exception:
+                pass
+
     def _make_coins_log_path(self, session_id: str) -> str:
         base = self._coins_log_base or ""
         root, ext = os.path.splitext(base)
@@ -277,6 +361,67 @@ class StatusReporter:
             return os.path.join(directory, f"{name}_{session_id}.csv")
         directory = base or "."
         return os.path.join(directory, f"coins_{session_id}.csv")
+
+    def _prepare_tmp_path(self, root: Optional[Path], tmp_name: str) -> Optional[Path]:
+        if root is None:
+            return None
+        root.mkdir(parents=True, exist_ok=True)
+        return root / tmp_name
+
+    def _build_sample_paths(self, root: Path, descriptor: str) -> SamplePaths:
+        root.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        base = root / f"{ts}_{descriptor}"
+        return SamplePaths(
+            base_path=base.with_suffix(".png"),
+            note_path=base.with_suffix(".txt"),
+            overlay_path=base.with_name(base.name + "_overlay.png"),
+            tmp_bin=root / "_tmp_bin.png" if "wave" in descriptor else root / "_tmp_coin_bin.png",
+        )
+
+    def _persist_sample(
+        self,
+        *,
+        img: Frame,
+        paths: SamplePaths,
+        overlay_paths: Iterable[tuple[str, tuple[int, int, int]]],
+        note_lines: Iterable[str],
+    ) -> None:
+        try:
+            cv2.imwrite(str(paths.base_path), img)
+            self._write_note(paths.note_path, note_lines)
+            overlay = img.copy()
+            for dot_path, colour in overlay_paths:
+                region = _resolve_match_region(dot_path)
+                if region:
+                    x = int(region.get("x", 0))
+                    y = int(region.get("y", 0))
+                    w = int(region.get("w", 0))
+                    h = int(region.get("h", 0))
+                    cv2.rectangle(overlay, (x, y), (x + w, y + h), colour, 2)
+            cv2.imwrite(str(paths.overlay_path), overlay)
+            if paths.tmp_bin and paths.tmp_bin.exists():
+                os.replace(paths.tmp_bin, paths.base_path.with_name(paths.base_path.stem + "_bin.png"))
+        except Exception:
+            pass
+
+    @staticmethod
+    def _write_note(path: Path, lines: Iterable[str]) -> None:
+        try:
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("\n".join(lines) + "\n")
+        except Exception:
+            pass
+
+
+@lru_cache(maxsize=16)
+def _resolve_match_region(dot_path: str) -> Optional[dict]:
+    entry = resolve_dot_path(dot_path, get_clickmap()) or {}
+    if isinstance(entry, dict):
+        region = entry.get("match_region")
+        if isinstance(region, dict):
+            return region
+    return None
 
 
 __all__ = ["StateChangeTracker", "StatusReporter"]

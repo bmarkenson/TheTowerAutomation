@@ -2,7 +2,7 @@
 
 import time
 from utils.logger import log
-from core.tap import tap_if_visible
+from core.input import tap_if_visible
 
 
 def handle_home_screen(restart_enabled=True):
