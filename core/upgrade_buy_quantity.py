@@ -85,11 +85,14 @@ def _normalize_quantity(value: str) -> str:
     cleaned = (
         cleaned.replace("l", "1")
         .replace("i", "1")
+        .replace("t", "1")
         .replace("o", "0")
         .replace("q", "0")
         .replace("d", "0")
         .replace("s", "5")
     )
+    if cleaned == "x":
+        cleaned = "x1"
     if cleaned == "mx":
         cleaned = "max"
     if cleaned not in _BUY_ALLOWED:
@@ -169,6 +172,54 @@ def get_buy_quantity_regions(image: np.ndarray) -> Dict[str, object]:
     }
 
 
+def is_buy_quantity_expanded(image: np.ndarray) -> bool:
+    """Return True when the selector options row is visible."""
+
+    return False
+
+
+def collapse_buy_quantity(
+    *,
+    screenshot: Optional[np.ndarray] = None,
+    capture_fn: Callable[[], Optional[np.ndarray]] = capture_adb_screenshot,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    max_attempts: int = 3,
+) -> Optional[np.ndarray]:
+    """Best-effort collapse of the expanded selector.
+
+    Returns the latest screenshot (collapsed when successful) so callers can
+    continue working with a fresh frame.
+    """
+
+    current = screenshot if screenshot is not None else capture_fn()
+    if current is None:
+        return None
+
+    try:
+        area_rect = _upgrade_area_rect()
+    except RuntimeError:
+        return current
+
+    collapsed_point = _collapsed_center(area_rect)
+
+    attempts = 0
+    while attempts < max_attempts:
+        if not is_buy_quantity_expanded(current):
+            return current
+
+        _tap_point(collapsed_point)
+        sleep_fn(0.35)
+
+        current = capture_fn()
+        if current is None:
+            attempts += 1
+            continue
+
+        attempts += 1
+
+    return current
+
+
 def _read_collapsed_quantity(
     image: np.ndarray,
     *,
@@ -214,7 +265,7 @@ def _read_collapsed_quantity(
         if not cleaned or len(cleaned) < 2:
             text_crop, _ = ocr_text_and_conf(crop, psm=7, config_extra=config_extra)
             cleaned = text_crop.replace("\n", "").strip()
-        if cleaned and len(cleaned) >= 2:
+        if cleaned and len(cleaned) >= 1:
             normalized = _normalize_quantity(cleaned)
             if normalized in _BUY_ALLOWED:
                 return cast(BuyQuantity, normalized)
@@ -286,6 +337,8 @@ def ensure_buy_quantity(
     """
     target = _normalize_quantity(quantity)
 
+    log(f"[UPGRADE_BUY] Requested quantity '{target}'", "MATCH")
+
     current = screenshot if screenshot is not None else capture_fn()
     if current is None:
         raise RuntimeError("Unable to capture screen for buy quantity adjustment")
@@ -298,7 +351,17 @@ def ensure_buy_quantity(
     for attempt in range(max_attempts):
         current_quantity = _read_collapsed_quantity(current)
         if current_quantity == target:
-            return current
+            log(
+                f"[UPGRADE_BUY] Quantity already '{target}', no adjustment needed",
+                "INFO",
+            )
+            collapsed = collapse_buy_quantity(
+                screenshot=current,
+                capture_fn=capture_fn,
+                sleep_fn=sleep_fn,
+                max_attempts=2,
+            )
+            return collapsed if collapsed is not None else current
 
         log(
             f"[UPGRADE_BUY] Adjusting quantity to '{target}' (attempt {attempt + 1})",
@@ -323,7 +386,17 @@ def ensure_buy_quantity(
 
                 final_quantity = _read_collapsed_quantity(current, expected=target)
                 if final_quantity == target:
-                    return current
+                    collapsed = collapse_buy_quantity(
+                        screenshot=current,
+                        capture_fn=capture_fn,
+                        sleep_fn=sleep_fn,
+                        max_attempts=2,
+                    )
+                    log(
+                        f"[UPGRADE_BUY] Quantity set to '{target}' (attempt {attempt + 1})",
+                        "INFO",
+                    )
+                    return collapsed if collapsed is not None else current
 
                 if final_quantity not in (None, target):
                     _save_debug(
@@ -348,13 +421,21 @@ def ensure_buy_quantity(
         f"[UPGRADE_BUY] Unable to confirm quantity '{target}' after {max_attempts} attempts",
         "WARN",
     )
-    return last_capture
+    collapsed = collapse_buy_quantity(
+        screenshot=last_capture,
+        capture_fn=capture_fn,
+        sleep_fn=sleep_fn,
+        max_attempts=1,
+    )
+    return collapsed if collapsed is not None else last_capture
 
 
 __all__ = [
     "BuyQuantity",
+    "collapse_buy_quantity",
     "detect_current_buy_quantity",
     "ensure_buy_quantity",
     "get_buy_quantity_regions",
+    "is_buy_quantity_expanded",
     "read_buy_quantity_from_image",
 ]

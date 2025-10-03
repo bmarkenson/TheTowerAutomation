@@ -24,8 +24,10 @@ from core.upgrade_box_detector import (
 )
 from core.upgrade_buy_quantity import (
     BuyQuantity,
+    collapse_buy_quantity,
     ensure_buy_quantity,
     detect_current_buy_quantity,
+    is_buy_quantity_expanded,
 )
 from utils.logger import log, log_mission
 
@@ -198,6 +200,20 @@ def _ensure_menu(menu: str, *, capture_fn: Callable[[], Optional[np.ndarray]], m
         screenshot = capture_fn()
         if screenshot is None:
             continue
+
+        if is_buy_quantity_expanded(screenshot):
+            log(
+                "[UPGRADE_NAV] Buy-quantity selector detected while switching menus; collapsing",
+                "WARN",
+            )
+            screenshot = collapse_buy_quantity(
+                screenshot=screenshot,
+                capture_fn=capture_fn,
+                sleep_fn=time.sleep,
+            )
+            if screenshot is None:
+                continue
+
         detection = detect_state_and_overlays(screenshot)
         current = _normalize_menu(detection.get("menu"))
         if current == menu_key:
@@ -210,6 +226,12 @@ def _ensure_menu(menu: str, *, capture_fn: Callable[[], Optional[np.ndarray]], m
 
     # final capture after attempts
     screenshot = capture_fn()
+    if screenshot is not None and is_buy_quantity_expanded(screenshot):
+        screenshot = collapse_buy_quantity(
+            screenshot=screenshot,
+            capture_fn=capture_fn,
+            sleep_fn=time.sleep,
+        )
     return screenshot
 
 
