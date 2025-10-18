@@ -17,6 +17,7 @@ from core.automation_supervisor import AutomationSupervisor
 from core.run_state import AUTOMATION, ExecMode
 from core.app_setup import AppConfig
 from core.status_report import StateChangeTracker, StatusReporter
+from core.recovery import handle_unknown_state, update_unknown_state
 from automation.missions.manager import MissionManager
 from automation.missions import get_mission
 from automation.missions.yaml_mission import YamlMission
@@ -25,6 +26,7 @@ from handlers.game_over_handler import handle_game_over
 from handlers.home_screen_handler import handle_home_screen
 from handlers.ad_gem_handler import handle_ad_gem, stop_blind_gem_tapper
 from handlers.daily_gem_handler import handle_daily_gem
+from handlers.dismiss_uw_detail import handle_uw_detail_popup
 
 
 Frame = NDArray[np.uint8]
@@ -73,7 +75,7 @@ class App:
         self._fast_game_over = config.fast_game_over or (self._mission_active and not config.full_game_over)
 
     def run(self) -> None:
-        log("Starting main heartbeat loop.", level="INFO")
+        log("Starting main heartbeat loop.", level="INFO", console=True)
         if ensure_adb_connected():
             time.sleep(2)
 
@@ -82,7 +84,7 @@ class App:
         if self._config.wait_on_start:
             try:
                 AUTOMATION.mode = ExecMode.WAIT
-                log("[CTRL] Startup flag: ExecMode set to WAIT", "INFO")
+                log("[CTRL] Startup flag: ExecMode set to WAIT", "INFO", console=True)
             except Exception:
                 pass
 
@@ -124,6 +126,20 @@ class App:
 
                 self._supervisor.auto_return_check(img, new_state)
 
+                if "UW_DETAIL" in overlays:
+                    handled_image = handle_uw_detail_popup(screenshot=img)
+                    if handled_image is not None:
+                        img = handled_image
+                    time.sleep(0.2)
+                    continue
+
+                if new_state == "UNKNOWN":
+                    update_unknown_state(True)
+                    trigger_after = self._supervisor.auto_return_secs or 900
+                    handle_unknown_state(img, trigger_after_s=trigger_after)
+                else:
+                    update_unknown_state(False)
+
                 if not is_paused:
                     self._mission_mgr.tick(img, detection)
                     self._handle_primary_states(new_state, overlays)
@@ -151,7 +167,7 @@ class App:
     def _handle_primary_states(self, new_state: str, overlays: Set[str]) -> None:
         """Dispatch handlers for top-level UI states and overlay-driven events."""
         if new_state == "GAME_OVER":
-            log("Detected GAME_OVER. Executing handler.", "INFO")
+            log("Detected GAME_OVER. Executing handler.", "INFO", console=True)
             handle_game_over(capture_stats=(not self._fast_game_over))
             self._mission_mgr.on_game_over()
             self._supervisor.record_run_restart()
@@ -181,7 +197,11 @@ class App:
         if config.mission_config_path:
             try:
                 mission = YamlMission.from_file(config.mission_config_path)
-                log(f"[MISSION] Loaded YAML mission from {config.mission_config_path}", "INFO")
+                log(
+                    f"[MISSION] Loaded YAML mission from {config.mission_config_path}",
+                    "INFO",
+                    console=True,
+                )
                 return mission
             except Exception as exc:
                 log(f"[MISSION] Failed to load YAML mission: {exc}", "ERROR")
@@ -194,7 +214,11 @@ class App:
                 from automation.strategies.yaml_strategy import YamlStrategy
 
                 strat = YamlStrategy.from_file(config.strategy_config_path)
-                log(f"[STRATEGY] Loaded YAML strategy from {config.strategy_config_path}", "INFO")
+                log(
+                    f"[STRATEGY] Loaded YAML strategy from {config.strategy_config_path}",
+                    "INFO",
+                    console=True,
+                )
                 return strat
             except Exception as exc:
                 log(f"[STRATEGY] Failed to load YAML strategy: {exc}", "ERROR")

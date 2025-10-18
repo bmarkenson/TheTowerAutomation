@@ -136,7 +136,6 @@ class MissionManager:
             except Exception as exc:
                 log(f"[EXEC] error: {exc}", "ERROR")
 
-
 def _materialize_actions(actions: Optional[Iterable[Any]]) -> List[Any]:
     if not actions:
         return []

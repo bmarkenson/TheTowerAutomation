@@ -8,6 +8,7 @@ states:
   - indicators.menu_utility
   - indicators.menu_uw
   - indicators.cinematic_wall_icon
+  - overlays.buy_quantity_menu_expanded
 
 - name: HOME_SCREEN
   type: primary
@@ -18,6 +19,56 @@ states:
   type: primary
   match_keys:
   - indicators.game_over
+
+- name: STORE
+  type: primary
+  match_keys:
+  - indicators.store
+
+- name: DAILY_MISSIONS
+  type: primary
+  match_keys:
+  - indicators.daily_missions
+
+- name: SETTINGS
+  type: primary
+  match_keys:
+  - indicators.settings
+
+- name: CARDS
+  type: primary
+  match_keys:
+  - indicators.cards
+
+- name: LAB
+  type: primary
+  match_keys:
+  - indicators.lab
+
+- name: TARGET_PRIORITY
+  type: primary
+  match_keys:
+  - indicators.target_priority
+
+- name: MODULES
+  type: primary
+  match_keys:
+  - indicators.modules
+
+- name: EVENT
+  type: primary
+  match_keys:
+  - indicators.event
+
+- name: DISTANCE_ADJUSTER
+  type: primary
+  match_keys:
+  - indicators.distance_adjuster
+
+- name: GUILD
+  type: primary
+  match_keys:
+  - indicators.guild
 
 - name: TOURNAMENT
   type: secondary
@@ -62,3 +113,12 @@ overlays:
   match_keys:
   - overlays.end_round
 
+- name: BUY_QUANTITY_MENU_EXPANDED
+  type: overlay
+  match_keys:
+  - overlays.buy_quantity_menu_expanded
+
+- name: UW_DETAIL
+  type: overlay
+  match_keys:
+  - overlays.uw_detail

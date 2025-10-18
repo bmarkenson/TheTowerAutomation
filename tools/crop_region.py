@@ -50,28 +50,21 @@ except Exception as e:
     screen_width, screen_height = 1920, 1080
 
 def reload_image():
-    """Capture a fresh screenshot, initialize globals (image/clone/img_w/h), reset scroll, and focus the window.
-
-    Inputs: none (uses ADB via capture_and_save_screenshot()).
-    Writes: updates globals image, clone, img_height, img_width; resets scroll_offset; saves screenshots/latest.png on disk.
-    Prompts: none (silent, except printed INFO).
-    """
+    """Load a manual image when provided, otherwise capture a fresh screenshot via ADB."""
     global image, clone, img_height, img_width, scroll_offset
-    # If an image path is provided (or default latest.png), load from disk.
-    # Fallback to ADB capture if the file is missing or unreadable.
-    img = None
-    img_path = IMAGE_PATH_OVERRIDE or SOURCE_PATH
-    try:
-        if img_path and os.path.exists(img_path):
-            img = cv2.imread(img_path)
-    except Exception:
-        img = None
 
-    if img is None:
-        # Try capturing via ADB as a fallback and use the returned BGR image.
+    if IMAGE_PATH_OVERRIDE:
+        img_path = IMAGE_PATH_OVERRIDE
+        if not os.path.exists(img_path):
+            raise RuntimeError(f"[ERROR] Manual image '{img_path}' not found.")
+        img = cv2.imread(img_path)
+        if img is None:
+            raise RuntimeError(f"[ERROR] Failed to read manual image '{img_path}'.")
+    else:
         img = capture_and_save_screenshot()
-    if img is None:
-        raise RuntimeError("[ERROR] Could not load image or capture screenshot.")
+        if img is None:
+            raise RuntimeError("[ERROR] Could not capture screenshot via ADB.")
+
     image = img
     clone = image.copy()
     img_height, img_width = image.shape[:2]
@@ -301,8 +294,8 @@ def handle_mouse(event, x, y, flags, param):
 def parse_args():
     p = argparse.ArgumentParser(description="Crop a region and save to clickmap + template.")
     p.add_argument("--overwrite", "-y", action="store_true", help="Overwrite existing clickmap entry without prompt.")
-    p.add_argument("--image", default=SOURCE_PATH,
-                   help="Path to source image to open (default: screenshots/latest.png). If missing, falls back to ADB capture.")
+    p.add_argument("--image",
+                   help="Path to a manual image to open instead of capturing via ADB. Pressing 'r' will reload this file.")
     return p.parse_args()
 
 def main():

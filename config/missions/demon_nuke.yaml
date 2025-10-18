@@ -1,0 +1,39 @@
+meta:
+  name: demon_nuke
+  version: 1
+
+vars:
+  accrue_seconds: 20     # time to accrue enemies before firing
+  post_demon_delay: 10    # seconds to wait after triggering demon mode
+  post_nuke_delay: 5      # seconds to wait after firing before ending round
+  demon_triggered: false  # per-run flag
+  nuke_fired: false       # per-run flag
+
+per_run_reset:
+  - demon_triggered
+  - nuke_fired
+
+rules:
+  # Trigger Demon Mode once per run as soon as the button appears
+  - when:
+      state: RUNNING
+      floating_visible: "floating_buttons.demon_mode"
+      assert: "!demon_triggered"
+    do:
+      - { type: fire_floating, name: floating_buttons.demon_mode }
+      - { type: set, var: demon_triggered, value: true }
+      - { type: sleep, ms: 10000 }
+
+  # After Demon Mode, follow the standard nuke timing
+  - when:
+      state: RUNNING
+      elapsed_secs: ">= 20"
+      floating_visible: "floating_buttons.nuke"
+      assert:
+        - "demon_triggered"
+        - "!nuke_fired"
+    do:
+      - { type: fire_floating, name: floating_buttons.nuke }
+      - { type: set, var: nuke_fired, value: true }
+      - { type: sleep, ms: 5000 }
+      - { type: restart_run }

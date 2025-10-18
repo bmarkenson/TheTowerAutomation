@@ -6,7 +6,6 @@ import os
 import cv2
 
 def handle_daily_gem():
-    print("Handling")
     session_id = _make_session_id()
     log(f"Handling DAILY AD GEM — Session: {session_id}", "INFO")
 

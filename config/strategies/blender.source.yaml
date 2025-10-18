@@ -2,7 +2,7 @@ meta:
   name: blender
   version: 1
 settings:
-  cooldown_sec: 20
+  cooldown_sec: 5 
   ultimate_refresh_sec: 300
   initial_buy_quantities:
     attack: max

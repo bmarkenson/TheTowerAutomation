@@ -449,7 +449,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 0
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: utility
@@ -646,7 +646,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 1
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: utility
@@ -843,7 +843,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 2
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: utility
@@ -1040,7 +1040,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 3
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: attack
@@ -1237,7 +1237,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 4
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: attack
@@ -1434,7 +1434,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 5
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: attack
@@ -1631,7 +1631,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 6
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: attack
@@ -1828,7 +1828,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 7
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: attack
@@ -2025,7 +2025,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 8
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: attack
@@ -2222,7 +2222,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 9
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: attack
@@ -2419,7 +2419,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 10
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: attack
@@ -2616,7 +2616,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 11
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: attack
@@ -2813,7 +2813,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 12
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: defense
@@ -3010,7 +3010,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 13
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: defense
@@ -3207,7 +3207,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 14
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: defense
@@ -3404,7 +3404,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 15
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: defense
@@ -3601,7 +3601,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 16
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: defense
@@ -3798,7 +3798,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 17
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: defense
@@ -3995,7 +3995,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 18
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: defense
@@ -4192,7 +4192,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 19
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: defense
@@ -4389,7 +4389,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 20
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: defense
@@ -4586,7 +4586,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 21
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: utility
@@ -4783,7 +4783,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 22
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: utility
@@ -4980,7 +4980,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 23
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: attack
@@ -5177,7 +5177,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 24
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: attack
@@ -5392,7 +5392,7 @@ rules:
     - '!completed'
     - current_phase == baseline
     - stage_baseline == 25
-  cooldown_sec: 20.0
+  cooldown_sec: 5.0
   do:
   - type: upgrade_purchase
     menu: attack

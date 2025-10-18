@@ -55,12 +55,22 @@ def restart_run(timeout_s: float = 12.0) -> bool:
       2) Tap End Round.
       3) Tap Yes to confirm.
     """
-    if not ensure_menu_open(timeout_s=timeout_s / 2):
+    menu_open = ensure_menu_open(timeout_s=timeout_s / 2)
+    if not menu_open:
         log("[RESTART] Failed to open menu; proceeding to attempt End Round", "WARN")
-    # Tap End Round and confirm
+        if safe_tap("navigation.toggle_menu", require_visible=False, dispatch="now"):
+            # Give the UI a moment to render the menu if the toggle succeeds
+            time.sleep(_RETRY_DELAY)
+    # Tap End Round and confirm (fallback to blind taps when template match fails)
     ok = tap_if_visible("overlays.end_round", retries=1)
+    if not ok:
+        ok = safe_tap("overlays.end_round", require_visible=False)
     time.sleep(_RETRY_DELAY)
-    ok_yes = tap_if_visible("buttons.yes:end_round", retries=1)
+    yes_ready = tap_if_visible("buttons.yes:end_round", retries=1)
+    if not yes_ready:
+        log("[RESTART] Yes button missing; aborting confirmation", "WARN")
+        return False
+    ok_yes = safe_tap("buttons.yes:end_round", require_visible=False)
     if not ok and not ok_yes:
         log("[RESTART] End Round/Yes taps may not have been accepted", "WARN")
     return True

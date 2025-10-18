@@ -96,6 +96,14 @@
         "w": 1055,
         "h": 662
       }
+    },
+    "uw_detail_region": {
+      "match_region": {
+        "x": 114,
+        "y": 636,
+        "w": 847,
+        "h": 778
+      }
     }
   },
   "gesture_targets": {
@@ -172,6 +180,16 @@
         "x2": 554,
         "y2": 1133,
         "duration_ms": 618
+      }
+    },
+    "uw_detail_dismiss": {
+      "roles": [
+        "gesture"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 120,
+        "y": 120
       }
     }
   },
@@ -365,12 +383,150 @@
       "roles": [
         "indicator"
       ]
+    },
+    "store": {
+      "match_template": "indicators/store.png",
+      "match_region": {
+        "x": 18,
+        "y": 107,
+        "w": 190,
+        "h": 51
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "daily_missions": {
+      "match_template": "indicators/daily_missions.png",
+      "match_region": {
+        "x": 20,
+        "y": 102,
+        "w": 457,
+        "h": 61
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "settings": {
+      "match_template": "indicators/settings.png",
+      "match_region": {
+        "x": 388,
+        "y": 233,
+        "w": 301,
+        "h": 80
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "cards": {
+      "match_template": "indicators/cards.png",
+      "match_region": {
+        "x": 16,
+        "y": 100,
+        "w": 204,
+        "h": 60
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "lab": {
+      "match_template": "indicators/lab.png",
+      "match_region": {
+        "x": 10,
+        "y": 92,
+        "w": 140,
+        "h": 76
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "target_priority": {
+      "match_template": "indicators/target_priority.png",
+      "match_region": {
+        "x": 270,
+        "y": 95,
+        "w": 545,
+        "h": 82
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "modules": {
+      "match_template": "indicators/modules.png",
+      "match_region": {
+        "x": 16,
+        "y": 93,
+        "w": 279,
+        "h": 72
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "event": {
+      "match_template": "indicators/event.png",
+      "match_region": {
+        "x": 16,
+        "y": 100,
+        "w": 192,
+        "h": 58
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "distance_adjuster": {
+      "match_template": "indicators/distance_adjuster.png",
+      "match_region": {
+        "x": 237,
+        "y": 1182,
+        "w": 605,
+        "h": 67
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "guild": {
+      "match_template": "indicators/guild.png",
+      "match_region": {
+        "x": 12,
+        "y": 102,
+        "w": 190,
+        "h": 61
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
     }
   },
   "overlays": {
     "ad_gem": {
       "match_template": "overlays/ad_gem.png",
       "region_ref": "ad_gem_region",
+      "match_threshold": 0.9,
+      "roles": [
+        "overlay"
+      ]
+    },
+    "uw_detail": {
+      "match_template": "overlays/uw_detail.png",
+      "region_ref": "uw_detail_region",
       "match_threshold": 0.9,
       "roles": [
         "overlay"
@@ -411,6 +567,18 @@
         "h": 121
       },
       "match_threshold": 0.9,
+      "roles": [
+        "overlay"
+      ]
+    },
+    "buy_quantity_menu_expanded": {
+      "match_template": "overlays/buy_quantity_menu_expanded.png",
+      "match_region": {
+        "x": 16,
+        "y": 1180,
+        "w": 340,
+        "h": 70
+      },
       "roles": [
         "overlay"
       ]
@@ -511,10 +679,14 @@
     "toggle_menu": {
       "match_template": "navigation/toggle_menu.png",
       "match_region": {
-        "x": 981,
-        "y": 172,
-        "w": 74,
-        "h": 71
+        "x": 940,
+        "y": 20,
+        "w": 120,
+        "h": 120
+      },
+      "tap": {
+        "x": 990,
+        "y": 70
       },
       "match_threshold": 0.9,
       "roles": [
@@ -587,6 +759,23 @@
         "h": 74
       },
       "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
+    "close_generic": {
+      "match_template": "buttons/close_generic.png",
+      "match_region": {
+        "x": 900,
+        "y": 80,
+        "w": 180,
+        "h": 180
+      },
+      "tap": {
+        "x": 1000,
+        "y": 180
+      },
+      "match_threshold": 0.85,
       "roles": [
         "button"
       ]

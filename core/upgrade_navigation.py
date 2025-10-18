@@ -27,8 +27,9 @@ from core.upgrade_buy_quantity import (
     collapse_buy_quantity,
     ensure_buy_quantity,
     detect_current_buy_quantity,
-    is_buy_quantity_expanded,
+    get_buy_quantity_regions,
 )
+from handlers.dismiss_uw_detail import handle_uw_detail_popup
 from utils.logger import log, log_mission
 
 # Default timing constants
@@ -191,6 +192,69 @@ def _perform_swipe(direction: str, span: SwipeSpan = "short") -> None:
     ])
 
 
+def _maybe_collapse_buy_quantity(
+    screenshot: Optional[np.ndarray],
+    *,
+    capture_fn: Callable[[], Optional[np.ndarray]],
+    sleep_fn: Callable[[float], None],
+) -> Optional[np.ndarray]:
+    image = screenshot if screenshot is not None else capture_fn()
+    if image is None:
+        return None
+
+    try:
+        detection = detect_state_and_overlays(image)
+    except Exception as exc:
+        log(
+            f"[UPGRADE_NAV] Failed to evaluate buy-quantity overlay: {exc}",
+            "WARN",
+        )
+        return image
+
+    overlays = set(detection.get("overlays") or [])
+    if "BUY_QUANTITY_MENU_EXPANDED" not in overlays:
+        return image
+
+    log("[UPGRADE_NAV] Collapsing stray buy-quantity selector", "INFO")
+
+    try:
+        regions = get_buy_quantity_regions(image)
+        cx, cy = regions["collapsed_center"]
+        adb_shell(["input", "tap", str(int(cx)), str(int(cy))])
+        sleep_fn(0.35)
+    except Exception as exc:
+        log(
+            f"[UPGRADE_NAV] Unable to tap collapse target directly ({exc}); falling back",
+            "WARN",
+        )
+        collapse_buy_quantity(
+            screenshot=image,
+            capture_fn=capture_fn,
+            sleep_fn=sleep_fn,
+            max_attempts=1,
+        )
+        sleep_fn(0.25)
+
+    refreshed = capture_fn()
+    if refreshed is not None:
+        image = refreshed
+        try:
+            detection = detect_state_and_overlays(image)
+        except Exception:
+            return image
+
+        overlays = set(detection.get("overlays") or [])
+        if "BUY_QUANTITY_MENU_EXPANDED" in overlays:
+            log(
+                "[UPGRADE_NAV] Buy-quantity selector still expanded after collapse attempt",
+                "WARN",
+            )
+        else:
+            log("[UPGRADE_NAV] Buy-quantity selector collapsed", "INFO")
+
+    return image
+
+
 def _ensure_menu(menu: str, *, capture_fn: Callable[[], Optional[np.ndarray]], max_attempts: int = 4) -> Optional[np.ndarray]:
     menu_key = _normalize_menu(menu)
     if menu_key is None or menu_key not in _MENU_NAV:
@@ -201,18 +265,21 @@ def _ensure_menu(menu: str, *, capture_fn: Callable[[], Optional[np.ndarray]], m
         if screenshot is None:
             continue
 
-        if is_buy_quantity_expanded(screenshot):
-            log(
-                "[UPGRADE_NAV] Buy-quantity selector detected while switching menus; collapsing",
-                "WARN",
-            )
-            screenshot = collapse_buy_quantity(
-                screenshot=screenshot,
-                capture_fn=capture_fn,
-                sleep_fn=time.sleep,
-            )
-            if screenshot is None:
-                continue
+        screenshot = _maybe_collapse_buy_quantity(
+            screenshot,
+            capture_fn=capture_fn,
+            sleep_fn=time.sleep,
+        )
+        if screenshot is None:
+            continue
+
+        dismissed_menu = handle_uw_detail_popup(
+            screenshot=screenshot,
+            capture_fn=capture_fn,
+            sleep_fn=time.sleep,
+        )
+        if dismissed_menu is not None:
+            screenshot = dismissed_menu
 
         detection = detect_state_and_overlays(screenshot)
         current = _normalize_menu(detection.get("menu"))
@@ -226,12 +293,18 @@ def _ensure_menu(menu: str, *, capture_fn: Callable[[], Optional[np.ndarray]], m
 
     # final capture after attempts
     screenshot = capture_fn()
-    if screenshot is not None and is_buy_quantity_expanded(screenshot):
-        screenshot = collapse_buy_quantity(
-            screenshot=screenshot,
-            capture_fn=capture_fn,
-            sleep_fn=time.sleep,
-        )
+    screenshot = _maybe_collapse_buy_quantity(
+        screenshot,
+        capture_fn=capture_fn,
+        sleep_fn=time.sleep,
+    )
+    dismissed_menu = handle_uw_detail_popup(
+        screenshot=screenshot,
+        capture_fn=capture_fn,
+        sleep_fn=time.sleep,
+    )
+    if dismissed_menu is not None:
+        screenshot = dismissed_menu
     return screenshot
 
 
@@ -703,13 +776,45 @@ def ensure_ultimate_state(
     if screenshot is None:
         raise RuntimeError("Unable to capture screenshot for ultimate weapons menu")
 
+    collapsed = _maybe_collapse_buy_quantity(
+        screenshot,
+        capture_fn=capture_fn,
+        sleep_fn=sleep_fn,
+    )
+    if collapsed is not None:
+        screenshot = collapsed
+
+    dismissed = handle_uw_detail_popup(
+        screenshot=screenshot,
+        capture_fn=capture_fn,
+        sleep_fn=sleep_fn,
+    )
+    if dismissed is not None:
+        screenshot = dismissed
+
     # Nudge to the top so we walk the list deterministically.
     for _ in range(3):
         swipe_fn("towards_top", "extended")
         sleep_fn(_SCROLL_SETTLE_SEC)
         shot = capture_fn()
         if shot is not None:
-            screenshot = shot
+            collapsed = _maybe_collapse_buy_quantity(
+                shot,
+                capture_fn=capture_fn,
+                sleep_fn=sleep_fn,
+            )
+            if collapsed is not None:
+                screenshot = collapsed
+            else:
+                screenshot = shot
+
+            dismissed = handle_uw_detail_popup(
+                screenshot=screenshot,
+                capture_fn=capture_fn,
+                sleep_fn=sleep_fn,
+            )
+            if dismissed is not None:
+                screenshot = dismissed
 
     def _context_is_valid(image: Optional[np.ndarray], stage: str) -> bool:
         if image is None:
@@ -756,6 +861,22 @@ def ensure_ultimate_state(
     status_summary: Dict[str, Dict[str, Dict[str, float] | Dict[str, str]]] = {}
 
     while remaining and scroll_attempts <= max_scroll_attempts:
+        collapsed = _maybe_collapse_buy_quantity(
+            screenshot,
+            capture_fn=capture_fn,
+            sleep_fn=sleep_fn,
+        )
+        if collapsed is not None:
+            screenshot = collapsed
+
+        dismissed = handle_uw_detail_popup(
+            screenshot=screenshot,
+            capture_fn=capture_fn,
+            sleep_fn=sleep_fn,
+        )
+        if dismissed is not None:
+            screenshot = dismissed
+
         if not _context_is_valid(screenshot, "scan loop"):
             return
 
@@ -831,6 +952,21 @@ def ensure_ultimate_state(
 
                 post = capture_fn()
                 if post is not None:
+                    collapsed_post = _maybe_collapse_buy_quantity(
+                        post,
+                        capture_fn=capture_fn,
+                        sleep_fn=sleep_fn,
+                    )
+                    if collapsed_post is not None:
+                        post = collapsed_post
+
+                    dismissed_post = handle_uw_detail_popup(
+                        screenshot=post,
+                        capture_fn=capture_fn,
+                        sleep_fn=sleep_fn,
+                    )
+                    if dismissed_post is not None:
+                        post = dismissed_post
                     if not _context_is_valid(post, "post-toggle capture"):
                         return
                     screenshot = post
@@ -878,6 +1014,22 @@ def ensure_ultimate_state(
             sleep_fn(_SCROLL_SETTLE_SEC)
             shot = capture_fn()
             if shot is not None:
+                collapsed_shot = _maybe_collapse_buy_quantity(
+                    shot,
+                    capture_fn=capture_fn,
+                    sleep_fn=sleep_fn,
+                )
+                if collapsed_shot is not None:
+                    shot = collapsed_shot
+
+            if shot is not None:
+                dismissed_shot = handle_uw_detail_popup(
+                    screenshot=shot,
+                    capture_fn=capture_fn,
+                    sleep_fn=sleep_fn,
+                )
+                if dismissed_shot is not None:
+                    shot = dismissed_shot
                 if not _context_is_valid(shot, "post-scroll capture"):
                     return
                 screenshot = shot
@@ -889,6 +1041,22 @@ def ensure_ultimate_state(
             sleep_fn(_SCROLL_SETTLE_SEC)
             shot = capture_fn()
             if shot is not None:
+                collapsed_shot = _maybe_collapse_buy_quantity(
+                    shot,
+                    capture_fn=capture_fn,
+                    sleep_fn=sleep_fn,
+                )
+                if collapsed_shot is not None:
+                    shot = collapsed_shot
+
+            if shot is not None:
+                dismissed_shot = handle_uw_detail_popup(
+                    screenshot=shot,
+                    capture_fn=capture_fn,
+                    sleep_fn=sleep_fn,
+                )
+                if dismissed_shot is not None:
+                    shot = dismissed_shot
                 if not _context_is_valid(shot, "post-scroll capture"):
                     return
                 screenshot = shot

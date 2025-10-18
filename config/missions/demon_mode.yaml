@@ -1,0 +1,53 @@
+meta:
+  name: demon_mode
+  version: 1
+
+vars:
+  nuke_wait_seconds: 300   # seconds to wait after Demon Mode before firing
+  post_nuke_delay: 5      # seconds to wait after firing before ending round
+  demon_triggered: false  # per-run flag
+  nuke_fired: false       # per-run flag
+  purchase_active: false  # whether we should keep buying attack upgrades
+
+per_run_reset:
+  - demon_triggered
+  - nuke_fired
+  - purchase_active
+
+rules:
+  # Trigger Demon Mode as soon as the button appears, then start the upgrade loop
+  - when:
+      state: RUNNING
+      floating_visible: "floating_buttons.demon_mode"
+      assert: "!demon_triggered"
+    do:
+      - { type: fire_floating, name: floating_buttons.demon_mode }
+      - { type: set, var: demon_triggered, value: true }
+      - { type: set, var: purchase_active, value: true }
+
+  # Rapidly alternate key attack upgrades for the duration of demon mode
+  - when:
+      state: RUNNING
+      elapsed_secs: "< 65"
+      assert:
+        - "demon_triggered"
+        - "!nuke_fired"
+        - purchase_active
+    do:
+      - { type: upgrade_purchase, menu: attack, label: "Range" }
+      - { type: sleep, ms: 1000 }
+
+  # Fire the nuke once the wait period has elapsed
+  - when:
+      state: RUNNING
+      elapsed_secs: ">= 65"
+      floating_visible: "floating_buttons.nuke"
+      assert:
+        - "demon_triggered"
+        - "!nuke_fired"
+    do:
+      - { type: fire_floating, name: floating_buttons.nuke }
+      - { type: set, var: purchase_active, value: false }
+      - { type: set, var: nuke_fired, value: true }
+      - { type: sleep, ms: 5000 }
+      - { type: restart_run }

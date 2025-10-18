@@ -132,7 +132,11 @@ def is_game_foregrounded():
     if package:
         if package != _last_foreground_pkg:
             if _last_foreground_pkg is None:
-                log(f"[WATCHDOG] Started — current foreground app: {package}", level="DEBUG")
+                log(
+                    f"[WATCHDOG] Started — current foreground app: {package}",
+                    level="DEBUG",
+                    console=True,
+                )
             else:
                 log(f"[WATCHDOG] Foreground changed: {package}", level="DEBUG")
             _last_foreground_pkg = package

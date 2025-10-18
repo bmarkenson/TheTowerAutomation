@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, Literal, Optional, Tuple
+from typing import Any, Dict, Literal, Optional, Tuple, Sequence, Union
 
 from utils.logger import log
 from core.adb_utils import adb_shell
@@ -12,6 +12,7 @@ from core.clickmap_access import resolve_dot_path, get_click, get_swipe
 from core.label_tapper import get_label_match
 
 DispatchMode = Literal["now", "queue"]
+Coord = Union[Sequence[int], Sequence[float]]
 
 
 def _compute_offset(entry: Dict[str, Any]) -> Optional[Tuple[int, int]]:
@@ -52,7 +53,7 @@ def _dispatch_swipe(x1: int, y1: int, x2: int, y2: int, duration_ms: int) -> Non
 
 
 def safe_tap(
-    name: str,
+    name: Union[str, Coord],
     *,
     require_visible: bool = True,
     retries: int = 0,
@@ -62,6 +63,22 @@ def safe_tap(
     screenshot=None,
     log_label: Optional[str] = None,
 ) -> bool:
+    if isinstance(name, (tuple, list)):
+        tap_x = int(name[0])
+        tap_y = int(name[1])
+        label = log_label or f"tap@{tap_x},{tap_y}"
+        if require_visible:
+            log(
+                f"[WARN] TAP_SAFE coordinate path called with require_visible=True; forcing False",
+                "WARN",
+            )
+        log(
+            f"TAP_SAFE now={dispatch=='now'} label={label} at ({tap_x},{tap_y}) vis=False",
+            "ACTION",
+        )
+        _dispatch_tap(tap_x, tap_y, label=label, dispatch=dispatch)
+        return True
+
     attempts = max(0, int(retries)) + 1
     entry = resolve_dot_path(name)
     label = log_label or name

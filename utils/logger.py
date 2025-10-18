@@ -11,6 +11,28 @@ from typing import Optional
 _MISSION_LOG_PATH: Optional[str] = None
 
 
+def _parse_console_levels() -> set[str]:
+    """Return the set of log levels that should be echoed to stdout."""
+    env_levels = os.getenv("TOWER_CONSOLE_LEVELS")
+    if env_levels:
+        parsed = {part.strip().upper() for part in env_levels.split(",") if part.strip()}
+        if parsed:
+            return parsed
+    return {"STATUS", "ERROR"}
+
+
+_CONSOLE_LEVELS = _parse_console_levels()
+
+
+def _should_print_to_console(level: str, msg: str) -> bool:
+    """Decide whether a log entry should also be emitted to stdout."""
+    normalized = level.upper() if level else "INFO"
+    if normalized in _CONSOLE_LEVELS:
+        return True
+    # Fallback for legacy callers that still embed a [STATUS] tag in the message.
+    return "[STATUS]" in msg and "STATUS" in _CONSOLE_LEVELS
+
+
 def set_mission_log_path(path: Optional[str]) -> None:
     """Configure an optional secondary log file for mission/strategy logs."""
     global _MISSION_LOG_PATH
@@ -28,25 +50,36 @@ def _write_entry(entry: str, *, extra_path: Optional[str] = None) -> None:
             extra.write(entry + "\n")
 
 
-def log(msg: str, level: str = "INFO", *, extra_path: Optional[str] = None) -> None:
+def log(
+    msg: str,
+    level: str = "INFO",
+    *,
+    extra_path: Optional[str] = None,
+    console: Optional[bool] = None,
+) -> None:
     """
-    Write a timestamped log entry to stdout and append to logs/actions.log.
+    Write a timestamped log entry to the primary file log and optionally stdout.
 
     Args:
         msg (str): The log message text.
         level (str, optional): Log level label (e.g., "INFO", "ERROR"). Defaults to "INFO".
+        extra_path (str, optional): Secondary log path to append to in addition to the default log.
+        console (bool, optional): Force console emission; default determines based on configured levels.
 
     Side effects:
-        - Prints to stdout.
+        - Prints to stdout when allowed for the provided log level.
         - Creates logs/ directory if missing.
         - Appends entry to logs/actions.log.
 
     Raises:
         OSError: If unable to create logs/ directory or write to the log file.
     """
+    normalized_level = level.upper() if level else "INFO"
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    entry = f"[{level} {timestamp}] {msg}"
-    print(entry)
+    entry = f"[{normalized_level} {timestamp}] {msg}"
+    emit_console = _should_print_to_console(normalized_level, msg) if console is None else console
+    if emit_console:
+        print(entry)
 
     _write_entry(entry, extra_path=extra_path)
 
@@ -54,3 +87,8 @@ def log(msg: str, level: str = "INFO", *, extra_path: Optional[str] = None) -> N
 def log_mission(msg: str, level: str = "INFO") -> None:
     """Log mission/strategy messages to the main log and optional mission log."""
     log(msg, level, extra_path=_MISSION_LOG_PATH)
+
+
+def log_status(msg: str) -> None:
+    """Helper for status updates that should appear on the console."""
+    log(msg, "STATUS")

@@ -42,7 +42,7 @@ def handle_game_over(*, capture_stats: bool = True):
         Tap failures cause an early abort via _abort_handler(), which sets AUTOMATION.mode=WAIT.
     """
     session_id = _make_session_id()
-    log(f"Handling GAME OVER — Session: {session_id}", "INFO")
+    log(f"Handling GAME OVER — Session: {session_id}", "INFO", console=True)
 
     # Clear the monotonic wave hint immediately so fresh runs accept wave 1 detections.
     set_wave_hint(None)
@@ -88,11 +88,11 @@ def handle_game_over(*, capture_stats: bool = True):
     # Step 7: Decide next action based on mode
     mode = AUTOMATION.mode
     if mode == ExecMode.WAIT:
-        log("Pausing on Game Over — waiting for user signal.", "INFO")
+        log("Pausing on Game Over — waiting for user signal.", "INFO", console=True)
         while AUTOMATION.mode is ExecMode.WAIT:
             time.sleep(1)
     elif mode == ExecMode.HOME:
-        log("Mode = HOME (not implemented yet)", "INFO")
+        log("Mode = HOME (not implemented yet)", "INFO", console=True)
         return  # Exit cleanly
     else:
         if not tap_if_visible("buttons.retry:game_over", retries=1):

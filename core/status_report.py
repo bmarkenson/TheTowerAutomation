@@ -17,7 +17,7 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
-from utils.logger import log
+from utils.logger import log, log_status
 from utils.wave_detector import detect_wave_number_from_image
 from utils.coin_detector import detect_coins_from_image, format_compact_decimal
 from core.clickmap_access import get_clickmap, resolve_dot_path
@@ -202,10 +202,9 @@ class StatusReporter:
         ovl_str = ", ".join(sorted(overlays)) if overlays else "—"
         state_str = self._supervisor.format_state(ui_state)
 
-        log(
-            f"[STATUS] State={state_str} | Wave={wave_str} | Coins/min={coins_str} | Menu={menu_str} | "
-            f"Secondary=[{sec_str}] | Overlays=[{ovl_str}]",
-            "INFO",
+        log_status(
+            f"State={state_str} | Wave={wave_str} | Coins/min={coins_str} | Menu={menu_str} | "
+            f"Secondary=[{sec_str}] | Overlays=[{ovl_str}]"
         )
 
         if self._save_wave_samples:
@@ -309,14 +308,11 @@ class StatusReporter:
                 total_parts.append(f"RunΔ={_fmt_signed(run_gain)}")
             if delta_prev is not None and delta_hours is not None and snapshot.reason == "hourly":
                 total_parts.append(f"Δprev={_fmt_signed(delta_prev)} over {delta_hours:.2f}h")
-            log(f"[STATUS] " + " | ".join(total_parts), "INFO")
+            log_status(" | ".join(total_parts))
 
         if report_rate and delta_hours is not None:
             rate_str = format_compact_decimal(coins_hr)
-            log(
-                f"[STATUS] Coins/hr≈{rate_str} over {delta_hours:.2f}h",
-                "INFO",
-            )
+            log_status(f"Coins/hr≈{rate_str} over {delta_hours:.2f}h")
 
         if snapshot.reason not in {"startup", "hourly"}:
             parts = [f"Total={self._coins_last_total_str}"]

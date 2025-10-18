@@ -402,7 +402,11 @@ class AutomationSupervisor:
                 reason = (
                     "state RUNNING" if ui_state == "RUNNING" else "paused/disabled"
                 )
-                log(f"[AUTO] Return-to-Game timer cancelled due to {reason} (after {elapsed}s)", "INFO")
+                log(
+                    f"[AUTO] Return-to-Game timer cancelled due to {reason} (after {elapsed}s)",
+                    "INFO",
+                    console=True,
+                )
                 self._rtg_visible_since_ts = None
             return
 
@@ -421,16 +425,28 @@ class AutomationSupervisor:
                 if self._rtg_visible_since_ts is None:
                     self._rtg_visible_since_ts = time.time()
                     mins = (self.auto_return_secs // 60) if self.auto_return_secs > 0 else 0
-                    log(f"[AUTO] Return-to-Game detected; starting timer ({mins}m)", "INFO")
+                    log(
+                        f"[AUTO] Return-to-Game detected; starting timer ({mins}m)",
+                        "INFO",
+                        console=True,
+                    )
                 elif (time.time() - self._rtg_visible_since_ts) >= self.auto_return_secs > 0:
                     elapsed = int(time.time() - self._rtg_visible_since_ts)
-                    log(f"[AUTO] Return-to-Game visible for {elapsed}s — tapping now.", "ACTION")
+                    log(
+                        f"[AUTO] Return-to-Game visible for {elapsed}s — tapping now.",
+                        "ACTION",
+                        console=True,
+                    )
                     tap_if_visible("buttons.return_to_game", retries=1)
                     self._rtg_visible_since_ts = None
             else:
                 if self._rtg_visible_since_ts is not None:
                     elapsed = int(time.time() - self._rtg_visible_since_ts)
-                    log(f"[AUTO] Return-to-Game disappeared before threshold — cancelling timer (after {elapsed}s)", "INFO")
+                    log(
+                        f"[AUTO] Return-to-Game disappeared before threshold — cancelling timer (after {elapsed}s)",
+                        "INFO",
+                        console=True,
+                    )
                     self._rtg_visible_since_ts = None
         except Exception:
             self._rtg_visible_since_ts = None
@@ -455,7 +471,11 @@ class AutomationSupervisor:
             return
         try:
             AUTOMATION.state = normalized
-            log(f"[CTRL] State set to {normalized} via control file", "INFO")
+            log(
+                f"[CTRL] State set to {normalized} via control file",
+                "INFO",
+                console=True,
+            )
             self._last_applied_state = normalized
             self._paused_since_ts = time.time() if normalized == "PAUSED" else None
         except Exception as exc:
@@ -469,7 +489,11 @@ class AutomationSupervisor:
             return
         try:
             AUTOMATION.mode = normalized
-            log(f"[CTRL] Mode set to {normalized} via control file", "INFO")
+            log(
+                f"[CTRL] Mode set to {normalized} via control file",
+                "INFO",
+                console=True,
+            )
             self._last_applied_mode = normalized
         except Exception as exc:
             log(f"[CTRL] Failed to set mode={normalized}: {exc}", "WARN")

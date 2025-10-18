@@ -1,0 +1,67 @@
+Okay, chores done and shocking you with a timely reply sad chuckle ... here's my "assorted tips and tricks from several people that finally made T14 work for me":
+
+Decide if you want to go the Hybrid or the GC way – flip-flopping between them is tiresome and one has a harder time to really pinpoint where stuff helped or harmed since it's inbetween.
+If you go GC it can require a certain re-thinking and re-learning of used behaviors. There's no point in keeping Wall Health or Regen Substats "to be safe" because as GC you will die if all your other safety measures fail. As long as one keeps holding on to those things one is a damage tilted hybrid.
+Going GC means you can lock EALS in the WS and pull all the coin from it – nice!
+Going GC also means you can pull every mod level beyond 161 from your armor mod – even nicer!
+And as you may have gleaned by now - I had to switch to GC to make it viable for me, if you want to go down that path as Hybrid then ... I still hope you'll find a useful information here and there :Heart:
+ 
+Masteries
+Masteries I personally needed to make it perform the same as T12 Hybrid
+WAm – Since we can't push deep into T14 we need the spawn cap come to us instead
+ISm – And since we can't push deep, we need to reduce the time spent there. Every minute shaved off increases the effective CPH by shrinking the overall time without really shrinking the earnings.
+DMm & DMGm – Since my labs are low and WS+ is meh I need every help I can get to sustain my run and those two substantially helped there. IF I could do it all over again I would have gotten STm first though, it is an insane damage boost, especially at Level 9
+Important Sidenote regarding DMm - If you use Auto-Restart Run you need to have Smart-DM, otherwise it's worthless.
+
+Masteries that helped push it far beyond what I earned in T12
+STm – As mentioned, I'd have gotten it before DMm & DMGm if Matt had converted me sooner. The Damage increase is insanely good and pushes the waves by a lot
+EOm – With GT+ the statistics lie and I also fell for the trap to believe it does barely anything, it truly truly does help as soon as you're in T14 because you can basically tag everything
+ENm – It also allows you to pick the "x1.65 / x8 Boss Health" Perk if you so want toand massively helps against bosses (yay, rays!)
+Other Masteries helped increase Econ too (like EBm) but had no real impact on the T14 performance.
+Cards
+My Card Preset changed quite a bit – it obviously depends on how many slots one has but my new Farm Preset looks like this:
+LMS, Berserker, Crit Chance, Coins, Crit Coin, Wave Skip, Slow Aura, Attack Speed, RPC, Extra Orb, Damage, Cash, Free Upgrades, Second Wind, Plasma Cannon, Energy Shield, Nuke, Wave Accelerator, Super Tower, Energy Net, Intro Sprint, Enemy Balance, Demon Mode, Fortress
+Nuke and Fortress are only in there so I don't forget I want to buy the masteries at some point but literally serve no purpose other than as a reminder.
+ 
+UWs
+As far as UWs are concerned I personally would say that the minimum requirements to do the jump are:
+pBH – You don't want to have to deal with anything but Bosses and Elites
+pCF – Borb-Damage becomes vital against bosses (Minionek says this falls under "helpful but not vital" - the CF opinion wars wage on :Funny:)
+High SL Coverage – if you want to get it via SL4 or SLa does not really matter I think, but at some point the RoI will simply shift and you need SL to keep on killing stuff. Since TP SL doesn't work there for me anymore anything that spends too much time in the gaps is a potential death sentence, so those gaps need to become very small
+A very solid Damage UW – if it's SM or CL doesn't really matter I guess, but you need to be able to dish out solid amounts against those Bosses and Rays
+UW-Stuff that I am sure helped me but was not technically necessary
+CF+ unlock by itself made sure the trash gets spiraled into the BH, I had the impression since I unlocked that I basically got no chips from ranged anymore – also CF+ helps with borb. I'm sure at CF+0 it's more placebo effect than anything but hey ^^
+I personally saw no difference in the performance between CF60 and CF75 in T14 except for a wee bit less borb damage, I guess that's more relevant in Tournament and higher Tiers?
+Perks
+Perk Bans changed quite a lot with going GC but after some patient slaps against my head I settled on the following:
+Lifesteal / KB TO, Boss Health / Speed TO, Damage/Damage TO, Regen, Max Health, DABS, Interest
+Since cash is basically irrelevant at this point due to FRUPS the Cash TO can stay in, and 4 white perks banned drastically decrease the Perk RNG
+My Autoperk changed a bit as well, it now looks as follows:
+PWR, CTO, GS, GTb, BHd, Coin, Damage, CLd, SLb, Enemy Health / Regen TO, DWq, Damage / Boss Health TO, Enemy Speed / Enemy Damage TO
+ 
+Mods
+Speaking of Mods, I settled on using my Tournament-ACP for Farm since HP lost relevance. The Substats I used for this are:
+Orbs, Orb Speed, Wall Rebuild, Shockwave Frequency, Death Defy, Landmine Radius (for the Stun)
+Vault
+Vault unlocks that helped increase T14 viability considerably
+WS Orb Adjuster – The fact I can now set both orbs to 30m and do minrange without orbs racing around outside of range really helped with making sure everything is tagged and inside the BH
+Damage Slider – Using the rule of thumb of "Set it so that you don't die during IS" is a very fast way to figure out the correct setting. It massively helps with killing only inside SL and gave a very decent coin boost, otherwise the enemies tagged by Orbs had the tendency to die outside SL too quick due to the orb hit. I started testing with 1E-8, settled on 1E-9 ... but every time you have a big bump in damage (Masteries etc) one should try to go lower again.
+Auto-Restart Run - Basically a must considering that your runs will now mostly last no more than 4-5 hours at MOST, so if you don't want to coddle your runs you should seriously consider this.
+Workshop and Workshop +
+Due to being GC (if desired) one can remove a lot of coin from Health and Wall Health which frees up some room.
+I still invested in Defense in WS+ to get the Orb Size to 30 so the tag consistency of the EOm as well as the Borb Damage got better. The difference between Orb Size 20 and Orb Size 30 made about 4–6% difference in Borb Damage. I set all the other Health stuff to 57 (just enough to get Orb Size)
+As mentioned EALS can now be locked
+I also locked BS Range, which helped with preventing kills outside SL too
+Shockwave Size is locked as well for me – I maxed the lab and set the WS to 0 so it sits at 1.6 now – very nice for tagging bosses and ranged without going beyond Orbs or delaying GT+ combos. But SW Size is such an individual thing and testing never hurts.
+ 
+General Stuff
+Target Priority is set to "Closest"  ... "Spotlight" is just too dangerous since it will stop firing at the boss and the rays while it's in a gap and the Coinloss is <1% from my experiments
+I keep SM, SLm and PS off during my runs. SLm is just too much of a wildcard and I have invested nothing in my SM, and PS is also so barebone it only serves as a FPS decrease from time to time. This obviously needs individual testing depending on the tower.
+As far as Bots are concerned I just run GB and a very weak Amp-Bot. We use what we have ^^
+As Minionek pointed out, one needs to get used to the fact that a 5k run is really amazing and a 4k run is already very very decent! Until I switched to Farm DC I not once managed to breach 4k waves and still beat T12 by dozens of T CPH
+
+Most importantly:
+The first few runs as GC in T14 felt ridiculously scary – you will lose your Wall constantly, you'll often pop Energy shields and I now finally understand how some people reach 30–40+ DDs in Farm runs. Basically one shifts from a Paladin to a Sorceress – seems to be "normal" but I honestly am still not fully used to seeing my Wall fall every 300 seconds and being used as an additional ES basically =)
+
+That's ... all I can think of right now. It's more than possible I forgot something or explained something too vaguely – if there's any questions at all or things I can clear up never hesitate to ask and I'll try to answer as good as I can! Or we'll find someone that can :Heart: 
+And of course - best of luck with all the tests and trials and experiments. It's what the game is all about in the end! :Love:
