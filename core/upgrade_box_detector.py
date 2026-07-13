@@ -44,6 +44,13 @@ _TEXT_KERNEL = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
 _CLAHE = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
 _RIGHT_INFO_FRACTION = 0.55
 _AFF_BRIGHT_THRESHOLD = 120
+_GOLD_BOX_REGION_START = 0.55
+_GOLD_BOX_HUE_RANGE = (12, 38)
+_GOLD_BOX_MIN_SATURATION = 90
+_GOLD_BOX_MIN_VALUE = 90
+_GOLD_BOX_MIN_PIXEL_RATIO = 0.04
+_GOLD_BOX_MIN_ROW_RATIO = 0.60
+_GOLD_BOX_MIN_COLUMN_RATIO = 0.45
 _MENU_ALIASES = {
     "attack_menu": "attack",
     "attack": "attack",
@@ -375,6 +382,54 @@ def _evaluate_affordability(image: np.ndarray, rect: Tuple[int, int, int, int]) 
     return "unaffordable", metrics
 
 
+def evaluate_upgrade_box_gold_box(
+    image: np.ndarray,
+    rect: Tuple[int, int, int, int],
+) -> Tuple[bool, Dict[str, float]]:
+    """Detect the rectangular gold border shown when an upgrade is Max.
+
+    The detector intentionally examines only the lower-right purchase control.
+    This is substantially cheaper and less ambiguous than OCR or the general
+    affordability classifier, and it remains valid when an upgrade starts a
+    run already gold boxed.
+    """
+
+    region = _extract_relative_region(
+        image,
+        rect,
+        (_GOLD_BOX_REGION_START, 1.0),
+        (_GOLD_BOX_REGION_START, 1.0),
+    )
+    if region is None or region.size == 0:
+        return False, {}
+
+    hsv = cv2.cvtColor(region, cv2.COLOR_BGR2HSV)
+    hue = hsv[:, :, 0]
+    saturation = hsv[:, :, 1]
+    value = hsv[:, :, 2]
+    gold_mask = (
+        (hue >= _GOLD_BOX_HUE_RANGE[0])
+        & (hue <= _GOLD_BOX_HUE_RANGE[1])
+        & (saturation >= _GOLD_BOX_MIN_SATURATION)
+        & (value >= _GOLD_BOX_MIN_VALUE)
+    )
+
+    pixel_ratio = float(gold_mask.mean())
+    row_ratio = float(gold_mask.mean(axis=1).max())
+    column_ratio = float(gold_mask.mean(axis=0).max())
+    metrics = {
+        "gold_pixel_ratio": pixel_ratio,
+        "gold_row_ratio": row_ratio,
+        "gold_column_ratio": column_ratio,
+    }
+    is_gold_boxed = (
+        pixel_ratio >= _GOLD_BOX_MIN_PIXEL_RATIO
+        and row_ratio >= _GOLD_BOX_MIN_ROW_RATIO
+        and column_ratio >= _GOLD_BOX_MIN_COLUMN_RATIO
+    )
+    return is_gold_boxed, metrics
+
+
 def _extract_relative_region(
     image: np.ndarray,
     rect: Tuple[int, int, int, int],
@@ -527,6 +582,21 @@ def _detect_boxes_for_column(
         )
     boxes.sort(key=lambda item: item.rect[1])
     return boxes
+
+
+def detect_visible_box_rects(
+    screenshot: np.ndarray,
+) -> Dict[str, List[Tuple[int, int, int, int]]]:
+    """Detect visible upgrade tile geometry without running label OCR."""
+
+    detected: Dict[str, List[Tuple[int, int, int, int]]] = {}
+    for column in ("left", "right"):
+        x, y, w, h = _get_column_rect(column)
+        roi = screenshot[y : y + h, x : x + w]
+        mask = _to_bright_mask(roi)
+        bands = _find_horizontal_bands(mask, w)
+        detected[column] = _bands_to_rects(mask, (x, y), w, bands)
+    return detected
 
 
 def detect_visible_boxes(

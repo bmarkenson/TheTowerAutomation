@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import struct
 from typing import Optional
 
 import cv2
@@ -11,12 +12,59 @@ import numpy as np
 from numpy.typing import NDArray
 
 from utils.logger import log
-from core.adb_utils import screencap_png
+from core.adb_utils import screencap_png, screencap_raw
 
 
 Frame = NDArray[np.uint8]
 
 LATEST_SCREENSHOT = Path("screenshots/latest.png")
+
+
+def _decode_raw_screencap(raw_data: bytes) -> Frame:
+    """Decode Android ``screencap`` RGBA/RGBX/BGRA framebuffer bytes."""
+
+    if len(raw_data) < 12:
+        raise ValueError("Raw screenshot header is incomplete")
+
+    width, height, pixel_format = struct.unpack_from("<III", raw_data)
+    if width <= 0 or height <= 0:
+        raise ValueError(f"Invalid raw screenshot dimensions {width}x{height}")
+
+    expected_pixels = width * height * 4
+    header_size = len(raw_data) - expected_pixels
+    if header_size not in {12, 16}:
+        raise ValueError(
+            f"Unexpected raw screenshot size {len(raw_data)} for {width}x{height}"
+        )
+
+    pixels = np.frombuffer(raw_data, dtype=np.uint8, offset=header_size)
+    frame = pixels.reshape((height, width, 4))
+    if pixel_format in {1, 2}:  # RGBA_8888 / RGBX_8888
+        return cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+    if pixel_format == 5:  # BGRA_8888
+        return cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+    raise ValueError(f"Unsupported raw screenshot pixel format {pixel_format}")
+
+
+def capture_adb_raw_screenshot() -> Optional[Frame]:
+    """Capture and decode the faster uncompressed Android framebuffer."""
+
+    try:
+        raw_data = screencap_raw()
+        if not raw_data:
+            log("[ADB] Empty raw screenshot data", "ERROR")
+            return None
+        image = _decode_raw_screencap(raw_data)
+        expected_w, expected_h = 1080, 1920
+        if image.shape[1] != expected_w or image.shape[0] != expected_h:
+            raise ValueError(
+                f"Unsupported emulator resolution {image.shape[1]}x{image.shape[0]}; "
+                f"expected {expected_w}x{expected_h}. Update the BlueStacks display settings."
+            )
+        return image
+    except Exception as exc:
+        log(f"[ADB] Raw screenshot capture failed: {exc}", "ERROR")
+        return None
 
 
 def capture_adb_screenshot() -> Optional[Frame]:

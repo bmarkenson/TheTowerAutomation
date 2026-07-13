@@ -152,3 +152,37 @@ def screencap_png(
     except Exception as e:
         print(f"[ERROR] Unexpected ADB screencap exception: {e}")
         return None
+
+
+def screencap_raw(
+    device_id: Optional[str] = None,
+    check: bool = True,
+) -> Optional[bytes]:
+    """Capture the Android raw framebuffer without device-side PNG encoding."""
+
+    target = device_id or os.getenv("ADB_DEVICE") or ADB_DEVICE_ID
+
+    base_cmd = ["adb"]
+    if target:
+        base_cmd += ["-s", target]
+    full_cmd = base_cmd + ["exec-out", "screencap"]
+
+    try:
+        result = subprocess.run(
+            full_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=check,
+        )
+        return result.stdout
+    except subprocess.CalledProcessError as exc:
+        print(f"[ERROR] ADB raw screencap failed: {exc}")
+        if exc.stderr:
+            try:
+                print(f"[STDERR] {exc.stderr.decode(errors='ignore').strip()}")
+            except Exception:
+                pass
+        return None
+    except Exception as exc:
+        print(f"[ERROR] Unexpected ADB raw screencap exception: {exc}")
+        return None

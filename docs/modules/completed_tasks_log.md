@@ -39,11 +39,18 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Split home/in-run Store navigation, retained red-badge availability as the
   trigger, added a home red-badge region, and live-tested inactive Daily Gems as
   a normal not-ready result.
-- Replaced generic per-tick EHLS/EALS searches with a dedicated exclusive
-  initializer. A fresh live regression run gold boxed EHLS at wave 20, sent the
-  first EALS tap immediately from the same verified frame at wave 20, and gold
-  boxed EALS at wave 30 in 26.40 seconds. Completion waves, EALS first-tap
-  wave/time, total elapsed time, tap count, and failure reason are recorded.
+- Replaced generic per-tick EHLS/EALS searches with a dedicated exclusive,
+  state-driven initializer. It uses fast label templates and upgrade geometry,
+  detects the rectangular gold `Max` border directly, supports either or both
+  upgrades beginning gold boxed, and defers wave OCR until purchasing is done.
+  Purchase taps continue independently of capture latency; a continuously
+  drained H.264 stream supplies current verification frames, with guarded raw
+  capture as fallback. In the final fresh live regression, EHLS gold boxed at
+  wave 20 and EALS at wave 30 in both final fresh regressions. Human `touch`
+  markers recorded the first EALS dispatch 0.285 and 0.472 seconds after EHLS
+  became visibly gold (tap completion at 0.742 and 0.748 seconds). Completion
+  waves, EALS first-tap wave/time, total elapsed time, tap count, and failure
+  reason are recorded.
 
 ---
 
