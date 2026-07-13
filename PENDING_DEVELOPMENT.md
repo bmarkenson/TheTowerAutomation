@@ -9,6 +9,11 @@ audited against the codebase and incorporated below on 2026-07-13.
 
 ## Current validation gates
 
+- [ ] Refresh and revalidate the Home `Battle` button template. During the
+  cheaper-level-skip regression, `buttons.battle:home` failed to match while
+  the guarded Home control OCR read `BATTLE` at 96% confidence and started the
+  run successfully. Capture the current artwork and separately revalidate the
+  `Resume Battle` state.
 - [ ] When the Store red badge next appears, live-test the complete active Daily
   Gems flow: both badge locations, Store navigation, active claim, ad skip, and
   return to the correct source screen. The inactive `FREE`/countdown path is
