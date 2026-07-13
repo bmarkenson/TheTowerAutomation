@@ -95,24 +95,10 @@ class GcSkipperSequenceTests(unittest.TestCase):
 
     def test_ehls_then_eals_then_target_priority(self):
         actions = self._tick()
-        self.assertEqual(actions[0]["type"], "upgrade_purchase")
-        self.assertEqual(actions[0]["label"], "Enemy Health Level Skip")
+        self.assertEqual(actions, [{"type": "level_skip_initialize"}])
 
         mv = self.ctx.data["mission_vars"]
-        mv.update(
-            last_upgrade_label="Enemy Health Level Skip",
-            last_upgrade_sent=True,
-            last_upgrade_maxed_after=True,
-        )
-        actions = self._tick()
-        self.assertEqual(actions[0]["type"], "upgrade_purchase")
-        self.assertEqual(actions[0]["label"], "Enemy Attack Level Skip")
-
-        mv.update(
-            last_upgrade_label="Enemy Attack Level Skip",
-            last_upgrade_sent=True,
-            last_upgrade_maxed_after=True,
-        )
+        mv.update(ehls_completed=True, eals_completed=True)
         actions = self._tick()
         self.assertEqual(actions, [{"type": "target_priority_ensure"}])
         self.assertTrue(mv["ehls_completed"])

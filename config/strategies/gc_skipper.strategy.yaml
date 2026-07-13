@@ -21,6 +21,13 @@ vars:
   maxed_enemy_health_level_skip: false
   maxed_enemy_attack_level_skip: false
   target_priority_checked: false
+  ehls_completion_wave: null
+  eals_completion_wave: null
+  eals_first_tap_wave: null
+  eals_first_tap_elapsed_s: null
+  level_skip_elapsed_s: 0.0
+  level_skip_taps_sent: 0
+  level_skip_last_reason: ''
 per_run_reset:
 - run_initialised
 - fast_loop_active
@@ -35,6 +42,13 @@ per_run_reset:
 - last_upgrade_ts
 - maxed_enemy_health_level_skip
 - maxed_enemy_attack_level_skip
+- ehls_completion_wave
+- eals_completion_wave
+- eals_first_tap_wave
+- eals_first_tap_elapsed_s
+- level_skip_elapsed_s
+- level_skip_taps_sent
+- level_skip_last_reason
 rules:
 - name: reset_on_game_over
   when:
@@ -79,6 +93,27 @@ rules:
   - type: set
     var: last_upgrade_ts
     value: 0
+  - type: set
+    var: ehls_completion_wave
+    value: null
+  - type: set
+    var: eals_completion_wave
+    value: null
+  - type: set
+    var: eals_first_tap_wave
+    value: null
+  - type: set
+    var: eals_first_tap_elapsed_s
+    value: null
+  - type: set
+    var: level_skip_elapsed_s
+    value: 0.0
+  - type: set
+    var: level_skip_taps_sent
+    value: 0
+  - type: set
+    var: level_skip_last_reason
+    value: ''
 - name: initialise_fast_loop
   when:
     state: RUNNING
@@ -124,6 +159,27 @@ rules:
   - type: set
     var: last_upgrade_ts
     value: 0
+  - type: set
+    var: ehls_completion_wave
+    value: null
+  - type: set
+    var: eals_completion_wave
+    value: null
+  - type: set
+    var: eals_first_tap_wave
+    value: null
+  - type: set
+    var: eals_first_tap_elapsed_s
+    value: null
+  - type: set
+    var: level_skip_elapsed_s
+    value: 0.0
+  - type: set
+    var: level_skip_taps_sent
+    value: 0
+  - type: set
+    var: level_skip_last_reason
+    value: ''
 - name: disable_fast_loop
   when:
     state: RUNNING
@@ -138,148 +194,15 @@ rules:
   - type: set
     var: loop_sleep_override_sec
     value: 0.0
-- name: sync_ehls_from_flag
-  when:
-    state: RUNNING
-  assert:
-  - '!ehls_completed'
-  - maxed_enemy_health_level_skip
-  do:
-  - type: set
-    var: ehls_completed
-    value: true
-- name: detect_ehls_gold_scan
-  when:
-    state: RUNNING
-    upgrade_maxed:
-      menu: utility
-      label: Enemy Health Level Skip
-  assert:
-  - '!ehls_completed'
-  do:
-  - type: set
-    var: ehls_completed
-    value: true
-  - type: set
-    var: maxed_enemy_health_level_skip
-    value: true
-- name: mark_ehls_from_purchase
-  when:
-    state: RUNNING
-  assert:
-  - '!ehls_completed'
-  - last_upgrade_label == Enemy Health Level Skip
-  - last_upgrade_sent
-  - last_upgrade_maxed_after
-  do:
-  - type: set
-    var: ehls_completed
-    value: true
-  - type: set
-    var: maxed_enemy_health_level_skip
-    value: true
-  - type: set
-    var: last_upgrade_label
-    value: ''
-  - type: set
-    var: last_upgrade_reason
-    value: ''
-  - type: set
-    var: last_upgrade_sent
-    value: false
-  - type: set
-    var: last_upgrade_maxed_after
-    value: false
-  - type: set
-    var: last_upgrade_menu
-    value: ''
-  - type: set
-    var: last_upgrade_ts
-    value: 0
-- name: buy_ehls
+- name: initialize_level_skips_fast
   when:
     state: RUNNING
   assert:
   - fast_loop_active
-  - '!ehls_completed'
-  cooldown_sec: 0.5
-  do:
-  - type: upgrade_purchase
-    menu: utility
-    label: Enemy Health Level Skip
-- name: sync_eals_from_flag
-  when:
-    state: RUNNING
-  assert:
-  - ehls_completed
   - '!eals_completed'
-  - maxed_enemy_attack_level_skip
+  cooldown_sec: 0.25
   do:
-  - type: set
-    var: eals_completed
-    value: true
-- name: detect_eals_gold_scan
-  when:
-    state: RUNNING
-    upgrade_maxed:
-      menu: utility
-      label: Enemy Attack Level Skip
-  assert:
-  - ehls_completed
-  - '!eals_completed'
-  do:
-  - type: set
-    var: eals_completed
-    value: true
-  - type: set
-    var: maxed_enemy_attack_level_skip
-    value: true
-- name: mark_eals_from_purchase
-  when:
-    state: RUNNING
-  assert:
-  - ehls_completed
-  - '!eals_completed'
-  - last_upgrade_label == Enemy Attack Level Skip
-  - last_upgrade_sent
-  - last_upgrade_maxed_after
-  do:
-  - type: set
-    var: eals_completed
-    value: true
-  - type: set
-    var: maxed_enemy_attack_level_skip
-    value: true
-  - type: set
-    var: last_upgrade_label
-    value: ''
-  - type: set
-    var: last_upgrade_reason
-    value: ''
-  - type: set
-    var: last_upgrade_sent
-    value: false
-  - type: set
-    var: last_upgrade_maxed_after
-    value: false
-  - type: set
-    var: last_upgrade_menu
-    value: ''
-  - type: set
-    var: last_upgrade_ts
-    value: 0
-- name: buy_eals
-  when:
-    state: RUNNING
-  assert:
-  - fast_loop_active
-  - ehls_completed
-  - '!eals_completed'
-  cooldown_sec: 0.5
-  do:
-  - type: upgrade_purchase
-    menu: utility
-    label: Enemy Attack Level Skip
+  - type: level_skip_initialize
 - name: ensure_target_priority
   when:
     state: RUNNING

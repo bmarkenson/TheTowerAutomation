@@ -39,6 +39,11 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Split home/in-run Store navigation, retained red-badge availability as the
   trigger, added a home red-badge region, and live-tested inactive Daily Gems as
   a normal not-ready result.
+- Replaced generic per-tick EHLS/EALS searches with a dedicated exclusive
+  initializer. A fresh live regression run gold boxed EHLS at wave 20, sent the
+  first EALS tap immediately from the same verified frame at wave 20, and gold
+  boxed EALS at wave 30 in 26.40 seconds. Completion waves, EALS first-tap
+  wave/time, total elapsed time, tap count, and failure reason are recorded.
 
 ---
 

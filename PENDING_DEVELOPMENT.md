@@ -19,14 +19,6 @@ audited against the codebase and incorporated below on 2026-07-13.
 
 ## GC run initialization
 
-- [ ] Replace the generic EHLS/EALS upgrade search with a dedicated fast-start
-  path. Both level skips should normally be gold boxed by wave 30-40.
-  - Navigate to Utility once, keep both skip boxes in view, and avoid repeated
-    full-menu searches and long settle delays.
-  - Tap EHLS exclusively until its gold/Max state is verified, then EALS.
-  - Record elapsed seconds and wave at each completion; warn and preserve
-    diagnostics whenever either target misses the wave-40 objective.
-  - Keep all other tap-capable handlers blocked until both are complete.
 - [ ] Implement a once-per-continuous-session GC preflight, always after the
   current run's EHLS/EALS startup gate:
   - Cards must use the fixed `GC` deck; otherwise surrender, correct, restart.

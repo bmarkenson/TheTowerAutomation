@@ -31,6 +31,7 @@ from core.upgrade_navigation import (
 )
 from core.upgrade_buy_quantity import BuyQuantity
 from core.target_priority import ensure_target_priority_order
+from core.level_skip_initializer import initialize_level_skips
 from automation.missions.base import MissionContext
 from handlers.ad_gem_handler import (
     is_blind_gem_tapper_active,
@@ -164,6 +165,34 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                         ),
                         log_level,
                     )
+            elif t == "level_skip_initialize":
+                if is_strategy_action and last_state not in allowed_states:
+                    log_mission(
+                        f"[EXEC] Skip level_skip_initialize while state={last_state}",
+                        "DEBUG",
+                    )
+                    continue
+                result = initialize_level_skips(screenshot=screen)
+                if mv is not None:
+                    mv["ehls_completed"] = result.ehls_maxed
+                    mv["eals_completed"] = result.eals_maxed
+                    mv["maxed_enemy_health_level_skip"] = result.ehls_maxed
+                    mv["maxed_enemy_attack_level_skip"] = result.eals_maxed
+                    mv["ehls_completion_wave"] = result.ehls_wave
+                    mv["eals_completion_wave"] = result.eals_wave
+                    mv["eals_first_tap_wave"] = result.eals_first_tap_wave
+                    mv["eals_first_tap_elapsed_s"] = result.eals_first_tap_elapsed_s
+                    mv["level_skip_elapsed_s"] = result.elapsed_s
+                    mv["level_skip_taps_sent"] = result.taps_sent
+                    mv["level_skip_last_reason"] = result.reason
+                log_mission(
+                    f"[RUN_INIT] Fast level-skip result success={result.success} "
+                    f"reason={result.reason} elapsed={result.elapsed_s:.2f}s "
+                    f"waves=({result.ehls_wave},{result.eals_wave}) "
+                    f"eals_first_tap=({result.eals_first_tap_wave},"
+                    f"{result.eals_first_tap_elapsed_s}) taps={result.taps_sent}",
+                    "INFO" if result.success else "WARN",
+                )
             elif t == "target_priority_ensure":
                 if is_strategy_action and last_state not in allowed_states:
                     log_mission(f"[EXEC] Skip target_priority_ensure while state={last_state}", "DEBUG")
