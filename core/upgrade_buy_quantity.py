@@ -10,7 +10,7 @@ from typing import Literal, cast
 import cv2  # type: ignore
 import numpy as np  # type: ignore
 
-from core.adb_utils import adb_shell
+from core.input import safe_tap
 from core.clickmap_access import resolve_dot_path
 from core.ss_capture import capture_adb_screenshot
 from utils.logger import log
@@ -133,7 +133,7 @@ def _expanded_centers(rect: Tuple[int, int, int, int], quantity: BuyQuantity) ->
 
 def _tap_point(point: Tuple[int, int]) -> None:
     x, y = point
-    adb_shell(["input", "tap", str(int(x)), str(int(y))])
+    safe_tap((int(x), int(y)), require_visible=False, dispatch="now", log_label="buy_quantity")
 
 
 def get_buy_quantity_regions(image: np.ndarray) -> Dict[str, object]:

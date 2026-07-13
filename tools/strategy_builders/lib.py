@@ -60,7 +60,34 @@ def merge_conditions(base: Dict[str, Any], extra: Dict[str, Any]) -> Dict[str, A
     return merged
 
 
+def _with_assertions(when: Dict[str, Any], assertions: Iterable[Any] | None) -> Dict[str, Any]:
+    data = copy.deepcopy(when or {})
+    if assertions:
+        existing = as_list(data.get("assert"))
+        existing.extend(as_list(assertions))
+        data["assert"] = existing
+    return data
+
+
 def build_strategy_yaml(source: Dict[str, Any]) -> Dict[str, Any]:
+    builder = (source.get("builder") or source.get("strategy_type") or "").strip().lower()
+    if builder in {"passthrough", "manual", "raw"}:
+        return _build_manual_strategy(source)
+    if builder in {"", "default", "upgrade"}:
+        return _build_upgrade_strategy(source)
+    if builder == "glass_cannon":
+        return _build_glass_cannon_strategy(source)
+    raise ValueError(f"Unknown strategy builder '{builder}'")
+
+
+def _build_manual_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
+    data = copy.deepcopy(source)
+    data.pop("builder", None)
+    data.pop("strategy_type", None)
+    return data
+
+
+def _build_upgrade_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
     meta = copy.deepcopy(source.get("meta") or {})
     settings = source.get("settings") or {}
 
@@ -483,6 +510,349 @@ def build_strategy_yaml(source: Dict[str, Any]) -> Dict[str, Any]:
         "per_run_reset": per_run_reset,
         "rules": rules,
     }
+
+
+def _build_glass_cannon_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
+    meta = copy.deepcopy(source.get("meta") or {})
+    settings = source.get("settings") or {}
+    cards_cfg = source.get("cards") or {}
+    upgrades_cfg = source.get("upgrades") or {}
+    ultimate_targets = copy.deepcopy(source.get("ultimates") or _default_glass_cannon_ultimates())
+
+    def _coerce_int(value: Any, default: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return int(default)
+
+    def _coerce_float(value: Any, default: float) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return float(default)
+
+    late_wave = _coerce_int(settings.get("late_wave") or cards_cfg.get("late_wave"), 5000)
+
+    early_deck = (cards_cfg.get("early_deck") or "GCFarmEarly").strip()
+    late_deck = (cards_cfg.get("late_deck") or "GCFarmLate").strip()
+
+    ehls_cfg = upgrades_cfg.get("ehls") or {}
+    ehls_menu = (ehls_cfg.get("menu") or "utility").strip()
+    ehls_label = ehls_cfg.get("label") or "Enemy Health Level Skip"
+    ehls_cooldown = _coerce_float(
+        ehls_cfg.get("cooldown_sec") or settings.get("ehls_cooldown_sec"),
+        15.0,
+    )
+
+    range_cfg = upgrades_cfg.get("range") or {}
+    range_menu = (range_cfg.get("menu") or "attack").strip()
+    range_label = range_cfg.get("label") or "Range"
+    range_cooldown = _coerce_float(
+        range_cfg.get("cooldown_sec") or settings.get("range_cooldown_sec"),
+        15.0,
+    )
+
+    vars_block = {
+        "phase": "early",
+        "initial_uw_applied": False,
+        "ehls_completed": False,
+        "range_gold": False,
+        "cards_mode": "",
+        "cards_target": "",
+        "cards_check_pending": False,
+        "run_initialised": False,
+        "cards_menu_requested": False,
+        "early_cards_applied": False,
+        "late_cards_applied": False,
+    }
+
+    per_run_reset = [
+        "initial_uw_applied",
+        "ehls_completed",
+        "range_gold",
+        "cards_mode",
+        "cards_target",
+        "cards_check_pending",
+        "run_initialised",
+        "cards_menu_requested",
+        "early_cards_applied",
+        "late_cards_applied",
+    ]
+
+    late_wave_condition = f">= {late_wave}"
+    early_button_key = f"buttons.Cards:{early_deck}"
+    late_button_key = f"buttons.Cards:{late_deck}"
+
+    rules: List[Dict[str, Any]] = [
+        {
+            "name": "reset_on_game_over",
+            "when": {"state": "GAME_OVER"},
+            "do": [
+                {"type": "set", "var": "phase", "value": "early"},
+                {"type": "set", "var": "initial_uw_applied", "value": False},
+                {"type": "set", "var": "ehls_completed", "value": False},
+                {"type": "set", "var": "range_gold", "value": False},
+                {"type": "set", "var": "cards_mode", "value": ""},
+                {"type": "set", "var": "cards_target", "value": ""},
+                {"type": "set", "var": "cards_check_pending", "value": False},
+                {"type": "set", "var": "cards_menu_requested", "value": False},
+                {"type": "set", "var": "run_initialised", "value": False},
+                {"type": "set", "var": "early_cards_applied", "value": False},
+                {"type": "set", "var": "late_cards_applied", "value": False},
+            ],
+        },
+        {
+            "name": "initialise_run_state",
+            "when": _with_assertions({"state": "RUNNING"}, ["!run_initialised"]),
+            "do": [
+                {"type": "set", "var": "phase", "value": "early"},
+                {"type": "set", "var": "cards_mode", "value": ""},
+                {"type": "set", "var": "cards_target", "value": ""},
+                {"type": "set", "var": "cards_check_pending", "value": False},
+                {"type": "set", "var": "cards_menu_requested", "value": False},
+                {"type": "set", "var": "run_initialised", "value": True},
+                {"type": "set", "var": "early_cards_applied", "value": False},
+                {"type": "set", "var": "late_cards_applied", "value": False},
+            ],
+        },
+        {
+            "name": "apply_initial_ultimates",
+            "when": _with_assertions({"state": "RUNNING"}, ["!initial_uw_applied"]),
+            "do": [
+                {
+                    "type": "ultimate_ensure_state",
+                    "targets": ultimate_targets,
+                },
+                {"type": "set", "var": "initial_uw_applied", "value": True},
+            ],
+        },
+        {
+            "name": "detect_ehls_maxed",
+            "when": {
+                "state": "RUNNING",
+                "assert": ["!ehls_completed"],
+                "upgrade_maxed": {"menu": ehls_menu, "label": ehls_label},
+            },
+            "do": [
+                {"type": "set", "var": "ehls_completed", "value": True},
+            ],
+        },
+        {
+            "name": "purchase_ehls",
+            "when": _with_assertions({"state": "RUNNING"}, ["!ehls_completed"]),
+            "cooldown_sec": ehls_cooldown,
+            "do": [
+                {
+                    "type": "upgrade_purchase",
+                    "menu": ehls_menu,
+                    "label": ehls_label,
+                }
+            ],
+        },
+        {
+            "name": "request_cards_initial",
+            "when": _with_assertions(
+                {"state": "RUNNING"},
+                ["phase == early", "!cards_check_pending", "!early_cards_applied"],
+            ),
+            "do": [
+                {"type": "set", "var": "cards_target", "value": "early"},
+                {"type": "set", "var": "cards_check_pending", "value": True},
+                {"type": "set", "var": "cards_menu_requested", "value": False},
+            ],
+        },
+        {
+            "name": "transition_to_late_phase",
+            "when": _with_assertions(
+                {"state": "RUNNING", "wave": late_wave_condition},
+                ["phase == early"],
+            ),
+            "do": [
+                {"type": "set", "var": "phase", "value": "late"},
+            ],
+        },
+        {
+            "name": "request_cards_late_phase",
+            "when": _with_assertions(
+                {"state": "RUNNING"},
+                ["phase == late", "!cards_check_pending", "!late_cards_applied"],
+            ),
+            "do": [
+                {"type": "set", "var": "cards_target", "value": "late"},
+                {"type": "set", "var": "cards_check_pending", "value": True},
+                {"type": "set", "var": "cards_menu_requested", "value": False},
+            ],
+        },
+        {
+            "name": "ensure_menu_open_for_cards",
+            "when": _with_assertions(
+                {"state": "RUNNING", "overlays_contains": ["MENU_CLOSED"]},
+                ["cards_check_pending", "!cards_menu_requested"],
+            ),
+            "cooldown_sec": 4.0,
+            "do": [
+                {"type": "tap_label", "key": "navigation.menu_open_button"},
+                {"type": "sleep", "ms": 300},
+                {"type": "set", "var": "cards_menu_requested", "value": True},
+            ],
+        },
+        {
+            "name": "navigate_to_cards_menu",
+            "when": _with_assertions(
+                {"state": "RUNNING", "overlays_contains": ["MENU_OPEN"]},
+                ["cards_check_pending"],
+            ),
+            "cooldown_sec": 3.0,
+            "do": [
+                {"type": "tap_label", "key": "navigation.Cards"},
+                {"type": "sleep", "ms": 300},
+                {"type": "set", "var": "cards_menu_requested", "value": False},
+            ],
+        },
+        {
+            "name": "select_cards_early",
+            "when": _with_assertions({"state": "CARDS"}, ["cards_check_pending", "cards_target == early"]),
+            "cooldown_sec": 2.0,
+            "do": [
+                {
+                    "type": "tap_label",
+                    "key": early_button_key,
+                    "state_guard": ["CARDS"],
+                },
+                {"type": "sleep", "ms": 400},
+                {"type": "set", "var": "cards_check_pending", "value": False},
+            ],
+        },
+        {
+            "name": "confirm_cards_early",
+            "when": _with_assertions(
+                {
+                    "state": "CARDS",
+                    "secondary_not_contains": ["LOCKED_CARDS"],
+                },
+                ["!cards_check_pending", "cards_target == early"],
+            ),
+            "do": [
+                {
+                    "type": "tap_label",
+                    "key": "buttons.return_to_game",
+                    "state_guard": ["CARDS"],
+                },
+                {"type": "sleep", "ms": 400},
+                {"type": "set", "var": "cards_mode", "value": "early"},
+                {"type": "set", "var": "cards_target", "value": ""},
+                {"type": "set", "var": "cards_menu_requested", "value": False},
+                {"type": "set", "var": "early_cards_applied", "value": True},
+            ],
+        },
+        {
+            "name": "select_cards_late",
+            "when": _with_assertions({"state": "CARDS"}, ["cards_check_pending", "cards_target == late"]),
+            "cooldown_sec": 2.0,
+            "do": [
+                {
+                    "type": "tap_label",
+                    "key": late_button_key,
+                    "state_guard": ["CARDS"],
+                },
+                {"type": "sleep", "ms": 400},
+                {"type": "set", "var": "cards_check_pending", "value": False},
+            ],
+        },
+        {
+            "name": "confirm_cards_late",
+            "when": _with_assertions(
+                {
+                    "state": "CARDS",
+                    "secondary_not_contains": ["LOCKED_CARDS"],
+                },
+                ["!cards_check_pending", "cards_target == late"],
+            ),
+            "do": [
+                {
+                    "type": "tap_label",
+                    "key": "buttons.return_to_game",
+                    "state_guard": ["CARDS"],
+                },
+                {"type": "sleep", "ms": 400},
+                {"type": "set", "var": "cards_mode", "value": "late"},
+                {"type": "set", "var": "cards_target", "value": ""},
+                {"type": "set", "var": "cards_menu_requested", "value": False},
+                {"type": "set", "var": "late_cards_applied", "value": True},
+            ],
+        },
+        {
+            "name": "handle_locked_cards",
+            "when": _with_assertions(
+                {
+                    "state": "CARDS",
+                    "secondary_contains": ["LOCKED_CARDS"],
+                },
+                ["cards_target"],
+            ),
+            "cooldown_sec": 6.0,
+            "do": [
+                {
+                    "type": "tap_label",
+                    "key": "buttons.cards:locked:ok",
+                    "state_guard": ["CARDS"],
+                },
+                {"type": "sleep", "ms": 300},
+                {
+                    "type": "tap_label",
+                    "key": "buttons.return_to_game",
+                    "state_guard": ["CARDS"],
+                },
+                {"type": "sleep", "ms": 10000},
+                {"type": "set", "var": "cards_menu_requested", "value": False},
+                {"type": "set", "var": "cards_check_pending", "value": True},
+            ],
+        },
+        {
+            "name": "detect_range_gold",
+            "when": {
+                "state": "RUNNING",
+                "assert": ["phase == late", "!range_gold"],
+                "upgrade_maxed": {"menu": range_menu, "label": range_label},
+            },
+            "do": [
+                {"type": "set", "var": "range_gold", "value": True},
+            ],
+        },
+        {
+            "name": "purchase_range",
+            "when": _with_assertions({"state": "RUNNING"}, ["phase == late", "!range_gold"]),
+            "cooldown_sec": range_cooldown,
+            "do": [
+                {
+                    "type": "upgrade_purchase",
+                    "menu": range_menu,
+                    "label": range_label,
+                }
+            ],
+        },
+    ]
+
+    return {
+        "meta": meta,
+        "vars": vars_block,
+        "per_run_reset": per_run_reset,
+        "rules": rules,
+    }
+
+
+def _default_glass_cannon_ultimates() -> List[Dict[str, Any]]:
+    return [
+        {"label": "Chain Lightning", "toggles": {"primary": True}},
+        {"label": "Smart Missiles", "toggles": {"primary": True}},
+        {"label": "Death Wave", "toggles": {"primary": True}},
+        {"label": "Chrono Field", "toggles": {"primary": True}},
+        {"label": "Inner Land Mines", "toggles": {"primary": True}},
+        {"label": "Golden Tower", "toggles": {"primary": True}},
+        {"label": "Poison Swamp", "toggles": {"primary": True}},
+        {"label": "Black Hole", "toggles": {"primary": True}},
+        {"label": "Spotlight", "toggles": {"primary": True, "missiles": True}},
+    ]
 
 
 __all__ = ["build_strategy_yaml"]

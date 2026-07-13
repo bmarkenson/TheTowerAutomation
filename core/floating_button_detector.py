@@ -25,7 +25,7 @@ from numpy.typing import NDArray
 from utils.template_matcher import match_region
 from core.clickmap_access import get_entries_by_role
 from utils.logger import log
-from core.adb_utils import adb_shell
+from core.input import safe_tap
 
 
 Frame = NDArray[Any]
@@ -58,7 +58,7 @@ def tap_floating_button(name: str, buttons: Iterable[Dict[str, Any]]) -> bool:
             except Exception:
                 continue
             log(f"TAP_FLOATING: {name} at ({x},{y})", "ACTION")
-            adb_shell(["input", "tap", str(x), str(y)])
+            safe_tap((x, y), require_visible=False, dispatch="now", log_label=f"floating_button:{name}")
             return True
     return False
 

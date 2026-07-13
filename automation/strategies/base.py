@@ -29,5 +29,15 @@ class BaseStrategy:
 
         return []
 
+    def requires_run_initialization(self) -> bool:
+        """Whether this strategy owns an exclusive new-run initialization phase."""
+
+        return False
+
+    def is_run_initialization_complete(self, ctx: MissionContext) -> bool:
+        """Return whether normal automation actions may resume for this run."""
+
+        return True
+
     def on_game_over(self, ctx: MissionContext) -> None:
         """Optional hook when GAME_OVER is handled."""

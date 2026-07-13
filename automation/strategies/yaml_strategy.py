@@ -101,9 +101,14 @@ class YamlStrategy(BaseStrategy):
     def __init__(self, config: Dict[str, Any]):
         super().__init__()
         self.config = config or {}
+        self.name = str((self.config.get("meta") or {}).get("name") or "yaml")
         self.vars: Dict[str, Any] = dict(self.config.get("vars") or {})
         self.per_run_reset: List[str] = list(self.config.get("per_run_reset") or [])
         self.rules: List[Dict[str, Any]] = list(self.config.get("rules") or [])
+        initialization = self.config.get("run_initialization") or {}
+        self._run_initialization_assertions: List[Any] = list(
+            initialization.get("complete_when") or []
+        )
 
     @classmethod
     def from_file(cls, path: str) -> "YamlStrategy":
@@ -121,6 +126,15 @@ class YamlStrategy(BaseStrategy):
         mv = ctx.data.setdefault("mission_vars", {})
         for k in self.per_run_reset:
             mv[k] = False if isinstance(mv.get(k), bool) else 0
+
+    def requires_run_initialization(self) -> bool:
+        return bool(self._run_initialization_assertions)
+
+    def is_run_initialization_complete(self, ctx) -> bool:
+        if not self.requires_run_initialization():
+            return True
+        mv = ctx.data.get("mission_vars", {})
+        return _bool_assert(self._run_initialization_assertions, mv)
 
     # ---------------------------- conditions ---------------------------------
     def _floating_visible(self, screen, name: str) -> bool:
@@ -152,6 +166,14 @@ class YamlStrategy(BaseStrategy):
         # menu exact match (if provided by detector)
         menu_req = conds.get("menu")
         if menu_req and (detection.get("menu") or None) != menu_req:
+            return False
+        # secondary states contains / not contains
+        secondary_states = set(detection.get("secondary_states") or [])
+        sec_inc = conds.get("secondary_contains") or []
+        sec_exc = conds.get("secondary_not_contains") or []
+        if any(name for name in sec_inc if name not in secondary_states):
+            return False
+        if any(name for name in sec_exc if name in secondary_states):
             return False
         # overlays contains / not contains
         overlays = set(detection.get("overlays") or [])
@@ -190,7 +212,9 @@ class YamlStrategy(BaseStrategy):
         last_fire: Dict[str, float] = ctx.data.setdefault("rule_last_fire", {})
 
         for idx, rule in enumerate(self.rules):
-            when = rule.get("when") or {}
+            when = dict(rule.get("when") or {})
+            if "assert" in rule:
+                when["assert"] = rule["assert"]
             if not self._cond_ok(ctx, screen, detection, when):
                 continue
 

@@ -8,7 +8,7 @@ GOALS
 
 INPUTS (inside the ZIP)
 - Source trees: core/, handlers/, utils/, tools/
-- Project docs to read now: README_upload.md, PROJECT_SCOPE.md, ROADMAP.md, SPEC_LEGEND.md
+- Project docs to read now: README_upload.md, PROJECT_SCOPE.md, PENDING_DEVELOPMENT.md, SPEC_LEGEND.md
 
 DO-NOTS (important)
 - Do not rely on UI/preview truncation. Do not claim that there are ellipses unless you can quote where they are in the file bytes.  If you really don't know some characters, stop immediately and call that out.
@@ -25,7 +25,7 @@ PROTOCOL (perform in this order)
 3) Strictly parse the following docs and give a crisp synthesis (not fluffy): 
    - README_upload.md → concrete rules I expect you to follow (e.g., patching discipline, compare-before-change, etc.)
    - PROJECT_SCOPE.md → mission/goals/non-goals, reliability expectations, architectural constraints.
-   - ROADMAP.md → current priorities and near-term tasks I’m likely to ask for.
+   - PENDING_DEVELOPMENT.md → current priorities and near-term tasks I’m likely to ask for.
    - SPEC_LEGEND.md → any notation/terminology I’ll use in requests.
 4) If TheTowerAPIindex.yaml is present AND strictly parseable:
    - Parse it. Reconcile its entries with the AST registry.
@@ -33,7 +33,7 @@ PROTOCOL (perform in this order)
    - If it is NOT parseable, report the exact parse error (line/column + 5–7 line context), then IGNORE it and proceed with the AST registry. Do not “sanitize” or assume structure.
 5) Output Contract (show all of this):
    A) Function Registry summary (totals + per-module counts) + links to JSON/CSV artifacts.
-   B) The concise doc synthesis (README_upload.md, PROJECT_SCOPE.md, ROADMAP.md, SPEC_LEGEND.md).
+   B) The concise doc synthesis (README_upload.md, PROJECT_SCOPE.md, PENDING_DEVELOPMENT.md, SPEC_LEGEND.md).
    C) If YAML was parseable: a mismatch report (code↔YAML).
    D) A “Ready to Code” note stating you will: 
       - use existing functions first,

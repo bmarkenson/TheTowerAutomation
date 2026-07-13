@@ -18,7 +18,7 @@ This is a README file specifically for ChatGPT Codex to explain the automation p
   - `tools/`: Utility scripts used outside `main.py`
   - `utils/`: Shared helper functions
   - `PROJECT_SCOPE.md`: Core requirements and current state
-  - `ROADMAP.md`: In-progress work and planned features
+  - `../../PENDING_DEVELOPMENT.md`: In-progress work and planned features
   - `core/input_policy.md`: Defines allowed input behavior (tap, swipe)
 
 ---
@@ -56,7 +56,6 @@ This is a README file specifically for ChatGPT Codex to explain the automation p
 
 Continue loading and parsing:
 - `PROJECT_SCOPE.md`
-- `ROADMAP.md`
+- `../../PENDING_DEVELOPMENT.md`
  
-
 

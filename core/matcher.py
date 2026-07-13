@@ -87,6 +87,13 @@ def _match_entry(
     if template is None:
         raise ValueError(f"Failed to load template: {template_path}")
 
+    # Emulator resolution changes can clamp a configured search region below
+    # the template size. That cannot match and otherwise makes OpenCV assert.
+    region_h, region_w = region_img.shape[:2]
+    template_h, template_w = template.shape[:2]
+    if region_h < template_h or region_w < template_w:
+        return None, 0.0
+
     res = cv2.matchTemplate(region_img, template, cv2.TM_CCOEFF_NORMED)
     _, max_val, _, max_loc = cv2.minMaxLoc(res)
 

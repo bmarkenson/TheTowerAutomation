@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from typing import Sequence
 
@@ -16,6 +17,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Parse CLI args, build config, and run the app."""
     args = parse_args(argv)
     config = config_from_args(args)
+
+    os.environ["ADB_DEVICE"] = f"localhost:{config.adb_port}"
+    log(f"ADB target = {os.environ['ADB_DEVICE']}", "DEBUG")
 
     log(f"AUTO_START_ENABLED = {config.auto_start_enabled}", "DEBUG")
 

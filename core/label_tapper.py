@@ -161,6 +161,14 @@ def get_label_match(label_key: str, screenshot=None, return_meta=False):
 
     region_img = screenshot[y : y + clamped_h, x : x + clamped_w]
 
+    region_h, region_w = region_img.shape[:2]
+    template_h, template_w = template.shape[:2]
+    if region_h < template_h or region_w < template_w:
+        raise ValueError(
+            f"Template {template_w}x{template_h} is larger than search region "
+            f"{region_w}x{region_h} for {label_key}"
+        )
+
     result = cv2.matchTemplate(region_img, template, cv2.TM_CCOEFF_NORMED)
     _, max_val, _, max_loc = cv2.minMaxLoc(result)
 

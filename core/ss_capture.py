@@ -53,6 +53,13 @@ def capture_adb_screenshot() -> Optional[Frame]:
         if img is None:
             raise ValueError("OpenCV failed to decode image")
 
+        expected_w, expected_h = 1080, 1920
+        if img.shape[1] != expected_w or img.shape[0] != expected_h:
+            raise ValueError(
+                f"Unsupported emulator resolution {img.shape[1]}x{img.shape[0]}; "
+                f"expected {expected_w}x{expected_h}. Update the BlueStacks display settings."
+            )
+
         return img
 
     except Exception as e:

@@ -14,15 +14,19 @@ from core.clickmap_access import resolve_dot_path
 from utils.logger import log
 
 
-def _tapped_success(screenshot: np.ndarray) -> bool:
+def _overlay_present(screenshot: np.ndarray) -> bool:
     try:
         detection = detect_state_and_overlays(screenshot)
     except Exception as exc:
         log(f"[UW_DETAIL] Failed to re-evaluate overlay state: {exc}", "WARN")
-        return False
+        return True
 
     overlays = set(detection.get("overlays") or [])
-    return "UW_DETAIL" not in overlays
+    return "UW_DETAIL" in overlays
+
+
+def _tapped_success(screenshot: np.ndarray) -> bool:
+    return not _overlay_present(screenshot)
 
 
 def handle_uw_detail_popup(
@@ -40,6 +44,9 @@ def handle_uw_detail_popup(
     image = screenshot if screenshot is not None else capture_fn()
     if image is None:
         return None
+
+    if not _overlay_present(image):
+        return image
 
     entry = resolve_dot_path("overlays.uw_detail") or {}
     region = entry.get("match_region") or {}

@@ -21,7 +21,7 @@ This archive contains the full source code for an ADB-based automation project t
   - `tools/`: Utility scripts used outside `main.py`
   - `utils/`: Shared helper functions
   - `PROJECT_SCOPE.md`: Core requirements and current state
-  - `ROADMAP.md`: In-progress work and planned features
+  - `../../PENDING_DEVELOPMENT.md`: In-progress work and planned features
   - `core/input_policy.md`: Defines allowed input behavior (tap, swipe)
 
 ---
@@ -61,8 +61,7 @@ This archive contains the full source code for an ADB-based automation project t
 Start by loading and parsing:
 - `README_UPLOAD.md` (this file)
 - `PROJECT_SCOPE.md`
-- `ROADMAP.md`
+- `../../PENDING_DEVELOPMENT.md`
  
 
 All other modules can be loaded on demand. 
-

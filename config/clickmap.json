@@ -513,6 +513,89 @@
       "roles": [
         "indicator"
       ]
+    },
+    "Cards:GCFarmEarly": {
+      "match_template": "indicators/Cards:GCFarmEarly.png",
+      "match_region": {
+        "x": 420,
+        "y": 360,
+        "w": 237,
+        "h": 122
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "Cards:GCFarmLate": {
+      "match_template": "indicators/Cards:GCFarmLate.png",
+      "match_region": {
+        "x": 3,
+        "y": 350,
+        "w": 230,
+        "h": 127
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "menu:cards": {
+      "match_template": "indicators/menu:cards.png",
+      "match_region": {
+        "x": 14,
+        "y": 93,
+        "w": 200,
+        "h": 72
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "cards:deck3": {
+      "match_template": "indicators/cards:deck3.png",
+      "match_region": {
+        "x": 432,
+        "y": 359,
+        "w": 214,
+        "h": 43
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "cards:deck1": {
+      "match_template": "indicators/cards:deck1.png",
+      "match_region": {
+        "x": 5,
+        "y": 364,
+        "w": 222,
+        "h": 38
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "cards:locked": {
+      "match_template": "indicators/cards:locked.png",
+      "match_region": {
+        "x": 149,
+        "y": 661,
+        "w": 784,
+        "h": 597
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 548,
+        "y": 1129
+      }
     }
   },
   "overlays": {
@@ -558,6 +641,19 @@
         "overlay"
       ]
     },
+    "daily_free_gems_badge_home": {
+      "match_template": "overlays/daily_free_gems_badge.png",
+      "match_region": {
+        "x": 850,
+        "y": 1680,
+        "w": 230,
+        "h": 240
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "overlay"
+      ]
+    },
     "claim_ad_gem:home": {
       "match_template": "overlays/claim_ad_gem:home.png",
       "match_region": {
@@ -579,6 +675,32 @@
         "w": 340,
         "h": 70
       },
+      "roles": [
+        "overlay"
+      ]
+    },
+    "menu_open": {
+      "match_template": "overlays/menu_open.png",
+      "match_region": {
+        "x": 849,
+        "y": 14,
+        "w": 223,
+        "h": 110
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "overlay"
+      ]
+    },
+    "menu_closed": {
+      "match_template": "overlays/menu_closed.png",
+      "match_region": {
+        "x": 992,
+        "y": 22,
+        "w": 71,
+        "h": 81
+      },
+      "match_threshold": 0.9,
       "roles": [
         "overlay"
       ]
@@ -676,6 +798,16 @@
         "navigation"
       ]
     },
+    "goto_store_home": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 1000,
+        "y": 1830
+      }
+    },
     "toggle_menu": {
       "match_template": "navigation/toggle_menu.png",
       "match_region": {
@@ -692,9 +824,98 @@
       "roles": [
         "navigation"
       ]
+    },
+    "Cards": {
+      "match_template": "navigation/Cards.png",
+      "match_region": {
+        "x": 859,
+        "y": 229,
+        "w": 102,
+        "h": 95
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 913,
+        "y": 281
+      }
+    },
+    "menu_open_button": {
+      "match_template": "navigation/menu_open_button.png",
+      "match_region": {
+        "x": 997,
+        "y": 26,
+        "w": 59,
+        "h": 74
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "navigation"
+      ]
+    },
+    "menu_close_button": {
+      "match_template": "navigation/menu_close_button.png",
+      "match_region": {
+        "x": 983,
+        "y": 30,
+        "w": 73,
+        "h": 78
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 1017,
+        "y": 59
+      }
     }
   },
   "buttons": {
+    "battle_control:home": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 540,
+        "y": 1550
+      }
+    },
+    "exit_battle": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 960,
+        "y": 795
+      }
+    },
+    "surrender:exit_battle": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 350,
+        "y": 1070
+      }
+    },
+    "go_home:exit_battle": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 730,
+        "y": 1070
+      }
+    },
     "yes:end_round": {
       "match_template": "buttons/yes:end_round.png",
       "match_region": {
@@ -918,19 +1139,49 @@
         "button"
       ]
     },
-    "uw_toggle_to_off": {
-      "match_template": "buttons/uw_toggle_to_off.png",
+    "Cards:GCFarmEarly": {
+      "match_template": "buttons/Cards:GCFarmEarly.png",
+      "match_region": {
+        "x": 451,
+        "y": 396,
+        "w": 183,
+        "h": 49
+      },
       "match_threshold": 0.9,
       "roles": [
         "button"
       ]
     },
-    "uw_toggle_to_on": {
-      "match_template": "buttons/uw_toggle_to_on.png",
+    "Cards:GCFarmLate": {
+      "match_template": "buttons/Cards:GCFarmLate.png",
+      "match_region": {
+        "x": 28,
+        "y": 396,
+        "w": 184,
+        "h": 55
+      },
       "match_threshold": 0.9,
       "roles": [
         "button"
       ]
+    },
+    "cards:locked:ok": {
+      "match_template": "buttons/cards:locked:ok.png",
+      "match_region": {
+        "x": 359,
+        "y": 1069,
+        "w": 362,
+        "h": 122
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 538,
+        "y": 1132
+      }
     }
   },
   "upgrades": {
@@ -961,7 +1212,7 @@
           ]
         },
         "multishot_chance": {
-          "match_template": "upgrades/attack/left/multishot_chance.png",
+          "match_template": "upgrades/attack/left/multi_shot_chance.png",
           "region_ref": "upgrades_left",
           "match_threshold": 0.9,
           "roles": [

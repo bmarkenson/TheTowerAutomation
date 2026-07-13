@@ -25,6 +25,21 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-13 live automation validation
+
+- Added and live-verified `--adb-port` support with default port 5555.
+- Made GC the default strategy and added an exclusive new-run startup gate.
+- Live-verified the startup order: EHLS first, EALS second, then the
+  session-scoped Target Priority check; both skip boxes were visibly `Max`.
+- Split Exit Battle into guarded `Surrender` and `Go Home` actions; live-tested
+  that Go Home preserves and resumes the same run and Surrender reaches Game
+  Stats.
+- Repaired Round Stats scrolling with source-screen guards and true-edge
+  detection; live-tested the complete Game Over capture flow.
+- Split home/in-run Store navigation, retained red-badge availability as the
+  trigger, added a home red-badge region, and live-tested inactive Daily Gems as
+  a normal not-ready result.
+
 ---
 
 ## 📘 Documentation
@@ -32,4 +47,3 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Created `core/input_policy.md` to document dual-path tap architecture
 - Updated `README_UPLOAD.md` with summary of input tap architecture and assistant behavior
 - Updated `PROJECT_SCOPE.md` to reflect dual-path tap architecture, overlay support, and tap handler split
-

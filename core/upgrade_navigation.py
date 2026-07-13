@@ -220,7 +220,7 @@ def _maybe_collapse_buy_quantity(
     try:
         regions = get_buy_quantity_regions(image)
         cx, cy = regions["collapsed_center"]
-        adb_shell(["input", "tap", str(int(cx)), str(int(cy))])
+        safe_tap((int(cx), int(cy)), require_visible=False, dispatch="now", log_label="buy_quantity_collapse")
         sleep_fn(0.35)
     except Exception as exc:
         log(
@@ -387,7 +387,7 @@ def _tap_purchase_area(
         "ACTION",
     )
 
-    adb_shell(["input", "tap", str(tap_x), str(tap_y)])
+    safe_tap((tap_x, tap_y), require_visible=False, dispatch="now", log_label="upgrade_purchase")
 
 
 def _select_span(
@@ -1141,7 +1141,7 @@ def _tap_ultimate_toggle(rect: Tuple[int, int, int, int], toggle_name: str) -> N
     tap_y = y + int(round(h * center_y))
 
     log(f"[UPGRADE_NAV] Toggling '{toggle_name}' at ({tap_x},{tap_y})", "ACTION")
-    adb_shell(["input", "tap", str(tap_x), str(tap_y)])
+    safe_tap((tap_x, tap_y), require_visible=False, dispatch="now", log_label=f"ultimate_toggle:{toggle_name}")
 
 
 def _ultimate_toggle_is_on(

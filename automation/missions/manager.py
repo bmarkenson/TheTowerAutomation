@@ -48,7 +48,9 @@ class MissionManager:
                     self.strategy.on_run_start(self.ctx)
             self._run_started = True
         else:
-            if state in {"GAME_OVER", "HOME"}:
+            # A transient UNKNOWN frame can occur while menus animate during a
+            # live run.  Only terminal/home states establish a new run boundary.
+            if state in {"GAME_OVER", "HOME_SCREEN", "HOME"}:
                 self._run_started = False
         self._last_state = state
 
@@ -87,7 +89,16 @@ class MissionManager:
             except Exception:
                 log("[STRATEGY] on_game_over handler error", "ERROR")
 
-    def tick(self, screen, detection: Detection) -> None:
+    def run_initialization_pending(self, detection: Detection) -> bool:
+        """Return whether the strategy temporarily owns all tap authority."""
+
+        if detection.get("state") != "RUNNING" or not self.strategy:
+            return False
+        if not self.strategy.requires_run_initialization():
+            return False
+        return not self.strategy.is_run_initialization_complete(self.ctx)
+
+    def tick(self, screen, detection: Detection, *, strategy_only: bool = False) -> None:
         state = detection.get("state")
         self.ctx.data["last_detection_state"] = state
         self.ctx.data["last_detection"] = detection
@@ -96,7 +107,7 @@ class MissionManager:
 
         mission_actions: List[Any] = []
         mission_complete = not bool(self.mission)
-        if self.mission:
+        if self.mission and not strategy_only:
             try:
                 mission_actions = _materialize_actions(self.mission.tick(self.ctx, screen, detection))
             except Exception as exc:
@@ -115,10 +126,12 @@ class MissionManager:
             self._mission_was_complete = True
 
         strategy_actions: List[Any] = []
+        strategy_allowed_states = {"RUNNING", "CARDS"}
+        current_state = detection.get("state")
         if (
-            detection.get("state") == "RUNNING"
+            current_state in strategy_allowed_states
             and self.strategy
-            and (not self.mission or mission_complete)
+            and (strategy_only or not self.mission or mission_complete)
         ):
             try:
                 strategy_actions = _materialize_actions(self.strategy.tick(self.ctx, screen, detection))

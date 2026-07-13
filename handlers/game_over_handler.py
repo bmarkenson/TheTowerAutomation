@@ -2,13 +2,18 @@
 from utils.logger import log
 from core.ss_capture import capture_adb_screenshot
 from core.run_state import AUTOMATION, ExecMode
-from core.input import tap_if_visible, tap_now, swipe_now
+from core.input import tap_if_visible, tap_now
+from core.scrolling import guarded_swipe, scroll_to_edge
 from core.adb_utils import adb_shell
 from utils.wave_detector import set_wave_hint
 # Note: OCR fallback for More Stats is currently disabled; keeping imports out.
 import time
 import os
 import cv2
+
+
+MORE_STATS_INDICATOR = "indicators.more_stats"
+MORE_STATS_CONTENT_REGION = (100, 330, 880, 1370)
 
 def handle_game_over(*, capture_stats: bool = True):
     """
@@ -21,7 +26,7 @@ def handle_game_over(*, capture_stats: bool = True):
       4) Close "More Stats"; if it fails, abort handler.
       5) Based on AUTOMATION.mode:
          - WAIT: loop until mode changes.
-         - HOME: log and exit (not implemented beyond logging).
+         - HOME: tap the Game Stats Home button and return to the home screen.
          - else: tap "Retry"; if it fails, abort handler.
 
     Returns:
@@ -59,20 +64,42 @@ def handle_game_over(*, capture_stats: bool = True):
 
         time.sleep(1.5)
 
-        # Step 2: Swipe to top and capture
-        swipe_now("gesture_targets.goto_top:more_stats")
-        time.sleep(1.5)
-        save_image(capture_adb_screenshot(), f"{session_id}_more_stats_1")
+        # Step 2: Repeatedly swipe to the true top, verifying the Round Stats
+        # panel before and after every gesture.
+        top = scroll_to_edge(
+            "gesture_targets.goto_top:more_stats",
+            source_label=MORE_STATS_INDICATOR,
+            progress_region=MORE_STATS_CONTENT_REGION,
+            max_swipes=8,
+            settle_s=1.2,
+        )
+        if not top.success or top.screenshot is None:
+            return _abort_handler(f"Scroll More Stats to top ({top.reason})", session_id)
+        save_image(top.screenshot, f"{session_id}_more_stats_1")
 
         # Step 3: Swipe to page 2 and capture
-        swipe_now("gesture_targets.goto_pg2:more_stats")
-        time.sleep(1.2)
-        save_image(capture_adb_screenshot(), f"{session_id}_more_stats_2")
+        page_two = guarded_swipe(
+            "gesture_targets.goto_pg2:more_stats",
+            source_label=MORE_STATS_INDICATOR,
+            screenshot=top.screenshot,
+            settle_s=1.2,
+        )
+        if not page_two.success or page_two.screenshot is None:
+            return _abort_handler(f"Scroll More Stats to page 2 ({page_two.reason})", session_id)
+        save_image(page_two.screenshot, f"{session_id}_more_stats_2")
 
-        # Step 4: Swipe to bottom and capture
-        swipe_now("gesture_targets.goto_bottom:more_stats")
-        time.sleep(1.2)
-        save_image(capture_adb_screenshot(), f"{session_id}_more_stats_3")
+        # Step 4: Repeatedly swipe to the true bottom and capture.
+        bottom = scroll_to_edge(
+            "gesture_targets.goto_bottom:more_stats",
+            source_label=MORE_STATS_INDICATOR,
+            screenshot=page_two.screenshot,
+            progress_region=MORE_STATS_CONTENT_REGION,
+            max_swipes=12,
+            settle_s=1.2,
+        )
+        if not bottom.success or bottom.screenshot is None:
+            return _abort_handler(f"Scroll More Stats to bottom ({bottom.reason})", session_id)
+        save_image(bottom.screenshot, f"{session_id}_more_stats_3")
 
         # Step 5: Attempt to capture stats text (clipboard first, then OCR fallback)
         _save_stats_text(session_id)
@@ -92,8 +119,9 @@ def handle_game_over(*, capture_stats: bool = True):
         while AUTOMATION.mode is ExecMode.WAIT:
             time.sleep(1)
     elif mode == ExecMode.HOME:
-        log("Mode = HOME (not implemented yet)", "INFO", console=True)
-        return  # Exit cleanly
+        if not tap_if_visible("buttons.home:game_over", retries=1):
+            return _abort_handler("Go Home from Game Stats", session_id)
+        log("Mode = HOME — returned from Game Stats", "INFO", console=True)
     else:
         if not tap_if_visible("buttons.retry:game_over", retries=1):
             return _abort_handler("Retry Game", session_id)

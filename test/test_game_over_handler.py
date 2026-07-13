@@ -2,9 +2,26 @@
 # test/test_game_over_handler.py
 
 import traceback
+from unittest.mock import patch
 from handlers.game_over_handler import handle_game_over
 from core.run_state import AUTOMATION, ExecMode
 from utils.logger import log
+
+
+def test_home_mode_taps_game_stats_home_instead_of_retry():
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.HOME
+    try:
+        with (
+            patch("handlers.game_over_handler.set_wave_hint"),
+            patch("handlers.game_over_handler.tap_if_visible", return_value=True) as tap,
+            patch("handlers.game_over_handler.time.sleep"),
+        ):
+            handle_game_over(capture_stats=False)
+    finally:
+        AUTOMATION.mode = original_mode
+
+    tap.assert_called_once_with("buttons.home:game_over", retries=1)
 
 
 def run_test():

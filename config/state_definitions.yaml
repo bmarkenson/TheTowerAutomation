@@ -40,6 +40,21 @@ states:
   match_keys:
   - indicators.cards
 
+- name: LOCKED_CARDS
+  type: secondary
+  match_keys:
+  - indicators.cards:locked
+
+- name: CARDS_GCFARM_LATE
+  type: secondary
+  match_keys:
+  - indicators.cards:deck1
+
+- name: CARDS_GCFARM_EARLY
+  type: secondary
+  match_keys:
+  - indicators.cards:deck3
+
 - name: LAB
   type: primary
   match_keys:
@@ -104,6 +119,7 @@ overlays:
 - name: DAILY_GEMS_AVAILABLE
   match_keys:
   - overlays.daily_free_gems_badge
+  - overlays.daily_free_gems_badge_home
 
 - name: AD_GEMS_AVAILABLE
   match_keys:
@@ -111,7 +127,11 @@ overlays:
 
 - name: MENU_OPEN
   match_keys:
-  - overlays.end_round
+  - overlays.menu_open
+
+- name: MENU_CLOSED
+  match_keys:
+  - overlays.menu_closed
 
 - name: BUY_QUANTITY_MENU_EXPANDED
   type: overlay

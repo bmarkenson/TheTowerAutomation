@@ -44,12 +44,31 @@ class AppConfig:
     fast_game_over: bool
     full_game_over: bool
     mission_log_path: Optional[str]
+    adb_port: int
+
+
+def _adb_port(value: str) -> int:
+    """Parse and validate a TCP port for ``--adb-port``."""
+    try:
+        port = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("ADB port must be an integer") from exc
+    if not 1 <= port <= 65535:
+        raise argparse.ArgumentTypeError("ADB port must be between 1 and 65535")
+    return port
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
     """Create the argument parser that drives the CLI interface."""
 
     parser = argparse.ArgumentParser(description="Automation runtime controller")
+    parser.add_argument(
+        "--adb-port",
+        type=_adb_port,
+        default=5555,
+        metavar="PORT",
+        help="BlueStacks ADB TCP port (default: 5555)",
+    )
     parser.add_argument("--no-restart", action="store_true", help="Disable auto restart on home screen")
     parser.add_argument("--match-trace", action="store_true", help="Emit per-frame match logs from detector")
     parser.add_argument("--status-interval", type=int, default=60, help="Seconds between status summaries (0=disable)")
@@ -77,8 +96,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help="Skip More Stats capture on GAME_OVER (default: enabled when --mission != none)")
     parser.add_argument("--full-game-over", action="store_true",
                         help="Force capture of More Stats on GAME_OVER even when a mission is active")
-    parser.add_argument("--mission", default="none", help="Mission to run (none|demon_nuke|nuke|demon_mode)")
-    parser.add_argument("--strategy", default="none", help="Run-time strategy (none|blender)")
+    parser.add_argument(
+        "--mission",
+        default="none",
+        help="Legacy placeholder. Use --mission-config to load YAML missions (default: none)",
+    )
+    parser.add_argument(
+        "--strategy",
+        default="gc",
+        help="Runtime strategy: gc (default) or none; --strategy-config overrides it",
+    )
     parser.add_argument("--mission-log", default=None,
                         help="Optional path to write mission/strategy logs (always logs to actions.log as well)")
     parser.add_argument("--mission-config", default=None, help="Path to YAML mission config (overrides --mission)")
@@ -127,6 +154,7 @@ def config_from_args(args: argparse.Namespace) -> AppConfig:
         fast_game_over=bool(args.fast_game_over),
         full_game_over=bool(args.full_game_over),
         mission_log_path=args.mission_log,
+        adb_port=args.adb_port,
     )
 
 

@@ -1,4 +1,9 @@
-# TheTower Automation Roadmap
+# TheTower Automation Roadmap (Retired)
+
+> Retired on 2026-07-13 after an implementation audit. All unfinished items
+> that remain relevant were moved to the canonical
+> [`PENDING_DEVELOPMENT.md`](../../PENDING_DEVELOPMENT.md). This file is retained
+> only as a historical snapshot and should not be updated.
 
 This roadmap outlines current architectural goals, bugfixes, and planned features for the "The Tower: Idle Tower Defense" ADB-based automation project. Each item is tagged with a priority:
 
@@ -85,5 +90,4 @@ This roadmap outlines current architectural goals, bugfixes, and planned feature
 ---
 
 This roadmap is evolving and modular. Items may be pulled forward or deferred depending on system stability and automation priorities.
-
 

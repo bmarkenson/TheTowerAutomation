@@ -1,4 +1,9 @@
-# TheTower Roadmap — Priority View
+# TheTower Roadmap — Priority View (Retired)
+
+> Retired on 2026-07-13 after an implementation audit. All unfinished items
+> that remain relevant were moved to the canonical
+> [`PENDING_DEVELOPMENT.md`](../../PENDING_DEVELOPMENT.md). This file is retained
+> only as a historical snapshot and should not be updated.
 
 This document presents a flattened, priority-sorted view of all active roadmap items. Use it to quickly identify what to work on next without scanning the full roadmap structure.
 
@@ -44,4 +49,3 @@ This document presents a flattened, priority-sorted view of all active roadmap i
 - Store strategy mode config in YAML or JSON
 - Add conditional handler logic based on active mode
 - Add GUI window for manual control (pause/resume, state view, override)
-

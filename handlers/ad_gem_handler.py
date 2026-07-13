@@ -6,6 +6,7 @@ from core.tap_dispatcher import tap
 from core.clickmap_access import get_click
 from core.input import safe_tap
 from core.label_tapper import is_visible
+from core.run_state import AUTOMATION, RunState
 from utils.logger import log
 
 _blind_tapper_active = threading.Event()
@@ -62,8 +63,37 @@ def _blind_floating_gem_tapper(duration=20, interval=1, stop_event=None):
     log(f"Floating gem tapping initiated (duration={duration}s, interval={interval}s)", "ACTION")
 
     end_time = time.time() + duration
+    next_tap_time = time.time()
+    pause_started = None
+    pause_logged = False
     try:
-        while time.time() < end_time and not stop_event.is_set():
+        while not stop_event.is_set():
+            now = time.time()
+            if now >= end_time:
+                break
+
+            if AUTOMATION.state != RunState.RUNNING:
+                if not pause_logged:
+                    log("[AD_GEM] Blind tapper paused (automation not RUNNING)", "INFO")
+                    pause_logged = True
+                if pause_started is None:
+                    pause_started = now
+                time.sleep(0.25)
+                continue
+
+            if pause_started is not None:
+                paused_duration = time.time() - pause_started
+                end_time += paused_duration
+                next_tap_time += paused_duration
+                pause_started = None
+            if pause_logged:
+                log("[AD_GEM] Blind tapper resumed", "INFO")
+                pause_logged = False
+
+            if now < next_tap_time:
+                time.sleep(min(0.05, max(0.0, next_tap_time - now)))
+                continue
+
             try:
                 # Quiet path: suppress per-tap logging at the dispatcher
                 tap(x, y, label=label, log_it=False)
@@ -71,10 +101,7 @@ def _blind_floating_gem_tapper(duration=20, interval=1, stop_event=None):
             except Exception as e:
                 log(f"[ERROR] Blind gem tapper tap() failed: {e!r}", "ERROR")
                 break
-            # Sleep in small chunks to respond quickly to stop_event
-            target = time.time() + interval
-            while not stop_event.is_set() and time.time() < target:
-                time.sleep(min(0.05, target - time.time()))
+            next_tap_time = time.time() + interval
     finally:
         elapsed = int(time.time() - start_ts)
         log(f"Floating gem tapping finished (taps={taps}, elapsed≈{elapsed}s)", "ACTION")
@@ -150,6 +177,11 @@ def stop_blind_gem_tapper():
         _blind_tapper_stop.set()
         return True
     return False
+
+
+def is_blind_gem_tapper_active() -> bool:
+    """Return True if the blind floating gem tapper is currently running."""
+    return _blind_tapper_active.is_set()
 
 
 def handle_ad_gem():

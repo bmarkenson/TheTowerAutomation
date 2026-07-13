@@ -31,10 +31,12 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
+from pathlib import Path
 from typing import Any, Dict, List, Optional, TypedDict
 
 import numpy as np
 import yaml
+from PIL import Image
 
 from utils.template_matcher import match_region
 from utils.logger import log
@@ -72,6 +74,8 @@ def load_state_definitions(path: str = STATE_DEF_PATH) -> Dict[str, Any]:
 
 state_definitions: Dict[str, Any] = load_state_definitions()
 get_clickmap()
+
+ASSETS_ROOT = Path(__file__).resolve().parent.parent / "assets" / "match_templates"
 
 
 def reload_state_definitions(path: str = STATE_DEF_PATH) -> Dict[str, Any]:
@@ -179,6 +183,12 @@ def detect_state_and_overlays(
         if len(menu_candidates_in_order) > 1:
             log(f"[WARN] Multiple menus matched {menu_candidates_in_order} -> chose '{result['menu']}' (YAML order priority)", "WARN")
 
+    result["secondary_states"] = _resolve_card_secondary_conflicts(
+        screen,
+        result["secondary_states"],
+        state_lookup,
+    )
+
     # Match overlays (can be multiple)
     for overlay in overlays_config:
         overlay_name = overlay.get("name")
@@ -197,3 +207,82 @@ def detect_state_and_overlays(
                 break
 
     return result
+
+
+def _resolve_card_secondary_conflicts(
+    screen: np.ndarray,
+    secondary_states: List[str],
+    state_lookup: Dict[str, Any],
+) -> List[str]:
+    cards_states = [
+        "CARDS_GCFARM_EARLY",
+        "CARDS_GCFARM_LATE",
+    ]
+    active = [name for name in secondary_states if name in cards_states]
+    if len(active) <= 1:
+        return secondary_states
+
+    brightness_scores: Dict[str, float] = {}
+    for state_name in active:
+        entry = state_lookup.get(state_name) or {}
+        key = (entry.get("match_keys") or [None])[0]
+        region_entry = _resolve_dot_path_cached(key) if key else None
+        if not region_entry:
+            continue
+        region = region_entry.get("match_region") or {}
+        x = int(region.get("x", 0))
+        y = int(region.get("y", 0))
+        w = int(region.get("w", 0))
+        h = int(region.get("h", 0))
+        if w <= 0 or h <= 0:
+            continue
+        roi = screen[y : y + h, x : x + w]
+        if roi.size == 0:
+            continue
+        template_path = region_entry.get("match_template")
+        mask = _load_template_mask(template_path) if template_path else None
+        mask = _align_mask(mask, roi)
+        brightness_scores[state_name] = _masked_brightness(roi, mask)
+
+    if not brightness_scores:
+        return secondary_states
+
+    winner = max(brightness_scores, key=brightness_scores.get)
+    filtered = [state for state in secondary_states if state == winner or state not in brightness_scores]
+    return filtered
+
+
+def _masked_brightness(roi: np.ndarray, mask: Optional[np.ndarray]) -> float:
+    luminance = roi.astype(np.float32).mean(axis=2)
+    if mask is not None and mask.shape == luminance.shape:
+        values = luminance[mask]
+    else:
+        values = luminance.reshape(-1)
+    if values.size == 0:
+        return -1.0
+    return float(values.mean())
+
+
+def _align_mask(mask: Optional[np.ndarray], roi: np.ndarray) -> Optional[np.ndarray]:
+    if mask is None:
+        return None
+    if mask.shape == roi.shape[:2]:
+        return mask
+    h, w = roi.shape[:2]
+    mh, mw = mask.shape
+    return mask[: min(mh, h), : min(mw, w)]
+
+
+@lru_cache(maxsize=16)
+def _load_template_mask(template_path: str) -> Optional[np.ndarray]:
+    if not template_path:
+        return None
+    full_path = (ASSETS_ROOT / template_path).resolve()
+    if not full_path.exists():
+        return None
+    try:
+        img = Image.open(full_path).convert("L")
+    except Exception:
+        return None
+    mask = np.array(img) > 0
+    return mask

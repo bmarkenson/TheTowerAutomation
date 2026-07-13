@@ -32,4 +32,8 @@ python main.py \
   --mission-log logs/blender_mission.log
 ```
 
-Use `--mission-config` alongside `--strategy-config` to pair a YAML mission, or omit it to keep existing Python missions. Logs for rule firings and executor actions are written to `logs/actions.log` and mirrored to the optional mission log path.
+Use `--mission-config` alongside `--strategy-config` to pair YAML plans. Legacy `--mission`/`--strategy` names have been removed; the CLI arguments remain only as placeholders to keep older scripts working but must stay `none`. Logs for rule firings and executor actions are written to `logs/actions.log` and mirrored to the optional mission log path.
+
+## Development backlog
+
+Current planned work is tracked in [`PENDING_DEVELOPMENT.md`](PENDING_DEVELOPMENT.md).

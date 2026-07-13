@@ -1,35 +1,120 @@
 from utils.logger import log
 from core.ss_capture import capture_adb_screenshot
-from core.input import tap_if_visible, swipe_now
+from core.input import safe_tap, tap_if_visible
+from core.label_tapper import is_visible
+from core.scrolling import scroll_to_edge, scroll_until_visible
+from core.state_detector import detect_state_and_overlays
+from utils.ocr_utils import ocr_text_and_conf
 import time
 import os
 import cv2
+
+STORE_MENU_INDICATOR = "indicators.menu_store"
+DAILY_GEM_BUTTON = "buttons.claim_daily_gems"
+STORE_CONTENT_REGION = (0, 170, 1080, 1580)
+DAILY_GEM_CARD_COLUMN = (100, 180, 440, 1570)
+DAILY_GEM_NOT_READY = "daily_gem_not_ready"
+
+
+def _wait_for_label(label: str, *, timeout: float = 5.0, poll: float = 0.3) -> bool:
+    deadline = time.time() + max(0.0, timeout)
+    while time.time() < deadline:
+        if is_visible(label):
+            return True
+        time.sleep(max(0.05, poll))
+    return False
+
+
+def _daily_gem_unavailable(screenshot) -> str | None:
+    """Return a stop reason when the left daily-gem card is on cooldown."""
+
+    if screenshot is None:
+        return None
+    x, y, w, h = DAILY_GEM_CARD_COLUMN
+    crop = screenshot[y:y + h, x:x + w]
+    if crop.size == 0:
+        return None
+    text, confidence = ocr_text_and_conf(crop, psm=6)
+    words = {word.strip(".,:;!?()[]{}").upper() for word in text.split()}
+    if "FREE" in words:
+        log(
+            f"[DAILY_GEM] Free-gem card is not ready yet "
+            f"(OCR confidence={confidence:.1f})",
+            "INFO",
+        )
+        return DAILY_GEM_NOT_READY
+    return None
+
+
+def _open_store_for_current_screen() -> bool:
+    """Open Store using the control appropriate to the verified source screen."""
+
+    screenshot = capture_adb_screenshot()
+    if screenshot is None:
+        log("[DAILY_GEM] Cannot identify source screen before opening Store", "WARN")
+        return False
+    detection = detect_state_and_overlays(screenshot)
+    state = detection.get("state")
+    if state == "HOME_SCREEN":
+        log("[DAILY_GEM] Opening Store from the home-screen bottom navigation", "DEBUG")
+        return safe_tap(
+            "navigation.goto_store_home",
+            require_visible=False,
+            dispatch="now",
+        )
+    if state == "RUNNING":
+        log("[DAILY_GEM] Opening Store from the in-run gold cart", "DEBUG")
+        return tap_if_visible("navigation.goto_store", screenshot=screenshot, retries=1)
+    log(f"[DAILY_GEM] Refusing to open Store from state={state!r}", "WARN")
+    return False
 
 def handle_daily_gem():
     session_id = _make_session_id()
     log(f"Handling DAILY AD GEM — Session: {session_id}", "INFO")
 
     # Tap into Store
-    if not tap_if_visible("navigation.goto_store", retries=1):
+    if not _open_store_for_current_screen():
         return _abort_handler("Goto Store", session_id)
     time.sleep(1.2)
+    if not _wait_for_label(STORE_MENU_INDICATOR, timeout=4.0):
+        return _abort_handler("Store indicator not detected", session_id)
 
-    # Goto Top of Store
-    swipe_now("gesture_targets.goto_top:store")
-    time.sleep(1.5)
+    # Go to the true top of Store. Every gesture verifies that Store is still
+    # visible, and the loop stops when the content no longer moves.
+    top = scroll_to_edge(
+        "gesture_targets.goto_top:store",
+        source_label=STORE_MENU_INDICATOR,
+        progress_region=STORE_CONTENT_REGION,
+        max_swipes=8,
+        settle_s=1.0,
+    )
+    if not top.success or top.screenshot is None:
+        return _abort_handler(f"Goto top of Store ({top.reason})", session_id)
 
     # Save first screen
-    img_game_stats = capture_adb_screenshot()
-    save_image(img_game_stats, f"{session_id}_store_top")
+    save_image(top.screenshot, f"{session_id}_store_top")
 
-    # Goto Claim Daily Gems`
-    # Swipe and capture 
-    swipe_now("gesture_targets.goto_claim_daily_gems:store")
-    time.sleep(3)
-    save_image(capture_adb_screenshot(), f"{session_id}claim_daily_gems")
+    # Scroll only while Store remains verified, stopping when the claim button
+    # itself is visible rather than assuming one gesture reaches it.
+    claim = scroll_until_visible(
+        "gesture_targets.goto_claim_daily_gems:store",
+        source_label=STORE_MENU_INDICATOR,
+        target_label=DAILY_GEM_BUTTON,
+        screenshot=top.screenshot,
+        progress_region=STORE_CONTENT_REGION,
+        max_swipes=10,
+        settle_s=1.0,
+        stop_fn=_daily_gem_unavailable,
+    )
+    if claim.reason == DAILY_GEM_NOT_READY:
+        log("[DAILY_GEM] No claim available; leaving Store unchanged.", "INFO")
+        return
+    if not claim.success or claim.screenshot is None:
+        return _abort_handler(f"Find Claim Daily Gems ({claim.reason})", session_id)
+    save_image(claim.screenshot, f"{session_id}_claim_daily_gems")
 
     # Claim Daily Gem
-    if not tap_if_visible("buttons.claim_daily_gems", retries=1):
+    if not tap_if_visible(DAILY_GEM_BUTTON, retries=1):
         return _abort_handler("Claim_daily_gems", session_id)
     time.sleep(1.2)
 
@@ -47,6 +132,9 @@ def _make_session_id():
     return "Game" + time.strftime("%Y%m%d_%H%M")
 
 def save_image(img, tag):
+    if img is None:
+        log(f"[CAPTURE] Skipping save for '{tag}' (no image)", "WARN")
+        return
     path = os.path.join("screenshots", "matches", f"{tag}.png")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     cv2.imwrite(path, img)

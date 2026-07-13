@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Optional, Dict, Any, Set
+from typing import Optional, Dict, Any, Set, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
@@ -24,9 +24,10 @@ from automation.missions.yaml_mission import YamlMission
 from automation.strategies import get_strategy
 from handlers.game_over_handler import handle_game_over
 from handlers.home_screen_handler import handle_home_screen
-from handlers.ad_gem_handler import handle_ad_gem, stop_blind_gem_tapper
+from handlers.ad_gem_handler import handle_ad_gem, stop_blind_gem_tapper, start_blind_gem_tapper
 from handlers.daily_gem_handler import handle_daily_gem
 from handlers.dismiss_uw_detail import handle_uw_detail_popup
+from utils.wave_detector import detect_wave_number_from_image
 
 
 Frame = NDArray[np.uint8]
@@ -74,6 +75,12 @@ class App:
         )
         self._fast_game_over = config.fast_game_over or (self._mission_active and not config.full_game_over)
 
+        self._last_wave_value: Optional[int] = None
+        self._last_wave_conf: float = -1.0
+        self._last_wave_ts: float = 0.0
+        self._blind_tapper_suspended = False
+        self._run_initialization_gate_logged = False
+
     def run(self) -> None:
         log("Starting main heartbeat loop.", level="INFO", console=True)
         if ensure_adb_connected():
@@ -98,6 +105,68 @@ class App:
                 is_paused = self._supervisor.is_paused
 
                 detection = detect_state_and_overlays(img, log_matches=self._match_trace)
+
+                # Establish the new-run boundary from the minimum RUNNING
+                # detection, then give an initializing strategy exclusive tap
+                # authority. No overlay handler, recovery tap, mission action,
+                # or blind tapper may run before this gate clears.
+                self._mission_mgr.maybe_run_start(detection)
+                initialization_pending = self._mission_mgr.run_initialization_pending(detection)
+                if initialization_pending:
+                    if not self._run_initialization_gate_logged:
+                        log(
+                            "[RUN_INIT] Exclusive startup gate active; normal handlers are blocked",
+                            "INFO",
+                            console=True,
+                        )
+                        self._run_initialization_gate_logged = True
+                    if stop_blind_gem_tapper():
+                        self._blind_tapper_suspended = True
+                    if not is_paused:
+                        self._mission_mgr.tick(img, detection, strategy_only=True)
+                    mv = self._mission_mgr.ctx.data.setdefault("mission_vars", {})
+                    sleep_interval = max(
+                        0.5,
+                        float(mv.get("loop_sleep_override_sec") or 1.0),
+                    )
+                    time.sleep(sleep_interval)
+                    continue
+                if self._run_initialization_gate_logged:
+                    log(
+                        "[RUN_INIT] Startup gate complete; normal handlers may resume",
+                        "INFO",
+                        console=True,
+                    )
+                    self._run_initialization_gate_logged = False
+
+                img, detection, overlay_cleared = self._resolve_uw_detail_overlay(img, detection)
+                if not overlay_cleared:
+                    time.sleep(0.3)
+                    continue
+
+                wave_val: Optional[int] = None
+                wave_conf: float = -1.0
+                if detection.get("state") == "RUNNING":
+                    try:
+                        wave_val, wave_conf = detect_wave_number_from_image(img)
+                    except Exception:
+                        wave_val, wave_conf = None, -1.0
+
+                if wave_val is not None:
+                    self._last_wave_value = wave_val
+                    self._last_wave_conf = wave_conf
+                    self._last_wave_ts = time.time()
+                else:
+                    wave_val = self._last_wave_value
+                    wave_conf = self._last_wave_conf
+
+                detection["wave"] = wave_val
+                detection["wave_conf"] = wave_conf
+                mv = self._mission_mgr.ctx.data.setdefault("mission_vars", {})
+                mv["last_wave"] = wave_val
+                mv["last_wave_conf"] = wave_conf
+                mv["last_wave_ts"] = self._last_wave_ts
+
                 new_state, menu, secondary, overlays = self._normalise_detection(detection)
 
                 # Allow missions to react immediately to overlays before general state handling.
@@ -111,7 +180,6 @@ class App:
                     except Exception:
                         pass
 
-                self._mission_mgr.maybe_run_start(detection)
                 self._mission_mgr.on_state(detection)
 
                 self._state_tracker.update(state=new_state, menu=menu, secondary=secondary, overlays=overlays)
@@ -126,13 +194,6 @@ class App:
 
                 self._supervisor.auto_return_check(img, new_state)
 
-                if "UW_DETAIL" in overlays:
-                    handled_image = handle_uw_detail_popup(screenshot=img)
-                    if handled_image is not None:
-                        img = handled_image
-                    time.sleep(0.2)
-                    continue
-
                 if new_state == "UNKNOWN":
                     update_unknown_state(True)
                     trigger_after = self._supervisor.auto_return_secs or 900
@@ -140,11 +201,26 @@ class App:
                 else:
                     update_unknown_state(False)
 
+                if new_state != "RUNNING":
+                    if stop_blind_gem_tapper():
+                        self._blind_tapper_suspended = True
+                else:
+                    if self._blind_tapper_suspended:
+                        start_blind_gem_tapper(duration=10, interval=1, blocking=False)
+                        self._blind_tapper_suspended = False
+
                 if not is_paused:
                     self._mission_mgr.tick(img, detection)
                     self._handle_primary_states(new_state, overlays)
 
-                time.sleep(5)
+                sleep_interval = 5.0
+                try:
+                    override = float(mv.get("loop_sleep_override_sec") or 0.0)
+                    if override > 0:
+                        sleep_interval = max(0.5, override)
+                except Exception:
+                    sleep_interval = 5.0
+                time.sleep(sleep_interval)
         except KeyboardInterrupt:
             log("KeyboardInterrupt — shutting down.", "INFO")
         finally:
@@ -191,6 +267,37 @@ class App:
         secondary = set(detection.get("secondary_states") or [])
         overlays = set(detection.get("overlays") or [])
         return state, menu, secondary, overlays
+
+    def _resolve_uw_detail_overlay(
+        self,
+        img: Frame,
+        detection: Dict[str, Any],
+        *,
+        max_attempts: int = 3,
+    ) -> Tuple[Frame, Dict[str, Any], bool]:
+        overlays = set(detection.get("overlays") or [])
+        if "UW_DETAIL" not in overlays:
+            return img, detection, True
+
+        for attempt in range(1, max_attempts + 1):
+            handled_image = handle_uw_detail_popup(screenshot=img)
+            if handled_image is not None:
+                img = handled_image
+            time.sleep(0.2)
+            detection = detect_state_and_overlays(img, log_matches=self._match_trace)
+            overlays = set(detection.get("overlays") or [])
+            if "UW_DETAIL" not in overlays:
+                log(
+                    f"[UW_DETAIL] Overlay cleared after attempt {attempt}",
+                    "DEBUG",
+                )
+                return img, detection, True
+
+        log(
+            "[UW_DETAIL] Overlay persisted after multiple attempts; will retry next loop",
+            "WARN",
+        )
+        return img, detection, False
 
     def _load_mission(self, config: AppConfig):
         """Initialise the mission configuration based on CLI options."""

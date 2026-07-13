@@ -30,7 +30,13 @@ from core.upgrade_navigation import (
     find_upgrade,
 )
 from core.upgrade_buy_quantity import BuyQuantity
+from core.target_priority import ensure_target_priority_order
 from automation.missions.base import MissionContext
+from handlers.ad_gem_handler import (
+    is_blind_gem_tapper_active,
+    start_blind_gem_tapper,
+    stop_blind_gem_tapper,
+)
 
 
 Action = Dict[str, Any]
@@ -49,8 +55,20 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
 
             last_state = mv.get("last_detection_state") if mv is not None else None
 
+            state_guard = None
+            if isinstance(act, dict):
+                allowed = act.pop("_allow_states", None)
+                if allowed is None:
+                    allowed = act.get("state_guard")
+                if allowed:
+                    if isinstance(allowed, str):
+                        state_guard = {allowed}
+                    else:
+                        state_guard = set(allowed)
+            allowed_states = state_guard or {"RUNNING"}
+
             if t == "tap_label":
-                if is_strategy_action and last_state != "RUNNING":
+                if is_strategy_action and last_state not in allowed_states:
                     log_mission(
                         f"[EXEC] Skip tap_label while state={last_state}",
                         "DEBUG",
@@ -58,9 +76,10 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                     continue
                 key = act.get("key")
                 if key:
+                    _maybe_suspend_blind_tapper_for_cards(key, mv)
                     tap_if_visible(key)
             elif t == "restart_run":
-                if is_strategy_action and last_state != "RUNNING":
+                if is_strategy_action and last_state not in allowed_states:
                     log_mission(
                         f"[EXEC] Skip restart_run while state={last_state}",
                         "DEBUG",
@@ -68,7 +87,7 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                     continue
                 restart_run()
             elif t == "fire_floating":
-                if is_strategy_action and last_state != "RUNNING":
+                if is_strategy_action and last_state not in allowed_states:
                     log_mission(
                         f"[EXEC] Skip fire_floating while state={last_state}",
                         "DEBUG",
@@ -83,7 +102,7 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                 ms = int(act.get("ms", 0))
                 _sleep_ms(ms)
             elif t == "upgrade_set_buy_quantities":
-                if is_strategy_action and last_state != "RUNNING":
+                if is_strategy_action and last_state not in allowed_states:
                     log_mission(
                         f"[EXEC] Skip upgrade_set_buy_quantities while state={last_state}",
                         "DEBUG",
@@ -100,7 +119,7 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                 if menus:
                     apply_menu_buy_quantities(menus)  # type: ignore[arg-type]
             elif t == "upgrade_purchase":
-                if is_strategy_action and last_state != "RUNNING":
+                if is_strategy_action and last_state not in allowed_states:
                     log_mission(
                         f"[EXEC] Skip upgrade_purchase while state={last_state}",
                         "DEBUG",
@@ -145,8 +164,16 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                         ),
                         log_level,
                     )
+            elif t == "target_priority_ensure":
+                if is_strategy_action and last_state not in allowed_states:
+                    log_mission(f"[EXEC] Skip target_priority_ensure while state={last_state}", "DEBUG")
+                    continue
+                ok = ensure_target_priority_order()
+                if mv is not None:
+                    mv["target_priority_checked"] = ok
+                log_mission(f"[EXEC] target_priority_ensure verified={ok}", "INFO" if ok else "WARN")
             elif t in {"ultimate_set_all_on", "ultimate_ensure_state"}:
-                if is_strategy_action and last_state != "RUNNING":
+                if is_strategy_action and last_state not in allowed_states:
                     log_mission(
                         f"[EXEC] Skip {t} while state={last_state}",
                         "DEBUG",
@@ -193,3 +220,38 @@ def _sleep_ms(milliseconds: int) -> None:
 def _slugify_label(label: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")
     return slug
+
+
+_CARD_ENTRY_KEYS = {
+    "navigation.Cards",
+}
+
+_CARD_INTERACTION_KEYS = {
+    "buttons.Cards:GCFarmEarly",
+    "buttons.Cards:GCFarmLate",
+    "buttons.cards:locked:ok",
+    "buttons.cards:locked:cancel",
+}
+
+_CARD_EXIT_KEYS = {
+    "buttons.return_to_game",
+}
+
+
+def _maybe_suspend_blind_tapper_for_cards(key: str, mv: Optional[Dict[str, Any]]) -> None:
+    if mv is None:
+        return
+    paused_flag = "blind_tapper_paused_for_cards"
+    if key in _CARD_ENTRY_KEYS or key in _CARD_INTERACTION_KEYS:
+        if mv.get(paused_flag):
+            return
+        if is_blind_gem_tapper_active():
+            if stop_blind_gem_tapper():
+                log("[EXEC] Paused blind gem tapper before card interaction", "INFO")
+                mv[paused_flag] = True
+        return
+
+    if key in _CARD_EXIT_KEYS:
+        if mv.pop(paused_flag, False):
+            log("[EXEC] Resuming blind gem tapper after card interaction", "INFO")
+            start_blind_gem_tapper(duration=10, interval=1, blocking=False)
