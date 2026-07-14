@@ -596,6 +596,19 @@
         "x": 548,
         "y": 1129
       }
+    },
+    "cards:gc_active": {
+      "match_template": "indicators/cards:gc_active.png",
+      "match_region": {
+        "x": 3,
+        "y": 350,
+        "w": 230,
+        "h": 127
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
     }
   },
   "overlays": {

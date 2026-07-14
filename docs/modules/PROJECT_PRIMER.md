@@ -95,7 +95,7 @@ core/label_tapper.py
 core/matcher.py
 - MatchResult/match_entry_result(...) — canonical clickmap-backed template-match
   evaluation with normalized search geometry, cached assets, and explicit failure metadata.
-- get_match_result(dot_path, screen=None)/get_match(...) — detector-compatible
+- get_match_result(dot_path, screenshot=...)/get_match(...) — detector-compatible
   color profile; `_match_entry(...)` remains the compatibility-level entry helper.
 
 core/ss_capture.py

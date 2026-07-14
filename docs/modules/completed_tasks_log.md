@@ -72,6 +72,13 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Confirmed the Store badge persisted from the running screen to Home and into
   a new run. Added a distinct Home badge template, refreshed the stale Home
   `Battle` template, and added a canonical Home fixture for both matches.
+- Opened Cards through the live navigation template on ADB port 5565 and
+  captured the active fixed `GC` preset. Added a composite template containing
+  both its label and green selection border, validated it against two live
+  positives and two non-Cards negatives, and added a canonical Cards fixture.
+  Repointed the legacy GCFarm secondary states from generic slot-border crops
+  to their full identity templates so an active `GC` deck is no longer falsely
+  reported as `CARDS_GCFARM_EARLY`.
 - Fixed the Daily Gems handler so the active card's `FREE` price is not mistaken
   for a cooldown and a claim already visible at Store entry does not trigger a
   redundant top-and-back scroll. Live-verified the active in-run Store route,

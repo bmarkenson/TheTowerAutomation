@@ -48,12 +48,17 @@ states:
 - name: CARDS_GCFARM_LATE
   type: secondary
   match_keys:
-  - indicators.cards:deck1
+  - indicators.Cards:GCFarmLate
 
 - name: CARDS_GCFARM_EARLY
   type: secondary
   match_keys:
-  - indicators.cards:deck3
+  - indicators.Cards:GCFarmEarly
+
+- name: CARDS_GC_ACTIVE
+  type: secondary
+  match_keys:
+  - indicators.cards:gc_active
 
 - name: LAB
   type: primary

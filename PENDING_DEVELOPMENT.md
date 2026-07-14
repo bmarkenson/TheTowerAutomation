@@ -31,6 +31,8 @@ audited against the codebase and incorporated below on 2026-07-13.
 - [ ] Implement a once-per-continuous-session GC preflight, always after the
   current run's EHLS/EALS startup gate:
   - Cards must use the fixed `GC` deck; otherwise surrender, correct, restart.
+    The active `GC` preset now has a live-validated composite identity/selection
+    template and canonical fixture; preflight dispatch is not yet implemented.
   - Workshop must use the `Farm` preset; otherwise surrender, correct, restart.
   - Bots must use the `Farm` preset; otherwise surrender, correct, restart.
   - Auto Pick Perks must be enabled; enable it in place if necessary.
