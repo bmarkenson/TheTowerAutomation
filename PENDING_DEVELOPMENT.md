@@ -35,6 +35,11 @@ audited against the codebase and incorporated below on 2026-07-13.
     template and canonical fixture; preflight dispatch is not yet implemented.
   - Workshop must use the `Farm` preset; otherwise surrender, correct, restart.
   - Bots must use the `Farm` preset; otherwise surrender, correct, restart.
+    The Bots-screen guard and active `Farm` composite template are now backed by
+    canonical live fixtures; automated navigation is not yet integrated.
+  - Guardian chips must have `Fetch`, `Summon`, and `Scout` equipped. Separate
+    equipped-slot templates and an offline evidence validator are complete;
+    automated navigation is not yet integrated.
   - Auto Pick Perks must be enabled; enable it in place if necessary.
   - Ultimate Weapons that should be active must be on; Golden Tower and Black
     Hole are permanent, so no sync enforcement with Death Wave is required.
@@ -130,6 +135,16 @@ audited against the codebase and incorporated below on 2026-07-13.
   The 2026-07-13 reset began at `2/8 Missions` with two new missions and the next
   pair due eight hours later; the menu badge changed from 3 to 1 after viewing
   the screen while one completed mission remained claimable.
+- [ ] Add Event Mission and Guild contribution-chest claiming as separate,
+  badge-triggered handlers after mapping their available/unavailable states.
+  - On 2026-07-13 the in-run menu showed badges on Daily Missions (`2`), Event
+    (`1`), and Guild (`1`). Treat a menu badge only as a reason to inspect; do
+    not assume a specific claim target without fresh in-menu detection.
+  - The Guild Members fixture contains the already-claimed 100 chest, a glowing
+    250 chest, and locked 500/750 chests. Preserve it for claimability-template
+    design; no chest was tapped during capture.
+  - Event opened on Missions. Inventory the complete mission list and capture a
+    positive claim control plus a post-claim negative before implementing taps.
 - [ ] Add automated overlay coexistence and state-transition regression tests.
   This should be completed as part of the full live state-coverage audit above.
 

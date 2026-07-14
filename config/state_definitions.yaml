@@ -80,6 +80,16 @@ states:
   match_keys:
   - indicators.event
 
+- name: EVENT_BOTS_SCREEN
+  type: secondary
+  match_keys:
+  - indicators.event:bots_screen
+
+- name: BOTS_FARM_ACTIVE
+  type: secondary
+  match_keys:
+  - indicators.bots:farm_active
+
 - name: DISTANCE_ADJUSTER
   type: primary
   match_keys:
@@ -89,6 +99,26 @@ states:
   type: primary
   match_keys:
   - indicators.guild
+
+- name: GUILD_GUARDIAN_SCREEN
+  type: secondary
+  match_keys:
+  - indicators.guild:guardian_screen
+
+- name: GUARDIAN_FETCH_EQUIPPED
+  type: secondary
+  match_keys:
+  - indicators.guardian:fetch_equipped
+
+- name: GUARDIAN_SUMMON_EQUIPPED
+  type: secondary
+  match_keys:
+  - indicators.guardian:summon_equipped
+
+- name: GUARDIAN_SCOUT_EQUIPPED
+  type: secondary
+  match_keys:
+  - indicators.guardian:scout_equipped
 
 - name: TOURNAMENT
   type: secondary

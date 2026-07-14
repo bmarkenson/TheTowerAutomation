@@ -87,6 +87,12 @@ core/floating_button_detector.py
 - detect_floating_buttons(screen) — R list[dict]; S [cv2][state][log]; partial on exceptions.
 - tap_floating_button(name, buttons) — R bool; S [adb][log].
 
+core/gc_preflight.py
+- validate_gc_preflight_screens(cards_screen=..., bots_screen=...,
+  guardians_screen=...) — R GcPreflightEvidence; S [cv2][state].
+- evaluate_gc_section(spec, detection) — R GcSectionResult with missing evidence;
+  no input is sent. `tools/validate_gc_preflight.py` exposes the offline CLI.
+
 core/label_tapper.py
 - resolve_region(entry, clickmap) — R dict; E ValueError on bad region_ref.
 - get_label_match(label_key, screenshot=None, return_meta=False) — R bbox|meta; S [adb].

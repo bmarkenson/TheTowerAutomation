@@ -609,6 +609,84 @@
       "roles": [
         "indicator"
       ]
+    },
+    "event:bots_screen": {
+      "match_template": "indicators/event:bots_screen.png",
+      "match_region": {
+        "x": 440,
+        "y": 395,
+        "w": 205,
+        "h": 80
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "bots:farm_active": {
+      "match_template": "indicators/bots:farm_active.png",
+      "match_region": {
+        "x": 0,
+        "y": 480,
+        "w": 380,
+        "h": 130
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "guild:guardian_screen": {
+      "match_template": "indicators/guild:guardian_screen.png",
+      "match_region": {
+        "x": 20,
+        "y": 965,
+        "w": 480,
+        "h": 85
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "guardian:fetch_equipped": {
+      "match_template": "indicators/guardian:fetch_equipped.png",
+      "match_region": {
+        "x": 35,
+        "y": 390,
+        "w": 270,
+        "h": 270
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "guardian:summon_equipped": {
+      "match_template": "indicators/guardian:summon_equipped.png",
+      "match_region": {
+        "x": 775,
+        "y": 390,
+        "w": 270,
+        "h": 270
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "guardian:scout_equipped": {
+      "match_template": "indicators/guardian:scout_equipped.png",
+      "match_region": {
+        "x": 35,
+        "y": 670,
+        "w": 270,
+        "h": 270
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
     }
   },
   "overlays": {
@@ -854,6 +932,46 @@
         "type": "tap",
         "x": 913,
         "y": 281
+      }
+    },
+    "Event": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 910,
+        "y": 490
+      }
+    },
+    "Guild": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 910,
+        "y": 595
+      }
+    },
+    "event:bots_tab": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 900,
+        "y": 307
+      }
+    },
+    "guild:guardian_tab": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 472,
+        "y": 313
       }
     },
     "menu_open_button": {

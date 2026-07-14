@@ -79,6 +79,14 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   Repointed the legacy GCFarm secondary states from generic slot-border crops
   to their full identity templates so an active `GC` deck is no longer falsely
   reported as `CARDS_GCFARM_EARLY`.
+- Captured Event Bots with `Farm` active and Guild Guardian with `Fetch`,
+  `Summon`, and `Scout` equipped. Added separate stable screen guards and
+  configuration templates, plus an offline three-screen GC evidence validator.
+  Rejected selected-tab templates after same-menu negatives scored 0.985-0.996;
+  the workflow instead verifies stable target-screen content after navigation.
+- Captured Event Missions and Guild Members as same-parent negative fixtures.
+  The Guild frame preserves the unclaimed glowing 250 contribution chest; no
+  reward or configuration control was tapped.
 - Fixed the Daily Gems handler so the active card's `FREE` price is not mistaken
   for a cooldown and a claim already visible at Store entry does not trigger a
   redundant top-and-back scroll. Live-verified the active in-run Store route,
