@@ -6,7 +6,7 @@ Small CLI to control automation state/mode via a JSON control file
 consumed by main.py (default: logs/automation_ctl.json).
 
 Commands:
-  - pause                 → state=PAUSED
+  - pause                 → state=PAUSED until an explicit resume
   - resume                → state=RUNNING
   - stop                  → state=STOPPED
   - mode <retry|wait|home>→ set ExecMode
@@ -15,6 +15,7 @@ Commands:
   - status                → print current file contents (or defaults)
 
 Writes atomically (tmp + os.replace) and preserves unspecified fields.
+The control file is authoritative: PAUSED never expires automatically.
 """
 
 from __future__ import annotations
@@ -115,4 +116,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

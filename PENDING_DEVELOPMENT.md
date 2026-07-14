@@ -82,14 +82,12 @@ audited against the codebase and incorporated below on 2026-07-13.
 - [ ] Provide a convenient pause/resume interface so stopping the process with
   `Ctrl-C` is unnecessary.
   - Build on the existing control-file and `tools/automation_ctl.py` support.
+  - [x] Make manual pause indefinite and authoritative until explicit resume.
+    The duplicate in-memory 15-minute expiry and its CLI/config switches were
+    removed after the 2026-07-14 race allowed a blind tapper to run briefly
+    against a still-`PAUSED` control file.
   - Make pause state obvious and ensure manual input does not race automation.
   - Support extending or cancelling pending recovery timers.
-  - Fix timed pause expiry so the persisted control state and in-memory state
-    change atomically. During the 2026-07-14 floating-gem diagnostic, the
-    default 15-minute timeout resumed in memory while the control file still
-    said `PAUSED`; the ad-gem handler's blind tapper sent 13 taps before the
-    stale file reasserted pause. Diagnostics need an indefinite/extendable pause
-    and an imminent-expiry warning.
 - [ ] Detect likely manual player activity and automatically yield tap authority.
   - Treat an unexpected Go Home/manual navigation sequence during an active run
     as operator activity rather than an error to immediately undo.

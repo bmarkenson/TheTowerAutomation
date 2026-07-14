@@ -5,13 +5,13 @@ Encapsulates runtime automation control & small recoveries so `main.py` stays
 focused on capture → detect → dispatch.
 
 Features:
-- Control-file polling (pause/resume/mode) + optional auto-resume after N secs
+- Persistent control-file polling for explicit pause/resume/mode directives
 - Coins toggle debounce and plausibility (jump) gate
 - Auto "Return to Game" after sustained visibility, with logs and fallback match
 
 Public usage (simplified):
     sup = AutomationSupervisor(...)
-    sup.apply_control()        # updates AUTOMATION.state/mode, handles auto-resume
+    sup.apply_control()        # updates AUTOMATION.state/mode from persistent directives
     paused = sup.is_paused
     coins_val, coins_conf, has_min, coins_eff = sup.process_coins(img, coins_val, coins_conf, has_min, debug_out)
     sup.auto_return_check(img, ui_state)
@@ -65,8 +65,6 @@ class AutomationSupervisor:
         self,
         *,
         control_file: str,
-        auto_resume_secs: int,
-        auto_resume_enabled: bool = True,
         auto_return_secs: int = 0,
         auto_return_enabled: bool = True,
         auto_return_conf_threshold: float = 0.85,
@@ -76,8 +74,6 @@ class AutomationSupervisor:
         coins_jump_conf_floor: float = 90.0,
     ) -> None:
         self.control_file = Path(control_file)
-        self.auto_resume_secs = max(0, int(auto_resume_secs))
-        self.auto_resume_enabled = bool(auto_resume_enabled)
         self.auto_return_secs = max(0, int(auto_return_secs))
         self.auto_return_enabled = bool(auto_return_enabled)
         self.auto_return_conf_threshold = float(auto_return_conf_threshold)
@@ -90,7 +86,6 @@ class AutomationSupervisor:
         # Internal state
         self._last_applied_state: Optional[str] = None
         self._last_applied_mode: Optional[str] = None
-        self._paused_since_ts: Optional[float] = None
 
         self._last_coins_toggle_ts: float = 0.0
         self._coins_has_min_miss: int = 0
@@ -115,14 +110,12 @@ class AutomationSupervisor:
         return str(st) == "RunState.PAUSED" or st == "PAUSED"
 
     def apply_control(self) -> None:
-        """Poll the control file, apply state/mode, and auto-resume if needed."""
+        """Poll the control file and apply its persistent state/mode directives."""
 
         directives = self._load_control_directive()
         if directives:
             self._apply_state(directives.get("state"))
             self._apply_mode(directives.get("mode"))
-
-        self._auto_resume_if_needed()
 
     def format_state(self, ui_state: str) -> str:
         return f"{ui_state}/PAUSED" if self.is_paused else ui_state
@@ -477,7 +470,6 @@ class AutomationSupervisor:
                 console=True,
             )
             self._last_applied_state = normalized
-            self._paused_since_ts = time.time() if normalized == "PAUSED" else None
         except Exception as exc:
             log(f"[CTRL] Failed to set state={normalized}: {exc}", "WARN")
 
@@ -497,20 +489,6 @@ class AutomationSupervisor:
             self._last_applied_mode = normalized
         except Exception as exc:
             log(f"[CTRL] Failed to set mode={normalized}: {exc}", "WARN")
-
-    def _auto_resume_if_needed(self) -> None:
-        if not self.auto_resume_enabled or self.auto_resume_secs <= 0:
-            return
-        if not self.is_paused or self._paused_since_ts is None:
-            return
-        try:
-            if (time.time() - self._paused_since_ts) >= self.auto_resume_secs:
-                AUTOMATION.state = "RUNNING"
-                self._paused_since_ts = None
-                log("[CTRL] Auto-resume: State=RUNNING after pause timeout", "INFO")
-                self._last_applied_state = "RUNNING"
-        except Exception as exc:
-            log(f"[CTRL] Auto-resume failed: {exc}", "WARN")
 
 # Re-exports for convenience
 try:

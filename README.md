@@ -34,6 +34,20 @@ python main.py \
 
 Use `--mission-config` alongside `--strategy-config` to pair YAML plans. Legacy `--mission`/`--strategy` names have been removed; the CLI arguments remain only as placeholders to keep older scripts working but must stay `none`. Logs for rule firings and executor actions are written to `logs/actions.log` and mirrored to the optional mission log path.
 
+## Runtime pause control
+
+Pause and resume the running process through its persistent control file:
+
+```bash
+.venv/bin/python tools/automation_ctl.py pause
+.venv/bin/python tools/automation_ctl.py status
+.venv/bin/python tools/automation_ctl.py resume
+```
+
+A pause is indefinite and survives automation restarts. Only an explicit
+`resume` changes the desired state back to `RUNNING`; there is no pause-expiry
+timer.
+
 ## Development backlog
 
 Current planned work is tracked in [`PENDING_DEVELOPMENT.md`](PENDING_DEVELOPMENT.md).

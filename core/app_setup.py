@@ -26,8 +26,6 @@ class AppConfig:
     coins_log_base: str
     coins_log_enabled: bool
     control_file: str
-    auto_resume_enabled: bool
-    auto_resume_secs: int
     auto_return_enabled: bool
     auto_return_secs: int
     auto_return_conf_threshold: float
@@ -88,10 +86,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help="Minutes of continuous visibility before auto 'Return to Game' tap (default: 15)")
     parser.add_argument("--control-file", default="logs/automation_ctl.json",
                         help="Path to JSON control file for pause/resume/mode (default: logs/automation_ctl.json)")
-    parser.add_argument("--no-auto-resume", action="store_true",
-                        help="Disable automatic resume from PAUSED after timeout")
-    parser.add_argument("--auto-resume-minutes", type=int, default=15,
-                        help="Minutes to auto-resume from PAUSED (default: 15)")
     parser.add_argument("--fast-game-over", action="store_true",
                         help="Skip More Stats capture on GAME_OVER (default: enabled when --mission != none)")
     parser.add_argument("--full-game-over", action="store_true",
@@ -124,7 +118,6 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
 def config_from_args(args: argparse.Namespace) -> AppConfig:
     """Convert parsed CLI arguments to an `AppConfig` dataclass."""
 
-    auto_resume_secs = max(0, int(args.auto_resume_minutes)) * 60
     auto_return_secs = max(0, int(args.auto_return_minutes)) * 60
     coins_log_base = args.coins_log or DEFAULT_COINS_LOG_PATH
     return AppConfig(
@@ -136,8 +129,6 @@ def config_from_args(args: argparse.Namespace) -> AppConfig:
         coins_log_base=coins_log_base,
         coins_log_enabled=not args.no_coins_log,
         control_file=args.control_file,
-        auto_resume_enabled=not args.no_auto_resume,
-        auto_resume_secs=auto_resume_secs,
         auto_return_enabled=not args.no_auto_return,
         auto_return_secs=auto_return_secs,
         auto_return_conf_threshold=DEFAULT_AUTO_RETURN_CONF_THRESHOLD,

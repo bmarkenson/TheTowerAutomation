@@ -23,6 +23,11 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   PDT and 16:00 PST. It invokes the existing Store handler without requiring a
   badge, defers until a safe Home/Running state, backs off failures, and records
   completed or confirmed-not-ready outcomes once per game day.
+- Made the control file the sole authority for runtime pause state. Manual
+  pauses are now indefinite and survive restarts until an explicit resume;
+  removing the duplicate in-memory 15-minute expiry eliminates the window in
+  which automation could resume while the persisted directive still said
+  `PAUSED`.
 
 
 ---

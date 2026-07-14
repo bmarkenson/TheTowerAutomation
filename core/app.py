@@ -44,8 +44,6 @@ class App:
         set_mission_log_path(config.mission_log_path)
         self._supervisor = AutomationSupervisor(
             control_file=config.control_file,
-            auto_resume_secs=config.auto_resume_secs,
-            auto_resume_enabled=config.auto_resume_enabled,
             auto_return_secs=config.auto_return_secs,
             auto_return_enabled=config.auto_return_enabled,
             auto_return_conf_threshold=config.auto_return_conf_threshold,
