@@ -1,8 +1,17 @@
+from pathlib import Path
 from unittest.mock import patch
 
+import cv2
 import numpy as np
 
+from core.matcher import get_match
 from handlers.home_screen_handler import _tap_verified_home_battle_control
+
+
+ROOT = Path(__file__).resolve().parents[1]
+NEW_DAY_HOME_FIXTURE = (
+    ROOT / "test" / "fixtures" / "home_screen_new_day_store_badge_20260713.png"
+)
 
 
 def _screenshot():
@@ -59,3 +68,22 @@ def test_resume_battle_ocr_tolerates_button_border_artifacts():
         patch("handlers.home_screen_handler.safe_tap", return_value=True),
     ):
         assert _tap_verified_home_battle_control()
+
+
+def test_live_new_day_home_fixture_matches_battle_and_store_badge():
+    screenshot = cv2.imread(str(NEW_DAY_HOME_FIXTURE))
+    assert screenshot is not None
+
+    battle_point, battle_confidence = get_match(
+        "buttons.battle:home",
+        screenshot=screenshot,
+    )
+    badge_point, badge_confidence = get_match(
+        "overlays.daily_free_gems_badge_home",
+        screenshot=screenshot,
+    )
+
+    assert battle_point is not None
+    assert battle_confidence >= 0.9
+    assert badge_point is not None
+    assert badge_confidence >= 0.9

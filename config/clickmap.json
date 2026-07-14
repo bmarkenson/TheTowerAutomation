@@ -642,12 +642,12 @@
       ]
     },
     "daily_free_gems_badge_home": {
-      "match_template": "overlays/daily_free_gems_badge.png",
+      "match_template": "overlays/daily_free_gems_badge_home.png",
       "match_region": {
-        "x": 850,
-        "y": 1680,
-        "w": 230,
-        "h": 240
+        "x": 995,
+        "y": 1718,
+        "w": 64,
+        "h": 66
       },
       "match_threshold": 0.9,
       "roles": [
