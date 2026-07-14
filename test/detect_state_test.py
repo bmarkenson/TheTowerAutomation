@@ -3,7 +3,15 @@
 
 import argparse
 import os
+import sys
+
 import cv2
+
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
 from core.state_detector import detect_state_and_overlays
 from core.ss_capture import capture_and_save_screenshot
 
@@ -34,7 +42,7 @@ def main():
         capture_and_save_screenshot(args.image)
 
     if not os.path.exists(args.image):
-        print(f("[ERROR] Image not found: {args.image}"))
+        print(f"[ERROR] Image not found: {args.image}")
         return
 
     screen = cv2.imread(args.image)
