@@ -105,6 +105,11 @@ states:
   match_keys:
   - indicators.distance_adjuster
 
+- name: DAMAGE_ADJUSTER
+  type: primary
+  match_keys:
+  - indicators.damage_adjuster
+
 - name: GUILD
   type: primary
   match_keys:

@@ -117,6 +117,16 @@
         "y": 671
       }
     },
+    "dismiss_damage_adjuster": {
+      "roles": [
+        "gesture"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 50,
+        "y": 50
+      }
+    },
     "goto_top:more_stats": {
       "roles": [
         "gesture"
@@ -713,6 +723,19 @@
       "roles": [
         "indicator"
       ]
+    },
+    "damage_adjuster": {
+      "match_template": "indicators/damage_adjuster.png",
+      "match_region": {
+        "x": 150,
+        "y": 1575,
+        "w": 780,
+        "h": 115
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
     }
   },
   "overlays": {
@@ -1082,6 +1105,14 @@
         "x": 730,
         "y": 1070
       }
+    },
+    "damage_adjuster:attack": {
+      "match_template": "upgrades/attack/left/damage.png",
+      "region_ref": "upgrades_left",
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
     },
     "yes:end_round": {
       "match_template": "buttons/yes:end_round.png",

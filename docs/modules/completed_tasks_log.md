@@ -92,6 +92,12 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   and classified the selected preset by its green border rather than a
   high-correlation full-card template; the four cyan inactive neighbors provide
   same-frame negative evidence. No Workshop preset was changed.
+- Opened the in-run Damage detail panel through the left-side label rather than
+  the upgrade purchase offset and captured its persistent `Percent Of Enemy
+  Health` selector at `1E-22%`. Added a primary panel state, stable guard,
+  read-only OCR, and guarded open/dismiss actions using ordinary settled ADB
+  screenshots. The changing `94.80M` derived damage is not used as state, and
+  neither adjustment arrow was tapped.
 - Fixed the Daily Gems handler so the active card's `FREE` price is not mistaken
   for a cooldown and a claim already visible at Store entry does not trigger a
   redundant top-and-back scroll. Live-verified the active in-run Store route,

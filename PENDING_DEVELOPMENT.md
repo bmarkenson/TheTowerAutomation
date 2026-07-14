@@ -64,9 +64,15 @@ audited against the codebase and incorporated below on 2026-07-13.
 - [ ] Decide whether to validate perk bans and the Auto Pick Perk order during
   the session preflight. Keep automation-owned perk selection as a later option.
 - [ ] Add the Damage Slider to new-GC-run initialization.
-  - Detect its current position/value before changing it.
+  - [x] Detect its current position/value before changing it. The persistent
+    Damage panel, dedicated label-center open action, guarded dismissal, and OCR
+    reader are fixture-backed. Live evidence on 2026-07-14 read `1E-22%`; the
+    `94.80M` value beneath it is derived run damage and is intentionally ignored.
+    Ordinary settled ADB screenshots are sufficient; the H.264 stream was only
+    needed to diagnose the original upgrade-label tap offset.
   - Define the desired setting in strategy configuration rather than hardcoding
-    it in the runtime.
+    it in the runtime. Confirm whether the observed `1E-22%` is the required GC
+    value before adding configuration or adjustment behavior.
   - Verify the applied setting and make the operation safe to repeat.
 
 ## Runtime control

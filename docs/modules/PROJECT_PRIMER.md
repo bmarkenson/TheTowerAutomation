@@ -93,6 +93,13 @@ core/gc_preflight.py
 - evaluate_gc_section(spec, detection) — R GcSectionResult with missing evidence;
   no input is sent. `tools/validate_gc_preflight.py` exposes the offline CLI.
 
+core/damage_adjuster.py
+- read_damage_adjuster(screenshot) — R DamageAdjusterReading containing the
+  persistent panel guard, selector mode, and configured percentage; S [cv2].
+- open_damage_adjuster()/dismiss_damage_adjuster() — R reading|None/bool;
+  S [adb][cv2][tap][log]; require verified Attack/panel states and use ordinary
+  settled screenshots rather than the low-latency stream.
+
 core/workshop_preset.py
 - measure_preset_slot_selection(screenshot, region=FARM_PRESET_SLOT) — R
   PresetSlotSelection with green/cyan border pixel evidence; S [cv2].
