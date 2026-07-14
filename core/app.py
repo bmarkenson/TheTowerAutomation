@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional, Dict, Any, Set, Tuple
 
 import numpy as np
@@ -14,6 +16,7 @@ from core.watchdog import watchdog_process_check, ensure_adb_connected
 from core.ss_capture import capture_and_save_screenshot
 from core.state_detector import detect_state_and_overlays
 from core.automation_supervisor import AutomationSupervisor
+from core.daily_gem_scheduler import DailyGemScheduler
 from core.run_state import AUTOMATION, ExecMode
 from core.app_setup import AppConfig
 from core.status_report import StateChangeTracker, StatusReporter
@@ -25,7 +28,7 @@ from automation.strategies import get_strategy
 from handlers.game_over_handler import handle_game_over
 from handlers.home_screen_handler import handle_home_screen
 from handlers.ad_gem_handler import handle_ad_gem, stop_blind_gem_tapper, start_blind_gem_tapper
-from handlers.daily_gem_handler import handle_daily_gem
+from handlers.daily_gem_handler import DailyGemResult, handle_daily_gem
 from handlers.dismiss_uw_detail import handle_uw_detail_popup
 from utils.wave_detector import detect_wave_number_from_image
 
@@ -80,6 +83,8 @@ class App:
         self._last_wave_ts: float = 0.0
         self._blind_tapper_suspended = False
         self._run_initialization_gate_logged = False
+        rollover_state = Path(config.control_file).parent / "daily_gem_state.json"
+        self._daily_gem_scheduler = DailyGemScheduler(rollover_state)
 
     def run(self) -> None:
         log("Starting main heartbeat loop.", level="INFO", console=True)
@@ -242,6 +247,11 @@ class App:
 
     def _handle_primary_states(self, new_state: str, overlays: Set[str]) -> None:
         """Dispatch handlers for top-level UI states and overlay-driven events."""
+        if self._handle_daily_gem_if_due(new_state, overlays):
+            # The handler navigates through Store and may return to a different
+            # screen. Do not act on the stale pre-handler detection this tick.
+            return
+
         if new_state == "GAME_OVER":
             log("Detected GAME_OVER. Executing handler.", "INFO", console=True)
             handle_game_over(capture_stats=(not self._fast_game_over))
@@ -257,8 +267,36 @@ class App:
 
         if "AD_GEMS_AVAILABLE" in overlays:
             handle_ad_gem()
-        if "DAILY_GEMS_AVAILABLE" in overlays:
-            handle_daily_gem()
+
+    def _handle_daily_gem_if_due(self, new_state: str, overlays: Set[str]) -> bool:
+        """Run the Daily Gem probe from a safe state after UTC rollover."""
+
+        if new_state not in {"RUNNING", "HOME_SCREEN"}:
+            return False
+        badge_visible = "DAILY_GEMS_AVAILABLE" in overlays
+        attempted_at = datetime.now(timezone.utc)
+        if not self._daily_gem_scheduler.should_attempt(
+            badge_visible=badge_visible,
+            now=attempted_at,
+        ):
+            return False
+
+        reason = "badge" if badge_visible else "UTC rollover"
+        log(
+            f"[DAILY_GEM] Starting {reason} Store probe from state={new_state}",
+            "INFO",
+        )
+        if stop_blind_gem_tapper():
+            self._blind_tapper_suspended = True
+        result = handle_daily_gem()
+        if result in {DailyGemResult.CLAIMED, DailyGemResult.NOT_READY}:
+            # Attribute a badge-triggered claim to the game day on which the
+            # handler began. If navigation crosses UTC midnight, the new day
+            # must remain eligible on the next loop.
+            self._daily_gem_scheduler.mark_completed(result.value, now=attempted_at)
+        else:
+            self._daily_gem_scheduler.mark_failed()
+        return True
 
     def _normalise_detection(self, detection: Dict[str, Any]) -> tuple[str, Optional[str], Set[str], Set[str]]:
         """Normalise detector output, ensuring deterministic container types."""

@@ -77,6 +77,12 @@ core/clickmap_access.py
 - tap_now(name)/swipe_now(name) — R None; S [adb][log]; E CalledProcessError.
 - flatten_clickmap(prefix="")/get_entries_by_role(role) — R dict.
 
+core/daily_gem_scheduler.py
+- DailyGemScheduler.should_attempt(badge_visible=False, now=None) — R bool;
+  schedules after UTC midnight plus a one-minute grace and respects failure backoff.
+- mark_completed(result, now=None)/mark_failed(now=None) — S [fs][log];
+  atomically persists one completed probe per UTC game day or defers a retry.
+
 core/floating_button_detector.py
 - detect_floating_buttons(screen) — R list[dict]; S [cv2][state][log]; partial on exceptions.
 - tap_floating_button(name, buttons) — R bool; S [adb][log].

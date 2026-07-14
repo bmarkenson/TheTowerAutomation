@@ -2,9 +2,11 @@ from unittest.mock import patch
 
 import numpy as np
 
+from core.scrolling import ScrollResult
 from handlers.daily_gem_handler import (
     DAILY_GEM_BUTTON,
     DAILY_GEM_NOT_READY,
+    DailyGemResult,
     STORE_MENU_INDICATOR,
     _daily_gem_unavailable,
     _open_store_for_current_screen,
@@ -123,12 +125,41 @@ def test_visible_claim_at_store_entry_skips_all_scrolling():
         patch("handlers.daily_gem_handler.save_image"),
         patch("handlers.daily_gem_handler.time.sleep"),
     ):
-        handle_daily_gem()
+        result = handle_daily_gem()
 
     scroll_to_edge.assert_not_called()
     scroll_until_visible.assert_not_called()
+    assert result == DailyGemResult.CLAIMED
     assert [call.args[0] for call in tap.call_args_list] == [
         DAILY_GEM_BUTTON,
         "buttons.skip:claim_daily_gems",
         "buttons.return_to_game",
     ]
+
+
+def test_confirmed_cooldown_returns_not_ready_result():
+    screenshot = _screenshot()
+
+    def visible(label, *, screenshot=None):
+        return label == STORE_MENU_INDICATOR
+
+    with (
+        patch("handlers.daily_gem_handler._make_session_id", return_value="test"),
+        patch("handlers.daily_gem_handler._open_store_for_current_screen", return_value=True),
+        patch("handlers.daily_gem_handler._wait_for_label", return_value=True),
+        patch("handlers.daily_gem_handler.capture_adb_screenshot", return_value=screenshot),
+        patch("handlers.daily_gem_handler.is_visible", side_effect=visible),
+        patch(
+            "handlers.daily_gem_handler.scroll_to_edge",
+            return_value=ScrollResult(True, screenshot, 1, "edge_reached"),
+        ),
+        patch(
+            "handlers.daily_gem_handler.scroll_until_visible",
+            return_value=ScrollResult(False, screenshot, 0, DAILY_GEM_NOT_READY),
+        ),
+        patch("handlers.daily_gem_handler.save_image"),
+        patch("handlers.daily_gem_handler.time.sleep"),
+    ):
+        result = handle_daily_gem()
+
+    assert result == DailyGemResult.NOT_READY

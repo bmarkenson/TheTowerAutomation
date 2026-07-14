@@ -18,6 +18,10 @@ audited against the codebase and incorporated below on 2026-07-13.
   fixture; it was cleared before the new template could be exercised live. The
   in-run badge, Store navigation, active claim, ad skip, return to the running
   game, and inactive cooldown path are live-verified.
+- [ ] Live-validate the once-per-UTC-day Daily Gem Store probe across the next
+  game-day boundary. Confirm that its direct Store navigation claims the gem
+  despite the initially missing badge and that persisted completion suppresses
+  a second probe after an automation restart.
 - [ ] Run the default GC strategy under the full main loop for at least one
   natural Game Over -> Retry boundary and confirm the exclusive startup gate
   repeats EHLS then EALS while Target Priority remains session-scoped.
@@ -103,22 +107,6 @@ audited against the codebase and incorporated below on 2026-07-13.
     fixtures.
   - Choose one canonical runtime policy deliberately, then remove the
     compatibility shim and profile split.
-- [ ] Design a daily-rollover coordinator that detects the game-day boundary
-  and checks for the Store badge with a fresh frame before taking any refresh
-  action.
-  - At the 2026-07-13 17:00 PDT reset, two Daily Missions appeared while the
-    available Daily Gems Store badge remained absent.
-  - Closing and reopening the in-run menu did not refresh the badge; opening
-    Daily Missions and returning to the game did.
-  - Treat the observed 17:00 PDT boundary as a candidate UTC-midnight reset;
-    verify standard-time behavior before making that the canonical rule.
-  - Handle both a running process crossing the boundary and a process starting
-    after the boundary, with explicit once-per-game-day state and logs.
-  - If the first badge check is negative, stop at a visible decision point:
-    compare a controlled navigation refresh, a direct guarded Store probe, and
-    waiting for the game bug to be fixed before choosing an implementation.
-  - Schedule the check through the same exclusive tap authority as startup,
-    pause, handlers, and operator activity; it must not race another action.
 - [ ] Audit the floating ad-gem diamond and replace timed blind tapping if a
   reliable shape/color/contour or tracked-motion detector can locate it.
   - Compare the existing heuristic and orphaned directional templates against

@@ -19,6 +19,10 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Centralized clickmap-backed matching in `core.matcher` around a structured
   `MatchResult`, cached template loading, and shared region resolution while
   preserving the detector and label compatibility profiles at their public APIs.
+- Added a persisted Daily Gem scheduler keyed to UTC midnight, which is 17:00
+  PDT and 16:00 PST. It invokes the existing Store handler without requiring a
+  badge, defers until a safe Home/Running state, backs off failures, and records
+  completed or confirmed-not-ready outcomes once per game day.
 
 
 ---

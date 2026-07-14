@@ -1,20 +1,29 @@
-from utils.logger import log
-from core.ss_capture import capture_adb_screenshot
+from enum import Enum
+import os
+import re
+import time
+
+import cv2
+
 from core.input import safe_tap, tap_if_visible
 from core.label_tapper import is_visible
 from core.scrolling import scroll_to_edge, scroll_until_visible
+from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
+from utils.logger import log
 from utils.ocr_utils import ocr_text_and_conf
-import time
-import os
-import cv2
-import re
 
 STORE_MENU_INDICATOR = "indicators.menu_store"
 DAILY_GEM_BUTTON = "buttons.claim_daily_gems"
 STORE_CONTENT_REGION = (0, 170, 1080, 1580)
 DAILY_GEM_CARD_COLUMN = (100, 180, 440, 1570)
 DAILY_GEM_NOT_READY = "daily_gem_not_ready"
+
+
+class DailyGemResult(str, Enum):
+    CLAIMED = "claimed"
+    NOT_READY = "not_ready"
+    FAILED = "failed"
 
 
 def _wait_for_label(label: str, *, timeout: float = 5.0, poll: float = 0.3) -> bool:
@@ -78,7 +87,8 @@ def _open_store_for_current_screen() -> bool:
     log(f"[DAILY_GEM] Refusing to open Store from state={state!r}", "WARN")
     return False
 
-def handle_daily_gem():
+
+def handle_daily_gem() -> DailyGemResult:
     session_id = _make_session_id()
     log(f"Handling DAILY AD GEM — Session: {session_id}", "INFO")
 
@@ -126,7 +136,7 @@ def handle_daily_gem():
         )
         if claim.reason == DAILY_GEM_NOT_READY:
             log("[DAILY_GEM] No claim available; leaving Store unchanged.", "INFO")
-            return
+            return DailyGemResult.NOT_READY
         if not claim.success or claim.screenshot is None:
             return _abort_handler(f"Find Claim Daily Gems ({claim.reason})", session_id)
         claim_screenshot = claim.screenshot
@@ -147,9 +157,12 @@ def handle_daily_gem():
     if not tap_if_visible("buttons.return_to_game", retries=1):
         return _abort_handler("Return to Game", session_id)
     time.sleep(1.2)
+    return DailyGemResult.CLAIMED
+
 
 def _make_session_id():
     return "Game" + time.strftime("%Y%m%d_%H%M")
+
 
 def save_image(img, tag):
     if img is None:
@@ -160,6 +173,7 @@ def save_image(img, tag):
     cv2.imwrite(path, img)
     log(f"[CAPTURE] Saved screenshot: {path}", "INFO")
 
+
 def _abort_handler(step, session_id):
     """
     Logs error, saves screenshot, and aborts handler.
@@ -167,4 +181,4 @@ def _abort_handler(step, session_id):
     log(f"[ABORT]  Daily Gem handler failed at: {step}", "ERROR")
     debug_img = capture_adb_screenshot()
     save_image(debug_img, f"{session_id}_ABORT_{step.replace(' ', '_')}")
-    return
+    return DailyGemResult.FAILED
