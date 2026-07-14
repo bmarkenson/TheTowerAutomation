@@ -125,6 +125,11 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   became visibly gold (tap completion at 0.742 and 0.748 seconds). Completion
   waves, EALS first-tap wave/time, total elapsed time, tap count, and failure
   reason are recorded.
+- Restored optional pause expiry without restoring the split-brain timer race.
+  A plain control-file pause remains indefinite; `pause --minutes N` persists
+  its deadline, the supervisor mirrors that deadline in memory, and expiry
+  persists `RUNNING` before allowing automation actions to resume. A failed
+  control-file write leaves the process paused.
 
 ---
 

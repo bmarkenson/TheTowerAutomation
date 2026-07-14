@@ -7,6 +7,7 @@ consumed by main.py (default: logs/automation_ctl.json).
 
 Commands:
   - pause                 → state=PAUSED until an explicit resume
+  - pause --minutes N     → state=PAUSED until its persisted deadline
   - resume                → state=RUNNING
   - stop                  → state=STOPPED
   - mode <retry|wait|home>→ set ExecMode
@@ -15,14 +16,17 @@ Commands:
   - status                → print current file contents (or defaults)
 
 Writes atomically (tmp + os.replace) and preserves unspecified fields.
-The control file is authoritative: PAUSED never expires automatically.
+The control file is authoritative. A pause is indefinite unless it has an
+explicit ``resume_at`` deadline.
 """
 
 from __future__ import annotations
 import argparse
 import json
+import math
 import os
 import sys
+import time
 from datetime import datetime
 
 
@@ -52,12 +56,15 @@ def _atomic_write_json(path: str, data: dict) -> None:
     os.replace(tmp, path)
 
 
-def _set_state(path: str, state: str) -> None:
+def _set_state(path: str, state: str, *, resume_at: float | None = None) -> None:
     s = state.upper()
     if s not in VALID_STATES:
         raise SystemExit(f"Invalid state: {state}. Use one of {sorted(VALID_STATES)}")
     data = _read_json(path)
     data["state"] = s
+    data.pop("resume_at", None)
+    if s == "PAUSED" and resume_at is not None:
+        data["resume_at"] = resume_at
     data["updated_at"] = datetime.now().isoformat(timespec="seconds")
     _atomic_write_json(path, data)
     print(f"[OK] State set to {s} @ {path}")
@@ -77,6 +84,13 @@ def _set_mode(path: str, mode: str) -> None:
 def main(argv=None):
     p = argparse.ArgumentParser(description="Automation pause/mode controller")
     p.add_argument("command", nargs="+", help="pause | resume | stop | mode <m> | set state <s> | set mode <m> | status")
+    p.add_argument(
+        "--minutes",
+        type=float,
+        default=None,
+        metavar="N",
+        help="Optional positive duration for the pause command",
+    )
     p.add_argument("--control-file", dest="ctrl", default=DEFAULT_CTRL_PATH, help=f"Control file path (default: {DEFAULT_CTRL_PATH})")
     args = p.parse_args(argv)
 
@@ -84,8 +98,15 @@ def main(argv=None):
     ctrl = args.ctrl
 
     if cmd[0] == "pause" and len(cmd) == 1:
-        _set_state(ctrl, "PAUSED")
+        resume_at = None
+        if args.minutes is not None:
+            if not math.isfinite(args.minutes) or args.minutes <= 0:
+                p.error("--minutes must be a positive number")
+            resume_at = time.time() + (args.minutes * 60)
+        _set_state(ctrl, "PAUSED", resume_at=resume_at)
         return 0
+    if args.minutes is not None:
+        p.error("--minutes is only valid with the pause command")
     if cmd[0] == "resume" and len(cmd) == 1:
         _set_state(ctrl, "RUNNING")
         return 0
@@ -107,7 +128,18 @@ def main(argv=None):
         st = (data.get("state") or "RUNNING").upper()
         md = (data.get("mode") or "RETRY").upper()
         upd = data.get("updated_at") or "<never>"
-        print(json.dumps({"state": st, "mode": md, "updated_at": upd, "path": ctrl}, indent=2))
+        resume_at = data.get("resume_at")
+        remaining_seconds = None
+        if isinstance(resume_at, (int, float)) and math.isfinite(resume_at):
+            remaining_seconds = max(0, round(resume_at - time.time()))
+        print(json.dumps({
+            "state": st,
+            "mode": md,
+            "resume_at": resume_at,
+            "remaining_seconds": remaining_seconds,
+            "updated_at": upd,
+            "path": ctrl,
+        }, indent=2))
         return 0
 
     p.print_help()

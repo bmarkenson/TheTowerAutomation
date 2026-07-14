@@ -40,13 +40,15 @@ Pause and resume the running process through its persistent control file:
 
 ```bash
 .venv/bin/python tools/automation_ctl.py pause
+.venv/bin/python tools/automation_ctl.py pause --minutes 15
 .venv/bin/python tools/automation_ctl.py status
 .venv/bin/python tools/automation_ctl.py resume
 ```
 
-A pause is indefinite and survives automation restarts. Only an explicit
-`resume` changes the desired state back to `RUNNING`; there is no pause-expiry
-timer.
+A plain `pause` is indefinite and survives automation restarts. Pass
+`--minutes N` to request a timed pause instead. Its deadline is stored in the
+same authoritative control file, so the supervisor persists `RUNNING` before
+resuming and cannot race against a stale `PAUSED` directive.
 
 ## Development backlog
 

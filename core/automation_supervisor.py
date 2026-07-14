@@ -21,8 +21,11 @@ Public usage (simplified):
 from __future__ import annotations
 
 import json
+import math
+import os
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -86,6 +89,8 @@ class AutomationSupervisor:
         # Internal state
         self._last_applied_state: Optional[str] = None
         self._last_applied_mode: Optional[str] = None
+        self._pause_resume_at: Optional[float] = None
+        self._last_invalid_resume_at: object = None
 
         self._last_coins_toggle_ts: float = 0.0
         self._coins_has_min_miss: int = 0
@@ -110,12 +115,15 @@ class AutomationSupervisor:
         return str(st) == "RunState.PAUSED" or st == "PAUSED"
 
     def apply_control(self) -> None:
-        """Poll the control file and apply its persistent state/mode directives."""
+        """Apply persistent directives and expire an optional timed pause."""
 
         directives = self._load_control_directive()
         if directives:
             self._apply_state(directives.get("state"))
             self._apply_mode(directives.get("mode"))
+            self._sync_pause_deadline(directives)
+
+        self._auto_resume_if_needed()
 
     def format_state(self, ui_state: str) -> str:
         return f"{ui_state}/PAUSED" if self.is_paused else ui_state
@@ -445,7 +453,7 @@ class AutomationSupervisor:
             self._rtg_visible_since_ts = None
 
     # ------------------------------ helpers ---------------------------------
-    def _load_control_directive(self) -> Dict[str, str]:
+    def _load_control_directive(self) -> Dict[str, object]:
         if not self.control_file.exists():
             return {}
         try:
@@ -456,8 +464,8 @@ class AutomationSupervisor:
             return {}
         return data if isinstance(data, dict) else {}
 
-    def _apply_state(self, state: Optional[str]) -> None:
-        if not state:
+    def _apply_state(self, state: object) -> None:
+        if not isinstance(state, str) or not state:
             return
         normalized = state.upper()
         if normalized not in _ALLOWED_STATES or normalized == self._last_applied_state:
@@ -473,8 +481,8 @@ class AutomationSupervisor:
         except Exception as exc:
             log(f"[CTRL] Failed to set state={normalized}: {exc}", "WARN")
 
-    def _apply_mode(self, mode: Optional[str]) -> None:
-        if not mode:
+    def _apply_mode(self, mode: object) -> None:
+        if not isinstance(mode, str) or not mode:
             return
         normalized = mode.upper()
         if normalized not in _ALLOWED_MODES or normalized == self._last_applied_mode:
@@ -489,6 +497,84 @@ class AutomationSupervisor:
             self._last_applied_mode = normalized
         except Exception as exc:
             log(f"[CTRL] Failed to set mode={normalized}: {exc}", "WARN")
+
+    @staticmethod
+    def _parse_resume_at(value: object) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if math.isfinite(parsed) and parsed > 0 else None
+
+    def _sync_pause_deadline(self, directives: Dict[str, object]) -> None:
+        state = directives.get("state")
+        if not isinstance(state, str) or state.upper() != "PAUSED":
+            self._pause_resume_at = None
+            self._last_invalid_resume_at = None
+            return
+
+        raw_resume_at = directives.get("resume_at")
+        self._pause_resume_at = self._parse_resume_at(raw_resume_at)
+        if raw_resume_at is None or self._pause_resume_at is not None:
+            self._last_invalid_resume_at = None
+            return
+
+        if raw_resume_at != self._last_invalid_resume_at:
+            log(
+                f"[CTRL] Ignoring invalid pause resume_at={raw_resume_at!r}",
+                "WARN",
+            )
+            self._last_invalid_resume_at = raw_resume_at
+
+    def _write_control_directive(self, directives: Dict[str, object]) -> bool:
+        try:
+            self.control_file.parent.mkdir(parents=True, exist_ok=True)
+            temp_path = self.control_file.with_name(
+                f".{self.control_file.name}.{os.getpid()}.tmp"
+            )
+            with temp_path.open("w", encoding="utf-8") as handle:
+                json.dump(directives, handle, indent=2, ensure_ascii=False)
+            os.replace(temp_path, self.control_file)
+            return True
+        except OSError as exc:
+            log(f"[CTRL] Failed writing control file: {exc}", "WARN")
+            return False
+
+    def _auto_resume_if_needed(self) -> None:
+        deadline = self._pause_resume_at
+        if not self.is_paused or deadline is None or time.time() < deadline:
+            return
+
+        # Re-read immediately before writing so a manual resume, extension, or
+        # replacement with an indefinite pause wins over this cached deadline.
+        directives = self._load_control_directive()
+        state = directives.get("state")
+        current_deadline = self._parse_resume_at(directives.get("resume_at"))
+        if (
+            not isinstance(state, str)
+            or state.upper() != "PAUSED"
+            or current_deadline != deadline
+        ):
+            self._sync_pause_deadline(directives)
+            return
+
+        directives["state"] = "RUNNING"
+        directives.pop("resume_at", None)
+        directives["updated_at"] = datetime.now().astimezone().isoformat(
+            timespec="seconds"
+        )
+        if not self._write_control_directive(directives):
+            return
+
+        self._apply_state("RUNNING")
+        self._pause_resume_at = None
+        log(
+            "[CTRL] Timed pause expired; persisted State=RUNNING",
+            "INFO",
+            console=True,
+        )
 
 # Re-exports for convenience
 try:

@@ -82,10 +82,10 @@ audited against the codebase and incorporated below on 2026-07-13.
 - [ ] Provide a convenient pause/resume interface so stopping the process with
   `Ctrl-C` is unnecessary.
   - Build on the existing control-file and `tools/automation_ctl.py` support.
-  - [x] Make manual pause indefinite and authoritative until explicit resume.
-    The duplicate in-memory 15-minute expiry and its CLI/config switches were
-    removed after the 2026-07-14 race allowed a blind tapper to run briefly
-    against a still-`PAUSED` control file.
+  - [x] Make manual pause indefinite by default while supporting an explicit
+    timed pause. The 2026-07-14 race came from an in-memory expiry resuming
+    against a still-`PAUSED` control file; timed deadlines are now persisted in
+    that authoritative file and expiry writes `RUNNING` before actions resume.
   - Make pause state obvious and ensure manual input does not race automation.
   - Support extending or cancelling pending recovery timers.
 - [ ] Detect likely manual player activity and automatically yield tap authority.
