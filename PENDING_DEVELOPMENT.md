@@ -84,6 +84,12 @@ audited against the codebase and incorporated below on 2026-07-13.
   - Build on the existing control-file and `tools/automation_ctl.py` support.
   - Make pause state obvious and ensure manual input does not race automation.
   - Support extending or cancelling pending recovery timers.
+  - Fix timed pause expiry so the persisted control state and in-memory state
+    change atomically. During the 2026-07-14 floating-gem diagnostic, the
+    default 15-minute timeout resumed in memory while the control file still
+    said `PAUSED`; the ad-gem handler's blind tapper sent 13 taps before the
+    stale file reasserted pause. Diagnostics need an indefinite/extendable pause
+    and an imminent-expiry warning.
 - [ ] Detect likely manual player activity and automatically yield tap authority.
   - Treat an unexpected Go Home/manual navigation sequence during an active run
     as operator activity rather than an error to immediately undo.
@@ -131,11 +137,28 @@ audited against the codebase and incorporated below on 2026-07-13.
     fixtures.
   - Choose one canonical runtime policy deliberately, then remove the
     compatibility shim and profile split.
-- [ ] Audit the floating ad-gem diamond and replace timed blind tapping if a
+- [ ] Audit the floating gem (Bob) and replace timed blind tapping if a
   reliable shape/color/contour or tracked-motion detector can locate it.
-  - Compare the existing heuristic and orphaned directional templates against
-    live samples.
-  - Require a fresh detection immediately before each tap.
+  - A live 69-frame H.264 burst on 2026-07-14 identified Bob as the rotating
+    square-with-diamond icon on an approximately 180-190 px circular orbit
+    around `(540,480)`. It advances about 35 degrees/second, for an orbit near
+    10.4 seconds; the current blind point `(542,671)` is a bottom intercept.
+  - The orphaned directional templates scored only about 0.25-0.50 and were
+    commonly outranked by combat effects. The existing magenta-square heuristic
+    detected only 5/69 positive frames across the gameplay annulus (1/69 in its
+    historical crop). Neither is safe to restore as a single-frame detector.
+  - A measured offline spike normalized white/magenta evidence around the
+    expected annulus and fitted a constant-angular-velocity path. Roughly five
+    seconds cleanly separated the positive burst from a same-run no-Bob burst
+    and recovered the observed trajectory; shorter windows produced false
+    tracks. Validate this method across additional positive/negative effect
+    patterns before implementation.
+  - Use the low-latency stream for this moving target. A concurrent normal ADB
+    capture occupied 51 encoded frames (about 1.7 seconds), during which Bob
+    travels roughly 60 degrees. Require a current multi-frame track immediately
+    before a predicted single tap, then verify both disappearance and the
+    expected gem-count change. Do not fall back to timed blind taps on a failed
+    track.
 - [ ] Audit the home-screen `CLAIM` control in available and unavailable states;
   determine whether its artwork changes and split templates/state rules if so.
 - [ ] Add composite state-definition logic such as `all_of`, `any_of`, and
