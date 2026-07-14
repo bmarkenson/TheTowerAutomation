@@ -95,7 +95,8 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Fixed the Daily Gems cooldown exit so `NOT_READY` is returned only after the
   handler taps Return to Game. Failure to find that control now fails the probe
   instead of recording an incomplete Store visit as a successful daily check.
-  The fix has automated coverage and awaits its next natural live revalidation.
+  Live-verified the repaired path on 2026-07-14: the cooldown was detected,
+  Return to Game matched and tapped, and the resulting state was `RUNNING`.
 - Replaced generic per-tick EHLS/EALS searches with a dedicated exclusive,
   state-driven initializer. It uses fast label templates and upgrade geometry,
   detects the rectangular gold `Max` border directly, supports either or both

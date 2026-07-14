@@ -17,10 +17,8 @@ audited against the codebase and incorporated below on 2026-07-13.
   availability. The badge was captured on Home and matches its canonical
   fixture; it was cleared before the new template could be exercised live. The
   in-run badge, Store navigation, active claim, ad skip, return to the running
-  game, and inactive cooldown detection are live-verified. The cooldown path's
-  automatic Return-to-Game fix has automated coverage but still needs live
-  revalidation; on 2026-07-14 the old early return left Store open and required
-  a manual return.
+  game, and inactive cooldown path—including its automatic Return-to-Game
+  action—are live-verified.
 - [ ] Live-validate the once-per-UTC-day Daily Gem Store probe across the next
   game-day boundary. Confirm that its direct Store navigation claims the gem
   despite the initially missing badge and that persisted completion suppresses
