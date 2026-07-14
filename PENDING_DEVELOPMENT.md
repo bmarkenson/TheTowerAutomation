@@ -189,8 +189,6 @@ audited against the codebase and incorporated below on 2026-07-13.
     checked-in runner that will persist this behavior across Codex sessions.
   - Until then, require Codex commands to invoke `.venv/bin/python` and
     `.venv/bin/python -m pytest` explicitly and fail clearly if `.venv` is absent.
-- [ ] Isolate automated-test logging from `logs/actions.log` so synthetic test
-  events cannot be mistaken for live-device evidence.
 - [ ] Continue the full template audit begun on 2026-07-13.
   - The recursive static validator now checks nested entries, regions, files,
     image readability, and geometry; resolve/classify its dated orphan list.

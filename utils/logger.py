@@ -9,6 +9,13 @@ from typing import Optional
 
 
 _MISSION_LOG_PATH: Optional[str] = None
+DEFAULT_ACTION_LOG_PATH = os.path.join("logs", "actions.log")
+
+
+def get_action_log_path() -> str:
+    """Return the primary log path, honoring test/tool isolation overrides."""
+
+    return os.getenv("TOWER_ACTION_LOG_PATH") or DEFAULT_ACTION_LOG_PATH
 
 
 def _parse_console_levels() -> set[str]:
@@ -41,8 +48,9 @@ def set_mission_log_path(path: Optional[str]) -> None:
 
 def _write_entry(entry: str, *, extra_path: Optional[str] = None) -> None:
     """Append a log entry to the primary log and optional extra path."""
-    os.makedirs("logs", exist_ok=True)
-    with open("logs/actions.log", "a", encoding="utf-8") as f:
+    primary_path = get_action_log_path()
+    os.makedirs(os.path.dirname(primary_path) or ".", exist_ok=True)
+    with open(primary_path, "a", encoding="utf-8") as f:
         f.write(entry + "\n")
     if extra_path:
         os.makedirs(os.path.dirname(extra_path) or ".", exist_ok=True)
@@ -68,11 +76,12 @@ def log(
 
     Side effects:
         - Prints to stdout when allowed for the provided log level.
-        - Creates logs/ directory if missing.
-        - Appends entry to logs/actions.log.
+        - Creates the primary log directory if missing.
+        - Appends to ``TOWER_ACTION_LOG_PATH`` when set, otherwise
+          ``logs/actions.log``.
 
     Raises:
-        OSError: If unable to create logs/ directory or write to the log file.
+        OSError: If unable to create the primary directory or write the log file.
     """
     normalized_level = level.upper() if level else "INFO"
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

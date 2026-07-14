@@ -25,6 +25,13 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-13 test-log isolation
+
+- Added a runtime-overridable primary action-log path and configured pytest to
+  use a unique `/tmp/thetower-pytest-*` log before test modules are imported.
+- Verified targeted and full test runs leave the live `logs/actions.log` size
+  and modification time unchanged while retaining synthetic logs for diagnosis.
+
 ### 2026-07-13 live automation validation
 
 - Added and live-verified `--adb-port` support with default port 5555.
