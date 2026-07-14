@@ -96,6 +96,13 @@ audited against the codebase and incorporated below on 2026-07-13.
 
 ## Detection architecture
 
+- [ ] Finish matcher API and policy consolidation after fixture coverage is
+  broad enough to make the compatibility decision safely.
+  - Migrate remaining `utils.template_matcher` shim callers to `core.matcher`.
+  - Measure color/padding profiles against representative positive and negative
+    fixtures.
+  - Choose one canonical runtime policy deliberately, then remove the
+    compatibility shim and profile split.
 - [ ] Design a daily-rollover coordinator that detects the game-day boundary
   and checks for the Store badge with a fresh frame before taking any refresh
   action.

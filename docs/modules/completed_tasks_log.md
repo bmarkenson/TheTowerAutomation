@@ -16,6 +16,9 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   - `run_tune_gesture` → deleted (manual launch note)
 - Refactored tools/crop_region.py and main.py to use get_and_save_screenshot from ss_capture (centralizing save logic)
 - Updated tools/crop_region.py to correctly handle gesture logging (single click / swipe, then redraw window).  Also implemented scrolling within the crop window
+- Centralized clickmap-backed matching in `core.matcher` around a structured
+  `MatchResult`, cached template loading, and shared region resolution while
+  preserving the detector and label compatibility profiles at their public APIs.
 
 
 ---
@@ -24,6 +27,19 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
+
+### 2026-07-13 headless template workflow
+
+- Added a dry-run-first template tool that separates the exact asset crop from
+  its runtime search region, validates both current match profiles, accepts
+  positive and negative fixtures, and emits candidate, annotated, and JSON
+  review artifacts without requiring a desktop session.
+- Added guarded atomic commit support with explicit consent for replacements,
+  shared assets, and dimension changes while preserving unrelated clickmap
+  fields.
+- Reproduced the Home Store-badge asset from its canonical fixture pixel for
+  pixel and verified its 52x52 crop at the expected location within the
+  distinct 64x66 runtime search region.
 
 ### 2026-07-13 test-log isolation
 

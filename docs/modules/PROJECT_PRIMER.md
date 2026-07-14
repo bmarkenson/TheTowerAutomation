@@ -86,6 +86,12 @@ core/label_tapper.py
 - get_label_match(label_key, screenshot=None, return_meta=False) — R bbox|meta; S [adb].
 - is_visible(label_key, screenshot=None) — R bool; S [adb].
 
+core/matcher.py
+- MatchResult/match_entry_result(...) — canonical clickmap-backed template-match
+  evaluation with normalized search geometry, cached assets, and explicit failure metadata.
+- get_match_result(dot_path, screen=None)/get_match(...) — detector-compatible
+  color profile; `_match_entry(...)` remains the compatibility-level entry helper.
+
 core/ss_capture.py
 - capture_adb_screenshot()/capture_and_save_screenshot(path) — R ndarray|None; S [adb][cv2][fs][log].
 
@@ -125,6 +131,9 @@ test/*
 
 tools/*
 - crop_region.reload_image()/save_template_crop_and_entry()/handle_mouse(...) — S [adb][cv2][fs][log].
+- template_tool.build_plan()/validate_plan()/write_preview()/commit_plan()/main()
+  — headless dry-run-first template creation with exact-crop validation, runtime
+  profile checks, review artifacts, and guarded atomic asset/clickmap updates.
 - gesture_logger.ScrcpyBridge(start/ensure_running/stop/ctxmgr/flush_old/read_gesture) + record_and_save/ensure_entry/replay_gesture/main(--name).
 - run_blind_gem_tapper.main(--duration --interval --blocking); start_blind_gem_tapper(...).
 - scrcpy_adb_input_bridge.ensure_scrcpy_window_rect/get_android_screen_size/get_scrcpy_window_rect/map_to_android/send_tap/send_swipe/get_pixel_color_at_android_coords/start_mouse_listener/launch_scrcpy/cleanup_and_exit/main(--json-stream --rect-source --rect-diagnose).

@@ -11,7 +11,7 @@ Checks:
   6) optional multiscale probe to find best scale
 
 Usage:
-  python3 test/verify_match.py \
+  .venv/bin/python test/verify_match.py \
     --dot-path indicators.game_over \
     --screenshot screenshots/latest.png \
     --template-dir assets/match_templates \
@@ -24,6 +24,11 @@ import argparse
 import json
 import cv2
 import numpy as np
+
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 
 from core.clickmap_access import get_clickmap, resolve_dot_path
 from core.matcher import _match_entry  # low-level helper used by the shim
@@ -115,7 +120,7 @@ def main():
     # 3) Normal match via matcher (uses padding & threshold from entry)
     try:
         pt, conf = _match_entry(screen, entry, template_dir=args.template_dir)
-        print(f"[INFO] _match_entry result: pt={pt}, conf={conf:.3f}")
+        print(f"[INFO] _match_entry result: pt={pt}, conf={conf:.6f}")
     except Exception as e:
         print(f"[ERROR] _match_entry raised: {repr(e)}")
         sys.exit(3)
@@ -129,7 +134,7 @@ def main():
     }
     try:
         fs_pt, fs_conf = _match_entry(screen, fs_entry, template_dir=args.template_dir)
-        print(f"[INFO] Fullscreen probe: pt={fs_pt}, conf={fs_conf:.3f}")
+        print(f"[INFO] Fullscreen probe: pt={fs_pt}, conf={fs_conf:.6f}")
     except Exception as e:
         print(f"[ERROR] Fullscreen probe raised: {repr(e)}")
 
