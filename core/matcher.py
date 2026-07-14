@@ -3,6 +3,8 @@
 Centralized, clickmap-backed matching utilities.
 
 Public API:
+    get_match_result(dot_path, *, screenshot, template_dir=...)
+        → MatchResult(bbox, center, confidence, threshold, search_region)
     get_match(dot_path, *, screenshot, template_dir="assets/match_templates")
         → ((x, y), confidence) or (None, confidence)
 
@@ -14,20 +16,191 @@ Notes:
 - Uses OpenCV template matching (cv2.TM_CCOEFF_NORMED).
 - Reads template/region/threshold from clickmap entries (via clickmap.json).
 - Expands the search region by optional 'match_padding' (default 12px), clamped to screen bounds.
+- Supplies the shared low-level engine used by state detection and label tapping.
 """
 
 from __future__ import annotations
-from typing import Optional, Tuple, Dict, Any
-import os
+
+from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
+from typing import Any, Dict, Mapping, Optional, Tuple
+
 import cv2
 import numpy as np  # used by detect_floating_gem_square
+
 from core.clickmap_access import resolve_dot_path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_TEMPLATE_DIR = PROJECT_ROOT / "assets" / "match_templates"
+Rect = Tuple[int, int, int, int]
+
+
+@dataclass(frozen=True)
+class MatchResult:
+    """Complete result from one template-match evaluation.
+
+    ``bbox`` is the best candidate even when it is below threshold. Callers must
+    use ``matched`` before treating it as a valid detection.
+    """
+
+    bbox: Optional[Rect]
+    confidence: float
+    threshold: float
+    search_region: Optional[Rect]
+    failure_reason: Optional[str] = None
+
+    @property
+    def matched(self) -> bool:
+        return (
+            self.failure_reason is None
+            and self.bbox is not None
+            and self.confidence >= self.threshold
+        )
+
+    @property
+    def center(self) -> Optional[Tuple[int, int]]:
+        if self.bbox is None:
+            return None
+        x, y, w, h = self.bbox
+        return x + w // 2, y + h // 2
+
+
+def normalize_region(region: Any) -> Dict[str, int]:
+    """Normalize a supported region representation to ``x/y/w/h`` integers."""
+
+    if isinstance(region, Mapping) and isinstance(region.get("match_region"), Mapping):
+        region = region["match_region"]
+    if isinstance(region, Mapping) and all(key in region for key in ("x", "y", "w", "h")):
+        return {key: int(region[key]) for key in ("x", "y", "w", "h")}
+    if isinstance(region, Mapping) and all(
+        key in region for key in ("left", "top", "width", "height")
+    ):
+        return {
+            "x": int(region["left"]),
+            "y": int(region["top"]),
+            "w": int(region["width"]),
+            "h": int(region["height"]),
+        }
+    if isinstance(region, (list, tuple)) and len(region) == 4:
+        x, y, w, h = region
+        return {"x": int(x), "y": int(y), "w": int(w), "h": int(h)}
+    raise ValueError(f"Unsupported region format: {region!r}")
+
+
+def resolve_match_region(
+    entry: Mapping[str, Any],
+    clickmap: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, int]:
+    """Resolve an entry's direct or shared match region."""
+
+    if "match_region" in entry:
+        return normalize_region(entry["match_region"])
+    region_ref = entry.get("region_ref")
+    if not region_ref:
+        raise ValueError("No match_region or region_ref defined")
+    shared = resolve_dot_path(f"_shared_match_regions.{region_ref}", clickmap)
+    if not isinstance(shared, Mapping):
+        raise ValueError(f"Unknown region_ref '{region_ref}'")
+    return normalize_region(shared)
+
+
+@lru_cache(maxsize=256)
+def _read_template_cached(
+    path: str,
+    imread_flag: int,
+    mtime_ns: int,
+    size: int,
+):
+    # mtime/size are cache-key inputs so an asset refresh is observed without a
+    # process restart. They are intentionally unused in the function body.
+    del mtime_ns, size
+    return cv2.imread(path, imread_flag)
+
+
+def _load_template(path: Path, *, grayscale: bool):
+    if not path.is_file():
+        raise FileNotFoundError(f"Template not found: {path}")
+    stat = path.stat()
+    flag = cv2.IMREAD_GRAYSCALE if grayscale else cv2.IMREAD_COLOR
+    template = _read_template_cached(
+        str(path.resolve()),
+        flag,
+        stat.st_mtime_ns,
+        stat.st_size,
+    )
+    if template is None:
+        raise ValueError(f"Failed to load template: {path}")
+    return template
+
+
+def match_entry_result(
+    screenshot,
+    entry: Mapping[str, Any],
+    template_dir: str | Path = DEFAULT_TEMPLATE_DIR,
+    *,
+    grayscale: bool = False,
+    padding: Optional[int] = None,
+    clickmap: Optional[Mapping[str, Any]] = None,
+) -> MatchResult:
+    """Match a resolved clickmap entry and return geometry plus confidence.
+
+    ``grayscale`` and ``padding`` are explicit compatibility profiles. State
+    detection currently uses color and entry/default padding; label tapping uses
+    grayscale with zero padding. Both profiles share all other matching logic.
+    """
+
+    threshold = float(entry.get("match_threshold", 0.9)) if entry else 0.9
+    if not entry or "match_template" not in entry:
+        return MatchResult(None, 0.0, threshold, None, "missing match_template")
+    try:
+        region = resolve_match_region(entry, clickmap)
+    except ValueError as exc:
+        return MatchResult(None, 0.0, threshold, None, str(exc))
+
+    if screenshot is None or not hasattr(screenshot, "shape") or len(screenshot.shape) < 2:
+        return MatchResult(None, 0.0, threshold, None, "invalid screenshot")
+
+    x, y, w, h = (region[key] for key in ("x", "y", "w", "h"))
+    effective_padding = int(entry.get("match_padding", 12) if padding is None else padding)
+    if w <= 0 or h <= 0 or effective_padding < 0:
+        return MatchResult(None, 0.0, threshold, None, "invalid match region or padding")
+
+    screen_h, screen_w = screenshot.shape[:2]
+    x1 = max(0, x - effective_padding)
+    y1 = max(0, y - effective_padding)
+    x2 = min(screen_w, x + w + effective_padding)
+    y2 = min(screen_h, y + h + effective_padding)
+    search_region = (x1, y1, x2 - x1, y2 - y1)
+    if x1 >= x2 or y1 >= y2:
+        return MatchResult(None, 0.0, threshold, search_region, "match region is out of bounds")
+
+    template_path = Path(template_dir) / str(entry["match_template"])
+    template = _load_template(template_path, grayscale=grayscale)
+    region_img = screenshot[y1:y2, x1:x2]
+    if grayscale and getattr(region_img, "ndim", None) == 3:
+        region_img = cv2.cvtColor(region_img, cv2.COLOR_BGR2GRAY)
+
+    region_h, region_w = region_img.shape[:2]
+    template_h, template_w = template.shape[:2]
+    if region_h < template_h or region_w < template_w:
+        reason = (
+            f"template {template_w}x{template_h} exceeds search region "
+            f"{region_w}x{region_h}"
+        )
+        return MatchResult(None, 0.0, threshold, search_region, reason)
+
+    result = cv2.matchTemplate(region_img, template, cv2.TM_CCOEFF_NORMED)
+    _, max_val, _, max_loc = cv2.minMaxLoc(result)
+    bbox = (x1 + max_loc[0], y1 + max_loc[1], template_w, template_h)
+    return MatchResult(bbox, float(max_val), threshold, search_region)
 
 
 def _match_entry(
     screenshot,
     entry: Dict[str, Any],
-    template_dir: str = "assets/match_templates",
+    template_dir: str | Path = DEFAULT_TEMPLATE_DIR,
 ) -> Tuple[Optional[Tuple[int, int]], float]:
     """
     Low-level matcher using an already-resolved clickmap entry dict.
@@ -54,63 +227,29 @@ def _match_entry(
         ValueError if the template cannot be loaded.
         cv2.error if images are invalid.
     """
-    if not entry or "match_template" not in entry:
-        return None, 0.0
+    result = match_entry_result(screenshot, entry, template_dir=template_dir)
+    return (result.center if result.matched else None), result.confidence
 
-    template_path = os.path.join(template_dir, entry["match_template"])
-    if not os.path.exists(template_path):
-        raise FileNotFoundError(f"Template not found: {template_path}")
 
-    # Resolve region
-    region = entry.get("match_region")
-    if region is None and "region_ref" in entry:
-        region_entry = resolve_dot_path(f"_shared_match_regions.{entry['region_ref']}")
-        region = region_entry.get("match_region") if region_entry else None
+def get_match_result(
+    dot_path: str,
+    *,
+    screenshot,
+    template_dir: str | Path = DEFAULT_TEMPLATE_DIR,
+) -> MatchResult:
+    """Resolve a clickmap entry and return its complete match result."""
 
-    if not region:
-        return None, 0.0
-
-    x, y, w, h = region["x"], region["y"], region["w"], region["h"]
-    padding = int(entry.get("match_padding", 12))
-
-    # Expand region with padding, clamp to screen bounds
-    x1 = max(0, x - padding)
-    y1 = max(0, y - padding)
-    x2 = min(screenshot.shape[1], x + w + padding)
-    y2 = min(screenshot.shape[0], y + h + padding)
-    if x1 >= x2 or y1 >= y2:
-        return None, 0.0
-
-    region_img = screenshot[y1:y2, x1:x2]
-
-    template = cv2.imread(template_path)
-    if template is None:
-        raise ValueError(f"Failed to load template: {template_path}")
-
-    # Emulator resolution changes can clamp a configured search region below
-    # the template size. That cannot match and otherwise makes OpenCV assert.
-    region_h, region_w = region_img.shape[:2]
-    template_h, template_w = template.shape[:2]
-    if region_h < template_h or region_w < template_w:
-        return None, 0.0
-
-    res = cv2.matchTemplate(region_img, template, cv2.TM_CCOEFF_NORMED)
-    _, max_val, _, max_loc = cv2.minMaxLoc(res)
-
-    threshold = float(entry.get("match_threshold", 0.9))
-    if max_val >= threshold:
-        match_x = x1 + max_loc[0] + template.shape[1] // 2
-        match_y = y1 + max_loc[1] + template.shape[0] // 2
-        return (match_x, match_y), max_val
-    else:
-        return None, max_val
+    entry = resolve_dot_path(dot_path)
+    if not isinstance(entry, Mapping):
+        return MatchResult(None, 0.0, 0.9, None, f"unknown clickmap path '{dot_path}'")
+    return match_entry_result(screenshot, entry, template_dir=template_dir)
 
 
 def get_match(
     dot_path: str,
     *,
     screenshot,
-    template_dir: str = "assets/match_templates",
+    template_dir: str | Path = DEFAULT_TEMPLATE_DIR,
 ) -> Tuple[Optional[Tuple[int, int]], float]:
     """
     Resolve a clickmap entry by dot-path, then perform matching.
@@ -123,10 +262,8 @@ def get_match(
     Returns:
         ((x, y), confidence) if found; else (None, confidence).
     """
-    entry = resolve_dot_path(dot_path)
-    if not entry:
-        return None, 0.0
-    return _match_entry(screenshot, entry, template_dir=template_dir)
+    result = get_match_result(dot_path, screenshot=screenshot, template_dir=template_dir)
+    return (result.center if result.matched else None), result.confidence
 
 
 def detect_floating_gem_square(screenshot, region: Dict[str, int], debug: bool = False) -> bool:

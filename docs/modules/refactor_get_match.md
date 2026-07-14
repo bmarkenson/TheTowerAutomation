@@ -1,5 +1,24 @@
 # Refactor: Centralized Clickmap Matching via `core.matcher.get_match`
 
+## Current status (2026-07-13)
+
+The low-level OpenCV evaluation is now centralized in
+`core.matcher.match_entry_result()`. Its `MatchResult` exposes the best bounding
+box, center, confidence, threshold, effective search region, and failure reason.
+
+Compatibility APIs retain their existing contracts:
+
+- `core.matcher.get_match()` uses color matching plus configured/default
+  padding and returns a center point with confidence.
+- `core.label_tapper.get_label_match()` uses the same engine with its existing
+  grayscale/zero-padding profile and returns the matched bounding box.
+- `utils.template_matcher.match_region` remains a deprecated compatibility shim
+  around `core.matcher` while its remaining callers are migrated.
+
+The profiles are deliberately preserved until fixture coverage is sufficient
+to measure and choose one canonical color/padding policy. They no longer
+duplicate region resolution, template loading, matching, or result geometry.
+
 ## Summary
 The old matching logic was spread across:
 - `utils/template_matcher.py` (clickmap-backed `match_region`)
