@@ -92,6 +92,10 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   redundant top-and-back scroll. Live-verified the active in-run Store route,
   claim, ad skip, return to the running game, and badge clearance; the no-scroll
   entry path has automated coverage.
+- Fixed the Daily Gems cooldown exit so `NOT_READY` is returned only after the
+  handler taps Return to Game. Failure to find that control now fails the probe
+  instead of recording an incomplete Store visit as a successful daily check.
+  The fix has automated coverage and awaits its next natural live revalidation.
 - Replaced generic per-tick EHLS/EALS searches with a dedicated exclusive,
   state-driven initializer. It uses fast label templates and upgrade geometry,
   detects the rectangular gold `Max` border directly, supports either or both

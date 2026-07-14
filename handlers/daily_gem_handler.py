@@ -135,7 +135,9 @@ def handle_daily_gem() -> DailyGemResult:
             stop_fn=_daily_gem_unavailable,
         )
         if claim.reason == DAILY_GEM_NOT_READY:
-            log("[DAILY_GEM] No claim available; leaving Store unchanged.", "INFO")
+            log("[DAILY_GEM] No claim available; returning to game.", "INFO")
+            if not _return_to_game(session_id):
+                return DailyGemResult.FAILED
             return DailyGemResult.NOT_READY
         if not claim.success or claim.screenshot is None:
             return _abort_handler(f"Find Claim Daily Gems ({claim.reason})", session_id)
@@ -153,10 +155,8 @@ def handle_daily_gem() -> DailyGemResult:
         return _abort_handler("Skip Claim_daily_gems", session_id)
     time.sleep(1.2)
 
-    # Return to Game
-    if not tap_if_visible("buttons.return_to_game", retries=1):
-        return _abort_handler("Return to Game", session_id)
-    time.sleep(1.2)
+    if not _return_to_game(session_id):
+        return DailyGemResult.FAILED
     return DailyGemResult.CLAIMED
 
 
@@ -172,6 +172,16 @@ def save_image(img, tag):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     cv2.imwrite(path, img)
     log(f"[CAPTURE] Saved screenshot: {path}", "INFO")
+
+
+def _return_to_game(session_id: str) -> bool:
+    """Leave Store after either claiming the gem or confirming its cooldown."""
+
+    if not tap_if_visible("buttons.return_to_game", retries=1):
+        _abort_handler("Return to Game", session_id)
+        return False
+    time.sleep(1.2)
+    return True
 
 
 def _abort_handler(step, session_id):

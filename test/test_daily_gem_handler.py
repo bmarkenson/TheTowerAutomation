@@ -157,9 +157,41 @@ def test_confirmed_cooldown_returns_not_ready_result():
             "handlers.daily_gem_handler.scroll_until_visible",
             return_value=ScrollResult(False, screenshot, 0, DAILY_GEM_NOT_READY),
         ),
+        patch("handlers.daily_gem_handler.tap_if_visible", return_value=True) as tap,
         patch("handlers.daily_gem_handler.save_image"),
         patch("handlers.daily_gem_handler.time.sleep"),
     ):
         result = handle_daily_gem()
 
     assert result == DailyGemResult.NOT_READY
+    tap.assert_called_once_with("buttons.return_to_game", retries=1)
+
+
+def test_confirmed_cooldown_fails_when_return_to_game_is_unavailable():
+    screenshot = _screenshot()
+
+    def visible(label, *, screenshot=None):
+        return label == STORE_MENU_INDICATOR
+
+    with (
+        patch("handlers.daily_gem_handler._make_session_id", return_value="test"),
+        patch("handlers.daily_gem_handler._open_store_for_current_screen", return_value=True),
+        patch("handlers.daily_gem_handler._wait_for_label", return_value=True),
+        patch("handlers.daily_gem_handler.capture_adb_screenshot", return_value=screenshot),
+        patch("handlers.daily_gem_handler.is_visible", side_effect=visible),
+        patch(
+            "handlers.daily_gem_handler.scroll_to_edge",
+            return_value=ScrollResult(True, screenshot, 1, "edge_reached"),
+        ),
+        patch(
+            "handlers.daily_gem_handler.scroll_until_visible",
+            return_value=ScrollResult(False, screenshot, 0, DAILY_GEM_NOT_READY),
+        ),
+        patch("handlers.daily_gem_handler.tap_if_visible", return_value=False) as tap,
+        patch("handlers.daily_gem_handler.save_image"),
+        patch("handlers.daily_gem_handler.time.sleep"),
+    ):
+        result = handle_daily_gem()
+
+    assert result == DailyGemResult.FAILED
+    tap.assert_called_once_with("buttons.return_to_game", retries=1)
