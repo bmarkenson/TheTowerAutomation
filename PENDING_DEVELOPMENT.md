@@ -138,6 +138,9 @@ audited against the codebase and incorporated below on 2026-07-13.
 
 ## Capture and action architecture
 
+> Deferred on 2026-07-13 while higher-priority runtime and validation work is
+> completed. Retain these findings for a later architecture package.
+
 - [ ] Evaluate an app-owned low-latency frame source for scrolling and other
   multi-frame decisions instead of treating the level-skip H.264 stream as a
   one-off implementation detail.
