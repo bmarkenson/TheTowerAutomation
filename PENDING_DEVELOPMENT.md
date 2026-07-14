@@ -9,15 +9,15 @@ audited against the codebase and incorporated below on 2026-07-13.
 
 ## Current validation gates
 
-- [ ] Refresh and revalidate the Home `Battle` button template. During the
-  cheaper-level-skip regression, `buttons.battle:home` failed to match while
-  the guarded Home control OCR read `BATTLE` at 96% confidence and started the
-  run successfully. Capture the current artwork and separately revalidate the
-  `Resume Battle` state.
-- [ ] When the Store red badge next appears, live-test the complete active Daily
-  Gems flow: both badge locations, Store navigation, active claim, ad skip, and
-  return to the correct source screen. The inactive `FREE`/countdown path is
-  already live-verified.
+- [ ] Live-revalidate the refreshed Home `Battle` template at the next Home
+  boundary and separately capture/revalidate the `Resume Battle` state. Current
+  `Battle` artwork was captured on 2026-07-13 and matches its canonical fixture,
+  but the live start used the guarded OCR fallback before the asset was updated.
+- [ ] Live-revalidate the distinct Home Store-badge template at the next daily
+  availability. The badge was captured on Home and matches its canonical
+  fixture; it was cleared before the new template could be exercised live. The
+  in-run badge, Store navigation, active claim, ad skip, return to the running
+  game, and inactive cooldown path are live-verified.
 - [ ] Run the default GC strategy under the full main loop for at least one
   natural Game Over -> Retry boundary and confirm the exclusive startup gate
   repeats EHLS then EALS while Target Priority remains session-scoped.
@@ -96,6 +96,14 @@ audited against the codebase and incorporated below on 2026-07-13.
 
 ## Detection architecture
 
+- [ ] Add a guarded refresh for the game's delayed Store badge at daily
+  rollover, or confirm the game bug has been fixed before adding a workaround.
+  - At the 2026-07-13 17:00 PDT reset, two Daily Missions appeared while the
+    available Daily Gems Store badge remained absent.
+  - Closing and reopening the in-run menu did not refresh the badge; opening
+    Daily Missions and returning to the game did.
+  - Avoid hardcoding local wall time without first defining how the game-server
+    reset offset should be represented and adjusted for daylight time changes.
 - [ ] Audit the floating ad-gem diamond and replace timed blind tapping if a
   reliable shape/color/contour or tracked-motion detector can locate it.
   - Compare the existing heuristic and orphaned directional templates against
@@ -114,6 +122,9 @@ audited against the codebase and incorporated below on 2026-07-13.
   template and expected behavior, then design optional Lab automation around a
   configured research queue and explicit spending safeguards.
 - [ ] Add daily-quest claiming separately from the existing daily-gem handler.
+  The 2026-07-13 reset began at `2/8 Missions` with two new missions and the next
+  pair due eight hours later; the menu badge changed from 3 to 1 after viewing
+  the screen while one completed mission remained claimable.
 - [ ] Add automated overlay coexistence and state-transition regression tests.
   This should be completed as part of the full live state-coverage audit above.
 
@@ -138,11 +149,10 @@ audited against the codebase and incorporated below on 2026-07-13.
     comparing query and migration needs).
   - Keep screenshots only when OCR validation fails or confidence is below the
     configured threshold.
-- [ ] Close the in-run menu after Target Priority validation so normal play
-  resumes with the same menu-open state it had before validation.
-
 ## Configuration and developer tooling
 
+- [ ] Isolate automated-test logging from `logs/actions.log` so synthetic test
+  events cannot be mistaken for live-device evidence.
 - [ ] Continue the full template audit begun on 2026-07-13.
   - The recursive static validator now checks nested entries, regions, files,
     image readability, and geometry; resolve/classify its dated orphan list.

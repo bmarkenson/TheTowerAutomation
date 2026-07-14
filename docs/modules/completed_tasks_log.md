@@ -39,6 +39,17 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Split home/in-run Store navigation, retained red-badge availability as the
   trigger, added a home red-badge region, and live-tested inactive Daily Gems as
   a normal not-ready result.
+- Captured the 17:00 PDT new-day transition. Two Daily Missions appeared
+  immediately, but the Store badge did not appear until Daily Missions was
+  opened and closed; toggling the in-run menu alone did not refresh it.
+- Confirmed the Store badge persisted from the running screen to Home and into
+  a new run. Added a distinct Home badge template, refreshed the stale Home
+  `Battle` template, and added a canonical Home fixture for both matches.
+- Fixed the Daily Gems handler so the active card's `FREE` price is not mistaken
+  for a cooldown and a claim already visible at Store entry does not trigger a
+  redundant top-and-back scroll. Live-verified the active in-run Store route,
+  claim, ad skip, return to the running game, and badge clearance; the no-scroll
+  entry path has automated coverage.
 - Replaced generic per-tick EHLS/EALS searches with a dedicated exclusive,
   state-driven initializer. It uses fast label templates and upgrade geometry,
   detects the rectangular gold `Max` border directly, supports either or both
