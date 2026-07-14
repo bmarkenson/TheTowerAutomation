@@ -96,14 +96,22 @@ audited against the codebase and incorporated below on 2026-07-13.
 
 ## Detection architecture
 
-- [ ] Add a guarded refresh for the game's delayed Store badge at daily
-  rollover, or confirm the game bug has been fixed before adding a workaround.
+- [ ] Design a daily-rollover coordinator that detects the game-day boundary
+  and checks for the Store badge with a fresh frame before taking any refresh
+  action.
   - At the 2026-07-13 17:00 PDT reset, two Daily Missions appeared while the
     available Daily Gems Store badge remained absent.
   - Closing and reopening the in-run menu did not refresh the badge; opening
     Daily Missions and returning to the game did.
-  - Avoid hardcoding local wall time without first defining how the game-server
-    reset offset should be represented and adjusted for daylight time changes.
+  - Treat the observed 17:00 PDT boundary as a candidate UTC-midnight reset;
+    verify standard-time behavior before making that the canonical rule.
+  - Handle both a running process crossing the boundary and a process starting
+    after the boundary, with explicit once-per-game-day state and logs.
+  - If the first badge check is negative, stop at a visible decision point:
+    compare a controlled navigation refresh, a direct guarded Store probe, and
+    waiting for the game bug to be fixed before choosing an implementation.
+  - Schedule the check through the same exclusive tap authority as startup,
+    pause, handlers, and operator activity; it must not race another action.
 - [ ] Audit the floating ad-gem diamond and replace timed blind tapping if a
   reliable shape/color/contour or tracked-motion detector can locate it.
   - Compare the existing heuristic and orphaned directional templates against
@@ -127,6 +135,27 @@ audited against the codebase and incorporated below on 2026-07-13.
   the screen while one completed mission remained claimable.
 - [ ] Add automated overlay coexistence and state-transition regression tests.
   This should be completed as part of the full live state-coverage audit above.
+
+## Capture and action architecture
+
+- [ ] Evaluate an app-owned low-latency frame source for scrolling and other
+  multi-frame decisions instead of treating the level-skip H.264 stream as a
+  one-off implementation detail.
+  - Define a small frame-source interface with sequence, capture timestamp,
+    freshness, and `wait for a frame after this input` semantics.
+  - Replace fixed post-swipe sleeps with bounded observation of fresh frames and
+    require consecutive stable frames before declaring settle/edge conditions.
+  - Preserve pre- and post-action source-screen guards and retain a guarded raw
+    screenshot fallback when the stream is unavailable or stale.
+  - Account for this emulator's 180-second `screenrecord` maximum by supporting
+    restart/handoff without exposing buffered or pre-action frames as current.
+  - Benchmark latency, ADB load, missed transitions, and edge detection against
+    the current screenshot-and-sleep implementation before migrating callers.
+  - Decide stream ownership, shutdown, and single-instance behavior at the App
+    level so handlers cannot start competing screenrecord processes.
+- [ ] Review the tap/action execution architecture together with the shared
+  frame source. A post-input frame barrier may belong in the action layer rather
+  than being reimplemented independently by scrolling and every handler.
 
 ## Handler architecture
 
@@ -193,6 +222,17 @@ audited against the codebase and incorporated below on 2026-07-13.
 
 ## Development process
 
+- [ ] Treat behavioral blockers as explicit decision points.
+  - Stop further state-changing actions, preserve evidence, and report the exact
+    failed guard or assumption immediately.
+  - Present repair, redesign, defer, and workaround options with their safety
+    and maintenance tradeoffs; wait for agreement before choosing a behaviorally
+    different path.
+  - Do not lower a guard, use a blind/manual substitute, or encode an observed
+    game bug as permanent behavior merely to finish the current test.
+- [ ] Re-examine architecture whenever a new capability exposes duplicated
+  polling, sleeps, state ownership, or recovery logic. Prefer a short measured
+  design spike when it could simplify multiple pending features.
 - [ ] Use incremental Git commits while iterating.
   - Each commit should contain one coherent, tested behavior or audit result.
   - Review staged files before committing and exclude editor swap files,
