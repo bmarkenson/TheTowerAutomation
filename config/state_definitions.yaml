@@ -15,6 +15,16 @@ states:
   match_keys:
   - indicators.home_screen
 
+- name: WORKSHOP
+  type: primary
+  match_keys:
+  - indicators.workshop
+
+- name: WORKSHOP_FARM_SLOT
+  type: secondary
+  match_keys:
+  - indicators.workshop:farm_slot
+
 - name: GAME_OVER
   type: primary
   match_keys:

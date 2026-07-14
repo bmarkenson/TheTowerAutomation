@@ -29,12 +29,22 @@ audited against the codebase and incorporated below on 2026-07-13.
 
 ## GC run initialization
 
+- [ ] Distinguish `Go Home`/`Resume Battle` from a genuine new-run boundary
+  before integrating any Home-screen GC preflight navigation. The live
+  Workshop capture on 2026-07-14 resumed the same battle at wave 1230, but
+  `MissionManager` reset `_run_started` on `HOME_SCREEN` and reran the exclusive
+  EHLS/EALS initialization gate. Both upgrades were already gold boxed, so no
+  purchase was sent, but the boundary model is unsafe for automated preflight.
 - [ ] Implement a once-per-continuous-session GC preflight, always after the
   current run's EHLS/EALS startup gate:
   - Cards must use the fixed `GC` deck; otherwise surrender, correct, restart.
     The active `GC` preset now has a live-validated composite identity/selection
     template and canonical fixture; preflight dispatch is not yet implemented.
   - Workshop must use the `Farm` preset; otherwise surrender, correct, restart.
+    The Workshop screen guard, fixed-slot `Farm` identity template, and
+    green-selected versus cyan-inactive border classifier are backed by a live
+    canonical fixture. Read-only offline preflight evidence is complete;
+    automated Go Home/Workshop navigation and correction are not integrated.
   - Bots must use the `Farm` preset; otherwise surrender, correct, restart.
     The Bots-screen guard and active `Farm` composite template are now backed by
     canonical live fixtures; automated navigation is not yet integrated.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate captured Cards, Bots, and Guardian screens for the GC strategy."""
+"""Validate captured Cards, Workshop, Bots, and Guardian screens for GC."""
 
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ def _load(path: Path):
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cards-image", required=True, type=Path)
+    parser.add_argument("--workshop-image", required=True, type=Path)
     parser.add_argument("--bots-image", required=True, type=Path)
     parser.add_argument("--guardians-image", required=True, type=Path)
     return parser
@@ -38,6 +39,7 @@ def main(argv=None) -> int:
     try:
         evidence = validate_gc_preflight_screens(
             cards_screen=_load(args.cards_image),
+            workshop_screen=_load(args.workshop_image),
             bots_screen=_load(args.bots_image),
             guardians_screen=_load(args.guardians_image),
         )

@@ -687,6 +687,32 @@
       "roles": [
         "indicator"
       ]
+    },
+    "workshop": {
+      "match_template": "indicators/workshop.png",
+      "match_region": {
+        "x": 15,
+        "y": 95,
+        "w": 335,
+        "h": 80
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "workshop:farm_slot": {
+      "match_template": "indicators/workshop:farm_slot.png",
+      "match_region": {
+        "x": 45,
+        "y": 202,
+        "w": 140,
+        "h": 70
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
     }
   },
   "overlays": {
@@ -896,6 +922,16 @@
       "tap": {
         "type": "tap",
         "x": 1000,
+        "y": 1830
+      }
+    },
+    "goto_workshop_home": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 270,
         "y": 1830
       }
     },

@@ -87,6 +87,11 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Captured Event Missions and Guild Members as same-parent negative fixtures.
   The Guild frame preserves the unclaimed glowing 250 contribution chest; no
   reward or configuration control was tapped.
+- Used guarded Go Home navigation without ending the active run and captured
+  Workshop with `Farm` selected. Added stable Workshop/Farm identity templates
+  and classified the selected preset by its green border rather than a
+  high-correlation full-card template; the four cyan inactive neighbors provide
+  same-frame negative evidence. No Workshop preset was changed.
 - Fixed the Daily Gems handler so the active card's `FREE` price is not mistaken
   for a cooldown and a claim already visible at Store entry does not trigger a
   redundant top-and-back scroll. Live-verified the active in-run Store route,

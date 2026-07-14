@@ -88,10 +88,14 @@ core/floating_button_detector.py
 - tap_floating_button(name, buttons) — R bool; S [adb][log].
 
 core/gc_preflight.py
-- validate_gc_preflight_screens(cards_screen=..., bots_screen=...,
-  guardians_screen=...) — R GcPreflightEvidence; S [cv2][state].
+- validate_gc_preflight_screens(cards_screen=..., workshop_screen=...,
+  bots_screen=..., guardians_screen=...) — R GcPreflightEvidence; S [cv2][state].
 - evaluate_gc_section(spec, detection) — R GcSectionResult with missing evidence;
   no input is sent. `tools/validate_gc_preflight.py` exposes the offline CLI.
+
+core/workshop_preset.py
+- measure_preset_slot_selection(screenshot, region=FARM_PRESET_SLOT) — R
+  PresetSlotSelection with green/cyan border pixel evidence; S [cv2].
 
 core/label_tapper.py
 - resolve_region(entry, clickmap) — R dict; E ValueError on bad region_ref.
