@@ -183,12 +183,12 @@ audited against the codebase and incorporated below on 2026-07-13.
     configured threshold.
 ## Configuration and developer tooling
 
-- [ ] Standardize development commands on the repository `.venv` instead of
-  relying on whichever `python` happens to be first on the shell `PATH`.
-  - Provide a checked-in runner or task command that resolves `.venv/bin/python`
-    and fails clearly when the environment has not been created.
-  - Document environment creation/refresh and configure supported IDE and test
-    entry points consistently without changing the system Python installation.
+- [ ] Make Codex shell execution use the repository `.venv` by default instead
+  of inheriting the SSH session's system `python` and user-level `pytest`.
+  - Determine the supported workspace-level Codex instruction/configuration or
+    checked-in runner that will persist this behavior across Codex sessions.
+  - Until then, require Codex commands to invoke `.venv/bin/python` and
+    `.venv/bin/python -m pytest` explicitly and fail clearly if `.venv` is absent.
 - [ ] Isolate automated-test logging from `logs/actions.log` so synthetic test
   events cannot be mistaken for live-device evidence.
 - [ ] Continue the full template audit begun on 2026-07-13.
