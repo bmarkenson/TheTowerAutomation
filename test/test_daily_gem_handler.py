@@ -3,9 +3,12 @@ from unittest.mock import patch
 import numpy as np
 
 from handlers.daily_gem_handler import (
+    DAILY_GEM_BUTTON,
     DAILY_GEM_NOT_READY,
+    STORE_MENU_INDICATOR,
     _daily_gem_unavailable,
     _open_store_for_current_screen,
+    handle_daily_gem,
 )
 
 
@@ -76,3 +79,56 @@ def test_free_card_ocr_is_a_normal_not_ready_state():
         return_value=("gem x 15 FREE 2h 49m", 80.8),
     ):
         assert _daily_gem_unavailable(_screenshot()) == DAILY_GEM_NOT_READY
+
+
+def test_free_price_without_countdown_keeps_scrolling_for_claim():
+    with patch(
+        "handlers.daily_gem_handler.ocr_text_and_conf",
+        return_value=("gem x 15 FREE CLAIM", 91.2),
+    ):
+        assert _daily_gem_unavailable(_screenshot()) is None
+
+
+def test_unrelated_offer_timer_before_free_price_is_not_a_cooldown():
+    with patch(
+        "handlers.daily_gem_handler.ocr_text_and_conf",
+        return_value=("Time left 9d 23h gem x 15 FREE CLAIM", 86.7),
+    ):
+        assert _daily_gem_unavailable(_screenshot()) is None
+
+
+def test_colon_countdown_after_free_price_is_not_ready():
+    with patch(
+        "handlers.daily_gem_handler.ocr_text_and_conf",
+        return_value=("gem x 15 FREE 02:49:10", 88.0),
+    ):
+        assert _daily_gem_unavailable(_screenshot()) == DAILY_GEM_NOT_READY
+
+
+def test_visible_claim_at_store_entry_skips_all_scrolling():
+    screenshot = _screenshot()
+
+    def visible(label, *, screenshot=None):
+        return label in {STORE_MENU_INDICATOR, DAILY_GEM_BUTTON}
+
+    with (
+        patch("handlers.daily_gem_handler._make_session_id", return_value="test"),
+        patch("handlers.daily_gem_handler._open_store_for_current_screen", return_value=True),
+        patch("handlers.daily_gem_handler._wait_for_label", return_value=True),
+        patch("handlers.daily_gem_handler.capture_adb_screenshot", return_value=screenshot),
+        patch("handlers.daily_gem_handler.is_visible", side_effect=visible),
+        patch("handlers.daily_gem_handler.scroll_to_edge") as scroll_to_edge,
+        patch("handlers.daily_gem_handler.scroll_until_visible") as scroll_until_visible,
+        patch("handlers.daily_gem_handler.tap_if_visible", return_value=True) as tap,
+        patch("handlers.daily_gem_handler.save_image"),
+        patch("handlers.daily_gem_handler.time.sleep"),
+    ):
+        handle_daily_gem()
+
+    scroll_to_edge.assert_not_called()
+    scroll_until_visible.assert_not_called()
+    assert [call.args[0] for call in tap.call_args_list] == [
+        DAILY_GEM_BUTTON,
+        "buttons.skip:claim_daily_gems",
+        "buttons.return_to_game",
+    ]
