@@ -39,5 +39,15 @@ class BaseStrategy:
 
         return True
 
+    def requires_session_preflight(self) -> bool:
+        """Whether this strategy owns a once-per-process preflight gate."""
+
+        return False
+
+    def is_session_preflight_complete(self, ctx: MissionContext) -> bool:
+        """Return whether this process has verified its session requirements."""
+
+        return True
+
     def on_game_over(self, ctx: MissionContext) -> None:
         """Optional hook when GAME_OVER is handled."""

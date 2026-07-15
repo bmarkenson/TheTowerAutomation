@@ -82,6 +82,7 @@ class App:
         self._last_wave_ts: float = 0.0
         self._blind_tapper_suspended = False
         self._run_initialization_gate_logged = False
+        self._session_preflight_gate_logged = False
         rollover_state = Path(config.control_file).parent / "daily_gem_state.json"
         self._daily_gem_scheduler = DailyGemScheduler(rollover_state)
 
@@ -125,6 +126,10 @@ class App:
                 # or blind tapper may run before this gate clears.
                 self._mission_mgr.maybe_run_start(detection)
                 initialization_pending = self._mission_mgr.run_initialization_pending()
+                session_preflight_pending = (
+                    not initialization_pending
+                    and self._mission_mgr.session_preflight_pending()
+                )
                 if initialization_pending:
                     if not self._run_initialization_gate_logged:
                         log(
@@ -151,7 +156,41 @@ class App:
                         )
                     self._run_initialization_gate_logged = False
 
-                actions_blocked = is_paused or initialization_pending
+                if session_preflight_pending:
+                    if not self._session_preflight_gate_logged:
+                        log(
+                            "[SESSION_PREFLIGHT] Exclusive validation gate active; "
+                            "normal handlers are blocked",
+                            "INFO",
+                            console=True,
+                        )
+                        self._session_preflight_gate_logged = True
+                    if stop_blind_gem_tapper():
+                        self._blind_tapper_suspended = True
+                    if not is_paused:
+                        self._mission_mgr.tick(img, detection, strategy_only=True)
+                elif self._session_preflight_gate_logged:
+                    strategy = self._mission_mgr.strategy
+                    if (
+                        strategy
+                        and strategy.requires_session_preflight()
+                        and strategy.is_session_preflight_complete(
+                            self._mission_mgr.ctx
+                        )
+                    ):
+                        log(
+                            "[SESSION_PREFLIGHT] Validation complete; normal "
+                            "handlers may resume",
+                            "INFO",
+                            console=True,
+                        )
+                    self._session_preflight_gate_logged = False
+
+                actions_blocked = (
+                    is_paused
+                    or initialization_pending
+                    or session_preflight_pending
+                )
 
                 if not actions_blocked:
                     img, detection, overlay_cleared = self._resolve_upgrade_detail_overlay(

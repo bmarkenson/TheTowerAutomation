@@ -109,6 +109,10 @@ class YamlStrategy(BaseStrategy):
         self._run_initialization_assertions: List[Any] = list(
             initialization.get("complete_when") or []
         )
+        session_preflight = self.config.get("session_preflight") or {}
+        self._session_preflight_assertions: List[Any] = list(
+            session_preflight.get("complete_when") or []
+        )
 
     @classmethod
     def from_file(cls, path: str) -> "YamlStrategy":
@@ -135,6 +139,15 @@ class YamlStrategy(BaseStrategy):
             return True
         mv = ctx.data.get("mission_vars", {})
         return _bool_assert(self._run_initialization_assertions, mv)
+
+    def requires_session_preflight(self) -> bool:
+        return bool(self._session_preflight_assertions)
+
+    def is_session_preflight_complete(self, ctx) -> bool:
+        if not self.requires_session_preflight():
+            return True
+        mv = ctx.data.get("mission_vars", {})
+        return _bool_assert(self._session_preflight_assertions, mv)
 
     # ---------------------------- conditions ---------------------------------
     def _floating_visible(self, screen, name: str) -> bool:

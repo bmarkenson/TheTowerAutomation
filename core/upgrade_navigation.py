@@ -192,6 +192,12 @@ def _perform_swipe(direction: str, span: SwipeSpan = "short") -> None:
     ])
 
 
+def swipe_upgrade_menu(direction: str, span: SwipeSpan = "short") -> None:
+    """Scroll the upgrade-menu list using a named, bounded swipe profile."""
+
+    _perform_swipe(direction, span)
+
+
 def _maybe_collapse_buy_quantity(
     screenshot: Optional[np.ndarray],
     *,

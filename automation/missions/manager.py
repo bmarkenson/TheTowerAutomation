@@ -98,6 +98,17 @@ class MissionManager:
             return False
         return not self.strategy.is_run_initialization_complete(self.ctx)
 
+    def session_preflight_pending(self) -> bool:
+        """Return whether the active battle is waiting on session validation."""
+
+        if not self._battle_lifecycle.active_battle_observed or not self.strategy:
+            return False
+        if self.run_initialization_pending():
+            return False
+        if not self.strategy.requires_session_preflight():
+            return False
+        return not self.strategy.is_session_preflight_complete(self.ctx)
+
     def tick(self, screen, detection: Detection, *, strategy_only: bool = False) -> None:
         state = detection.get("state")
         self.ctx.data["last_detection_state"] = state

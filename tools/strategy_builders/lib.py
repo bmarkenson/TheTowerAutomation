@@ -120,6 +120,10 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
         except ValueError as exc:
             raise ValueError(f"gc_farm {exc}") from exc
 
+    session_requirements = _normalize_gc_session_preflight(
+        source.get("session_preflight")
+    )
+
     complete_when = ["ehls_completed", "eals_completed"]
     vars_block: Dict[str, Any] = {
         "run_initialised": False,
@@ -146,6 +150,14 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
     if target_priority_mode == "enforce":
         vars_block["target_priority_checked"] = False
         complete_when.append("target_priority_checked")
+    vars_block.update(
+        gc_session_preflight_completed=False,
+        gc_session_preflight_attempted=False,
+        gc_session_preflight_blocked=False,
+        gc_session_preflight_last_status="",
+        gc_session_preflight_last_reason="",
+        gc_session_preflight_evidence={},
+    )
 
     per_run_reset = [
         "run_initialised",
@@ -255,13 +267,106 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
             }
         )
 
+    rules.append(
+        {
+            "name": "validate_gc_session_preflight",
+            "when": {"state": "RUNNING"},
+            "assert": [
+                *complete_when,
+                "!gc_session_preflight_completed",
+                "!gc_session_preflight_attempted",
+            ],
+            "cooldown_sec": 30.0,
+            "do": [
+                {
+                    "type": "gc_session_preflight",
+                    "requirements": copy.deepcopy(session_requirements),
+                }
+            ],
+        }
+    )
+
     return {
         "meta": meta,
         "run_initialization": {"complete_when": complete_when},
+        "session_preflight": {
+            "complete_when": ["gc_session_preflight_completed"]
+        },
         "vars": vars_block,
         "per_run_reset": per_run_reset,
         "rules": rules,
     }
+
+
+def _normalize_gc_session_preflight(raw: Any) -> Dict[str, Any]:
+    """Validate the concrete GC configuration supported by live evidence."""
+
+    if not isinstance(raw, dict):
+        raise ValueError("gc_farm session_preflight must be a mapping")
+
+    requirements = copy.deepcopy(raw)
+    fixed_values = {
+        "cards_deck": "GC",
+        "workshop_preset": "Farm",
+        "bots_preset": "Farm",
+    }
+    for key, expected in fixed_values.items():
+        actual = str(requirements.get(key) or "").strip()
+        if actual != expected:
+            raise ValueError(
+                f"gc_farm session_preflight.{key} currently requires {expected!r}"
+            )
+        requirements[key] = actual
+
+    guardian_chips = requirements.get("guardian_chips")
+    if not isinstance(guardian_chips, list) or {
+        str(chip).strip() for chip in guardian_chips
+    } != {"Fetch", "Summon", "Scout"}:
+        raise ValueError(
+            "gc_farm session_preflight.guardian_chips must contain "
+            "Fetch, Summon, and Scout"
+        )
+    requirements["guardian_chips"] = [
+        str(chip).strip() for chip in guardian_chips
+    ]
+
+    if requirements.get("auto_pick_perks") is not True:
+        raise ValueError(
+            "gc_farm session_preflight.auto_pick_perks must currently be true"
+        )
+
+    weapons = requirements.get("ultimate_weapons")
+    if not isinstance(weapons, dict) or not weapons:
+        raise ValueError(
+            "gc_farm session_preflight.ultimate_weapons must be a non-empty mapping"
+        )
+    normalized_weapons: Dict[str, Dict[str, str]] = {}
+    for label, toggles in weapons.items():
+        canonical_label = str(label or "").strip()
+        if not canonical_label or not isinstance(toggles, dict) or not toggles:
+            raise ValueError(
+                "gc_farm session_preflight Ultimate Weapon entries require "
+                "a label and toggle mapping"
+            )
+        normalized_toggles: Dict[str, str] = {}
+        for toggle, state in toggles.items():
+            canonical_toggle = str(toggle or "").strip().lower()
+            normalized_state = (
+                "on"
+                if state is True
+                else "off"
+                if state is False
+                else str(state or "").strip().lower()
+            )
+            if not canonical_toggle or normalized_state not in {"on", "off"}:
+                raise ValueError(
+                    "gc_farm session_preflight Ultimate Weapon toggles require "
+                    "on/off states"
+                )
+            normalized_toggles[canonical_toggle] = normalized_state
+        normalized_weapons[canonical_label] = normalized_toggles
+    requirements["ultimate_weapons"] = normalized_weapons
+    return requirements
 
 
 def _build_upgrade_strategy(source: Dict[str, Any]) -> Dict[str, Any]:

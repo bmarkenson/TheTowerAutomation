@@ -17,6 +17,10 @@ from core.app import App
 from core.action_executor import execute_actions
 from core.app_setup import config_from_args, parse_args
 from core.automation_supervisor import AutomationSupervisor
+from core.gc_preflight_navigation import (
+    GcLivePreflightResult,
+    GcPreflightNavigationStatus,
+)
 from core.run_state import AUTOMATION, RunState
 from core.status_report import StatusReporter
 from tools.strategy_builders.lib import build_strategy_yaml
@@ -49,6 +53,14 @@ class _IncompleteInitializationStrategy(BaseStrategy):
         return True
 
     def is_run_initialization_complete(self, ctx: MissionContext) -> bool:
+        return False
+
+
+class _IncompleteSessionPreflightStrategy(BaseStrategy):
+    def requires_session_preflight(self) -> bool:
+        return True
+
+    def is_session_preflight_complete(self, ctx: MissionContext) -> bool:
         return False
 
 
@@ -188,10 +200,16 @@ class GcFarmProfileTests(unittest.TestCase):
             plans["gc_farm_t19_experiment"]["meta"]["family"], "gc_farm"
         )
         shared_t18_rules = [
-            rule
+            copy.deepcopy(rule)
             for rule in plans["gc_farm_t18"]["rules"]
             if rule["name"] != "ensure_target_priority"
         ]
+        preflight_rule = next(
+            rule
+            for rule in shared_t18_rules
+            if rule["name"] == "validate_gc_session_preflight"
+        )
+        preflight_rule["assert"].remove("target_priority_checked")
         self.assertEqual(plans["gc_farm_t19_experiment"]["rules"], shared_t18_rules)
 
     def test_enforce_profile_runs_level_skips_then_requested_target_priority(self):
@@ -228,8 +246,19 @@ class GcFarmProfileTests(unittest.TestCase):
         with patch("automation.strategies.yaml_strategy.log_mission"):
             actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
 
-        self.assertIsNone(actions)
+        self.assertEqual(
+            actions,
+            [
+                {
+                    "type": "gc_session_preflight",
+                    "requirements": strategy.config["rules"][-1]["do"][0][
+                        "requirements"
+                    ],
+                }
+            ],
+        )
         self.assertFalse(manager.run_initialization_pending())
+        self.assertTrue(manager.session_preflight_pending())
         self.assertFalse(
             any(
                 action.get("type") == "target_priority_ensure"
@@ -321,8 +350,14 @@ class GcFarmProfileTests(unittest.TestCase):
 
         tier_18_plan = build_strategy_yaml(tier_18_source)
         tier_19_plan = build_strategy_yaml(tier_19_source)
-        tier_18_action = tier_18_plan["rules"][-1]["do"][0]
-        tier_19_action = tier_19_plan["rules"][-1]["do"][0]
+        tier_18_action = next(
+            rule for rule in tier_18_plan["rules"]
+            if rule["name"] == "ensure_target_priority"
+        )["do"][0]
+        tier_19_action = next(
+            rule for rule in tier_19_plan["rules"]
+            if rule["name"] == "ensure_target_priority"
+        )["do"][0]
 
         self.assertNotEqual(tier_18_action["order"], tier_19_action["order"])
         self.assertEqual(
@@ -339,6 +374,34 @@ class GcFarmProfileTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "preserve mode must not supply"):
             build_strategy_yaml(source)
 
+    def test_session_requirements_are_carried_by_each_profile(self):
+        tier_18_source = yaml.safe_load(
+            SOURCE_PATHS["gc_farm_t18"].read_text(encoding="utf-8")
+        )
+        tier_19_source = copy.deepcopy(tier_18_source)
+        tier_19_source["meta"].update(name="gc_farm_t19_experiment", tier=19)
+        tier_19_source["session_preflight"]["ultimate_weapons"][
+            "Golden Tower"
+        ]["primary"] = "off"
+
+        tier_18_plan = build_strategy_yaml(tier_18_source)
+        tier_19_plan = build_strategy_yaml(tier_19_source)
+        tier_18_requirements = tier_18_plan["rules"][-1]["do"][0][
+            "requirements"
+        ]
+        tier_19_requirements = tier_19_plan["rules"][-1]["do"][0][
+            "requirements"
+        ]
+
+        self.assertEqual(
+            tier_18_requirements["ultimate_weapons"]["Golden Tower"]["primary"],
+            "on",
+        )
+        self.assertEqual(
+            tier_19_requirements["ultimate_weapons"]["Golden Tower"]["primary"],
+            "off",
+        )
+
     def test_enforce_profile_rejects_an_incomplete_order(self):
         source = yaml.safe_load(
             SOURCE_PATHS["gc_farm_t18"].read_text(encoding="utf-8")
@@ -347,6 +410,133 @@ class GcFarmProfileTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "every target exactly once"):
             build_strategy_yaml(source)
+
+
+    def test_session_preflight_waits_for_run_initialization_and_survives_unknown(self):
+        strategy = get_strategy("gc_farm_t19_experiment")
+        manager = MissionManager(None, strategy)
+        manager.start()
+        manager.maybe_run_start({"state": "RUNNING"})
+        mv = manager.ctx.data["mission_vars"]
+
+        self.assertTrue(manager.run_initialization_pending())
+        self.assertFalse(manager.session_preflight_pending())
+
+        mv.update(ehls_completed=True, eals_completed=True)
+        self.assertFalse(manager.run_initialization_pending())
+        self.assertTrue(manager.session_preflight_pending())
+
+        manager.maybe_run_start({"state": "UNKNOWN"})
+        self.assertTrue(manager.session_preflight_pending())
+
+        mv["gc_session_preflight_completed"] = True
+        self.assertFalse(manager.session_preflight_pending())
+
+        manager.maybe_run_start({"state": "GAME_OVER"})
+        manager.maybe_run_start({"state": "RUNNING"})
+        mv.update(ehls_completed=True, eals_completed=True)
+        self.assertTrue(mv["gc_session_preflight_completed"])
+        self.assertFalse(manager.session_preflight_pending())
+
+    def test_session_preflight_action_records_one_continuous_session_completion(self):
+        strategy = get_strategy("gc_farm_t19_experiment")
+        ctx = MissionContext()
+        strategy.on_start(ctx)
+        mv = ctx.data["mission_vars"]
+        mv["last_detection_state"] = "RUNNING"
+        action = next(
+            rule
+            for rule in strategy.rules
+            if rule["name"] == "validate_gc_session_preflight"
+        )["do"][0]
+        evidence = SimpleNamespace(as_dict=lambda: {"valid": True})
+        result = GcLivePreflightResult(
+            GcPreflightNavigationStatus.COMPLETE,
+            "all requirements verified",
+            evidence,
+        )
+
+        with patch(
+            "core.action_executor.run_read_only_gc_preflight",
+            return_value=result,
+        ) as run_preflight:
+            execute_actions(
+                object(),
+                [{**action, "_strategy": True}],
+                ctx,
+            )
+
+        run_preflight.assert_called_once_with(action["requirements"])
+        self.assertTrue(mv["gc_session_preflight_attempted"])
+        self.assertTrue(mv["gc_session_preflight_completed"])
+        self.assertFalse(mv["gc_session_preflight_blocked"])
+        self.assertEqual(mv["gc_session_preflight_evidence"], {"valid": True})
+
+    def test_session_preflight_mismatch_blocks_without_correction(self):
+        strategy = get_strategy("gc_farm_t19_experiment")
+        ctx = MissionContext()
+        strategy.on_start(ctx)
+        mv = ctx.data["mission_vars"]
+        mv["last_detection_state"] = "RUNNING"
+        action = next(
+            rule
+            for rule in strategy.rules
+            if rule["name"] == "validate_gc_session_preflight"
+        )["do"][0]
+        evidence = SimpleNamespace(as_dict=lambda: {"valid": False})
+        result = GcLivePreflightResult(
+            GcPreflightNavigationStatus.MISMATCH,
+            "configuration mismatch",
+            evidence,
+        )
+
+        with patch(
+            "core.action_executor.run_read_only_gc_preflight",
+            return_value=result,
+        ):
+            execute_actions(
+                object(),
+                [{**action, "_strategy": True}],
+                ctx,
+            )
+
+        self.assertTrue(mv["gc_session_preflight_attempted"])
+        self.assertFalse(mv["gc_session_preflight_completed"])
+        self.assertTrue(mv["gc_session_preflight_blocked"])
+
+    def test_natural_game_over_during_preflight_remains_pending_for_next_run(self):
+        strategy = get_strategy("gc_farm_t19_experiment")
+        ctx = MissionContext()
+        strategy.on_start(ctx)
+        mv = ctx.data["mission_vars"]
+        mv["last_detection_state"] = "RUNNING"
+        action = next(
+            rule
+            for rule in strategy.rules
+            if rule["name"] == "validate_gc_session_preflight"
+        )["do"][0]
+        result = GcLivePreflightResult(
+            GcPreflightNavigationStatus.BATTLE_ENDED,
+            "natural Game Over observed during GC preflight",
+        )
+
+        with patch(
+            "core.action_executor.run_read_only_gc_preflight",
+            return_value=result,
+        ):
+            execute_actions(
+                object(),
+                [{**action, "_strategy": True}],
+                ctx,
+            )
+
+        self.assertFalse(mv["gc_session_preflight_attempted"])
+        self.assertFalse(mv["gc_session_preflight_completed"])
+        self.assertFalse(mv["gc_session_preflight_blocked"])
+        self.assertEqual(
+            mv["gc_session_preflight_last_status"],
+            GcPreflightNavigationStatus.BATTLE_ENDED.value,
+        )
 
 
 class PausedStartupObservationTests(unittest.TestCase):
@@ -374,6 +564,7 @@ class PausedStartupObservationTests(unittest.TestCase):
         app._last_wave_ts = 0.0
         app._blind_tapper_suspended = False
         app._run_initialization_gate_logged = False
+        app._session_preflight_gate_logged = False
         app._capture_frame = MagicMock(side_effect=[frame, KeyboardInterrupt])
         app._resolve_upgrade_detail_overlay = MagicMock()
         app._handle_primary_states = MagicMock()
@@ -420,6 +611,69 @@ class PausedStartupObservationTests(unittest.TestCase):
                 call.args and "Startup gate complete" in str(call.args[0])
                 for call in runtime_log.call_args_list
             )
+        )
+
+    def test_paused_session_preflight_observes_without_actions(self):
+        frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+        strategy = _IncompleteSessionPreflightStrategy()
+        manager = MagicMock()
+        manager.ctx = MissionContext(data={"mission_vars": {}})
+        manager.strategy = strategy
+        manager.run_initialization_pending.return_value = False
+        manager.session_preflight_pending.return_value = True
+
+        supervisor = MagicMock()
+        supervisor.is_paused = True
+        supervisor.auto_return_secs = 900
+
+        app = App.__new__(App)
+        app._config = SimpleNamespace(wait_on_start=False)
+        app._supervisor = supervisor
+        app._mission_mgr = manager
+        app._state_tracker = MagicMock()
+        app._status_reporter = MagicMock()
+        app._match_trace = False
+        app._last_wave_value = None
+        app._last_wave_conf = -1.0
+        app._last_wave_ts = 0.0
+        app._blind_tapper_suspended = False
+        app._run_initialization_gate_logged = False
+        app._session_preflight_gate_logged = False
+        app._capture_frame = MagicMock(side_effect=[frame, KeyboardInterrupt])
+        app._resolve_upgrade_detail_overlay = MagicMock()
+        app._handle_primary_states = MagicMock()
+
+        with (
+            patch("core.app.ensure_adb_connected", return_value=False),
+            patch("core.app.threading.Thread"),
+            patch(
+                "core.app.detect_state_and_overlays",
+                return_value={"state": "RUNNING", "overlays": []},
+            ),
+            patch("core.app.detect_wave_number_from_image", return_value=(1, 99.0)),
+            patch("core.app.stop_blind_gem_tapper", return_value=False),
+            patch("core.app.start_blind_gem_tapper") as start_tapper,
+            patch("core.app.handle_unknown_state") as recover,
+            patch("core.app.time.sleep"),
+        ):
+            app.run()
+
+        manager.maybe_run_start.assert_called_once()
+        manager.tick.assert_not_called()
+        manager.handle_overlays.assert_not_called()
+        manager.on_state.assert_not_called()
+        app._resolve_upgrade_detail_overlay.assert_not_called()
+        app._handle_primary_states.assert_not_called()
+        supervisor.auto_return_check.assert_not_called()
+        start_tapper.assert_not_called()
+        recover.assert_not_called()
+        app._status_reporter.maybe_report.assert_called_once_with(
+            img=frame,
+            ui_state="RUNNING",
+            menu=None,
+            secondary=set(),
+            overlays=set(),
+            allow_actions=False,
         )
 
     def test_read_only_status_reporting_does_not_refresh_coin_display(self):

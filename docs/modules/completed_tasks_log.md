@@ -184,6 +184,21 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   to the explicit Tier 19 generated profile, with no strategy-name conditional
   in the app and no seeded completion state.
 
+### 2026-07-15 GC session preflight
+
+- Added a generic post-initialization session gate and profile-carried GC
+  requirements. Completion persists across run boundaries in one process;
+  paused and transient-unknown observations cannot release or act through the
+  gate.
+- Added guarded read-only traversal and evidence for GC Cards, Farm Workshop,
+  Farm Bots, Fetch/Summon/Scout Guardian chips, Auto Pick Perks, and all nine
+  required Ultimate Weapons. Dedicated Perks-close and visible Home
+  Event/Guild templates replaced broken generic/static dependencies.
+- Live-validated a natural Tier 19 wave-2558 Game Over -> Retry boundary, EHLS
+  then EALS at waves 20/30, preserve-mode Target Priority with no action, and a
+  complete once-per-session preflight. Mismatches block and log evidence;
+  automatic correction and Surrender remain disabled.
+
 ---
 
 ## 📘 Documentation

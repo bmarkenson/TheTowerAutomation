@@ -52,10 +52,14 @@ lifecycle, orchestration, and action authority in separate layers.
   and verifies `HOME_SCREEN`; the normal in-run route verifies `RUNNING`. Live
   validation detected the manually claimed gem's cooldown, returned to the
   battle, and persisted UTC day `2026-07-15` as `not_ready`.
-- [ ] Run the profile-based GC strategy under the full main loop for at least
+- [x] Run the profile-based GC strategy under the full main loop for at least
   one natural Game Over -> Retry boundary. Confirm one new lifecycle boundary,
   EHLS then EALS initialization, the selected profile's Target Priority policy,
   and no false completion across transient `UNKNOWN` frames.
+  - The Tier 19 run ended naturally at wave 2558 on 2026-07-15, the explicit
+    `gc_farm_t19_experiment` profile retried it, and EHLS then EALS completed at
+    waves 20 and 30. Preserve mode emitted no Target Priority action. The
+    existing transient-`UNKNOWN` regressions remained green.
 
 ## GC run initialization
 
@@ -69,28 +73,36 @@ lifecycle, orchestration, and action authority in separate layers.
   - `gc` selects Tier 18. The former `gc_manual_target_priority` name remains a
     temporary compatibility alias to the Tier 19 profile without seeding a
     completion variable.
+  - The observed Tier 19 experiment reached wave 2558, earned 872.38q coins,
+    was killed by Scatter, and death-defied 12 times. No new configuration
+    difference from Tier 18 was established, so the profile gained no
+    speculative fields beyond the concrete session requirements below.
 
 - [ ] Implement a once-per-continuous-session GC preflight, always after the
   current run's EHLS/EALS startup gate:
   - Cards must use the fixed `GC` deck; otherwise surrender, correct, restart.
     The active `GC` preset now has a live-validated composite identity/selection
-    template and canonical fixture; preflight dispatch is not yet implemented.
+    template and canonical fixture. Guarded live dispatch now verifies it.
   - Workshop must use the `Farm` preset; otherwise surrender, correct, restart.
     The Workshop screen guard, fixed-slot `Farm` identity template, and
     green-selected versus cyan-inactive border classifier are backed by a live
-    canonical fixture. Read-only offline preflight evidence is complete;
-    automated Go Home/Workshop navigation and correction are not integrated.
+    canonical fixture. Guarded Go Home/Workshop validation is integrated.
   - Bots must use the `Farm` preset; otherwise surrender, correct, restart.
     The Bots-screen guard and active `Farm` composite template are now backed by
-    canonical live fixtures; automated navigation is not yet integrated.
+    canonical live fixtures and visible-evidence Home navigation.
   - Guardian chips must have `Fetch`, `Summon`, and `Scout` equipped. Separate
-    equipped-slot templates and an offline evidence validator are complete;
-    automated navigation is not yet integrated.
-  - Auto Pick Perks must be enabled; enable it in place if necessary.
+    equipped-slot templates, validation, and guarded navigation are integrated.
+  - Auto Pick Perks must be enabled. Positive checkbox evidence and guarded
+    Perks navigation are live-validated; enabling it in place remains pending.
   - Ultimate Weapons that should be active must be on; Golden Tower and Black
     Hole are permanent, so no sync enforcement with Death Wave is required.
+    Read-only multi-position validation now verifies all nine profile-provided
+    weapons and Spotlight missiles.
   - Record the validation in explicit session logs so uninterrupted automation
-    does not repeat it every run.
+    does not repeat it every run. This is implemented and live-validated.
+  - The current mismatch policy deliberately blocks the exclusive gate and
+    logs exact evidence. Automated correction and Surrender remain disabled
+    until each mutation path and its authority policy are implemented.
 - [ ] Define the GC module preset and validate it during session preflight.
   - Inventory every equipped module slot and desired module name.
   - Tag the module shapes/icons with canonical module names and capture stable

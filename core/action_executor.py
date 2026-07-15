@@ -15,6 +15,7 @@ Future: extend with swipe/page actions or convert to dataclasses.
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from typing import Any, Dict, Iterable, Optional
@@ -32,6 +33,10 @@ from core.upgrade_navigation import (
 from core.upgrade_buy_quantity import BuyQuantity
 from core.target_priority import ensure_target_priority_order
 from core.level_skip_initializer import initialize_level_skips
+from core.gc_preflight_navigation import (
+    GcPreflightNavigationStatus,
+    run_read_only_gc_preflight,
+)
 from automation.missions.base import MissionContext
 from handlers.ad_gem_handler import (
     is_blind_gem_tapper_active,
@@ -205,6 +210,66 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                 if mv is not None:
                     mv["target_priority_checked"] = ok
                 log_mission(f"[EXEC] target_priority_ensure verified={ok}", "INFO" if ok else "WARN")
+            elif t == "gc_session_preflight":
+                if is_strategy_action and last_state not in allowed_states:
+                    log_mission(
+                        f"[EXEC] Skip gc_session_preflight while state={last_state}",
+                        "DEBUG",
+                    )
+                    continue
+                requirements = act.get("requirements")
+                if not isinstance(requirements, dict):
+                    log_mission(
+                        "[SESSION_PREFLIGHT] Missing profile requirements",
+                        "ERROR",
+                    )
+                    continue
+                if mv is not None:
+                    mv["gc_session_preflight_attempted"] = True
+                    mv["gc_session_preflight_blocked"] = False
+                result = run_read_only_gc_preflight(requirements)
+                evidence_payload = (
+                    result.evidence.as_dict()
+                    if result.evidence is not None
+                    else {}
+                )
+                if mv is not None:
+                    mv["gc_session_preflight_last_status"] = result.status.value
+                    mv["gc_session_preflight_last_reason"] = result.reason
+                    mv["gc_session_preflight_evidence"] = evidence_payload
+                if result.status is GcPreflightNavigationStatus.COMPLETE:
+                    if mv is not None:
+                        mv["gc_session_preflight_completed"] = True
+                    log_mission(
+                        "[SESSION_PREFLIGHT] Session validation completed: "
+                        + json.dumps(evidence_payload, sort_keys=True),
+                        "INFO",
+                    )
+                elif result.status is GcPreflightNavigationStatus.MISMATCH:
+                    if mv is not None:
+                        mv["gc_session_preflight_completed"] = False
+                        mv["gc_session_preflight_blocked"] = True
+                    log_mission(
+                        "[SESSION_PREFLIGHT] Configuration mismatch; automatic "
+                        "correction and Surrender are disabled: "
+                        + json.dumps(evidence_payload, sort_keys=True),
+                        "WARN",
+                    )
+                else:
+                    if mv is not None:
+                        mv["gc_session_preflight_completed"] = False
+                        mv["gc_session_preflight_attempted"] = False
+                    interrupted_level = (
+                        "INFO"
+                        if result.status
+                        is GcPreflightNavigationStatus.BATTLE_ENDED
+                        else "WARN"
+                    )
+                    log_mission(
+                        f"[SESSION_PREFLIGHT] Validation interrupted "
+                        f"status={result.status.value} reason={result.reason}",
+                        interrupted_level,
+                    )
             elif t in {"ultimate_set_all_on", "ultimate_ensure_state"}:
                 if is_strategy_action and last_state not in allowed_states:
                     log_mission(

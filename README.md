@@ -57,6 +57,14 @@ variable. Edit the matching `.source.yaml` profile and regenerate its explicit
   config/strategies/gc_farm_t19_experiment.source.yaml
 ```
 
+Both GC profiles also declare a once-per-process session preflight. After the
+current run's startup gate, it uses guarded read-only navigation to verify the
+GC Cards deck, Farm Workshop and Bots presets, Fetch/Summon/Scout Guardian
+chips, Auto Pick Perks, and the profile's required Ultimate Weapon toggles.
+Success is logged once and persists across run boundaries in that process. A
+mismatch blocks normal automation and logs its evidence; it does not change a
+preset, toggle, equipment, or Surrender the run.
+
 Use `--mission-config` alongside `--strategy-config` to pair custom YAML plans.
 The `--strategy` option selects a bundled named strategy, while
 `--strategy-config` overrides it with an explicit YAML file. Logs for rule

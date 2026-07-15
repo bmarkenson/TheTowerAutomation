@@ -1250,6 +1250,16 @@
         "navigation"
       ]
     },
+    "open_perks": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 540,
+        "y": 60
+      }
+    },
     "goto_store": {
       "match_template": "navigation/goto_store.png",
       "match_region": {
@@ -1274,6 +1284,16 @@
       }
     },
     "goto_home_store": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 80,
+        "y": 1830
+      }
+    },
+    "goto_home": {
       "roles": [
         "navigation"
       ],
@@ -1328,26 +1348,6 @@
         "y": 281
       }
     },
-    "Event": {
-      "roles": [
-        "navigation"
-      ],
-      "tap": {
-        "type": "tap",
-        "x": 910,
-        "y": 490
-      }
-    },
-    "Guild": {
-      "roles": [
-        "navigation"
-      ],
-      "tap": {
-        "type": "tap",
-        "x": 910,
-        "y": 595
-      }
-    },
     "event:bots_tab": {
       "roles": [
         "navigation"
@@ -1398,6 +1398,32 @@
         "x": 1017,
         "y": 59
       }
+    },
+    "home_guild": {
+      "match_template": "navigation/home_guild.png",
+      "match_region": {
+        "x": 20,
+        "y": 850,
+        "w": 210,
+        "h": 220
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "navigation"
+      ]
+    },
+    "home_event": {
+      "match_template": "navigation/home_event.png",
+      "match_region": {
+        "x": 20,
+        "y": 580,
+        "w": 200,
+        "h": 220
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "navigation"
+      ]
     }
   },
   "buttons": {
@@ -1715,6 +1741,19 @@
         "x": 538,
         "y": 1132
       }
+    },
+    "close:perks": {
+      "match_template": "buttons/close:perks.png",
+      "match_region": {
+        "x": 860,
+        "y": 90,
+        "w": 150,
+        "h": 150
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
     }
   },
   "upgrades": {
