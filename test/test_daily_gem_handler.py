@@ -145,6 +145,42 @@ def test_visible_claim_at_store_entry_skips_all_scrolling():
     return_from_store.assert_called_once_with("test", "RUNNING")
 
 
+def test_cooldown_at_store_entry_skips_all_scrolling():
+    screenshot = _screenshot()
+
+    def visible(label, *, screenshot=None):
+        return label == STORE_MENU_INDICATOR
+
+    with (
+        patch("handlers.daily_gem_handler._make_session_id", return_value="test"),
+        patch(
+            "handlers.daily_gem_handler._open_store_for_current_screen",
+            return_value="RUNNING",
+        ),
+        patch("handlers.daily_gem_handler._wait_for_label", return_value=True),
+        patch("handlers.daily_gem_handler.capture_adb_screenshot", return_value=screenshot),
+        patch("handlers.daily_gem_handler.is_visible", side_effect=visible),
+        patch(
+            "handlers.daily_gem_handler._daily_gem_unavailable",
+            return_value=DAILY_GEM_NOT_READY,
+        ),
+        patch("handlers.daily_gem_handler.scroll_to_edge") as scroll_to_edge,
+        patch("handlers.daily_gem_handler.scroll_until_visible") as scroll_until_visible,
+        patch(
+            "handlers.daily_gem_handler._return_from_store",
+            return_value=True,
+        ) as return_from_store,
+        patch("handlers.daily_gem_handler.save_image"),
+        patch("handlers.daily_gem_handler.time.sleep"),
+    ):
+        result = handle_daily_gem()
+
+    assert result == DailyGemResult.NOT_READY
+    scroll_to_edge.assert_not_called()
+    scroll_until_visible.assert_not_called()
+    return_from_store.assert_called_once_with("test", "RUNNING")
+
+
 def test_confirmed_cooldown_returns_not_ready_result():
     screenshot = _screenshot()
 

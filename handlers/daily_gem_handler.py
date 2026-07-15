@@ -106,6 +106,11 @@ def handle_daily_gem() -> DailyGemResult:
     if store_entry is None or not is_visible(STORE_MENU_INDICATOR, screenshot=store_entry):
         return _abort_handler("Store entry capture not verified", session_id)
 
+    if _daily_gem_unavailable(store_entry) == DAILY_GEM_NOT_READY:
+        log("[DAILY_GEM] Cooldown visible at Store entry; skipping scroll", "DEBUG")
+        if not _return_from_store(session_id, source_state):
+            return DailyGemResult.FAILED
+        return DailyGemResult.NOT_READY
     if is_visible(DAILY_GEM_BUTTON, screenshot=store_entry):
         log("[DAILY_GEM] Claim is already visible at Store entry; skipping scroll", "DEBUG")
         claim_screenshot = store_entry
