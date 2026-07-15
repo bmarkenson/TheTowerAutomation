@@ -388,7 +388,14 @@ class App:
                 return strat
             except Exception as exc:
                 log(f"[STRATEGY] Failed to load YAML strategy: {exc}", "ERROR")
-        return get_strategy(config.strategy_name)
+        strategy = get_strategy(config.strategy_name)
+        if strategy:
+            log(
+                f"[STRATEGY] Loaded bundled strategy profile {strategy.name}",
+                "INFO",
+                console=True,
+            )
+        return strategy
 
 
 __all__ = ["App"]

@@ -170,6 +170,20 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   passed; the live level skips required zero purchase taps and Target Priority
   was verified before the gate released.
 
+### 2026-07-15 GC strategy profiles
+
+- Replaced the tactical `target_priority_checked=True` strategy variant with a
+  concrete build-time GC family/profile model. `gc_farm_t18` enforces its
+  explicit Target Priority order, while `gc_farm_t19_experiment` omits Target
+  Priority from both the generated action rules and startup completion gate.
+- Routed profile-provided orders through the shared action executor to the
+  existing Target Priority enforcer. Failed verification leaves the gate
+  incomplete; the successful session-scoped result persists across run
+  boundaries.
+- Retained `gc_manual_target_priority` only as a compatibility name resolving
+  to the explicit Tier 19 generated profile, with no strategy-name conditional
+  in the app and no seeded completion state.
+
 ---
 
 ## 📘 Documentation

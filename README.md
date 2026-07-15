@@ -32,7 +32,36 @@ python main.py \
   --mission-log logs/blender_mission.log
 ```
 
-Use `--mission-config` alongside `--strategy-config` to pair YAML plans. Legacy `--mission`/`--strategy` names have been removed; the CLI arguments remain only as placeholders to keep older scripts working but must stay `none`. Logs for rule firings and executor actions are written to `logs/actions.log` and mirrored to the optional mission log path.
+Bundled GC farming strategies are generated from one shared family builder and
+compact Tier profiles:
+
+- `gc` and `gc_farm_t18` select the Tier 18 profile. Its configured Target
+  Priority order is verified and enforced after EHLS/EALS.
+- `gc_farm_t19_experiment` selects the experimental Tier 19 profile. It runs
+  EHLS/EALS but preserves the current Target Priority order without inspecting
+  it or including it in the startup completion gate.
+
+For example:
+
+```bash
+.venv/bin/python main.py --adb-port 5555 --strategy gc_farm_t19_experiment
+```
+
+The former `gc_manual_target_priority` name remains a compatibility alias for
+`gc_farm_t19_experiment` during migration; it no longer seeds a completion
+variable. Edit the matching `.source.yaml` profile and regenerate its explicit
+`.strategy.yaml` plan with:
+
+```bash
+.venv/bin/python tools/strategy/build_strategy.py \
+  config/strategies/gc_farm_t19_experiment.source.yaml
+```
+
+Use `--mission-config` alongside `--strategy-config` to pair custom YAML plans.
+The `--strategy` option selects a bundled named strategy, while
+`--strategy-config` overrides it with an explicit YAML file. Logs for rule
+firings and executor actions are written to `logs/actions.log` and mirrored to
+the optional mission log path.
 
 ## Runtime pause control
 

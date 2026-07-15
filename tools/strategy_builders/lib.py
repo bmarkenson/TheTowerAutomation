@@ -73,6 +73,8 @@ def build_strategy_yaml(source: Dict[str, Any]) -> Dict[str, Any]:
     builder = (source.get("builder") or source.get("strategy_type") or "").strip().lower()
     if builder in {"passthrough", "manual", "raw"}:
         return _build_manual_strategy(source)
+    if builder == "gc_farm":
+        return _build_gc_farm_strategy(source)
     if builder in {"", "default", "upgrade"}:
         return _build_upgrade_strategy(source)
     if builder == "glass_cannon":
@@ -85,6 +87,181 @@ def _build_manual_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
     data.pop("builder", None)
     data.pop("strategy_type", None)
     return data
+
+
+def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
+    """Compose the shared GC startup sequence with one concrete profile."""
+
+    meta = copy.deepcopy(source.get("meta") or {})
+    profile_name = str(meta.get("name") or "").strip()
+    if not profile_name:
+        raise ValueError("gc_farm profile requires meta.name")
+
+    initialization = source.get("initialization") or {}
+    target_priority = initialization.get("target_priority") or {}
+    target_priority_mode = str(target_priority.get("mode") or "").strip().lower()
+    if target_priority_mode not in {"preserve", "enforce"}:
+        raise ValueError(
+            "gc_farm initialization.target_priority.mode must be preserve or enforce"
+        )
+
+    target_priority_order: List[str] | None = None
+    configured_order = target_priority.get("order")
+    if target_priority_mode == "preserve":
+        if configured_order is not None:
+            raise ValueError("gc_farm preserve mode must not supply a Target Priority order")
+    else:
+        if not isinstance(configured_order, list):
+            raise ValueError("gc_farm enforce mode requires a Target Priority order")
+        from core.target_priority_config import validate_target_priority_order
+
+        try:
+            target_priority_order = validate_target_priority_order(configured_order)
+        except ValueError as exc:
+            raise ValueError(f"gc_farm {exc}") from exc
+
+    complete_when = ["ehls_completed", "eals_completed"]
+    vars_block: Dict[str, Any] = {
+        "run_initialised": False,
+        "fast_loop_active": False,
+        "loop_sleep_override_sec": 0.0,
+        "ehls_completed": False,
+        "eals_completed": False,
+        "last_upgrade_label": "",
+        "last_upgrade_reason": "",
+        "last_upgrade_sent": False,
+        "last_upgrade_maxed_after": False,
+        "last_upgrade_menu": "",
+        "last_upgrade_ts": 0,
+        "maxed_enemy_health_level_skip": False,
+        "maxed_enemy_attack_level_skip": False,
+        "ehls_completion_wave": None,
+        "eals_completion_wave": None,
+        "eals_first_tap_wave": None,
+        "eals_first_tap_elapsed_s": None,
+        "level_skip_elapsed_s": 0.0,
+        "level_skip_taps_sent": 0,
+        "level_skip_last_reason": "",
+    }
+    if target_priority_mode == "enforce":
+        vars_block["target_priority_checked"] = False
+        complete_when.append("target_priority_checked")
+
+    per_run_reset = [
+        "run_initialised",
+        "fast_loop_active",
+        "loop_sleep_override_sec",
+        "ehls_completed",
+        "eals_completed",
+        "last_upgrade_label",
+        "last_upgrade_reason",
+        "last_upgrade_sent",
+        "last_upgrade_maxed_after",
+        "last_upgrade_menu",
+        "last_upgrade_ts",
+        "maxed_enemy_health_level_skip",
+        "maxed_enemy_attack_level_skip",
+        "ehls_completion_wave",
+        "eals_completion_wave",
+        "eals_first_tap_wave",
+        "eals_first_tap_elapsed_s",
+        "level_skip_elapsed_s",
+        "level_skip_taps_sent",
+        "level_skip_last_reason",
+    ]
+
+    reset_values = {
+        "run_initialised": False,
+        "fast_loop_active": False,
+        "loop_sleep_override_sec": 0.0,
+        "ehls_completed": False,
+        "eals_completed": False,
+        "maxed_enemy_health_level_skip": False,
+        "maxed_enemy_attack_level_skip": False,
+        "last_upgrade_label": "",
+        "last_upgrade_reason": "",
+        "last_upgrade_sent": False,
+        "last_upgrade_maxed_after": False,
+        "last_upgrade_menu": "",
+        "last_upgrade_ts": 0,
+        "ehls_completion_wave": None,
+        "eals_completion_wave": None,
+        "eals_first_tap_wave": None,
+        "eals_first_tap_elapsed_s": None,
+        "level_skip_elapsed_s": 0.0,
+        "level_skip_taps_sent": 0,
+        "level_skip_last_reason": "",
+    }
+    initialize_values = copy.deepcopy(reset_values)
+    initialize_values.update(
+        run_initialised=True,
+        fast_loop_active=True,
+        loop_sleep_override_sec=1.0,
+    )
+
+    rules: List[Dict[str, Any]] = [
+        {
+            "name": "reset_on_game_over",
+            "when": {"state": "GAME_OVER"},
+            "do": [
+                {"type": "set", "var": name, "value": value}
+                for name, value in reset_values.items()
+            ],
+        },
+        {
+            "name": "initialise_fast_loop",
+            "when": {"state": "RUNNING"},
+            "assert": ["!run_initialised"],
+            "do": [
+                {"type": "set", "var": name, "value": value}
+                for name, value in initialize_values.items()
+            ],
+        },
+        {
+            "name": "disable_fast_loop",
+            "when": {"state": "RUNNING"},
+            "assert": ["fast_loop_active", "ehls_completed", "eals_completed"],
+            "do": [
+                {"type": "set", "var": "fast_loop_active", "value": False},
+                {"type": "set", "var": "loop_sleep_override_sec", "value": 0.0},
+            ],
+        },
+        {
+            "name": "initialize_level_skips_fast",
+            "when": {"state": "RUNNING"},
+            "assert": ["fast_loop_active", "!eals_completed"],
+            "cooldown_sec": 0.25,
+            "do": [{"type": "level_skip_initialize"}],
+        },
+    ]
+
+    if target_priority_mode == "enforce":
+        rules.append(
+            {
+                "name": "ensure_target_priority",
+                "when": {"state": "RUNNING"},
+                "assert": [
+                    "ehls_completed",
+                    "eals_completed",
+                    "!target_priority_checked",
+                ],
+                "cooldown_sec": 30.0,
+                "do": [
+                    {
+                        "type": "target_priority_ensure",
+                        "order": copy.deepcopy(target_priority_order),
+                    }
+                ],
+            }
+        )
+
+    return {
+        "meta": meta,
+        "run_initialization": {"complete_when": complete_when},
+        "vars": vars_block,
+        "per_run_reset": per_run_reset,
+        "rules": rules,
+    }
 
 
 def _build_upgrade_strategy(source: Dict[str, Any]) -> Dict[str, Any]:

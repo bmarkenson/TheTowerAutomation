@@ -98,7 +98,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--strategy",
         default="gc",
-        help="Runtime strategy: gc (default) or none; --strategy-config overrides it",
+        help=(
+            "Runtime strategy: gc (Tier 18 default), gc_farm_t18, "
+            "gc_farm_t19_experiment, or none; --strategy-config overrides it"
+        ),
     )
     parser.add_argument("--mission-log", default=None,
                         help="Optional path to write mission/strategy logs (always logs to actions.log as well)")

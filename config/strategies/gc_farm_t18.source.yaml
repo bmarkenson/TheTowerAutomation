@@ -1,0 +1,22 @@
+meta:
+  name: gc_farm_t18
+  family: gc_farm
+  tier: 18
+  version: 1
+
+builder: gc_farm
+
+initialization:
+  target_priority:
+    mode: enforce
+    order:
+      - Fleets
+      - Boss
+      - Elites
+      - In Spotlight
+      - Tank
+      - Closest (Default)
+      - Ranged
+      - Protector
+      - Fast
+      - Basic

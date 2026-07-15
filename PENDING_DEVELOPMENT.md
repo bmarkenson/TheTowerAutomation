@@ -52,11 +52,23 @@ lifecycle, orchestration, and action authority in separate layers.
   and verifies `HOME_SCREEN`; the normal in-run route verifies `RUNNING`. Live
   validation detected the manually claimed gem's cooldown, returned to the
   battle, and persisted UTC day `2026-07-15` as `not_ready`.
-- [ ] Run the default GC strategy under the full main loop for at least one
-  natural Game Over -> Retry boundary and confirm the exclusive startup gate
-  repeats EHLS then EALS while Target Priority remains session-scoped.
+- [ ] Run the profile-based GC strategy under the full main loop for at least
+  one natural Game Over -> Retry boundary. Confirm one new lifecycle boundary,
+  EHLS then EALS initialization, the selected profile's Target Priority policy,
+  and no false completion across transient `UNKNOWN` frames.
 
 ## GC run initialization
+
+- [x] Replace the tactical manual-Target-Priority variant with shared GC family
+  profiles.
+  - `gc_farm_t18` and `gc_farm_t19_experiment` are stable profile identities
+    generated from one concrete `gc_farm` builder.
+  - Preserve mode omits the Target Priority assertion, variable, rule, and
+    action; enforce mode carries that profile's explicit order through the
+    executor and keeps the startup gate closed until verification succeeds.
+  - `gc` selects Tier 18. The former `gc_manual_target_priority` name remains a
+    temporary compatibility alias to the Tier 19 profile without seeding a
+    completion variable.
 
 - [ ] Implement a once-per-continuous-session GC preflight, always after the
   current run's EHLS/EALS startup gate:

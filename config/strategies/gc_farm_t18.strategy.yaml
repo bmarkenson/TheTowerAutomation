@@ -1,6 +1,8 @@
 meta:
-  name: gc_skipper
-  version: 2
+  name: gc_farm_t18
+  family: gc_farm
+  tier: 18
+  version: 1
 run_initialization:
   complete_when:
   - ehls_completed
@@ -20,7 +22,6 @@ vars:
   last_upgrade_ts: 0
   maxed_enemy_health_level_skip: false
   maxed_enemy_attack_level_skip: false
-  target_priority_checked: false
   ehls_completion_wave: null
   eals_completion_wave: null
   eals_first_tap_wave: null
@@ -28,6 +29,7 @@ vars:
   level_skip_elapsed_s: 0.0
   level_skip_taps_sent: 0
   level_skip_last_reason: ''
+  target_priority_checked: false
 per_run_reset:
 - run_initialised
 - fast_loop_active
@@ -213,3 +215,14 @@ rules:
   cooldown_sec: 30.0
   do:
   - type: target_priority_ensure
+    order:
+    - Fleets
+    - Boss
+    - Elites
+    - In Spotlight
+    - Tank
+    - Closest (Default)
+    - Ranged
+    - Protector
+    - Fast
+    - Basic

@@ -197,7 +197,11 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                 if is_strategy_action and last_state not in allowed_states:
                     log_mission(f"[EXEC] Skip target_priority_ensure while state={last_state}", "DEBUG")
                     continue
-                ok = ensure_target_priority_order()
+                expected_order = act.get("order")
+                if expected_order is None:
+                    ok = ensure_target_priority_order()
+                else:
+                    ok = ensure_target_priority_order(expected=expected_order)
                 if mv is not None:
                     mv["target_priority_checked"] = ok
                 log_mission(f"[EXEC] target_priority_ensure verified={ok}", "INFO" if ok else "WARN")

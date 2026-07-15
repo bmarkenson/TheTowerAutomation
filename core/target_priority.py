@@ -13,22 +13,15 @@ import numpy as np
 from core.ss_capture import capture_adb_screenshot
 from core.input import safe_tap
 from core.run_controls import ensure_menu_open
+from core.target_priority_config import (
+    TARGET_PRIORITY_TARGETS,
+    validate_target_priority_order,
+)
 from utils.ocr_utils import ocr_text_and_conf
 from utils.logger import log
 
 
-TARGETS = (
-    "Fleets",
-    "Boss",
-    "Elites",
-    "In Spotlight",
-    "Tank",
-    "Closest (Default)",
-    "Ranged",
-    "Protector",
-    "Fast",
-    "Basic",
-)
+TARGETS = TARGET_PRIORITY_TARGETS
 
 _ROW_FIRST_CENTER_Y = 320
 _ROW_STEP_Y = 160
@@ -113,9 +106,7 @@ def ensure_target_priority_order(
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> bool:
     """Open the panel, enforce expected using Up arrows, and verify it."""
-    expected_list = list(expected)
-    if len(expected_list) != len(TARGETS) or set(expected_list) != set(TARGETS):
-        raise ValueError("Expected Target Priority order must contain every target exactly once")
+    expected_list = validate_target_priority_order(expected)
     if not ensure_menu_fn():
         log("[TARGET_PRIORITY] Unable to open the game menu", "WARN")
         return False
