@@ -71,11 +71,10 @@ class App:
         self._match_trace = config.match_trace
         self._auto_start_enabled = config.auto_start_enabled
 
-        self._mission_active = bool(
-            (config.mission_name and config.mission_name.lower() != "none")
-            or config.mission_config_path
-        )
-        self._fast_game_over = config.fast_game_over or (self._mission_active and not config.full_game_over)
+        # Structured battle records are the default for every run, including
+        # mission-driven runs. Only the explicit fast flag may skip capture;
+        # the legacy full flag remains an override when both are supplied.
+        self._fast_game_over = config.fast_game_over and not config.full_game_over
 
         self._last_wave_value: Optional[int] = None
         self._last_wave_conf: float = -1.0
@@ -310,7 +309,16 @@ class App:
 
         if new_state == "GAME_OVER":
             log("Detected GAME_OVER. Executing handler.", "INFO", console=True)
-            handle_game_over(capture_stats=(not self._fast_game_over))
+            strategy = self._mission_mgr.strategy
+            handle_game_over(
+                capture_stats=(not self._fast_game_over),
+                battle_context={
+                    "strategy": strategy.name if strategy else None,
+                    "last_wave": self._last_wave_value,
+                    "last_wave_confidence": self._last_wave_conf,
+                    "coins_log_path": self._status_reporter.coins_log_path,
+                },
+            )
             self._mission_mgr.on_game_over()
             self._supervisor.record_run_restart()
             new_path = self._status_reporter.rotate_coins_log()

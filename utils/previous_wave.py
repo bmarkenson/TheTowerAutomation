@@ -4,6 +4,7 @@
 import os
 import re
 import glob
+import json
 from datetime import datetime
 from typing import Optional
 
@@ -18,6 +19,13 @@ _HI_LINE_RE  = re.compile(r'^\s*Highest\s*Wave[: ]+\s*(\d{1,6})\b', re.IGNORECAS
 # ---------- File selection ----------
 
 _TS_RE = re.compile(r"Game(\d{8})_(\d{4})_game_stats\.png$")  # GameYYYYMMDD_HHMM_game_stats.png
+
+
+def _latest_battle_record(records_dir: str = "logs/battles") -> Optional[str]:
+    candidates = glob.glob(os.path.join(records_dir, "Battle*.json"))
+    if not candidates:
+        return None
+    return max(candidates, key=os.path.basename)
 
 def _parse_ts_from_name(path: str) -> Optional[datetime]:
     m = _TS_RE.search(os.path.basename(path))
@@ -60,11 +68,31 @@ def _extract_current_and_highest(text: str):
 
 # ---------- Public API ----------
 
-def get_previous_run_wave(matches_dir: str = "screenshots/matches") -> Optional[int]:
+def get_previous_run_wave(
+    matches_dir: str = "screenshots/matches",
+    records_dir: str = "logs/battles",
+) -> Optional[int]:
     """
-    Load the latest 'GameYYYYMMDD_HHMM_game_stats.png' under matches_dir,
-    OCR the text, and return the parsed current Wave number (or None on failure).
+    Read the latest structured battle record and return its final wave. Legacy
+    Game Stats screenshot OCR remains as a migration fallback.
     """
+    record_path = _latest_battle_record(records_dir)
+    if record_path:
+        try:
+            with open(record_path, "r", encoding="utf-8") as handle:
+                record = json.load(handle)
+            for section in record.get("more_stats", {}).get("sections", []):
+                if section.get("key") != "battle_report":
+                    continue
+                for row in section.get("rows", []):
+                    if row.get("key") == "wave" and isinstance(row.get("value"), int):
+                        return int(row["value"])
+            value = record.get("game_stats", {}).get("fields", {}).get("wave", {}).get("value")
+            if isinstance(value, int):
+                return value
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            pass
+
     path = _latest_game_stats_image(matches_dir)
     if not path:
         return None
@@ -85,9 +113,10 @@ def main():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--matches-dir", default="screenshots/matches", help="Directory containing Game*_game_stats.png")
+    parser.add_argument("--records-dir", default="logs/battles", help="Directory containing Battle*.json records")
     args = parser.parse_args()
 
-    val = get_previous_run_wave(matches_dir=args.matches_dir)
+    val = get_previous_run_wave(matches_dir=args.matches_dir, records_dir=args.records_dir)
     print("Previous run wave:", "<none>" if val is None else val)
 
 

@@ -87,9 +87,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--control-file", default="logs/automation_ctl.json",
                         help="Path to JSON control file for pause/resume/mode (default: logs/automation_ctl.json)")
     parser.add_argument("--fast-game-over", action="store_true",
-                        help="Skip More Stats capture on GAME_OVER (default: enabled when --mission != none)")
+                        help="Explicitly skip structured More Stats capture on GAME_OVER")
     parser.add_argument("--full-game-over", action="store_true",
-                        help="Force capture of More Stats on GAME_OVER even when a mission is active")
+                        help="Legacy override that forces capture when --fast-game-over is also supplied")
     parser.add_argument(
         "--mission",
         default="none",

@@ -65,6 +65,37 @@ Success is logged once and persists across run boundaries in that process. A
 mismatch blocks normal automation and logs its evidence; it does not change a
 preset, toggle, equipment, or Surrender the run.
 
+## Battle statistics
+
+At Game Over, the normal handler now OCRs the complete scrolling **More Stats**
+page into one durable record instead of routinely saving three screenshots.
+Each battle produces:
+
+- `logs/battles/Battle*.json` — the versioned source record, including named
+  sections/rows, raw OCR text, confidence, strategy/runtime context, and
+  derived values;
+- `logs/battles/Battle*.md` — a human-readable view of the same battle.
+
+Every label/value row found on the page is retained by section; the schema does
+not limit capture to a fixed shortlist of stats. Capture validation currently
+requires all 16 known sections and all 14 known Currencies rows, so a missing
+section cannot silently produce a partial record. Every numeric row in
+**Currencies** gets a calculated real-time hourly rate unless the page already
+provides one, as it does for Cells. Derived values also include combined Reroll
+Dice/hour (earned plus fetched), total module Shards/hour (Cannon, Armor,
+Generator, and Core), effective game speed, waves per real hour, real seconds
+per wave, coins and cells per wave, base/ad coin shares, death defies, estimated
+start time, and any discrepancy between final-wave OCR and the runtime wave
+hint. Game values keep both their original text and parsed case-sensitive
+magnitude (`q`, `Q`, `D`, `aa`, `ab`, and later suffixes).
+
+The long page is captured as overlapping, guarded in-memory viewports. Source
+screenshots are written to `screenshots/matches/` only when the page cannot be
+captured to its edge, required sections/rows are missing, or OCR validation is
+uncertain.
+`--fast-game-over` is the explicit opt-out when a run intentionally should not
+create a record.
+
 Use `--mission-config` alongside `--strategy-config` to pair custom YAML plans.
 The `--strategy` option selects a bundled named strategy, while
 `--strategy-config` overrides it with an explicit YAML file. Logs for rule

@@ -1,0 +1,354 @@
+from datetime import datetime, timezone
+from decimal import Decimal
+
+import numpy as np
+
+from core.battle_stats import (
+    build_battle_record,
+    format_tower_number,
+    parse_duration_seconds,
+    parse_tower_number,
+    persist_battle_record,
+)
+from utils.previous_wave import get_previous_run_wave
+
+
+def _frame(page: int) -> np.ndarray:
+    return np.full((1920, 1080, 3), page, dtype=np.uint8)
+
+
+def _ocr_data(lines):
+    data = {
+        key: []
+        for key in (
+            "text",
+            "conf",
+            "left",
+            "top",
+            "width",
+            "height",
+            "block_num",
+            "par_num",
+            "line_num",
+        )
+    }
+    for line_number, (label, value, confidence) in enumerate(lines, start=1):
+        is_header = value is None
+        left = 300 if is_header else 40
+        for token in label.split():
+            _append_token(data, token, confidence, left, line_number)
+            left += len(token) * 18 + 16
+        if value is not None:
+            left = 620
+            for token in value.split():
+                _append_token(data, token, confidence, left, line_number)
+                left += len(token) * 18 + 16
+    return data
+
+
+def _append_token(data, text, confidence, left, line_number):
+    data["text"].append(text)
+    data["conf"].append(confidence)
+    data["left"].append(left)
+    data["top"].append(20 + line_number * 55)
+    data["width"].append(max(15, len(text) * 17))
+    data["height"].append(35)
+    data["block_num"].append(1)
+    data["par_num"].append(1)
+    data["line_num"].append(line_number)
+
+
+PAGES = {
+    1: _ocr_data(
+        [
+            ("Battle Report", None, 96),
+            ("Battle Date", "Jul 15, 2026 06:46", 95),
+            ("Game Time", "5h 0m 0s", 95),
+            ("Real Time", "1h 0m 0s", 95),
+            ("Tier", "19", 95),
+            ("Wave", "2000", 95),
+            ("Killed By", "Scatter", 95),
+            ("Coins Earned", "2.00q", 95),
+            ("Coins Per Hour", "2.00q", 95),
+            ("Cells Earned", "100.00K", 95),
+            ("Cells Per Hour", "100.00K", 95),
+            ("Damage", None, 96),
+            ("Damage Dealt", "blur", 20),
+        ]
+    ),
+    2: _ocr_data(
+        [
+            ("Damage Dealt", "17.04ab", 96),
+            ("Projectiles", "30.14aa", 95),
+            ("Smart Missiles", "4.8laa", 55),
+            ("Damage Taken", None, 96),
+            ("Tower", "434.09Q", 95),
+            ("Wall", "705.94Q", 95),
+            ("Currencies", None, 96),
+            ("Cells Earned", "100.00K", 95),
+            ("Gems", "36", 95),
+            ("Ad Gems", "24", 95),
+            ("Gem Blocks Tapped", "2", 95),
+            ("Fetch Gems", "3", 95),
+            ("Medals", "1", 95),
+            ("Reroll Shards Earned", "72.00K", 95),
+            ("Reroll Shards Fetched", "0)", 95),
+            ("Cannon Shards", "10", 95),
+            ("Armor Shards", "20", 95),
+            ("Generator Shards", "30", 95),
+            ("Core Shards", "40", 95),
+            ("Common Modules", "4", 95),
+            ("Rare Modules", "2", 95),
+            ("Future Stat Added By The Game", "7", 95),
+        ]
+    ),
+    3: _ocr_data(
+        [
+            ("Common Modules", "4", 95),
+            ("Rare Modules", "2", 95),
+            ("Future Stat Added By The Game", "7", 95),
+            ("Killed With Effect Active", None, 96),
+            ("Golden Tower 160698", "[100.0%]", 95),
+            ("Amplify Bot", "0", 95),
+            ("Enemies Destroyed By", None, 96),
+            ("Projectiles", "40", 95),
+            ("Other", "138", 95),
+        ]
+    ),
+    4: _ocr_data(
+        [
+            ("Records", None, 96),
+            ("Record Example", "1", 95),
+            ("Bonus Health Gained", None, 96),
+            ("From Death Wave", "0", 95),
+            ("Health Regenerated", None, 96),
+            ("Lifesteal", "1", 95),
+            ("Damage Blocked", None, 96),
+            ("Defense Absolute", "1", 95),
+            ("Utility", None, 96),
+            ("Recovery Packages", "1", 95),
+            ("Counts", None, 96),
+            ("Projectiles Count", "1", 95),
+        ]
+    ),
+    5: _ocr_data(
+        [
+            ("Enemies Hit By", None, 96),
+            ("Projectiles", "1", 95),
+            ("Total Enemies", None, 96),
+            ("Basic", "1", 95),
+            ("Coins", None, 96),
+            ("Coins Earned", "2.00q", 95),
+            ("Cash", None, 96),
+            ("Cash Earned", "$1.00K", 95),
+        ]
+    ),
+}
+
+
+def _data_fn(frame):
+    return PAGES[int(frame[0, 0, 0])]
+
+
+def _game_text(_frame, *, psm):
+    assert psm == 6
+    return (
+        "GAME STATS Wave 2000 Tier 19 Highest Wave: 5575 "
+        "Killed By Scatter Death defied 12 times coins earned ad coins earned "
+        "total coins 1.00q + 1.00q = 2.00q",
+        95.0,
+    )
+
+
+def _record(*, source_complete=True, source_reason="edge_reached"):
+    return build_battle_record(
+        _frame(9),
+        [_frame(1), _frame(2), _frame(3), _frame(4), _frame(5)],
+        source_complete=source_complete,
+        source_reason=source_reason,
+        battle_id="Battle20260715T120000-0700",
+        captured_at=datetime(2026, 7, 15, 12, 0, tzinfo=timezone.utc),
+        strategy_name="gc_farm_t19_experiment",
+        runtime_context={"last_wave": 42},
+        data_fn=_data_fn,
+        game_stats_text_fn=_game_text,
+    )
+
+
+def test_tower_number_parser_preserves_case_sensitive_magnitudes():
+    assert parse_tower_number("2q") == Decimal("2e15")
+    assert parse_tower_number("2Q") == Decimal("2e18")
+    assert parse_tower_number("3D") == Decimal("3e33")
+    assert parse_tower_number("4aa") == Decimal("4e36")
+    assert parse_tower_number("5ab") == Decimal("5e39")
+    assert parse_tower_number("4.81laa") is None
+    assert format_tower_number(Decimal("4.81e36")) == "4.81aa"
+    assert format_tower_number(Decimal("2.5e39")) == "2.5ab"
+    assert parse_duration_seconds("5h 43m 19s") == 20599
+
+
+def test_overlapping_pages_are_sectioned_deduplicated_and_derived():
+    record = _record()
+    sections = {section["key"]: section for section in record["more_stats"]["sections"]}
+
+    damage = {row["key"]: row for row in sections["damage"]["rows"]}
+    currencies = {row["key"]: row for row in sections["currencies"]["rows"]}
+    destroyed = {row["key"]: row for row in sections["enemies_destroyed_by"]["rows"]}
+    effects = {
+        row["key"]: row
+        for row in sections["killed_with_effect_active"]["rows"]
+    }
+    assert damage["damage_dealt"]["value_raw"] == "17.04ab"
+    assert damage["projectiles"]["value_raw"] == "30.14aa"
+    assert damage["smart_missiles"]["value_normalized"] == "4.81aa"
+    assert damage["smart_missiles"]["value_decimal"] == "4.810000000000000000000000000E+36"
+    battle_report = {
+        row["key"]: row for row in sections["battle_report"]["rows"]
+    }
+    assert battle_report["battle_date"]["value_type"] == "datetime_text"
+    assert currencies["reroll_shards_earned"]["value_decimal"] == "72000.00"
+    assert currencies["reroll_shards_fetched"]["value"] == 0
+    assert currencies["future_stat_added_by_the_game"]["value"] == 7
+    assert effects["golden_tower"]["value"] == 160698
+    assert effects["golden_tower"]["active_percent"] == 100.0
+    assert destroyed["projectiles"]["value"] == 40
+
+    assert record["quality"]["valid"]
+    assert not record["quality"]["retain_source_images"]
+    assert record["derived"] == {
+        "effective_game_speed": 5.0,
+        "waves_per_real_hour": 2000.0,
+        "real_seconds_per_wave": 1.8,
+        "coins_per_wave_decimal": "1000000000000.00",
+        "cells_per_wave_decimal": "50.00",
+        "currency_rates_per_real_hour": {
+            "gems": {"label": "Gems", "source_raw": "36", "value_decimal": "36"},
+            "ad_gems": {"label": "Ad Gems", "source_raw": "24", "value_decimal": "24"},
+            "gem_blocks_tapped": {
+                "label": "Gem Blocks Tapped",
+                "source_raw": "2",
+                "value_decimal": "2",
+            },
+            "fetch_gems": {"label": "Fetch Gems", "source_raw": "3", "value_decimal": "3"},
+            "medals": {"label": "Medals", "source_raw": "1", "value_decimal": "1"},
+            "reroll_shards_earned": {
+                "label": "Reroll Shards Earned",
+                "source_raw": "72.00K",
+                "value_decimal": "72000.00",
+            },
+            "reroll_shards_fetched": {
+                "label": "Reroll Shards Fetched",
+                "source_raw": "0)",
+                "value_decimal": "0",
+            },
+            "cannon_shards": {
+                "label": "Cannon Shards",
+                "source_raw": "10",
+                "value_decimal": "10",
+            },
+            "armor_shards": {
+                "label": "Armor Shards",
+                "source_raw": "20",
+                "value_decimal": "20",
+            },
+            "generator_shards": {
+                "label": "Generator Shards",
+                "source_raw": "30",
+                "value_decimal": "30",
+            },
+            "core_shards": {
+                "label": "Core Shards",
+                "source_raw": "40",
+                "value_decimal": "40",
+            },
+            "common_modules": {
+                "label": "Common Modules",
+                "source_raw": "4",
+                "value_decimal": "4",
+            },
+            "rare_modules": {
+                "label": "Rare Modules",
+                "source_raw": "2",
+                "value_decimal": "2",
+            },
+            "future_stat_added_by_the_game": {
+                "label": "Future Stat Added By The Game",
+                "source_raw": "7",
+                "value_decimal": "7",
+            },
+        },
+        "reroll_dice_per_real_hour_decimal": "72000.00",
+        "module_shards_per_real_hour_decimal": "100",
+        "base_coin_share_percent": 50.0,
+        "ad_coin_share_percent": 50.0,
+        "death_defies": 12,
+        "estimated_started_at": "2026-07-15T11:00:00+00:00",
+        "runtime_wave_error": -1958,
+    }
+
+
+def test_incomplete_capture_is_persisted_but_retains_source_evidence():
+    record = _record(source_complete=False, source_reason="source_screen_lost")
+
+    assert not record["quality"]["valid"]
+    assert record["quality"]["retain_source_images"]
+    assert "source_screen_lost" in record["quality"]["warnings"][0]
+
+
+def test_missing_game_stats_only_field_retains_source_evidence():
+    def incomplete_game_text(_frame, *, psm):
+        assert psm == 6
+        return "GAME STATS Wave 2000 Tier 19 Killed By Scatter", 95.0
+
+    record = build_battle_record(
+        _frame(9),
+        [_frame(1), _frame(2), _frame(3), _frame(4), _frame(5)],
+        source_complete=True,
+        source_reason="edge_reached",
+        data_fn=_data_fn,
+        game_stats_text_fn=incomplete_game_text,
+    )
+
+    assert not record["quality"]["valid"]
+    assert record["quality"]["retain_source_images"]
+    assert record["game_stats"]["quality"]["missing_required_fields"]
+
+
+def test_missing_current_more_stats_sections_retain_source_evidence():
+    record = build_battle_record(
+        _frame(9),
+        [_frame(1), _frame(2), _frame(3), _frame(4)],
+        source_complete=True,
+        source_reason="edge_reached",
+        data_fn=_data_fn,
+        game_stats_text_fn=_game_text,
+    )
+
+    assert not record["quality"]["valid"]
+    assert record["quality"]["retain_source_images"]
+    assert "cash" in record["more_stats"]["quality"]["missing_required_sections"]
+
+
+def test_record_persists_json_markdown_and_replaces_previous_wave_screenshot(tmp_path):
+    record = _record()
+    json_path, markdown_path = persist_battle_record(record, records_dir=tmp_path)
+
+    assert json_path.exists()
+    assert markdown_path.exists()
+    markdown = markdown_path.read_text(encoding="utf-8")
+    assert "## Battle Report" in markdown
+    assert "Coins Per Wave: 1T" in markdown
+    assert "Cells Per Wave: 50" in markdown
+    assert "Reroll Dice/hour: 72K" in markdown
+    assert "Shards/hour (total module shards): 100" in markdown
+    assert "### Currency rates" in markdown
+    assert "Gems/hour: 36" in markdown
+    assert "Common Modules/hour: 4" in markdown
+    assert "Cells Earned/hour" not in markdown
+    assert (
+        get_previous_run_wave(
+            matches_dir=str(tmp_path / "missing-screenshots"),
+            records_dir=str(tmp_path),
+        )
+        == 2000
+    )

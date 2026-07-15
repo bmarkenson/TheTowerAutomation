@@ -285,13 +285,31 @@ lifecycle, orchestration, and action authority in separate layers.
   - Make More Stats paging/capture failures recoverable rather than forcing a
     global WAIT for every capture problem.
   - Add automated coverage for RETRY and WAIT; HOME is now covered.
-- [ ] Replace routine Game Over screenshots with structured OCR capture.
-  - OCR every Round Stats section into named fields and retain confidence/raw
-    text for uncertain rows.
-  - Store records in a durable format (initially JSON/JSONL or SQLite after
-    comparing query and migration needs).
-  - Keep screenshots only when OCR validation fails or confidence is below the
-    configured threshold.
+- [ ] Live-validate the structured Game Over OCR record at the next natural
+  boundary.
+  - The implementation now captures every overlapping More Stats viewport in
+    memory, OCRs every observed section/row into named fields with raw text and
+    confidence, and writes versioned JSON plus a human-readable Markdown file
+    under `logs/battles/`.
+  - Routine screenshots are suppressed after a complete, confident capture;
+    incomplete navigation, missing any of the 16 current sections, missing
+    required rows, unparsed numeric values, or low confidence retain all source
+    frames as explicit OCR evidence.
+  - Every observed label/value row is retained without a fixed stat allowlist.
+    Game Stats-only values and initial derived fields are included: highest
+    wave, Death Defies, generic hourly rates for numeric Currencies rows lacking
+    one, combined Reroll Dice/hour, total module Shards/hour, base/ad coin
+    shares, effective game speed, wave rate, seconds per wave, coins/cells per
+    wave, estimated start time, and runtime wave error. The page's existing
+    Cells Per Hour row is retained directly rather than duplicated.
+  - A read-only 2026-07-15 Battle History traversal validated 16 sections, 145
+    named rows, all 14 current Currencies rows, and 13 calculated currency
+    rates; the result passed section, row, parse, and confidence validation.
+    Historical three-frame artifacts prove why overlapping capture is required:
+    they omit the middle of the long page.
+  - At the natural boundary, still confirm handler-driven edge detection, Game
+    Stats-only OCR, Markdown readability, screenshot suppression/fallback, and
+    the WAIT/Retry transition without surrendering a battle.
 ## Configuration and developer tooling
 
 - [ ] Make Codex shell execution use the repository `.venv` by default instead

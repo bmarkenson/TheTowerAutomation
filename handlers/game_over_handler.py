@@ -1,30 +1,45 @@
-# handlers/game_over_handler.py
+"""Game Over navigation and structured battle-stat capture."""
+
+import os
+import time
+from datetime import datetime
+from typing import Any, Mapping, Optional
+
+import cv2
+
 from utils.logger import log
 from core.ss_capture import capture_adb_screenshot
 from core.run_state import AUTOMATION, ExecMode
-from core.input import tap_if_visible, tap_now
-from core.scrolling import guarded_swipe, scroll_to_edge
-from core.adb_utils import adb_shell
+from core.input import tap_if_visible
+from core.scrolling import capture_scroll_to_edge, scroll_to_edge
+from core.battle_stats import (
+    build_battle_record,
+    make_battle_id,
+    persist_battle_record,
+)
 from utils.wave_detector import set_wave_hint
-# Note: OCR fallback for More Stats is currently disabled; keeping imports out.
-import time
-import os
-import cv2
 
 
 MORE_STATS_INDICATOR = "indicators.more_stats"
 MORE_STATS_CONTENT_REGION = (100, 330, 880, 1370)
 
-def handle_game_over(*, capture_stats: bool = True):
+
+def handle_game_over(
+    *,
+    capture_stats: bool = True,
+    battle_context: Optional[Mapping[str, Any]] = None,
+):
     """
     Handle the GAME OVER flow: capture stats, close stats, and retry or pause.
 
     Workflow:
-      1) Save initial game-over stats screenshot.
+      1) Capture the initial Game Stats dialog in memory.
       2) Tap "More Stats"; if it fails, abort handler.
-      3) Swipe to top, save screenshot; swipe to page 2, save; swipe to bottom, save.
-      4) Close "More Stats"; if it fails, abort handler.
-      5) Based on AUTOMATION.mode:
+      3) Swipe to top, then retain every overlapping viewport through the bottom.
+      4) OCR and persist a structured JSON/Markdown record. Screenshots are
+         retained only when capture/OCR validation fails.
+      5) Close "More Stats"; if it fails, abort handler.
+      6) Based on AUTOMATION.mode:
          - WAIT: loop until mode changes.
          - HOME: tap the Game Stats Home button and return to the home screen.
          - else: tap "Retry"; if it fails, abort handler.
@@ -33,8 +48,8 @@ def handle_game_over(*, capture_stats: bool = True):
         None — mission/handler side-effects only.
 
     Side effects:
-        [adb] Captures screenshots.
-        [cv2] Writes images to disk.
+        [adb] Captures screenshots in memory.
+        [ocr][fs] Writes a structured battle record and optional failure images.
         [fs] Creates directories and files.
         [tap][swipe] Sends UI input.
         [log] Emits structured logs.
@@ -46,7 +61,9 @@ def handle_game_over(*, capture_stats: bool = True):
     Errors:
         Tap failures cause an early abort via _abort_handler(), which sets AUTOMATION.mode=WAIT.
     """
-    session_id = _make_session_id()
+    captured_at = datetime.now().astimezone()
+    session_id = _make_session_id(captured_at.timetuple())
+    battle_id = make_battle_id(captured_at)
     log(f"Handling GAME OVER — Session: {session_id}", "INFO", console=True)
 
     # Clear the monotonic wave hint immediately so fresh runs accept wave 1 detections.
@@ -54,9 +71,11 @@ def handle_game_over(*, capture_stats: bool = True):
     log("[WAVE] Cleared wave hint on game over", "INFO")
 
     if capture_stats:
-        # Save first screen
+        # Keep source frames in memory. Routine successful captures persist only
+        # structured data; screenshots are failure evidence.
         img_game_stats = capture_adb_screenshot()
-        save_image(img_game_stats, f"{session_id}_game_stats")
+        if img_game_stats is None:
+            return _abort_handler("Capture Game Stats", session_id)
 
         # Step 1: Tap "More Stats"
         if not tap_if_visible("buttons.more_stats:game_over", retries=1):
@@ -73,38 +92,41 @@ def handle_game_over(*, capture_stats: bool = True):
             max_swipes=8,
             settle_s=1.2,
         )
-        if not top.success or top.screenshot is None:
+        if top.screenshot is None:
             return _abort_handler(f"Scroll More Stats to top ({top.reason})", session_id)
-        save_image(top.screenshot, f"{session_id}_more_stats_1")
 
-        # Step 3: Swipe to page 2 and capture
-        page_two = guarded_swipe(
-            "gesture_targets.goto_pg2:more_stats",
-            source_label=MORE_STATS_INDICATOR,
-            screenshot=top.screenshot,
-            settle_s=1.2,
+        if top.success:
+            capture = capture_scroll_to_edge(
+                "gesture_targets.goto_pg2:more_stats",
+                source_label=MORE_STATS_INDICATOR,
+                screenshot=top.screenshot,
+                progress_region=MORE_STATS_CONTENT_REGION,
+                max_swipes=16,
+                settle_s=1.2,
+            )
+            more_stats_frames = list(capture.screenshots)
+            source_complete = capture.success
+            source_reason = capture.reason
+        else:
+            # Capture/OCR failure must not strand a completed battle. Preserve
+            # the available evidence, produce an explicitly incomplete record,
+            # and continue to the verified close button.
+            more_stats_frames = [top.screenshot]
+            source_complete = False
+            source_reason = f"top_{top.reason}"
+
+        _save_battle_stats_record(
+            battle_id=battle_id,
+            session_id=session_id,
+            game_stats_frame=img_game_stats,
+            more_stats_frames=more_stats_frames,
+            source_complete=source_complete,
+            source_reason=source_reason,
+            battle_context=battle_context,
+            captured_at=captured_at,
         )
-        if not page_two.success or page_two.screenshot is None:
-            return _abort_handler(f"Scroll More Stats to page 2 ({page_two.reason})", session_id)
-        save_image(page_two.screenshot, f"{session_id}_more_stats_2")
 
-        # Step 4: Repeatedly swipe to the true bottom and capture.
-        bottom = scroll_to_edge(
-            "gesture_targets.goto_bottom:more_stats",
-            source_label=MORE_STATS_INDICATOR,
-            screenshot=page_two.screenshot,
-            progress_region=MORE_STATS_CONTENT_REGION,
-            max_swipes=12,
-            settle_s=1.2,
-        )
-        if not bottom.success or bottom.screenshot is None:
-            return _abort_handler(f"Scroll More Stats to bottom ({bottom.reason})", session_id)
-        save_image(bottom.screenshot, f"{session_id}_more_stats_3")
-
-        # Step 5: Attempt to capture stats text (clipboard first, then OCR fallback)
-        _save_stats_text(session_id)
-
-        # Step 6: Close More Stats
+        # Step 5: Close More Stats
         if not tap_if_visible("buttons.close:more_stats", retries=1):
             return _abort_handler("Close More Stats", session_id)
 
@@ -112,7 +134,7 @@ def handle_game_over(*, capture_stats: bool = True):
     else:
         log("[GAME_OVER] Fast mode enabled — skipping More Stats capture.", "INFO")
 
-    # Step 7: Decide next action based on mode
+    # Step 6: Decide next action based on mode
     mode = AUTOMATION.mode
     if mode == ExecMode.WAIT:
         log("Pausing on Game Over — waiting for user signal.", "INFO", console=True)
@@ -131,51 +153,60 @@ def handle_game_over(*, capture_stats: bool = True):
 
     time.sleep(2)
 
-def _save_stats_text(session_id: str) -> None:
-    """
-    On the More Stats screen, tap the save-stats button to copy text to the
-    clipboard, then read the clipboard and write it to a file next to the
-    screenshots for this session.
-    """
-    # Disabled: save-stats tap and clipboard capture are unreliable with
-    # host-clipboard emulators (e.g., BlueStacks on Windows). Skipping.
-    log("[MORE_STATS] save-stats capture disabled.", "INFO")
-    return
 
-    # Try to read clipboard via standard ADB command (Android 10+)
-    res = adb_shell(["cmd", "clipboard", "get"], capture_output=True, check=False)
-    text = None
-    if res and res.stdout is not None:
-        out = res.stdout.strip()
-        if out and out.lower() not in {"(null)", "null", "no primary clip"}:
-            text = out
+def _save_battle_stats_record(
+    *,
+    battle_id: str,
+    session_id: str,
+    game_stats_frame,
+    more_stats_frames,
+    source_complete: bool,
+    source_reason: str,
+    battle_context: Optional[Mapping[str, Any]],
+    captured_at: Optional[datetime] = None,
+) -> None:
+    """Persist OCR output and retain source images only for uncertain records."""
 
-    path = os.path.join("screenshots", "matches", f"{session_id}_more_stats.txt")
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    context = dict(battle_context or {})
+    strategy_name = context.pop("strategy", None)
+    try:
+        record = build_battle_record(
+            game_stats_frame,
+            more_stats_frames,
+            source_complete=source_complete,
+            source_reason=source_reason,
+            battle_id=battle_id,
+            captured_at=captured_at,
+            strategy_name=strategy_name,
+            runtime_context=context,
+        )
+        json_path, markdown_path = persist_battle_record(record)
+        log(
+            f"[BATTLE_STATS] Saved record: {json_path} (view: {markdown_path})",
+            "INFO",
+            console=True,
+        )
+        if not record["quality"]["retain_source_images"]:
+            return
+        warnings = "; ".join(record["quality"]["warnings"]) or "validation failed"
+        log(f"[BATTLE_STATS] Retaining source screenshots: {warnings}", "WARN")
+    except Exception as exc:
+        log(f"[BATTLE_STATS] Structured capture failed: {exc}", "ERROR", console=True)
 
-    if not text:
-        # OCR fallback disabled for now (clipboard may be on host OS in emulators).
-        log("[MORE_STATS] Clipboard empty; OCR fallback disabled — skipping stats text capture.", "WARN")
-        text = None
+    save_image(game_stats_frame, f"{session_id}_game_stats_OCR_EVIDENCE")
+    for index, frame in enumerate(more_stats_frames, start=1):
+        save_image(frame, f"{session_id}_more_stats_{index}_OCR_EVIDENCE")
 
-    if text:
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(text)
-            log(f"[CAPTURE] Saved More Stats text: {path}", "INFO")
-        except Exception as e:
-            log(f"[ERROR] Failed to write stats text: {e}", "ERROR")
-    else:
-        log("[MORE_STATS] No stats text captured via clipboard or OCR.", "WARN")
 
-def _make_session_id():
+def _make_session_id(captured_at=None):
     """
     Build a session identifier for captured artifacts.
 
     Returns:
-        str: "GameYYYYMMDD_%H%M"
+        str: "GameYYYYMMDD_%H%M%S"
     """
-    return "Game" + time.strftime("%Y%m%d_%H%M")
+    return "Game" + time.strftime("%Y%m%d_%H%M%S", captured_at)
+
 
 def save_image(img, tag):
     """
@@ -200,6 +231,7 @@ def save_image(img, tag):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     cv2.imwrite(path, img)
     log(f"[CAPTURE] Saved screenshot: {path}", "INFO")
+
 
 def _abort_handler(step, session_id):
     """

@@ -29,6 +29,16 @@ class ScrollResult:
     reason: str
 
 
+@dataclass(frozen=True)
+class ScrollCaptureResult:
+    """Outcome from capturing every distinct viewport during a bounded scroll."""
+
+    success: bool
+    screenshots: Tuple[Frame, ...]
+    swipes: int
+    reason: str
+
+
 def guarded_swipe(
     swipe_key: str,
     *,
@@ -125,6 +135,90 @@ def scroll_to_edge(
         "WARN",
     )
     return ScrollResult(False, current, total_swipes, "max_swipes_exceeded")
+
+
+def capture_scroll_to_edge(
+    swipe_key: str,
+    *,
+    source_label: str,
+    screenshot: Optional[Frame] = None,
+    progress_region: Optional[Region] = None,
+    max_swipes: int = 16,
+    settle_s: float = 1.0,
+    stable_threshold: float = 1.0,
+    capture_fn: Callable[[], Optional[Frame]] = capture_adb_screenshot,
+    visible_fn: Callable[..., bool] = is_visible,
+    swipe_fn: Callable[[str], bool] = swipe_now,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> ScrollCaptureResult:
+    """Capture each distinct viewport while guarded scrolling reaches an edge.
+
+    Unlike :func:`scroll_to_edge`, this helper retains the overlapping frames
+    encountered along the way.  Callers can therefore reconstruct long pages
+    without writing routine screenshots to disk.
+    """
+
+    current = screenshot if screenshot is not None else capture_fn()
+    if current is None:
+        return ScrollCaptureResult(False, (), 0, "capture_before_failed")
+    if not visible_fn(source_label, screenshot=current):
+        log(
+            f"[SCROLL] Refusing capture scroll: source '{source_label}' is not visible",
+            "WARN",
+        )
+        return ScrollCaptureResult(False, (current,), 0, "wrong_source_screen")
+
+    screenshots = [current]
+    total_swipes = 0
+    for _ in range(max(1, int(max_swipes))):
+        step = guarded_swipe(
+            swipe_key,
+            source_label=source_label,
+            screenshot=current,
+            settle_s=settle_s,
+            capture_fn=capture_fn,
+            visible_fn=visible_fn,
+            swipe_fn=swipe_fn,
+            sleep_fn=sleep_fn,
+        )
+        total_swipes += step.swipes
+        if not step.success or step.screenshot is None:
+            return ScrollCaptureResult(
+                False,
+                tuple(screenshots),
+                total_swipes,
+                step.reason,
+            )
+
+        difference = _mean_abs_difference(current, step.screenshot, progress_region)
+        current = step.screenshot
+        if difference <= max(0.0, stable_threshold):
+            log(
+                f"[SCROLL] Captured edge with '{swipe_key}' after {total_swipes} "
+                f"swipe(s) ({len(screenshots)} distinct viewport(s), "
+                f"difference={difference:.2f})",
+                "DEBUG",
+            )
+            return ScrollCaptureResult(
+                True,
+                tuple(screenshots),
+                total_swipes,
+                "edge_reached",
+            )
+
+        screenshots.append(current)
+
+    log(
+        f"[SCROLL] Capture edge not reached with '{swipe_key}' after "
+        f"{total_swipes} swipe(s)",
+        "WARN",
+    )
+    return ScrollCaptureResult(
+        False,
+        tuple(screenshots),
+        total_swipes,
+        "max_swipes_exceeded",
+    )
 
 
 def scroll_until_visible(
@@ -232,7 +326,9 @@ def _crop(frame: Frame, region: Optional[Region]) -> Frame:
 
 
 __all__ = [
+    "ScrollCaptureResult",
     "ScrollResult",
+    "capture_scroll_to_edge",
     "guarded_swipe",
     "scroll_to_edge",
     "scroll_until_visible",

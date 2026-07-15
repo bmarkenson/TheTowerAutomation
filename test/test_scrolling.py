@@ -1,6 +1,11 @@
 import numpy as np
 
-from core.scrolling import guarded_swipe, scroll_to_edge, scroll_until_visible
+from core.scrolling import (
+    capture_scroll_to_edge,
+    guarded_swipe,
+    scroll_to_edge,
+    scroll_until_visible,
+)
 
 
 def _frame(value: int) -> np.ndarray:
@@ -43,6 +48,26 @@ def test_scroll_to_edge_stops_when_settled_content_is_stable():
     assert result.reason == "edge_reached"
     assert result.swipes == 2
     assert swipes == ["gesture.edge", "gesture.edge"]
+
+
+def test_capture_scroll_to_edge_retains_each_distinct_viewport():
+    captures = iter((_frame(20), _frame(30), _frame(30)))
+    result = capture_scroll_to_edge(
+        "gesture.edge",
+        source_label="indicators.expected",
+        screenshot=_frame(10),
+        max_swipes=5,
+        stable_threshold=0.0,
+        capture_fn=lambda: next(captures),
+        visible_fn=lambda _label, **_kwargs: True,
+        swipe_fn=lambda _key: True,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.success
+    assert result.reason == "edge_reached"
+    assert result.swipes == 3
+    assert [int(frame[0, 0, 0]) for frame in result.screenshots] == [10, 20, 30]
 
 
 def test_scroll_until_visible_returns_when_target_appears():
