@@ -10,6 +10,24 @@ thread and is not exhaustive for earlier project history.
 
 ## Open
 
+### Automation owner exited without a clean shutdown record
+
+- **Observed:** 2026-07-15 while refreshing the final thread handoff.
+- **Symptom:** The unified runtime session ended with exit code 1 after its last
+  status output, host PID `2933074` no longer existed, and the lock remained on
+  disk. `actions.log` ended during a floating-gem sequence at 11:59 PDT without
+  `KeyboardInterrupt`, a traceback, or `Exited cleanly`.
+- **Concurrent UI evidence:** A fresh screenshot showed the Home Workshop
+  `Farm` screen even though the last runtime status claimed `RUNNING/UW_MENU`.
+  No automation navigation action explaining that transition was logged.
+- **Safety response:** The persistent control file was set to `PAUSED`. No
+  navigation, Resume, process restart, or Surrender followed. The current
+  battle/resume state is unverified.
+- **Status:** Unresolved. Before restarting, determine whether the owner was
+  terminated by the execution-session lifetime, crashed outside the structured
+  logger, or coincided with manual player activity. Treat the lock as stale and
+  the current Workshop screen as authoritative.
+
 ### Runtime wave status can remain stale during an active battle
 
 - **Observed:** 2026-07-15 after restarting automation during an existing Tier

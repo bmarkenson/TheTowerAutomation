@@ -29,6 +29,11 @@ lifecycle, orchestration, and action authority in separate layers.
 
 ## Current validation gates
 
+- [ ] Diagnose the unclean runtime-owner exit recorded in
+  `docs/observed_issues.md`. The 2026-07-15 owner disappeared with exit code 1,
+  left a stale lock, and emitted no clean-shutdown record while the device was
+  on Workshop. Keep control `PAUSED` and inspect for an execution-session limit,
+  an unlogged crash, or manual-player activity before restarting automation.
 - [ ] Reproduce and diagnose the stale runtime wave status recorded in
   `docs/observed_issues.md`. On 2026-07-15 status remained at wave 1300 while a
   fresh live screenshot showed wave 1986. Inspect wave-detector updates and the
