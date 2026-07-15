@@ -2,6 +2,14 @@
 
 This repository drives automated gameplay loops for *The Tower: Idle Tower Defense*. Runtime entry point is `main.py`, which wires detection, missions, and strategies.
 
+## Starting a development thread
+
+Agents and developers should begin with [`AGENTS.md`](AGENTS.md) and the
+canonical [`docs/new_thread.md`](docs/new_thread.md) entrypoint. It links the
+runtime runbook, observed-issue ledger, architecture direction, and current
+backlog. Stable operational guidance belongs there; every handoff should add
+only freshly inspected volatile process and battle state.
+
 ## Running with YAML strategies
 
 Strategies can now be authored in YAML and loaded at runtime. The Blender upgrade loop has been ported to `config/strategies/blender.strategy.yaml`.

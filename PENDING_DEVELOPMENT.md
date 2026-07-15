@@ -29,6 +29,11 @@ lifecycle, orchestration, and action authority in separate layers.
 
 ## Current validation gates
 
+- [ ] Reproduce and diagnose the stale runtime wave status recorded in
+  `docs/observed_issues.md`. On 2026-07-15 status remained at wave 1300 while a
+  fresh live screenshot showed wave 1986. Inspect wave-detector updates and the
+  monotonic hint non-destructively before changing behavior; do not interrupt
+  the active experiment merely to reproduce it.
 - [x] Live-revalidate the refreshed Home `Battle` template at a genuine new-run
   boundary and confirm that `NEW_BATTLE` arms the lifecycle boundary. On
   2026-07-14 at ADB port 5565, repeated paused observations classified the Home
