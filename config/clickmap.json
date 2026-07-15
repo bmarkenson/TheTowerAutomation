@@ -192,7 +192,7 @@
         "duration_ms": 618
       }
     },
-    "uw_detail_dismiss": {
+    "upgrade_detail_dismiss": {
       "roles": [
         "gesture"
       ],
@@ -501,10 +501,10 @@
     "distance_adjuster": {
       "match_template": "indicators/distance_adjuster.png",
       "match_region": {
-        "x": 237,
-        "y": 1182,
-        "w": 605,
-        "h": 67
+        "x": 205,
+        "y": 975,
+        "w": 670,
+        "h": 140
       },
       "match_threshold": 0.9,
       "roles": [
@@ -736,6 +736,279 @@
       "roles": [
         "indicator"
       ]
+    },
+    "wave_panel": {
+      "match_template": "indicators/wave_panel.png",
+      "match_region": {
+        "x": 120,
+        "y": 320,
+        "w": 350,
+        "h": 100
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "perks_panel": {
+      "match_template": "indicators/perks_panel.png",
+      "match_region": {
+        "x": 410,
+        "y": 95,
+        "w": 280,
+        "h": 120
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "settings_stats": {
+      "match_template": "indicators/settings_stats.png",
+      "match_region": {
+        "x": 410,
+        "y": 210,
+        "w": 260,
+        "h": 120
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "settings_toggles": {
+      "match_template": "indicators/settings_toggles.png",
+      "match_region": {
+        "x": 370,
+        "y": 250,
+        "w": 340,
+        "h": 120
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "settings_language": {
+      "match_template": "indicators/settings_language.png",
+      "match_region": {
+        "x": 350,
+        "y": 240,
+        "w": 400,
+        "h": 120
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "settings_update_notes": {
+      "match_template": "indicators/settings_update_notes.png",
+      "match_region": {
+        "x": 275,
+        "y": 55,
+        "w": 530,
+        "h": 130
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "settings_credits": {
+      "match_template": "indicators/settings_credits.png",
+      "match_region": {
+        "x": 375,
+        "y": 240,
+        "w": 340,
+        "h": 120
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "lab_select_research": {
+      "match_template": "indicators/lab_select_research.png",
+      "match_region": {
+        "x": 265,
+        "y": 95,
+        "w": 540,
+        "h": 120
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "lab_history": {
+      "match_template": "indicators/lab_history.png",
+      "match_region": {
+        "x": 375,
+        "y": 360,
+        "w": 350,
+        "h": 120
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "modules_information": {
+      "match_template": "indicators/modules_information.png",
+      "match_region": {
+        "x": 300,
+        "y": 145,
+        "w": 490,
+        "h": 180
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "modules_history": {
+      "match_template": "indicators/modules_history.png",
+      "match_region": {
+        "x": 345,
+        "y": 140,
+        "w": 400,
+        "h": 130
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "battle_heat": {
+      "match_template": "indicators/battle_heat.png",
+      "match_region": {
+        "x": 275,
+        "y": 125,
+        "w": 550,
+        "h": 130
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "battle_overheat": {
+      "match_template": "indicators/battle_overheat.png",
+      "match_region": {
+        "x": 375,
+        "y": 125,
+        "w": 420,
+        "h": 130
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "battle_history": {
+      "match_template": "indicators/battle_history.png",
+      "match_region": {
+        "x": 0,
+        "y": 75,
+        "w": 530,
+        "h": 125
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "inbox": {
+      "match_template": "indicators/inbox.png",
+      "match_region": {
+        "x": 0,
+        "y": 80,
+        "w": 280,
+        "h": 110
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "themes": {
+      "match_template": "indicators/themes.png",
+      "match_region": {
+        "x": 0,
+        "y": 80,
+        "w": 300,
+        "h": 110
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "vault": {
+      "match_template": "indicators/vault.png",
+      "match_region": {
+        "x": 0,
+        "y": 80,
+        "w": 390,
+        "h": 110
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "tournament_screen": {
+      "match_template": "indicators/tournament_screen.png",
+      "match_region": {
+        "x": 0,
+        "y": 80,
+        "w": 440,
+        "h": 110
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "ranking": {
+      "match_template": "indicators/ranking.png",
+      "match_region": {
+        "x": 365,
+        "y": 110,
+        "w": 370,
+        "h": 120
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "settings_encyclopedia": {
+      "match_template": "indicators/settings_encyclopedia.png",
+      "match_region": {
+        "x": 275,
+        "y": 235,
+        "w": 530,
+        "h": 125
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "tournament_prizes": {
+      "match_template": "indicators/tournament_prizes.png",
+      "match_region": {
+        "x": 375,
+        "y": 125,
+        "w": 330,
+        "h": 120
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
     }
   },
   "overlays": {
@@ -749,11 +1022,16 @@
     },
     "uw_detail": {
       "match_template": "overlays/uw_detail.png",
-      "region_ref": "uw_detail_region",
       "match_threshold": 0.9,
       "roles": [
         "overlay"
-      ]
+      ],
+      "match_region": {
+        "x": 100,
+        "y": 950,
+        "w": 880,
+        "h": 220
+      }
     },
     "end_round": {
       "match_template": "overlays/end_round.png",
@@ -810,14 +1088,15 @@
     "buy_quantity_menu_expanded": {
       "match_template": "overlays/buy_quantity_menu_expanded.png",
       "match_region": {
-        "x": 16,
-        "y": 1180,
-        "w": 340,
-        "h": 70
+        "x": 185,
+        "y": 1140,
+        "w": 880,
+        "h": 110
       },
       "roles": [
         "overlay"
-      ]
+      ],
+      "match_threshold": 0.9
     },
     "menu_open": {
       "match_template": "overlays/menu_open.png",
@@ -839,6 +1118,32 @@
         "y": 22,
         "w": 71,
         "h": 81
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "overlay"
+      ]
+    },
+    "exit_battle_dialog": {
+      "match_template": "overlays/exit_battle_dialog.png",
+      "match_region": {
+        "x": 300,
+        "y": 700,
+        "w": 490,
+        "h": 150
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "overlay"
+      ]
+    },
+    "upgrade_detail": {
+      "match_template": "overlays/upgrade_detail.png",
+      "match_region": {
+        "x": 70,
+        "y": 770,
+        "w": 940,
+        "h": 260
       },
       "match_threshold": 0.9,
       "roles": [

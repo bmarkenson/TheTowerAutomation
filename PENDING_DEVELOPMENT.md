@@ -130,6 +130,11 @@ lifecycle, orchestration, and action authority in separate layers.
   - Ensure expected screens never resolve to `UNKNOWN`.
   - Add regression fixtures for every recognized primary, secondary, menu, and
     overlay state.
+  - The 2026-07-14 active-battle and Home-with-Resume traversal is recorded in
+    `docs/ui_state_traversal_2026-07-14.md`. Its safe/read-only screens now have
+    explicit states and fixtures, including Wave/Perks, Settings/Lab/Modules
+    subpages, upgrade details, Battle Heat/History, Ranking, Inbox, Themes,
+    Vault, and Tournament. A full no-battle Home traversal remains pending.
 - [ ] Perform a guided live traversal of every reachable screen and a complete
   farm-run lifecycle to find missing or stale templates.
   - Save one canonical fixture per distinct screen state, not routine gameplay

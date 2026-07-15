@@ -10,6 +10,16 @@ states:
   - indicators.cinematic_wall_icon
   - overlays.buy_quantity_menu_expanded
 
+- name: WAVE_PANEL
+  type: primary
+  match_keys:
+  - indicators.wave_panel
+
+- name: PERKS
+  type: primary
+  match_keys:
+  - indicators.perks_panel
+
 - name: HOME_SCREEN
   type: primary
   match_keys:
@@ -44,6 +54,12 @@ states:
   type: primary
   match_keys:
   - indicators.settings
+  - indicators.settings_stats
+  - indicators.settings_toggles
+  - indicators.settings_language
+  - indicators.settings_update_notes
+  - indicators.settings_credits
+  - indicators.settings_encyclopedia
 
 - name: CARDS
   type: primary
@@ -74,6 +90,8 @@ states:
   type: primary
   match_keys:
   - indicators.lab
+  - indicators.lab_select_research
+  - indicators.lab_history
 
 - name: TARGET_PRIORITY
   type: primary
@@ -84,6 +102,8 @@ states:
   type: primary
   match_keys:
   - indicators.modules
+  - indicators.modules_information
+  - indicators.modules_history
 
 - name: EVENT
   type: primary
@@ -114,6 +134,54 @@ states:
   type: primary
   match_keys:
   - indicators.guild
+
+- name: BATTLE_HEAT
+  type: primary
+  match_keys:
+  - indicators.battle_heat
+  - indicators.battle_overheat
+
+- name: BATTLE_HISTORY
+  type: primary
+  match_keys:
+  - indicators.battle_history
+
+- name: RANKING
+  type: primary
+  match_keys:
+  - indicators.ranking
+
+- name: INBOX
+  type: primary
+  match_keys:
+  - indicators.inbox
+
+- name: THEMES
+  type: primary
+  match_keys:
+  - indicators.themes
+
+- name: VAULT
+  type: primary
+  match_keys:
+  - indicators.vault
+
+- name: TOURNAMENT_SCREEN
+  type: primary
+  match_keys:
+  - indicators.tournament_screen
+  - indicators.tournament_prizes
+
+- name: UPGRADE_DETAIL
+  type: fallback_primary
+  match_keys:
+  - overlays.upgrade_detail
+  - overlays.uw_detail
+
+- name: EXIT_BATTLE_DIALOG
+  type: fallback_primary
+  match_keys:
+  - overlays.exit_battle_dialog
 
 - name: GUILD_GUARDIAN_SCREEN
   type: secondary
@@ -188,7 +256,13 @@ overlays:
   match_keys:
   - overlays.buy_quantity_menu_expanded
 
-- name: UW_DETAIL
+- name: UPGRADE_DETAIL
   type: overlay
   match_keys:
+  - overlays.upgrade_detail
   - overlays.uw_detail
+
+- name: EXIT_BATTLE_DIALOG
+  type: overlay
+  match_keys:
+  - overlays.exit_battle_dialog

@@ -159,8 +159,13 @@ def detect_state_and_overlays(
                 matched_states.append(state_name)
                 break
 
-    # Classify into primary, secondary, and menu (mutually exclusive selection)
+    # Classify into primary, secondary, menu, and fallback-primary candidates.
+    # Fallback primaries describe modal screens whose evidence may coexist with
+    # a more specific primary (for example, an upgrade detail shown over the
+    # dedicated Damage Adjuster). They are authoritative only when no ordinary
+    # primary matched.
     menu_candidates_in_order = []  # preserve YAML order for priority
+    fallback_primary_candidates = []
     for name in matched_states:
         # find the state entry (by name) in YAML
         state_entry = state_lookup.get(name)
@@ -172,10 +177,22 @@ def detect_state_and_overlays(
             if result["state"] != "UNKNOWN":
                 raise RuntimeError(f"[ERROR] Multiple primary states matched: {result['state']} and {name}")
             result["state"] = name
+        elif state_type == "fallback_primary":
+            fallback_primary_candidates.append(name)
         elif state_type == "menu":
             menu_candidates_in_order.append(name)
         else:
             result["secondary_states"].append(name)
+
+    if result["state"] == "UNKNOWN" and fallback_primary_candidates:
+        result["state"] = fallback_primary_candidates[0]
+        if len(fallback_primary_candidates) > 1:
+            log(
+                f"[WARN] Multiple fallback primaries matched "
+                f"{fallback_primary_candidates} -> chose "
+                f"'{result['state']}' (YAML order priority)",
+                "WARN",
+            )
 
     if menu_candidates_in_order:
         # pick the first matched in YAML order (order = priority)

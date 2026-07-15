@@ -29,7 +29,7 @@ from core.upgrade_buy_quantity import (
     detect_current_buy_quantity,
     get_buy_quantity_regions,
 )
-from handlers.dismiss_uw_detail import handle_uw_detail_popup
+from handlers.dismiss_uw_detail import handle_upgrade_detail_popup
 from utils.logger import log, log_mission
 
 # Default timing constants
@@ -273,7 +273,7 @@ def _ensure_menu(menu: str, *, capture_fn: Callable[[], Optional[np.ndarray]], m
         if screenshot is None:
             continue
 
-        dismissed_menu = handle_uw_detail_popup(
+        dismissed_menu = handle_upgrade_detail_popup(
             screenshot=screenshot,
             capture_fn=capture_fn,
             sleep_fn=time.sleep,
@@ -298,7 +298,7 @@ def _ensure_menu(menu: str, *, capture_fn: Callable[[], Optional[np.ndarray]], m
         capture_fn=capture_fn,
         sleep_fn=time.sleep,
     )
-    dismissed_menu = handle_uw_detail_popup(
+    dismissed_menu = handle_upgrade_detail_popup(
         screenshot=screenshot,
         capture_fn=capture_fn,
         sleep_fn=time.sleep,
@@ -784,7 +784,7 @@ def ensure_ultimate_state(
     if collapsed is not None:
         screenshot = collapsed
 
-    dismissed = handle_uw_detail_popup(
+    dismissed = handle_upgrade_detail_popup(
         screenshot=screenshot,
         capture_fn=capture_fn,
         sleep_fn=sleep_fn,
@@ -808,7 +808,7 @@ def ensure_ultimate_state(
             else:
                 screenshot = shot
 
-            dismissed = handle_uw_detail_popup(
+            dismissed = handle_upgrade_detail_popup(
                 screenshot=screenshot,
                 capture_fn=capture_fn,
                 sleep_fn=sleep_fn,
@@ -869,7 +869,7 @@ def ensure_ultimate_state(
         if collapsed is not None:
             screenshot = collapsed
 
-        dismissed = handle_uw_detail_popup(
+        dismissed = handle_upgrade_detail_popup(
             screenshot=screenshot,
             capture_fn=capture_fn,
             sleep_fn=sleep_fn,
@@ -960,7 +960,7 @@ def ensure_ultimate_state(
                     if collapsed_post is not None:
                         post = collapsed_post
 
-                    dismissed_post = handle_uw_detail_popup(
+                    dismissed_post = handle_upgrade_detail_popup(
                         screenshot=post,
                         capture_fn=capture_fn,
                         sleep_fn=sleep_fn,
@@ -1023,7 +1023,7 @@ def ensure_ultimate_state(
                     shot = collapsed_shot
 
             if shot is not None:
-                dismissed_shot = handle_uw_detail_popup(
+                dismissed_shot = handle_upgrade_detail_popup(
                     screenshot=shot,
                     capture_fn=capture_fn,
                     sleep_fn=sleep_fn,
@@ -1050,7 +1050,7 @@ def ensure_ultimate_state(
                     shot = collapsed_shot
 
             if shot is not None:
-                dismissed_shot = handle_uw_detail_popup(
+                dismissed_shot = handle_upgrade_detail_popup(
                     screenshot=shot,
                     capture_fn=capture_fn,
                     sleep_fn=sleep_fn,

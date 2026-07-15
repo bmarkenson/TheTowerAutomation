@@ -1,4 +1,4 @@
-"""Handler to dismiss Ultimate Weapon detail popups."""
+"""Handler to dismiss upgrade-card detail popups."""
 
 from __future__ import annotations
 
@@ -18,25 +18,25 @@ def _overlay_present(screenshot: np.ndarray) -> bool:
     try:
         detection = detect_state_and_overlays(screenshot)
     except Exception as exc:
-        log(f"[UW_DETAIL] Failed to re-evaluate overlay state: {exc}", "WARN")
+        log(f"[UPGRADE_DETAIL] Failed to re-evaluate overlay state: {exc}", "WARN")
         return True
 
     overlays = set(detection.get("overlays") or [])
-    return "UW_DETAIL" in overlays
+    return "UPGRADE_DETAIL" in overlays
 
 
 def _tapped_success(screenshot: np.ndarray) -> bool:
     return not _overlay_present(screenshot)
 
 
-def handle_uw_detail_popup(
+def handle_upgrade_detail_popup(
     *,
     screenshot: Optional[np.ndarray] = None,
     capture_fn: Callable[[], Optional[np.ndarray]] = capture_adb_screenshot,
     sleep_fn: Callable[[float], None] = time.sleep,
     max_attempts: int = 3,
 ) -> Optional[np.ndarray]:
-    """Attempt to dismiss the UW detail popup overlay.
+    """Attempt to dismiss any upgrade-card detail popup overlay.
 
     Returns the freshest screenshot available after dismissal (or the original on failure).
     """
@@ -48,7 +48,7 @@ def handle_uw_detail_popup(
     if not _overlay_present(image):
         return image
 
-    entry = resolve_dot_path("overlays.uw_detail") or {}
+    entry = resolve_dot_path("overlays.upgrade_detail") or {}
     region = entry.get("match_region") or {}
     region_x = int(region.get("x", 80))
     region_y = int(region.get("y", 120))
@@ -66,13 +66,14 @@ def handle_uw_detail_popup(
     for attempt in range(1, max_attempts + 1):
         tap_x, tap_y = candidate_taps[(attempt - 1) % len(candidate_taps)]
         log(
-            f"[UW_DETAIL] Dismissing detail popup (attempt {attempt}) with tap at ({tap_x},{tap_y})",
+            f"[UPGRADE_DETAIL] Dismissing detail popup (attempt {attempt}) "
+            f"with tap at ({tap_x},{tap_y})",
             "ACTION",
         )
 
         if attempt == 1:
             tapped = safe_tap(
-                "gesture_targets.uw_detail_dismiss",
+                "gesture_targets.upgrade_detail_dismiss",
                 require_visible=False,
                 retries=1,
                 retry_delay=0.2,
@@ -83,18 +84,18 @@ def handle_uw_detail_popup(
                     (tap_x, tap_y),
                     require_visible=False,
                     dispatch="now",
-                    log_label="uw_detail_fallback",
+                    log_label="upgrade_detail_fallback",
                 )
         else:
             tapped = safe_tap(
                 (tap_x, tap_y),
                 require_visible=False,
                 dispatch="now",
-                log_label="uw_detail_fallback",
+                log_label="upgrade_detail_fallback",
             )
 
         if not tapped:
-            log("[UW_DETAIL] Tap dispatch failed", "WARN")
+            log("[UPGRADE_DETAIL] Tap dispatch failed", "WARN")
 
         sleep_fn(0.3)
         refreshed = capture_fn()
@@ -102,11 +103,14 @@ def handle_uw_detail_popup(
             continue
         image = refreshed
         if _tapped_success(image):
-            log("[UW_DETAIL] Popup dismissed", "INFO")
+            log("[UPGRADE_DETAIL] Popup dismissed", "INFO")
             return image
 
-    log("[UW_DETAIL] Unable to dismiss popup after multiple attempts", "WARN")
+    log("[UPGRADE_DETAIL] Unable to dismiss popup after multiple attempts", "WARN")
     return image
 
 
-__all__ = ["handle_uw_detail_popup"]
+handle_uw_detail_popup = handle_upgrade_detail_popup
+
+
+__all__ = ["handle_upgrade_detail_popup", "handle_uw_detail_popup"]

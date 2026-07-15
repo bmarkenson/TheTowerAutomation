@@ -30,7 +30,7 @@ from handlers.game_over_handler import handle_game_over
 from handlers.home_screen_handler import handle_home_screen
 from handlers.ad_gem_handler import handle_ad_gem, stop_blind_gem_tapper, start_blind_gem_tapper
 from handlers.daily_gem_handler import DailyGemResult, handle_daily_gem
-from handlers.dismiss_uw_detail import handle_uw_detail_popup
+from handlers.dismiss_uw_detail import handle_upgrade_detail_popup
 from utils.wave_detector import detect_wave_number_from_image
 
 
@@ -154,7 +154,10 @@ class App:
                 actions_blocked = is_paused or initialization_pending
 
                 if not actions_blocked:
-                    img, detection, overlay_cleared = self._resolve_uw_detail_overlay(img, detection)
+                    img, detection, overlay_cleared = self._resolve_upgrade_detail_overlay(
+                        img,
+                        detection,
+                    )
                     if not overlay_cleared:
                         time.sleep(0.3)
                         continue
@@ -323,7 +326,7 @@ class App:
         overlays = set(detection.get("overlays") or [])
         return state, menu, secondary, overlays
 
-    def _resolve_uw_detail_overlay(
+    def _resolve_upgrade_detail_overlay(
         self,
         img: Frame,
         detection: Dict[str, Any],
@@ -331,25 +334,26 @@ class App:
         max_attempts: int = 3,
     ) -> Tuple[Frame, Dict[str, Any], bool]:
         overlays = set(detection.get("overlays") or [])
-        if "UW_DETAIL" not in overlays:
+        if "UPGRADE_DETAIL" not in overlays:
             return img, detection, True
 
         for attempt in range(1, max_attempts + 1):
-            handled_image = handle_uw_detail_popup(screenshot=img)
+            handled_image = handle_upgrade_detail_popup(screenshot=img)
             if handled_image is not None:
                 img = handled_image
             time.sleep(0.2)
             detection = detect_state_and_overlays(img, log_matches=self._match_trace)
             overlays = set(detection.get("overlays") or [])
-            if "UW_DETAIL" not in overlays:
+            if "UPGRADE_DETAIL" not in overlays:
                 log(
-                    f"[UW_DETAIL] Overlay cleared after attempt {attempt}",
+                    f"[UPGRADE_DETAIL] Overlay cleared after attempt {attempt}",
                     "DEBUG",
                 )
                 return img, detection, True
 
         log(
-            "[UW_DETAIL] Overlay persisted after multiple attempts; will retry next loop",
+            "[UPGRADE_DETAIL] Overlay persisted after multiple attempts; "
+            "will retry next loop",
             "WARN",
         )
         return img, detection, False

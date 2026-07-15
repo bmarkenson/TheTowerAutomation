@@ -214,7 +214,7 @@ class PausedStartupObservationTests(unittest.TestCase):
         app._blind_tapper_suspended = False
         app._run_initialization_gate_logged = False
         app._capture_frame = MagicMock(side_effect=[frame, KeyboardInterrupt])
-        app._resolve_uw_detail_overlay = MagicMock()
+        app._resolve_upgrade_detail_overlay = MagicMock()
         app._handle_primary_states = MagicMock()
 
         with (
@@ -249,7 +249,7 @@ class PausedStartupObservationTests(unittest.TestCase):
         manager.tick.assert_not_called()
         manager.handle_overlays.assert_not_called()
         manager.on_state.assert_not_called()
-        app._resolve_uw_detail_overlay.assert_not_called()
+        app._resolve_upgrade_detail_overlay.assert_not_called()
         app._handle_primary_states.assert_not_called()
         supervisor.auto_return_check.assert_not_called()
         start_tapper.assert_not_called()
