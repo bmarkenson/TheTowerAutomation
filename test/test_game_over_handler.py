@@ -6,8 +6,12 @@ from pathlib import Path
 from unittest.mock import patch
 import numpy as np
 
-from handlers.game_over_handler import handle_game_over, _save_battle_stats_record
-from core.run_state import AUTOMATION, ExecMode
+from handlers.game_over_handler import (
+    _save_battle_stats_record,
+    _wait_for_game_over_direction,
+    handle_game_over,
+)
+from core.run_state import AUTOMATION, ExecMode, RunState
 from core.scrolling import ScrollResult
 from utils.logger import log
 
@@ -26,6 +30,55 @@ def test_home_mode_taps_game_stats_home_instead_of_retry():
         AUTOMATION.mode = original_mode
 
     tap.assert_called_once_with("buttons.home:game_over", retries=1)
+
+
+def test_game_over_wait_polls_control_and_blocks_retry_while_paused():
+    original_state = AUTOMATION.state
+    original_mode = AUTOMATION.mode
+    AUTOMATION.state = RunState.RUNNING
+    AUTOMATION.mode = ExecMode.WAIT
+    sync_calls = 0
+
+    def sync_control():
+        nonlocal sync_calls
+        sync_calls += 1
+        if sync_calls == 1:
+            AUTOMATION.state = RunState.PAUSED
+            AUTOMATION.mode = ExecMode.RETRY
+        else:
+            AUTOMATION.state = RunState.RUNNING
+
+    try:
+        with patch("handlers.game_over_handler.time.sleep") as sleep:
+            direction = _wait_for_game_over_direction(sync_control)
+    finally:
+        AUTOMATION.state = original_state
+        AUTOMATION.mode = original_mode
+
+    assert direction is ExecMode.RETRY
+    assert sync_calls == 2
+    sleep.assert_called_once_with(1)
+
+
+def test_game_over_wait_exits_when_control_stops_automation():
+    original_state = AUTOMATION.state
+    original_mode = AUTOMATION.mode
+    AUTOMATION.state = RunState.RUNNING
+    AUTOMATION.mode = ExecMode.WAIT
+
+    def sync_control():
+        AUTOMATION.state = RunState.STOPPED
+        AUTOMATION.mode = ExecMode.RETRY
+
+    try:
+        with patch("handlers.game_over_handler.time.sleep") as sleep:
+            direction = _wait_for_game_over_direction(sync_control)
+    finally:
+        AUTOMATION.state = original_state
+        AUTOMATION.mode = original_mode
+
+    assert direction is None
+    sleep.assert_not_called()
 
 
 def test_valid_structured_stats_do_not_save_routine_screenshots():
@@ -83,12 +136,21 @@ def test_uncertain_structured_stats_retain_source_screenshots():
 
 def test_capture_failure_is_recorded_without_stranding_game_over_navigation():
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    perks = {"quality": {"valid": True, "warnings": []}}
     original_mode = AUTOMATION.mode
     AUTOMATION.mode = ExecMode.HOME
     try:
         with (
             patch("handlers.game_over_handler.set_wave_hint"),
             patch("handlers.game_over_handler.capture_adb_screenshot", return_value=frame),
+            patch(
+                "handlers.game_over_handler._capture_game_over_perks",
+                return_value=(perks, [], True),
+            ),
+            patch(
+                "handlers.game_over_handler._capture_clipboard_battle_record",
+                return_value=(None, "clipboard_service_failed"),
+            ),
             patch("handlers.game_over_handler.tap_if_visible", return_value=True) as tap,
             patch(
                 "handlers.game_over_handler.scroll_to_edge",
@@ -105,6 +167,57 @@ def test_capture_failure_is_recorded_without_stranding_game_over_navigation():
     capture_scroll.assert_not_called()
     assert save_record.call_args.kwargs["source_complete"] is False
     assert save_record.call_args.kwargs["source_reason"] == "top_max_swipes_exceeded"
+    assert [call.args[0] for call in tap.call_args_list] == [
+        "buttons.more_stats:game_over",
+        "buttons.close:more_stats",
+        "buttons.home:game_over",
+    ]
+
+
+def test_clipboard_success_skips_more_stats_scrolling_and_keeps_perk_order():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    record = {
+        "quality": {
+            "valid": True,
+            "retain_source_images": False,
+            "warnings": [],
+        }
+    }
+    perks = {
+        "selected": [
+            {
+                "latest_selection_rank": 1,
+                "display_text": "Boss health -73.5%, but boss speed +50%",
+            }
+        ],
+        "quality": {"valid": True, "warnings": []},
+    }
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.HOME
+    try:
+        with (
+            patch("handlers.game_over_handler.set_wave_hint"),
+            patch("handlers.game_over_handler.capture_adb_screenshot", return_value=frame),
+            patch(
+                "handlers.game_over_handler._capture_game_over_perks",
+                return_value=(perks, [frame], True),
+            ),
+            patch(
+                "handlers.game_over_handler._capture_clipboard_battle_record",
+                return_value=(record, "clipboard_copy"),
+            ),
+            patch("handlers.game_over_handler.tap_if_visible", return_value=True) as tap,
+            patch("handlers.game_over_handler.scroll_to_edge") as scroll,
+            patch("handlers.game_over_handler._persist_battle_stats_record") as persist,
+            patch("handlers.game_over_handler.time.sleep"),
+        ):
+            handle_game_over(capture_stats=True)
+    finally:
+        AUTOMATION.mode = original_mode
+
+    scroll.assert_not_called()
+    assert record["perks"] == perks
+    assert persist.call_args.kwargs["perks_frames"] == [frame]
     assert [call.args[0] for call in tap.call_args_list] == [
         "buttons.more_stats:game_over",
         "buttons.close:more_stats",

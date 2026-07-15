@@ -166,6 +166,32 @@
         "duration_ms": 279
       }
     },
+    "goto_top:perks": {
+      "roles": [
+        "gesture"
+      ],
+      "swipe": {
+        "type": "swipe",
+        "x1": 540,
+        "y1": 500,
+        "x2": 540,
+        "y2": 1600,
+        "duration_ms": 250
+      }
+    },
+    "goto_next:perks": {
+      "roles": [
+        "gesture"
+      ],
+      "swipe": {
+        "type": "swipe",
+        "x1": 540,
+        "y1": 1600,
+        "x2": 540,
+        "y2": 1350,
+        "duration_ms": 250
+      }
+    },
     "goto_top:store": {
       "roles": [
         "gesture"
@@ -1539,6 +1565,26 @@
         "h": 74
       },
       "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
+    "copy:more_stats": {
+      "tap": {
+        "type": "tap",
+        "x": 907,
+        "y": 1633
+      },
+      "roles": [
+        "button"
+      ]
+    },
+    "perks:game_over": {
+      "tap": {
+        "type": "tap",
+        "x": 720,
+        "y": 1034
+      },
       "roles": [
         "button"
       ]

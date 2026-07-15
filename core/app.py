@@ -312,6 +312,7 @@ class App:
             strategy = self._mission_mgr.strategy
             handle_game_over(
                 capture_stats=(not self._fast_game_over),
+                control_sync=self._supervisor.apply_control,
                 battle_context={
                     "strategy": strategy.name if strategy else None,
                     "last_wave": self._last_wave_value,

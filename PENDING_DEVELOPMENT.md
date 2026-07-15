@@ -60,6 +60,11 @@ lifecycle, orchestration, and action authority in separate layers.
     `gc_farm_t19_experiment` profile retried it, and EHLS then EALS completed at
     waves 20 and 30. Preserve mode emitted no Target Priority action. The
     existing transient-`UNKNOWN` regressions remained green.
+  - A later natural Tier 19 boundary at wave 4969 exercised the complete new
+    Game Over capture and Retry path. The replacement process consumed the
+    persisted `RUNNING/RETRY` direction, created one new lifecycle boundary,
+    gold-boxed EHLS at wave 20 and EALS at wave 30, completed the startup
+    assertion, and again emitted no Target Priority action.
 
 ## GC run initialization
 
@@ -78,22 +83,22 @@ lifecycle, orchestration, and action authority in separate layers.
     difference from Tier 18 was established, so the profile gained no
     speculative fields beyond the concrete session requirements below.
 
-- [ ] Implement a once-per-continuous-session GC preflight, always after the
+- [x] Implement a once-per-continuous-session GC preflight, always after the
   current run's EHLS/EALS startup gate:
-  - Cards must use the fixed `GC` deck; otherwise surrender, correct, restart.
+  - Cards must use the fixed `GC` deck.
     The active `GC` preset now has a live-validated composite identity/selection
     template and canonical fixture. Guarded live dispatch now verifies it.
-  - Workshop must use the `Farm` preset; otherwise surrender, correct, restart.
+  - Workshop must use the `Farm` preset.
     The Workshop screen guard, fixed-slot `Farm` identity template, and
     green-selected versus cyan-inactive border classifier are backed by a live
     canonical fixture. Guarded Go Home/Workshop validation is integrated.
-  - Bots must use the `Farm` preset; otherwise surrender, correct, restart.
+  - Bots must use the `Farm` preset.
     The Bots-screen guard and active `Farm` composite template are now backed by
     canonical live fixtures and visible-evidence Home navigation.
   - Guardian chips must have `Fetch`, `Summon`, and `Scout` equipped. Separate
     equipped-slot templates, validation, and guarded navigation are integrated.
   - Auto Pick Perks must be enabled. Positive checkbox evidence and guarded
-    Perks navigation are live-validated; enabling it in place remains pending.
+    Perks navigation are live-validated.
   - Ultimate Weapons that should be active must be on; Golden Tower and Black
     Hole are permanent, so no sync enforcement with Death Wave is required.
     Read-only multi-position validation now verifies all nine profile-provided
@@ -103,6 +108,14 @@ lifecycle, orchestration, and action authority in separate layers.
   - The current mismatch policy deliberately blocks the exclusive gate and
     logs exact evidence. Automated correction and Surrender remain disabled
     until each mutation path and its authority policy are implemented.
+  - A post-Retry live pass on 2026-07-15 validated the GC Cards deck, both Farm
+    presets, Fetch/Summon/Scout, Auto Pick Perks, all nine required Ultimate
+    Weapons, and Spotlight missiles. It logged one complete structured session
+    result and resumed the active battle without Surrender.
+  - Repeating the route exposed a Home-render transition that made Event
+    identity score 0.23 on a stale frame. Guarded visible navigation now
+    recaptures and revalidates the primary state for every bounded retry; the
+    repaired Event, Bots, Guild, Guardian, and Resume route passed live.
 - [ ] Define the GC module preset and validate it during session preflight.
   - Inventory every equipped module slot and desired module name.
   - Tag the module shapes/icons with canonical module names and capture stable
@@ -281,35 +294,44 @@ lifecycle, orchestration, and action authority in separate layers.
   - Preserve ordering and mutual-exclusion rules for handlers that can tap.
   - Integrate per-handler pause/resume with the global controls rather than
     creating a second control mechanism.
-- [ ] Harden the Game Over handler.
+- [ ] Finish hardening the Game Over handler.
   - Make More Stats paging/capture failures recoverable rather than forcing a
     global WAIT for every capture problem.
-  - Add automated coverage for RETRY and WAIT; HOME is now covered.
-- [ ] Live-validate the structured Game Over OCR record at the next natural
+  - [x] Keep polling the persistent control file while parked in Game Over
+    WAIT, block terminal actions while paused, and exit cleanly on STOPPED.
+  - [x] Add automated coverage for RETRY, WAIT/PAUSED, STOPPED, and HOME.
+- [x] Live-validate the structured Game Over battle record at a natural
   boundary.
-  - The implementation now captures every overlapping More Stats viewport in
-    memory, OCRs every observed section/row into named fields with raw text and
-    confidence, and writes versioned JSON plus a human-readable Markdown file
-    under `logs/battles/`.
+  - The primary path copies the full More Stats report through Android's
+    clipboard service and writes versioned JSON plus a human-readable Markdown
+    file under `logs/battles/`. Guarded scrolling OCR remains the fallback.
   - Routine screenshots are suppressed after a complete, confident capture;
     incomplete navigation, missing any of the 16 current sections, missing
     required rows, unparsed numeric values, or low confidence retain all source
     frames as explicit OCR evidence.
-  - Every observed label/value row is retained without a fixed stat allowlist.
-    Game Stats-only values and initial derived fields are included: highest
-    wave, Death Defies, generic hourly rates for numeric Currencies rows lacking
-    one, combined Reroll Dice/hour, total module Shards/hour, base/ad coin
-    shares, effective game speed, wave rate, seconds per wave, coins/cells per
-    wave, estimated start time, and runtime wave error. The page's existing
-    Cells Per Hour row is retained directly rather than duplicated.
+  - Every copied label/value row is retained without a fixed stat allowlist.
+    Compact Game Stats-only values and derived fields include highest wave,
+    generic hourly rates for numeric Currencies rows lacking one, combined
+    Reroll Dice/hour, total module Shards/hour, base/ad coin shares, effective
+    game speed, wave rate, seconds per wave, coins/cells per wave, estimated
+    start time, and runtime wave error. Death Defies comes from the copied
+    Counts section; the page's existing Cells Per Hour row is retained directly
+    rather than duplicated.
+  - Selected Perks are stored latest-selection-first. Blue rows are leveled;
+    green and purple rows are single-instance. Dense overlapping capture keeps
+    the order in which a newly leveled blue perk moves its complete row to the
+    top.
   - A read-only 2026-07-15 Battle History traversal validated 16 sections, 145
     named rows, all 14 current Currencies rows, and 13 calculated currency
     rates; the result passed section, row, parse, and confidence validation.
     Historical three-frame artifacts prove why overlapping capture is required:
     they omit the middle of the long page.
-  - At the natural boundary, still confirm handler-driven edge detection, Game
-    Stats-only OCR, Markdown readability, screenshot suppression/fallback, and
-    the WAIT/Retry transition without surrendering a battle.
+  - The natural Tier 19 wave-4969 boundary copied 144 exact Stats rows, OCRed
+    all 27 ordered perks, reconciled compact `3.00Q + 1.50Q = 4.49Q` coin
+    evidence against the copied total, and produced a valid record with no
+    warnings after reprocessing retained evidence. The same boundary validated
+    WAIT-to-Retry, a fresh lifecycle, EHLS/EALS initialization, and Tier 19
+    Target Priority preservation without Surrender.
 ## Configuration and developer tooling
 
 - [ ] Make Codex shell execution use the repository `.venv` by default instead

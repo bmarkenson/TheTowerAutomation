@@ -67,32 +67,42 @@ preset, toggle, equipment, or Surrender the run.
 
 ## Battle statistics
 
-At Game Over, the normal handler now OCRs the complete scrolling **More Stats**
-page into one durable record instead of routinely saving three screenshots.
-Each battle produces:
+At Game Over, the normal handler copies the complete **More Stats** battle
+report through Android's clipboard service and combines it with narrowly scoped
+OCR into one durable record. Each battle produces:
 
-- `logs/battles/Battle*.json` — the versioned source record, including named
-  sections/rows, raw OCR text, confidence, strategy/runtime context, and
-  derived values;
+- `logs/battles/Battle*.json` — the authoritative versioned source record,
+  including named sections/rows, exact copied text, OCR evidence, ordered
+  perks, strategy/runtime context, and derived values;
 - `logs/battles/Battle*.md` — a human-readable view of the same battle.
 
-Every label/value row found on the page is retained by section; the schema does
-not limit capture to a fixed shortlist of stats. Capture validation currently
-requires all 16 known sections and all 14 known Currencies rows, so a missing
-section cannot silently produce a partial record. Every numeric row in
-**Currencies** gets a calculated real-time hourly rate unless the page already
-provides one, as it does for Cells. Derived values also include combined Reroll
-Dice/hour (earned plus fetched), total module Shards/hour (Cannon, Armor,
-Generator, and Core), effective game speed, waves per real hour, real seconds
-per wave, coins and cells per wave, base/ad coin shares, death defies, estimated
-start time, and any discrepancy between final-wave OCR and the runtime wave
-hint. Game values keep both their original text and parsed case-sensitive
-magnitude (`q`, `Q`, `D`, `aa`, `ab`, and later suffixes).
+Every copied label/value row is retained by section; the schema does not limit
+capture to a fixed shortlist. Validation currently requires all 16 known
+sections and all 14 known Currencies rows, so a partial clipboard report cannot
+silently become a valid record. The compact Game Stats dialog is OCRed only for
+values absent from the copy report, including Highest Wave and the base/ad coin
+breakdown. Its wave, tier, killed-by, and copied total provide cross-source
+identity and coin-suffix checks.
 
-The long page is captured as overlapping, guarded in-memory viewports. Source
-screenshots are written to `screenshots/matches/` only when the page cannot be
-captured to its edge, required sections/rows are missing, or OCR validation is
-uncertain.
+The ordered Selected Perks list is OCRed separately. Its stored order is latest
+selection first. Blue perks are recorded as leveled perks; green and purple
+perks are recorded as single-instance perks. When a blue perk gains another
+level, its newest observation moves that complete perk back to the top.
+
+Every numeric row in **Currencies** gets a calculated real-time hourly rate
+unless the page already provides one, as it does for Cells. Derived values also
+include combined Reroll Dice/hour (earned plus fetched), total module
+Shards/hour (Cannon, Armor, Generator, and Core), effective game speed, waves
+per real hour, real seconds per wave, coins and cells per wave, base/ad coin
+shares, death defies, estimated start time, and any discrepancy between
+final-wave OCR and the runtime wave hint. Game values keep both their original
+text and parsed case-sensitive magnitude (`q`, `Q`, `D`, `aa`, `ab`, and later
+suffixes).
+
+If clipboard acquisition or validation fails, the handler falls back to
+overlapping, guarded OCR viewports of the scrolling More Stats page. Source
+screenshots are written to `screenshots/matches/` only when capture, parsing,
+or OCR validation needs evidence.
 `--fast-game-over` is the explicit opt-out when a run intentionally should not
 create a record.
 

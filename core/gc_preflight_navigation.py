@@ -142,15 +142,23 @@ def _guarded_visible_tap(
     capture_fn: Capture,
     detector: Detector,
     tap_visible_fn: Callable[..., bool],
+    retries: int = 1,
+    retry_delay_s: float = 0.5,
+    sleep_fn: Callable[[float], None] = time.sleep,
 ) -> None:
-    frame, detection = _capture_detection(capture_fn, detector)
-    state = str(detection.get("state") or "UNKNOWN")
-    if state not in allowed_states:
-        raise _NavigationFailure(
-            f"refusing {key}: state={state}, expected={sorted(allowed_states)}"
-        )
-    if not tap_visible_fn(key, screenshot=frame, retries=1):
-        raise _NavigationFailure(f"visible tap failed: {key}")
+    attempts = max(0, int(retries)) + 1
+    for attempt in range(attempts):
+        frame, detection = _capture_detection(capture_fn, detector)
+        state = str(detection.get("state") or "UNKNOWN")
+        if state not in allowed_states:
+            raise _NavigationFailure(
+                f"refusing {key}: state={state}, expected={sorted(allowed_states)}"
+            )
+        if tap_visible_fn(key, screenshot=frame, retries=0):
+            return
+        if attempt < attempts - 1:
+            sleep_fn(max(0.0, float(retry_delay_s)))
+    raise _NavigationFailure(f"visible tap failed: {key}")
 
 
 def _select_running_menu(
@@ -489,6 +497,9 @@ def run_read_only_gc_preflight(
             capture_fn=capture_fn,
             detector=detector,
             tap_visible_fn=tap_visible_fn,
+            retries=16,
+            retry_delay_s=0.5,
+            sleep_fn=sleep_fn,
         )
         _wait_for(
             state="EVENT",
@@ -531,6 +542,9 @@ def run_read_only_gc_preflight(
             capture_fn=capture_fn,
             detector=detector,
             tap_visible_fn=tap_visible_fn,
+            retries=16,
+            retry_delay_s=0.5,
+            sleep_fn=sleep_fn,
         )
         _wait_for(
             state="GUILD",

@@ -1,4 +1,4 @@
-"""Structured OCR and persistence for completed-battle statistics."""
+"""Structured capture and persistence for completed-battle statistics."""
 
 from __future__ import annotations
 
@@ -79,14 +79,9 @@ _REQUIRED_MORE_STATS_SECTIONS = {
     "enemies_destroyed_by",
 }
 _REQUIRED_GAME_STATS_FIELDS = {
-    "wave",
-    "tier",
     "highest_wave",
-    "killed_by",
-    "death_defies",
     "base_coins_earned",
     "ad_coins_earned",
-    "total_coins_earned",
 }
 
 
@@ -262,6 +257,7 @@ def ocr_more_stats(
 
     if not frames:
         return {
+            "source_method": "ocr",
             "page_count": 0,
             "raw_text": "",
             "sections": [],
@@ -269,6 +265,7 @@ def ocr_more_stats(
                 "valid": False,
                 "source_complete": False,
                 "source_reason": source_reason or "no_frames",
+                "source_method": "ocr",
                 "warnings": ["No More Stats frames were captured"],
                 "retain_source_images": True,
             },
@@ -350,6 +347,7 @@ def ocr_more_stats(
         )
 
     return {
+        "source_method": "ocr",
         "page_count": len(frames),
         "raw_text": "\n\n".join(raw_pages),
         "sections": sections,
@@ -357,6 +355,7 @@ def ocr_more_stats(
             "valid": valid,
             "source_complete": bool(source_complete),
             "source_reason": source_reason,
+            "source_method": "ocr",
             "confidence_threshold": float(confidence_threshold),
             "row_count": len(selected),
             "missing_required_sections": missing_sections,
@@ -364,6 +363,130 @@ def ocr_more_stats(
             "missing_currency_rows": missing_currencies,
             "low_confidence_rows": uncertain,
             "unparsed_numeric_rows": unparsed_numeric,
+            "warnings": warnings,
+            "retain_source_images": not valid,
+        },
+    }
+
+
+def parse_more_stats_clipboard(text: str) -> dict[str, Any]:
+    """Parse the exact tab-delimited Battle Report copied by the Stats UI."""
+
+    raw_text = str(text or "")
+    normalized = raw_text.replace("\r\n", "\n").replace("\r", "\n").rstrip("\x00")
+    sections: list[dict[str, Any]] = []
+    current_section: Optional[dict[str, Any]] = None
+    malformed_lines: list[int] = []
+
+    for line_number, raw_line in enumerate(normalized.split("\n"), start=1):
+        if not raw_line.strip():
+            continue
+        if "\t" not in raw_line:
+            name = raw_line.strip()
+            current_section = {"name": name, "key": _slug(name), "rows": []}
+            sections.append(current_section)
+            continue
+
+        if current_section is None:
+            malformed_lines.append(line_number)
+            continue
+        label, value = (part.strip() for part in raw_line.split("\t", 1))
+        if not label or not value:
+            malformed_lines.append(line_number)
+            continue
+
+        row = {
+            "section": current_section["name"],
+            "section_key": current_section["key"],
+            "label": label,
+            "key": _slug(label),
+            "value_raw": value,
+            "confidence": 100.0,
+            "label_confidence": 100.0,
+            "value_confidence": 100.0,
+            "source": "android_clipboard",
+            "source_line": line_number,
+        }
+        if current_section["key"] == "battle_report" and row["key"] == "battle_date":
+            row.update({"value_type": "datetime_text", "value": value})
+        elif current_section["key"] == "killed_with_effect_active":
+            effect = _parse_effect_active_line(f"{label} {value}")
+            if effect:
+                row.update(effect["parsed"])
+            else:
+                _add_parsed_value(row)
+        else:
+            _add_parsed_value(row)
+        current_section["rows"].append(row)
+
+    present_sections = {section["key"] for section in sections}
+    missing_sections = sorted(_REQUIRED_MORE_STATS_SECTIONS - present_sections)
+    battle_report = next(
+        (section for section in sections if section["key"] == "battle_report"),
+        None,
+    )
+    missing_required = sorted(
+        _REQUIRED_BATTLE_REPORT_ROWS
+        - {row["key"] for row in (battle_report or {}).get("rows", [])}
+    )
+    currencies = next(
+        (section for section in sections if section["key"] == "currencies"),
+        None,
+    )
+    missing_currencies = sorted(
+        _REQUIRED_CURRENCY_ROWS
+        - {row["key"] for row in (currencies or {}).get("rows", [])}
+    )
+    rows = [row for section in sections for row in section["rows"]]
+    unparsed_numeric = [
+        f"{row['section_key']}.{row['key']}"
+        for row in rows
+        if row.get("value_type") == "text"
+        and not (
+            row.get("section_key") == "battle_report"
+            and row.get("key") in {"battle_date", "killed_by"}
+        )
+    ]
+
+    warnings: list[str] = []
+    if malformed_lines:
+        warnings.append(
+            "Malformed clipboard rows at source lines: "
+            + ", ".join(str(line) for line in malformed_lines)
+        )
+    if missing_sections:
+        warnings.append("Missing required More Stats sections: " + ", ".join(missing_sections))
+    if missing_required:
+        warnings.append("Missing required Battle Report rows: " + ", ".join(missing_required))
+    if missing_currencies:
+        warnings.append("Missing required Currencies rows: " + ", ".join(missing_currencies))
+    if unparsed_numeric:
+        warnings.append("Unparsed numeric rows: " + ", ".join(unparsed_numeric))
+
+    valid = not (
+        malformed_lines
+        or missing_sections
+        or missing_required
+        or missing_currencies
+        or unparsed_numeric
+    )
+    return {
+        "source_method": "android_clipboard",
+        "page_count": 1,
+        "raw_text": raw_text,
+        "sections": sections,
+        "quality": {
+            "valid": valid,
+            "source_complete": True,
+            "source_reason": "clipboard_copy",
+            "source_method": "android_clipboard",
+            "row_count": len(rows),
+            "missing_required_sections": missing_sections,
+            "missing_required_rows": missing_required,
+            "missing_currency_rows": missing_currencies,
+            "low_confidence_rows": [],
+            "unparsed_numeric_rows": unparsed_numeric,
+            "malformed_source_lines": malformed_lines,
             "warnings": warnings,
             "retain_source_images": not valid,
         },
@@ -395,34 +518,257 @@ def build_battle_record(
         confidence_threshold=confidence_threshold,
         data_fn=data_fn,
     )
+    return _assemble_battle_record(
+        game_stats,
+        more_stats,
+        battle_id=battle_id or make_battle_id(when),
+        captured_at=when,
+        strategy_name=strategy_name,
+        runtime_context=runtime_context,
+    )
+
+
+def build_battle_record_from_clipboard(
+    game_stats_frame: Frame,
+    clipboard_text: str,
+    *,
+    battle_id: Optional[str] = None,
+    captured_at: Optional[datetime] = None,
+    strategy_name: Optional[str] = None,
+    runtime_context: Optional[Mapping[str, Any]] = None,
+    game_stats_text_fn: Callable[..., tuple[str, float]] = ocr_text_and_conf,
+) -> dict[str, Any]:
+    """Build a per-battle record using exact copied Stats text plus Game Stats OCR."""
+
+    when = captured_at or datetime.now().astimezone()
+    game_stats = ocr_game_stats(game_stats_frame, text_fn=game_stats_text_fn)
+    more_stats = parse_more_stats_clipboard(clipboard_text)
+    return _assemble_battle_record(
+        game_stats,
+        more_stats,
+        battle_id=battle_id or make_battle_id(when),
+        captured_at=when,
+        strategy_name=strategy_name,
+        runtime_context=runtime_context,
+    )
+
+
+def _assemble_battle_record(
+    game_stats: dict[str, Any],
+    more_stats: dict[str, Any],
+    *,
+    battle_id: str,
+    captured_at: datetime,
+    strategy_name: Optional[str],
+    runtime_context: Optional[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Combine normalized source data and apply cross-source validation."""
+
+    coin_breakdown = _reconcile_game_coin_breakdown(game_stats, more_stats)
     missing_game_fields = sorted(
         _REQUIRED_GAME_STATS_FIELDS - set(game_stats["fields"])
     )
     game_stats["quality"] = {
-        "valid": not missing_game_fields,
+        "valid": not missing_game_fields and coin_breakdown["valid"],
         "missing_required_fields": missing_game_fields,
+        "coin_breakdown": coin_breakdown,
     }
     record = {
         "schema_version": SCHEMA_VERSION,
-        "battle_id": battle_id or make_battle_id(when),
-        "captured_at": when.isoformat(timespec="seconds"),
+        "battle_id": battle_id,
+        "captured_at": captured_at.isoformat(timespec="seconds"),
         "strategy": strategy_name,
         "runtime": dict(runtime_context or {}),
         "game_stats": game_stats,
         "more_stats": more_stats,
     }
     record["derived"] = derive_battle_stats(record)
+    identity = compare_battle_identity(game_stats, more_stats)
     warnings = list(more_stats["quality"]["warnings"])
     if missing_game_fields:
         warnings.append(
             "Missing required Game Stats fields: " + ", ".join(missing_game_fields)
         )
-    valid = bool(more_stats["quality"]["valid"] and not missing_game_fields)
+    if not coin_breakdown["valid"]:
+        warnings.extend(coin_breakdown["warnings"])
+    if identity["mismatches"]:
+        warnings.append(
+            "Game Stats/More Stats identity mismatch: "
+            + ", ".join(item["field"] for item in identity["mismatches"])
+        )
+    valid = bool(
+        more_stats["quality"]["valid"]
+        and not missing_game_fields
+        and coin_breakdown["valid"]
+        and not identity["mismatches"]
+    )
     record["quality"] = {
         "valid": valid,
         "retain_source_images": not valid,
         "warnings": warnings,
+        "identity": identity,
     }
+    return record
+
+
+def _reconcile_game_coin_breakdown(
+    game_stats: dict[str, Any],
+    more_stats: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate and repair the compact coin split using the exact copied total.
+
+    The coin icon causes Tesseract to read a trailing ``q``/``Q`` magnitude as
+    another zero (for example ``3.00Q`` becomes ``3000``). The copied Battle
+    Report supplies the exact total and its case-sensitive suffix, allowing a
+    repair only when the resulting base plus ad values agree with that total.
+    """
+
+    rows = _row_lookup(more_stats.get("sections", []))
+    total_row = rows.get(("battle_report", "coins_earned"))
+    copied_total = _row_number(total_row)
+    copied_raw = _row_raw(total_row)
+    fields = game_stats.get("fields", {})
+    base_field = fields.get("base_coins_earned")
+    ad_field = fields.get("ad_coins_earned")
+    if copied_total is None or base_field is None or ad_field is None:
+        return {
+            "valid": False,
+            "reconciled": False,
+            "copied_total_raw": copied_raw,
+            "warnings": ["Compact Game Stats coin breakdown could not be validated"],
+        }
+
+    base = _field_decimal(base_field)
+    ad = _field_decimal(ad_field)
+    if base is not None and ad is not None and _approximately_total(base + ad, copied_total):
+        return {
+            "valid": True,
+            "reconciled": False,
+            "copied_total_raw": copied_raw,
+            "warnings": [],
+        }
+
+    suffix_match = re.search(r"([KMBTqQsSOND]|[a-z]{2})$", copied_raw.strip())
+    if not suffix_match:
+        return {
+            "valid": False,
+            "reconciled": False,
+            "copied_total_raw": copied_raw,
+            "warnings": ["Compact Game Stats coin breakdown disagrees with copied total"],
+        }
+    suffix = suffix_match.group(1)
+    repaired: dict[str, tuple[str, Decimal]] = {}
+    for key in ("base_coins_earned", "ad_coins_earned", "total_coins_earned"):
+        field = fields.get(key)
+        if not field:
+            continue
+        candidate = _repair_coin_suffix(str(field.get("raw") or ""), suffix)
+        value = parse_tower_number(candidate) if candidate else None
+        if candidate and value is not None:
+            repaired[key] = (candidate, value)
+
+    if not {"base_coins_earned", "ad_coins_earned"} <= repaired.keys():
+        return {
+            "valid": False,
+            "reconciled": False,
+            "copied_total_raw": copied_raw,
+            "warnings": ["Compact Game Stats coin magnitudes could not be recovered"],
+        }
+    repaired_sum = repaired["base_coins_earned"][1] + repaired["ad_coins_earned"][1]
+    if not _approximately_total(repaired_sum, copied_total):
+        return {
+            "valid": False,
+            "reconciled": False,
+            "copied_total_raw": copied_raw,
+            "warnings": ["Repaired Game Stats coin split disagrees with copied total"],
+        }
+
+    for key, (raw, value) in repaired.items():
+        field = fields[key]
+        field["ocr_raw"] = field.get("raw")
+        field["raw"] = raw
+        field["decimal"] = str(value)
+        field["reconciled_from_copied_total"] = True
+    return {
+        "valid": True,
+        "reconciled": True,
+        "copied_total_raw": copied_raw,
+        "suffix": suffix,
+        "warnings": [],
+    }
+
+
+def _repair_coin_suffix(raw: str, suffix: str) -> Optional[str]:
+    text = (raw or "").strip().replace(",", "")
+    if re.search(r"([KMBTqQsSOND]|[a-z]{2})$", text):
+        return text
+    if not text.endswith("0"):
+        return None
+    mantissa = text[:-1]
+    if "." not in mantissa:
+        if len(mantissa) < 3:
+            return None
+        mantissa = mantissa[:-2] + "." + mantissa[-2:]
+    return mantissa + suffix
+
+
+def _approximately_total(value: Decimal, expected: Decimal) -> bool:
+    tolerance = max(expected.copy_abs() * Decimal("0.02"), Decimal("0.01"))
+    return (value - expected).copy_abs() <= tolerance
+
+
+def compare_battle_identity(
+    game_stats: Mapping[str, Any],
+    more_stats: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Compare stable battle identifiers exposed by both source surfaces."""
+
+    fields = game_stats.get("fields", {})
+    rows = _row_lookup(more_stats.get("sections", []))
+    report = {
+        row_key: row
+        for (section_key, row_key), row in rows.items()
+        if section_key == "battle_report"
+    }
+    checked: list[str] = []
+    mismatches: list[dict[str, Any]] = []
+    for field in ("wave", "tier", "killed_by"):
+        game_value = fields.get(field, {}).get("value")
+        report_value = report.get(field, {}).get("value")
+        if game_value is None or report_value is None:
+            continue
+        checked.append(field)
+        left = str(game_value).strip().casefold()
+        right = str(report_value).strip().casefold()
+        if left != right:
+            mismatches.append(
+                {
+                    "field": field,
+                    "game_stats": game_value,
+                    "more_stats": report_value,
+                }
+            )
+    return {
+        "checked_fields": checked,
+        "mismatches": mismatches,
+        "valid": not mismatches,
+    }
+
+
+def attach_battle_perks(
+    record: dict[str, Any],
+    perks: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Attach ordered Selected Perks and fold their validation into the record."""
+
+    record["perks"] = dict(perks)
+    perk_quality = perks.get("quality", {})
+    if perk_quality.get("valid"):
+        return record
+    warnings = list(perk_quality.get("warnings", [])) or ["Perks capture failed validation"]
+    record["quality"]["valid"] = False
+    record["quality"]["retain_source_images"] = True
+    record["quality"]["warnings"].extend(warnings)
     return record
 
 
@@ -486,13 +832,17 @@ def derive_battle_stats(record: Mapping[str, Any]) -> dict[str, Any]:
 
     base_coins = _field_decimal(game_fields.get("base_coins_earned"))
     ad_coins = _field_decimal(game_fields.get("ad_coins_earned"))
-    total_coins = _field_decimal(game_fields.get("total_coins_earned"))
+    total_coins = _row_number(rows.get(("battle_report", "coins_earned")))
+    if total_coins is None:
+        total_coins = _field_decimal(game_fields.get("total_coins_earned"))
     if total_coins and base_coins is not None:
         derived["base_coin_share_percent"] = round(float(base_coins / total_coins * 100), 3)
     if total_coins and ad_coins is not None:
         derived["ad_coin_share_percent"] = round(float(ad_coins / total_coins * 100), 3)
 
-    death_defies = game_fields.get("death_defies", {}).get("value")
+    death_defies = _row_int(rows.get(("counts", "death_defy")))
+    if death_defies is None:
+        death_defies = game_fields.get("death_defies", {}).get("value")
     if death_defies is not None:
         derived["death_defies"] = int(death_defies)
 
@@ -536,6 +886,8 @@ def render_battle_markdown(record: Mapping[str, Any]) -> str:
     lines.append(f"Captured: {record.get('captured_at', 'unknown')}")
     if record.get("strategy"):
         lines.append(f"Strategy: {record['strategy']}")
+    source_method = record.get("more_stats", {}).get("source_method", "ocr")
+    lines.append(f"Stats source: {_display_source_method(str(source_method))}")
     lines.extend(["", "## Derived", ""])
     derived = record.get("derived", {})
     if derived:
@@ -564,19 +916,41 @@ def render_battle_markdown(record: Mapping[str, Any]) -> str:
         if field:
             lines.append(f"| {_display_key(key)} | {field.get('raw', field.get('value', ''))} |")
 
+    perks = record.get("perks", {})
+    selected_perks = perks.get("selected", [])
+    if perks:
+        lines.extend(["", "## Selected Perks", ""])
+        lines.append(
+            "Order is latest selection first; a blue leveled perk moves to the "
+            "front when its newest level is selected."
+        )
+        lines.extend(
+            [
+                "",
+                "| Rank | Color | Instance model | Displayed perk | OCR confidence |",
+                "| ---: | --- | --- | --- | ---: |",
+            ]
+        )
+        for perk in selected_perks:
+            lines.append(
+                f"| {perk['latest_selection_rank']} | {perk['color']} | "
+                f"{perk['instance_model']} | {perk['display_text']} | "
+                f"{float(perk['confidence']):.1f} |"
+            )
+
     for section in record.get("more_stats", {}).get("sections", []):
         lines.extend(
             [
                 "",
                 f"## {section['name']}",
                 "",
-                "| Stat | Value | OCR confidence |",
+                "| Stat | Value | Source quality |",
                 "| --- | ---: | ---: |",
             ]
         )
         for row in section.get("rows", []):
             lines.append(
-                f"| {row['label']} | {row['value_raw']} | {row['confidence']:.1f} |"
+                f"| {row['label']} | {row['value_raw']} | {_display_row_quality(row)} |"
             )
 
     quality = record.get("quality", {})
@@ -1192,6 +1566,18 @@ def _display_key(key: str) -> str:
     return (key or "").replace("_", " ").title()
 
 
+def _display_source_method(source_method: str) -> str:
+    if source_method == "android_clipboard":
+        return "Android clipboard (exact copied text)"
+    return "scrolling screenshot OCR"
+
+
+def _display_row_quality(row: Mapping[str, Any]) -> str:
+    if row.get("source") == "android_clipboard":
+        return "exact clipboard text"
+    return f"OCR {float(row.get('confidence', -1.0)):.1f}"
+
+
 def _display_derived(key: str, value: Any) -> str:
     if key.endswith("_decimal"):
         try:
@@ -1241,12 +1627,16 @@ __all__ = [
     "DEFAULT_CONFIDENCE_THRESHOLD",
     "DEFAULT_RECORDS_DIR",
     "SCHEMA_VERSION",
+    "attach_battle_perks",
     "build_battle_record",
+    "build_battle_record_from_clipboard",
+    "compare_battle_identity",
     "derive_battle_stats",
     "format_tower_number",
     "make_battle_id",
     "ocr_game_stats",
     "ocr_more_stats",
+    "parse_more_stats_clipboard",
     "parse_duration_seconds",
     "parse_tower_number",
     "persist_battle_record",

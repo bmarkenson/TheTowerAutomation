@@ -5,6 +5,7 @@ import numpy as np
 from core.battle_lifecycle import HomeBattleControl
 from core.gc_preflight_navigation import (
     GcPreflightNavigationStatus,
+    _guarded_visible_tap,
     _select_running_menu,
     run_read_only_gc_preflight,
 )
@@ -242,3 +243,34 @@ def test_running_menu_selection_retries_when_cinematic_mode_consumes_first_tap()
     assert frame is ui.frame
     assert attempts == 2
     assert ui.menu == "UW_MENU"
+
+
+def test_visible_navigation_rechecks_fresh_state_while_destination_renders():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    captures = 0
+    taps = []
+    sleeps = []
+
+    def capture():
+        nonlocal captures
+        captures += 1
+        return frame
+
+    def tap_visible(key, **kwargs):
+        taps.append((key, kwargs))
+        return len(taps) == 3
+
+    _guarded_visible_tap(
+        "navigation.home_event",
+        allowed_states={"HOME_SCREEN"},
+        capture_fn=capture,
+        detector=lambda _frame: {"state": "HOME_SCREEN"},
+        tap_visible_fn=tap_visible,
+        retries=4,
+        retry_delay_s=0.25,
+        sleep_fn=sleeps.append,
+    )
+
+    assert captures == 3
+    assert [kwargs["retries"] for _key, kwargs in taps] == [0, 0, 0]
+    assert sleeps == [0.25, 0.25]

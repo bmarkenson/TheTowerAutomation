@@ -1,16 +1,24 @@
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 
 import numpy as np
 
 from core.battle_stats import (
+    attach_battle_perks,
     build_battle_record,
+    build_battle_record_from_clipboard,
     format_tower_number,
+    parse_more_stats_clipboard,
     parse_duration_seconds,
     parse_tower_number,
     persist_battle_record,
+    render_battle_markdown,
 )
 from utils.previous_wave import get_previous_run_wave
+
+
+CLIPBOARD_REPORT_PATH = Path(__file__).parent / "fixtures" / "battle_report_clipboard.txt"
 
 
 def _frame(page: int) -> np.ndarray:
@@ -352,3 +360,158 @@ def test_record_persists_json_markdown_and_replaces_previous_wave_screenshot(tmp
         )
         == 2000
     )
+
+
+def _clipboard_game_text(_frame, *, psm):
+    assert psm == 6
+    return (
+        "GAME STATS Wave 2558 Tier 19 Highest Wave: 5575 "
+        "Killed By Scatter Death defied 12 times coins earned ad coins earned "
+        "total coins 600.00q + 272.38q = 872.38q",
+        95.0,
+    )
+
+
+def test_exact_clipboard_report_retains_every_section_and_row():
+    text = CLIPBOARD_REPORT_PATH.read_text(encoding="utf-8")
+
+    stats = parse_more_stats_clipboard(text)
+    sections = {section["key"]: section for section in stats["sections"]}
+    rows = {
+        (section["key"], row["key"]): row
+        for section in stats["sections"]
+        for row in section["rows"]
+    }
+
+    assert stats["source_method"] == "android_clipboard"
+    assert stats["quality"]["valid"]
+    assert stats["quality"]["row_count"] == 145
+    assert len(sections) == 16
+    assert rows[("damage", "smart_missiles")]["value_raw"] == "4.81aa"
+    assert rows[("damage_taken", "tower")]["value_raw"] == "434.09Q"
+    assert rows[("killed_with_effect_active", "golden_tower")]["value"] == 160698
+    assert rows[("killed_with_effect_active", "golden_tower")]["active_percent"] == 100.0
+    assert rows[("currencies", "reroll_shards_earned")]["value_decimal"] == "30240.00"
+    assert all(row["source"] == "android_clipboard" for row in rows.values())
+
+
+def test_clipboard_record_is_identity_checked_and_drives_existing_derivations():
+    text = CLIPBOARD_REPORT_PATH.read_text(encoding="utf-8")
+    record = build_battle_record_from_clipboard(
+        _frame(9),
+        text,
+        battle_id="BattleClipboard",
+        captured_at=datetime(2026, 7, 15, 7, 56, tzinfo=timezone.utc),
+        strategy_name="gc_farm_t19_experiment",
+        runtime_context={"last_wave": 2558},
+        game_stats_text_fn=_clipboard_game_text,
+    )
+
+    assert record["quality"]["valid"]
+    assert record["quality"]["identity"] == {
+        "checked_fields": ["wave", "tier", "killed_by"],
+        "mismatches": [],
+        "valid": True,
+    }
+    assert len(record["derived"]["currency_rates_per_real_hour"]) == 13
+    assert "cells_earned" not in record["derived"]["currency_rates_per_real_hour"]
+    assert record["derived"]["death_defies"] == 12
+    assert record["derived"]["reroll_dice_per_real_hour_decimal"]
+    assert record["derived"]["module_shards_per_real_hour_decimal"]
+
+
+def test_live_clipboard_report_may_omit_historical_battle_date():
+    text = CLIPBOARD_REPORT_PATH.read_text(encoding="utf-8").replace(
+        "Battle Date\tJul 15, 2026 06:46\n",
+        "",
+    )
+
+    stats = parse_more_stats_clipboard(text)
+
+    assert stats["quality"]["valid"]
+    assert stats["quality"]["row_count"] == 144
+
+
+def test_clipboard_record_rejects_stale_battle_identity():
+    def mismatched_game_text(_frame, *, psm):
+        text, confidence = _clipboard_game_text(_frame, psm=psm)
+        return text.replace("Wave 2558", "Wave 4969"), confidence
+
+    record = build_battle_record_from_clipboard(
+        _frame(9),
+        CLIPBOARD_REPORT_PATH.read_text(encoding="utf-8"),
+        game_stats_text_fn=mismatched_game_text,
+    )
+
+    assert not record["quality"]["valid"]
+    assert record["quality"]["identity"]["mismatches"] == [
+        {"field": "wave", "game_stats": 4969, "more_stats": 2558}
+    ]
+
+
+def test_perk_order_and_instance_model_are_rendered_for_perusal():
+    record = _record()
+    perks = {
+        "order_semantics": "latest_selected_first",
+        "selected": [
+            {
+                "latest_selection_rank": 1,
+                "color": "purple",
+                "instance_model": "single_instance",
+                "display_text": "Boss health -73.5%, but boss speed +50%",
+                "confidence": 94.0,
+            },
+            {
+                "latest_selection_rank": 2,
+                "color": "blue",
+                "instance_model": "leveled",
+                "display_text": "Defense percent +25.00%",
+                "confidence": 93.0,
+            },
+        ],
+        "quality": {"valid": True, "warnings": []},
+    }
+
+    attach_battle_perks(record, perks)
+    markdown = render_battle_markdown(record)
+
+    assert "## Selected Perks" in markdown
+    assert "latest selection first" in markdown
+    assert "| 1 | purple | single_instance | Boss health" in markdown
+    assert "| 2 | blue | leveled | Defense percent +25.00%" in markdown
+
+
+def test_compact_coin_suffix_ocr_is_reconciled_against_exact_copied_total():
+    def coin_icon_game_text(_frame, *, psm):
+        assert psm == 6
+        return (
+            "GAME STATS Wave 2558 Tier 19 Highest Wave: 5575 "
+            "Killed By Scatter Death defied 12 times coins earned ad coins earned "
+            "total coins 3000© + 1500© = 4.490©",
+            92.4,
+        )
+
+    report = CLIPBOARD_REPORT_PATH.read_text(encoding="utf-8").replace(
+        "872.38q",
+        "4.49Q",
+    )
+    record = build_battle_record_from_clipboard(
+        _frame(9),
+        report,
+        game_stats_text_fn=coin_icon_game_text,
+    )
+    fields = record["game_stats"]["fields"]
+
+    assert record["quality"]["valid"]
+    assert record["game_stats"]["quality"]["coin_breakdown"] == {
+        "valid": True,
+        "reconciled": True,
+        "copied_total_raw": "4.49Q",
+        "suffix": "Q",
+        "warnings": [],
+    }
+    assert fields["base_coins_earned"]["raw"] == "3.00Q"
+    assert fields["ad_coins_earned"]["raw"] == "1.50Q"
+    assert fields["total_coins_earned"]["raw"] == "4.49Q"
+    assert record["derived"]["base_coin_share_percent"] == 66.815
+    assert record["derived"]["ad_coin_share_percent"] == 33.408
