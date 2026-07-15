@@ -968,6 +968,16 @@
         "y": 1830
       }
     },
+    "goto_home_store": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 80,
+        "y": 1830
+      }
+    },
     "goto_workshop_home": {
       "roles": [
         "navigation"

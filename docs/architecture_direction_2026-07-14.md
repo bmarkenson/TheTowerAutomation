@@ -38,9 +38,8 @@ fixed. In particular, the observed Damage value `1E-22%` has not been confirmed
 as the desired GC setting and must not be encoded as policy yet.
 
 The earlier warning that Go Home/Resume could be mistaken for a new run is also
-superseded: the battle-lifecycle separation described below fixes that model and
-the Resume path has been live-validated. The genuine Home `NEW_BATTLE` boundary
-still requires live validation.
+superseded: the battle-lifecycle separation described below fixes that model,
+and both Resume and genuine Home `NEW_BATTLE` paths have been live-validated.
 
 ## Architecture decision
 
@@ -94,8 +93,10 @@ center behavior remains available for compatibility and tooling, and shared
   require explicit action geometry.
 - The stale Home Resume template was refreshed and live-validated. A guarded
   Resume returned to the same battle, and replaying the observations did not
-  emit a second run start. A genuine new-Battle boundary still needs live
-  validation.
+  emit a second run start. At a later genuine boundary, repeated paused Home
+  observations classified `NEW_BATTLE` at 96.0 OCR confidence without arming
+  initialization; the guarded Battle tap then started exactly one gate. EHLS
+  completed at wave 20 and EALS at wave 30.
 
 The duplicate-implementation audit found no accidental second implementation
 of these new responsibilities. The lifecycle tracker, Home classifier,
@@ -182,12 +183,10 @@ layer exists; it is not a prerequisite for retaining the working tap method.
 
 ## Scope for the next work
 
-1. At the next genuine new-run boundary, validate the Home `NEW_BATTLE`
-   lifecycle behavior without surrendering the current battle.
-2. Run the default GC strategy through a natural Game Over -> Retry boundary to
+1. Run the default GC strategy through a natural Game Over -> Retry boundary to
    confirm that the exclusive startup gate repeats EHLS then EALS while Target
    Priority remains session-scoped.
-3. Treat the app-owned frame source plus short-lived UI-state action lease as a
+2. Treat the app-owned frame source plus short-lived UI-state action lease as a
    separate, reviewable architecture package. Do not begin with a Bob detector.
 
 Matcher-policy consolidation, the centralized handler registry, GC session

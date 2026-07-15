@@ -29,11 +29,13 @@ lifecycle, orchestration, and action authority in separate layers.
 
 ## Current validation gates
 
-- [ ] Live-revalidate the refreshed Home `Battle` template at the next genuine
-  new-run boundary and confirm that `NEW_BATTLE` arms the lifecycle boundary.
-  Current `Battle` artwork was captured on 2026-07-13 and matches its canonical
-  fixture, but the live start used the guarded OCR fallback before the asset was
-  updated. The distinct `Resume Battle` path is now live-validated separately.
+- [x] Live-revalidate the refreshed Home `Battle` template at a genuine new-run
+  boundary and confirm that `NEW_BATTLE` arms the lifecycle boundary. On
+  2026-07-14 at ADB port 5565, repeated paused observations classified the Home
+  control as `NEW_BATTLE` by OCR at 96.0 confidence without activating the
+  startup gate. The guarded visible Battle tap started exactly one gate; EHLS
+  completed at wave 20 and EALS at wave 30. The distinct `Resume Battle` path
+  remains live-validated separately.
 - [ ] Live-revalidate the distinct Home Store-badge template at the next daily
   availability. The badge was captured on Home and matches its canonical
   fixture; it was cleared before the new template could be exercised live. The
@@ -44,6 +46,12 @@ lifecycle, orchestration, and action authority in separate layers.
   game-day boundary. Confirm that its direct Store navigation claims the gem
   despite the initially missing badge and that persisted completion suppresses
   a second probe after an automation restart.
+- [x] Fix the Daily Gem `NOT_READY` return policy around transitional Home.
+  Scheduled probes now wait for `RUNNING` instead of preempting Home -> Battle.
+  The retained rare Home-origin route returns through the bottom Home selection
+  and verifies `HOME_SCREEN`; the normal in-run route verifies `RUNNING`. Live
+  validation detected the manually claimed gem's cooldown, returned to the
+  battle, and persisted UTC day `2026-07-15` as `not_ready`.
 - [ ] Run the default GC strategy under the full main loop for at least one
   natural Game Over -> Retry boundary and confirm the exclusive startup gate
   repeats EHLS then EALS while Target Priority remains session-scoped.

@@ -113,6 +113,12 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   instead of recording an incomplete Store visit as a successful daily check.
   Live-verified the repaired path on 2026-07-14: the cooldown was detected,
   Return to Game matched and tapped, and the resulting state was `RUNNING`.
+- Prevented scheduled Daily Gem probes from preempting transitional Home
+  screens. The automatic path now waits for `RUNNING`; the retained rare
+  Home-origin Store route returns through the bottom Home selection and verifies
+  `HOME_SCREEN`, while the in-run route verifies `RUNNING`. Live validation on
+  port 5565 detected a manually claimed gem's cooldown, returned to the battle,
+  and persisted UTC day `2026-07-15` as `not_ready`.
 - Replaced generic per-tick EHLS/EALS searches with a dedicated exclusive,
   state-driven initializer. It uses fast label templates and upgrade geometry,
   detects the rectangular gold `Max` border directly, supports either or both
@@ -142,7 +148,11 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   BATTLE` at 93.75 confidence. The refreshed template matched the live frame at
   1.000 and stayed below threshold on the canonical new-Battle fixture; its
   guarded visible tap returned to the same battle at wave 3468. Replaying those
-  live observations through the new lifecycle emitted no second run start.
+  live observations through the new lifecycle emitted no second run start. A
+  later genuine Home boundary repeatedly classified `NEW_BATTLE` at 96.0 OCR
+  confidence while paused without activating initialization. Its guarded
+  visible tap started exactly one gate; EHLS completed at wave 20 and EALS at
+  wave 30.
 - Added a non-blocking OS process lock keyed by ADB target. A second runtime for
   the same target exits before constructing `App`, while different target ports
   retain independent lock files.

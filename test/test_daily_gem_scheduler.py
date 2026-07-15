@@ -97,5 +97,6 @@ def test_app_defers_scheduled_probe_from_unsafe_screen():
     app = App.__new__(App)
     app._daily_gem_scheduler = Mock()
 
+    assert not app._handle_daily_gem_if_due("HOME_SCREEN", set())
     assert not app._handle_daily_gem_if_due("STORE", set())
     app._daily_gem_scheduler.should_attempt.assert_not_called()

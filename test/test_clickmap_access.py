@@ -34,3 +34,4 @@ def test_blind_navigation_targets_have_explicit_tap_geometry():
     assert get_click("navigation.goto_defense") == (406, 1868)
     assert get_click("navigation.goto_utility") == (670, 1867)
     assert get_click("navigation.goto_uw") == (941, 1871)
+    assert get_click("navigation.goto_home_store") == (80, 1830)

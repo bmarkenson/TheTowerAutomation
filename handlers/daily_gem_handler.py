@@ -65,8 +65,8 @@ def _daily_gem_unavailable(screenshot) -> str | None:
     return None
 
 
-def _open_store_for_current_screen() -> bool:
-    """Open Store using the control appropriate to the verified source screen."""
+def _open_store_for_current_screen() -> str | None:
+    """Open Store and return the verified source state on success."""
 
     screenshot = capture_adb_screenshot()
     if screenshot is None:
@@ -76,16 +76,18 @@ def _open_store_for_current_screen() -> bool:
     state = detection.get("state")
     if state == "HOME_SCREEN":
         log("[DAILY_GEM] Opening Store from the home-screen bottom navigation", "DEBUG")
-        return safe_tap(
+        opened = safe_tap(
             "navigation.goto_store_home",
             require_visible=False,
             dispatch="now",
         )
+        return state if opened else None
     if state == "RUNNING":
         log("[DAILY_GEM] Opening Store from the in-run gold cart", "DEBUG")
-        return tap_if_visible("navigation.goto_store", screenshot=screenshot, retries=1)
+        opened = tap_if_visible("navigation.goto_store", screenshot=screenshot, retries=1)
+        return state if opened else None
     log(f"[DAILY_GEM] Refusing to open Store from state={state!r}", "WARN")
-    return False
+    return None
 
 
 def handle_daily_gem() -> DailyGemResult:
@@ -93,7 +95,8 @@ def handle_daily_gem() -> DailyGemResult:
     log(f"Handling DAILY AD GEM — Session: {session_id}", "INFO")
 
     # Tap into Store
-    if not _open_store_for_current_screen():
+    source_state = _open_store_for_current_screen()
+    if source_state is None:
         return _abort_handler("Goto Store", session_id)
     time.sleep(1.2)
     if not _wait_for_label(STORE_MENU_INDICATOR, timeout=4.0):
@@ -135,8 +138,8 @@ def handle_daily_gem() -> DailyGemResult:
             stop_fn=_daily_gem_unavailable,
         )
         if claim.reason == DAILY_GEM_NOT_READY:
-            log("[DAILY_GEM] No claim available; returning to game.", "INFO")
-            if not _return_to_game(session_id):
+            log("[DAILY_GEM] No claim available; leaving Store.", "INFO")
+            if not _return_from_store(session_id, source_state):
                 return DailyGemResult.FAILED
             return DailyGemResult.NOT_READY
         if not claim.success or claim.screenshot is None:
@@ -155,7 +158,7 @@ def handle_daily_gem() -> DailyGemResult:
         return _abort_handler("Skip Claim_daily_gems", session_id)
     time.sleep(1.2)
 
-    if not _return_to_game(session_id):
+    if not _return_from_store(session_id, source_state):
         return DailyGemResult.FAILED
     return DailyGemResult.CLAIMED
 
@@ -174,13 +177,42 @@ def save_image(img, tag):
     log(f"[CAPTURE] Saved screenshot: {path}", "INFO")
 
 
-def _return_to_game(session_id: str) -> bool:
-    """Leave Store after either claiming the gem or confirming its cooldown."""
+def _return_from_store(session_id: str, source_state: str) -> bool:
+    """Leave Store through the route appropriate to its verified source."""
 
-    if not tap_if_visible("buttons.return_to_game", retries=1):
-        _abort_handler("Return to Game", session_id)
+    if source_state == "RUNNING":
+        returned = tap_if_visible("buttons.return_to_game", retries=1)
+        step = "Return to Game"
+    elif source_state == "HOME_SCREEN":
+        returned = safe_tap(
+            "navigation.goto_home_store",
+            require_visible=False,
+            dispatch="now",
+        )
+        step = "Return Home"
+    else:
+        returned = False
+        step = f"Return from Store ({source_state})"
+
+    if not returned:
+        _abort_handler(step, session_id)
         return False
     time.sleep(1.2)
+
+    screenshot = capture_adb_screenshot()
+    state = (
+        detect_state_and_overlays(screenshot).get("state")
+        if screenshot is not None
+        else None
+    )
+    if state != source_state:
+        log(
+            f"[DAILY_GEM] Store return reached state={state!r}; "
+            f"expected {source_state!r}",
+            "WARN",
+        )
+        _abort_handler(f"Verify {step}", session_id)
+        return False
     return True
 
 

@@ -10,6 +10,7 @@ from handlers.daily_gem_handler import (
     STORE_MENU_INDICATOR,
     _daily_gem_unavailable,
     _open_store_for_current_screen,
+    _return_from_store,
     handle_daily_gem,
 )
 
@@ -28,7 +29,7 @@ def test_home_screen_uses_bottom_store_navigation():
         patch("handlers.daily_gem_handler.safe_tap", return_value=True) as safe_tap,
         patch("handlers.daily_gem_handler.tap_if_visible") as tap_if_visible,
     ):
-        assert _open_store_for_current_screen()
+        assert _open_store_for_current_screen() == "HOME_SCREEN"
 
     safe_tap.assert_called_once_with(
         "navigation.goto_store_home",
@@ -49,7 +50,7 @@ def test_running_screen_uses_gold_cart_template():
         patch("handlers.daily_gem_handler.safe_tap") as safe_tap,
         patch("handlers.daily_gem_handler.tap_if_visible", return_value=True) as tap_if_visible,
     ):
-        assert _open_store_for_current_screen()
+        assert _open_store_for_current_screen() == "RUNNING"
 
     tap_if_visible.assert_called_once_with(
         "navigation.goto_store",
@@ -69,7 +70,7 @@ def test_unknown_screen_refuses_store_navigation():
         patch("handlers.daily_gem_handler.safe_tap") as safe_tap,
         patch("handlers.daily_gem_handler.tap_if_visible") as tap_if_visible,
     ):
-        assert not _open_store_for_current_screen()
+        assert _open_store_for_current_screen() is None
 
     safe_tap.assert_not_called()
     tap_if_visible.assert_not_called()
@@ -115,13 +116,20 @@ def test_visible_claim_at_store_entry_skips_all_scrolling():
 
     with (
         patch("handlers.daily_gem_handler._make_session_id", return_value="test"),
-        patch("handlers.daily_gem_handler._open_store_for_current_screen", return_value=True),
+        patch(
+            "handlers.daily_gem_handler._open_store_for_current_screen",
+            return_value="RUNNING",
+        ),
         patch("handlers.daily_gem_handler._wait_for_label", return_value=True),
         patch("handlers.daily_gem_handler.capture_adb_screenshot", return_value=screenshot),
         patch("handlers.daily_gem_handler.is_visible", side_effect=visible),
         patch("handlers.daily_gem_handler.scroll_to_edge") as scroll_to_edge,
         patch("handlers.daily_gem_handler.scroll_until_visible") as scroll_until_visible,
         patch("handlers.daily_gem_handler.tap_if_visible", return_value=True) as tap,
+        patch(
+            "handlers.daily_gem_handler._return_from_store",
+            return_value=True,
+        ) as return_from_store,
         patch("handlers.daily_gem_handler.save_image"),
         patch("handlers.daily_gem_handler.time.sleep"),
     ):
@@ -133,8 +141,8 @@ def test_visible_claim_at_store_entry_skips_all_scrolling():
     assert [call.args[0] for call in tap.call_args_list] == [
         DAILY_GEM_BUTTON,
         "buttons.skip:claim_daily_gems",
-        "buttons.return_to_game",
     ]
+    return_from_store.assert_called_once_with("test", "RUNNING")
 
 
 def test_confirmed_cooldown_returns_not_ready_result():
@@ -145,7 +153,10 @@ def test_confirmed_cooldown_returns_not_ready_result():
 
     with (
         patch("handlers.daily_gem_handler._make_session_id", return_value="test"),
-        patch("handlers.daily_gem_handler._open_store_for_current_screen", return_value=True),
+        patch(
+            "handlers.daily_gem_handler._open_store_for_current_screen",
+            return_value="RUNNING",
+        ),
         patch("handlers.daily_gem_handler._wait_for_label", return_value=True),
         patch("handlers.daily_gem_handler.capture_adb_screenshot", return_value=screenshot),
         patch("handlers.daily_gem_handler.is_visible", side_effect=visible),
@@ -157,17 +168,20 @@ def test_confirmed_cooldown_returns_not_ready_result():
             "handlers.daily_gem_handler.scroll_until_visible",
             return_value=ScrollResult(False, screenshot, 0, DAILY_GEM_NOT_READY),
         ),
-        patch("handlers.daily_gem_handler.tap_if_visible", return_value=True) as tap,
+        patch(
+            "handlers.daily_gem_handler._return_from_store",
+            return_value=True,
+        ) as return_from_store,
         patch("handlers.daily_gem_handler.save_image"),
         patch("handlers.daily_gem_handler.time.sleep"),
     ):
         result = handle_daily_gem()
 
     assert result == DailyGemResult.NOT_READY
-    tap.assert_called_once_with("buttons.return_to_game", retries=1)
+    return_from_store.assert_called_once_with("test", "RUNNING")
 
 
-def test_confirmed_cooldown_fails_when_return_to_game_is_unavailable():
+def test_confirmed_cooldown_fails_when_store_return_is_unavailable():
     screenshot = _screenshot()
 
     def visible(label, *, screenshot=None):
@@ -175,7 +189,10 @@ def test_confirmed_cooldown_fails_when_return_to_game_is_unavailable():
 
     with (
         patch("handlers.daily_gem_handler._make_session_id", return_value="test"),
-        patch("handlers.daily_gem_handler._open_store_for_current_screen", return_value=True),
+        patch(
+            "handlers.daily_gem_handler._open_store_for_current_screen",
+            return_value="RUNNING",
+        ),
         patch("handlers.daily_gem_handler._wait_for_label", return_value=True),
         patch("handlers.daily_gem_handler.capture_adb_screenshot", return_value=screenshot),
         patch("handlers.daily_gem_handler.is_visible", side_effect=visible),
@@ -187,11 +204,54 @@ def test_confirmed_cooldown_fails_when_return_to_game_is_unavailable():
             "handlers.daily_gem_handler.scroll_until_visible",
             return_value=ScrollResult(False, screenshot, 0, DAILY_GEM_NOT_READY),
         ),
-        patch("handlers.daily_gem_handler.tap_if_visible", return_value=False) as tap,
+        patch(
+            "handlers.daily_gem_handler._return_from_store",
+            return_value=False,
+        ) as return_from_store,
         patch("handlers.daily_gem_handler.save_image"),
         patch("handlers.daily_gem_handler.time.sleep"),
     ):
         result = handle_daily_gem()
 
     assert result == DailyGemResult.FAILED
+    return_from_store.assert_called_once_with("test", "RUNNING")
+
+
+def test_home_origin_returns_through_bottom_navigation_and_verifies_home():
+    screenshot = _screenshot()
+    with (
+        patch("handlers.daily_gem_handler.safe_tap", return_value=True) as safe_tap,
+        patch("handlers.daily_gem_handler.tap_if_visible") as tap_if_visible,
+        patch("handlers.daily_gem_handler.capture_adb_screenshot", return_value=screenshot),
+        patch(
+            "handlers.daily_gem_handler.detect_state_and_overlays",
+            return_value={"state": "HOME_SCREEN"},
+        ),
+        patch("handlers.daily_gem_handler.time.sleep"),
+    ):
+        assert _return_from_store("test", "HOME_SCREEN")
+
+    safe_tap.assert_called_once_with(
+        "navigation.goto_home_store",
+        require_visible=False,
+        dispatch="now",
+    )
+    tap_if_visible.assert_not_called()
+
+
+def test_running_origin_returns_through_in_run_control_and_verifies_running():
+    screenshot = _screenshot()
+    with (
+        patch("handlers.daily_gem_handler.safe_tap") as safe_tap,
+        patch("handlers.daily_gem_handler.tap_if_visible", return_value=True) as tap,
+        patch("handlers.daily_gem_handler.capture_adb_screenshot", return_value=screenshot),
+        patch(
+            "handlers.daily_gem_handler.detect_state_and_overlays",
+            return_value={"state": "RUNNING"},
+        ),
+        patch("handlers.daily_gem_handler.time.sleep"),
+    ):
+        assert _return_from_store("test", "RUNNING")
+
     tap.assert_called_once_with("buttons.return_to_game", retries=1)
+    safe_tap.assert_not_called()

@@ -285,7 +285,10 @@ class App:
     def _handle_daily_gem_if_due(self, new_state: str, overlays: Set[str]) -> bool:
         """Run the Daily Gem probe from a safe state after UTC rollover."""
 
-        if new_state not in {"RUNNING", "HOME_SCREEN"}:
+        # Home is normally a transitional screen before the next battle. Let
+        # the Home handler start/resume that battle, then probe Store from the
+        # stable RUNNING route on a later loop.
+        if new_state != "RUNNING":
             return False
         badge_visible = "DAILY_GEMS_AVAILABLE" in overlays
         attempted_at = datetime.now(timezone.utc)
