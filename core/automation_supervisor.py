@@ -323,11 +323,14 @@ class AutomationSupervisor:
         has_min: bool,
         *,
         debug_out: Optional[str] = None,
+        allow_actions: bool = True,
     ) -> Tuple[Optional[Decimal], float, bool, Optional[Decimal]]:
         """
-        Apply plausibility gate and, when not paused, debounce the coin-toggle to
-        switch display if '/min' is missing. Returns updated (val, conf, has_min, eff).
-        May issue one toggle and a re-capture.
+        Apply plausibility and optionally debounce the coin-display toggle.
+
+        ``allow_actions=False`` keeps status sampling read-only even when the
+        supervisor itself is not paused, such as during an exclusive startup
+        gate. Returns updated ``(val, conf, has_min, eff)``.
         """
         # Plausibility first
         coins_eff = self._apply_plausibility(coins_val, coins_conf)
@@ -339,7 +342,7 @@ class AutomationSupervisor:
             else:
                 coins_eff = None
 
-        if not self.is_paused:
+        if allow_actions and not self.is_paused:
             now_ts = time.time()
             if has_min:
                 self._coins_has_min_miss = 0

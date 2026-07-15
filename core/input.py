@@ -8,7 +8,7 @@ from typing import Any, Dict, Literal, Optional, Tuple, Sequence, Union
 from utils.logger import log
 from core.adb_utils import adb_shell
 from core.tap_dispatcher import tap as enqueue_tap
-from core.clickmap_access import resolve_dot_path, get_click, get_swipe
+from core.clickmap_access import get_click, get_explicit_tap, get_swipe, resolve_dot_path
 from core.label_tapper import get_label_match
 
 DispatchMode = Literal["now", "queue"]
@@ -106,7 +106,7 @@ def safe_tap(
                 if attempt < attempts - 1:
                     time.sleep(max(0.0, float(retry_delay)))
         if allow_fallback:
-            coords = get_click(name)
+            coords = get_explicit_tap(name)
             if coords:
                 log(
                     f"TAP_SAFE now={dispatch=='now'} label={label} at {coords} vis=False fallback=True",
@@ -118,7 +118,7 @@ def safe_tap(
             log(f"[SKIP] TAP_SAFE failed for {label}: {last_err}", "WARN")
         return False
 
-    coords = get_click(name)
+    coords = get_explicit_tap(name)
     if not coords:
         log(f"[SKIP] TAP_SAFE blind path has no coords for {label}", "WARN")
         return False

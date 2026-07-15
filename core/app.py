@@ -17,6 +17,7 @@ from core.ss_capture import capture_and_save_screenshot
 from core.state_detector import detect_state_and_overlays
 from core.automation_supervisor import AutomationSupervisor
 from core.daily_gem_scheduler import DailyGemScheduler
+from core.home_battle import detect_home_battle_control
 from core.run_state import AUTOMATION, ExecMode
 from core.app_setup import AppConfig
 from core.status_report import StateChangeTracker, StatusReporter
@@ -108,13 +109,22 @@ class App:
                 is_paused = self._supervisor.is_paused
 
                 detection = detect_state_and_overlays(img, log_matches=self._match_trace)
+                if detection.get("state") == "HOME_SCREEN":
+                    home_evidence = detect_home_battle_control(img)
+                    detection["home_battle_control"] = home_evidence.control.value
+                    log(
+                        "[BATTLE] Home control="
+                        f"{home_evidence.control.value} source={home_evidence.source} "
+                        f"confidence={home_evidence.confidence:.2f}",
+                        "DEBUG",
+                    )
 
-                # Establish the new-run boundary from the minimum RUNNING
-                # detection, then give an initializing strategy exclusive tap
+                # Update battle identity independently of screen navigation,
+                # then give a genuinely initializing strategy exclusive tap
                 # authority. No overlay handler, recovery tap, mission action,
                 # or blind tapper may run before this gate clears.
                 self._mission_mgr.maybe_run_start(detection)
-                initialization_pending = self._mission_mgr.run_initialization_pending(detection)
+                initialization_pending = self._mission_mgr.run_initialization_pending()
                 if initialization_pending:
                     if not self._run_initialization_gate_logged:
                         log(
@@ -127,25 +137,27 @@ class App:
                         self._blind_tapper_suspended = True
                     if not is_paused:
                         self._mission_mgr.tick(img, detection, strategy_only=True)
-                    mv = self._mission_mgr.ctx.data.setdefault("mission_vars", {})
-                    sleep_interval = max(
-                        0.5,
-                        float(mv.get("loop_sleep_override_sec") or 1.0),
-                    )
-                    time.sleep(sleep_interval)
-                    continue
-                if self._run_initialization_gate_logged:
-                    log(
-                        "[RUN_INIT] Startup gate complete; normal handlers may resume",
-                        "INFO",
-                        console=True,
-                    )
+                elif self._run_initialization_gate_logged:
+                    strategy = self._mission_mgr.strategy
+                    if (
+                        strategy
+                        and strategy.requires_run_initialization()
+                        and strategy.is_run_initialization_complete(self._mission_mgr.ctx)
+                    ):
+                        log(
+                            "[RUN_INIT] Startup gate complete; normal handlers may resume",
+                            "INFO",
+                            console=True,
+                        )
                     self._run_initialization_gate_logged = False
 
-                img, detection, overlay_cleared = self._resolve_uw_detail_overlay(img, detection)
-                if not overlay_cleared:
-                    time.sleep(0.3)
-                    continue
+                actions_blocked = is_paused or initialization_pending
+
+                if not actions_blocked:
+                    img, detection, overlay_cleared = self._resolve_uw_detail_overlay(img, detection)
+                    if not overlay_cleared:
+                        time.sleep(0.3)
+                        continue
 
                 wave_val: Optional[int] = None
                 wave_conf: float = -1.0
@@ -172,18 +184,19 @@ class App:
 
                 new_state, menu, secondary, overlays = self._normalise_detection(detection)
 
-                # Allow missions to react immediately to overlays before general state handling.
-                self._mission_mgr.handle_overlays(detection)
+                if not actions_blocked:
+                    # Allow missions to react immediately to overlays before general state handling.
+                    self._mission_mgr.handle_overlays(detection)
 
-                if "TOURNAMENT" in secondary:
-                    try:
-                        if AUTOMATION.mode != ExecMode.WAIT:
-                            AUTOMATION.mode = ExecMode.WAIT
-                            log("[CTRL] Tournament detected — ExecMode set to WAIT", "INFO")
-                    except Exception:
-                        pass
+                    if "TOURNAMENT" in secondary:
+                        try:
+                            if AUTOMATION.mode != ExecMode.WAIT:
+                                AUTOMATION.mode = ExecMode.WAIT
+                                log("[CTRL] Tournament detected — ExecMode set to WAIT", "INFO")
+                        except Exception:
+                            pass
 
-                self._mission_mgr.on_state(detection)
+                    self._mission_mgr.on_state(detection)
 
                 self._state_tracker.update(state=new_state, menu=menu, secondary=secondary, overlays=overlays)
 
@@ -193,18 +206,21 @@ class App:
                     menu=menu,
                     secondary=secondary,
                     overlays=overlays,
+                    allow_actions=not actions_blocked,
                 )
 
-                self._supervisor.auto_return_check(img, new_state)
+                if not actions_blocked:
+                    self._supervisor.auto_return_check(img, new_state)
 
                 if new_state == "UNKNOWN":
                     update_unknown_state(True)
-                    trigger_after = self._supervisor.auto_return_secs or 900
-                    handle_unknown_state(img, trigger_after_s=trigger_after)
+                    if not actions_blocked:
+                        trigger_after = self._supervisor.auto_return_secs or 900
+                        handle_unknown_state(img, trigger_after_s=trigger_after)
                 else:
                     update_unknown_state(False)
 
-                if new_state != "RUNNING":
+                if new_state != "RUNNING" or actions_blocked:
                     if stop_blind_gem_tapper():
                         self._blind_tapper_suspended = True
                 else:
@@ -212,11 +228,11 @@ class App:
                         start_blind_gem_tapper(duration=10, interval=1, blocking=False)
                         self._blind_tapper_suspended = False
 
-                if not is_paused:
+                if not actions_blocked:
                     self._mission_mgr.tick(img, detection)
                     self._handle_primary_states(new_state, overlays)
 
-                sleep_interval = 5.0
+                sleep_interval = 1.0 if initialization_pending else 5.0
                 try:
                     override = float(mv.get("loop_sleep_override_sec") or 0.0)
                     if override > 0:

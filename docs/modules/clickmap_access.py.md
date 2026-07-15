@@ -6,7 +6,8 @@ core.clickmap_access.dot_path_exists(dot_path: str, data: Optional[Mapping[str, 
 core.clickmap_access.set_dot_path(dot_path: str, value: Any, allow_overwrite: bool = False) — R: None (mutates in-memory clickmap); E: KeyError if final key exists and allow_overwrite=False; ValueError if path traverses non-dict.
 core.clickmap_access.interactive_get_dot_path(clickmap: Dict[str, Any]) — R: 'group.suffix' or 'upgrades.<attack|defense|utility>.<left|right>'; None if user cancels; S: [fs?] none; interactive I/O.
 core.clickmap_access.prompt_roles(group: str, key: str) — R: list[str] role suggestions (interactive override allowed).
-core.clickmap_access.get_click(name: str) — R: (x:int, y:int) from explicit 'tap' or center of 'match_region'; None if unresolved.
+core.clickmap_access.get_explicit_tap(name: str) — R: (x:int, y:int) only from an explicit `tap`; None otherwise. Used by guarded runtime blind-tap paths.
+core.clickmap_access.get_click(name: str) — R: (x:int, y:int) from an explicit `tap` or the center of a direct `match_region`; None if unresolved. This compatibility/tooling API does not resolve a broad `region_ref` center and is not used by `safe_tap(..., require_visible=False)`.
 core.clickmap_access.get_swipe(name: str) — R: swipe dict {x1,y1,x2,y2,duration_ms} or None.
 core.clickmap_access.has_click(name: str) — R: bool indicating click coords resolvable.
 core.clickmap_access.tap_now(name: str) — R: None (issues ADB tap); S: [adb], [log]; E: CalledProcessError if adb_shell fails (when check=True upstream).

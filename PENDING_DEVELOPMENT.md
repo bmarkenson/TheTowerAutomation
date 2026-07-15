@@ -7,12 +7,33 @@ The older `docs/modules/ROADMAP.md` and `docs/modules/roadmap_priorities.md`
 are retained as retired historical snapshots. Their unfinished items were
 audited against the codebase and incorporated below on 2026-07-13.
 
+The result and scope boundary of the 2026-07-14 architecture-review thread are
+recorded in `docs/architecture_direction_2026-07-14.md`. In short: retain the
+clickmap as a declarative UI evidence/action-geometry catalog, but keep state,
+lifecycle, orchestration, and action authority in separate layers.
+
+## Immediate architecture handoff
+
+- [x] Fix the paused exclusive-startup-gate semantics before continuing the
+  broader architecture package.
+  - Initialization incompleteness must not depend on the current primary screen
+    being `RUNNING`; a transient `UNKNOWN` observation is not completion.
+  - While paused, continue capture, detection, and status reporting, but issue
+    no strategy or handler actions.
+  - Log gate completion only after the strategy completion assertion is true.
+  - Add regression coverage for paused startup and for a
+    `RUNNING -> UNKNOWN -> RUNNING` observation sequence.
+- [x] After that fix, rerun the focused architecture/initialization tests and
+  live-validate paused status behavior. Inspect the process, lock, control file,
+  and latest logs first; do not assume the dated live instance is still paused.
+
 ## Current validation gates
 
-- [ ] Live-revalidate the refreshed Home `Battle` template at the next Home
-  boundary and separately capture/revalidate the `Resume Battle` state. Current
-  `Battle` artwork was captured on 2026-07-13 and matches its canonical fixture,
-  but the live start used the guarded OCR fallback before the asset was updated.
+- [ ] Live-revalidate the refreshed Home `Battle` template at the next genuine
+  new-run boundary and confirm that `NEW_BATTLE` arms the lifecycle boundary.
+  Current `Battle` artwork was captured on 2026-07-13 and matches its canonical
+  fixture, but the live start used the guarded OCR fallback before the asset was
+  updated. The distinct `Resume Battle` path is now live-validated separately.
 - [ ] Live-revalidate the distinct Home Store-badge template at the next daily
   availability. The badge was captured on Home and matches its canonical
   fixture; it was cleared before the new template could be exercised live. The
@@ -29,12 +50,6 @@ audited against the codebase and incorporated below on 2026-07-13.
 
 ## GC run initialization
 
-- [ ] Distinguish `Go Home`/`Resume Battle` from a genuine new-run boundary
-  before integrating any Home-screen GC preflight navigation. The live
-  Workshop capture on 2026-07-14 resumed the same battle at wave 1230, but
-  `MissionManager` reset `_run_started` on `HOME_SCREEN` and reran the exclusive
-  EHLS/EALS initialization gate. Both upgrades were already gold boxed, so no
-  purchase was sent, but the boundary model is unsafe for automated preflight.
 - [ ] Implement a once-per-continuous-session GC preflight, always after the
   current run's EHLS/EALS startup gate:
   - Cards must use the fixed `GC` deck; otherwise surrender, correct, restart.
@@ -77,8 +92,6 @@ audited against the codebase and incorporated below on 2026-07-13.
 
 ## Runtime control
 
-- [ ] Add a single-instance lock so two automation processes cannot send
-  competing taps to the same ADB target.
 - [ ] Provide a convenient pause/resume interface so stopping the process with
   `Ctrl-C` is unnecessary.
   - Build on the existing control-file and `tools/automation_ctl.py` support.
@@ -135,12 +148,14 @@ audited against the codebase and incorporated below on 2026-07-13.
     fixtures.
   - Choose one canonical runtime policy deliberately, then remove the
     compatibility shim and profile split.
-- [ ] Audit the floating gem (Bob) and replace timed blind tapping if a
-  reliable shape/color/contour or tracked-motion detector can locate it.
-  - A live 69-frame H.264 burst on 2026-07-14 identified Bob as the rotating
-    square-with-diamond icon on an approximately 180-190 px circular orbit
-    around `(540,480)`. It advances about 35 degrees/second, for an orbit near
-    10.4 seconds; the current blind point `(542,671)` is a bottom intercept.
+- [ ] Preserve the working scheduled floating-gem (Bob) intercept and add a
+  fresh on-screen `RUNNING` authorization check without delaying its cadence.
+  - Live H.264 bursts identified Bob as the rotating square-with-diamond icon on
+    an approximately 180-190 px circular orbit around `(540,480)`; the current
+    blind point `(542,671)` is a proven bottom intercept.
+  - Bob's game speed is static. Do not infer its speed from frame retrieval
+    timestamps: buffering, skipped stream sequences, and manual labeling made
+    the experimental timing appear variable.
   - The orphaned directional templates scored only about 0.25-0.50 and were
     commonly outranked by combat effects. The existing magenta-square heuristic
     detected only 5/69 positive frames across the gameplay annulus (1/69 in its
@@ -149,14 +164,18 @@ audited against the codebase and incorporated below on 2026-07-13.
     expected annulus and fitted a constant-angular-velocity path. Roughly five
     seconds cleanly separated the positive burst from a same-run no-Bob burst
     and recovered the observed trajectory; shorter windows produced false
-    tracks. Validate this method across additional positive/negative effect
-    patterns before implementation.
-  - Use the low-latency stream for this moving target. A concurrent normal ADB
-    capture occupied 51 encoded frames (about 1.7 seconds), during which Bob
-    travels roughly 60 degrees. Require a current multi-frame track immediately
-    before a predicted single tap, then verify both disappearance and the
-    expected gem-count change. Do not fall back to timed blind taps on a failed
-    track.
+    tracks. This is optional detector research, not a prerequisite for the
+    existing tap method.
+  - The ephemeral source captures are documented in
+    `docs/architecture_direction_2026-07-14.md`. The 69-frame `stream` directory
+    is positive; the 112-frame `full_orbit` directory is only a noisy no-Bob
+    negative. Promote reviewed fixtures into the repository before relying on
+    either `/tmp` directory for a durable regression suite.
+  - Have an app-owned frame observer publish a short-lived `RUNNING` lease. The
+    tapper should check that lease in memory immediately before each tap and
+    skip when it is stale or invalid, without moving the absolute monotonic tap
+    schedule. Navigation, non-running evidence, pause, capture failure, and
+    stream staleness must invalidate the lease.
 - [ ] Audit the home-screen `CLAIM` control in available and unavailable states;
   determine whether its artwork changes and split templates/state rules if so.
 - [ ] Add composite state-definition logic such as `all_of`, `any_of`, and
@@ -209,6 +228,11 @@ audited against the codebase and incorporated below on 2026-07-13.
 - [ ] Review the tap/action execution architecture together with the shared
   frame source. A post-input frame barrier may belong in the action layer rather
   than being reimplemented independently by scrolling and every handler.
+  - Include a thread-safe UI-state observation snapshot and short-lived action
+    lease so latency-sensitive scheduled actions can verify a fresh `RUNNING`
+    state with an O(1) in-memory check.
+  - Preserve absolute monotonic schedules across skipped actions; a stale guard
+    should skip the current action rather than phase-shifting later attempts.
 
 ## Handler architecture
 

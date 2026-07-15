@@ -5,6 +5,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from utils.logger import log, log_mission
 from automation.missions.base import BaseMission, MissionContext
 from automation.strategies.base import BaseStrategy
+from core.battle_lifecycle import BattleLifecycle
 from core.action_executor import execute_actions
 
 
@@ -19,7 +20,7 @@ class MissionManager:
         self._started = False
         self._last_state = None
         self._mission_was_complete = False
-        self._run_started = False
+        self._battle_lifecycle = BattleLifecycle()
 
     def start(self) -> None:
         if self._started:
@@ -35,23 +36,22 @@ class MissionManager:
         self._started = True
 
     def maybe_run_start(self, detection: Detection) -> None:
+        """Emit run-start hooks only when the battle lifecycle starts anew."""
+
         state = detection.get("state")
-        if state == "RUNNING":
-            if not self._run_started:
-                if self.mission:
-                    self.mission.on_run_start(self.ctx)
-                    try:
-                        self._mission_was_complete = bool(self.mission.is_complete(self.ctx))
-                    except Exception:
-                        self._mission_was_complete = False
-                if self.strategy:
-                    self.strategy.on_run_start(self.ctx)
-            self._run_started = True
-        else:
-            # A transient UNKNOWN frame can occur while menus animate during a
-            # live run.  Only terminal/home states establish a new run boundary.
-            if state in {"GAME_OVER", "HOME_SCREEN", "HOME"}:
-                self._run_started = False
+        battle_started = self._battle_lifecycle.observe(
+            state,
+            home_control=detection.get("home_battle_control", "UNKNOWN"),
+        )
+        if battle_started:
+            if self.mission:
+                self.mission.on_run_start(self.ctx)
+                try:
+                    self._mission_was_complete = bool(self.mission.is_complete(self.ctx))
+                except Exception:
+                    self._mission_was_complete = False
+            if self.strategy:
+                self.strategy.on_run_start(self.ctx)
         self._last_state = state
 
     def handle_overlays(self, detection: Detection) -> None:
@@ -89,10 +89,10 @@ class MissionManager:
             except Exception:
                 log("[STRATEGY] on_game_over handler error", "ERROR")
 
-    def run_initialization_pending(self, detection: Detection) -> bool:
-        """Return whether the strategy temporarily owns all tap authority."""
+    def run_initialization_pending(self) -> bool:
+        """Return whether the active battle still requires initialization."""
 
-        if detection.get("state") != "RUNNING" or not self.strategy:
+        if not self._battle_lifecycle.active_battle_observed or not self.strategy:
             return False
         if not self.strategy.requires_run_initialization():
             return False

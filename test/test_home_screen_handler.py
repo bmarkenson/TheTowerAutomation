@@ -5,6 +5,8 @@ import cv2
 import numpy as np
 
 from core.matcher import get_match
+from core.battle_lifecycle import HomeBattleControl
+from core.home_battle import HomeBattleEvidence, detect_home_battle_control
 from handlers.home_screen_handler import _tap_verified_home_battle_control
 
 
@@ -26,8 +28,13 @@ def test_verified_home_battle_ocr_fallback_taps_configured_control():
             return_value={"state": "HOME_SCREEN"},
         ),
         patch(
-            "handlers.home_screen_handler.ocr_text_and_conf",
-            return_value=("BATTLE", 96.0),
+            "handlers.home_screen_handler.detect_home_battle_control",
+            return_value=HomeBattleEvidence(
+                HomeBattleControl.NEW_BATTLE,
+                "ocr",
+                96.0,
+                "BATTLE",
+            ),
         ),
         patch("handlers.home_screen_handler.safe_tap", return_value=True) as tap,
     ):
@@ -55,19 +62,14 @@ def test_home_battle_fallback_refuses_unknown_screen():
 
 
 def test_resume_battle_ocr_tolerates_button_border_artifacts():
-    with (
-        patch("handlers.home_screen_handler.capture_adb_screenshot", return_value=_screenshot()),
-        patch(
-            "handlers.home_screen_handler.detect_state_and_overlays",
-            return_value={"state": "HOME_SCREEN"},
-        ),
-        patch(
-            "handlers.home_screen_handler.ocr_text_and_conf",
-            return_value=("L RESUME BATTLE J", 93.75),
-        ),
-        patch("handlers.home_screen_handler.safe_tap", return_value=True),
+    with patch(
+        "core.home_battle.ocr_text_and_conf",
+        return_value=("L RESUME BATTLE J", 93.75),
     ):
-        assert _tap_verified_home_battle_control()
+        evidence = detect_home_battle_control(_screenshot())
+
+    assert evidence.control is HomeBattleControl.RESUME_BATTLE
+    assert evidence.source == "ocr"
 
 
 def test_live_new_day_home_fixture_matches_battle_and_store_badge():
@@ -87,3 +89,12 @@ def test_live_new_day_home_fixture_matches_battle_and_store_badge():
     assert battle_confidence >= 0.9
     assert badge_point is not None
     assert badge_confidence >= 0.9
+
+
+def test_live_new_day_home_fixture_classifies_as_new_battle():
+    screenshot = cv2.imread(str(NEW_DAY_HOME_FIXTURE))
+    assert screenshot is not None
+
+    evidence = detect_home_battle_control(screenshot)
+
+    assert evidence.control is HomeBattleControl.NEW_BATTLE

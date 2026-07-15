@@ -135,6 +135,7 @@ class StatusReporter:
         secondary: Set[str],
         overlays: Set[str],
         now_ts: Optional[float] = None,
+        allow_actions: bool = True,
     ) -> None:
         if self._interval == 0:
             return
@@ -164,7 +165,7 @@ class StatusReporter:
                     img, debug_out=str(coins_debug_tmp) if coins_debug_tmp else None
                 )
 
-                if self._supervisor.should_capture_total(now):
+                if allow_actions and self._supervisor.should_capture_total(now):
                     total_snapshot, per_min_refresh = self._supervisor.capture_total_snapshot(
                         current_img=img,
                         current_value=coins_val,
@@ -181,6 +182,7 @@ class StatusReporter:
                     coins_conf,
                     has_min,
                     debug_out=str(coins_debug_tmp) if coins_debug_tmp else None,
+                    allow_actions=allow_actions,
                 )
             except Exception:
                 coins_val, coins_conf, coins_eff = None, -1.0, None

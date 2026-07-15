@@ -131,6 +131,35 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   persists `RUNNING` before allowing automation actions to resume. A failed
   control-file write leaves the process paused.
 
+### 2026-07-14 architecture safety foundation
+
+- Separated battle lifecycle from visible UI navigation. `GAME_OVER` and a
+  verified Home `NEW_BATTLE` control now end the observed battle identity;
+  Home `RESUME_BATTLE`, unknown Home evidence, and transient unknown screens
+  preserve it. The existing Home OCR/template evidence is shared by lifecycle
+  handling and guarded Home actions. A live guarded Go Home at wave 3457
+  exposed the stale historical Resume asset, while OCR classified `RESUME
+  BATTLE` at 93.75 confidence. The refreshed template matched the live frame at
+  1.000 and stayed below threshold on the canonical new-Battle fixture; its
+  guarded visible tap returned to the same battle at wave 3468. Replaying those
+  live observations through the new lifecycle emitted no second run start.
+- Added a non-blocking OS process lock keyed by ADB target. A second runtime for
+  the same target exits before constructing `App`, while different target ports
+  retain independent lock files.
+- Separated legacy direct-`match_region` center resolution from runtime blind
+  input authority. `get_click()` retains its historical center behavior for
+  compatibility and tooling, while blind named `safe_tap` actions require an
+  explicit `tap`. Broad scrolling `region_ref` windows continue to locate and
+  tap the actual matched element; the four in-run menu navigation targets now
+  declare their existing static coordinates explicitly.
+- Repaired the paused exclusive startup gate. Initialization ownership now
+  follows the active battle lifecycle across transient unknown frames, paused
+  capture/detection/status reporting remains active without actions, and gate
+  completion is logged only after the strategy assertion succeeds. The
+  49-test architecture checkpoint and live paused/resumed validation both
+  passed; the live level skips required zero purchase taps and Target Priority
+  was verified before the gate released.
+
 ---
 
 ## 📘 Documentation

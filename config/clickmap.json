@@ -881,6 +881,11 @@
         "w": 87,
         "h": 66
       },
+      "tap": {
+        "type": "tap",
+        "x": 136,
+        "y": 1864
+      },
       "match_threshold": 0.9,
       "roles": [
         "navigation"
@@ -893,6 +898,11 @@
         "y": 1841,
         "w": 82,
         "h": 55
+      },
+      "tap": {
+        "type": "tap",
+        "x": 406,
+        "y": 1868
       },
       "match_threshold": 0.9,
       "roles": [
@@ -907,6 +917,11 @@
         "w": 82,
         "h": 70
       },
+      "tap": {
+        "type": "tap",
+        "x": 670,
+        "y": 1867
+      },
       "match_threshold": 0.9,
       "roles": [
         "navigation"
@@ -919,6 +934,11 @@
         "y": 1836,
         "w": 88,
         "h": 70
+      },
+      "tap": {
+        "type": "tap",
+        "x": 941,
+        "y": 1871
       },
       "match_threshold": 0.9,
       "roles": [

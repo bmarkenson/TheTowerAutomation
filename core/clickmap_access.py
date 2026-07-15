@@ -141,12 +141,11 @@ def get_entries_by_role(role: str) -> Dict[str, Dict[str, Any]]:
     return results
 
 
-def get_click(name: str) -> Optional[Tuple[int, int]]:
-    """Return tap coordinates for ``name`` if available."""
+def get_explicit_tap(name: str) -> Optional[Tuple[int, int]]:
+    """Return only explicitly configured static tap coordinates for ``name``."""
 
     entry = resolve_dot_path(name)
     if not isinstance(entry, Mapping):
-        log(f"[CLICKMAP] No entry for '{name}'", "WARN")
         return None
 
     tap = entry.get("tap")
@@ -155,6 +154,27 @@ def get_click(name: str) -> Optional[Tuple[int, int]]:
             return int(tap["x"]), int(tap["y"])
         except Exception:
             return None
+
+    return None
+
+
+def get_click(name: str) -> Optional[Tuple[int, int]]:
+    """Resolve click coordinates using explicit tap or legacy region center.
+
+    This compatibility lookup preserves the historical center of a direct
+    ``match_region`` for tooling and callers that deliberately request it. The
+    runtime blind-tap path uses :func:`get_explicit_tap` instead. Entries using
+    a broad ``region_ref`` never resolve to that search window's center.
+    """
+
+    entry = resolve_dot_path(name)
+    if not isinstance(entry, Mapping):
+        log(f"[CLICKMAP] No entry for '{name}'", "WARN")
+        return None
+
+    explicit = get_explicit_tap(name)
+    if explicit is not None:
+        return explicit
 
     region = entry.get("match_region")
     if isinstance(region, Mapping) and {"x", "y", "w", "h"} <= region.keys():
@@ -206,6 +226,7 @@ __all__ = [
     "set_dot_path",
     "flatten_clickmap",
     "get_entries_by_role",
+    "get_explicit_tap",
     "get_click",
     "has_click",
     "get_swipe",

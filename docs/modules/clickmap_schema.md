@@ -30,7 +30,7 @@ Each leaf entry represents a single screen element.
 |------------------|------------|-------------|
 | `match_template` | `str`      | Filename in `assets/match_templates/` |
 | `match_region`   | `dict`     | Region in `{x, y, w, h}` format |
-| `tap`            | `dict`     | Optional override tap point `{x, y}` |
+| `tap`            | `dict`     | Explicit static tap point `{x, y}` for a guarded blind action |
 | `swipe`          | `dict`     | Optional gesture action `{x1, y1, x2, y2, duration_ms}` |
 | `roles`          | `list[str]`| Element classification (`button`, `label`, `overlay`, etc.) |
 | `region_ref`     | `str`      | Optional pointer to `_shared_match_regions` key |
@@ -91,7 +91,11 @@ Entries are referenced using their full path, e.g.:
 
 ## 📌 Notes
 
-- If `tap` is not present, tap defaults to center of `match_region`
+- A direct `match_region` center remains available through the legacy/tooling
+  `get_click()` lookup. Runtime blind actions do not treat that derived point as
+  action authority; they require an explicit `tap`.
+- Visibility-aware actions tap the center of the matched template bounding box
+  (or an explicitly supported offset). Blind actions require an explicit `tap`.
 - `match_threshold` is optional and usually defined globally
 - `clickmap.json` must be tool-friendly: YAML-compatible, grepable, and stable
 
