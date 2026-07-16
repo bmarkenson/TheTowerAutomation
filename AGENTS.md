@@ -7,9 +7,12 @@ facts until they have been verified against the current process and device.
 ## Non-negotiable rules
 
 - Run project Python through `.venv/bin/python`, including tests.
-- Never Surrender an active battle. Leaving through the verified Exit Battle →
-  Go Home route is allowed only when the task authorizes it and the active run
-  remains resumable.
+- Never Surrender a pre-existing, operator-owned, or automation farming battle.
+  A battle deliberately started by the agent for a bounded test may be
+  Surrendered only when the task author explicitly authorizes it and the agent
+  has recorded that test-run ownership before starting it. Leaving through the
+  verified Exit Battle → Go Home route is allowed only when the task authorizes
+  it and the active run remains resumable.
 - Before any live action, inspect the control file, lock/PID, ADB target,
   current screen, and recent `logs/actions.log` entries.
 - Capture and detection may continue while paused, but pause blocks every
