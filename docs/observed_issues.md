@@ -10,6 +10,24 @@ thread and is not exhaustive for earlier project history.
 
 ## Open
 
+### Direct ADB screenshots intermittently returned incomplete black frames
+
+- **Observed:** 2026-07-16 while preserving a natural Game Over boundary and
+  again before navigating from no-battle Home to Modules.
+- **Symptom:** A direct `adb exec-out screencap -p` returned a valid-sized PNG
+  with only small strips of the real UI rendered and nearly all remaining
+  pixels black. An immediate repeated capture rendered the complete unchanged
+  screen both times.
+- **Evidence:** The failed/retry pairs are retained under
+  `screenshots/adb_incomplete_frames_2026-07-16/`.
+- **Safety response:** Neither incomplete frame was accepted as action
+  authority. Navigation waited for a complete repeated frame and a fresh
+  project state detection.
+- **Status:** Unresolved. Determine whether this is an emulator compositor race,
+  an ADB capture/transport issue, or another source of partial frames. Verify
+  whether actionable templates always fail closed and add an explicit
+  completeness/freshness guard if they do not.
+
 ### Automation owner exited without a clean shutdown record
 
 - **Observed:** 2026-07-15 while refreshing the final thread handoff.
@@ -35,6 +53,26 @@ thread and is not exhaustive for earlier project history.
   remains unestablished.
 
 ## Resolved
+
+### Day-length Game Time forced clipboard battle capture into invalid OCR fallback
+
+- **Observed:** 2026-07-16 on the natural Tier 18 wave-8803 Game Over boundary.
+- **Symptom:** The copied report contained all 144 exact rows, but validation
+  rejected `Game Time = 1d 16h 10m 28s` as unparsed. The handler therefore
+  used its guarded OCR fallback, whose initial record missed `Counts`,
+  `Health Regenerated`, and `Game Time`, and could not parse
+  `Damage > Death Wave`.
+- **Evidence:** `logs/actions.log` from 10:14:45–10:15:20 PDT and retained
+  fallback source frames named `Game20260716_101413_*_OCR_EVIDENCE.png`.
+- **Cause:** `parse_duration_seconds()` accepted hours, minutes, and seconds
+  but not the game's day component.
+- **Resolution:** Compact durations now accept days. The already-copied report,
+  retained Game Stats frame, and 27 valid ordered perks rebuilt the same
+  `Battle20260716T101413-0700` record as a valid clipboard-backed record with
+  no warnings.
+- **Regression:** `test/test_battle_stats.py` covers
+  `1d 16h 10m 28s` without changing the existing hour-only behavior.
+- **Fixed by:** `3b0d986`.
 
 ### Preset identity templates falsely claimed inactive GC presets were active
 

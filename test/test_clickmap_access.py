@@ -35,3 +35,16 @@ def test_blind_navigation_targets_have_explicit_tap_geometry():
     assert get_click("navigation.goto_utility") == (670, 1867)
     assert get_click("navigation.goto_uw") == (941, 1871)
     assert get_click("navigation.goto_home_store") == (80, 1830)
+    assert get_click("navigation.goto_modules_home") == (630, 1830)
+
+
+def test_module_loadout_inspection_targets_have_explicit_tap_geometry():
+    assert get_click("buttons.module:equipped_outer_left_top") == (115, 407)
+    assert get_click("buttons.module:equipped_inner_left_top") == (307, 407)
+    assert get_click("buttons.module:equipped_inner_right_top") == (773, 407)
+    assert get_click("buttons.module:equipped_outer_right_top") == (964, 407)
+    assert get_click("buttons.module:equipped_outer_left_bottom") == (115, 663)
+    assert get_click("buttons.module:equipped_inner_left_bottom") == (307, 663)
+    assert get_click("buttons.module:equipped_inner_right_bottom") == (773, 663)
+    assert get_click("buttons.module:equipped_outer_right_bottom") == (964, 663)
+    assert get_click("buttons.close:module_detail") == (929, 223)

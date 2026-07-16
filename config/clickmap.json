@@ -1401,6 +1401,16 @@
         "y": 1830
       }
     },
+    "goto_modules_home": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 630,
+        "y": 1830
+      }
+    },
     "toggle_menu": {
       "match_template": "navigation/toggle_menu.png",
       "match_region": {
@@ -1553,6 +1563,96 @@
         "type": "tap",
         "x": 540,
         "y": 1550
+      }
+    },
+    "module:equipped_outer_left_top": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 115,
+        "y": 407
+      }
+    },
+    "close:module_detail": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 929,
+        "y": 223
+      }
+    },
+    "module:equipped_inner_left_top": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 307,
+        "y": 407
+      }
+    },
+    "module:equipped_inner_right_top": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 773,
+        "y": 407
+      }
+    },
+    "module:equipped_outer_right_top": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 964,
+        "y": 407
+      }
+    },
+    "module:equipped_outer_left_bottom": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 115,
+        "y": 663
+      }
+    },
+    "module:equipped_inner_left_bottom": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 307,
+        "y": 663
+      }
+    },
+    "module:equipped_inner_right_bottom": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 773,
+        "y": 663
+      }
+    },
+    "module:equipped_outer_right_bottom": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 964,
+        "y": 663
       }
     },
     "exit_battle": {

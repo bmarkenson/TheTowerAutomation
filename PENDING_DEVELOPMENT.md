@@ -34,6 +34,14 @@ lifecycle, orchestration, and action authority in separate layers.
   left a stale lock, and emitted no clean-shutdown record while the device was
   on Workshop. Keep control `PAUSED` and inspect for an execution-session limit,
   an unlogged crash, or manual-player activity before restarting automation.
+- [ ] Diagnose the intermittent incomplete ADB screenshot frames recorded in
+  `docs/observed_issues.md`.
+  - Two direct captures on 2026-07-16 returned valid-sized PNGs whose content
+    was almost entirely black; an immediate repeated capture rendered the full
+    unchanged Game Stats or Home screen.
+  - Determine whether current state templates reliably reject every incomplete
+    frame. Add an explicit completeness/freshness guard before action authority
+    if partial compositor frames can match actionable evidence.
 - [x] Reproduce and diagnose the stale runtime wave status recorded in
   `docs/observed_issues.md`. On 2026-07-15 status remained at wave 1300 while a
   fresh live screenshot showed wave 1986. Inspect wave-detector updates and the
@@ -144,8 +152,13 @@ lifecycle, orchestration, and action authority in separate layers.
     Dimension Core; Assist = Being Annihilator, Singularity Harness,
     Anti-Cube Portal, and Harmony Conductor. Retain this inventory as explicit
     non-GC evidence; do not encode these modules as GC requirements.
-  - [ ] Inventory and confirm the actual GC Primary and Assist module names
-    before encoding module requirements.
+  - [x] Inventory and confirm the actual GC Primary and Assist module names
+    before encoding module requirements. At the natural post-wave-8803
+    no-battle boundary on 2026-07-16, the user-confirmed normal GC setup was:
+    Primary = Amplifying Strike, Black Hole Digestor, Orbital Augment, and
+    Multiverse Nexus; Assist = Being Annihilator, Singularity Harness,
+    Anti-Cube Portal, and Dimension Core. The overview and eight detail panels
+    are retained under `screenshots/module_inventory_2026-07-16/`.
   - Tag the module shapes/icons with canonical module names and capture stable
     templates or another reliable visual representation.
   - Correct a wrong module setup only at a verified no-battle boundary. A
