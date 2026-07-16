@@ -4,7 +4,69 @@ This is the canonical entrypoint for every new TheTower development thread.
 Handoffs should reference this document instead of reproducing all stable
 operational guidance from memory.
 
+## Shared-workspace concurrency
+
+The operator and multiple agent threads may modify this working tree at the same
+time. A status or diff is a snapshot, and newly appearing changes are not by
+themselves an anomaly or a reason to stop unrelated work.
+
+- Treat every change not deliberately made for the current task as owned by the
+  operator or another thread.
+- Recheck `git status` and the staged and unstaged diff for each target file
+  immediately before editing, staging, or committing. Reread a target that
+  changed since it was last inspected and preserve compatible concurrent edits.
+- Stage only explicitly owned paths or hunks. Never revert, overwrite, stage,
+  commit, or silently incorporate parallel work.
+- Continue around unrelated changes. If edits overlap or ownership is unclear,
+  stop changing that file and coordinate with the user.
+- In the handoff, report only changes owned by the current thread and identify
+  parallel work separately when it materially affects the next task.
+
+## Lightweight read-only questions
+
+A simple explanatory question may use this reduced startup path when its answer
+can be established from repository source or documentation and the task requires
+no file changes, tests, runtime diagnosis, claims about volatile state, or
+process/device interaction:
+
+1. Read `AGENTS.md` and this file.
+2. Inspect only the directly relevant source, documentation, dependencies, and
+   callers needed to answer accurately.
+3. Skip the remaining required reading, working-tree inspection, and runtime
+   inspection below.
+
+If the task expands beyond those limits, complete the full applicable startup
+checklist before making changes or relying on runtime state.
+
+## Code-only development
+
+Code or documentation changes and automated tests do not qualify for the
+lightweight path. Complete the applicable required reading below, inspect the
+working tree and recent commits, preserve concurrent work, and run automated
+validation proportionate to the change.
+
+Code-only development does not by itself require ADB access or inspection of a
+live automation process. Complete the mandatory runtime inspection before any
+process/device interaction, live validation, runtime diagnosis, or claim about
+volatile runtime state.
+
+Choose validation proportionate to the remaining uncertainty. Canonical
+screenshots and retained live fixtures are sufficient when they directly
+exercise the behavior under test and no current-state, transition, timing, or
+device-integration property remains unresolved. Use live validation when it
+would materially resolve uncertainty that repository-local evidence cannot and
+the interaction is safe within the task's authority. Neither require nor defer
+live validation merely by default.
+
+When live validation would add material evidence but the relevant state is
+unavailable, the interaction would be unsafe or disruptive, or the task does
+not authorize it, record that validation as pending. Do not describe behavior
+as live-validated unless the applicable runtime inspection and validation were
+actually completed.
+
 ## Required reading order
+
+For work outside the lightweight read-only path:
 
 1. [`../AGENTS.md`](../AGENTS.md) — automatic safety and development rules.
 2. [`runtime_operations.md`](runtime_operations.md) — ADB, process, control,
@@ -18,6 +80,10 @@ operational guidance from memory.
 6. The current working-tree status/diff and recent commits.
 
 ## Mandatory fresh inspection
+
+This section is mandatory before process/device interaction, live validation,
+runtime diagnosis, or claims about volatile runtime state. It is not a
+prerequisite for code-only edits whose validation is entirely repository-local.
 
 Do not assume that the process, PID, ADB port, control state, battle state,
 pause state, current screen, wave, strategy, or last handoff observation is

@@ -1,8 +1,20 @@
 # TheTower Agent Instructions
 
 Before doing any work, read [`docs/new_thread.md`](docs/new_thread.md) and
-follow its startup inspection checklist. Do not rely on a handoff's runtime
-facts until they have been verified against the current process and device.
+follow the applicable startup path defined there. A simple read-only source or
+documentation question may use its lightweight path. If the task requires code
+or documentation changes, complete the applicable
+repository/development checklist and run proportionate automated validation.
+Code-only work does not require live ADB access unless it includes process or
+device interaction, live validation, runtime diagnosis, or claims about
+volatile runtime state. Choose validation proportionate to the remaining
+uncertainty: retained live fixtures may be sufficient, while live interaction
+should be used when it materially resolves current-state, transition, timing,
+or device-integration uncertainty and is safe within the task's authority.
+Neither require nor defer live validation merely by default. If the task's
+scope expands, complete the newly applicable checklist before proceeding. Do
+not rely on a handoff's runtime facts until they have been verified against the
+current process and device.
 
 ## Non-negotiable rules
 
@@ -22,6 +34,13 @@ facts until they have been verified against the current process and device.
 - Treat existing untracked files as user-owned unless their ownership and scope
   have been deliberately established. Do not delete, overwrite, stage, or
   silently incorporate them.
+- Expect the operator and other agent threads to work in this shared workspace
+  concurrently. Treat tracked or untracked changes outside the current task as
+  owned by that parallel work; do not revert, overwrite, stage, or silently
+  incorporate them. Recheck status and the target-file diff immediately before
+  editing, staging, or committing. If a target changed since inspection, reread
+  and reconcile it; unrelated changes are not a blocker, but overlapping or
+  unclear ownership requires coordination with the user.
 - Keep `YamlStrategy` and the runtime evaluator generic. Prefer compact source
   configuration plus explicit generated plans over strategy-name conditionals
   or duplicated expanded YAML.
