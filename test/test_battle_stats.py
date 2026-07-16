@@ -193,6 +193,7 @@ def test_tower_number_parser_preserves_case_sensitive_magnitudes():
     assert format_tower_number(Decimal("4.81e36")) == "4.81aa"
     assert format_tower_number(Decimal("2.5e39")) == "2.5ab"
     assert parse_duration_seconds("5h 43m 19s") == 20599
+    assert parse_duration_seconds("1d 16h 10m 28s") == 144628
 
 
 def test_overlapping_pages_are_sectioned_deduplicated_and_derived():

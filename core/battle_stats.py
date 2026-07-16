@@ -135,17 +135,18 @@ def parse_tower_number(raw: str) -> Optional[Decimal]:
 
 
 def parse_duration_seconds(raw: str) -> Optional[int]:
-    """Parse a compact ``5h 43m 19s``-style duration."""
+    """Parse a compact ``1d 5h 43m 19s``-style duration."""
 
     text = (raw or "").strip().lower()
     match = re.fullmatch(
-        r"\s*(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?\s*(?:(\d+)\s*s)?\s*",
+        r"\s*(?:(\d+)\s*d)?\s*(?:(\d+)\s*h)?\s*"
+        r"(?:(\d+)\s*m)?\s*(?:(\d+)\s*s)?\s*",
         text,
     )
     if not match or not any(part is not None for part in match.groups()):
         return None
-    hours, minutes, seconds = (int(part or 0) for part in match.groups())
-    return hours * 3600 + minutes * 60 + seconds
+    days, hours, minutes, seconds = (int(part or 0) for part in match.groups())
+    return days * 86400 + hours * 3600 + minutes * 60 + seconds
 
 
 def format_tower_number(value: Decimal) -> str:
