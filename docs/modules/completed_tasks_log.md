@@ -199,6 +199,24 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   complete once-per-session preflight. Mismatches block and log evidence;
   automatic correction and Surrender remain disabled.
 
+### 2026-07-15 Mission and Guild reward collection
+
+- Added a bounded side-menu reward probe. The aggregate red/purple attention
+  dot schedules inspection but never authorizes a reward tap; fixed Daily,
+  Event, and Guild badge regions select panels, and every action requires a
+  fresh parent-state check plus exact available artwork.
+- Added distinct positive/negative evidence for Daily mission claims, weekly
+  chests, Event mission claims, and Guild contribution chests. Claimed and
+  locked chest artwork stays below threshold. Weekly/Guild reward reveals share
+  the verified `SKIP` control; Event scanning uses screen-guarded bounded
+  scrolling.
+- Live-validated the full handler on a paused Tier 20 run at port 5565. It
+  claimed three remaining Daily missions and one remaining Event reward,
+  skipped Guild because only claimed/locked chests were present, logged
+  `daily=3 event=1 guild=0`, and restored `RUNNING/MENU_CLOSED`. A second probe
+  saw no relevant badges despite an unrelated Modules badge and performed no
+  reward action. The battle continued naturally and was never surrendered.
+
 ---
 
 ## 📘 Documentation

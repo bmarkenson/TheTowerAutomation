@@ -254,20 +254,28 @@ lifecycle, orchestration, and action authority in separate layers.
 - [ ] Add a `LAB_READY` overlay and handler after capturing a stable live
   template and expected behavior, then design optional Lab automation around a
   configured research queue and explicit spending safeguards.
-- [ ] Add daily-quest claiming separately from the existing daily-gem handler.
-  The 2026-07-13 reset began at `2/8 Missions` with two new missions and the next
-  pair due eight hours later; the menu badge changed from 3 to 1 after viewing
-  the screen while one completed mission remained claimable.
-- [ ] Add Event Mission and Guild contribution-chest claiming as separate,
-  badge-triggered handlers after mapping their available/unavailable states.
+- [x] Add daily-quest and weekly-chest claiming separately from the existing
+  daily-gem handler.
+  - On 2026-07-15 at ADB port 5565, the Daily badge `4` matched four visible
+    claims. A guarded first claim advanced weekly completion from 19/35 to
+    20/35 and exposed a glowing weekly chest. The chest opened a four-page
+    reward reveal with a stable `SKIP`; its post-claim green check is a negative.
+  - The bounded live handler then claimed the three remaining Daily missions,
+    revalidating `DAILY_MISSIONS` and exact available artwork before every tap.
+- [x] Add Event Mission and Guild contribution-chest claiming as separate,
+  badge-inspected handlers after mapping their available/unavailable states.
   - On 2026-07-13 the in-run menu showed badges on Daily Missions (`2`), Event
     (`1`), and Guild (`1`). Treat a menu badge only as a reason to inspect; do
     not assume a specific claim target without fresh in-menu detection.
-  - The Guild Members fixture contains the already-claimed 100 chest, a glowing
-    250 chest, and locked 500/750 chests. Preserve it for claimability-template
-    design; no chest was tapped during capture.
-  - Event opened on Missions. Inventory the complete mission list and capture a
-    positive claim control plus a post-claim negative before implementing taps.
+  - Live Event evidence proved that badge `1` can correspond to two visible
+    claim controls. Both were claimed under exact `EVENT` evidence; the handler
+    then guarded-scrolls the remaining list to its edge.
+  - The preserved Guild Members fixture supplies a glowing 250-chest positive.
+    A fresh 650-contribution panel supplies claimed 100/250/500 and locked 750
+    negatives. No live Guild chest was available to tap during final validation.
+  - The closed-menu alert may remain purple for unrelated Modules work. It only
+    schedules a bounded inspection (30-minute success cooldown, five-minute
+    failure backoff); fixed badge regions identify which reward panels may open.
 - [ ] Add automated overlay coexistence and state-transition regression tests.
   This should be completed as part of the full live state-coverage audit above.
 

@@ -140,7 +140,7 @@ def test_visible_claim_at_store_entry_skips_all_scrolling():
     assert result == DailyGemResult.CLAIMED
     assert [call.args[0] for call in tap.call_args_list] == [
         DAILY_GEM_BUTTON,
-        "buttons.skip:claim_daily_gems",
+        "buttons.skip_reward_reveal",
     ]
     return_from_store.assert_called_once_with("test", "RUNNING")
 

@@ -62,10 +62,21 @@ For a gate-free experiment, select the no-strategy mode explicitly:
 ```
 
 This keeps the regular capture, detection, lifecycle, Game Over, Home, ad-gem,
-Daily Gem, floating-gem, status, and recovery handlers running. It loads no GC
-strategy, so there are no strategy upgrade actions, new-run initialization
-gate, or session-preflight gate. The default remains `gc` when `--strategy` is
-omitted.
+Daily Gem, Daily/Event Mission reward, Guild chest, floating-gem, status, and
+recovery handlers running. It loads no GC strategy, so there are no strategy
+upgrade actions, new-run initialization gate, or session-preflight gate. The
+default remains `gc` when `--strategy` is omitted.
+
+Mission and Guild reward collection uses the in-run menu's attention dot only
+as a reason to inspect. After opening the menu, the handler independently
+measures the Daily Missions, Event, and Guild badge slots. Every reward tap then
+requires its parent screen plus exact available artwork: Daily `CLAIM`, an
+unclaimed weekly chest, Event `CLAIM`, or a glowing Guild contribution chest.
+Claimed and locked chests are negatives. Reward reveals are dismissed through
+their verified `SKIP` control, Event Missions are searched with bounded guarded
+scrolling, and the handler returns to the active battle and closes the menu.
+Persistent unrelated alerts are rate-limited to one inspection every 30
+minutes; failures retry after five minutes.
 
 The former `gc_manual_target_priority` name remains a compatibility alias for
 `gc_farm_t19_experiment` during migration; it no longer seeds a completion

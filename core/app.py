@@ -18,6 +18,8 @@ from core.state_detector import detect_state_and_overlays
 from core.automation_supervisor import AutomationSupervisor
 from core.daily_gem_scheduler import DailyGemScheduler
 from core.home_battle import detect_home_battle_control
+from core.menu_reward_badges import menu_reward_alert_visible
+from core.mission_reward_scheduler import MissionRewardScheduler
 from core.run_state import AUTOMATION, ExecMode
 from core.app_setup import AppConfig
 from core.status_report import StateChangeTracker, StatusReporter
@@ -31,6 +33,7 @@ from handlers.home_screen_handler import handle_home_screen
 from handlers.ad_gem_handler import handle_ad_gem, stop_blind_gem_tapper, start_blind_gem_tapper
 from handlers.daily_gem_handler import DailyGemResult, handle_daily_gem
 from handlers.dismiss_uw_detail import handle_upgrade_detail_popup
+from handlers.mission_reward_handler import MissionRewardResult, handle_mission_rewards
 from utils.wave_detector import detect_wave_number_from_image
 
 
@@ -84,6 +87,7 @@ class App:
         self._session_preflight_gate_logged = False
         rollover_state = Path(config.control_file).parent / "daily_gem_state.json"
         self._daily_gem_scheduler = DailyGemScheduler(rollover_state)
+        self._mission_reward_scheduler = MissionRewardScheduler()
 
     def run(self) -> None:
         log("Starting main heartbeat loop.", level="INFO", console=True)
@@ -273,7 +277,7 @@ class App:
 
                 if not actions_blocked:
                     self._mission_mgr.tick(img, detection)
-                    self._handle_primary_states(new_state, overlays)
+                    self._handle_primary_states(new_state, overlays, img)
 
                 sleep_interval = 1.0 if initialization_pending else 5.0
                 try:
@@ -302,11 +306,20 @@ class App:
                 return None
         return img
 
-    def _handle_primary_states(self, new_state: str, overlays: Set[str]) -> None:
+    def _handle_primary_states(
+        self,
+        new_state: str,
+        overlays: Set[str],
+        img: Frame,
+    ) -> None:
         """Dispatch handlers for top-level UI states and overlay-driven events."""
         if self._handle_daily_gem_if_due(new_state, overlays):
             # The handler navigates through Store and may return to a different
             # screen. Do not act on the stale pre-handler detection this tick.
+            return
+        if self._handle_mission_rewards_if_due(new_state, img):
+            # The handler traverses several panels and restores RUNNING. Avoid
+            # dispatching against the frame captured before that navigation.
             return
 
         if new_state == "GAME_OVER":
@@ -334,6 +347,27 @@ class App:
 
         if "AD_GEMS_AVAILABLE" in overlays:
             handle_ad_gem()
+
+    def _handle_mission_rewards_if_due(self, new_state: str, img: Frame) -> bool:
+        """Inspect relevant side-menu badges when the closed menu requests attention."""
+
+        if new_state != "RUNNING":
+            return False
+        alert_visible = menu_reward_alert_visible(img)
+        if not self._mission_reward_scheduler.should_attempt(
+            alert_visible=alert_visible,
+        ):
+            return False
+
+        log("[MISSION_REWARDS] Starting side-menu reward probe", "INFO")
+        if stop_blind_gem_tapper():
+            self._blind_tapper_suspended = True
+        result = handle_mission_rewards(screenshot=img)
+        if result == MissionRewardResult.FAILED:
+            self._mission_reward_scheduler.mark_failed()
+        else:
+            self._mission_reward_scheduler.mark_completed()
+        return True
 
     def _handle_daily_gem_if_due(self, new_state: str, overlays: Set[str]) -> bool:
         """Run the Daily Gem probe from a safe state after UTC rollover."""

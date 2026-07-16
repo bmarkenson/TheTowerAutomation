@@ -218,6 +218,32 @@
         "duration_ms": 618
       }
     },
+    "goto_top:event_missions": {
+      "roles": [
+        "gesture"
+      ],
+      "swipe": {
+        "type": "swipe",
+        "x1": 540,
+        "y1": 950,
+        "x2": 540,
+        "y2": 1600,
+        "duration_ms": 260
+      }
+    },
+    "goto_next:event_missions": {
+      "roles": [
+        "gesture"
+      ],
+      "swipe": {
+        "type": "swipe",
+        "x1": 540,
+        "y1": 1600,
+        "x2": 540,
+        "y2": 950,
+        "duration_ms": 260
+      }
+    },
     "upgrade_detail_dismiss": {
       "roles": [
         "gesture"
@@ -1374,6 +1400,36 @@
         "y": 281
       }
     },
+    "menu_daily_missions": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 910,
+        "y": 174
+      }
+    },
+    "menu_event": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 910,
+        "y": 484
+      }
+    },
+    "menu_guild": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 910,
+        "y": 589
+      }
+    },
     "event:bots_tab": {
       "roles": [
         "navigation"
@@ -1632,6 +1688,58 @@
         "button"
       ]
     },
+    "claim_daily_mission": {
+      "match_template": "buttons/claim_daily_mission.png",
+      "match_region": {
+        "x": 100,
+        "y": 580,
+        "w": 850,
+        "h": 1170
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
+    "claim_weekly_mission_chest": {
+      "match_template": "buttons/claim_weekly_mission_chest.png",
+      "match_region": {
+        "x": 50,
+        "y": 280,
+        "w": 980,
+        "h": 190
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
+    "claim_event_mission": {
+      "match_template": "buttons/claim_event_mission.png",
+      "match_region": {
+        "x": 100,
+        "y": 800,
+        "w": 850,
+        "h": 950
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
+    "claim_guild_chest": {
+      "match_template": "buttons/claim_guild_chest.png",
+      "match_region": {
+        "x": 60,
+        "y": 620,
+        "w": 980,
+        "h": 200
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
     "claim_daily_gems": {
       "match_template": "buttons/claim_daily_gems.png",
       "region_ref": "claim_daily_gems",
@@ -1640,8 +1748,8 @@
         "button"
       ]
     },
-    "skip:claim_daily_gems": {
-      "match_template": "buttons/skip:claim_daily_gems.png",
+    "skip_reward_reveal": {
+      "match_template": "buttons/skip_reward_reveal.png",
       "match_region": {
         "x": 778,
         "y": 6,

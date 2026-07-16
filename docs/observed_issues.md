@@ -119,6 +119,23 @@ thread and is not exhaustive for earlier project history.
 
 ## Operational lessons
 
+### A detached child may not survive the agent execution wrapper
+
+- **Observed:** 2026-07-15 while replacing the paused port-5565 runtime after
+  live Mission reward validation.
+- **Symptom:** `nohup .venv/bin/python main.py --adb-port 5565 --strategy none
+  ... &` returned exit code 0, but no process survived, the lock retained the
+  old owner's metadata, and neither `actions.log` nor the redirected output
+  recorded startup.
+- **Verification:** Host process inspection found no replacement. Starting the
+  same command in a persistent host PTY immediately acquired a new lock,
+  consumed `PAUSED / RETRY`, connected to port 5565, and reported the active
+  Tier 20 run.
+- **Lesson:** A successful shell launch result is not process-start evidence.
+  Verify the host PID, refreshed lock metadata, startup log, control
+  consumption, and first state report together; use a persistent execution
+  session when detached children are reaped by the wrapper.
+
 ### An isolated ADB-daemon startup failure is not target inaccessibility
 
 - **Observed:** 2026-07-15 while refreshing handoff state.

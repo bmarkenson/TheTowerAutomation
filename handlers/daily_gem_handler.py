@@ -159,7 +159,7 @@ def handle_daily_gem() -> DailyGemResult:
     time.sleep(1.2)
 
     # Skip
-    if not tap_if_visible("buttons.skip:claim_daily_gems", retries=1):
+    if not tap_if_visible("buttons.skip_reward_reveal", retries=1):
         return _abort_handler("Skip Claim_daily_gems", session_id)
     time.sleep(1.2)
 
