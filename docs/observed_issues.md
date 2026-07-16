@@ -28,7 +28,9 @@ thread and is not exhaustive for earlier project history.
   logger, or coincided with manual player activity. Treat the lock as stale and
   the current Workshop screen as authoritative.
 
-### Runtime wave status can remain stale during an active battle
+## Resolved
+
+### Runtime wave status remained stale during an active battle
 
 - **Observed:** 2026-07-15 after restarting automation during an existing Tier
   19 run.
@@ -37,15 +39,31 @@ thread and is not exhaustive for earlier project history.
   read-only screenshot showed the live battle at wave 1986.
 - **Context:** Primary state remained `RUNNING`; the UW menu was open and other
   automation continued normally.
-- **Impact:** Status output and runtime `last_wave` context may be stale even
-  though the battle is progressing. The exact final Battle Report remains
+- **Impact:** Status output and runtime `last_wave` context were stale even
+  though the battle was progressing. The exact final Battle Report remained
   independently available from the clipboard at Game Over.
 - **Evidence:** `logs/actions.log` around 11:34–11:51 PDT and the handoff-thread
-  screenshot `/tmp/thetower_handoff_current.png` (ephemeral).
-- **Status:** Unresolved. Reproduce and inspect the wave detector's update and
-  monotonic-hint behavior non-destructively before changing it.
-
-## Resolved
+  screenshot `/tmp/thetower_handoff_current.png` (ephemeral). A later retained
+  Tier 20 frame read wave 3502 from a clean detector state but reproduced wave
+  1300 when the old hint was seeded 14 or 60 minutes earlier.
+- **Cause:** The process-global OCR hint assumed 10 waves/minute, treated more
+  than 30 waves/minute plus a small tolerance as implausible, and returned the
+  old value when current OCR exceeded that model. The live run could progress
+  faster, so the hint could never catch up. The app and status reporter also
+  mutated the same hint independently.
+- **Resolution:** Wave OCR is stateless and selects only per-frame values
+  reproduced by at least two preprocessing variants. Lone outliers, tied
+  candidates, and disagreeing quick/heavy consensus return no observation.
+  Status reporting reuses the app's observation instead of running a second
+  state-mutating read. Progression rate, previous-wave, digit-width, and fixed
+  wave-ceiling assumptions were removed.
+- **Validation:** All six quick variants read the retained Tier 20 frame as
+  3502 at confidence 87–92; the revised detector returned 3502 at aggregate
+  confidence 90. The full suite passed with 201 tests.
+- **Regression:** `test/test_wave_detector.py` covers consensus, isolated
+  high-confidence outliers, tied ambiguity, heavy fallback/disagreement, and
+  values above the former ceiling.
+- **Fixed by:** `b945118`.
 
 ### Game Over WAIT blocked persistent control polling
 
