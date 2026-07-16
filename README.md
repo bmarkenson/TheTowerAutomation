@@ -55,6 +55,18 @@ For example:
 .venv/bin/python main.py --adb-port 5555 --strategy gc_farm_t19_experiment
 ```
 
+For a gate-free experiment, select the no-strategy mode explicitly:
+
+```bash
+.venv/bin/python main.py --adb-port 5555 --strategy none
+```
+
+This keeps the regular capture, detection, lifecycle, Game Over, Home, ad-gem,
+Daily Gem, floating-gem, status, and recovery handlers running. It loads no GC
+strategy, so there are no strategy upgrade actions, new-run initialization
+gate, or session-preflight gate. The default remains `gc` when `--strategy` is
+omitted.
+
 The former `gc_manual_target_priority` name remains a compatibility alias for
 `gc_farm_t19_experiment` during migration; it no longer seeds a completion
 variable. Edit the matching `.source.yaml` profile and regenerate its explicit

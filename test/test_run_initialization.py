@@ -87,6 +87,15 @@ class DefaultStrategyTests(unittest.TestCase):
         config = config_from_args(parse_args(["--strategy", "none"]))
         self.assertEqual(config.strategy_name, "none")
 
+        strategy = get_strategy(config.strategy_name)
+        self.assertIsNone(strategy)
+
+        manager = MissionManager(None, strategy)
+        manager.start()
+        manager.maybe_run_start({"state": "RUNNING"})
+        self.assertFalse(manager.run_initialization_pending())
+        self.assertFalse(manager.session_preflight_pending())
+
     def test_named_gc_profiles_are_selectable(self):
         for profile_name in PROFILE_NAMES:
             with self.subTest(profile=profile_name):
