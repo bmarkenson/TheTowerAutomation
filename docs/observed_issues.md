@@ -27,8 +27,61 @@ thread and is not exhaustive for earlier project history.
   terminated by the execution-session lifetime, crashed outside the structured
   logger, or coincided with manual player activity. Treat the lock as stale and
   the current Workshop screen as authoritative.
+- **Recurrence:** A later port-5565 owner (`3342552`) stopped after its final
+  22:45:39 state line without a shutdown record and left its lock behind. The
+  immediately preceding Game Over handler failure had already navigated to
+  no-battle Home. The user subsequently confirmed that the process had been
+  killed, but whether that kill was manual or execution-wrapper lifecycle
+  remains unestablished.
 
 ## Resolved
+
+### Preset identity templates falsely claimed inactive GC presets were active
+
+- **Observed:** 2026-07-15 at a natural no-battle boundary on port 5565.
+- **Symptom:** Cards visibly had `Tournament` selected while
+  `CARDS_GC_ACTIVE` matched the cyan inactive `GC` slot at confidence 0.9377.
+  Bots visibly had `Amplify` selected while `BOTS_FARM_ACTIVE` matched the cyan
+  inactive `Farm` slot at confidence 0.9402.
+- **Cause:** Each composite template was reliable evidence for the named slot's
+  identity but insufficient evidence for its green selected border.
+- **Resolution:** Cards and Bots now publish `*_SLOT` identity states. The same
+  explicit green-versus-cyan border classifier used by Workshop synthesizes an
+  active preflight claim only when the named slot is actually selected. A
+  verified `NEW_BATTLE` Home route can correct the supported GC presets and
+  known Guardian loadout before allowing Battle to start; unknown layouts fail
+  closed.
+- **Live validation:** Workshop changed Tourney → Farm, Cards Tournament → GC,
+  Bots Amplify → Farm, and Guardians Attack/Ally/Scout →
+  Fetch/Summon/Scout. A complete second pass made no preset mutation and
+  returned to no-battle Home.
+- **Regression:** `test/test_gc_preflight_templates.py` retains both inactive
+  screens; `test/test_gc_no_battle_setup.py` covers mutation authority,
+  idempotence, unknown configuration, known Guardian replacements, and Battle
+  start blocking.
+- **Fixed by:** `5238497`.
+
+### Blind Game Over Perks action navigated to Home and lost the battle record
+
+- **Observed:** 2026-07-15 on the natural Tier 20 Game Over session
+  `Game20260715_224503`.
+- **Symptom:** The handler logged a blind `buttons.perks:game_over` tap at
+  `(720, 1034)`, never verified the Perks panel, captured two invalid rows, then
+  failed to close Perks. The retained abort frame was already the no-battle
+  Tier-selection Home screen, so neither More Stats nor a battle record was
+  captured.
+- **Evidence:** `logs/actions.log` from 22:45:03–22:45:27 and
+  `screenshots/matches/Game20260715_224503_ABORT_Close_Perks.png`.
+- **Cause:** A historical static coordinate retained action authority from only
+  the parent Game Stats indicator. The handler did not require visible Perks
+  button artwork or verify the destination before scrolling/closing.
+- **Resolution:** The Perks action now requires an exact Game Stats button
+  template and then bounded Perks-panel evidence. Missing button or panel is a
+  recoverable incomplete-Perks result only when Game Stats is still visible;
+  no blind fallback remains.
+- **Regression:** `test/test_game_over_handler.py` covers the real button
+  fixture, Home negative, missing-button recovery, and missing-panel recovery.
+- **Fixed by:** `5238497`.
 
 ### Runtime wave status remained stale during an active battle
 

@@ -78,6 +78,10 @@ scrolling, and the handler returns to the active battle and closes the menu.
 Persistent unrelated alerts are rate-limited to one inspection every 30
 minutes; failures retry after five minutes.
 
+Ordinary Daily Mission claims are banked on local Sunday until the server's
+Monday 00:00 UTC weekly reset (17:00 PDT / 16:00 PST). Glowing weekly mission
+chests, Event rewards, and Guild chests remain collectible during that hold.
+
 The former `gc_manual_target_priority` name remains a compatibility alias for
 `gc_farm_t19_experiment` during migration; it no longer seeds a completion
 variable. Edit the matching `.source.yaml` profile and regenerate its explicit
@@ -92,9 +96,13 @@ Both GC profiles also declare a once-per-process session preflight. After the
 current run's startup gate, it uses guarded read-only navigation to verify the
 GC Cards deck, Farm Workshop and Bots presets, Fetch/Summon/Scout Guardian
 chips, Auto Pick Perks, and the profile's required Ultimate Weapon toggles.
-Success is logged once and persists across run boundaries in that process. A
-mismatch blocks normal automation and logs its evidence; it does not change a
-preset, toggle, equipment, or Surrender the run.
+Before a new battle starts, a separate verified no-battle Home route may
+correct Cards `GC`, Workshop `Farm`, Bots `Farm`, and the supported
+Attack/Ally/Scout → Fetch/Summon/Scout Guardian transition. Unknown no-battle
+layouts fail closed. The later in-battle preflight remains read-only; success
+is logged once and persists across run boundaries, while any remaining
+mismatch blocks normal automation without changing equipment or Surrendering
+the run.
 
 ## Battle statistics
 

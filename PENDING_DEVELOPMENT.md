@@ -102,15 +102,18 @@ lifecycle, orchestration, and action authority in separate layers.
 - [x] Implement a once-per-continuous-session GC preflight, always after the
   current run's EHLS/EALS startup gate:
   - Cards must use the fixed `GC` deck.
-    The active `GC` preset now has a live-validated composite identity/selection
-    template and canonical fixture. Guarded live dispatch now verifies it.
+    The `GC` slot identity and its green-selected versus cyan-inactive border
+    are now separate evidence. A live `Tournament` selection disproved the old
+    active-template claim at confidence 0.94; the inactive fixture prevents
+    recurrence.
   - Workshop must use the `Farm` preset.
     The Workshop screen guard, fixed-slot `Farm` identity template, and
     green-selected versus cyan-inactive border classifier are backed by a live
     canonical fixture. Guarded Go Home/Workshop validation is integrated.
   - Bots must use the `Farm` preset.
-    The Bots-screen guard and active `Farm` composite template are now backed by
-    canonical live fixtures and visible-evidence Home navigation.
+    The Bots-screen guard, `Farm` slot identity, and border selection evidence
+    are backed by active and inactive live fixtures. A visible `Amplify`
+    selection similarly disproved the old active-template claim at 0.94.
   - Guardian chips must have `Fetch`, `Summon`, and `Scout` equipped. Separate
     equipped-slot templates, validation, and guarded navigation are integrated.
   - Auto Pick Perks must be enabled. Positive checkbox evidence and guarded
@@ -121,9 +124,11 @@ lifecycle, orchestration, and action authority in separate layers.
     weapons and Spotlight missiles.
   - Record the validation in explicit session logs so uninterrupted automation
     does not repeat it every run. This is implemented and live-validated.
-  - The current mismatch policy deliberately blocks the exclusive gate and
-    logs exact evidence. Automated correction and Surrender remain disabled
-    until each mutation path and its authority policy are implemented.
+  - At a verified no-battle `NEW_BATTLE` Home boundary, the profile now
+    validates and corrects Cards `GC`, Workshop `Farm`, Bots `Farm`, and the
+    known Attack/Ally/Scout → Fetch/Summon/Scout Guardian transition before
+    Battle may start. Unknown layouts fail closed. The active-battle session
+    preflight remains read-only and blocks on mismatch.
   - A post-Retry live pass on 2026-07-15 validated the GC Cards deck, both Farm
     presets, Fetch/Summon/Scout, Auto Pick Perks, all nine required Ultimate
     Weapons, and Spotlight missiles. It logged one complete structured session
@@ -133,10 +138,19 @@ lifecycle, orchestration, and action authority in separate layers.
     recaptures and revalidates the primary state for every bounded retry; the
     repaired Event, Bots, Guild, Guardian, and Resume route passed live.
 - [ ] Define the GC module preset and validate it during session preflight.
-  - Inventory every equipped module slot and desired module name.
+  - [x] Inventory every currently equipped module slot and module name. The
+    live no-battle screen exposes separate Primary and Assist loadouts:
+    Primary = Amplifying Strike, Project Funding, Orbital Augment, and
+    Dimension Core; Assist = Being Annihilator, Singularity Harness,
+    Anti-Cube Portal, and Harmony Conductor.
+  - Confirm which of those observed Primary/Assist modules are the desired GC
+    policy before encoding them as requirements.
   - Tag the module shapes/icons with canonical module names and capture stable
     templates or another reliable visual representation.
-  - If the module setup is wrong, surrender the run, correct it, and restart.
+  - Correct a wrong module setup only at a verified no-battle boundary. A
+    bounded agent-owned test battle may be surrendered only under the explicit
+    authorization recorded in `AGENTS.md`; existing/operator runs remain
+    protected.
 - [ ] Decide whether to validate perk bans and the Auto Pick Perk order during
   the session preflight. Keep automation-owned perk selection as a later option.
 - [ ] Add the Damage Slider to new-GC-run initialization.
@@ -262,6 +276,11 @@ lifecycle, orchestration, and action authority in separate layers.
     reward reveal with a stable `SKIP`; its post-claim green check is a negative.
   - The bounded live handler then claimed the three remaining Daily missions,
     revalidating `DAILY_MISSIONS` and exact available artwork before every tap.
+  - Ordinary Daily Mission claims are held during local Sunday until the
+    server's Monday 00:00 UTC weekly reset (17:00 PDT / 16:00 PST). Glowing
+    weekly chests remain eligible during the hold, as do Event and Guild
+    rewards. Probe cooldowns are clamped so a pre-reset inspection cannot delay
+    the banked claims past reset.
 - [x] Add Event Mission and Guild contribution-chest claiming as separate,
   badge-inspected handlers after mapping their available/unavailable states.
   - On 2026-07-13 the in-run menu showed badges on Daily Missions (`2`), Event
@@ -324,6 +343,10 @@ lifecycle, orchestration, and action authority in separate layers.
   - [x] Keep polling the persistent control file while parked in Game Over
     WAIT, block terminal actions while paused, and exit cleanly on STOPPED.
   - [x] Add automated coverage for RETRY, WAIT/PAUSED, STOPPED, and HOME.
+  - [x] Replace the blind Game Stats Perks coordinate with exact visible button
+    evidence and require the Perks panel after the tap. A missing button/panel
+    now records incomplete Perks and continues only when Game Stats remains
+    visible; it cannot silently take the terminal Home path.
 - [x] Live-validate the structured Game Over battle record at a natural
   boundary.
   - The primary path copies the full More Stats report through Android's
