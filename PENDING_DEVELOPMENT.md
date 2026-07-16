@@ -138,13 +138,14 @@ lifecycle, orchestration, and action authority in separate layers.
     recaptures and revalidates the primary state for every bounded retry; the
     repaired Event, Bots, Guild, Guardian, and Resume route passed live.
 - [ ] Define the GC module preset and validate it during session preflight.
-  - [x] Inventory every currently equipped module slot and module name. The
-    live no-battle screen exposes separate Primary and Assist loadouts:
+  - [x] Inventory the loadout visible at the 2026-07-15 no-battle boundary.
+    The user confirmed that it is the Tournament/Milestone loadout, not GC:
     Primary = Amplifying Strike, Project Funding, Orbital Augment, and
     Dimension Core; Assist = Being Annihilator, Singularity Harness,
-    Anti-Cube Portal, and Harmony Conductor.
-  - Confirm which of those observed Primary/Assist modules are the desired GC
-    policy before encoding them as requirements.
+    Anti-Cube Portal, and Harmony Conductor. Retain this inventory as explicit
+    non-GC evidence; do not encode these modules as GC requirements.
+  - [ ] Inventory and confirm the actual GC Primary and Assist module names
+    before encoding module requirements.
   - Tag the module shapes/icons with canonical module names and capture stable
     templates or another reliable visual representation.
   - Correct a wrong module setup only at a verified no-battle boundary. A
