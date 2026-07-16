@@ -54,6 +54,27 @@ thread and is not exhaustive for earlier project history.
 
 ## Resolved
 
+### Generic close template did not recognize the Modules detail panel
+
+- **Observed:** 2026-07-16 while opening the first equipped module at the
+  natural post-wave-8803 no-battle boundary.
+- **Symptom:** Being Annihilator opened correctly, but
+  `buttons.close_generic` scored 0.5309 in its configured region and 0.7439
+  across the full screen, below its 0.85 threshold. The post-open guard stopped
+  the inspection with the detail panel still visible.
+- **Cause:** The generic crop includes border context from another modal and is
+  not reliable evidence for the Modules detail close control.
+- **Resolution:** The generic threshold was not lowered. Modules navigation,
+  all eight fixed equipped-slot positions, and the module-detail close control
+  now have explicit action geometry. Live inspection required a fresh
+  `MODULES` state plus OCR `Equipped:` detail evidence before using the
+  dedicated close action.
+- **Live validation:** All eight GC module panels opened and closed under the
+  guards, and the final Modules-to-Home navigation verified `HOME_SCREEN`.
+- **Regression:** `test/test_clickmap_access.py` fixes the explicit geometry
+  contract for Modules navigation, equipped slots, and detail close.
+- **Fixed by:** `a5dc2a8`.
+
 ### Day-length Game Time forced clipboard battle capture into invalid OCR fallback
 
 - **Observed:** 2026-07-16 on the natural Tier 18 wave-8803 Game Over boundary.
