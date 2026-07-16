@@ -20,7 +20,6 @@ class AppConfig:
     """Configuration values consumed by the runtime `App`."""
     auto_start_enabled: bool
     status_interval: int
-    reset_wave_hint: bool
     save_wave_samples: Optional[str]
     save_coin_samples: Optional[str]
     coins_log_base: str
@@ -70,8 +69,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-restart", action="store_true", help="Disable auto restart on home screen")
     parser.add_argument("--match-trace", action="store_true", help="Emit per-frame match logs from detector")
     parser.add_argument("--status-interval", type=int, default=60, help="Seconds between status summaries (0=disable)")
-    parser.add_argument("--reset-wave-hint", action="store_true",
-                        help="Reset the wave OCR monotonic/time-weighted hint at startup")
     parser.add_argument("--save-wave-samples", default=None,
                         help="Directory to save per-status wave samples: raw frame (and bin winner). Filename encodes wave.")
     parser.add_argument("--save-coin-samples", default=None,
@@ -128,7 +125,6 @@ def config_from_args(args: argparse.Namespace) -> AppConfig:
     return AppConfig(
         auto_start_enabled=not args.no_restart,
         status_interval=max(0, int(args.status_interval)),
-        reset_wave_hint=bool(args.reset_wave_hint),
         save_wave_samples=args.save_wave_samples,
         save_coin_samples=args.save_coin_samples,
         coins_log_base=coins_log_base,

@@ -604,6 +604,8 @@ class PausedStartupObservationTests(unittest.TestCase):
             menu=None,
             secondary=set(),
             overlays=set(),
+            wave=1,
+            wave_conf=99.0,
             allow_actions=False,
         )
 
@@ -682,6 +684,8 @@ class PausedStartupObservationTests(unittest.TestCase):
             menu=None,
             secondary=set(),
             overlays=set(),
+            wave=1,
+            wave_conf=99.0,
             allow_actions=False,
         )
 
@@ -707,10 +711,6 @@ class PausedStartupObservationTests(unittest.TestCase):
             AUTOMATION.state = RunState.RUNNING
             with (
                 patch(
-                    "core.status_report.detect_wave_number_from_image",
-                    return_value=(1, 99.0),
-                ),
-                patch(
                     "core.status_report.detect_coins_from_image",
                     return_value=(Decimal("100"), 99.0, False),
                 ),
@@ -724,6 +724,8 @@ class PausedStartupObservationTests(unittest.TestCase):
                     menu=None,
                     secondary=set(),
                     overlays=set(),
+                    wave=1,
+                    wave_conf=99.0,
                     now_ts=1.0,
                     allow_actions=False,
                 )

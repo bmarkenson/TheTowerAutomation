@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import os
 import re
-import time
-from typing import Any, Dict, List, Optional, Tuple
+from collections import defaultdict
+from typing import Any, DefaultDict, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -15,18 +15,18 @@ from core.clickmap_access import get_clickmap, resolve_dot_path
 from core.ss_capture import capture_adb_screenshot
 from utils.ocr_utils import ocr_number_with_fallback
 
-from .hint import get_hint_state, set_wave_hint
-
 # ROIs: use the full label region as primary (more stable across UIs)
 # The previous digits-only ROI appears misaligned in some setups.
 PRIMARY_DOT_PATH = "_shared_match_regions.wave_number"
 FALLBACK_DOT_PATH = ""  # disabled by default; can be overridden via args
 
-# Preferences & limits
-# Keep conservative ceiling to avoid selecting spurious large OCR reads
-_DEFAULT_MAX_VALUE = 20000         # hard ceiling on accepted wave values
-_DEFAULT_RATE_PER_MIN = 10.0       # expected waves per minute
-_DEFAULT_TOLERANCE = 20            # ±window around expected
+# A wave observation must be reproduced by at least two independently
+# preprocessed versions of the same fixed UI region. Progression rate, prior
+# wave, digit width, and a fixed maximum are deliberately not evidence about
+# what the current frame says.
+_MIN_CONSENSUS_SUPPORT = 2
+
+Candidate = Tuple[int, float, str, np.ndarray]
 
 
 def _tess_info() -> str:
@@ -159,66 +159,41 @@ def _fast_variants_from_crop(crop_bgr: np.ndarray) -> List[Tuple[str, np.ndarray
     return variants
 
 
-def _score(
-    val: Optional[int],
-    conf: float,
+def _select_consensus(
+    candidates: List[Candidate],
     *,
-    last_wave: Optional[int],
-    expected: Optional[float],
-    tolerance: int,
-    max_value: int,
-) -> Tuple[int, int, float, float, int]:
-    """Rank OCR candidates for max() selection."""
+    min_support: int = _MIN_CONSENSUS_SUPPORT,
+) -> Tuple[Optional[int], float, Optional[str], Optional[np.ndarray]]:
+    """Select a wave only when multiple image variants independently agree."""
 
-    if val is None:
-        return (1, 0, 0, -1.0, -1e9)
+    grouped: DefaultDict[int, List[Candidate]] = defaultdict(list)
+    for candidate in candidates:
+        value = candidate[0]
+        if value >= 1:
+            grouped[value].append(candidate)
 
-    if last_wave is not None and val < last_wave:
-        return (0, 0, 0, -1.0, -1e9)
+    if not grouped:
+        return None, -1.0, None, None
 
-    valid_flag = 2 if val < max_value else 0
+    ranked = sorted(
+        grouped.items(),
+        key=lambda item: (
+            len(item[1]),
+            max(candidate[1] for candidate in item[1]),
+        ),
+        reverse=True,
+    )
+    value, agreeing = ranked[0]
+    support = len(agreeing)
+    if support < min_support:
+        return None, -1.0, None, None
+    if len(ranked) > 1 and len(ranked[1][1]) == support:
+        return None, -1.0, None, None
 
-    if expected is None:
-        prox_bucket = 1
-        prox_tb = 0.0
-    else:
-        delta = abs(val - expected)
-        if delta <= tolerance:
-            prox_bucket = 2
-        elif delta <= 2 * tolerance:
-            prox_bucket = 1
-        else:
-            prox_bucket = 0
-        prox_tb = -float(delta)
-
-    digits_len = len(str(val))
-
-    scale_hint: Optional[float] = None
-    try:
-        if expected is not None:
-            scale_hint = float(expected)
-    except Exception:
-        scale_hint = None
-    if scale_hint is None and last_wave is not None:
-        try:
-            scale_hint = float(last_wave)
-        except Exception:
-            scale_hint = None
-
-    if scale_hint is not None:
-        if scale_hint >= 1000:
-            min_digits = 4
-        elif scale_hint >= 100:
-            min_digits = 3
-        elif scale_hint >= 10:
-            min_digits = 2
-        else:
-            min_digits = 1
-        if digits_len < min_digits:
-            valid_flag = min(valid_flag, 1)
-            prox_bucket = min(prox_bucket, 0)
-
-    return (valid_flag, prox_bucket, digits_len, float(conf), prox_tb)
+    representative = max(agreeing, key=lambda candidate: candidate[1])
+    confidences = [candidate[1] for candidate in agreeing if candidate[1] >= 0]
+    confidence = float(np.median(confidences)) if confidences else -1.0
+    return value, confidence, representative[2], representative[3]
 
 
 def _detect_quick(
@@ -226,10 +201,6 @@ def _detect_quick(
     dot_path: str,
     *,
     verbose: bool,
-    last_wave: Optional[int],
-    expected: Optional[float],
-    tolerance: int,
-    max_value: int,
 ) -> Tuple[Optional[int], float, Optional[str], Optional[np.ndarray]]:
     """Run the fast OCR path on the given ROI."""
 
@@ -247,27 +218,28 @@ def _detect_quick(
             log(f"FAST ROI {dot_path} bbox={bbox} crop={width}x{height}", "DEBUG")
         except Exception:
             pass
-    best_val, best_conf, best_tag, best_img = None, -1.0, None, None
-    best_score = _score(None, -1.0, last_wave=last_wave, expected=expected, tolerance=tolerance, max_value=max_value)
+    candidates: List[Candidate] = []
 
     for tag, variant in _fast_variants_from_crop(crop):
         val, conf, _ = ocr_number_with_fallback(variant, psm_digits=7, psm_text=7)
-        cand_score = _score(val, conf, last_wave=last_wave, expected=expected, tolerance=tolerance, max_value=max_value)
         if verbose:
             height, width = variant.shape[:2]
             log(
-                f"FAST candidate {dot_path}/{tag}: size={width}x{height} val={val} conf={conf} score={cand_score}",
+                f"FAST candidate {dot_path}/{tag}: size={width}x{height} "
+                f"val={val} conf={conf}",
                 "DEBUG",
             )
-        if cand_score > best_score:
-            best_score, best_val, best_conf, best_tag, best_img = cand_score, val, conf, tag, variant.copy()
+        if val is not None:
+            candidates.append((val, conf, f"{dot_path}/{tag}", variant.copy()))
+
+    best_val, best_conf, best_tag, best_img = _select_consensus(candidates)
 
     if verbose:
         log(
-            f"FAST best={best_tag} value={best_val} conf={best_conf} score={best_score}",
+            f"FAST consensus={best_tag} value={best_val} conf={best_conf}",
             "DEBUG",
         )
-    return best_val, best_conf, best_tag and f"{dot_path}/{best_tag}", best_img
+    return best_val, best_conf, best_tag, best_img
 
 
 def _bins_from_crop(crop_bgr: np.ndarray) -> List[Tuple[str, np.ndarray]]:
@@ -330,10 +302,6 @@ def _detect_heavy(
     verbose: bool,
     dump_dir: Optional[str],
     debug_out: Optional[str],
-    last_wave: Optional[int],
-    expected: Optional[float],
-    tolerance: int,
-    max_value: int,
 ) -> Tuple[Optional[int], float, Optional[str], Optional[np.ndarray]]:
     """Enumerate heavyweight OCR binarisations and select the best candidate."""
 
@@ -352,20 +320,19 @@ def _detect_heavy(
         os.makedirs(dump_dir, exist_ok=True)
         cv2.imwrite(os.path.join(dump_dir, f"{os.path.basename(dot_path)}_full_raw.png"), full)
 
-    best_val, best_conf, best_tag, best_img = None, -1.0, None, None
-    best_score = _score(None, -1.0, last_wave=last_wave, expected=expected, tolerance=tolerance, max_value=max_value)
+    candidates: List[Candidate] = []
 
     for crop_name, crop in _make_crops(full):
         for bin_name, bin_img in _bins_from_crop(crop):
             for scale_name, scaled in _scaled_variants(bin_img):
                 tag = f"{crop_name}_{bin_name}_{scale_name}"
                 val, conf, _ = ocr_number_with_fallback(scaled, psm_digits=7, psm_text=7)
-                cand_score = _score(val, conf, last_wave=last_wave, expected=expected, tolerance=tolerance, max_value=max_value)
 
                 if verbose:
                     height, width = scaled.shape[:2]
                     log(
-                        f"HEAVY candidate {dot_path}/{tag}: size={width}x{height} val={val} conf={conf} score={cand_score}",
+                        f"HEAVY candidate {dot_path}/{tag}: size={width}x{height} "
+                        f"val={val} conf={conf}",
                         "DEBUG",
                     )
 
@@ -375,22 +342,21 @@ def _detect_heavy(
                     with open(os.path.join(dump_dir, f"{os.path.basename(dot_path)}_{tag}.txt"), "w", encoding="utf-8") as fh:
                         fh.write(f"Tesseract: {_tess_info()}\n")
                         fh.write(
-                            f"Variant: {tag} size={scaled.shape[1]}x{scaled.shape[0]} val={val} conf={conf} score={cand_score}\n"
+                            f"Variant: {tag} size={scaled.shape[1]}x{scaled.shape[0]} "
+                            f"val={val} conf={conf}\n"
                         )
                         fh.write(repr(probes))
 
-                if cand_score > best_score:
-                    best_score, best_val, best_conf, best_tag, best_img = (
-                        cand_score,
-                        val,
-                        conf,
-                        f"{dot_path}/{tag}",
-                        scaled.copy(),
+                if val is not None:
+                    candidates.append(
+                        (val, conf, f"{dot_path}/{tag}", scaled.copy())
                     )
+
+    best_val, best_conf, best_tag, best_img = _select_consensus(candidates)
 
     if verbose:
         log(
-            f"HEAVY best={best_tag} value={best_val} conf={best_conf} score={best_score}",
+            f"HEAVY consensus={best_tag} value={best_val} conf={best_conf}",
             "DEBUG",
         )
     if debug_out and best_img is not None:
@@ -407,139 +373,53 @@ def detect_wave_number_from_image(
     verbose: bool = False,
     dump_dir: Optional[str] = None,
     debug_out: Optional[str] = None,
-    rate_per_min: float = _DEFAULT_RATE_PER_MIN,
-    tolerance: int = _DEFAULT_TOLERANCE,
-    max_value: int = _DEFAULT_MAX_VALUE,
 ) -> Tuple[Optional[int], float]:
-    """Detect the wave number from a frame using fast and heavy OCR pipelines."""
-
-    now = time.time()
-    last_wave, last_ts = get_hint_state()
-    expected = None
-    if last_wave is not None and last_ts is not None:
-        dt_min = max(0.0, (now - last_ts) / 60.0)
-        expected = last_wave + rate_per_min * dt_min
+    """Detect the wave number from one frame using OCR ensemble consensus."""
 
     val, conf, _tag, best_img = _detect_quick(
         img_bgr,
         primary_dot_path,
         verbose=verbose,
-        last_wave=last_wave,
-        expected=expected,
-        tolerance=tolerance,
-        max_value=max_value,
     )
-    used = primary_dot_path
 
-    if (val is None or (val is not None and len(str(val)) <= 2)) and fallback_dot_path:
+    if val is None and fallback_dot_path:
         if verbose:
-            reason = "failed" if val is None else f"too-short({val})"
             log(
-                f"Primary ROI {primary_dot_path} {reason}; trying fallback {fallback_dot_path}",
+                f"Primary ROI {primary_dot_path} lacked consensus; trying "
+                f"fallback {fallback_dot_path}",
                 "DEBUG",
             )
         val, conf, _tag, best_img = _detect_quick(
             img_bgr,
             fallback_dot_path,
             verbose=verbose,
-            last_wave=last_wave,
-            expected=expected,
-            tolerance=tolerance,
-            max_value=max_value,
         )
-        if val is not None:
-            used = fallback_dot_path
 
     if use_heavy or val is None:
-        for roi in (primary_dot_path, fallback_dot_path):
+        quick_value = val
+        for roi in filter(None, (primary_dot_path, fallback_dot_path)):
             hv_val, hv_conf, _hv_tag, hv_img = _detect_heavy(
                 img_bgr,
                 roi,
                 verbose=verbose,
                 dump_dir=dump_dir,
                 debug_out=debug_out,
-                last_wave=last_wave,
-                expected=expected,
-                tolerance=tolerance,
-                max_value=max_value,
             )
-            if _score(
-                hv_val,
-                hv_conf,
-                last_wave=last_wave,
-                expected=expected,
-                tolerance=tolerance,
-                max_value=max_value,
-            ) > _score(
-                val,
-                conf,
-                last_wave=last_wave,
-                expected=expected,
-                tolerance=tolerance,
-                max_value=max_value,
-            ):
-                val, conf, best_img, used = hv_val, hv_conf, hv_img, roi
+            if hv_val is None:
+                continue
+            if quick_value is not None and hv_val != quick_value:
+                if verbose:
+                    log(
+                        f"Wave OCR ambiguous: quick={quick_value}, heavy={hv_val}",
+                        "DEBUG",
+                    )
+                return None, -1.0
+            if val is None or hv_conf > conf:
+                val, conf, best_img = hv_val, hv_conf, hv_img
+            break
 
     if debug_out and best_img is not None:
         cv2.imwrite(debug_out, best_img)
-
-    if val is not None and last_wave is not None and last_ts is not None:
-        dt_min = max(0.0, (now - last_ts) / 60.0)
-        near = True if expected is None else (abs(val - expected) <= 2 * tolerance)
-        allowed_inc = 3.0 * rate_per_min * dt_min + (2 * tolerance)
-        massive_jump = (val - last_wave) > allowed_inc
-        low_conf = conf < 60.0
-        too_short = (last_wave >= 1000 and len(str(val)) < 4) or (100 <= last_wave < 1000 and len(str(val)) < 3)
-        suspicious = (not near and (massive_jump or low_conf)) or too_short
-        if suspicious:
-            hv_best: Tuple[Optional[int], float, Optional[str], Optional[np.ndarray]] = (None, -1.0, None, None)
-            for roi in (primary_dot_path, fallback_dot_path):
-                hv_val, hv_conf, _hv_tag, hv_img = _detect_heavy(
-                    img_bgr,
-                    roi,
-                    verbose=verbose,
-                    dump_dir=dump_dir,
-                    debug_out=debug_out,
-                    last_wave=last_wave,
-                    expected=expected,
-                    tolerance=tolerance,
-                    max_value=max_value,
-                )
-                if _score(
-                    hv_val,
-                    hv_conf,
-                    last_wave=last_wave,
-                    expected=expected,
-                    tolerance=tolerance,
-                    max_value=max_value,
-                ) > _score(
-                    hv_best[0],
-                    hv_best[1],
-                    last_wave=last_wave,
-                    expected=expected,
-                    tolerance=tolerance,
-                    max_value=max_value,
-                ):
-                    hv_best = (hv_val, hv_conf, roi, hv_img)
-
-            hv_val, hv_conf, hv_used, hv_img = hv_best
-            if hv_val is not None:
-                hv_near = True if expected is None else (abs(hv_val - expected) <= 2 * tolerance)
-                hv_massive_jump = (hv_val - last_wave) > allowed_inc
-                hv_too_short = (
-                    (last_wave >= 1000 and len(str(hv_val)) < 4)
-                    or (100 <= last_wave < 1000 and len(str(hv_val)) < 3)
-                )
-                hv_suspicious = (not hv_near and (hv_massive_jump or hv_conf < 60.0)) or hv_too_short
-                if not hv_suspicious:
-                    val, conf = hv_val, hv_conf
-                    best_img = hv_img if hv_img is not None else best_img
-                    used = hv_used or used
-                else:
-                    return last_wave, conf
-
-    if val is not None:
-        set_wave_hint(val, ts=now)
 
     return val, conf
 
@@ -552,9 +432,6 @@ def detect_wave_number(
     verbose: bool = False,
     dump_dir: Optional[str] = None,
     debug_out: Optional[str] = None,
-    rate_per_min: float = _DEFAULT_RATE_PER_MIN,
-    tolerance: int = _DEFAULT_TOLERANCE,
-    max_value: int = _DEFAULT_MAX_VALUE,
 ) -> Tuple[Optional[int], float]:
     """Capture via ADB and run wave detection."""
 
@@ -569,9 +446,6 @@ def detect_wave_number(
         verbose=verbose,
         dump_dir=dump_dir,
         debug_out=debug_out,
-        rate_per_min=rate_per_min,
-        tolerance=tolerance,
-        max_value=max_value,
     )
 
 
@@ -596,10 +470,9 @@ def get_wave_number_from_image(img_bgr: np.ndarray, dot_path: str = PRIMARY_DOT_
 __all__ = [
     "FALLBACK_DOT_PATH",
     "PRIMARY_DOT_PATH",
-    "_DEFAULT_MAX_VALUE",
-    "_DEFAULT_RATE_PER_MIN",
-    "_DEFAULT_TOLERANCE",
+    "_MIN_CONSENSUS_SUPPORT",
     "_save_overlay",
+    "_select_consensus",
     "_tess_info",
     "detect_wave_number",
     "detect_wave_number_from_image",

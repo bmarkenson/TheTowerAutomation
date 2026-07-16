@@ -134,6 +134,8 @@ class StatusReporter:
         menu: Optional[str],
         secondary: Set[str],
         overlays: Set[str],
+        wave: Optional[int],
+        wave_conf: float,
         now_ts: Optional[float] = None,
         allow_actions: bool = True,
     ) -> None:
@@ -144,8 +146,6 @@ class StatusReporter:
         if now - self._last_status_ts < self._interval:
             return
 
-        wave = None
-        wave_conf = -1.0
         coins_val = None
         coins_conf = -1.0
         coins_eff = None
@@ -154,9 +154,22 @@ class StatusReporter:
         coins_debug_tmp: Optional[Path] = None
         per_min_refresh: Optional[Tuple[Optional[Decimal], float, bool]] = None
 
-        if ui_state == "RUNNING":
-            debug_out = self._prepare_tmp_path(self._save_wave_samples, "_tmp_bin.png")
-            wave, wave_conf = detect_wave_number_from_image(img, debug_out=str(debug_out) if debug_out else None)
+        if ui_state != "RUNNING":
+            wave = None
+            wave_conf = -1.0
+        else:
+            # The app already observed this frame's wave. Repeat OCR only when
+            # an explicit diagnostic sample requested the winning bin image;
+            # never let this auxiliary pass replace the shared observation.
+            debug_out = self._prepare_tmp_path(
+                self._save_wave_samples,
+                "_tmp_bin.png",
+            )
+            if debug_out is not None:
+                try:
+                    detect_wave_number_from_image(img, debug_out=str(debug_out))
+                except Exception:
+                    pass
 
             try:
                 coins_debug_tmp = self._prepare_tmp_path(self._save_coin_samples, "_tmp_coin_bin.png")

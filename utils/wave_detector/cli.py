@@ -12,9 +12,6 @@ from core.ss_capture import capture_adb_screenshot
 from .pipeline import (
     FALLBACK_DOT_PATH,
     PRIMARY_DOT_PATH,
-    _DEFAULT_MAX_VALUE,
-    _DEFAULT_RATE_PER_MIN,
-    _DEFAULT_TOLERANCE,
     _save_overlay,
     _tess_info,
     detect_wave_number_from_image,
@@ -44,24 +41,6 @@ def main() -> None:
         "--dump-candidates",
         default=None,
         help="Directory to save heavy-sweep variants and OCR probes",
-    )
-    parser.add_argument(
-        "--rate-per-min",
-        type=float,
-        default=_DEFAULT_RATE_PER_MIN,
-        help="Expected waves per minute for time-based scoring",
-    )
-    parser.add_argument(
-        "--tolerance",
-        type=int,
-        default=_DEFAULT_TOLERANCE,
-        help="±window around expected value",
-    )
-    parser.add_argument(
-        "--max-value",
-        type=int,
-        default=_DEFAULT_MAX_VALUE,
-        help="Hard ceiling on accepted wave values",
     )
     args = parser.parse_args()
 
@@ -93,9 +72,6 @@ def main() -> None:
         verbose=args.verbose,
         dump_dir=args.dump_candidates,
         debug_out=args.debug_out,
-        rate_per_min=args.rate_per_min,
-        tolerance=args.tolerance,
-        max_value=args.max_value,
     )
 
     if args.save_overlay:

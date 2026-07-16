@@ -247,6 +247,8 @@ class App:
                     menu=menu,
                     secondary=secondary,
                     overlays=overlays,
+                    wave=wave_val,
+                    wave_conf=wave_conf,
                     allow_actions=not actions_blocked,
                 )
 

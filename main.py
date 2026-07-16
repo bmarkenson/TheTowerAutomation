@@ -8,7 +8,6 @@ import sys
 from typing import Sequence
 
 from utils.logger import log
-from utils.wave_detector import set_wave_hint
 from core.app_setup import parse_args, config_from_args
 from core.app import App
 from core.single_instance import InstanceAlreadyRunning, SingleInstanceLock
@@ -25,10 +24,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         with SingleInstanceLock(os.environ["ADB_DEVICE"]):
             log(f"AUTO_START_ENABLED = {config.auto_start_enabled}", "DEBUG")
-
-            if config.reset_wave_hint:
-                set_wave_hint(None)
-                log("[WAVE] Reset wave hint at startup", "DEBUG")
 
             app = App(config)
             app.run()

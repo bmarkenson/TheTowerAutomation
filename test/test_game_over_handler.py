@@ -21,7 +21,6 @@ def test_home_mode_taps_game_stats_home_instead_of_retry():
     AUTOMATION.mode = ExecMode.HOME
     try:
         with (
-            patch("handlers.game_over_handler.set_wave_hint"),
             patch("handlers.game_over_handler.tap_if_visible", return_value=True) as tap,
             patch("handlers.game_over_handler.time.sleep"),
         ):
@@ -141,7 +140,6 @@ def test_capture_failure_is_recorded_without_stranding_game_over_navigation():
     AUTOMATION.mode = ExecMode.HOME
     try:
         with (
-            patch("handlers.game_over_handler.set_wave_hint"),
             patch("handlers.game_over_handler.capture_adb_screenshot", return_value=frame),
             patch(
                 "handlers.game_over_handler._capture_game_over_perks",
@@ -196,7 +194,6 @@ def test_clipboard_success_skips_more_stats_scrolling_and_keeps_perk_order():
     AUTOMATION.mode = ExecMode.HOME
     try:
         with (
-            patch("handlers.game_over_handler.set_wave_hint"),
             patch("handlers.game_over_handler.capture_adb_screenshot", return_value=frame),
             patch(
                 "handlers.game_over_handler._capture_game_over_perks",

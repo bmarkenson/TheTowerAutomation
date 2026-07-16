@@ -22,7 +22,6 @@ from core.battle_stats import (
     persist_battle_record,
 )
 from core.battle_perks import ocr_selected_perks
-from utils.wave_detector import set_wave_hint
 
 
 MORE_STATS_INDICATOR = "indicators.more_stats"
@@ -75,10 +74,6 @@ def handle_game_over(
     session_id = _make_session_id(captured_at.timetuple())
     battle_id = make_battle_id(captured_at)
     log(f"Handling GAME OVER — Session: {session_id}", "INFO", console=True)
-
-    # Clear the monotonic wave hint immediately so fresh runs accept wave 1 detections.
-    set_wave_hint(None)
-    log("[WAVE] Cleared wave hint on game over", "INFO")
 
     if capture_stats:
         # Keep source frames in memory. Routine successful captures persist only
@@ -186,9 +181,6 @@ def handle_game_over(
     else:
         if not tap_if_visible("buttons.retry:game_over", retries=1):
             return _abort_handler("Retry Game", session_id)
-        # After a successful retry the wave counter resets to 1; reset the hint.
-        set_wave_hint(1)
-        log("[WAVE] Reset wave hint to 1 after game restart", "INFO")
 
     time.sleep(2)
 
