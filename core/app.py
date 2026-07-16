@@ -18,8 +18,13 @@ from core.state_detector import detect_state_and_overlays
 from core.automation_supervisor import AutomationSupervisor
 from core.daily_gem_scheduler import DailyGemScheduler
 from core.home_battle import detect_home_battle_control
+from core.battle_lifecycle import HomeBattleControl
+from core.gc_no_battle_setup import run_gc_no_battle_setup
 from core.menu_reward_badges import menu_reward_alert_visible
-from core.mission_reward_scheduler import MissionRewardScheduler
+from core.mission_reward_scheduler import (
+    MissionRewardScheduler,
+    daily_mission_claims_allowed,
+)
 from core.run_state import AUTOMATION, ExecMode
 from core.app_setup import AppConfig
 from core.status_report import StateChangeTracker, StatusReporter
@@ -342,6 +347,21 @@ class App:
                 log(f"[COINS] Started new coins log: {new_path}", "INFO")
         elif new_state == "HOME_SCREEN":
             log("Detected HOME_SCREEN. Executing handler.", "INFO")
+            home_control = detect_home_battle_control(img).control
+            requirements = self._mission_mgr.no_battle_setup_requirements()
+            if (
+                self._auto_start_enabled
+                and home_control is HomeBattleControl.NEW_BATTLE
+                and requirements
+            ):
+                setup = run_gc_no_battle_setup(requirements, screenshot=img)
+                if not setup.complete:
+                    log(
+                        f"[GC_NO_BATTLE] Blocking Battle start: {setup.reason}",
+                        "ERROR",
+                    )
+                    return
+                self._mission_mgr.mark_no_battle_setup_complete(setup.evidence)
             handle_home_screen(restart_enabled=self._auto_start_enabled)
             self._mission_mgr.on_home()
 
@@ -362,11 +382,16 @@ class App:
         log("[MISSION_REWARDS] Starting side-menu reward probe", "INFO")
         if stop_blind_gem_tapper():
             self._blind_tapper_suspended = True
-        result = handle_mission_rewards(screenshot=img)
+        wall_now = datetime.now(timezone.utc)
+        claim_daily_missions = daily_mission_claims_allowed(wall_now)
+        result = handle_mission_rewards(
+            screenshot=img,
+            claim_daily_missions=claim_daily_missions,
+        )
         if result == MissionRewardResult.FAILED:
-            self._mission_reward_scheduler.mark_failed()
+            self._mission_reward_scheduler.mark_failed(wall_now=wall_now)
         else:
-            self._mission_reward_scheduler.mark_completed()
+            self._mission_reward_scheduler.mark_completed(wall_now=wall_now)
         return True
 
     def _handle_daily_gem_if_due(self, new_state: str, overlays: Set[str]) -> bool:

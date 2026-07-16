@@ -15,6 +15,8 @@ from core.matcher import get_match
 from core.state_detector import detect_state_and_overlays
 from core.upgrade_box_detector import UpgradeBox
 from core.workshop_preset import (
+    BOTS_FARM_PRESET_SLOT,
+    CARDS_GC_PRESET_SLOT,
     FARM_PRESET_SLOT,
     INACTIVE_PRESET_SLOTS,
     measure_preset_slot_selection,
@@ -23,10 +25,14 @@ from core.workshop_preset import (
 
 ROOT = Path(__file__).resolve().parents[1]
 GC_ACTIVE_FIXTURE = ROOT / "test" / "fixtures" / "cards_gc_active_20260713.png"
+GC_INACTIVE_FIXTURE = ROOT / "test" / "fixtures" / "cards_gc_inactive_20260715.png"
 HOME_NEGATIVE_FIXTURE = (
     ROOT / "test" / "fixtures" / "home_screen_new_day_store_badge_20260713.png"
 )
 BOT_FIXTURE = ROOT / "test" / "fixtures" / "event_bots_farm_active_20260713.png"
+BOT_INACTIVE_FIXTURE = (
+    ROOT / "test" / "fixtures" / "event_bots_farm_inactive_20260715.png"
+)
 WORKSHOP_FIXTURE = ROOT / "test" / "fixtures" / "workshop_farm_active_20260714.png"
 EVENT_MISSIONS_FIXTURE = ROOT / "test" / "fixtures" / "event_missions_20260713.png"
 GUARDIAN_FIXTURE = (
@@ -66,20 +72,41 @@ def test_live_gc_cards_fixture_identifies_active_gc_preset():
     screen = _load(GC_ACTIVE_FIXTURE)
 
     point, confidence = get_match(
-        "indicators.cards:gc_active",
+        "indicators.cards:gc_slot",
         screenshot=screen,
     )
     detection = detect_state_and_overlays(screen)
+    selection = measure_preset_slot_selection(screen, CARDS_GC_PRESET_SLOT)
 
     assert point == (118, 420)
     assert confidence >= 0.99
     assert detection["state"] == "CARDS"
-    assert detection["secondary_states"] == ["CARDS_GC_ACTIVE"]
+    assert detection["secondary_states"] == ["CARDS_GC_SLOT"]
+    assert selection.selected
+
+
+def test_inactive_gc_cards_slot_is_not_claimed_as_active():
+    screen = _load(GC_INACTIVE_FIXTURE)
+    detection = detect_state_and_overlays(screen)
+    selection = measure_preset_slot_selection(screen, CARDS_GC_PRESET_SLOT)
+    evidence = validate_gc_preflight_screens(
+        cards_screen=screen,
+        workshop_screen=_load(WORKSHOP_FIXTURE),
+        bots_screen=_load(BOT_FIXTURE),
+        guardians_screen=_load(GUARDIAN_FIXTURE),
+    )
+
+    assert detection["state"] == "CARDS"
+    assert detection["secondary_states"] == ["CARDS_GC_SLOT"]
+    assert not selection.selected
+    assert not evidence.valid
+    assert evidence.cards.missing_secondary == ("CARDS_GC_ACTIVE",)
+    assert not evidence.cards_selection.selected
 
 
 def test_gc_active_preset_does_not_match_home_screen():
     point, confidence = get_match(
-        "indicators.cards:gc_active",
+        "indicators.cards:gc_slot",
         screenshot=_load(HOME_NEGATIVE_FIXTURE),
     )
 
@@ -97,10 +124,34 @@ def test_live_gc_configuration_fixtures_form_complete_preflight_evidence():
 
     assert evidence.valid
     assert evidence.cards.missing_secondary == ()
+    assert evidence.cards_selection.selected
     assert evidence.workshop.missing_secondary == ()
     assert evidence.workshop_selection.selected
     assert evidence.bots.missing_secondary == ()
+    assert evidence.bots_selection.selected
     assert evidence.guardians.missing_secondary == ()
+
+
+def test_inactive_farm_bot_slot_is_not_claimed_as_active():
+    screen = _load(BOT_INACTIVE_FIXTURE)
+    detection = detect_state_and_overlays(screen)
+    selection = measure_preset_slot_selection(screen, BOTS_FARM_PRESET_SLOT)
+    evidence = validate_gc_preflight_screens(
+        cards_screen=_load(GC_ACTIVE_FIXTURE),
+        workshop_screen=_load(WORKSHOP_FIXTURE),
+        bots_screen=screen,
+        guardians_screen=_load(GUARDIAN_FIXTURE),
+    )
+
+    assert detection["state"] == "EVENT"
+    assert detection["secondary_states"] == [
+        "EVENT_BOTS_SCREEN",
+        "BOTS_FARM_SLOT",
+    ]
+    assert not selection.selected
+    assert not evidence.valid
+    assert evidence.bots.missing_secondary == ("BOTS_FARM_ACTIVE",)
+    assert not evidence.bots_selection.selected
 
 
 def test_wrong_tabs_do_not_satisfy_bots_or_guardian_preflight_sections():
@@ -118,6 +169,7 @@ def test_wrong_tabs_do_not_satisfy_bots_or_guardian_preflight_sections():
     )
     assert evidence.bots.missing_secondary == (
         "BOTS_FARM_ACTIVE",
+        "BOTS_FARM_SLOT",
         "EVENT_BOTS_SCREEN",
     )
     assert evidence.guardians.missing_secondary == (

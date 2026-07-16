@@ -81,10 +81,10 @@ states:
   match_keys:
   - indicators.Cards:GCFarmEarly
 
-- name: CARDS_GC_ACTIVE
+- name: CARDS_GC_SLOT
   type: secondary
   match_keys:
-  - indicators.cards:gc_active
+  - indicators.cards:gc_slot
 
 - name: LAB
   type: primary
@@ -115,10 +115,10 @@ states:
   match_keys:
   - indicators.event:bots_screen
 
-- name: BOTS_FARM_ACTIVE
+- name: BOTS_FARM_SLOT
   type: secondary
   match_keys:
-  - indicators.bots:farm_active
+  - indicators.bots:farm_slot
 
 - name: DISTANCE_ADJUSTER
   type: primary

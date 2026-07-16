@@ -113,6 +113,9 @@ class YamlStrategy(BaseStrategy):
         self._session_preflight_assertions: List[Any] = list(
             session_preflight.get("complete_when") or []
         )
+        self._session_preflight_requirements: Dict[str, Any] = dict(
+            session_preflight.get("requirements") or {}
+        )
 
     @classmethod
     def from_file(cls, path: str) -> "YamlStrategy":
@@ -148,6 +151,9 @@ class YamlStrategy(BaseStrategy):
             return True
         mv = ctx.data.get("mission_vars", {})
         return _bool_assert(self._session_preflight_assertions, mv)
+
+    def session_preflight_requirements(self) -> Dict[str, Any]:
+        return dict(self._session_preflight_requirements)
 
     # ---------------------------- conditions ---------------------------------
     def _floating_visible(self, screen, name: str) -> bool:

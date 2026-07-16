@@ -226,21 +226,42 @@ def _capture_game_over_perks():
             [],
             False,
         )
-    if not tap_blind("buttons.perks:game_over", dispatch="now"):
+    if not tap_if_visible(
+        "buttons.perks:game_over",
+        screenshot=game_stats_screen,
+        retries=1,
+    ):
         return (
             ocr_selected_perks(
                 [],
                 source_complete=False,
-                source_reason="perks_tap_failed",
+                source_reason="perks_button_not_visible",
             ),
             [],
             True,
         )
 
-    time.sleep(1.0)
+    perks_screen = _wait_for_visible(PERKS_INDICATOR, timeout=5.0)
+    if perks_screen is None:
+        current = capture_adb_screenshot()
+        restored = bool(
+            current is not None
+            and is_visible("indicators.game_over", screenshot=current)
+        )
+        return (
+            ocr_selected_perks(
+                [],
+                source_complete=False,
+                source_reason="perks_panel_not_visible",
+            ),
+            [],
+            restored,
+        )
+
     top = scroll_to_edge(
         "gesture_targets.goto_top:perks",
         source_label=PERKS_INDICATOR,
+        screenshot=perks_screen,
         progress_region=PERKS_CONTENT_REGION,
         max_swipes=8,
         settle_s=0.8,
@@ -289,6 +310,18 @@ def _capture_game_over_perks():
     if closed:
         time.sleep(1.0)
     return perks, frames, closed
+
+
+def _wait_for_visible(label: str, *, timeout: float, poll: float = 0.25):
+    """Return a fresh frame only after the expected control is visible."""
+
+    deadline = time.monotonic() + max(0.0, timeout)
+    while time.monotonic() < deadline:
+        screenshot = capture_adb_screenshot()
+        if screenshot is not None and is_visible(label, screenshot=screenshot):
+            return screenshot
+        time.sleep(max(0.05, poll))
+    return None
 
 
 def _capture_clipboard_battle_record(

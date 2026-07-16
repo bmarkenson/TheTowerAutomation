@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, MutableSet
+from typing import Any, Dict, List, Mapping, MutableSet
 
 from automation.missions.base import MissionContext
 
@@ -48,6 +48,11 @@ class BaseStrategy:
         """Return whether this process has verified its session requirements."""
 
         return True
+
+    def session_preflight_requirements(self) -> Mapping[str, Any]:
+        """Return persistent no-battle requirements, if this strategy has any."""
+
+        return {}
 
     def on_game_over(self, ctx: MissionContext) -> None:
         """Optional hook when GAME_OVER is handled."""

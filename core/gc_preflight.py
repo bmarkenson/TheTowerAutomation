@@ -7,7 +7,12 @@ from typing import Any, Callable, Iterable, Mapping
 
 from core.auto_pick_perks import AutoPickPerksEvidence, measure_auto_pick_perks
 from core.state_detector import detect_state_and_overlays
-from core.workshop_preset import PresetSlotSelection, measure_preset_slot_selection
+from core.workshop_preset import (
+    BOTS_FARM_PRESET_SLOT,
+    CARDS_GC_PRESET_SLOT,
+    PresetSlotSelection,
+    measure_preset_slot_selection,
+)
 
 
 Detection = Mapping[str, Any]
@@ -34,9 +39,11 @@ class GcSectionResult:
 @dataclass(frozen=True)
 class GcPreflightEvidence:
     cards: GcSectionResult
+    cards_selection: PresetSlotSelection
     workshop: GcSectionResult
     workshop_selection: PresetSlotSelection
     bots: GcSectionResult
+    bots_selection: PresetSlotSelection
     guardians: GcSectionResult
 
     @property
@@ -99,7 +106,7 @@ GC_SECTION_SPECS = {
     "cards": GcSectionSpec(
         name="cards",
         expected_state="CARDS",
-        required_secondary=frozenset({"CARDS_GC_ACTIVE"}),
+        required_secondary=frozenset({"CARDS_GC_ACTIVE", "CARDS_GC_SLOT"}),
     ),
     "workshop": GcSectionSpec(
         name="workshop",
@@ -111,7 +118,9 @@ GC_SECTION_SPECS = {
     "bots": GcSectionSpec(
         name="bots",
         expected_state="EVENT",
-        required_secondary=frozenset({"EVENT_BOTS_SCREEN", "BOTS_FARM_ACTIVE"}),
+        required_secondary=frozenset(
+            {"EVENT_BOTS_SCREEN", "BOTS_FARM_ACTIVE", "BOTS_FARM_SLOT"}
+        ),
     ),
     "guardians": GcSectionSpec(
         name="guardians",
@@ -154,6 +163,20 @@ def validate_gc_preflight_screens(
 ) -> GcPreflightEvidence:
     """Validate captured GC preflight sections without sending input."""
 
+    cards_detection = dict(detector(cards_screen))
+    cards_selection = measure_preset_slot_selection(
+        cards_screen,
+        CARDS_GC_PRESET_SLOT,
+    )
+    cards_secondary = set(cards_detection.get("secondary_states") or ())
+    if (
+        cards_detection.get("state") == "CARDS"
+        and "CARDS_GC_SLOT" in cards_secondary
+        and cards_selection.selected
+    ):
+        cards_secondary.add("CARDS_GC_ACTIVE")
+    cards_detection["secondary_states"] = sorted(cards_secondary)
+
     workshop_detection = dict(detector(workshop_screen))
     workshop_selection = measure_preset_slot_selection(workshop_screen)
     workshop_secondary = set(workshop_detection.get("secondary_states") or ())
@@ -165,13 +188,30 @@ def validate_gc_preflight_screens(
         workshop_secondary.add("WORKSHOP_FARM_ACTIVE")
     workshop_detection["secondary_states"] = sorted(workshop_secondary)
 
+    bots_detection = dict(detector(bots_screen))
+    bots_selection = measure_preset_slot_selection(
+        bots_screen,
+        BOTS_FARM_PRESET_SLOT,
+    )
+    bots_secondary = set(bots_detection.get("secondary_states") or ())
+    if (
+        bots_detection.get("state") == "EVENT"
+        and "EVENT_BOTS_SCREEN" in bots_secondary
+        and "BOTS_FARM_SLOT" in bots_secondary
+        and bots_selection.selected
+    ):
+        bots_secondary.add("BOTS_FARM_ACTIVE")
+    bots_detection["secondary_states"] = sorted(bots_secondary)
+
     return GcPreflightEvidence(
-        cards=evaluate_gc_section(GC_SECTION_SPECS["cards"], detector(cards_screen)),
+        cards=evaluate_gc_section(GC_SECTION_SPECS["cards"], cards_detection),
+        cards_selection=cards_selection,
         workshop=evaluate_gc_section(
             GC_SECTION_SPECS["workshop"], workshop_detection
         ),
         workshop_selection=workshop_selection,
-        bots=evaluate_gc_section(GC_SECTION_SPECS["bots"], detector(bots_screen)),
+        bots=evaluate_gc_section(GC_SECTION_SPECS["bots"], bots_detection),
+        bots_selection=bots_selection,
         guardians=evaluate_gc_section(
             GC_SECTION_SPECS["guardians"], detector(guardians_screen)
         ),

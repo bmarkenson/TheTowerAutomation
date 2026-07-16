@@ -151,6 +151,8 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
         vars_block["target_priority_checked"] = False
         complete_when.append("target_priority_checked")
     vars_block.update(
+        gc_no_battle_setup_completed=False,
+        gc_no_battle_setup_evidence={},
         gc_session_preflight_completed=False,
         gc_session_preflight_attempted=False,
         gc_session_preflight_blocked=False,
@@ -290,7 +292,8 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
         "meta": meta,
         "run_initialization": {"complete_when": complete_when},
         "session_preflight": {
-            "complete_when": ["gc_session_preflight_completed"]
+            "complete_when": ["gc_session_preflight_completed"],
+            "requirements": copy.deepcopy(session_requirements),
         },
         "vars": vars_block,
         "per_run_reset": per_run_reset,

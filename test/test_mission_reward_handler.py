@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
 import cv2
@@ -15,6 +16,8 @@ from core.mission_reward_scheduler import (
     FAILURE_RETRY_SECONDS,
     MissionRewardScheduler,
     PROBE_COOLDOWN_SECONDS,
+    daily_mission_claims_allowed,
+    seconds_until_daily_mission_release,
 )
 import handlers.mission_reward_handler as rewards
 from handlers.mission_reward_handler import MissionRewardResult
@@ -152,6 +155,37 @@ def test_scheduler_bounds_persistent_attention_and_failed_attempts():
     )
 
 
+def test_daily_mission_claims_release_at_monday_utc_reset():
+    before_pdt = datetime(2026, 7, 19, 23, 59, 59, tzinfo=timezone.utc)
+    reset_pdt = datetime(2026, 7, 20, 0, 0, 0, tzinfo=timezone.utc)
+    before_pst = datetime(2026, 12, 6, 23, 59, 59, tzinfo=timezone.utc)
+    reset_pst = datetime(2026, 12, 7, 0, 0, 0, tzinfo=timezone.utc)
+
+    assert not daily_mission_claims_allowed(before_pdt)
+    assert daily_mission_claims_allowed(reset_pdt)
+    assert not daily_mission_claims_allowed(before_pst)
+    assert daily_mission_claims_allowed(reset_pst)
+    assert seconds_until_daily_mission_release(before_pdt) == 1.0
+    assert seconds_until_daily_mission_release(reset_pdt) is None
+
+
+def test_daily_mission_claims_are_not_held_outside_local_sunday():
+    saturday = datetime(2026, 7, 19, 0, 0, tzinfo=timezone.utc)
+    monday_local = datetime(2026, 7, 20, 8, 0, tzinfo=timezone.utc)
+
+    assert daily_mission_claims_allowed(saturday)
+    assert daily_mission_claims_allowed(monday_local)
+
+
+def test_scheduler_cooldown_does_not_straddle_weekly_reset():
+    scheduler = MissionRewardScheduler()
+    before_reset = datetime(2026, 7, 19, 23, 59, 50, tzinfo=timezone.utc)
+
+    scheduler.mark_completed(now=100.0, wall_now=before_reset)
+    assert not scheduler.should_attempt(alert_visible=True, now=109.9)
+    assert scheduler.should_attempt(alert_visible=True, now=110.0)
+
+
 def test_daily_claim_loop_revalidates_before_mission_and_chest_actions():
     initial = np.zeros((2, 2, 3), dtype=np.uint8)
     after_mission = np.ones((2, 2, 3), dtype=np.uint8)
@@ -182,6 +216,53 @@ def test_daily_claim_loop_revalidates_before_mission_and_chest_actions():
     ]
 
 
+def test_sunday_hold_still_claims_glowing_weekly_chest():
+    initial = np.zeros((2, 2, 3), dtype=np.uint8)
+    after_chest = np.ones((2, 2, 3), dtype=np.uint8)
+
+    def visible(label, *, screenshot):
+        return (
+            label == rewards.WEEKLY_MISSION_CHEST
+            and int(screenshot[0, 0, 0]) == 0
+        )
+
+    with (
+        patch.object(rewards, "_is_state", return_value=True),
+        patch.object(rewards, "is_visible", side_effect=visible),
+        patch.object(rewards, "tap_if_visible", return_value=True) as tap,
+        patch.object(rewards, "_dismiss_reward_reveal", return_value=after_chest),
+    ):
+        success, claimed = rewards._claim_daily_rewards(
+            initial,
+            claim_missions=False,
+        )
+
+    assert success
+    assert claimed == 1
+    tap.assert_called_once_with(rewards.WEEKLY_MISSION_CHEST, screenshot=initial)
+
+
+def test_sunday_hold_does_not_tap_ordinary_daily_claim():
+    screenshot = np.zeros((2, 2, 3), dtype=np.uint8)
+
+    def visible(label, *, screenshot):
+        return label == rewards.DAILY_MISSION_CLAIM
+
+    with (
+        patch.object(rewards, "_is_state", return_value=True),
+        patch.object(rewards, "is_visible", side_effect=visible),
+        patch.object(rewards, "tap_if_visible") as tap,
+    ):
+        success, claimed = rewards._claim_daily_rewards(
+            screenshot,
+            claim_missions=False,
+        )
+
+    assert success
+    assert claimed == 0
+    tap.assert_not_called()
+
+
 def test_app_dispatches_alert_probe_and_records_success():
     app = App.__new__(App)
     app._mission_reward_scheduler = Mock()
@@ -191,6 +272,7 @@ def test_app_dispatches_alert_probe_and_records_success():
 
     with (
         patch("core.app.menu_reward_alert_visible", return_value=True),
+        patch("core.app.daily_mission_claims_allowed", return_value=False),
         patch("core.app.stop_blind_gem_tapper", return_value=True),
         patch(
             "core.app.handle_mission_rewards",
@@ -202,8 +284,13 @@ def test_app_dispatches_alert_probe_and_records_success():
     app._mission_reward_scheduler.should_attempt.assert_called_once_with(
         alert_visible=True,
     )
-    handler.assert_called_once_with(screenshot=screenshot)
-    app._mission_reward_scheduler.mark_completed.assert_called_once_with()
+    handler.assert_called_once_with(
+        screenshot=screenshot,
+        claim_daily_missions=False,
+    )
+    assert app._mission_reward_scheduler.mark_completed.call_count == 1
+    wall_now = app._mission_reward_scheduler.mark_completed.call_args.kwargs["wall_now"]
+    assert wall_now.tzinfo is timezone.utc
     app._mission_reward_scheduler.mark_failed.assert_not_called()
     assert app._blind_tapper_suspended
 

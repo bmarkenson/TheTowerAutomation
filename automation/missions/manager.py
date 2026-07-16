@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from utils.logger import log, log_mission
 from automation.missions.base import BaseMission, MissionContext
@@ -108,6 +108,21 @@ class MissionManager:
         if not self.strategy.requires_session_preflight():
             return False
         return not self.strategy.is_session_preflight_complete(self.ctx)
+
+    def no_battle_setup_requirements(self) -> Dict[str, Any]:
+        """Return profile settings still needing a verified no-battle pass."""
+
+        if not self.strategy:
+            return {}
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        if mv.get("gc_no_battle_setup_completed"):
+            return {}
+        return dict(self.strategy.session_preflight_requirements())
+
+    def mark_no_battle_setup_complete(self, evidence: Mapping[str, Any]) -> None:
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        mv["gc_no_battle_setup_completed"] = True
+        mv["gc_no_battle_setup_evidence"] = dict(evidence)
 
     def tick(self, screen, detection: Detection, *, strategy_only: bool = False) -> None:
         state = detection.get("state")

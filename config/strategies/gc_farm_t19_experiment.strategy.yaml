@@ -11,6 +11,35 @@ run_initialization:
 session_preflight:
   complete_when:
   - gc_session_preflight_completed
+  requirements:
+    cards_deck: GC
+    workshop_preset: Farm
+    bots_preset: Farm
+    guardian_chips:
+    - Fetch
+    - Summon
+    - Scout
+    auto_pick_perks: true
+    ultimate_weapons:
+      Chain Lightning:
+        primary: 'on'
+      Smart Missiles:
+        primary: 'on'
+      Death Wave:
+        primary: 'on'
+      Chrono Field:
+        primary: 'on'
+      Inner Land Mines:
+        primary: 'on'
+      Golden Tower:
+        primary: 'on'
+      Poison Swamp:
+        primary: 'on'
+      Black Hole:
+        primary: 'on'
+      Spotlight:
+        primary: 'on'
+        missiles: 'on'
 vars:
   run_initialised: false
   fast_loop_active: false
@@ -32,6 +61,8 @@ vars:
   level_skip_elapsed_s: 0.0
   level_skip_taps_sent: 0
   level_skip_last_reason: ''
+  gc_no_battle_setup_completed: false
+  gc_no_battle_setup_evidence: {}
   gc_session_preflight_completed: false
   gc_session_preflight_attempted: false
   gc_session_preflight_blocked: false

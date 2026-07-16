@@ -4,16 +4,88 @@
 import traceback
 from pathlib import Path
 from unittest.mock import patch
+import cv2
 import numpy as np
 
 from handlers.game_over_handler import (
+    _capture_game_over_perks,
     _save_battle_stats_record,
     _wait_for_game_over_direction,
     handle_game_over,
 )
 from core.run_state import AUTOMATION, ExecMode, RunState
+from core.matcher import get_match
 from core.scrolling import ScrollResult
 from utils.logger import log
+
+
+ROOT = Path(__file__).resolve().parents[1]
+FIXTURES = ROOT / "test" / "fixtures"
+
+
+def test_game_over_perks_button_requires_visible_button_artwork():
+    positive = cv2.imread(str(FIXTURES / "game_over_stats_20260715.png"))
+    negative = cv2.imread(str(FIXTURES / "home_screen_new_day_store_badge_20260713.png"))
+    assert positive is not None
+    assert negative is not None
+
+    point, confidence = get_match("buttons.perks:game_over", screenshot=positive)
+    negative_point, negative_confidence = get_match(
+        "buttons.perks:game_over",
+        screenshot=negative,
+    )
+
+    assert point == (720, 1034)
+    assert confidence >= 0.99
+    assert negative_point is None
+    assert negative_confidence < 0.9
+
+
+def test_missing_game_over_perks_button_is_recoverable_without_blind_tap():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    perks = {"quality": {"source_reason": "perks_button_not_visible"}}
+
+    with (
+        patch("handlers.game_over_handler.capture_adb_screenshot", return_value=frame),
+        patch("handlers.game_over_handler.is_visible", return_value=True),
+        patch("handlers.game_over_handler.tap_if_visible", return_value=False) as tap,
+        patch("handlers.game_over_handler.ocr_selected_perks", return_value=perks),
+        patch("handlers.game_over_handler.scroll_to_edge") as scroll,
+    ):
+        result, frames, restored = _capture_game_over_perks()
+
+    assert result is perks
+    assert frames == []
+    assert restored
+    tap.assert_called_once_with(
+        "buttons.perks:game_over",
+        screenshot=frame,
+        retries=1,
+    )
+    scroll.assert_not_called()
+
+
+def test_missing_perks_panel_continues_only_if_game_stats_is_still_visible():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    perks = {"quality": {"source_reason": "perks_panel_not_visible"}}
+
+    def visible(label, *, screenshot):
+        return label == "indicators.game_over"
+
+    with (
+        patch("handlers.game_over_handler.capture_adb_screenshot", return_value=frame),
+        patch("handlers.game_over_handler.is_visible", side_effect=visible),
+        patch("handlers.game_over_handler.tap_if_visible", return_value=True),
+        patch("handlers.game_over_handler._wait_for_visible", return_value=None),
+        patch("handlers.game_over_handler.ocr_selected_perks", return_value=perks),
+        patch("handlers.game_over_handler.scroll_to_edge") as scroll,
+    ):
+        result, frames, restored = _capture_game_over_perks()
+
+    assert result is perks
+    assert frames == []
+    assert restored
+    scroll.assert_not_called()
 
 
 def test_home_mode_taps_game_stats_home_instead_of_retry():

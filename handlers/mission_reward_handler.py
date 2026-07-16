@@ -45,7 +45,11 @@ class MissionRewardSummary:
         return self.daily + self.event + self.guild
 
 
-def handle_mission_rewards(screenshot=None) -> MissionRewardResult:
+def handle_mission_rewards(
+    screenshot=None,
+    *,
+    claim_daily_missions: bool = True,
+) -> MissionRewardResult:
     """Inspect relevant menu badges, claim proven rewards, and resume the run."""
 
     menu_screen = _ensure_menu_open(screenshot)
@@ -106,7 +110,13 @@ def handle_mission_rewards(screenshot=None) -> MissionRewardResult:
             success = False
             break
 
-        section_success, claimed = claim_fn(panel)
+        if summary_field == "daily":
+            section_success, claimed = claim_fn(
+                panel,
+                claim_missions=claim_daily_missions,
+            )
+        else:
+            section_success, claimed = claim_fn(panel)
         summary = MissionRewardSummary(
             daily=claimed if summary_field == "daily" else summary.daily,
             event=claimed if summary_field == "event" else summary.event,
@@ -134,7 +144,11 @@ def handle_mission_rewards(screenshot=None) -> MissionRewardResult:
     return MissionRewardResult.NOTHING_AVAILABLE
 
 
-def _claim_daily_rewards(screenshot) -> tuple[bool, int]:
+def _claim_daily_rewards(
+    screenshot,
+    *,
+    claim_missions: bool = True,
+) -> tuple[bool, int]:
     current = screenshot
     claimed = 0
     for _ in range(MAX_DAILY_REWARDS):
@@ -148,6 +162,13 @@ def _claim_daily_rewards(screenshot) -> tuple[bool, int]:
                 return False, claimed
             claimed += 1
             continue
+        if not claim_missions:
+            log(
+                "[MISSION_REWARDS] Holding ordinary Daily Mission claims "
+                "until the weekly reset",
+                "INFO",
+            )
+            return True, claimed
         if is_visible(DAILY_MISSION_CLAIM, screenshot=current):
             if not tap_if_visible(DAILY_MISSION_CLAIM, screenshot=current):
                 return False, claimed

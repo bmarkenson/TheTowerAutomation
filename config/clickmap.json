@@ -659,8 +659,8 @@
         "y": 1129
       }
     },
-    "cards:gc_active": {
-      "match_template": "indicators/cards:gc_active.png",
+    "cards:gc_slot": {
+      "match_template": "indicators/cards:gc_slot.png",
       "match_region": {
         "x": 3,
         "y": 350,
@@ -685,8 +685,8 @@
         "indicator"
       ]
     },
-    "bots:farm_active": {
-      "match_template": "indicators/bots:farm_active.png",
+    "bots:farm_slot": {
+      "match_template": "indicators/bots:farm_slot.png",
       "match_region": {
         "x": 0,
         "y": 480,
@@ -742,6 +742,32 @@
       "match_region": {
         "x": 35,
         "y": 670,
+        "w": 270,
+        "h": 270
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "guardian:attack_equipped": {
+      "match_template": "indicators/guardian:attack_equipped.png",
+      "match_region": {
+        "x": 35,
+        "y": 390,
+        "w": 270,
+        "h": 270
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "guardian:ally_equipped": {
+      "match_template": "indicators/guardian:ally_equipped.png",
+      "match_region": {
+        "x": 775,
+        "y": 390,
         "w": 270,
         "h": 270
       },
@@ -1365,6 +1391,16 @@
         "y": 1830
       }
     },
+    "goto_cards_home": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 450,
+        "y": 1830
+      }
+    },
     "toggle_menu": {
       "match_template": "navigation/toggle_menu.png",
       "match_region": {
@@ -1636,11 +1672,14 @@
       ]
     },
     "perks:game_over": {
-      "tap": {
-        "type": "tap",
-        "x": 720,
-        "y": 1034
+      "match_template": "buttons/perks:game_over.png",
+      "match_region": {
+        "x": 493,
+        "y": 825,
+        "w": 427,
+        "h": 474
       },
+      "match_threshold": 0.9,
       "roles": [
         "button"
       ]
@@ -1895,6 +1934,32 @@
         "x": 538,
         "y": 1132
       }
+    },
+    "guardian:fetch_inventory": {
+      "match_template": "buttons/guardian:fetch_inventory.png",
+      "match_region": {
+        "x": 35,
+        "y": 1400,
+        "w": 330,
+        "h": 340
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
+    "guardian:summon_inventory": {
+      "match_template": "buttons/guardian:summon_inventory.png",
+      "match_region": {
+        "x": 380,
+        "y": 1400,
+        "w": 330,
+        "h": 340
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
     },
     "close:perks": {
       "match_template": "buttons/close:perks.png",
