@@ -84,6 +84,11 @@ its exit, and start the replacement under a persisted pause when validation is
 needed before actions resume. Do not kill an arbitrary PID merely because it
 appears in a possibly stale lock.
 
+A shell launch returning success is not evidence that a replacement survived
+the execution wrapper. Confirm the new host PID, refreshed lock metadata,
+startup log, control consumption, and first state report together before
+treating the replacement as live.
+
 The Game Over handler polls the same control file while waiting. `PAUSED`
 blocks Retry/Home, `STOPPED` exits without a terminal tap, and `WAIT` continues
 to wait for an explicit mode change.
@@ -112,7 +117,8 @@ to wait for an explicit mode change.
 - Failure/OCR evidence: `screenshots/matches/`
 - Canonical regression fixtures: `test/fixtures/`
 - Actionable backlog: `PENDING_DEVELOPMENT.md`
-- Recurrence history: `docs/observed_issues.md`
+- Open anomalies: `docs/observed_issues.md`
+- Resolved recurrence history: `docs/issues/`
 
 `logs/` and `screenshots/` are ignored runtime evidence, not substitutes for a
 tracked issue entry. When an anomaly matters beyond the current thread, record

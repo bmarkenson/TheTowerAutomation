@@ -1,5 +1,9 @@
 # Architecture Direction and Thread Handoff — 2026-07-14
 
+> Historical review record. Current runtime architecture is maintained in
+> [`../runtime.md`](../runtime.md); active work is indexed in
+> [`../../../PENDING_DEVELOPMENT.md`](../../../PENDING_DEVELOPMENT.md).
+
 This note is the durable outcome of the architecture-review thread that began
 by asking whether the clickmap paradigm is sound. `PENDING_DEVELOPMENT.md`
 remains the canonical task list; this document records the reasoning and scope

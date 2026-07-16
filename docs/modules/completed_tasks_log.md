@@ -221,6 +221,12 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 
 ## 📘 Documentation
 
+- 2026-07-16: Split the active backlog by domain, separated open anomalies from
+  resolved operational history, and extracted current runtime architecture from
+  the dated review handoff. Added an on-demand handoff template that excludes
+  stale runtime and validation claims plus an on-demand maintenance guide for
+  future lifecycle updates. Preserved the complete pre-split backlog and
+  architecture narrative under dated history paths.
 - Created `core/input_policy.md` to document dual-path tap architecture
 - Updated `README_UPLOAD.md` with summary of input tap architecture and assistant behavior
 - Updated `PROJECT_SCOPE.md` to reflect dual-path tap architecture, overlay support, and tap handler split

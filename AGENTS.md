@@ -41,18 +41,28 @@ current process and device.
   editing, staging, or committing. If a target changed since inspection, reread
   and reconcile it; unrelated changes are not a blocker, but overlapping or
   unclear ownership requires coordination with the user.
+- Before adding a helper or utility, search the existing code and callers for
+  identical or closely related behavior. Reuse or extend an existing function
+  when doing so preserves clear ownership and semantics; create a new helper
+  only when adapting existing code would distort its contract or architectural
+  boundary.
 - Keep `YamlStrategy` and the runtime evaluator generic. Prefer compact source
   configuration plus explicit generated plans over strategy-name conditionals
   or duplicated expanded YAML.
 
 ## Documentation discipline
 
+- Before changing documentation structure or moving information between active
+  and historical files, read and follow
+  [`docs/documentation_maintenance.md`](docs/documentation_maintenance.md).
 - Record newly observed runtime/tooling anomalies in
   [`docs/observed_issues.md`](docs/observed_issues.md), including evidence and
   whether they are confirmed, unresolved, or resolved.
-- When an issue is fixed, add the fixing commit and regression-test location to
-  its entry. Do not erase the original symptom; recurrence history is useful.
+- When an issue is fixed, add the fixing commit and regression-test location,
+  then move the complete entry to the applicable archive under `docs/issues/`.
+  Do not erase the original symptom; recurrence history is useful.
 - Keep actionable work in `PENDING_DEVELOPMENT.md`. The issue ledger is evidence
   and history, not a second backlog.
-- Every handoff must explicitly direct the next thread to `AGENTS.md` and
-  `docs/new_thread.md`, then report only freshly inspected volatile state.
+- Every handoff must follow `docs/handoff_template.md`, direct the next thread
+  to follow the automatically loaded `AGENTS.md` and read
+  `docs/new_thread.md`, and report only freshly inspected volatile state.
