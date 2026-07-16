@@ -7,6 +7,7 @@ import numpy as np
 
 from core.clickmap_access import get_click
 from core.app import App
+from core.event_mission_tracker import EventMissionWarning
 from core.matcher import get_match
 from core.menu_reward_badges import (
     measure_menu_reward_badges,
@@ -19,6 +20,7 @@ from core.mission_reward_scheduler import (
     daily_mission_claims_allowed,
     seconds_until_daily_mission_release,
 )
+from core.scrolling import ScrollResult
 import handlers.mission_reward_handler as rewards
 from handlers.mission_reward_handler import MissionRewardResult
 
@@ -267,6 +269,7 @@ def test_app_dispatches_alert_probe_and_records_success():
     app = App.__new__(App)
     app._mission_reward_scheduler = Mock()
     app._mission_reward_scheduler.should_attempt.return_value = True
+    app._event_mission_tracker = Mock()
     app._blind_tapper_suspended = False
     screenshot = np.zeros((2, 2, 3), dtype=np.uint8)
 
@@ -287,12 +290,76 @@ def test_app_dispatches_alert_probe_and_records_success():
     handler.assert_called_once_with(
         screenshot=screenshot,
         claim_daily_missions=False,
+        event_inventory_callback=app._event_mission_tracker.record_inventory,
     )
     assert app._mission_reward_scheduler.mark_completed.call_count == 1
     wall_now = app._mission_reward_scheduler.mark_completed.call_args.kwargs["wall_now"]
     assert wall_now.tzinfo is timezone.utc
     app._mission_reward_scheduler.mark_failed.assert_not_called()
     assert app._blind_tapper_suspended
+
+
+def test_event_inventory_piggybacks_on_badge_triggered_claim_pass():
+    screenshot = np.zeros((2, 2, 3), dtype=np.uint8)
+    callback = Mock()
+    edge = ScrollResult(False, screenshot, 1, "edge_before_target")
+
+    with (
+        patch.object(
+            rewards,
+            "scroll_to_edge",
+            return_value=ScrollResult(True, screenshot, 1, "edge_reached"),
+        ),
+        patch.object(rewards, "_is_state", return_value=True),
+        patch.object(rewards, "is_visible", return_value=False),
+        patch.object(rewards, "scroll_until_visible", return_value=edge),
+        patch.object(rewards, "_record_event_inventory") as inventory,
+    ):
+        success, claimed = rewards._claim_event_rewards(
+            screenshot,
+            inventory_callback=callback,
+        )
+
+    assert success
+    assert claimed == 0
+    inventory.assert_called_once_with(screenshot, callback)
+
+
+def test_due_event_warning_is_forced_to_stdout_and_action_log():
+    app = App.__new__(App)
+    app._event_mission_tracker = Mock()
+    app._event_mission_tracker.due_warnings.return_value = (
+        EventMissionWarning(
+            name="Reach wave 20 without cards",
+            progress="0/20",
+            incomplete_seconds=3 * 24 * 3600,
+            stalled_seconds=2 * 24 * 3600,
+        ),
+    )
+
+    with patch("core.app.log") as log:
+        app._emit_event_mission_warnings()
+
+    log.assert_called_once()
+    message, level = log.call_args.args
+    assert "[EVENT_MISSION_WARNING]" in message
+    assert level == "WARN"
+    assert log.call_args.kwargs == {"console": True}
+
+
+def test_event_warning_state_failure_does_not_stop_the_runtime():
+    app = App.__new__(App)
+    app._event_mission_tracker = Mock()
+    app._event_mission_tracker.due_warnings.side_effect = OSError("read failed")
+
+    with patch("core.app.log") as log:
+        app._emit_event_mission_warnings()
+
+    log.assert_called_once_with(
+        "[EVENT_MISSIONS] Warning check failed: read failed",
+        "WARN",
+        console=True,
+    )
 
 
 def test_app_defers_reward_probe_from_unsafe_screen():

@@ -17,6 +17,7 @@ from core.ss_capture import capture_and_save_screenshot
 from core.state_detector import detect_state_and_overlays
 from core.automation_supervisor import AutomationSupervisor
 from core.daily_gem_scheduler import DailyGemScheduler
+from core.event_mission_tracker import EventMissionTracker, format_warning
 from core.home_battle import detect_home_battle_control
 from core.battle_lifecycle import HomeBattleControl
 from core.gc_no_battle_setup import run_gc_no_battle_setup
@@ -93,6 +94,10 @@ class App:
         rollover_state = Path(config.control_file).parent / "daily_gem_state.json"
         self._daily_gem_scheduler = DailyGemScheduler(rollover_state)
         self._mission_reward_scheduler = MissionRewardScheduler()
+        event_mission_state = (
+            Path(config.control_file).parent / "event_mission_tracker.json"
+        )
+        self._event_mission_tracker = EventMissionTracker(event_mission_state)
 
     def run(self) -> None:
         log("Starting main heartbeat loop.", level="INFO", console=True)
@@ -260,6 +265,7 @@ class App:
                     wave_conf=wave_conf,
                     allow_actions=not actions_blocked,
                 )
+                self._emit_event_mission_warnings()
 
                 if not actions_blocked:
                     self._supervisor.auto_return_check(img, new_state)
@@ -387,12 +393,28 @@ class App:
         result = handle_mission_rewards(
             screenshot=img,
             claim_daily_missions=claim_daily_missions,
+            event_inventory_callback=self._event_mission_tracker.record_inventory,
         )
         if result == MissionRewardResult.FAILED:
             self._mission_reward_scheduler.mark_failed(wall_now=wall_now)
         else:
             self._mission_reward_scheduler.mark_completed(wall_now=wall_now)
         return True
+
+    def _emit_event_mission_warnings(self) -> None:
+        """Repeat due persisted Event Mission reminders without UI activity."""
+
+        try:
+            warnings = self._event_mission_tracker.due_warnings()
+        except Exception as exc:
+            log(
+                f"[EVENT_MISSIONS] Warning check failed: {exc}",
+                "WARN",
+                console=True,
+            )
+            return
+        for warning in warnings:
+            log(format_warning(warning), "WARN", console=True)
 
     def _handle_daily_gem_if_due(self, new_state: str, overlays: Set[str]) -> bool:
         """Run the Daily Gem probe from a safe state after UTC rollover."""

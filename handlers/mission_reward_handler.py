@@ -5,8 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 import time
-from typing import Optional
+from typing import Callable, Optional
 
+from core.event_missions import (
+    EventMissionInventory,
+    capture_event_mission_inventory,
+)
 from core.input import safe_tap, tap_if_visible
 from core.label_tapper import is_visible
 from core.menu_reward_badges import measure_menu_reward_badges
@@ -49,6 +53,9 @@ def handle_mission_rewards(
     screenshot=None,
     *,
     claim_daily_missions: bool = True,
+    event_inventory_callback: Optional[
+        Callable[[EventMissionInventory], object]
+    ] = None,
 ) -> MissionRewardResult:
     """Inspect relevant menu badges, claim proven rewards, and resume the run."""
 
@@ -114,6 +121,11 @@ def handle_mission_rewards(
             section_success, claimed = claim_fn(
                 panel,
                 claim_missions=claim_daily_missions,
+            )
+        elif summary_field == "event":
+            section_success, claimed = claim_fn(
+                panel,
+                inventory_callback=event_inventory_callback,
             )
         else:
             section_success, claimed = claim_fn(panel)
@@ -183,7 +195,13 @@ def _claim_daily_rewards(
     return False, claimed
 
 
-def _claim_event_rewards(screenshot) -> tuple[bool, int]:
+def _claim_event_rewards(
+    screenshot,
+    *,
+    inventory_callback: Optional[
+        Callable[[EventMissionInventory], object]
+    ] = None,
+) -> tuple[bool, int]:
     top = scroll_to_edge(
         "gesture_targets.goto_top:event_missions",
         source_label="indicators.event",
@@ -214,6 +232,10 @@ def _claim_event_rewards(screenshot) -> tuple[bool, int]:
             )
             if not found.success:
                 if found.reason in {"edge_before_target", "max_swipes_exceeded"}:
+                    _record_event_inventory(
+                        found.screenshot if found.screenshot is not None else current,
+                        inventory_callback,
+                    )
                     return True, claimed
                 return False, claimed
             current = found.screenshot
@@ -226,6 +248,31 @@ def _claim_event_rewards(screenshot) -> tuple[bool, int]:
 
     log("[MISSION_REWARDS] Event reward claim bound reached", "WARN")
     return False, claimed
+
+
+def _record_event_inventory(
+    screenshot,
+    callback: Optional[Callable[[EventMissionInventory], object]],
+) -> None:
+    """Inventory Event rows during an existing badge-triggered panel visit."""
+
+    if callback is None or screenshot is None:
+        return
+    try:
+        inventory = capture_event_mission_inventory(screenshot)
+        accepted = callback(inventory)
+        incomplete = sum(1 for mission in inventory.missions if mission.incomplete)
+        log(
+            "[EVENT_MISSIONS] Inventory "
+            f"event={inventory.event_name or 'unknown'!r} "
+            f"rows={len(inventory.missions)} incomplete={incomplete} "
+            f"complete={inventory.complete} accepted={accepted is not False}",
+            "INFO" if inventory.complete else "WARN",
+        )
+    except Exception as exc:
+        # Reminders are advisory and must not turn an otherwise successful
+        # reward claim into a navigation failure.
+        log(f"[EVENT_MISSIONS] Inventory failed: {exc}", "WARN")
 
 
 def _claim_guild_chests(screenshot) -> tuple[bool, int]:

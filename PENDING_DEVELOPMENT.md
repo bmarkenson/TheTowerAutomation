@@ -296,6 +296,19 @@ lifecycle, orchestration, and action authority in separate layers.
   - The closed-menu alert may remain purple for unrelated Modules work. It only
     schedules a bounded inspection (30-minute success cooldown, five-minute
     failure backoff); fixed badge regions identify which reward panels may open.
+- [ ] Track long-running incomplete Event Missions and remind the operator.
+  - [x] Piggyback a guarded full-list inventory on the existing Event-badge
+    claim visit; do not add an independent periodic Event navigation. OCR reads
+    the event identity, mission names, and visible progress from overlapping
+    viewports and persists accepted observations in
+    `logs/event_mission_tracker.json`.
+  - [x] Warn after a mission has remained incomplete for 72 hours with no
+    observed progress for 48 hours, then repeat every six hours. Warnings use a
+    stable `[EVENT_MISSION_WARNING]` prefix and are forced to both stdout and
+    `logs/actions.log`. Event boundaries clear old state, and incomplete OCR
+    inventories cannot erase prior observations.
+  - [ ] Live-validate one complete top-to-bottom inventory at the next natural
+    Event badge without interrupting or surrendering the active battle.
 - [ ] Add automated overlay coexistence and state-transition regression tests.
   This should be completed as part of the full live state-coverage audit above.
 

@@ -567,6 +567,8 @@ class PausedStartupObservationTests(unittest.TestCase):
         app._mission_mgr = manager
         app._state_tracker = MagicMock()
         app._status_reporter = MagicMock()
+        app._event_mission_tracker = MagicMock()
+        app._event_mission_tracker.due_warnings.return_value = ()
         app._match_trace = False
         app._last_wave_value = None
         app._last_wave_conf = -1.0
@@ -643,6 +645,8 @@ class PausedStartupObservationTests(unittest.TestCase):
         app._mission_mgr = manager
         app._state_tracker = MagicMock()
         app._status_reporter = MagicMock()
+        app._event_mission_tracker = MagicMock()
+        app._event_mission_tracker.due_warnings.return_value = ()
         app._match_trace = False
         app._last_wave_value = None
         app._last_wave_conf = -1.0
