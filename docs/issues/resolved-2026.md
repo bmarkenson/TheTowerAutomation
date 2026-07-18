@@ -183,6 +183,90 @@ and actionable work lives in
   colors, instance models, and validation.
 - **Fixed by:** `ce536a2`.
 
+### Strategy builder compatibility wrapper dropped the repository interpreter
+
+- **Observed:** 2026-07-17 while regenerating the GC profiles after adding the
+  Poison Swamp Stun requirement.
+- **Symptom:** `.venv/bin/python tools/strategy/build_strategy.py ...` used
+  `os.execvp` to launch the underlying executable by its `env python3` shebang,
+  so the build failed with `No module named 'cv2'` despite `cv2` being installed
+  in the repository virtual environment.
+- **Evidence:** Directly invoking
+  `.venv/bin/python tools/strategy_builders/build_strategy.py ...` succeeded
+  against the same source and environment.
+- **Safety response:** No runtime or device action depended on the failed build;
+  generated profiles were not accepted until regeneration and tests passed.
+- **Cause:** The compatibility wrapper executed the builder file directly, so
+  its environment shebang selected `python3` from `PATH` instead of preserving
+  the interpreter used to invoke the wrapper.
+- **Resolution:** The wrapper now re-executes the underlying builder with
+  `sys.executable` and therefore retains the repository virtual environment.
+- **Regression:** `test/test_strategy_builder_cli.py` invokes the compatibility
+  wrapper as a subprocess, requires a successful Farm plan build, and inspects
+  the generated configuration.
+- **Fixed by:** `5c6fb25`; dedicated regression coverage added by `36c340f`.
+
+### Retained scroll positions hid GC preflight and module inventory evidence
+
+- **Observed:** 2026-07-16 during the bounded live GC module-gate validation.
+- **Symptom:** The Ancestral inventory search reopened at its retained bottom
+  position and incorrectly concluded that Project Funding was absent. Later,
+  GC preflight opened the remembered Event Bots tab below its preset header;
+  the parent `EVENT` state was valid, but `EVENT_BOTS_SCREEN` and the Farm
+  preset evidence remained offscreen and preflight safely retried. Final
+  cleanup also left Home vertically offset, moving the Event and Guild identity
+  icons above their original narrow match regions.
+- **Evidence:** `logs/actions.log` records the fail-closed Project Funding
+  search at 15:44–15:45, the partial-detail retry at 15:49–15:51, three guarded
+  Event Bots preflight failures at 15:58–16:02, and the successful repaired
+  lifecycle at 16:10–16:15. Reviewed module frames remain under
+  `screenshots/module_inventory_2026-07-16/`; the scrolled Home regression frame
+  is `test/fixtures/gc_module_gate_20260716/home_scrolled_new_battle.png`.
+- **Safety response:** No module action followed either failed search. The
+  developer-owned battle remained resumable while preflight cleanup returned
+  to `RUNNING`; automation was paused before diagnostic navigation.
+- **Cause:** The game retained scroll positions across visits, while the
+  inventory/preflight paths assumed their identity controls would reopen at the
+  top; narrow Home identity regions also assumed the default vertical offset.
+- **Resolution:** Module inventory and Event Bots navigation perform bounded,
+  visually verified rewinds and require complete module-detail evidence;
+  widened Home identity regions cover the retained scrolled layout.
+- **Regression:** `test/test_gc_module_loadout.py`,
+  `test/test_gc_preflight_navigation.py`, and
+  `test/test_gc_no_battle_setup.py` cover retained scroll and complete-detail
+  authority; `test/test_gc_preflight_templates.py` covers scrolled Home.
+- **Fixed by:** `5c6fb25`.
+
+### Guild chest probe retained Guardian and excluded the 750 chest slot
+
+- **Observed:** 2026-07-17 during a bounded live Guild chest collection test.
+- **Symptom:** The reward sweep detected a Guild menu badge, opened Guild, and
+  returned with `guild=0`. A fresh guarded visit showed that Guild had retained
+  its Guardian tab, while the handler assumed Members was already selected.
+  After selecting Members, the glowing 750-contribution chest still failed the
+  broad match because its 90-pixel template did not fit inside the right edge
+  of the declared search region; the best in-region candidate was a claimed
+  500 chest at `0.737` confidence.
+- **Evidence:** `logs/actions.log` records the badge-triggered zero-claim pass
+  at 00:16–00:17 and the paused validation at 00:30–00:38. The retained
+  Guardian, live glowing 750 chest, and post-claim Members frames are
+  `screenshots/matches/guild_chest_guardian_retained_20260717.png`,
+  `screenshots/matches/guild_chest_750_available_20260717.png`, and
+  `screenshots/matches/guild_chests_claimed_20260717.png`.
+- **Safety response:** The live owner consumed persistent `PAUSED` before
+  diagnostic navigation. Every tap used repeated complete frames plus fresh
+  state or matched-control evidence; the existing battle was not ended and was
+  returned to its resumable in-battle screen.
+- **Cause:** Guild retained its last selected tab, but the collector assumed
+  Members was already active; the chest match region also ended before a full
+  template could fit over the rightmost 750-contribution slot.
+- **Resolution:** Guild collection explicitly reselects Members and waits for
+  the panel to settle before matching; the chest region includes the complete
+  rightmost slot.
+- **Regression:** `test/test_mission_reward_handler.py` covers retained-tab
+  reselection and a complete template match in the 750-contribution slot.
+- **Fixed by:** `5c6fb25`.
+
 ## Operational lessons
 
 ### A detached child may not survive the agent execution wrapper
