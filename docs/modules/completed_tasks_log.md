@@ -376,6 +376,23 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   The implementation fix is `592acad`; the focused suite passed 73 tests, the
   full suite passed 325 tests, and clickmap integrity reported no errors.
 
+### 2026-07-18 Farm preflight evidence and degraded-handler recovery
+
+- Changed cross-scroll Ultimate Weapon aggregation to preserve nested toggle
+  evidence, including the Poison Swamp Stun state that exists only on its
+  detail panel.
+- Split active/repairable preflight exclusivity from a terminal blocked result.
+  A conclusive non-repairable failure still blocks strategy and mission work,
+  but bounded ad-gem handling remains available; terminal Game Over behavior
+  continues through the battle lifecycle.
+- Regression coverage reproduces the live multi-scroll overwrite and verifies
+  the degraded handler boundary. The focused suites passed 107 tests and the
+  full suite passed 328 tests.
+- Live validation on the preserved Tier 18 battle completed every Farm
+  preflight requirement with `Poison Swamp: primary=on, stun=off`, released
+  normal handlers, and collected the ad gem stranded by the old gate. The
+  implementation fix is `453c484`.
+
 ---
 
 ## 📘 Documentation

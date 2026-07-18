@@ -8,6 +8,43 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Farm preflight discarded verified Poison Swamp Stun evidence and stranded safe handlers
+
+- **Observed:** 2026-07-18 during the first complete `farm_t18` session
+  preflight after restarting from Tournament Results.
+- **Symptom:** The guarded detail path logged `Poison Swamp Stun verified off`,
+  but the final aggregate reported `stun=off (actual=missing)`. Every other
+  requirement passed, yet the session remained blocked while its Tier 18
+  battle advanced. An ad-gem claim detected at 06:42 PDT remained visible for
+  more than twenty minutes because the terminal mismatch was treated as an
+  actively navigating preflight.
+- **Safety response:** The failed owner made no further strategy or handler
+  taps. It was persisted `PAUSED`, confirmed paused, interrupted cleanly, and
+  replaced against the same resumable battle. No Surrender occurred.
+- **Cause:** Each UW scroll position was merged into the accumulated evidence
+  with a shallow outer `dict.update()`. A later primary-only Poison Swamp
+  observation replaced the earlier nested mapping and erased the detail-only
+  `stun=off` result. Separately, the runtime used one `session_preflight_pending`
+  condition for both active navigation and a terminal non-repairable mismatch,
+  so its exclusive action gate also suppressed bounded ad-gem handling.
+- **Resolution:** UW observations now merge per label and per toggle. The
+  mission manager distinguishes a terminally blocked mismatch from an owned
+  Home-repair transition; strategy and mission actions remain blocked, while
+  the bounded ad-gem handler stays available. Active validation and repairable
+  mismatch navigation retain exclusive tap authority, and Game Over continues
+  through the existing terminal lifecycle.
+- **Live validation:** The replacement owner resumed the same Tier 18 battle,
+  reverified Stun off, completed every session requirement with final
+  Poison Swamp evidence `primary=on, stun=off`, released the preflight gate,
+  collected the previously stranded ad gem, and observed its overlay disappear.
+- **Regression:** `test/test_gc_preflight_navigation.py` reproduces a later
+  primary-only Poison Swamp observation after detail verification;
+  `test/test_run_initialization.py` covers terminal-block classification and
+  proves that only the ad-gem path is released while strategy, mission,
+  recovery, and general primary handlers remain blocked. The full suite passed
+  328 tests.
+- **Fixed by:** `453c484`.
+
 ### Tournament preflight opened Tournament Heat instead of the intended section
 
 - **Observed:** 2026-07-18 during guarded read-only validation of an active
