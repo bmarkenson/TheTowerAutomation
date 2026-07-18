@@ -30,6 +30,13 @@ checked-item detail remains in the
 
 ## Farm run initialization
 
+- [ ] Live-validate the complete generated `farm` new-run sequence at the next
+  natural new-battle boundary: time-sensitive EHLS/EALS initialization, Tier 18
+  Damage Slider enforcement at `1E-22%`, Target Priority enforcement, complete
+  session preflight, and release to normal automation. Use the actual `farm`
+  strategy rather than direct helper calls, and confirm the resolved run
+  configuration is present in runtime/battle evidence. Do not Surrender the
+  current developer-owned Tier 18 validation run merely to create the boundary.
 - [ ] Capture a fresh, name-reconciled Tournament module overview before adding
   it as a negative-loadout regression fixture. The existing retained Tournament
   details establish individual identities but not one canonical overview.
