@@ -22,20 +22,77 @@ and actionable work lives in
   active battle, and no Surrender, preset selection, equipment change, or
   Home repair occurred.
 - **Cause:** The generic session route assumed every profile had Perks, and the
-  historical Guild coordinate actually addressed the Tournament Heat flame
-  control. The in-battle Guild shield is at `(1015, 694)`.
+  historical Guild coordinate addressed whichever control occupied that grid
+  cell rather than proving the Guild button was visible.
+- **Recurrence:** Later on 2026-07-18, the Tournament Trophy control shifted
+  Guild from the no-Trophy location `(910, 589)` to `(1015, 694)`. The interim
+  fixed coordinate happened to work only for the Trophy layout and exposed the
+  same missing action-authority boundary.
 - **Resolution:** Tournament profiles explicitly omit Perks. Tournament Heat
-  now has a dedicated semantic state and visible close control, cleanup knows
-  how to restore the battle from it, and `navigation.menu_guild` points to the
-  observed Guild shield.
+  has a dedicated semantic state and visible close control, and cleanup knows
+  how to restore the battle from it. Daily Missions, Modules, Event, Guild,
+  Event Bots, and Guild Members/Guardian navigation now require exact visible
+  button templates and tap the match itself. The Guild template searches both
+  layouts and resolves the actual location on each frame.
 - **Live validation:** The corrected route opened Cards, Ultimate Weapons,
   Modules, Bots, and Guardians in-battle, used Home only for Workshop, passed
   every Tournament requirement, and resumed the same active battle.
 - **Regression:** `test/test_gc_preflight_navigation.py` covers profiles
-  without Perks and the in-battle section route;
-  `test/test_mission_reward_handler.py` fixes the Guild coordinate; and
-  `test/test_ui_state_coverage.py` covers Tournament Heat detection.
-- **Fixed by:** `4f2ee00`.
+  without Perks and proves side-menu/tabs use visible taps;
+  `test/test_mission_reward_handler.py` matches Guild at both no-Trophy and
+  Trophy positions; and `test/test_ui_state_coverage.py` covers Tournament
+  Heat detection.
+- **Fixed by:** `4f2ee00` for the initial Tournament route and `592acad` for
+  the layout-independent visible action boundary.
+
+### Tournament observer continuously ran the floating-gem tapper
+
+- **Observed:** 2026-07-18 during the first passive Tournament observer run.
+- **Symptom:** `logs/actions.log` showed a new 20-second blind floating-gem
+  sequence starting immediately after each previous sequence ended, even when
+  no ad gem had just been collected.
+- **Safety response:** The observer owner was stopped cleanly before the
+  natural Tournament end. The bounded tapper stopped with it, and no replacement
+  process was launched until the continuous authority was removed.
+- **Cause:** The generated Tournament policy named `floating_gem` as an enabled
+  handler, and the app interpreted that opt-in as authority to restart a
+  background tapper whenever its prior 20-second run ended.
+- **Resolution:** Tournament enables only `ad_gem` and terminal-result handling.
+  The app may suspend/resume an already running bounded sweep across a control
+  pause, but only the ad-gem handler can start a new sweep.
+- **Regression:** `test/test_tournament_observer.py` proves a running
+  Tournament frame does not start the tapper and retains the existing visible
+  ad-gem behavior.
+- **Fixed by:** `592acad`.
+
+### Natural Tournament completion was not detected or tracked
+
+- **Observed:** 2026-07-18 at the preserved natural end of a Tier 17+
+  Tournament.
+- **Symptom:** The visible `TOURNAMENT STATS` dialog was classified `UNKNOWN`.
+  The normal `GAME_OVER` handler was not applicable because it expects Perks,
+  standard Game Stats fields, and Retry/Home controls, while Tournament offers
+  `MORE STATS` and `OK`. The copied detail report also used the legitimate tier
+  value `17+`, which the shared parser initially flagged as unparsed.
+- **Safety response:** Automation was stopped and control set to `WAIT`. The
+  summary was retained; only template-matched `MORE STATS`, `COPY`, and `CLOSE`
+  controls were exercised. `OK` was not tapped.
+- **Cause:** State definitions had only the normal Game Stats terminal
+  indicator, no Tournament result schema/handler existed, and structured
+  Round Stats accepted ordinary numeric tiers but not a minimum tier suffix.
+- **Resolution:** `TOURNAMENT_RESULTS` is a distinct terminal lifecycle state.
+  Its handler persists summary OCR plus the exact copied Round Stats report,
+  verifies summary/detailed wave identity, restores the summary, remains in
+  `WAIT`, and suppresses recent matching valid duplicates. Numeric values such
+  as `17+` parse as `minimum_integer` without weakening other numeric checks.
+- **Live validation:** The preserved result produced a valid 144-row record
+  with 16 sections and matching summary/detailed wave evidence, then restored
+  the Tournament Stats dialog without dismissing it.
+- **Regression:** `test/test_tournament_results.py` covers state separation,
+  summary OCR, visible controls, persistence, identity, and duplicate
+  suppression; `test/test_battle_stats.py` covers `17+`; and
+  `test/test_run_initialization.py` covers the Tournament lifecycle boundary.
+- **Fixed by:** `592acad`.
 
 ### Generic close template did not recognize the Modules detail panel
 

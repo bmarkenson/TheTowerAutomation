@@ -71,18 +71,32 @@ resumable Exit Battle → Go Home path. The route never selects or equips a
 setting and must verify that Resume returns to the same Tournament.
 
 After one conclusive validation attempt, the Tournament runtime policy grants
-action authority only to ad-gem collection, the floating-gem tapper, and the
-natural Game Over handler. A configuration mismatch is retained as session
-evidence but cannot request repair or block result capture. The profile does
-not buy upgrades, Surrender, auto-return Home, or start another battle. Game
-Over records receive the resolved run configuration and validation evidence,
-then remain in `WAIT` for operator direction.
+action authority only to ad-gem collection and terminal-result handling. An ad
+gem starts the same bounded floating-gem sweep used by normal battles; the
+Tournament policy does not run an independent or continuous floating-gem
+handler. A configuration mismatch is retained as session evidence but cannot
+request repair or block result capture. The profile does not buy upgrades,
+Surrender, auto-return Home, or start another battle.
+
+In-battle side-menu destinations and Event/Guild tabs require visible template
+matches and tap the matched bounding box. Their static coordinates are not
+action authority; this is required because the Tournament Trophy control moves
+the Guild button to a different grid cell.
+
+Natural Tournament completion is the distinct `TOURNAMENT_RESULTS` terminal
+state. Its handler OCRs league, wave, rank, death source, and the displayed coin
+split; opens `MORE STATS`, copies the exact Round Stats report, and restores the
+summary using only visible matched controls. It writes JSON and Markdown under
+`logs/tournaments`, skips a recent matching valid record after process restart,
+and deliberately has no authority to press the terminal `OK` button. The
+resolved run configuration and validation evidence are included in the record,
+and control remains in `WAIT` for operator direction.
 
 ## State and battle lifecycle
 
 - Visible navigation and battle lifecycle are separate. Home
-  `RESUME_BATTLE` preserves the current battle identity; `GAME_OVER` or a
-  verified Home `NEW_BATTLE` ends it.
+  `RESUME_BATTLE` preserves the current battle identity; `GAME_OVER`,
+  `TOURNAMENT_RESULTS`, or a verified Home `NEW_BATTLE` ends it.
 - Lifecycle and guarded Home actions share one Home classifier. A handler must
   not infer a new run independently from navigation alone.
 - Transient `UNKNOWN` observations preserve an owned, incomplete startup gate.

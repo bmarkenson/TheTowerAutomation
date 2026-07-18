@@ -348,20 +348,33 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - The initial route exposed the current `Tournament Heat` title as a missing
   `BATTLE_HEAT` variant. Added its dedicated state template and visible close
   control, and made guarded cleanup recognize and close that dialog.
-- The optimized in-battle route then exposed the historical
-  `navigation.menu_guild` coordinate as the Tournament Heat control. Corrected
-  it to the observed Guild shield and retained the clickmap regression.
+- The optimized in-battle route then exposed a static
+  `navigation.menu_guild` coordinate as the Tournament Heat control. A later
+  Trophy-layout recurrence proved that no single coordinate is authoritative:
+  all in-battle side-menu destinations plus Event/Guild tabs now require
+  visible template matches and tap their observed bounding boxes.
 - Added a generated passive Tournament strategy. It attempts validation once,
   records conclusive mismatch evidence without requesting repair, permits only
-  ad gems, floating gems, and natural Game Over handling, persists Game Over
-  `WAIT`, and suppresses coin-display, recovery, Home, and mission actions. The
-  normal battle record receives the resolved Tournament configuration and
-  session-preflight evidence.
+  ad gems and terminal-result handling, persists terminal `WAIT`, and
+  suppresses coin-display, recovery, Home, and mission actions. Floating-gem
+  collection remains the normal bounded sweep started by an ad-gem collection;
+  it is not a continuous Tournament handler.
 - Live validation passed every configured requirement on the active Tier 17+
   Tournament. Cards, Ultimate Weapons, Modules, Bots, and Guardians remained
   in-battle; only Workshop used the resumable Home route. The observer returned
   to the same battle without Surrender or configuration changes, collected an
   ad gem, and completed a later status interval with no non-gem action.
+- Added the distinct `TOURNAMENT_RESULTS` state and a non-dismissing result
+  handler. The live natural result was recorded as a valid 144-row exact
+  Round Stats report with summary/detailed wave agreement, then restored to
+  Tournament Stats and left in `WAIT`; `OK` was never tapped. Tournament tier
+  values such as `17+` are now structured minimum integers. Recent matching
+  valid records suppress duplicate capture after restart.
+- Regression coverage is in `test/test_tournament_results.py`,
+  `test/test_tournament_observer.py`, `test/test_mission_reward_handler.py`,
+  `test/test_gc_preflight_navigation.py`, and `test/test_battle_stats.py`.
+  The implementation fix is `592acad`; the focused suite passed 73 tests, the
+  full suite passed 325 tests, and clickmap integrity reported no errors.
 
 ---
 
