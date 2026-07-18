@@ -111,7 +111,10 @@ def test_live_farm_cards_fixture_identifies_active_farm_preset():
     assert point == (118, 420)
     assert confidence >= 0.99
     assert detection["state"] == "CARDS"
-    assert detection["secondary_states"] == ["CARDS_FARM_SLOT"]
+    assert detection["secondary_states"] == [
+        "CARDS_FARM_SLOT",
+        "CARDS_TOURNAMENT_SLOT",
+    ]
     assert selection.selected
 
 
@@ -127,7 +130,10 @@ def test_inactive_farm_cards_slot_is_not_claimed_as_active():
     )
 
     assert detection["state"] == "CARDS"
-    assert detection["secondary_states"] == ["CARDS_FARM_SLOT"]
+    assert detection["secondary_states"] == [
+        "CARDS_FARM_SLOT",
+        "CARDS_TOURNAMENT_SLOT",
+    ]
     assert not selection.selected
     assert not evidence.valid
     assert evidence.cards.missing_secondary == ("CARDS_FARM_ACTIVE",)
@@ -187,6 +193,7 @@ def test_inactive_farm_bot_slot_is_not_claimed_as_active():
     assert detection["secondary_states"] == [
         "EVENT_BOTS_SCREEN",
         "BOTS_FARM_SLOT",
+        "BOTS_AMPLIFY_SLOT",
     ]
     assert not selection.selected
     assert not evidence.valid
@@ -270,7 +277,10 @@ def test_live_workshop_fixture_identifies_farm_and_selected_border():
     selection = measure_preset_slot_selection(screen, FARM_PRESET_SLOT)
 
     assert detection["state"] == "WORKSHOP"
-    assert detection["secondary_states"] == ["WORKSHOP_FARM_SLOT"]
+    assert detection["secondary_states"] == [
+        "WORKSHOP_FARM_SLOT",
+        "WORKSHOP_TOURNEY_SLOT",
+    ]
     assert selection.valid_region
     assert selection.selected
     assert selection.green_pixels >= 1000

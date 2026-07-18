@@ -1139,6 +1139,58 @@
       "roles": [
         "indicator"
       ]
+    },
+    "cards:tournament_slot": {
+      "match_template": "indicators/cards:tournament_slot.png",
+      "match_region": {
+        "x": 212,
+        "y": 350,
+        "w": 230,
+        "h": 127
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "workshop:tourney_slot": {
+      "match_template": "indicators/workshop:tourney_slot.png",
+      "match_region": {
+        "x": 212,
+        "y": 185,
+        "w": 230,
+        "h": 98
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "bots:amplify_slot": {
+      "match_template": "indicators/bots:amplify_slot.png",
+      "match_region": {
+        "x": 700,
+        "y": 480,
+        "w": 380,
+        "h": 130
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "tournament_heat": {
+      "match_template": "indicators/tournament_heat.png",
+      "match_region": {
+        "x": 240,
+        "y": 100,
+        "w": 680,
+        "h": 150
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
     }
   },
   "overlays": {
@@ -1521,6 +1573,16 @@
         "y": 174
       }
     },
+    "menu_modules": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 1015,
+        "y": 380
+      }
+    },
     "menu_event": {
       "roles": [
         "navigation"
@@ -1537,8 +1599,8 @@
       ],
       "tap": {
         "type": "tap",
-        "x": 910,
-        "y": 589
+        "x": 1015,
+        "y": 694
       }
     },
     "guild:members_tab": {
@@ -2256,6 +2318,19 @@
         "y": 90,
         "w": 150,
         "h": 150
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
+    "close:tournament_heat": {
+      "match_template": "buttons/close:tournament_heat.png",
+      "match_region": {
+        "x": 900,
+        "y": 80,
+        "w": 180,
+        "h": 180
       },
       "match_threshold": 0.9,
       "roles": [

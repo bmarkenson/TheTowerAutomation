@@ -57,6 +57,27 @@ exposes the plan's resolved
 the versioned battle JSON. Runtime code does not inherit configuration or
 branch on a Farm strategy name.
 
+## Tournament observer profile
+
+`Tournament` is a passive, single-battle observer profile. Its generated plan
+owns the Tournament Cards, Tourney Workshop, Amplify Bots, Attack/Ally/Scout
+Guardians, Tournament/Milestone modules, all nine Ultimate Weapons, and
+Spotlight missiles. Tournament battles have no Perks, so Perks are not part of
+this contract.
+
+The read-only route inspects Cards, Ultimate Weapons, Modules, Bots, and
+Guardians from the active battle. Workshop is the only check that takes the
+resumable Exit Battle → Go Home path. The route never selects or equips a
+setting and must verify that Resume returns to the same Tournament.
+
+After one conclusive validation attempt, the Tournament runtime policy grants
+action authority only to ad-gem collection, the floating-gem tapper, and the
+natural Game Over handler. A configuration mismatch is retained as session
+evidence but cannot request repair or block result capture. The profile does
+not buy upgrades, Surrender, auto-return Home, or start another battle. Game
+Over records receive the resolved run configuration and validation evidence,
+then remain in `WAIT` for operator direction.
+
 ## State and battle lifecycle
 
 - Visible navigation and battle lifecycle are separate. Home

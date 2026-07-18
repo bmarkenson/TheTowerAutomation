@@ -14,6 +14,7 @@ from core.state_detector import detect_state_and_overlays
 from core.workshop_preset import (
     BOTS_FARM_PRESET_SLOT,
     CARDS_FARM_PRESET_SLOT,
+    FARM_PRESET_SLOT,
     PresetSlotSelection,
     measure_preset_slot_selection,
 )
@@ -28,6 +29,9 @@ class GcSectionSpec:
     name: str
     expected_state: str
     required_secondary: frozenset[str]
+    selection_region: Optional[tuple[int, int, int, int]] = None
+    slot_secondary: Optional[str] = None
+    selected_secondary: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -89,6 +93,7 @@ class GcSessionPreflightEvidence:
     configuration: GcPreflightEvidence
     module_mode: str
     modules: Optional[GcModuleLoadoutEvidence]
+    auto_pick_perks_required: bool
     auto_pick_perks: AutoPickPerksEvidence
     ultimate_weapons: UltimateWeaponEvidence
 
@@ -99,11 +104,15 @@ class GcSessionPreflightEvidence:
         )
 
     @property
+    def auto_pick_perks_valid(self) -> bool:
+        return not self.auto_pick_perks_required or self.auto_pick_perks.enabled
+
+    @property
     def valid(self) -> bool:
         return (
             self.configuration.valid
             and self.modules_blocking_valid
-            and self.auto_pick_perks.enabled
+            and self.auto_pick_perks_valid
             and self.ultimate_weapons.valid
         )
 
@@ -138,6 +147,11 @@ class GcSessionPreflightEvidence:
                 matches_expected=self.modules.valid,
                 blocking_valid=self.modules_blocking_valid,
             )
+        payload["auto_pick_perks"].update(
+            required=self.auto_pick_perks_required,
+            checked=self.auto_pick_perks_required,
+            valid=self.auto_pick_perks_valid,
+        )
         payload["ultimate_weapons"]["valid"] = self.ultimate_weapons.valid
         payload["valid"] = self.valid
         return payload
@@ -148,6 +162,9 @@ GC_SECTION_SPECS = {
         name="cards",
         expected_state="CARDS",
         required_secondary=frozenset({"CARDS_FARM_ACTIVE", "CARDS_FARM_SLOT"}),
+        selection_region=CARDS_FARM_PRESET_SLOT,
+        slot_secondary="CARDS_FARM_SLOT",
+        selected_secondary="CARDS_FARM_ACTIVE",
     ),
     "workshop": GcSectionSpec(
         name="workshop",
@@ -155,6 +172,9 @@ GC_SECTION_SPECS = {
         required_secondary=frozenset(
             {"WORKSHOP_FARM_SLOT", "WORKSHOP_FARM_ACTIVE"}
         ),
+        selection_region=FARM_PRESET_SLOT,
+        slot_secondary="WORKSHOP_FARM_SLOT",
+        selected_secondary="WORKSHOP_FARM_ACTIVE",
     ),
     "bots": GcSectionSpec(
         name="bots",
@@ -162,6 +182,9 @@ GC_SECTION_SPECS = {
         required_secondary=frozenset(
             {"EVENT_BOTS_SCREEN", "BOTS_FARM_ACTIVE", "BOTS_FARM_SLOT"}
         ),
+        selection_region=BOTS_FARM_PRESET_SLOT,
+        slot_secondary="BOTS_FARM_SLOT",
+        selected_secondary="BOTS_FARM_ACTIVE",
     ),
     "guardians": GcSectionSpec(
         name="guardians",
@@ -194,6 +217,27 @@ def evaluate_gc_section(spec: GcSectionSpec, detection: Detection) -> GcSectionR
     )
 
 
+def _detect_section_selection(
+    screen,
+    spec: GcSectionSpec,
+    detector: Detector,
+) -> tuple[dict[str, Any], Optional[PresetSlotSelection]]:
+    detection = dict(detector(screen))
+    if spec.selection_region is None:
+        return detection, None
+    selection = measure_preset_slot_selection(screen, spec.selection_region)
+    secondary = set(detection.get("secondary_states") or ())
+    if (
+        detection.get("state") == spec.expected_state
+        and spec.slot_secondary in secondary
+        and selection.selected
+        and spec.selected_secondary
+    ):
+        secondary.add(spec.selected_secondary)
+    detection["secondary_states"] = sorted(secondary)
+    return detection, selection
+
+
 def validate_gc_preflight_screens(
     *,
     cards_screen,
@@ -201,60 +245,55 @@ def validate_gc_preflight_screens(
     bots_screen,
     guardians_screen,
     detector: Detector = detect_state_and_overlays,
+    section_specs: Mapping[str, GcSectionSpec] = GC_SECTION_SPECS,
 ) -> GcPreflightEvidence:
-    """Validate captured GC preflight sections without sending input."""
+    """Validate captured profile preflight sections without sending input."""
 
-    cards_detection = dict(detector(cards_screen))
-    cards_selection = measure_preset_slot_selection(
+    required_names = {"cards", "workshop", "bots", "guardians"}
+    missing_names = sorted(required_names - set(section_specs))
+    if missing_names:
+        raise ValueError(
+            "preflight section specs are missing: " + ", ".join(missing_names)
+        )
+
+    cards_detection, cards_selection = _detect_section_selection(
         cards_screen,
-        CARDS_FARM_PRESET_SLOT,
+        section_specs["cards"],
+        detector,
     )
-    cards_secondary = set(cards_detection.get("secondary_states") or ())
-    if (
-        cards_detection.get("state") == "CARDS"
-        and "CARDS_FARM_SLOT" in cards_secondary
-        and cards_selection.selected
-    ):
-        cards_secondary.add("CARDS_FARM_ACTIVE")
-    cards_detection["secondary_states"] = sorted(cards_secondary)
-
-    workshop_detection = dict(detector(workshop_screen))
-    workshop_selection = measure_preset_slot_selection(workshop_screen)
-    workshop_secondary = set(workshop_detection.get("secondary_states") or ())
-    if (
-        workshop_detection.get("state") == "WORKSHOP"
-        and "WORKSHOP_FARM_SLOT" in workshop_secondary
-        and workshop_selection.selected
-    ):
-        workshop_secondary.add("WORKSHOP_FARM_ACTIVE")
-    workshop_detection["secondary_states"] = sorted(workshop_secondary)
-
-    bots_detection = dict(detector(bots_screen))
-    bots_selection = measure_preset_slot_selection(
+    workshop_detection, workshop_selection = _detect_section_selection(
+        workshop_screen,
+        section_specs["workshop"],
+        detector,
+    )
+    bots_detection, bots_selection = _detect_section_selection(
         bots_screen,
-        BOTS_FARM_PRESET_SLOT,
+        section_specs["bots"],
+        detector,
     )
-    bots_secondary = set(bots_detection.get("secondary_states") or ())
     if (
-        bots_detection.get("state") == "EVENT"
-        and "EVENT_BOTS_SCREEN" in bots_secondary
-        and "BOTS_FARM_SLOT" in bots_secondary
-        and bots_selection.selected
+        cards_selection is None
+        or workshop_selection is None
+        or bots_selection is None
     ):
-        bots_secondary.add("BOTS_FARM_ACTIVE")
-    bots_detection["secondary_states"] = sorted(bots_secondary)
+        raise ValueError("cards, workshop, and bots specs require selection regions")
+    guardians_detection, _guardians_selection = _detect_section_selection(
+        guardians_screen,
+        section_specs["guardians"],
+        detector,
+    )
 
     return GcPreflightEvidence(
-        cards=evaluate_gc_section(GC_SECTION_SPECS["cards"], cards_detection),
+        cards=evaluate_gc_section(section_specs["cards"], cards_detection),
         cards_selection=cards_selection,
         workshop=evaluate_gc_section(
-            GC_SECTION_SPECS["workshop"], workshop_detection
+            section_specs["workshop"], workshop_detection
         ),
         workshop_selection=workshop_selection,
-        bots=evaluate_gc_section(GC_SECTION_SPECS["bots"], bots_detection),
+        bots=evaluate_gc_section(section_specs["bots"], bots_detection),
         bots_selection=bots_selection,
         guardians=evaluate_gc_section(
-            GC_SECTION_SPECS["guardians"], detector(guardians_screen)
+            section_specs["guardians"], guardians_detection
         ),
     )
 
@@ -347,8 +386,10 @@ def validate_gc_session_preflight_screens(
     ultimate_requirements: Mapping[str, Mapping[str, Any]],
     ultimate_observations: Mapping[str, Mapping[str, Any]],
     detector: Detector = detect_state_and_overlays,
+    section_specs: Mapping[str, GcSectionSpec] = GC_SECTION_SPECS,
+    auto_pick_perks_required: bool = True,
 ) -> GcSessionPreflightEvidence:
-    """Validate every currently implemented read-only GC session requirement."""
+    """Validate every currently implemented read-only session requirement."""
 
     configuration = validate_gc_preflight_screens(
         cards_screen=cards_screen,
@@ -356,10 +397,12 @@ def validate_gc_session_preflight_screens(
         bots_screen=bots_screen,
         guardians_screen=guardians_screen,
         detector=detector,
+        section_specs=section_specs,
     )
-    perks_detection = detector(perks_screen)
     auto_pick = measure_auto_pick_perks(perks_screen)
-    if perks_detection.get("state") != "PERKS":
+    if auto_pick_perks_required and (
+        perks_screen is None or detector(perks_screen).get("state") != "PERKS"
+    ):
         auto_pick = AutoPickPerksEvidence(
             region=auto_pick.region,
             valid_region=auto_pick.valid_region,
@@ -382,6 +425,7 @@ def validate_gc_session_preflight_screens(
         configuration=configuration,
         module_mode=module_mode,
         modules=modules,
+        auto_pick_perks_required=auto_pick_perks_required,
         auto_pick_perks=auto_pick,
         ultimate_weapons=evaluate_ultimate_weapon_state(
             ultimate_requirements,

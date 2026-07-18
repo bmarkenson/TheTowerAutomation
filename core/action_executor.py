@@ -41,6 +41,9 @@ from core.gc_preflight_navigation import (
     GcPreflightNavigationStatus,
     run_read_only_gc_preflight,
 )
+from core.tournament_preflight import (
+    validate_tournament_session_preflight_screens,
+)
 from automation.missions.base import MissionContext
 from handlers.ad_gem_handler import (
     is_blind_gem_tapper_active,
@@ -264,10 +267,10 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                     f"observed={observation.observed} matches={observation.matches}",
                     "INFO" if observation.observed else "WARN",
                 )
-            elif t == "gc_session_preflight":
+            elif t in {"gc_session_preflight", "session_preflight"}:
                 if is_strategy_action and last_state not in allowed_states:
                     log_mission(
-                        f"[EXEC] Skip gc_session_preflight while state={last_state}",
+                        f"[EXEC] Skip {t} while state={last_state}",
                         "DEBUG",
                     )
                     continue
@@ -278,10 +281,23 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                         "ERROR",
                     )
                     continue
+                validator = str(act.get("validator") or "farm").strip().lower()
+                if validator not in {"farm", "tournament"}:
+                    log_mission(
+                        f"[SESSION_PREFLIGHT] Unsupported validator {validator!r}",
+                        "ERROR",
+                    )
+                    continue
                 if mv is not None:
                     mv["gc_session_preflight_attempted"] = True
                     mv["gc_session_preflight_blocked"] = False
-                result = run_read_only_gc_preflight(requirements)
+                if validator == "tournament":
+                    result = run_read_only_gc_preflight(
+                        requirements,
+                        validate_fn=validate_tournament_session_preflight_screens,
+                    )
+                else:
+                    result = run_read_only_gc_preflight(requirements)
                 evidence_payload = (
                     result.evidence.as_dict()
                     if result.evidence is not None
@@ -303,7 +319,8 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                     )
                 elif result.status is GcPreflightNavigationStatus.MISMATCH:
                     repairable = bool(
-                        result.evidence is not None
+                        act.get("allow_repair", True)
+                        and result.evidence is not None
                         and getattr(
                             result.evidence,
                             "requires_no_battle_repair",

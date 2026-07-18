@@ -120,6 +120,9 @@ class YamlStrategy(BaseStrategy):
         self._run_configuration: Dict[str, Any] = copy.deepcopy(
             self.config.get("run_configuration") or {}
         )
+        self._runtime_policy: Dict[str, Any] = copy.deepcopy(
+            self.config.get("runtime_policy") or {}
+        )
 
     @classmethod
     def from_file(cls, path: str) -> "YamlStrategy":
@@ -164,6 +167,9 @@ class YamlStrategy(BaseStrategy):
 
     def run_configuration(self) -> Dict[str, Any]:
         return copy.deepcopy(self._run_configuration)
+
+    def runtime_policy(self) -> Dict[str, Any]:
+        return copy.deepcopy(self._runtime_policy)
 
     # ---------------------------- conditions ---------------------------------
     def _floating_visible(self, screen, name: str) -> bool:

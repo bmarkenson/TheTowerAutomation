@@ -125,6 +125,26 @@ class AutomationSupervisor:
 
         self._auto_resume_if_needed()
 
+    def persist_mode(self, mode: str) -> bool:
+        """Persist and apply a runtime-owned terminal mode transition."""
+
+        normalized = str(mode).strip().upper()
+        if normalized not in _ALLOWED_MODES:
+            raise ValueError(
+                f"Unsupported automation mode {mode!r}; "
+                f"expected one of {sorted(_ALLOWED_MODES)}"
+            )
+        directives = self._load_control_directive()
+        directives["mode"] = normalized
+        directives["updated_at"] = datetime.now().astimezone().isoformat(
+            timespec="seconds"
+        )
+        if not self._write_control_directive(directives):
+            return False
+        self._last_applied_mode = None
+        self._apply_mode(normalized)
+        return True
+
     def format_state(self, ui_state: str) -> str:
         return f"{ui_state}/PAUSED" if self.is_paused else ui_state
 

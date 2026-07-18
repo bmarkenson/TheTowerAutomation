@@ -112,6 +112,46 @@ explicit percentage; Tier 18 enforces `1E-22%` during every new-run
 initialization after EHLS/EALS. The fully resolved configuration is embedded in
 the generated plan and copied into each battle's JSON record.
 
+### Validating Tournament setup
+
+The Tournament validator is a read-only live test for an already active
+Tournament. It verifies Tournament Cards, Tourney Workshop, Amplify Bots,
+Attack/Ally/Scout Guardians, the Tournament module loadout, all nine Ultimate
+Weapons, and Spotlight missiles. Tournaments have no Perks, so the route does
+not open or validate the Perks screen.
+
+Pause persistent automation intent before running the test, then restore the
+previous control state after it returns to the same battle:
+
+```bash
+.venv/bin/python tools/automation_ctl.py pause
+.venv/bin/python tools/validate_tournament_preflight.py
+.venv/bin/python tools/automation_ctl.py resume
+```
+
+The validator refuses to navigate unless the control file declares `PAUSED`
+and a fresh complete screenshot proves `RUNNING/TOURNAMENT`. It never selects a
+preset, equips a module, or Surrenders. Cards, Ultimate Weapons, Modules, Bots,
+and Guardians are inspected from the active battle. Only Workshop uses the
+guarded Exit Battle → Go Home route; the validator then requires verified
+Resume evidence and exits nonzero on any mismatch or incomplete evidence. Pass
+`--capture-only --output-dir PATH` to retain the same guarded screens without
+evaluating them.
+
+To keep observing that Tournament after the check, start the passive profile:
+
+```bash
+.venv/bin/python main.py --adb-port 5555 --strategy tournament --no-restart
+```
+
+The Tournament profile attempts the same read-only validation once, records a
+conclusive pass or mismatch as session evidence, and then limits runtime action
+authority to ad gems, floating gems, and the natural Game Over handler. It does
+not buy upgrades, repair configuration, Surrender, auto-return Home, or start a
+new battle. At Game Over it captures the normal structured battle JSON and
+Markdown records with the resolved Tournament configuration and preflight
+evidence, then waits for operator direction.
+
 ## Battle statistics
 
 At Game Over, the normal handler copies the complete **More Stats** battle

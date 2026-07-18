@@ -59,5 +59,10 @@ class BaseStrategy:
 
         return {}
 
+    def runtime_policy(self) -> Mapping[str, Any]:
+        """Return optional handler restrictions for this strategy."""
+
+        return {}
+
     def on_game_over(self, ctx: MissionContext) -> None:
         """Optional hook when GAME_OVER is handled."""

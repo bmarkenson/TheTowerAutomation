@@ -142,7 +142,7 @@ def test_reward_reveal_uses_shared_skip_control():
 def test_menu_reward_navigation_coordinates_are_mapped():
     assert get_click("navigation.menu_daily_missions") == (910, 174)
     assert get_click("navigation.menu_event") == (910, 484)
-    assert get_click("navigation.menu_guild") == (910, 589)
+    assert get_click("navigation.menu_guild") == (1015, 694)
     assert get_click("navigation.guild:members_tab") == (156, 313)
 
 

@@ -135,3 +135,21 @@ def test_default_runtime_configuration_has_no_global_pause_expiry_options():
     assert not hasattr(config, "auto_resume_secs")
     with pytest.raises(SystemExit):
         parse_args(["--auto-resume-minutes", "15"])
+
+
+def test_runtime_owned_mode_transition_is_persisted_before_waiting(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    control_file.write_text(
+        json.dumps({"state": "RUNNING", "mode": "RETRY"}),
+        encoding="utf-8",
+    )
+    supervisor = _supervisor(control_file)
+    supervisor.apply_control()
+
+    assert supervisor.persist_mode("WAIT")
+
+    saved = json.loads(control_file.read_text(encoding="utf-8"))
+    assert saved["state"] == "RUNNING"
+    assert saved["mode"] == "WAIT"
+    assert saved["updated_at"]
+    assert AUTOMATION.mode.value == "WAIT"

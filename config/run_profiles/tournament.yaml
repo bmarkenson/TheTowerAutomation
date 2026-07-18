@@ -1,0 +1,35 @@
+schema_version: 1
+name: tournament
+
+invariants:
+  cards_deck: Tournament
+  workshop_preset: Tourney
+  bots_preset: Amplify
+  guardian_chips:
+    - Attack
+    - Ally
+    - Scout
+  auto_pick_perks: false
+  ultimate_weapons:
+    Chain Lightning:
+      primary: on
+    Smart Missiles:
+      primary: on
+    Death Wave:
+      primary: on
+    Chrono Field:
+      primary: on
+    Inner Land Mines:
+      primary: on
+    Golden Tower:
+      primary: on
+    Poison Swamp:
+      primary: on
+    Black Hole:
+      primary: on
+    Spotlight:
+      primary: on
+      missiles: on
+
+loadout:
+  modules: tournament_standard

@@ -9,3 +9,12 @@ presets:
     armor_primary: Orbital Augment
     core_primary: Multiverse Nexus
     core_assist: Dimension Core
+  tournament_standard:
+    cannon_assist: Being Annihilator
+    cannon_primary: Amplifying Strike
+    generator_primary: Project Funding
+    generator_assist: Singularity Harness
+    armor_assist: Anti-Cube Portal
+    armor_primary: Orbital Augment
+    core_primary: Dimension Core
+    core_assist: Harmony Conductor

@@ -1,0 +1,7 @@
+meta:
+  name: tournament
+  family: tournament
+  version: 1
+
+builder: tournament
+run_profile: tournament

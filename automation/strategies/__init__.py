@@ -7,7 +7,7 @@ from .base import BaseStrategy
 from .yaml_strategy import YamlStrategy
 
 UNKNOWN_STRATEGY_MSG = (
-    "Unknown strategy; use farm, farm_t18, farm_t19_experiment, none, "
+    "Unknown strategy; use farm, farm_t18, farm_t19_experiment, tournament, none, "
     "or a legacy gc alias, or provide --strategy-config with a YAML plan."
 )
 
@@ -15,6 +15,7 @@ _BUNDLED_STRATEGY_PROFILES = {
     "farm": "farm_t18",
     "farm_t18": "farm_t18",
     "farm_t19_experiment": "farm_t19_experiment",
+    "tournament": "tournament",
     # Compatibility names all resolve to an explicit generated profile.
     "gc": "farm_t18",
     "gc_farm_t18": "farm_t18",

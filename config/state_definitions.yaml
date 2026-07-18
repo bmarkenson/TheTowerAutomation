@@ -35,6 +35,11 @@ states:
   match_keys:
   - indicators.workshop:farm_slot
 
+- name: WORKSHOP_TOURNEY_SLOT
+  type: secondary
+  match_keys:
+  - indicators.workshop:tourney_slot
+
 - name: GAME_OVER
   type: primary
   match_keys:
@@ -86,6 +91,11 @@ states:
   match_keys:
   - indicators.cards:farm_slot
 
+- name: CARDS_TOURNAMENT_SLOT
+  type: secondary
+  match_keys:
+  - indicators.cards:tournament_slot
+
 - name: LAB
   type: primary
   match_keys:
@@ -120,6 +130,11 @@ states:
   match_keys:
   - indicators.bots:farm_slot
 
+- name: BOTS_AMPLIFY_SLOT
+  type: secondary
+  match_keys:
+  - indicators.bots:amplify_slot
+
 - name: DISTANCE_ADJUSTER
   type: primary
   match_keys:
@@ -140,6 +155,7 @@ states:
   match_keys:
   - indicators.battle_heat
   - indicators.battle_overheat
+  - indicators.tournament_heat
 
 - name: BATTLE_HISTORY
   type: primary
@@ -203,6 +219,16 @@ states:
   type: secondary
   match_keys:
   - indicators.guardian:scout_equipped
+
+- name: GUARDIAN_ATTACK_EQUIPPED
+  type: secondary
+  match_keys:
+  - indicators.guardian:attack_equipped
+
+- name: GUARDIAN_ALLY_EQUIPPED
+  type: secondary
+  match_keys:
+  - indicators.guardian:ally_equipped
 
 - name: TOURNAMENT
   type: secondary

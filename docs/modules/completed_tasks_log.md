@@ -327,6 +327,42 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   then verified Farm restored by pixel evidence and returned to `NEW_BATTLE`
   Home. Automation remained in the operator's pre-existing paused state.
 
+### 2026-07-18 Tournament configuration validator
+
+- Added a compact Tournament contract and read-only live validator for Cards
+  `Tournament`, Workshop `Tourney`, Bots `Amplify`, Guardian
+  `Attack`/`Ally`/`Scout`, all nine Ultimate Weapons, Spotlight missiles, and
+  the eight-slot Tournament/Milestone module loadout. Perks are explicitly
+  excluded because Tournament battles do not have Perks.
+- Reused the shared profile-driven session evaluator and guarded navigation
+  route. The CLI requires persisted `PAUSED` control and fresh
+  `RUNNING/TOURNAMENT` evidence, never selects or equips anything, uses the
+  active battle for Cards, Ultimate Weapons, Modules, Bots, and Guardians, and
+  uses the verified Exit Battle → Go Home route only for Workshop. It resumes
+  only from authoritative Tournament evidence.
+- Added separate Tournament/Tourney/Amplify slot identities plus green-border
+  selection checks, Attack/Ally equipped states, a fresh name-reconciled
+  Tournament module overview, and positive/negative fixture coverage. Farm
+  fixtures prove that visible inactive Tournament labels do not satisfy the
+  Tournament contract.
+- The initial route exposed the current `Tournament Heat` title as a missing
+  `BATTLE_HEAT` variant. Added its dedicated state template and visible close
+  control, and made guarded cleanup recognize and close that dialog.
+- The optimized in-battle route then exposed the historical
+  `navigation.menu_guild` coordinate as the Tournament Heat control. Corrected
+  it to the observed Guild shield and retained the clickmap regression.
+- Added a generated passive Tournament strategy. It attempts validation once,
+  records conclusive mismatch evidence without requesting repair, permits only
+  ad gems, floating gems, and natural Game Over handling, persists Game Over
+  `WAIT`, and suppresses coin-display, recovery, Home, and mission actions. The
+  normal battle record receives the resolved Tournament configuration and
+  session-preflight evidence.
+- Live validation passed every configured requirement on the active Tier 17+
+  Tournament. Cards, Ultimate Weapons, Modules, Bots, and Guardians remained
+  in-battle; only Workshop used the resumable Home route. The observer returned
+  to the same battle without Surrender or configuration changes, collected an
+  ad gem, and completed a later status interval with no non-gem action.
+
 ---
 
 ## 📘 Documentation

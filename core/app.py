@@ -6,7 +6,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Dict, Any, Set, Tuple
+from typing import Optional, Dict, Any, Mapping, Set, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
@@ -37,7 +37,12 @@ from automation.missions.yaml_mission import YamlMission
 from automation.strategies import get_strategy
 from handlers.game_over_handler import handle_game_over
 from handlers.home_screen_handler import handle_home_screen
-from handlers.ad_gem_handler import handle_ad_gem, stop_blind_gem_tapper, start_blind_gem_tapper
+from handlers.ad_gem_handler import (
+    handle_ad_gem,
+    is_blind_gem_tapper_active,
+    start_blind_gem_tapper,
+    stop_blind_gem_tapper,
+)
 from handlers.daily_gem_handler import DailyGemResult, handle_daily_gem
 from handlers.dismiss_uw_detail import handle_upgrade_detail_popup
 from handlers.mission_reward_handler import MissionRewardResult, handle_mission_rewards
@@ -100,6 +105,34 @@ class App:
             Path(config.control_file).parent / "event_mission_tracker.json"
         )
         self._event_mission_tracker = EventMissionTracker(event_mission_state)
+
+    def _runtime_policy(self) -> Dict[str, Any]:
+        strategy = self._mission_mgr.strategy
+        if not strategy:
+            return {}
+        try:
+            policy = strategy.runtime_policy()
+        except Exception:
+            return {}
+        return dict(policy) if isinstance(policy, Mapping) else {}
+
+    def _handler_enabled(self, name: str) -> bool:
+        """Honor an optional strategy handler allowlist; legacy plans allow all."""
+
+        handlers = self._runtime_policy().get("handlers")
+        if handlers is None:
+            return True
+        if not isinstance(handlers, (list, tuple, set, frozenset)):
+            return False
+        return name in {str(handler).strip() for handler in handlers}
+
+    def _handler_explicitly_enabled(self, name: str) -> bool:
+        """Return true only when a restrictive plan names the handler."""
+
+        handlers = self._runtime_policy().get("handlers")
+        return isinstance(handlers, (list, tuple, set, frozenset)) and name in {
+            str(handler).strip() for handler in handlers
+        }
 
     def run(self) -> None:
         log("Starting main heartbeat loop.", level="INFO", console=True)
@@ -211,7 +244,7 @@ class App:
                     or session_preflight_pending
                 )
 
-                if not actions_blocked:
+                if not actions_blocked and self._handler_enabled("upgrade_detail"):
                     img, detection, overlay_cleared = self._resolve_upgrade_detail_overlay(
                         img,
                         detection,
@@ -269,28 +302,36 @@ class App:
                     overlays=overlays,
                     wave=wave_val,
                     wave_conf=wave_conf,
-                    allow_actions=not actions_blocked,
+                    allow_actions=(
+                        not actions_blocked
+                        and self._handler_enabled("coin_display")
+                    ),
                 )
-                self._emit_event_mission_warnings()
+                if self._handler_enabled("event_mission_warnings"):
+                    self._emit_event_mission_warnings()
 
-                if not actions_blocked:
+                if (
+                    not actions_blocked
+                    and self._handler_enabled("auto_return")
+                    and self._runtime_policy().get("auto_return", True) is not False
+                ):
                     self._supervisor.auto_return_check(img, new_state)
 
                 if new_state == "UNKNOWN":
                     update_unknown_state(True)
-                    if not actions_blocked:
+                    if (
+                        not actions_blocked
+                        and self._handler_enabled("unknown_recovery")
+                    ):
                         trigger_after = self._supervisor.auto_return_secs or 900
                         handle_unknown_state(img, trigger_after_s=trigger_after)
                 else:
                     update_unknown_state(False)
 
-                if new_state != "RUNNING" or actions_blocked:
-                    if stop_blind_gem_tapper():
-                        self._blind_tapper_suspended = True
-                else:
-                    if self._blind_tapper_suspended:
-                        start_blind_gem_tapper(duration=10, interval=1, blocking=False)
-                        self._blind_tapper_suspended = False
+                self._sync_floating_gem_tapper(
+                    state=new_state,
+                    actions_blocked=actions_blocked,
+                )
 
                 if not actions_blocked:
                     self._mission_mgr.tick(img, detection)
@@ -322,6 +363,26 @@ class App:
                 time.sleep(2)
                 return None
         return img
+
+    def _sync_floating_gem_tapper(
+        self,
+        *,
+        state: str,
+        actions_blocked: bool,
+    ) -> None:
+        """Run continuous blind floating-gem collection only for opted-in plans."""
+
+        if state != "RUNNING" or actions_blocked:
+            if stop_blind_gem_tapper():
+                self._blind_tapper_suspended = True
+            return
+        continuous = self._handler_explicitly_enabled("floating_gem")
+        if continuous and not is_blind_gem_tapper_active():
+            start_blind_gem_tapper(duration=20, interval=1, blocking=False)
+            self._blind_tapper_suspended = False
+        elif self._blind_tapper_suspended:
+            start_blind_gem_tapper(duration=10, interval=1, blocking=False)
+            self._blind_tapper_suspended = False
 
     def _attempt_session_preflight_repair(
         self,
@@ -370,18 +431,35 @@ class App:
         img: Frame,
     ) -> None:
         """Dispatch handlers for top-level UI states and overlay-driven events."""
-        if self._handle_daily_gem_if_due(new_state, overlays):
+        if (
+            self._handler_enabled("daily_gem")
+            and self._handle_daily_gem_if_due(new_state, overlays)
+        ):
             # The handler navigates through Store and may return to a different
             # screen. Do not act on the stale pre-handler detection this tick.
             return
-        if self._handle_mission_rewards_if_due(new_state, img):
+        if (
+            self._handler_enabled("mission_rewards")
+            and self._handle_mission_rewards_if_due(new_state, img)
+        ):
             # The handler traverses several panels and restores RUNNING. Avoid
             # dispatching against the frame captured before that navigation.
             return
 
-        if new_state == "GAME_OVER":
+        if new_state == "GAME_OVER" and self._handler_enabled("game_over"):
             log("Detected GAME_OVER. Executing handler.", "INFO", console=True)
             strategy = self._mission_mgr.strategy
+            if self._runtime_policy().get("game_over_mode") == "wait":
+                if not self._supervisor.persist_mode("WAIT"):
+                    # Preserve the safe in-memory behavior even if the control
+                    # file cannot be updated. A later readable directive may
+                    # still give the handler explicit operator direction.
+                    AUTOMATION.mode = ExecMode.WAIT
+                    log(
+                        "[CTRL] Could not persist Tournament Game Over WAIT; "
+                        "using in-memory WAIT",
+                        "WARN",
+                    )
             repair_in_progress = (
                 self._mission_mgr.session_preflight_repair_in_progress()
             )
@@ -397,6 +475,12 @@ class App:
                     "last_wave": self._last_wave_value,
                     "last_wave_confidence": self._last_wave_conf,
                     "coins_log_path": self._status_reporter.coins_log_path,
+                    "session_preflight_evidence": dict(
+                        self._mission_mgr.ctx.data.get("mission_vars", {}).get(
+                            "gc_session_preflight_evidence",
+                            {},
+                        )
+                    ),
                 },
             )
             self._mission_mgr.on_game_over()
@@ -404,7 +488,7 @@ class App:
             new_path = self._status_reporter.rotate_coins_log()
             if new_path:
                 log(f"[COINS] Started new coins log: {new_path}", "INFO")
-        elif new_state == "HOME_SCREEN":
+        elif new_state == "HOME_SCREEN" and self._handler_enabled("home"):
             log("Detected HOME_SCREEN. Executing handler.", "INFO")
             home_control = detect_home_battle_control(img).control
             requirements = self._mission_mgr.no_battle_setup_requirements()
@@ -424,7 +508,10 @@ class App:
             handle_home_screen(restart_enabled=self._auto_start_enabled)
             self._mission_mgr.on_home()
 
-        if "AD_GEMS_AVAILABLE" in overlays:
+        if (
+            "AD_GEMS_AVAILABLE" in overlays
+            and self._handler_enabled("ad_gem")
+        ):
             handle_ad_gem()
 
     def _handle_mission_rewards_if_due(self, new_state: str, img: Frame) -> bool:

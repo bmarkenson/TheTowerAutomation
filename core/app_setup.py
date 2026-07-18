@@ -97,7 +97,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default="farm",
         help=(
             "Runtime strategy: farm (Tier 18 default), farm_t18, "
-            "farm_t19_experiment, or none. Legacy gc names remain aliases. "
+            "farm_t19_experiment, tournament observer, or none. "
+            "Legacy gc names remain aliases. "
             "Use none for the regular "
             "handler loop with no strategy actions or startup gates; "
             "--strategy-config overrides this option"

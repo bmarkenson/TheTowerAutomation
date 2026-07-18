@@ -231,6 +231,68 @@ def _select_running_menu(
     )
 
 
+def _ensure_running_side_menu_open(
+    *,
+    capture_fn: Capture,
+    detector: Detector,
+    tap_visible_fn: Callable[..., bool],
+    sleep_fn: Callable[[float], None],
+) -> Frame:
+    """Open the in-run side menu only when fresh overlay evidence requires it."""
+
+    frame, detection = _capture_detection(capture_fn, detector)
+    if detection.get("state") != "RUNNING":
+        raise _NavigationFailure("side-menu guard lost RUNNING")
+    overlays = set(detection.get("overlays") or ())
+    if "MENU_OPEN" in overlays:
+        return frame
+    if "MENU_CLOSED" not in overlays:
+        raise _NavigationFailure(
+            "in-run menu was neither verified open nor verified closed"
+        )
+    _guarded_visible_tap(
+        "navigation.menu_open_button",
+        allowed_states={"RUNNING"},
+        capture_fn=capture_fn,
+        detector=detector,
+        tap_visible_fn=tap_visible_fn,
+        sleep_fn=sleep_fn,
+    )
+    return _wait_for(
+        state="RUNNING",
+        overlay="MENU_OPEN",
+        capture_fn=capture_fn,
+        detector=detector,
+        sleep_fn=sleep_fn,
+    )
+
+
+def _return_to_game_from_section(
+    *,
+    state: str,
+    capture_fn: Capture,
+    detector: Detector,
+    tap_visible_fn: Callable[..., bool],
+    sleep_fn: Callable[[float], None],
+) -> Frame:
+    """Use the visible in-run return strip and verify the battle view."""
+
+    _guarded_visible_tap(
+        "buttons.return_to_game",
+        allowed_states={state},
+        capture_fn=capture_fn,
+        detector=detector,
+        tap_visible_fn=tap_visible_fn,
+        sleep_fn=sleep_fn,
+    )
+    return _wait_for(
+        state="RUNNING",
+        capture_fn=capture_fn,
+        detector=detector,
+        sleep_fn=sleep_fn,
+    )
+
+
 def _verify_active_home(
     frame: Frame,
     detect_home_control_fn: HomeControlDetector,
@@ -284,6 +346,19 @@ def _return_to_running(
         state = str(detection.get("state") or "UNKNOWN")
         if state == "RUNNING":
             return
+        if state == "BATTLE_HEAT":
+            if tap_visible_fn(
+                "buttons.close:tournament_heat",
+                screenshot=frame,
+                retries=1,
+            ):
+                _wait_for(
+                    state="RUNNING",
+                    capture_fn=capture_fn,
+                    detector=detector,
+                    sleep_fn=sleep_fn,
+                )
+            return
         if state == "CARDS":
             if tap_visible_fn("buttons.return_to_game", screenshot=frame, retries=1):
                 _wait_for(
@@ -302,7 +377,20 @@ def _return_to_running(
                     sleep_fn=sleep_fn,
                 )
             return
-        if state in {"WORKSHOP", "EVENT", "GUILD"}:
+        if state in {"MODULES", "EVENT", "GUILD"}:
+            if tap_visible_fn(
+                "buttons.return_to_game",
+                screenshot=frame,
+                retries=1,
+            ):
+                _wait_for(
+                    state="RUNNING",
+                    capture_fn=capture_fn,
+                    detector=detector,
+                    sleep_fn=sleep_fn,
+                )
+                return
+        if state in {"WORKSHOP", "MODULES", "EVENT", "GUILD"}:
             if not safe_tap_fn(
                 "navigation.goto_home", require_visible=False, dispatch="now"
             ):
@@ -385,27 +473,12 @@ def run_read_only_gc_preflight(
             sleep_fn=sleep_fn,
         )
 
-        frame, detection = _capture_detection(capture_fn, detector)
-        overlays = set(detection.get("overlays") or ())
-        if "MENU_OPEN" not in overlays:
-            if "MENU_CLOSED" not in overlays:
-                raise _NavigationFailure(
-                    "in-run menu was neither verified open nor verified closed"
-                )
-            _guarded_visible_tap(
-                "navigation.menu_open_button",
-                allowed_states={"RUNNING"},
-                capture_fn=capture_fn,
-                detector=detector,
-                tap_visible_fn=tap_visible_fn,
-            )
-            _wait_for(
-                state="RUNNING",
-                overlay="MENU_OPEN",
-                capture_fn=capture_fn,
-                detector=detector,
-                sleep_fn=sleep_fn,
-            )
+        _ensure_running_side_menu_open(
+            capture_fn=capture_fn,
+            detector=detector,
+            tap_visible_fn=tap_visible_fn,
+            sleep_fn=sleep_fn,
+        )
 
         _guarded_visible_tap(
             "navigation.Cards",
@@ -434,32 +507,39 @@ def run_read_only_gc_preflight(
             sleep_fn=sleep_fn,
         )
 
-        _guarded_static_tap(
-            "navigation.open_perks",
-            allowed_states={"RUNNING"},
-            capture_fn=capture_fn,
-            detector=detector,
-            safe_tap_fn=safe_tap_fn,
-        )
-        perks = _wait_for(
-            state="PERKS",
-            capture_fn=capture_fn,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
-        _guarded_visible_tap(
-            "buttons.close:perks",
-            allowed_states={"PERKS"},
-            capture_fn=capture_fn,
-            detector=detector,
-            tap_visible_fn=tap_visible_fn,
-        )
-        _wait_for(
-            state="RUNNING",
-            capture_fn=capture_fn,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
+        auto_pick_perks = requirements.get("auto_pick_perks")
+        if auto_pick_perks not in {True, False}:
+            raise _NavigationFailure(
+                "profile did not supply a boolean Auto Pick Perks requirement"
+            )
+        perks = None
+        if auto_pick_perks:
+            _guarded_static_tap(
+                "navigation.open_perks",
+                allowed_states={"RUNNING"},
+                capture_fn=capture_fn,
+                detector=detector,
+                safe_tap_fn=safe_tap_fn,
+            )
+            perks = _wait_for(
+                state="PERKS",
+                capture_fn=capture_fn,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
+            _guarded_visible_tap(
+                "buttons.close:perks",
+                allowed_states={"PERKS"},
+                capture_fn=capture_fn,
+                detector=detector,
+                tap_visible_fn=tap_visible_fn,
+            )
+            _wait_for(
+                state="RUNNING",
+                capture_fn=capture_fn,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
 
         _select_running_menu(
             "navigation.goto_uw",
@@ -546,22 +626,17 @@ def run_read_only_gc_preflight(
                 swipe_fn("towards_bottom", "medium")
                 sleep_fn(0.5)
 
-        if not go_home_fn():
-            _capture_detection(capture_fn, detector)
-            raise _NavigationFailure("guarded Go Home failed")
-        home = _wait_for(
-            state="HOME_SCREEN",
-            capture_fn=capture_fn,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
-        _verify_active_home(home, detect_home_control_fn)
-
         modules = None
         if module_mode != "preserve":
+            _ensure_running_side_menu_open(
+                capture_fn=capture_fn,
+                detector=detector,
+                tap_visible_fn=tap_visible_fn,
+                sleep_fn=sleep_fn,
+            )
             _guarded_static_tap(
-                "navigation.goto_modules_home",
-                allowed_states={"HOME_SCREEN"},
+                "navigation.menu_modules",
+                allowed_states={"RUNNING"},
                 capture_fn=capture_fn,
                 detector=detector,
                 safe_tap_fn=safe_tap_fn,
@@ -572,58 +647,26 @@ def run_read_only_gc_preflight(
                 detector=detector,
                 sleep_fn=sleep_fn,
             )
-            _guarded_static_tap(
-                "navigation.goto_home",
-                allowed_states={"MODULES"},
+            _return_to_game_from_section(
+                state="MODULES",
                 capture_fn=capture_fn,
                 detector=detector,
-                safe_tap_fn=safe_tap_fn,
-            )
-            home = _wait_for(
-                state="HOME_SCREEN",
-                capture_fn=capture_fn,
-                detector=detector,
+                tap_visible_fn=tap_visible_fn,
                 sleep_fn=sleep_fn,
             )
-            _verify_active_home(home, detect_home_control_fn)
 
-        _guarded_static_tap(
-            "navigation.goto_workshop_home",
-            allowed_states={"HOME_SCREEN"},
-            capture_fn=capture_fn,
-            detector=detector,
-            safe_tap_fn=safe_tap_fn,
-        )
-        workshop = _wait_for(
-            state="WORKSHOP",
-            capture_fn=capture_fn,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
-        _guarded_static_tap(
-            "navigation.goto_home",
-            allowed_states={"WORKSHOP"},
-            capture_fn=capture_fn,
-            detector=detector,
-            safe_tap_fn=safe_tap_fn,
-        )
-        home = _wait_for(
-            state="HOME_SCREEN",
-            capture_fn=capture_fn,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
-        _verify_active_home(home, detect_home_control_fn)
-
-        _guarded_visible_tap(
-            "navigation.home_event",
-            allowed_states={"HOME_SCREEN"},
+        _ensure_running_side_menu_open(
             capture_fn=capture_fn,
             detector=detector,
             tap_visible_fn=tap_visible_fn,
-            retries=16,
-            retry_delay_s=0.5,
             sleep_fn=sleep_fn,
+        )
+        _guarded_static_tap(
+            "navigation.menu_event",
+            allowed_states={"RUNNING"},
+            capture_fn=capture_fn,
+            detector=detector,
+            safe_tap_fn=safe_tap_fn,
         )
         _wait_for(
             state="EVENT",
@@ -652,30 +695,26 @@ def run_read_only_gc_preflight(
             event_swipe_fn=event_swipe_fn,
             sleep_fn=sleep_fn,
         )
-        _guarded_static_tap(
-            "navigation.goto_home",
-            allowed_states={"EVENT"},
-            capture_fn=capture_fn,
-            detector=detector,
-            safe_tap_fn=safe_tap_fn,
-        )
-        home = _wait_for(
-            state="HOME_SCREEN",
-            capture_fn=capture_fn,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
-        _verify_active_home(home, detect_home_control_fn)
-
-        _guarded_visible_tap(
-            "navigation.home_guild",
-            allowed_states={"HOME_SCREEN"},
+        _return_to_game_from_section(
+            state="EVENT",
             capture_fn=capture_fn,
             detector=detector,
             tap_visible_fn=tap_visible_fn,
-            retries=16,
-            retry_delay_s=0.5,
             sleep_fn=sleep_fn,
+        )
+
+        _ensure_running_side_menu_open(
+            capture_fn=capture_fn,
+            detector=detector,
+            tap_visible_fn=tap_visible_fn,
+            sleep_fn=sleep_fn,
+        )
+        _guarded_static_tap(
+            "navigation.menu_guild",
+            allowed_states={"RUNNING"},
+            capture_fn=capture_fn,
+            detector=detector,
+            safe_tap_fn=safe_tap_fn,
         )
         _wait_for(
             state="GUILD",
@@ -697,9 +736,44 @@ def run_read_only_gc_preflight(
             detector=detector,
             sleep_fn=sleep_fn,
         )
+        _return_to_game_from_section(
+            state="GUILD",
+            capture_fn=capture_fn,
+            detector=detector,
+            tap_visible_fn=tap_visible_fn,
+            sleep_fn=sleep_fn,
+        )
+
+        # Workshop is the only persistent section unavailable from the active
+        # battle. Leave through the verified resumable Home route only after
+        # every in-run read-only section has been captured.
+        if not go_home_fn():
+            _capture_detection(capture_fn, detector)
+            raise _NavigationFailure("guarded Go Home failed")
+        home = _wait_for(
+            state="HOME_SCREEN",
+            capture_fn=capture_fn,
+            detector=detector,
+            sleep_fn=sleep_fn,
+        )
+        _verify_active_home(home, detect_home_control_fn)
+
+        _guarded_static_tap(
+            "navigation.goto_workshop_home",
+            allowed_states={"HOME_SCREEN"},
+            capture_fn=capture_fn,
+            detector=detector,
+            safe_tap_fn=safe_tap_fn,
+        )
+        workshop = _wait_for(
+            state="WORKSHOP",
+            capture_fn=capture_fn,
+            detector=detector,
+            sleep_fn=sleep_fn,
+        )
         _guarded_static_tap(
             "navigation.goto_home",
-            allowed_states={"GUILD"},
+            allowed_states={"WORKSHOP"},
             capture_fn=capture_fn,
             detector=detector,
             safe_tap_fn=safe_tap_fn,

@@ -79,6 +79,12 @@ def build_strategy_yaml(source: Dict[str, Any]) -> Dict[str, Any]:
         from tools.strategy_builders.farm_profile import resolve_farm_source
 
         return _build_gc_farm_strategy(resolve_farm_source(source))
+    if builder == "tournament":
+        from tools.strategy_builders.tournament_profile import (
+            build_tournament_strategy,
+        )
+
+        return build_tournament_strategy(source)
     if builder in {"", "default", "upgrade"}:
         return _build_upgrade_strategy(source)
     if builder == "glass_cannon":
