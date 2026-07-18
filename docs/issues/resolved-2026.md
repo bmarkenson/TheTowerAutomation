@@ -8,6 +8,35 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Tournament preflight opened Tournament Heat instead of the intended section
+
+- **Observed:** 2026-07-18 during guarded read-only validation of an active
+  Tier 17+ Tournament.
+- **Symptom:** The first shared Farm route attempted to open Perks, but a
+  Tournament has no Perks and the same action opened Tournament Heat. After
+  Perks was removed from the Tournament contract, the optimized in-battle
+  route later tapped `navigation.menu_guild` at `(910, 589)`, opened Tournament
+  Heat again, and timed out waiting for `GUILD`.
+- **Safety response:** Both passes failed closed. The newly recognized Heat
+  dialog was closed through visible evidence, the runtime returned to the
+  active battle, and no Surrender, preset selection, equipment change, or
+  Home repair occurred.
+- **Cause:** The generic session route assumed every profile had Perks, and the
+  historical Guild coordinate actually addressed the Tournament Heat flame
+  control. The in-battle Guild shield is at `(1015, 694)`.
+- **Resolution:** Tournament profiles explicitly omit Perks. Tournament Heat
+  now has a dedicated semantic state and visible close control, cleanup knows
+  how to restore the battle from it, and `navigation.menu_guild` points to the
+  observed Guild shield.
+- **Live validation:** The corrected route opened Cards, Ultimate Weapons,
+  Modules, Bots, and Guardians in-battle, used Home only for Workshop, passed
+  every Tournament requirement, and resumed the same active battle.
+- **Regression:** `test/test_gc_preflight_navigation.py` covers profiles
+  without Perks and the in-battle section route;
+  `test/test_mission_reward_handler.py` fixes the Guild coordinate; and
+  `test/test_ui_state_coverage.py` covers Tournament Heat detection.
+- **Fixed by:** `4f2ee00`.
+
 ### Generic close template did not recognize the Modules detail panel
 
 - **Observed:** 2026-07-16 while opening the first equipped module at the
