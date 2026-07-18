@@ -45,6 +45,11 @@ states:
   match_keys:
   - indicators.game_over
 
+- name: TOURNAMENT_RESULTS
+  type: primary
+  match_keys:
+  - indicators.tournament_stats
+
 - name: STORE
   type: primary
   match_keys:

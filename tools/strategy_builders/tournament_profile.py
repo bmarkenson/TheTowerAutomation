@@ -9,7 +9,7 @@ from core.tournament_preflight import load_tournament_requirements
 
 
 TOURNAMENT_RUNTIME_POLICY = {
-    "handlers": ["ad_gem", "floating_gem", "game_over"],
+    "handlers": ["ad_gem", "game_over"],
     "auto_return": False,
     "game_over_mode": "wait",
 }

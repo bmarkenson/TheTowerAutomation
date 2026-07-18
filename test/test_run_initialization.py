@@ -186,6 +186,17 @@ class RunBoundaryTests(unittest.TestCase):
 
         self.assertEqual(strategy.run_starts, 2)
 
+    def test_tournament_results_establish_a_run_boundary(self):
+        strategy = _RunCountingStrategy()
+        manager = MissionManager(None, strategy)
+        manager.start()
+
+        manager.maybe_run_start({"state": "RUNNING"})
+        manager.maybe_run_start({"state": "TOURNAMENT_RESULTS"})
+        manager.maybe_run_start({"state": "RUNNING"})
+
+        self.assertEqual(strategy.run_starts, 2)
+
 
 class FarmProfileTests(unittest.TestCase):
     def _source(self, name="farm_t18"):

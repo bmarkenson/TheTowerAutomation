@@ -41,7 +41,7 @@ def test_tournament_strategy_is_a_passive_observer():
     assert strategy is not None
     assert strategy.name == "tournament"
     assert strategy.runtime_policy() == {
-        "handlers": ["ad_gem", "floating_gem", "game_over"],
+        "handlers": ["ad_gem", "game_over"],
         "auto_return": False,
         "game_over_mode": "wait",
     }
@@ -94,7 +94,7 @@ def test_tournament_policy_suppresses_unrelated_runtime_handlers():
 
     assert app._handler_enabled("ad_gem")
     assert app._handler_enabled("game_over")
-    assert app._handler_explicitly_enabled("floating_gem")
+    assert not app._handler_enabled("floating_gem")
     assert not app._handler_enabled("daily_gem")
     assert not app._handler_enabled("mission_rewards")
     assert not app._handler_enabled("event_mission_warnings")
@@ -105,13 +105,12 @@ def test_tournament_policy_suppresses_unrelated_runtime_handlers():
     assert not app._handler_enabled("unknown_recovery")
 
 
-def test_tournament_policy_keeps_continuous_floating_gem_collection_active():
+def test_tournament_does_not_start_floating_gem_tapper_without_ad_gem():
     app = App.__new__(App)
     app._mission_mgr = SimpleNamespace(strategy=get_strategy("tournament"))
     app._blind_tapper_suspended = False
 
     with (
-        patch("core.app.is_blind_gem_tapper_active", return_value=False),
         patch("core.app.start_blind_gem_tapper") as start,
         patch("core.app.stop_blind_gem_tapper") as stop,
     ):
@@ -120,7 +119,7 @@ def test_tournament_policy_keeps_continuous_floating_gem_collection_active():
             actions_blocked=False,
         )
 
-    start.assert_called_once_with(duration=20, interval=1, blocking=False)
+    start.assert_not_called()
     stop.assert_not_called()
 
 
@@ -168,7 +167,6 @@ def test_tournament_main_loop_keeps_status_and_recovery_read_only():
                 },
             ),
             patch("core.app.detect_wave_number_from_image", return_value=(1800, 99.0)),
-            patch("core.app.is_blind_gem_tapper_active", return_value=False),
             patch("core.app.start_blind_gem_tapper") as start_tapper,
             patch("core.app.stop_blind_gem_tapper", return_value=False),
             patch("core.app.handle_unknown_state") as unknown_recovery,
@@ -191,7 +189,7 @@ def test_tournament_main_loop_keeps_status_and_recovery_read_only():
         wave_conf=99.0,
         allow_actions=False,
     )
-    start_tapper.assert_called_once_with(duration=20, interval=1, blocking=False)
+    start_tapper.assert_not_called()
 
 
 def test_tournament_running_handler_collects_only_visible_ad_gem():
@@ -247,3 +245,44 @@ def test_tournament_game_over_waits_and_records_profile_evidence():
     }
     manager.on_game_over.assert_called_once_with()
     app._supervisor.record_run_restart.assert_called_once_with()
+
+
+def test_tournament_results_are_recorded_once_without_dismissing_dialog():
+    strategy = get_strategy("tournament")
+    assert strategy is not None
+    manager = MagicMock()
+    manager.strategy = strategy
+    manager.ctx = MissionContext(data={"mission_vars": {}})
+    app = App.__new__(App)
+    app._mission_mgr = manager
+    app._supervisor = MagicMock()
+    app._status_reporter = MagicMock()
+    app._status_reporter.coins_log_path = "logs/tournament.csv"
+    app._status_reporter.rotate_coins_log.return_value = None
+    app._last_wave_value = 2028
+    app._last_wave_conf = 99.0
+    app._tournament_results_captured = False
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+    with (
+        patch(
+            "core.app.handle_tournament_results",
+            return_value={"tournament_id": "Tournament20260718"},
+        ) as tournament_results,
+        patch("core.app.handle_game_over") as normal_game_over,
+    ):
+        app._handle_primary_states("TOURNAMENT_RESULTS", set(), frame)
+        app._handle_primary_states("TOURNAMENT_RESULTS", set(), frame)
+
+    app._supervisor.persist_mode.assert_called_once_with("WAIT")
+    tournament_results.assert_called_once()
+    assert tournament_results.call_args.args == (frame,)
+    assert (
+        tournament_results.call_args.kwargs["battle_context"]["run_configuration"][
+            "profile"
+        ]
+        == "tournament"
+    )
+    normal_game_over.assert_not_called()
+    manager.on_game_over.assert_called_once_with()
+    app._supervisor.record_run_restart.assert_not_called()

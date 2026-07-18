@@ -73,8 +73,8 @@ def _capture_detection(
     if frame is None:
         raise _NavigationFailure("screenshot capture failed")
     detection = detector(frame)
-    if detection.get("state") == "GAME_OVER":
-        raise _BattleEnded("natural Game Over observed during GC preflight")
+    if detection.get("state") in {"GAME_OVER", "TOURNAMENT_RESULTS"}:
+        raise _BattleEnded("natural terminal result observed during GC preflight")
     return frame, detection
 
 
@@ -198,19 +198,20 @@ def _select_running_menu(
     *,
     capture_fn: Capture,
     detector: Detector,
-    safe_tap_fn: Callable[..., bool],
+    tap_visible_fn: Callable[..., bool],
     sleep_fn: Callable[[float], None],
 ) -> Frame:
     """Select an in-run menu, allowing one tap to be consumed by Cinematic Mode."""
 
     last_failure: Optional[Exception] = None
     for _ in range(2):
-        _guarded_static_tap(
+        _guarded_visible_tap(
             key,
             allowed_states={"RUNNING"},
             capture_fn=capture_fn,
             detector=detector,
-            safe_tap_fn=safe_tap_fn,
+            tap_visible_fn=tap_visible_fn,
+            sleep_fn=sleep_fn,
         )
         try:
             return _wait_for(
@@ -546,7 +547,7 @@ def run_read_only_gc_preflight(
             "UW_MENU",
             capture_fn=capture_fn,
             detector=detector,
-            safe_tap_fn=safe_tap_fn,
+            tap_visible_fn=tap_visible_fn,
             sleep_fn=sleep_fn,
         )
         for _ in range(3):
@@ -634,12 +635,13 @@ def run_read_only_gc_preflight(
                 tap_visible_fn=tap_visible_fn,
                 sleep_fn=sleep_fn,
             )
-            _guarded_static_tap(
+            _guarded_visible_tap(
                 "navigation.menu_modules",
                 allowed_states={"RUNNING"},
                 capture_fn=capture_fn,
                 detector=detector,
-                safe_tap_fn=safe_tap_fn,
+                tap_visible_fn=tap_visible_fn,
+                sleep_fn=sleep_fn,
             )
             modules = _wait_for(
                 state="MODULES",
@@ -661,12 +663,13 @@ def run_read_only_gc_preflight(
             tap_visible_fn=tap_visible_fn,
             sleep_fn=sleep_fn,
         )
-        _guarded_static_tap(
+        _guarded_visible_tap(
             "navigation.menu_event",
             allowed_states={"RUNNING"},
             capture_fn=capture_fn,
             detector=detector,
-            safe_tap_fn=safe_tap_fn,
+            tap_visible_fn=tap_visible_fn,
+            sleep_fn=sleep_fn,
         )
         _wait_for(
             state="EVENT",
@@ -674,12 +677,13 @@ def run_read_only_gc_preflight(
             detector=detector,
             sleep_fn=sleep_fn,
         )
-        _guarded_static_tap(
+        _guarded_visible_tap(
             "navigation.event:bots_tab",
             allowed_states={"EVENT"},
             capture_fn=capture_fn,
             detector=detector,
-            safe_tap_fn=safe_tap_fn,
+            tap_visible_fn=tap_visible_fn,
+            sleep_fn=sleep_fn,
         )
         sleep_fn(0.5)
         bots = _wait_for(
@@ -709,12 +713,13 @@ def run_read_only_gc_preflight(
             tap_visible_fn=tap_visible_fn,
             sleep_fn=sleep_fn,
         )
-        _guarded_static_tap(
+        _guarded_visible_tap(
             "navigation.menu_guild",
             allowed_states={"RUNNING"},
             capture_fn=capture_fn,
             detector=detector,
-            safe_tap_fn=safe_tap_fn,
+            tap_visible_fn=tap_visible_fn,
+            sleep_fn=sleep_fn,
         )
         _wait_for(
             state="GUILD",
@@ -722,12 +727,13 @@ def run_read_only_gc_preflight(
             detector=detector,
             sleep_fn=sleep_fn,
         )
-        _guarded_static_tap(
+        _guarded_visible_tap(
             "navigation.guild:guardian_tab",
             allowed_states={"GUILD"},
             capture_fn=capture_fn,
             detector=detector,
-            safe_tap_fn=safe_tap_fn,
+            tap_visible_fn=tap_visible_fn,
+            sleep_fn=sleep_fn,
         )
         guardians = _wait_for(
             state="GUILD",

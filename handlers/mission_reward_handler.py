@@ -11,7 +11,7 @@ from core.event_missions import (
     EventMissionInventory,
     capture_event_mission_inventory,
 )
-from core.input import safe_tap, tap_if_visible
+from core.input import tap_if_visible
 from core.label_tapper import is_visible
 from core.menu_reward_badges import measure_menu_reward_badges
 from core.scrolling import scroll_to_edge, scroll_until_visible
@@ -107,7 +107,7 @@ def handle_mission_rewards(
         if menu_screen is None:
             success = False
             break
-        if not safe_tap(navigation, require_visible=False, dispatch="now"):
+        if not tap_if_visible(navigation, screenshot=menu_screen, retries=1):
             log(f"[MISSION_REWARDS] Could not open {name}", "WARN")
             success = False
             break
@@ -281,10 +281,10 @@ def _claim_guild_chests(screenshot) -> tuple[bool, int]:
         return False, 0
     # Guild retains its last selected tab.  Always reselect Members before
     # interpreting absence of glowing contribution chests as authoritative.
-    if not safe_tap(
+    if not tap_if_visible(
         "navigation.guild:members_tab",
-        require_visible=False,
-        dispatch="now",
+        screenshot=current,
+        retries=1,
     ):
         return False, 0
     current = _wait_for_state("GUILD", settle_s=0.8)

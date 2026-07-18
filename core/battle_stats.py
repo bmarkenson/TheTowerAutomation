@@ -1440,6 +1440,11 @@ def _add_parsed_value(row: dict[str, Any]) -> None:
         row["value_type"] = "percent"
         row["value"] = float(percentage.group(1))
         return
+    minimum_integer = re.fullmatch(r"([0-9]+)\s*\+", normalized)
+    if minimum_integer:
+        row["value_type"] = "minimum_integer"
+        row["value"] = int(minimum_integer.group(1))
+        return
     row["value_type"] = "text"
     row["value"] = raw
 

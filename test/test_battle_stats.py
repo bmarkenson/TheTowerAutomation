@@ -432,6 +432,26 @@ def test_exact_clipboard_report_retains_every_section_and_row():
     assert all(row["source"] == "android_clipboard" for row in rows.values())
 
 
+def test_tournament_plus_tier_is_a_valid_structured_value():
+    text = CLIPBOARD_REPORT_PATH.read_text(encoding="utf-8").replace(
+        "Tier\t19",
+        "Tier\t17+",
+    )
+
+    stats = parse_more_stats_clipboard(text)
+    tier = next(
+        row
+        for section in stats["sections"]
+        if section["key"] == "battle_report"
+        for row in section["rows"]
+        if row["key"] == "tier"
+    )
+
+    assert stats["quality"]["valid"]
+    assert tier["value_type"] == "minimum_integer"
+    assert tier["value"] == 17
+
+
 def test_clipboard_record_is_identity_checked_and_drives_existing_derivations():
     text = CLIPBOARD_REPORT_PATH.read_text(encoding="utf-8")
     record = build_battle_record_from_clipboard(

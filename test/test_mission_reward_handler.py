@@ -5,7 +5,6 @@ from unittest.mock import Mock, patch
 import cv2
 import numpy as np
 
-from core.clickmap_access import get_click
 from core.app import App
 from core.event_mission_tracker import EventMissionWarning
 from core.matcher import get_match
@@ -139,11 +138,26 @@ def test_reward_reveal_uses_shared_skip_control():
     assert confidence >= 0.99
 
 
-def test_menu_reward_navigation_coordinates_are_mapped():
-    assert get_click("navigation.menu_daily_missions") == (910, 174)
-    assert get_click("navigation.menu_event") == (910, 484)
-    assert get_click("navigation.menu_guild") == (1015, 694)
-    assert get_click("navigation.guild:members_tab") == (156, 313)
+def test_menu_navigation_matches_actual_buttons_with_and_without_trophy():
+    normal = _load("running_menu_reward_badges_20260715.png")
+    tournament = _load("running_menu_tournament_trophy_20260718.png")
+
+    expected = {
+        "navigation.menu_daily_missions": ((910, 172), (910, 172)),
+        "navigation.menu_modules": ((1015, 380), (1015, 380)),
+        "navigation.menu_event": ((910, 484), (910, 484)),
+        "navigation.menu_guild": ((910, 588), (1015, 693)),
+    }
+    for key, (normal_point, tournament_point) in expected.items():
+        match, confidence = get_match(key, screenshot=normal)
+        tournament_match, tournament_confidence = get_match(
+            key,
+            screenshot=tournament,
+        )
+        assert match == normal_point
+        assert confidence >= 0.9
+        assert tournament_match == tournament_point
+        assert tournament_confidence >= 0.9
 
 
 def test_guild_claim_reselects_members_before_matching_retained_tab():
@@ -159,23 +173,23 @@ def test_guild_claim_reselects_members_before_matching_retained_tab():
 
     with (
         patch.object(rewards, "_is_state", return_value=True),
-        patch.object(rewards, "safe_tap", return_value=True) as navigate,
         patch.object(rewards, "_wait_for_state", return_value=members) as wait,
         patch.object(rewards, "is_visible", side_effect=visible),
-        patch.object(rewards, "tap_if_visible", return_value=True) as claim,
+        patch.object(rewards, "tap_if_visible", return_value=True) as tap,
         patch.object(rewards, "_dismiss_reward_reveal", return_value=after_claim),
     ):
         success, claimed = rewards._claim_guild_chests(guardian)
 
     assert success
     assert claimed == 1
-    navigate.assert_called_once_with(
-        "navigation.guild:members_tab",
-        require_visible=False,
-        dispatch="now",
-    )
     wait.assert_called_once_with("GUILD", settle_s=0.8)
-    claim.assert_called_once_with(rewards.GUILD_CHEST_CLAIM, screenshot=members)
+    assert tap.call_args_list[0].args == ("navigation.guild:members_tab",)
+    assert tap.call_args_list[0].kwargs == {
+        "screenshot": guardian,
+        "retries": 1,
+    }
+    assert tap.call_args_list[1].args == (rewards.GUILD_CHEST_CLAIM,)
+    assert tap.call_args_list[1].kwargs == {"screenshot": members}
 
 
 def test_scheduler_bounds_persistent_attention_and_failed_attempts():

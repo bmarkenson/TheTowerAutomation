@@ -1191,6 +1191,19 @@
       "roles": [
         "indicator"
       ]
+    },
+    "tournament_stats": {
+      "match_template": "indicators/tournament_stats.png",
+      "match_region": {
+        "x": 130,
+        "y": 300,
+        "w": 820,
+        "h": 150
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
     }
   },
   "overlays": {
@@ -1571,7 +1584,15 @@
         "type": "tap",
         "x": 910,
         "y": 174
-      }
+      },
+      "match_template": "navigation/menu_daily_missions.png",
+      "match_region": {
+        "x": 850,
+        "y": 115,
+        "w": 220,
+        "h": 110
+      },
+      "match_threshold": 0.9
     },
     "menu_modules": {
       "roles": [
@@ -1581,7 +1602,15 @@
         "type": "tap",
         "x": 1015,
         "y": 380
-      }
+      },
+      "match_template": "navigation/menu_modules.png",
+      "match_region": {
+        "x": 850,
+        "y": 325,
+        "w": 220,
+        "h": 115
+      },
+      "match_threshold": 0.9
     },
     "menu_event": {
       "roles": [
@@ -1591,7 +1620,15 @@
         "type": "tap",
         "x": 910,
         "y": 484
-      }
+      },
+      "match_template": "navigation/menu_event.png",
+      "match_region": {
+        "x": 850,
+        "y": 430,
+        "w": 220,
+        "h": 115
+      },
+      "match_threshold": 0.9
     },
     "menu_guild": {
       "roles": [
@@ -1601,7 +1638,15 @@
         "type": "tap",
         "x": 1015,
         "y": 694
-      }
+      },
+      "match_template": "navigation/menu_guild.png",
+      "match_region": {
+        "x": 850,
+        "y": 530,
+        "w": 220,
+        "h": 220
+      },
+      "match_threshold": 0.9
     },
     "guild:members_tab": {
       "roles": [
@@ -1611,7 +1656,15 @@
         "type": "tap",
         "x": 156,
         "y": 313
-      }
+      },
+      "match_template": "navigation/guild:members_tab.png",
+      "match_region": {
+        "x": 0,
+        "y": 260,
+        "w": 310,
+        "h": 105
+      },
+      "match_threshold": 0.88
     },
     "event:bots_tab": {
       "roles": [
@@ -1621,7 +1674,15 @@
         "type": "tap",
         "x": 900,
         "y": 307
-      }
+      },
+      "match_template": "navigation/event:bots_tab.png",
+      "match_region": {
+        "x": 715,
+        "y": 260,
+        "w": 365,
+        "h": 105
+      },
+      "match_threshold": 0.88
     },
     "guild:guardian_tab": {
       "roles": [
@@ -1631,7 +1692,15 @@
         "type": "tap",
         "x": 472,
         "y": 313
-      }
+      },
+      "match_template": "navigation/guild:guardian_tab.png",
+      "match_region": {
+        "x": 310,
+        "y": 260,
+        "w": 320,
+        "h": 105
+      },
+      "match_threshold": 0.88
     },
     "menu_open_button": {
       "match_template": "navigation/menu_open_button.png",
@@ -2019,7 +2088,15 @@
       },
       "roles": [
         "button"
-      ]
+      ],
+      "match_template": "buttons/copy:more_stats.png",
+      "match_region": {
+        "x": 820,
+        "y": 1530,
+        "w": 190,
+        "h": 190
+      },
+      "match_threshold": 0.88
     },
     "perks:game_over": {
       "match_template": "buttons/perks:game_over.png",
@@ -2331,6 +2408,19 @@
         "y": 80,
         "w": 180,
         "h": 180
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
+    "more_stats:tournament": {
+      "match_template": "buttons/more_stats:tournament.png",
+      "match_region": {
+        "x": 300,
+        "y": 800,
+        "w": 480,
+        "h": 300
       },
       "match_threshold": 0.9,
       "roles": [

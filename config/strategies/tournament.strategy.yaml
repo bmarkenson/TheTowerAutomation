@@ -5,7 +5,6 @@ meta:
 runtime_policy:
   handlers:
   - ad_gem
-  - floating_gem
   - game_over
   auto_return: false
   game_over_mode: wait
@@ -133,7 +132,6 @@ run_configuration:
   runtime_policy:
     handlers:
     - ad_gem
-    - floating_gem
     - game_over
     auto_return: false
     game_over_mode: wait

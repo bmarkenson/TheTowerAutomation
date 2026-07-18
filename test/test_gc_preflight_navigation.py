@@ -64,8 +64,20 @@ class _FakeUi:
         self.static_taps.append(key)
         transitions = {
             "navigation.open_perks": ("PERKS", None, set()),
-            "navigation.goto_uw": ("RUNNING", "UW_MENU", set()),
             "navigation.goto_workshop_home": ("WORKSHOP", None, set()),
+            "buttons.battle_control:home": ("RUNNING", "UW_MENU", set()),
+        }
+        if key == "navigation.goto_home":
+            self.state, self.menu, self.secondary = "HOME_SCREEN", None, set()
+        elif key in transitions:
+            self.state, self.menu, self.secondary = transitions[key]
+        return True
+
+    def visible_tap(self, key, **_kwargs):
+        self.visible_taps.append(key)
+        transitions = {
+            "navigation.Cards": ("CARDS", None, set()),
+            "navigation.goto_uw": ("RUNNING", "UW_MENU", set()),
             "navigation.menu_modules": ("MODULES", None, set()),
             "navigation.menu_event": ("EVENT", None, set()),
             "navigation.menu_guild": ("GUILD", None, set()),
@@ -79,26 +91,13 @@ class _FakeUi:
                 None,
                 {"GUILD_GUARDIAN_SCREEN"},
             ),
-            "buttons.battle_control:home": ("RUNNING", "UW_MENU", set()),
-        }
-        if key == "navigation.goto_home":
-            self.state, self.menu, self.secondary = "HOME_SCREEN", None, set()
-        elif key in transitions:
-            self.state, self.menu, self.secondary = transitions[key]
-        return True
-
-    def visible_tap(self, key, **_kwargs):
-        self.visible_taps.append(key)
-        transitions = {
-            "navigation.Cards": ("CARDS", None),
-            "navigation.home_event": ("EVENT", None),
-            "navigation.home_guild": ("GUILD", None),
-            "buttons.return_to_game": ("RUNNING", "UW_MENU"),
-            "buttons.close:perks": ("RUNNING", "UW_MENU"),
+            "navigation.home_event": ("EVENT", None, set()),
+            "navigation.home_guild": ("GUILD", None, set()),
+            "buttons.return_to_game": ("RUNNING", "UW_MENU", set()),
+            "buttons.close:perks": ("RUNNING", "UW_MENU", set()),
         }
         if key in transitions:
-            self.state, self.menu = transitions[key]
-            self.secondary = set()
+            self.state, self.menu, self.secondary = transitions[key]
         return True
 
     def go_home(self):
@@ -194,9 +193,15 @@ def test_read_only_route_returns_to_running_and_never_uses_mutating_controls():
     assert result.valid
     assert ui.state == "RUNNING"
     assert "buttons.battle_control:home" in ui.static_taps
-    assert "navigation.menu_modules" in ui.static_taps
-    assert "navigation.menu_event" in ui.static_taps
-    assert "navigation.menu_guild" in ui.static_taps
+    assert "navigation.menu_modules" in ui.visible_taps
+    assert "navigation.menu_event" in ui.visible_taps
+    assert "navigation.menu_guild" in ui.visible_taps
+    assert "navigation.event:bots_tab" in ui.visible_taps
+    assert "navigation.guild:guardian_tab" in ui.visible_taps
+    assert "navigation.goto_uw" in ui.visible_taps
+    assert "navigation.menu_modules" not in ui.static_taps
+    assert "navigation.menu_event" not in ui.static_taps
+    assert "navigation.menu_guild" not in ui.static_taps
     assert "navigation.goto_modules_home" not in ui.static_taps
     assert "navigation.home_event" not in ui.visible_taps
     assert "navigation.home_guild" not in ui.visible_taps
@@ -252,6 +257,7 @@ def test_preserved_modules_skip_module_navigation_and_validation():
 
     assert result.status is GcPreflightNavigationStatus.COMPLETE
     assert "navigation.menu_modules" not in ui.static_taps
+    assert "navigation.menu_modules" not in ui.visible_taps
     assert validated["module_mode"] == "preserve"
     assert validated["modules_screen"] is None
     assert validated["module_requirements"] is None
@@ -366,20 +372,20 @@ def test_running_menu_selection_retries_when_cinematic_mode_consumes_first_tap()
     ui.secondary = {"CINEMATIC_MODE"}
     attempts = 0
 
-    def cinematic_safe_tap(key, **kwargs):
+    def cinematic_visible_tap(key, **kwargs):
         nonlocal attempts
         attempts += 1
         if attempts == 1:
             ui.secondary = set()
             return True
-        return ui.safe_tap(key, **kwargs)
+        return ui.visible_tap(key, **kwargs)
 
     frame = _select_running_menu(
         "navigation.goto_uw",
         "UW_MENU",
         capture_fn=ui.capture,
         detector=ui.detect,
-        safe_tap_fn=cinematic_safe_tap,
+        tap_visible_fn=cinematic_visible_tap,
         sleep_fn=lambda _seconds: None,
     )
 

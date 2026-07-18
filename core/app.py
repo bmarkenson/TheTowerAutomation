@@ -36,10 +36,10 @@ from automation.missions import get_mission
 from automation.missions.yaml_mission import YamlMission
 from automation.strategies import get_strategy
 from handlers.game_over_handler import handle_game_over
+from handlers.tournament_result_handler import handle_tournament_results
 from handlers.home_screen_handler import handle_home_screen
 from handlers.ad_gem_handler import (
     handle_ad_gem,
-    is_blind_gem_tapper_active,
     start_blind_gem_tapper,
     stop_blind_gem_tapper,
 )
@@ -95,6 +95,7 @@ class App:
         self._last_wave_conf: float = -1.0
         self._last_wave_ts: float = 0.0
         self._blind_tapper_suspended = False
+        self._tournament_results_captured = False
         self._run_initialization_gate_logged = False
         self._session_preflight_gate_logged = False
         self._session_preflight_repair_denial_logged = False
@@ -125,14 +126,6 @@ class App:
         if not isinstance(handlers, (list, tuple, set, frozenset)):
             return False
         return name in {str(handler).strip() for handler in handlers}
-
-    def _handler_explicitly_enabled(self, name: str) -> bool:
-        """Return true only when a restrictive plan names the handler."""
-
-        handlers = self._runtime_policy().get("handlers")
-        return isinstance(handlers, (list, tuple, set, frozenset)) and name in {
-            str(handler).strip() for handler in handlers
-        }
 
     def run(self) -> None:
         log("Starting main heartbeat loop.", level="INFO", console=True)
@@ -370,17 +363,13 @@ class App:
         state: str,
         actions_blocked: bool,
     ) -> None:
-        """Run continuous blind floating-gem collection only for opted-in plans."""
+        """Suspend and resume only an ad-gem-triggered bounded tapper."""
 
         if state != "RUNNING" or actions_blocked:
             if stop_blind_gem_tapper():
                 self._blind_tapper_suspended = True
             return
-        continuous = self._handler_explicitly_enabled("floating_gem")
-        if continuous and not is_blind_gem_tapper_active():
-            start_blind_gem_tapper(duration=20, interval=1, blocking=False)
-            self._blind_tapper_suspended = False
-        elif self._blind_tapper_suspended:
+        if self._blind_tapper_suspended:
             start_blind_gem_tapper(duration=10, interval=1, blocking=False)
             self._blind_tapper_suspended = False
 
@@ -431,6 +420,8 @@ class App:
         img: Frame,
     ) -> None:
         """Dispatch handlers for top-level UI states and overlay-driven events."""
+        if new_state == "RUNNING":
+            self._tournament_results_captured = False
         if (
             self._handler_enabled("daily_gem")
             and self._handle_daily_gem_if_due(new_state, overlays)
@@ -444,6 +435,51 @@ class App:
         ):
             # The handler traverses several panels and restores RUNNING. Avoid
             # dispatching against the frame captured before that navigation.
+            return
+
+        if (
+            new_state == "TOURNAMENT_RESULTS"
+            and self._handler_enabled("game_over")
+        ):
+            if getattr(self, "_tournament_results_captured", False):
+                return
+            log(
+                "Detected TOURNAMENT_RESULTS. Capturing result without dismissing it.",
+                "INFO",
+                console=True,
+            )
+            if not self._supervisor.persist_mode("WAIT"):
+                AUTOMATION.mode = ExecMode.WAIT
+                log(
+                    "[CTRL] Could not persist Tournament Results WAIT; "
+                    "using in-memory WAIT",
+                    "WARN",
+                )
+            strategy = self._mission_mgr.strategy
+            record = handle_tournament_results(
+                img,
+                battle_context={
+                    "strategy": strategy.name if strategy else None,
+                    "run_configuration": (
+                        strategy.run_configuration() if strategy else {}
+                    ),
+                    "last_wave": self._last_wave_value,
+                    "last_wave_confidence": self._last_wave_conf,
+                    "coins_log_path": self._status_reporter.coins_log_path,
+                    "session_preflight_evidence": dict(
+                        self._mission_mgr.ctx.data.get("mission_vars", {}).get(
+                            "gc_session_preflight_evidence",
+                            {},
+                        )
+                    ),
+                },
+            )
+            if record is not None:
+                self._tournament_results_captured = True
+                self._mission_mgr.on_game_over()
+                new_path = self._status_reporter.rotate_coins_log()
+                if new_path:
+                    log(f"[COINS] Started new coins log: {new_path}", "INFO")
             return
 
         if new_state == "GAME_OVER" and self._handler_enabled("game_over"):

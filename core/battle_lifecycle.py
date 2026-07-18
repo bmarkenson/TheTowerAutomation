@@ -52,7 +52,7 @@ class BattleLifecycle:
                 return True
             return False
 
-        if state == "GAME_OVER":
+        if state in {"GAME_OVER", "TOURNAMENT_RESULTS"}:
             self.active_battle_observed = False
         elif state in {"HOME", "HOME_SCREEN"}:
             if control is HomeBattleControl.NEW_BATTLE:

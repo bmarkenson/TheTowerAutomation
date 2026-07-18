@@ -11,7 +11,7 @@ from utils.logger import log
 from core.android_clipboard import read_battle_report_clipboard
 from core.ss_capture import capture_adb_screenshot
 from core.run_state import AUTOMATION, ExecMode, RunState
-from core.input import tap_blind, tap_if_visible
+from core.input import tap_if_visible
 from core.label_tapper import is_visible
 from core.scrolling import capture_scroll_to_edge, scroll_to_edge
 from core.battle_stats import (
@@ -343,7 +343,11 @@ def _capture_clipboard_battle_record(
         return None, "more_stats_not_visible"
 
     before = read_battle_report_clipboard()
-    if not tap_blind("buttons.copy:more_stats", dispatch="now"):
+    if not tap_if_visible(
+        "buttons.copy:more_stats",
+        screenshot=stats_screen,
+        retries=1,
+    ):
         return None, "copy_tap_failed"
 
     candidate = None
