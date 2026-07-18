@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import cv2
@@ -14,7 +15,7 @@ from core.home_battle import HomeBattleEvidence
 from core.matcher import get_match
 from core.workshop_preset import (
     BOTS_FARM_PRESET_SLOT,
-    CARDS_GC_PRESET_SLOT,
+    CARDS_FARM_PRESET_SLOT,
     FARM_PRESET_SLOT,
     PresetSlotSelection,
 )
@@ -23,18 +24,34 @@ from core.workshop_preset import (
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "test" / "fixtures"
 REQUIREMENTS = {
-    "cards_deck": "GC",
+    "cards_deck": "Farm",
     "workshop_preset": "Farm",
     "bots_preset": "Farm",
     "guardian_chips": ["Fetch", "Summon", "Scout"],
+    "modules": {
+        "cannon_assist": "Being Annihilator",
+        "cannon_primary": "Amplifying Strike",
+        "generator_primary": "Black Hole Digestor",
+        "generator_assist": "Singularity Harness",
+        "armor_assist": "Anti-Cube Portal",
+        "armor_primary": "Orbital Augment",
+        "core_primary": "Multiverse Nexus",
+        "core_assist": "Dimension Core",
+    },
 }
 
 
 class _NoBattleRouter:
-    def __init__(self, *, selected: bool = False, correct_guardians: bool = False):
+    def __init__(
+        self,
+        *,
+        selected: bool = False,
+        correct_guardians: bool = False,
+        bots_offscreen: bool = False,
+    ):
         self.state = "home"
         self.selected = {
-            CARDS_GC_PRESET_SLOT: selected,
+            CARDS_FARM_PRESET_SLOT: selected,
             FARM_PRESET_SLOT: selected,
             BOTS_FARM_PRESET_SLOT: selected,
         }
@@ -45,6 +62,9 @@ class _NoBattleRouter:
         )
         self.static_actions = []
         self.visible_actions = []
+        self.module_checks = []
+        self.bots_offscreen = bots_offscreen
+        self.swipes = []
 
     def capture(self):
         return self.state
@@ -54,7 +74,7 @@ class _NoBattleRouter:
         if frame == "home":
             return {"state": "HOME_SCREEN", "secondary_states": []}
         if frame == "cards":
-            return {"state": "CARDS", "secondary_states": ["CARDS_GC_SLOT"]}
+            return {"state": "CARDS", "secondary_states": ["CARDS_FARM_SLOT"]}
         if frame == "workshop":
             return {
                 "state": "WORKSHOP",
@@ -63,9 +83,13 @@ class _NoBattleRouter:
         if frame == "event":
             return {"state": "EVENT", "secondary_states": []}
         if frame == "bots":
+            secondary = [] if self.bots_offscreen else [
+                "EVENT_BOTS_SCREEN",
+                "BOTS_FARM_SLOT",
+            ]
             return {
                 "state": "EVENT",
-                "secondary_states": ["EVENT_BOTS_SCREEN", "BOTS_FARM_SLOT"],
+                "secondary_states": secondary,
             }
         if frame == "guild":
             return {"state": "GUILD", "secondary_states": []}
@@ -75,6 +99,8 @@ class _NoBattleRouter:
                 if chip in self.guardians:
                     secondary.append(f"GUARDIAN_{chip.upper()}_EQUIPPED")
             return {"state": "GUILD", "secondary_states": secondary}
+        if frame == "modules":
+            return {"state": "MODULES", "secondary_states": []}
         raise AssertionError(frame)
 
     def home_control(self, _frame):
@@ -97,6 +123,7 @@ class _NoBattleRouter:
             ("home", "navigation.goto_workshop_home"): "workshop",
             ("event", "navigation.event:bots_tab"): "bots",
             ("guild", "navigation.guild:guardian_tab"): "guardians",
+            ("home", "navigation.goto_modules_home"): "modules",
         }
         if label == "navigation.goto_home" and self.state != "home":
             self.state = "home"
@@ -107,10 +134,26 @@ class _NoBattleRouter:
         self.state = destination
         return True
 
+    def ensure_modules(self, requirements, **kwargs):
+        assert self.state == "modules"
+        assert kwargs["screenshot"] == "modules"
+        self.module_checks.append(dict(requirements))
+        return SimpleNamespace(
+            valid=True,
+            as_dict=lambda: {"valid": True, "slots": []},
+        )
+
+    def swipe(self, label):
+        self.swipes.append(label)
+        if self.state == "bots" and label == "gesture_targets.goto_top:event_bots":
+            self.bots_offscreen = False
+            return True
+        return True
+
     def visible_tap(self, label, **_kwargs):
         self.visible_actions.append(label)
-        if self.state == "cards" and label == "indicators.cards:gc_slot":
-            self.selected[CARDS_GC_PRESET_SLOT] = True
+        if self.state == "cards" and label == "indicators.cards:farm_slot":
+            self.selected[CARDS_FARM_PRESET_SLOT] = True
             return True
         if self.state == "workshop" and label == "indicators.workshop:farm_slot":
             self.selected[FARM_PRESET_SLOT] = True
@@ -144,21 +187,23 @@ class _NoBattleRouter:
         return True
 
 
-def _run(router):
+def _run(router, requirements=REQUIREMENTS):
     return run_gc_no_battle_setup(
-        REQUIREMENTS,
+        requirements,
         screenshot="home",
         capture_fn=router.capture,
         detector=router.detect,
         detect_home_control_fn=router.home_control,
         safe_tap_fn=router.static_tap,
         tap_visible_fn=router.visible_tap,
+        swipe_fn=router.swipe,
         measure_selection_fn=router.measure,
+        ensure_modules_fn=router.ensure_modules,
         sleep_fn=lambda _seconds: None,
     )
 
 
-def test_no_battle_setup_corrects_supported_gc_presets_and_guardians():
+def test_no_battle_setup_corrects_supported_farm_presets_and_guardians():
     router = _NoBattleRouter()
 
     result = _run(router)
@@ -167,8 +212,9 @@ def test_no_battle_setup_corrects_supported_gc_presets_and_guardians():
     assert router.state == "home"
     assert all(router.selected.values())
     assert router.guardians == {"fetch", "summon", "scout"}
+    assert router.module_checks == [REQUIREMENTS["modules"]]
     assert router.visible_actions == [
-        "indicators.cards:gc_slot",
+        "indicators.cards:farm_slot",
         "indicators.workshop:farm_slot",
         "navigation.home_event",
         "indicators.bots:farm_slot",
@@ -186,10 +232,54 @@ def test_no_battle_setup_leaves_already_correct_settings_untouched():
     result = _run(router)
 
     assert result.complete
+    assert router.module_checks == [REQUIREMENTS["modules"]]
     assert router.visible_actions == [
         "navigation.home_event",
         "navigation.home_guild",
     ]
+
+
+def test_no_battle_setup_restores_retained_bots_scroll_before_preset_check():
+    router = _NoBattleRouter(
+        selected=True,
+        correct_guardians=True,
+        bots_offscreen=True,
+    )
+
+    result = _run(router)
+
+    assert result.complete
+    assert router.swipes == ["gesture_targets.goto_top:event_bots"]
+
+
+def test_no_battle_setup_skips_observed_modules_until_in_run_preflight():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+    requirements = {
+        **REQUIREMENTS,
+        "loadout_policies": {"modules": "observe"},
+    }
+
+    result = _run(router, requirements)
+
+    assert result.complete
+    assert router.module_checks == []
+    assert "navigation.goto_modules_home" not in router.static_actions
+    assert result.evidence["modules"] == {"mode": "observe", "checked": False}
+
+
+def test_no_battle_setup_skips_preserved_modules_entirely():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+    requirements = {
+        key: value for key, value in REQUIREMENTS.items() if key != "modules"
+    }
+    requirements["loadout_policies"] = {"modules": "preserve"}
+
+    result = _run(router, requirements)
+
+    assert result.complete
+    assert router.module_checks == []
+    assert "navigation.goto_modules_home" not in router.static_actions
+    assert result.evidence["modules"] == {"mode": "preserve", "checked": False}
 
 
 def test_no_battle_setup_rejects_unconfigured_profile_without_actions():
@@ -254,7 +344,7 @@ def test_app_runs_no_battle_setup_before_starting_profile_battle():
     setup = GcNoBattleSetupResult(
         GcNoBattleSetupStatus.COMPLETE,
         "ok",
-        {"cards_deck": "GC"},
+        {"cards_deck": "Farm"},
     )
 
     with (

@@ -115,6 +115,20 @@ def test_guild_chest_template_separates_glowing_from_claimed_and_locked():
     assert unavailable_confidence < 0.9
 
 
+def test_guild_chest_template_covers_rightmost_750_slot():
+    template = cv2.imread(
+        str(ROOT / "assets" / "match_templates" / "buttons" / "claim_guild_chest.png")
+    )
+    assert template is not None
+    screenshot = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    screenshot[660:750, 970:1060] = template
+
+    point, confidence = get_match("buttons.claim_guild_chest", screenshot=screenshot)
+
+    assert point == (1015, 705)
+    assert confidence >= 0.99
+
+
 def test_reward_reveal_uses_shared_skip_control():
     point, confidence = get_match(
         "buttons.skip_reward_reveal",
@@ -129,6 +143,39 @@ def test_menu_reward_navigation_coordinates_are_mapped():
     assert get_click("navigation.menu_daily_missions") == (910, 174)
     assert get_click("navigation.menu_event") == (910, 484)
     assert get_click("navigation.menu_guild") == (910, 589)
+    assert get_click("navigation.guild:members_tab") == (156, 313)
+
+
+def test_guild_claim_reselects_members_before_matching_retained_tab():
+    guardian = np.zeros((2, 2, 3), dtype=np.uint8)
+    members = np.ones((2, 2, 3), dtype=np.uint8)
+    after_claim = np.full((2, 2, 3), 2, dtype=np.uint8)
+
+    def visible(label, *, screenshot):
+        return (
+            label == rewards.GUILD_CHEST_CLAIM
+            and int(screenshot[0, 0, 0]) == 1
+        )
+
+    with (
+        patch.object(rewards, "_is_state", return_value=True),
+        patch.object(rewards, "safe_tap", return_value=True) as navigate,
+        patch.object(rewards, "_wait_for_state", return_value=members) as wait,
+        patch.object(rewards, "is_visible", side_effect=visible),
+        patch.object(rewards, "tap_if_visible", return_value=True) as claim,
+        patch.object(rewards, "_dismiss_reward_reveal", return_value=after_claim),
+    ):
+        success, claimed = rewards._claim_guild_chests(guardian)
+
+    assert success
+    assert claimed == 1
+    navigate.assert_called_once_with(
+        "navigation.guild:members_tab",
+        require_visible=False,
+        dispatch="now",
+    )
+    wait.assert_called_once_with("GUILD", settle_s=0.8)
+    claim.assert_called_once_with(rewards.GUILD_CHEST_CLAIM, screenshot=members)
 
 
 def test_scheduler_bounds_persistent_attention_and_failed_attempts():

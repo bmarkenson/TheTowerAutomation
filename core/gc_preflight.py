@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping, Optional
 
 from core.auto_pick_perks import AutoPickPerksEvidence, measure_auto_pick_perks
+from core.gc_module_loadout import (
+    GcModuleLoadoutEvidence,
+    evaluate_gc_module_loadout,
+)
 from core.state_detector import detect_state_and_overlays
 from core.workshop_preset import (
     BOTS_FARM_PRESET_SLOT,
-    CARDS_GC_PRESET_SLOT,
+    CARDS_FARM_PRESET_SLOT,
     PresetSlotSelection,
     measure_preset_slot_selection,
 )
@@ -83,20 +87,57 @@ class UltimateWeaponEvidence:
 @dataclass(frozen=True)
 class GcSessionPreflightEvidence:
     configuration: GcPreflightEvidence
+    module_mode: str
+    modules: Optional[GcModuleLoadoutEvidence]
     auto_pick_perks: AutoPickPerksEvidence
     ultimate_weapons: UltimateWeaponEvidence
+
+    @property
+    def modules_blocking_valid(self) -> bool:
+        return self.module_mode != "enforce" or bool(
+            self.modules is not None and self.modules.valid
+        )
 
     @property
     def valid(self) -> bool:
         return (
             self.configuration.valid
+            and self.modules_blocking_valid
             and self.auto_pick_perks.enabled
             and self.ultimate_weapons.valid
+        )
+
+    @property
+    def requires_no_battle_repair(self) -> bool:
+        """Whether a mismatch belongs to a no-battle configuration surface."""
+
+        return (
+            not self.configuration.valid
+            or bool(
+                self.module_mode == "enforce"
+                and self.modules is not None
+                and self.modules.has_authoritative_mismatch
+            )
         )
 
     def as_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["configuration"]["valid"] = self.configuration.valid
+        if self.modules is None:
+            payload["modules"] = {
+                "mode": self.module_mode,
+                "checked": False,
+                "matches_expected": None,
+                "blocking_valid": self.modules_blocking_valid,
+            }
+        else:
+            payload["modules"] = self.modules.as_dict()
+            payload["modules"].update(
+                mode=self.module_mode,
+                checked=True,
+                matches_expected=self.modules.valid,
+                blocking_valid=self.modules_blocking_valid,
+            )
         payload["ultimate_weapons"]["valid"] = self.ultimate_weapons.valid
         payload["valid"] = self.valid
         return payload
@@ -106,7 +147,7 @@ GC_SECTION_SPECS = {
     "cards": GcSectionSpec(
         name="cards",
         expected_state="CARDS",
-        required_secondary=frozenset({"CARDS_GC_ACTIVE", "CARDS_GC_SLOT"}),
+        required_secondary=frozenset({"CARDS_FARM_ACTIVE", "CARDS_FARM_SLOT"}),
     ),
     "workshop": GcSectionSpec(
         name="workshop",
@@ -166,15 +207,15 @@ def validate_gc_preflight_screens(
     cards_detection = dict(detector(cards_screen))
     cards_selection = measure_preset_slot_selection(
         cards_screen,
-        CARDS_GC_PRESET_SLOT,
+        CARDS_FARM_PRESET_SLOT,
     )
     cards_secondary = set(cards_detection.get("secondary_states") or ())
     if (
         cards_detection.get("state") == "CARDS"
-        and "CARDS_GC_SLOT" in cards_secondary
+        and "CARDS_FARM_SLOT" in cards_secondary
         and cards_selection.selected
     ):
-        cards_secondary.add("CARDS_GC_ACTIVE")
+        cards_secondary.add("CARDS_FARM_ACTIVE")
     cards_detection["secondary_states"] = sorted(cards_secondary)
 
     workshop_detection = dict(detector(workshop_screen))
@@ -299,7 +340,10 @@ def validate_gc_session_preflight_screens(
     workshop_screen,
     bots_screen,
     guardians_screen,
+    modules_screen=None,
     perks_screen,
+    module_requirements: Optional[Mapping[str, Any]] = None,
+    module_mode: str = "enforce",
     ultimate_requirements: Mapping[str, Mapping[str, Any]],
     ultimate_observations: Mapping[str, Mapping[str, Any]],
     detector: Detector = detect_state_and_overlays,
@@ -322,8 +366,22 @@ def validate_gc_session_preflight_screens(
             enabled=False,
             green_pixels=auto_pick.green_pixels,
         )
+    if module_mode not in {"enforce", "observe", "preserve"}:
+        raise ValueError(f"unsupported module policy {module_mode!r}")
+    modules = None
+    if module_mode != "preserve":
+        if modules_screen is None or not isinstance(module_requirements, Mapping):
+            raise ValueError(
+                f"module policy {module_mode!r} requires screen and requirements"
+            )
+        modules = evaluate_gc_module_loadout(
+            modules_screen,
+            module_requirements,
+        )
     return GcSessionPreflightEvidence(
         configuration=configuration,
+        module_mode=module_mode,
+        modules=modules,
         auto_pick_perks=auto_pick,
         ultimate_weapons=evaluate_ultimate_weapon_state(
             ultimate_requirements,

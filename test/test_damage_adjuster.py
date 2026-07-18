@@ -6,7 +6,10 @@ import cv2
 from core.clickmap_access import get_click
 from core.damage_adjuster import (
     DAMAGE_SELECTOR_MODE,
+    DamageAdjusterReading,
+    configure_damage_slider,
     dismiss_damage_adjuster,
+    normalize_damage_percentage,
     open_damage_adjuster,
     read_damage_adjuster,
 )
@@ -52,6 +55,17 @@ def test_closed_attack_menu_does_not_match_damage_adjuster():
     assert reading.percentage is None
 
 
+def test_incomplete_black_frame_cannot_authorize_damage_panel_evidence():
+    panel = _load(PANEL_FIXTURE)
+    incomplete = panel * 0
+    incomplete[1575:1850, 60:1020] = panel[1575:1850, 60:1020]
+
+    reading = read_damage_adjuster(incomplete)
+
+    assert not reading.visible
+    assert reading.percentage is None
+
+
 def test_damage_detail_action_taps_label_center_without_purchase_offset():
     screen = _load(ATTACK_FIXTURE)
 
@@ -64,6 +78,132 @@ def test_damage_detail_action_taps_label_center_without_purchase_offset():
         label="buttons.damage_adjuster:attack",
         dispatch="now",
     )
+
+
+def test_damage_slider_arrow_actions_have_explicit_geometry():
+    assert get_click("buttons.damage_adjuster:decrease") == (195, 1755)
+    assert get_click("buttons.damage_adjuster:increase") == (885, 1755)
+
+
+def test_damage_percentage_normalization_uses_screen_notation():
+    assert normalize_damage_percentage("1e-22") == "1E-22%"
+    assert normalize_damage_percentage("1E-22%") == "1E-22%"
+
+
+def _reading(percentage, *, confidence=95.0):
+    return DamageAdjusterReading(
+        visible=True,
+        mode=DAMAGE_SELECTOR_MODE,
+        percentage=percentage,
+        ocr_text=f"Percent Of Enemy Health {percentage}",
+        ocr_confidence=confidence,
+        panel_confidence=1.0,
+    )
+
+
+def test_damage_slider_enforcement_uses_verified_single_step_feedback():
+    reads = iter(
+        (
+            _reading("1E-20%"),
+            _reading("1E-21%"),
+            _reading("1E-21%"),
+            _reading("1E-22%"),
+        )
+    )
+    taps = []
+
+    def tap(name, **kwargs):
+        taps.append((name, kwargs))
+        return True
+
+    with (
+        patch("core.damage_adjuster.open_damage_adjuster", return_value=_reading("1E-20%")),
+        patch("core.damage_adjuster.read_damage_adjuster", side_effect=lambda _frame: next(reads)),
+        patch("core.damage_adjuster.dismiss_damage_adjuster", return_value=True),
+    ):
+        result = configure_damage_slider(
+            "1e-22",
+            capture_fn=lambda: object(),
+            tap_fn=tap,
+            ensure_menu_fn=lambda *_args, **_kwargs: object(),
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert result.success
+    assert result.initial == "1E-20%"
+    assert result.final == "1E-22%"
+    assert result.changed
+    assert result.steps == 2
+    assert [name for name, _kwargs in taps] == [
+        "buttons.damage_adjuster:decrease",
+        "buttons.damage_adjuster:decrease",
+    ]
+    assert all(
+        kwargs == {"require_visible": False, "dispatch": "now"}
+        for _name, kwargs in taps
+    )
+
+
+def test_damage_slider_already_at_target_sends_no_arrow_tap():
+    taps = []
+    with (
+        patch("core.damage_adjuster.open_damage_adjuster", return_value=_reading("1E-22%")),
+        patch("core.damage_adjuster.dismiss_damage_adjuster", return_value=True),
+    ):
+        result = configure_damage_slider(
+            "1E-22%",
+            capture_fn=lambda: object(),
+            tap_fn=lambda *args, **kwargs: taps.append((args, kwargs)) or True,
+            ensure_menu_fn=lambda *_args, **_kwargs: object(),
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert result.success
+    assert not result.changed
+    assert result.steps == 0
+    assert taps == []
+
+
+def test_damage_slider_observation_reports_mismatch_without_changing_value():
+    taps = []
+    with (
+        patch("core.damage_adjuster.open_damage_adjuster", return_value=_reading("1E-20%")),
+        patch("core.damage_adjuster.dismiss_damage_adjuster", return_value=True),
+    ):
+        result = configure_damage_slider(
+            "1E-22%",
+            mode="observe",
+            capture_fn=lambda: object(),
+            tap_fn=lambda *args, **kwargs: taps.append((args, kwargs)) or True,
+            ensure_menu_fn=lambda *_args, **_kwargs: object(),
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert result.observed
+    assert not result.matches
+    assert not result.success
+    assert result.reason == "observed_mismatch"
+    assert taps == []
+
+
+def test_damage_slider_enforcement_fails_closed_when_feedback_moves_away():
+    reads = iter((_reading("1E-20%"), _reading("1E-19%")))
+    with (
+        patch("core.damage_adjuster.open_damage_adjuster", return_value=_reading("1E-20%")),
+        patch("core.damage_adjuster.read_damage_adjuster", side_effect=lambda _frame: next(reads)),
+        patch("core.damage_adjuster.dismiss_damage_adjuster", return_value=True),
+    ):
+        result = configure_damage_slider(
+            "1E-22%",
+            capture_fn=lambda: object(),
+            tap_fn=lambda *_args, **_kwargs: True,
+            ensure_menu_fn=lambda *_args, **_kwargs: object(),
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert not result.success
+    assert result.steps == 1
+    assert result.reason == "value_moved_away_from_target"
 
 
 def test_open_damage_adjuster_uses_settled_screenshot_workflow():

@@ -244,6 +244,45 @@
         "duration_ms": 260
       }
     },
+    "goto_next:module_inventory": {
+      "roles": [
+        "gesture"
+      ],
+      "swipe": {
+        "type": "swipe",
+        "x1": 540,
+        "y1": 1500,
+        "x2": 540,
+        "y2": 1290,
+        "duration_ms": 260
+      }
+    },
+    "goto_previous:module_inventory": {
+      "roles": [
+        "gesture"
+      ],
+      "swipe": {
+        "type": "swipe",
+        "x1": 540,
+        "y1": 1290,
+        "x2": 540,
+        "y2": 1500,
+        "duration_ms": 260
+      }
+    },
+    "goto_top:event_bots": {
+      "roles": [
+        "gesture"
+      ],
+      "swipe": {
+        "type": "swipe",
+        "x1": 540,
+        "y1": 650,
+        "x2": 540,
+        "y2": 1450,
+        "duration_ms": 350
+      }
+    },
     "upgrade_detail_dismiss": {
       "roles": [
         "gesture"
@@ -256,6 +295,19 @@
     }
   },
   "indicators": {
+    "poison_swamp_stun_off": {
+      "match_template": "indicators/poison_swamp_stun_off.png",
+      "match_region": {
+        "x": 840,
+        "y": 1540,
+        "w": 140,
+        "h": 160
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
     "menu_attack": {
       "match_template": "indicators/menu_attack.png",
       "match_region": {
@@ -659,8 +711,8 @@
         "y": 1129
       }
     },
-    "cards:gc_slot": {
-      "match_template": "indicators/cards:gc_slot.png",
+    "cards:farm_slot": {
+      "match_template": "indicators/cards:farm_slot.png",
       "match_region": {
         "x": 3,
         "y": 350,
@@ -1090,6 +1142,19 @@
     }
   },
   "overlays": {
+    "poison_swamp_detail": {
+      "match_template": "overlays/poison_swamp_detail.png",
+      "match_region": {
+        "x": 250,
+        "y": 210,
+        "w": 580,
+        "h": 180
+      },
+      "match_threshold": 0.95,
+      "roles": [
+        "overlay"
+      ]
+    },
     "ad_gem": {
       "match_template": "overlays/ad_gem.png",
       "region_ref": "ad_gem_region",
@@ -1476,6 +1541,16 @@
         "y": 589
       }
     },
+    "guild:members_tab": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 156,
+        "y": 313
+      }
+    },
     "event:bots_tab": {
       "roles": [
         "navigation"
@@ -1531,9 +1606,9 @@
       "match_template": "navigation/home_guild.png",
       "match_region": {
         "x": 20,
-        "y": 850,
+        "y": 720,
         "w": 210,
-        "h": 220
+        "h": 350
       },
       "match_threshold": 0.9,
       "roles": [
@@ -1544,9 +1619,9 @@
       "match_template": "navigation/home_event.png",
       "match_region": {
         "x": 20,
-        "y": 580,
+        "y": 450,
         "w": 200,
-        "h": 220
+        "h": 350
       },
       "match_threshold": 0.9,
       "roles": [
@@ -1555,6 +1630,19 @@
     }
   },
   "buttons": {
+    "poison_swamp_stun_on": {
+      "match_template": "buttons/poison_swamp_stun_on.png",
+      "match_region": {
+        "x": 840,
+        "y": 1540,
+        "w": 140,
+        "h": 160
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
     "battle_control:home": {
       "roles": [
         "button"
@@ -1583,6 +1671,86 @@
         "type": "tap",
         "x": 929,
         "y": 223
+      }
+    },
+    "module:detail_equip_toggle": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 270,
+        "y": 1670
+      }
+    },
+    "module:select_primary": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 400,
+        "y": 1095
+      }
+    },
+    "module:select_assist": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 680,
+        "y": 1095
+      }
+    },
+    "module:decline_level_transfer": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 350,
+        "y": 1125
+      }
+    },
+    "module:rarity_filter": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 670,
+        "y": 1690
+      }
+    },
+    "module:rarity_none": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 520,
+        "y": 480
+      }
+    },
+    "module:rarity_ancestral": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 850,
+        "y": 1475
+      }
+    },
+    "module:rarity_all": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 585,
+        "y": 1575
       }
     },
     "module:equipped_inner_left_top": {
@@ -1692,6 +1860,26 @@
       "roles": [
         "button"
       ]
+    },
+    "damage_adjuster:decrease": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 195,
+        "y": 1755
+      }
+    },
+    "damage_adjuster:increase": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 885,
+        "y": 1755
+      }
     },
     "yes:end_round": {
       "match_template": "buttons/yes:end_round.png",
@@ -1869,9 +2057,9 @@
     "claim_guild_chest": {
       "match_template": "buttons/claim_guild_chest.png",
       "match_region": {
-        "x": 60,
+        "x": 40,
         "y": 620,
-        "w": 980,
+        "w": 1040,
         "h": 200
       },
       "match_threshold": 0.9,

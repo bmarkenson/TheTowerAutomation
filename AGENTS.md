@@ -19,16 +19,24 @@ current process and device.
 ## Non-negotiable rules
 
 - Run project Python through `.venv/bin/python`, including tests.
-- Never Surrender a pre-existing, operator-owned, or automation farming battle.
-  A battle deliberately started by the agent for a bounded test may be
-  Surrendered only when the task author explicitly authorizes it and the agent
-  has recorded that test-run ownership before starting it. Leaving through the
-  verified Exit Battle → Go Home route is allowed only when the task authorizes
-  it and the active run remains resumable.
+- Never Surrender a pre-existing or operator-owned battle merely to create a
+  development test boundary. A battle deliberately started by the agent for a
+  bounded test may be Surrendered only when the task author explicitly
+  authorizes it and the agent records that test-run ownership before starting
+  it. Runtime automation may Surrender only through an implemented,
+  profile-declared recovery that authoritatively detects a failed Home-only
+  configuration gate and owns the complete Home repair, restart, and
+  revalidation sequence. Leaving through the verified Exit Battle → Go Home
+  route is allowed only when the task authorizes it and the active run remains
+  resumable.
 - Before any live action, inspect the control file, lock/PID, ADB target,
   current screen, and recent `logs/actions.log` entries.
 - Capture and detection may continue while paused, but pause blocks every
   strategy and handler action.
+- If an agent sets a running battle to `PAUSED` to complete bounded work,
+  restore `RUNNING` when that work is complete after rechecking live state and
+  confirming that the pause is still agent-owned. Do not leave an agent-owned
+  work pause behind as a handoff state.
 - Prefer repairing broken dependencies and authority boundaries over bypassing
   them with unguarded taps, seeded completion variables, or one-off aliases.
 - Treat existing untracked files as user-owned unless their ownership and scope

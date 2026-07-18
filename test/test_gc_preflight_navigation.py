@@ -10,15 +10,30 @@ from core.gc_preflight_navigation import (
     run_read_only_gc_preflight,
 )
 from core.home_battle import HomeBattleEvidence
+from core.poison_swamp_stun import PoisonSwampStunState
 from core.upgrade_box_detector import UpgradeBox
 
 
 ULTIMATE_REQUIREMENTS = {
     "Golden Tower": {"primary": "on"},
     "Black Hole": {"primary": "on"},
+    "Poison Swamp": {"primary": "on", "stun": "off"},
     "Spotlight": {"primary": "on", "missiles": "on"},
 }
-PREFLIGHT_REQUIREMENTS = {"ultimate_weapons": ULTIMATE_REQUIREMENTS}
+MODULE_REQUIREMENTS = {
+    "cannon_assist": "Being Annihilator",
+    "cannon_primary": "Amplifying Strike",
+    "generator_primary": "Black Hole Digestor",
+    "generator_assist": "Singularity Harness",
+    "armor_assist": "Anti-Cube Portal",
+    "armor_primary": "Orbital Augment",
+    "core_primary": "Multiverse Nexus",
+    "core_assist": "Dimension Core",
+}
+PREFLIGHT_REQUIREMENTS = {
+    "ultimate_weapons": ULTIMATE_REQUIREMENTS,
+    "modules": MODULE_REQUIREMENTS,
+}
 
 
 class _FakeUi:
@@ -30,6 +45,8 @@ class _FakeUi:
         self.static_taps: list[str] = []
         self.visible_taps: list[str] = []
         self.swipes: list[tuple[str, str]] = []
+        self.event_swipes: list[str] = []
+        self.bots_offscreen = False
 
     def capture(self):
         return self.frame
@@ -48,10 +65,11 @@ class _FakeUi:
             "navigation.open_perks": ("PERKS", None, set()),
             "navigation.goto_uw": ("RUNNING", "UW_MENU", set()),
             "navigation.goto_workshop_home": ("WORKSHOP", None, set()),
+            "navigation.goto_modules_home": ("MODULES", None, set()),
             "navigation.event:bots_tab": (
                 "EVENT",
                 None,
-                {"EVENT_BOTS_SCREEN"},
+                set() if self.bots_offscreen else {"EVENT_BOTS_SCREEN"},
             ),
             "navigation.guild:guardian_tab": (
                 "GUILD",
@@ -87,9 +105,22 @@ class _FakeUi:
     def swipe(self, direction, span):
         self.swipes.append((direction, span))
 
+    def event_swipe(self, label):
+        self.event_swipes.append(label)
+        self.secondary = {"EVENT_BOTS_SCREEN"}
+        return True
+
 
 def _home_evidence(control=HomeBattleControl.RESUME_BATTLE):
     return HomeBattleEvidence(control=control, source="test", confidence=100.0)
+
+
+def _stun_off_result(ui, *, changed=False):
+    return SimpleNamespace(
+        screenshot=ui.frame,
+        evidence=SimpleNamespace(state=PoisonSwampStunState.OFF),
+        changed=changed,
+    )
 
 
 def test_game_over_observation_aborts_without_sending_input():
@@ -119,15 +150,26 @@ def test_game_over_observation_aborts_without_sending_input():
 
 def test_read_only_route_returns_to_running_and_never_uses_mutating_controls():
     ui = _FakeUi()
+    ui.bots_offscreen = True
     boxes = [
         UpgradeBox(
             "left",
             (0, 0, 1, 1),
             text=label,
-            toggles={name: "on" for name in toggles},
+            toggles={name: "on" for name in toggles if name != "stun"},
         )
         for label, toggles in ULTIMATE_REQUIREMENTS.items()
     ]
+    corrections = []
+    validated = {}
+
+    def ensure_stun(**kwargs):
+        corrections.append(kwargs)
+        return _stun_off_result(ui, changed=True)
+
+    def validate(**kwargs):
+        validated.update(kwargs)
+        return SimpleNamespace(valid=True)
 
     result = run_read_only_gc_preflight(
         PREFLIGHT_REQUIREMENTS,
@@ -137,10 +179,12 @@ def test_read_only_route_returns_to_running_and_never_uses_mutating_controls():
         tap_visible_fn=ui.visible_tap,
         go_home_fn=ui.go_home,
         swipe_fn=ui.swipe,
+        event_swipe_fn=ui.event_swipe,
         detect_boxes_fn=lambda _frame, **_kwargs: {"left": boxes, "right": []},
+        ensure_poison_swamp_stun_fn=ensure_stun,
         detect_home_control_fn=lambda _frame: _home_evidence(),
         sleep_fn=lambda _seconds: None,
-        validate_fn=lambda **_kwargs: SimpleNamespace(valid=True),
+        validate_fn=validate,
     )
 
     assert result.status is GcPreflightNavigationStatus.COMPLETE
@@ -151,7 +195,54 @@ def test_read_only_route_returns_to_running_and_never_uses_mutating_controls():
     assert not any("surrender" in key for key in all_keys)
     assert not any("preset" in key for key in all_keys)
     assert not any("toggle" in key for key in all_keys)
+    assert len(corrections) == 1
+    assert validated["ultimate_observations"]["Poison Swamp"]["stun"] == "off"
     assert ui.swipes == [("towards_top", "extended")] * 3
+    assert ui.event_swipes == ["gesture_targets.goto_top:event_bots"]
+
+
+def test_preserved_modules_skip_module_navigation_and_validation():
+    ui = _FakeUi()
+    boxes = [
+        UpgradeBox(
+            "left",
+            (0, 0, 1, 1),
+            text=label,
+            toggles={name: "on" for name in toggles if name != "stun"},
+        )
+        for label, toggles in ULTIMATE_REQUIREMENTS.items()
+    ]
+    requirements = {
+        "ultimate_weapons": ULTIMATE_REQUIREMENTS,
+        "loadout_policies": {"modules": "preserve"},
+    }
+    validated = {}
+
+    def validate(**kwargs):
+        validated.update(kwargs)
+        return SimpleNamespace(valid=True)
+
+    result = run_read_only_gc_preflight(
+        requirements,
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.safe_tap,
+        tap_visible_fn=ui.visible_tap,
+        go_home_fn=ui.go_home,
+        swipe_fn=ui.swipe,
+        event_swipe_fn=ui.event_swipe,
+        detect_boxes_fn=lambda _frame, **_kwargs: {"left": boxes, "right": []},
+        ensure_poison_swamp_stun_fn=lambda **_kwargs: _stun_off_result(ui),
+        detect_home_control_fn=lambda _frame: _home_evidence(),
+        sleep_fn=lambda _seconds: None,
+        validate_fn=validate,
+    )
+
+    assert result.status is GcPreflightNavigationStatus.COMPLETE
+    assert "navigation.goto_modules_home" not in ui.static_taps
+    assert validated["module_mode"] == "preserve"
+    assert validated["modules_screen"] is None
+    assert validated["module_requirements"] is None
 
 
 def test_new_battle_home_control_aborts_without_tapping_battle():
@@ -183,7 +274,7 @@ def test_resume_control_is_reverified_on_fresh_frame_immediately_before_tap():
             "left",
             (0, 0, 1, 1),
             text=label,
-            toggles={name: "on" for name in toggles},
+            toggles={name: "on" for name in toggles if name != "stun"},
         )
         for label, toggles in ULTIMATE_REQUIREMENTS.items()
     ]
@@ -208,6 +299,7 @@ def test_resume_control_is_reverified_on_fresh_frame_immediately_before_tap():
         go_home_fn=ui.go_home,
         swipe_fn=ui.swipe,
         detect_boxes_fn=lambda _frame, **_kwargs: {"left": boxes, "right": []},
+        ensure_poison_swamp_stun_fn=lambda **_kwargs: _stun_off_result(ui),
         detect_home_control_fn=changing_home_control,
         sleep_fn=lambda _seconds: None,
     )

@@ -75,6 +75,10 @@ def build_strategy_yaml(source: Dict[str, Any]) -> Dict[str, Any]:
         return _build_manual_strategy(source)
     if builder == "gc_farm":
         return _build_gc_farm_strategy(source)
+    if builder == "farm":
+        from tools.strategy_builders.farm_profile import resolve_farm_source
+
+        return _build_gc_farm_strategy(resolve_farm_source(source))
     if builder in {"", "default", "upgrade"}:
         return _build_upgrade_strategy(source)
     if builder == "glass_cannon":
@@ -100,9 +104,10 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
     initialization = source.get("initialization") or {}
     target_priority = initialization.get("target_priority") or {}
     target_priority_mode = str(target_priority.get("mode") or "").strip().lower()
-    if target_priority_mode not in {"preserve", "enforce"}:
+    if target_priority_mode not in {"preserve", "observe", "enforce"}:
         raise ValueError(
-            "gc_farm initialization.target_priority.mode must be preserve or enforce"
+            "gc_farm initialization.target_priority.mode must be preserve, "
+            "observe, or enforce"
         )
 
     target_priority_order: List[str] | None = None
@@ -112,13 +117,43 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
             raise ValueError("gc_farm preserve mode must not supply a Target Priority order")
     else:
         if not isinstance(configured_order, list):
-            raise ValueError("gc_farm enforce mode requires a Target Priority order")
+            raise ValueError(
+                f"gc_farm {target_priority_mode} mode requires a Target Priority order"
+            )
         from core.target_priority_config import validate_target_priority_order
 
         try:
             target_priority_order = validate_target_priority_order(configured_order)
         except ValueError as exc:
             raise ValueError(f"gc_farm {exc}") from exc
+
+    damage_slider = initialization.get("damage_slider") or {"mode": "preserve"}
+    damage_slider_mode = str(damage_slider.get("mode") or "").strip().lower()
+    if damage_slider_mode not in {"preserve", "observe", "enforce"}:
+        raise ValueError(
+            "gc_farm initialization.damage_slider.mode must be preserve, "
+            "observe, or enforce"
+        )
+    damage_slider_value: str | None = None
+    configured_damage_value = damage_slider.get("value")
+    if damage_slider_mode == "preserve":
+        if configured_damage_value is not None:
+            raise ValueError(
+                "gc_farm preserved Damage Slider must not supply a value"
+            )
+    else:
+        if configured_damage_value is None:
+            raise ValueError(
+                f"gc_farm {damage_slider_mode} Damage Slider requires a value"
+            )
+        from core.damage_adjuster import normalize_damage_percentage
+
+        try:
+            damage_slider_value = normalize_damage_percentage(
+                configured_damage_value
+            )
+        except ValueError as exc:
+            raise ValueError(f"gc_farm Damage Slider {exc}") from exc
 
     session_requirements = _normalize_gc_session_preflight(
         source.get("session_preflight")
@@ -150,12 +185,24 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
     if target_priority_mode == "enforce":
         vars_block["target_priority_checked"] = False
         complete_when.append("target_priority_checked")
+    elif target_priority_mode == "observe":
+        vars_block["target_priority_observed"] = False
+        vars_block["target_priority_observation"] = {}
+    if damage_slider_mode == "enforce":
+        vars_block["damage_slider_checked"] = False
+        vars_block["damage_slider_observation"] = {}
+        complete_when.append("damage_slider_checked")
+    elif damage_slider_mode == "observe":
+        vars_block["damage_slider_observed"] = False
+        vars_block["damage_slider_observation"] = {}
     vars_block.update(
         gc_no_battle_setup_completed=False,
         gc_no_battle_setup_evidence={},
         gc_session_preflight_completed=False,
         gc_session_preflight_attempted=False,
         gc_session_preflight_blocked=False,
+        gc_session_preflight_repair_required=False,
+        gc_session_preflight_repair_in_progress=False,
         gc_session_preflight_last_status="",
         gc_session_preflight_last_reason="",
         gc_session_preflight_evidence={},
@@ -183,6 +230,14 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
         "level_skip_taps_sent",
         "level_skip_last_reason",
     ]
+    if damage_slider_mode == "enforce":
+        per_run_reset.extend(
+            ["damage_slider_checked", "damage_slider_observation"]
+        )
+    elif damage_slider_mode == "observe":
+        per_run_reset.extend(
+            ["damage_slider_observed", "damage_slider_observation"]
+        )
 
     reset_values = {
         "run_initialised": False,
@@ -206,6 +261,16 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
         "level_skip_taps_sent": 0,
         "level_skip_last_reason": "",
     }
+    if damage_slider_mode == "enforce":
+        reset_values.update(
+            damage_slider_checked=False,
+            damage_slider_observation={},
+        )
+    elif damage_slider_mode == "observe":
+        reset_values.update(
+            damage_slider_observed=False,
+            damage_slider_observation={},
+        )
     initialize_values = copy.deepcopy(reset_values)
     initialize_values.update(
         run_initialised=True,
@@ -240,14 +305,43 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
                 {"type": "set", "var": "loop_sleep_override_sec", "value": 0.0},
             ],
         },
+    ]
+
+    rules.append(
         {
             "name": "initialize_level_skips_fast",
             "when": {"state": "RUNNING"},
             "assert": ["fast_loop_active", "!eals_completed"],
             "cooldown_sec": 0.25,
             "do": [{"type": "level_skip_initialize"}],
-        },
-    ]
+        }
+    )
+
+    if damage_slider_mode in {"observe", "enforce"}:
+        completion_var = (
+            "damage_slider_checked"
+            if damage_slider_mode == "enforce"
+            else "damage_slider_observed"
+        )
+        rules.append(
+            {
+                "name": f"{damage_slider_mode}_damage_slider",
+                "when": {"state": "RUNNING"},
+                "assert": [
+                    "ehls_completed",
+                    "eals_completed",
+                    f"!{completion_var}",
+                ],
+                "cooldown_sec": 30.0,
+                "do": [
+                    {
+                        "type": "damage_slider_configure",
+                        "mode": damage_slider_mode,
+                        "value": damage_slider_value,
+                    }
+                ],
+            }
+        )
 
     if target_priority_mode == "enforce":
         rules.append(
@@ -263,6 +357,25 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
                 "do": [
                     {
                         "type": "target_priority_ensure",
+                        "order": copy.deepcopy(target_priority_order),
+                    }
+                ],
+            }
+        )
+    elif target_priority_mode == "observe":
+        rules.append(
+            {
+                "name": "observe_target_priority",
+                "when": {"state": "RUNNING"},
+                "assert": [
+                    "ehls_completed",
+                    "eals_completed",
+                    "!target_priority_observed",
+                ],
+                "cooldown_sec": 30.0,
+                "do": [
+                    {
+                        "type": "target_priority_observe",
                         "order": copy.deepcopy(target_priority_order),
                     }
                 ],
@@ -288,7 +401,7 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
         }
     )
 
-    return {
+    plan = {
         "meta": meta,
         "run_initialization": {"complete_when": complete_when},
         "session_preflight": {
@@ -299,6 +412,10 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
         "per_run_reset": per_run_reset,
         "rules": rules,
     }
+    run_configuration = source.get("run_configuration")
+    if isinstance(run_configuration, dict):
+        plan["run_configuration"] = copy.deepcopy(run_configuration)
+    return plan
 
 
 def _normalize_gc_session_preflight(raw: Any) -> Dict[str, Any]:
@@ -309,7 +426,7 @@ def _normalize_gc_session_preflight(raw: Any) -> Dict[str, Any]:
 
     requirements = copy.deepcopy(raw)
     fixed_values = {
-        "cards_deck": "GC",
+        "cards_deck": "Farm",
         "workshop_preset": "Farm",
         "bots_preset": "Farm",
     }
@@ -332,6 +449,34 @@ def _normalize_gc_session_preflight(raw: Any) -> Dict[str, Any]:
     requirements["guardian_chips"] = [
         str(chip).strip() for chip in guardian_chips
     ]
+
+    raw_policies = requirements.get("loadout_policies") or {}
+    if not isinstance(raw_policies, dict):
+        raise ValueError("gc_farm session_preflight.loadout_policies must be a mapping")
+    unknown_policies = sorted(set(raw_policies) - {"modules"})
+    if unknown_policies:
+        raise ValueError(
+            "gc_farm session_preflight has unsupported loadout policies: "
+            + ", ".join(unknown_policies)
+        )
+    module_mode = str(raw_policies.get("modules") or "enforce").strip().lower()
+    if module_mode not in {"enforce", "observe", "preserve"}:
+        raise ValueError(
+            "gc_farm session_preflight modules policy must be enforce, "
+            "observe, or preserve"
+        )
+    requirements["loadout_policies"] = {"modules": module_mode}
+    if module_mode == "preserve":
+        if "modules" in requirements:
+            raise ValueError(
+                "gc_farm preserved modules must not supply module requirements"
+            )
+    else:
+        from core.gc_module_loadout import normalize_gc_module_requirements
+
+        requirements["modules"] = normalize_gc_module_requirements(
+            requirements.get("modules")
+        )
 
     if requirements.get("auto_pick_perks") is not True:
         raise ValueError(
@@ -365,6 +510,14 @@ def _normalize_gc_session_preflight(raw: Any) -> Dict[str, Any]:
                 raise ValueError(
                     "gc_farm session_preflight Ultimate Weapon toggles require "
                     "on/off states"
+                )
+            if canonical_toggle == "stun" and (
+                canonical_label.lower() != "poison swamp"
+                or normalized_state != "off"
+            ):
+                raise ValueError(
+                    "gc_farm session_preflight supports only Poison Swamp "
+                    "stun=off"
                 )
             normalized_toggles[canonical_toggle] = normalized_state
         normalized_weapons[canonical_label] = normalized_toggles

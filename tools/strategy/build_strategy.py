@@ -12,4 +12,7 @@ if not SCRIPT.exists():
     print(f"Underlying builder not found: {SCRIPT}", file=sys.stderr)
     sys.exit(2)
 
-os.execvp(str(SCRIPT), [str(SCRIPT)] + sys.argv[1:])
+os.execv(
+    sys.executable,
+    [sys.executable, str(SCRIPT), *sys.argv[1:]],
+)

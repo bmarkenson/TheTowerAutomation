@@ -1,0 +1,13 @@
+schema_version: 1
+presets:
+  farm_t18:
+    - Fleets
+    - Boss
+    - Elites
+    - In Spotlight
+    - Tank
+    - Closest (Default)
+    - Ranged
+    - Protector
+    - Fast
+    - Basic

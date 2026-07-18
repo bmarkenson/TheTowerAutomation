@@ -81,10 +81,10 @@ states:
   match_keys:
   - indicators.Cards:GCFarmEarly
 
-- name: CARDS_GC_SLOT
+- name: CARDS_FARM_SLOT
   type: secondary
   match_keys:
-  - indicators.cards:gc_slot
+  - indicators.cards:farm_slot
 
 - name: LAB
   type: primary
@@ -177,6 +177,7 @@ states:
   match_keys:
   - overlays.upgrade_detail
   - overlays.uw_detail
+  - overlays.poison_swamp_detail
 
 - name: EXIT_BATTLE_DIALOG
   type: fallback_primary
@@ -261,6 +262,7 @@ overlays:
   match_keys:
   - overlays.upgrade_detail
   - overlays.uw_detail
+  - overlays.poison_swamp_detail
 
 - name: EXIT_BATTLE_DIALOG
   type: overlay

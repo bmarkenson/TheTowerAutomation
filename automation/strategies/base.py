@@ -54,5 +54,10 @@ class BaseStrategy:
 
         return {}
 
+    def run_configuration(self) -> Mapping[str, Any]:
+        """Return the resolved configuration recorded with battle results."""
+
+        return {}
+
     def on_game_over(self, ctx: MissionContext) -> None:
         """Optional hook when GAME_OVER is handled."""

@@ -1,0 +1,18 @@
+meta:
+  name: farm_t19_experiment
+  family: farm
+  tier: 19
+  experimental: true
+  version: 1
+
+builder: farm
+run_profile: farm
+
+loadout:
+  modules:
+    mode: enforce
+    preset: farm_standard
+  damage_slider:
+    mode: preserve
+  target_priority:
+    mode: preserve

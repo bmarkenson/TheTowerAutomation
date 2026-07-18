@@ -288,6 +288,13 @@ def _ensure_menu(menu: str, *, capture_fn: Callable[[], Optional[np.ndarray]], m
             screenshot = dismissed_menu
 
         detection = detect_state_and_overlays(screenshot)
+        if detection.get("state") != "RUNNING":
+            log(
+                f"[UPGRADE_NAV] Refusing menu switch from "
+                f"state={detection.get('state')!r}",
+                "WARN",
+            )
+            return None
         current = _normalize_menu(detection.get("menu"))
         if current == menu_key:
             return screenshot
@@ -311,6 +318,36 @@ def _ensure_menu(menu: str, *, capture_fn: Callable[[], Optional[np.ndarray]], m
     )
     if dismissed_menu is not None:
         screenshot = dismissed_menu
+    return screenshot
+
+
+def ensure_upgrade_menu(
+    menu: str,
+    *,
+    capture_fn: Callable[[], Optional[np.ndarray]] = capture_adb_screenshot,
+    max_attempts: int = 4,
+) -> Optional[np.ndarray]:
+    """Return a fresh verified running frame on the requested upgrade menu."""
+
+    menu_key = _normalize_menu(menu)
+    screenshot = _ensure_menu(
+        menu,
+        capture_fn=capture_fn,
+        max_attempts=max_attempts,
+    )
+    if screenshot is None:
+        return None
+    detection = detect_state_and_overlays(screenshot)
+    if (
+        detection.get("state") != "RUNNING"
+        or _normalize_menu(detection.get("menu")) != menu_key
+    ):
+        log(
+            f"[UPGRADE_NAV] Requested menu {menu_key!r} was not verified: "
+            f"state={detection.get('state')!r} menu={detection.get('menu')!r}",
+            "WARN",
+        )
+        return None
     return screenshot
 
 

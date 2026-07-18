@@ -1,0 +1,19 @@
+meta:
+  name: farm_t18
+  family: farm
+  tier: 18
+  version: 1
+
+builder: farm
+run_profile: farm
+
+loadout:
+  modules:
+    mode: enforce
+    preset: farm_standard
+  damage_slider:
+    mode: enforce
+    value: "1e-22"
+  target_priority:
+    mode: enforce
+    preset: farm_t18

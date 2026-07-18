@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -24,7 +25,7 @@ except Exception:  # pragma: no cover - exercised through the unavailable path
 Frame = np.ndarray
 OcrDataFn = Callable[[Frame], Mapping[str, Sequence[Any]]]
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DEFAULT_RECORDS_DIR = Path("logs/battles")
 MORE_STATS_CROP = (140, 330, 800, 1370)
 GAME_STATS_CROP = (40, 400, 995, 1110)
@@ -503,6 +504,7 @@ def build_battle_record(
     battle_id: Optional[str] = None,
     captured_at: Optional[datetime] = None,
     strategy_name: Optional[str] = None,
+    run_configuration: Optional[Mapping[str, Any]] = None,
     runtime_context: Optional[Mapping[str, Any]] = None,
     confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
     data_fn: Optional[OcrDataFn] = None,
@@ -525,6 +527,7 @@ def build_battle_record(
         battle_id=battle_id or make_battle_id(when),
         captured_at=when,
         strategy_name=strategy_name,
+        run_configuration=run_configuration,
         runtime_context=runtime_context,
     )
 
@@ -536,6 +539,7 @@ def build_battle_record_from_clipboard(
     battle_id: Optional[str] = None,
     captured_at: Optional[datetime] = None,
     strategy_name: Optional[str] = None,
+    run_configuration: Optional[Mapping[str, Any]] = None,
     runtime_context: Optional[Mapping[str, Any]] = None,
     game_stats_text_fn: Callable[..., tuple[str, float]] = ocr_text_and_conf,
 ) -> dict[str, Any]:
@@ -550,6 +554,7 @@ def build_battle_record_from_clipboard(
         battle_id=battle_id or make_battle_id(when),
         captured_at=when,
         strategy_name=strategy_name,
+        run_configuration=run_configuration,
         runtime_context=runtime_context,
     )
 
@@ -561,6 +566,7 @@ def _assemble_battle_record(
     battle_id: str,
     captured_at: datetime,
     strategy_name: Optional[str],
+    run_configuration: Optional[Mapping[str, Any]],
     runtime_context: Optional[Mapping[str, Any]],
 ) -> dict[str, Any]:
     """Combine normalized source data and apply cross-source validation."""
@@ -579,6 +585,7 @@ def _assemble_battle_record(
         "battle_id": battle_id,
         "captured_at": captured_at.isoformat(timespec="seconds"),
         "strategy": strategy_name,
+        "run_configuration": copy.deepcopy(dict(run_configuration or {})),
         "runtime": dict(runtime_context or {}),
         "game_stats": game_stats,
         "more_stats": more_stats,
@@ -887,8 +894,45 @@ def render_battle_markdown(record: Mapping[str, Any]) -> str:
     lines.append(f"Captured: {record.get('captured_at', 'unknown')}")
     if record.get("strategy"):
         lines.append(f"Strategy: {record['strategy']}")
+    run_configuration = record.get("run_configuration") or {}
+    if run_configuration:
+        lines.append(
+            "Run configuration: "
+            f"{run_configuration.get('profile', 'unknown')} "
+            f"Tier {run_configuration.get('tier', 'unknown')}"
+        )
     source_method = record.get("more_stats", {}).get("source_method", "ocr")
     lines.append(f"Stats source: {_display_source_method(str(source_method))}")
+    if run_configuration:
+        loadout = run_configuration.get("loadout") or {}
+        lines.extend(["", "## Run Configuration", ""])
+        for key, label in (
+            ("modules", "Modules"),
+            ("damage_slider", "Damage Slider"),
+            ("target_priority", "Target Priority"),
+        ):
+            policy = loadout.get(key)
+            if not isinstance(policy, Mapping):
+                continue
+            details = [f"mode `{policy.get('mode', 'unknown')}`"]
+            if policy.get("preset"):
+                details.append(f"preset `{policy['preset']}`")
+            if "value" in policy:
+                details.append(f"value `{policy['value']}`")
+            resolved = policy.get("resolved")
+            if isinstance(resolved, Mapping):
+                values = "; ".join(
+                    f"{name}={value}" for name, value in resolved.items()
+                )
+                details.append(f"resolved: {values}")
+            elif isinstance(resolved, Sequence) and not isinstance(
+                resolved,
+                (str, bytes),
+            ):
+                details.append(
+                    "resolved: " + " > ".join(str(value) for value in resolved)
+                )
+            lines.append(f"- {label}: " + "; ".join(details))
     lines.extend(["", "## Derived", ""])
     derived = record.get("derived", {})
     if derived:

@@ -7,18 +7,21 @@ from .base import BaseStrategy
 from .yaml_strategy import YamlStrategy
 
 UNKNOWN_STRATEGY_MSG = (
-    "Unknown strategy; use gc, gc_farm_t18, gc_farm_t19_experiment, none, "
-    "or provide --strategy-config with a YAML plan."
+    "Unknown strategy; use farm, farm_t18, farm_t19_experiment, none, "
+    "or a legacy gc alias, or provide --strategy-config with a YAML plan."
 )
 
 _BUNDLED_STRATEGY_PROFILES = {
-    "gc": "gc_farm_t18",
-    "gc_farm_t18": "gc_farm_t18",
-    "gc_farm_t19_experiment": "gc_farm_t19_experiment",
+    "farm": "farm_t18",
+    "farm_t18": "farm_t18",
+    "farm_t19_experiment": "farm_t19_experiment",
     # Compatibility names all resolve to an explicit generated profile.
-    "gc_skipper": "gc_farm_t18",
-    "glass_cannon": "gc_farm_t18",
-    "gc_manual_target_priority": "gc_farm_t19_experiment",
+    "gc": "farm_t18",
+    "gc_farm_t18": "farm_t18",
+    "gc_farm_t19_experiment": "farm_t19_experiment",
+    "gc_skipper": "farm_t18",
+    "glass_cannon": "farm_t18",
+    "gc_manual_target_priority": "farm_t19_experiment",
 }
 
 

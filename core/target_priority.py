@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass
 from difflib import SequenceMatcher
 import re
 import time
@@ -31,6 +32,18 @@ _LABEL_HALF_HEIGHT = 50
 _SCOPE_TARGET = (910, 380)
 _CLOSE_TARGET = (950, 100)
 _UP_ARROW_X = 910
+
+
+@dataclass(frozen=True)
+class TargetPriorityObservation:
+    expected: tuple[str, ...]
+    actual: tuple[str, ...]
+    observed: bool
+    matches: Optional[bool]
+    reason: str
+
+    def as_dict(self) -> dict[str, object]:
+        return asdict(self)
 
 
 def _normalise(text: str) -> str:
@@ -94,7 +107,59 @@ def target_priority_matches(actual: Sequence[str], expected: Sequence[str]) -> b
 
 
 def _tap(point: tuple[int, int]) -> bool:
-    return safe_tap(point, require_visible=False, dispatch="now", log_label="target_priority")
+    return safe_tap(
+        point,
+        require_visible=False,
+        dispatch="now",
+        log_label="target_priority",
+    )
+
+
+def observe_target_priority_order(
+    expected: Sequence[str] = TARGETS,
+    *,
+    capture_fn: Callable[[], Optional[np.ndarray]] = capture_adb_screenshot,
+    tap_fn: Callable[[tuple[int, int]], bool] = _tap,
+    ensure_menu_fn: Callable[[], bool] = ensure_menu_open,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> TargetPriorityObservation:
+    """Read and compare Target Priority without changing its order."""
+
+    expected_list = validate_target_priority_order(expected)
+    panel_open = False
+    try:
+        if not ensure_menu_fn():
+            raise RuntimeError("unable to open the game menu")
+        if not tap_fn(_SCOPE_TARGET):
+            raise RuntimeError("unable to open Target Priority")
+        panel_open = True
+        sleep_fn(0.6)
+        actual = read_target_priority_order(capture_fn)
+        matches = target_priority_matches(actual, expected_list)
+        log(
+            f"[TARGET_PRIORITY] Observed order matches_expected={matches}: {actual}",
+            "INFO",
+        )
+        return TargetPriorityObservation(
+            expected=tuple(expected_list),
+            actual=tuple(actual),
+            observed=True,
+            matches=matches,
+            reason="observed",
+        )
+    except Exception as exc:
+        log(f"[TARGET_PRIORITY] Observation failed: {exc}", "WARN")
+        return TargetPriorityObservation(
+            expected=tuple(expected_list),
+            actual=(),
+            observed=False,
+            matches=None,
+            reason=str(exc),
+        )
+    finally:
+        if panel_open:
+            tap_fn(_CLOSE_TARGET)
+            sleep_fn(0.2)
 
 
 def ensure_target_priority_order(
@@ -145,8 +210,10 @@ def ensure_target_priority_order(
 
 __all__ = [
     "TARGETS",
+    "TargetPriorityObservation",
     "detect_target_priority_order",
     "ensure_target_priority_order",
+    "observe_target_priority_order",
     "read_target_priority_order",
     "target_priority_matches",
 ]

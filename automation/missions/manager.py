@@ -109,6 +109,38 @@ class MissionManager:
             return False
         return not self.strategy.is_session_preflight_complete(self.ctx)
 
+    def session_preflight_repair_required(self) -> bool:
+        """Return whether preflight requested a guarded no-battle repair."""
+
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        return bool(mv.get("gc_session_preflight_repair_required"))
+
+    def session_preflight_repair_in_progress(self) -> bool:
+        """Return whether this process surrendered a run for preflight repair."""
+
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        return bool(mv.get("gc_session_preflight_repair_in_progress"))
+
+    def begin_session_preflight_repair(self) -> bool:
+        """Claim the one guarded surrender transition for a repair request."""
+
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        if not mv.get("gc_session_preflight_repair_required") or mv.get(
+            "gc_session_preflight_repair_in_progress"
+        ):
+            return False
+        mv["gc_session_preflight_repair_in_progress"] = True
+        return True
+
+    def fail_session_preflight_repair(self, reason: str) -> None:
+        """Fail closed after a surrender transition cannot be completed."""
+
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        mv["gc_session_preflight_repair_required"] = False
+        mv["gc_session_preflight_repair_in_progress"] = False
+        mv["gc_session_preflight_blocked"] = True
+        mv["gc_session_preflight_last_reason"] = str(reason)
+
     def no_battle_setup_requirements(self) -> Dict[str, Any]:
         """Return profile settings still needing a verified no-battle pass."""
 
@@ -121,8 +153,20 @@ class MissionManager:
 
     def mark_no_battle_setup_complete(self, evidence: Mapping[str, Any]) -> None:
         mv = self.ctx.data.setdefault("mission_vars", {})
+        repairing = bool(
+            mv.get("gc_session_preflight_repair_required")
+            or mv.get("gc_session_preflight_repair_in_progress")
+        )
         mv["gc_no_battle_setup_completed"] = True
         mv["gc_no_battle_setup_evidence"] = dict(evidence)
+        mv["gc_session_preflight_repair_required"] = False
+        mv["gc_session_preflight_repair_in_progress"] = False
+        if repairing:
+            # The next battle must establish fresh session evidence for the
+            # corrected no-battle settings.
+            mv["gc_session_preflight_attempted"] = False
+            mv["gc_session_preflight_completed"] = False
+            mv["gc_session_preflight_blocked"] = False
 
     def tick(self, screen, detection: Detection, *, strategy_only: bool = False) -> None:
         state = detection.get("state")

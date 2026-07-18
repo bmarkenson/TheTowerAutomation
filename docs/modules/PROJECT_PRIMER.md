@@ -95,10 +95,14 @@ core/gc_preflight.py
 
 core/damage_adjuster.py
 - read_damage_adjuster(screenshot) — R DamageAdjusterReading containing the
-  persistent panel guard, selector mode, and configured percentage; S [cv2].
+  persistent panel guard, selector mode, configured percentage, and complete
+  frame requirement; S [cv2].
 - open_damage_adjuster()/dismiss_damage_adjuster() — R reading|None/bool;
   S [adb][cv2][tap][log]; require verified Attack/panel states and use ordinary
   settled screenshots rather than the low-latency stream.
+- configure_damage_slider(expected, mode=...) — R DamageSliderResult;
+  S [adb][cv2][ocr][tap][log]; observes or feedback-enforces an explicit
+  percentage, reacquiring action authority and strict progress on every step.
 
 core/workshop_preset.py
 - measure_preset_slot_selection(screenshot, region=FARM_PRESET_SLOT) — R

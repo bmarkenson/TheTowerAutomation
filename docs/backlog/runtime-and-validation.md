@@ -1,4 +1,4 @@
-# Runtime, Validation, and GC Backlog
+# Runtime, Validation, and Farm Backlog
 
 This file contains active work only. Before live work, follow `AGENTS.md`,
 [`../new_thread.md`](../new_thread.md), and the complete
@@ -28,47 +28,13 @@ checked-item detail remains in the
   the initial badge is absent and that persisted completion suppresses a second
   probe after restart.
 
-## GC run initialization
+## Farm run initialization
 
-- [ ] Define the GC module preset and validate it during session preflight.
-  Established evidence:
-  - The 2026-07-15 Tournament/Milestone loadout is explicitly negative GC
-    evidence: Primary = Amplifying Strike, Project Funding, Orbital Augment,
-    Dimension Core; Assist = Being Annihilator, Singularity Harness,
-    Anti-Cube Portal, Harmony Conductor.
-  - The user-confirmed normal GC loadout captured at the 2026-07-16 natural
-    post-wave-8803 boundary is: Primary = Amplifying Strike, Black Hole
-    Digestor, Orbital Augment, Multiverse Nexus; Assist = Being Annihilator,
-    Singularity Harness, Anti-Cube Portal, Dimension Core. The overview and all
-    eight detail panels are retained under
-    `screenshots/module_inventory_2026-07-16/`.
-  Remaining work:
-  - Build the smallest evidence-supported, data-driven index that identifies a
-    module from stable icon artwork rather than hardcoding the observed name at
-    each equipped-slot position.
-  - Use equipped-slot geometry to report Primary/Assist placement separately
-    from identity. Return confidence plus explicit unknown/ambiguous results
-    instead of guessing.
-  - Measure the effect of rarity borders, equipped glow, levels, surrounding
-    artwork, and incomplete/black frames before choosing templates, features,
-    or a compact YAML/JSON catalog representation.
-  - Add regression fixtures/tests covering both confirmed loadouts and
-    meaningful negative or ambiguous cases.
-  - Keep the first implementation read-only: do not change, equip, unequip,
-    level, merge, shatter, or purchase modules.
-  - Any future correction is separate work and may act only at a verified
-    no-battle boundary. Existing and operator-owned battles remain protected by
-    `AGENTS.md`; a bounded agent-owned test battle requires its explicit
-    Surrender authorization.
+- [ ] Capture a fresh, name-reconciled Tournament module overview before adding
+  it as a negative-loadout regression fixture. The existing retained Tournament
+  details establish individual identities but not one canonical overview.
 - [ ] Decide whether session preflight should validate perk bans and Auto Pick
   Perk order. Keep automation-owned perk selection as a later option.
-- [ ] Add the Damage Slider to new-GC-run initialization.
-  - Read-only detection, guarded panel navigation, and OCR are fixture-backed;
-    live evidence read `1E-22%`, while the changing `94.80M` value is derived
-    damage and intentionally ignored.
-  - Confirm the desired GC value before encoding policy.
-  - Define it in strategy configuration rather than hardcoding runtime logic,
-    verify the applied value, and make adjustment safe to repeat.
 
 ## Runtime control
 

@@ -1,0 +1,223 @@
+{
+  "catalog_version": 1,
+  "rarity": "Ancestral",
+  "normalization": {
+    "size": 160,
+    "mask_radius_fraction": 0.34
+  },
+  "ancestral_green": {
+    "hsv_lower": [35, 80, 100],
+    "hsv_upper": [95, 255, 255],
+    "minimum_fraction": 0.12
+  },
+  "authority": {
+    "minimum_confidence": 0.23,
+    "minimum_margin": 0.08
+  },
+  "roles": {
+    "primary": {
+      "crop_size": 134,
+      "frame_crop_size": 190
+    },
+    "assist": {
+      "crop_size": 100,
+      "frame_crop_size": 142
+    }
+  },
+  "slots": [
+    {
+      "key": "cannon_assist",
+      "family": "cannon",
+      "role": "assist",
+      "center": [115, 410]
+    },
+    {
+      "key": "cannon_primary",
+      "family": "cannon",
+      "role": "primary",
+      "center": [307, 410]
+    },
+    {
+      "key": "generator_primary",
+      "family": "generator",
+      "role": "primary",
+      "center": [773, 410]
+    },
+    {
+      "key": "generator_assist",
+      "family": "generator",
+      "role": "assist",
+      "center": [964, 410]
+    },
+    {
+      "key": "armor_assist",
+      "family": "armor",
+      "role": "assist",
+      "center": [115, 660]
+    },
+    {
+      "key": "armor_primary",
+      "family": "armor",
+      "role": "primary",
+      "center": [307, 660]
+    },
+    {
+      "key": "core_primary",
+      "family": "core",
+      "role": "primary",
+      "center": [773, 660]
+    },
+    {
+      "key": "core_assist",
+      "family": "core",
+      "role": "assist",
+      "center": [964, 660]
+    }
+  ],
+  "modules": [
+    {
+      "slug": "amplifying_strike",
+      "name": "Amplifying Strike",
+      "family": "cannon",
+      "template": "assets/match_templates/modules/ancestral/amplifying_strike.png"
+    },
+    {
+      "slug": "astral_deliverance",
+      "name": "Astral Deliverance",
+      "family": "cannon",
+      "template": "assets/match_templates/modules/ancestral/astral_deliverance.png"
+    },
+    {
+      "slug": "being_annihilator",
+      "name": "Being Annihilator",
+      "family": "cannon",
+      "template": "assets/match_templates/modules/ancestral/being_annihilator.png"
+    },
+    {
+      "slug": "death_penalty",
+      "name": "Death Penalty",
+      "family": "cannon",
+      "template": "assets/match_templates/modules/ancestral/death_penalty.png"
+    },
+    {
+      "slug": "havoc_bringer",
+      "name": "Havoc Bringer",
+      "family": "cannon",
+      "template": "assets/match_templates/modules/ancestral/havoc_bringer.png"
+    },
+    {
+      "slug": "shrink_ray",
+      "name": "Shrink Ray",
+      "family": "cannon",
+      "template": "assets/match_templates/modules/ancestral/shrink_ray.png"
+    },
+    {
+      "slug": "black_hole_digestor",
+      "name": "Black Hole Digestor",
+      "family": "generator",
+      "template": "assets/match_templates/modules/ancestral/black_hole_digestor.png"
+    },
+    {
+      "slug": "galaxy_compressor",
+      "name": "Galaxy Compressor",
+      "family": "generator",
+      "template": "assets/match_templates/modules/ancestral/galaxy_compressor.png"
+    },
+    {
+      "slug": "project_funding",
+      "name": "Project Funding",
+      "family": "generator",
+      "template": "assets/match_templates/modules/ancestral/project_funding.png"
+    },
+    {
+      "slug": "pulsar_harvester",
+      "name": "Pulsar Harvester",
+      "family": "generator",
+      "template": "assets/match_templates/modules/ancestral/pulsar_harvester.png"
+    },
+    {
+      "slug": "restorative_bonus",
+      "name": "Restorative Bonus",
+      "family": "generator",
+      "template": "assets/match_templates/modules/ancestral/restorative_bonus.png"
+    },
+    {
+      "slug": "singularity_harness",
+      "name": "Singularity Harness",
+      "family": "generator",
+      "template": "assets/match_templates/modules/ancestral/singularity_harness.png"
+    },
+    {
+      "slug": "anti_cube_portal",
+      "name": "Anti-Cube Portal",
+      "family": "armor",
+      "template": "assets/match_templates/modules/ancestral/anti_cube_portal.png"
+    },
+    {
+      "slug": "negative_mass_projector",
+      "name": "Negative Mass Projector",
+      "family": "armor",
+      "template": "assets/match_templates/modules/ancestral/negative_mass_projector.png"
+    },
+    {
+      "slug": "orbital_augment",
+      "name": "Orbital Augment",
+      "family": "armor",
+      "template": "assets/match_templates/modules/ancestral/orbital_augment.png"
+    },
+    {
+      "slug": "sharp_fortitude",
+      "name": "Sharp Fortitude",
+      "family": "armor",
+      "template": "assets/match_templates/modules/ancestral/sharp_fortitude.png"
+    },
+    {
+      "slug": "space_displacer",
+      "name": "Space Displacer",
+      "family": "armor",
+      "template": "assets/match_templates/modules/ancestral/space_displacer.png"
+    },
+    {
+      "slug": "wormhole_redirector",
+      "name": "Wormhole Redirector",
+      "family": "armor",
+      "template": "assets/match_templates/modules/ancestral/wormhole_redirector.png"
+    },
+    {
+      "slug": "dimension_core",
+      "name": "Dimension Core",
+      "family": "core",
+      "template": "assets/match_templates/modules/ancestral/dimension_core.png"
+    },
+    {
+      "slug": "harmony_conductor",
+      "name": "Harmony Conductor",
+      "family": "core",
+      "template": "assets/match_templates/modules/ancestral/harmony_conductor.png"
+    },
+    {
+      "slug": "magnetic_hook",
+      "name": "Magnetic Hook",
+      "family": "core",
+      "template": "assets/match_templates/modules/ancestral/magnetic_hook.png"
+    },
+    {
+      "slug": "multiverse_nexus",
+      "name": "Multiverse Nexus",
+      "family": "core",
+      "template": "assets/match_templates/modules/ancestral/multiverse_nexus.png"
+    },
+    {
+      "slug": "om_chip",
+      "name": "Om Chip",
+      "family": "core",
+      "template": "assets/match_templates/modules/ancestral/om_chip.png"
+    },
+    {
+      "slug": "primordial_collapse",
+      "name": "Primordial Collapse",
+      "family": "core",
+      "template": "assets/match_templates/modules/ancestral/primordial_collapse.png"
+    }
+  ]
+}

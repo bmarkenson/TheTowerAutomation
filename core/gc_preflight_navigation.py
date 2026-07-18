@@ -1,4 +1,4 @@
-"""Guarded, read-only navigation for the GC session preflight."""
+"""Guarded GC session preflight navigation and in-run correction."""
 
 from __future__ import annotations
 
@@ -16,7 +16,11 @@ from core.gc_preflight import (
 )
 from core.battle_lifecycle import HomeBattleControl
 from core.home_battle import HomeBattleEvidence, detect_home_battle_control
-from core.input import safe_tap, tap_if_visible
+from core.input import safe_tap, swipe_now, tap_if_visible
+from core.poison_swamp_stun import (
+    PoisonSwampStunResult,
+    ensure_poison_swamp_stun_off,
+)
 from core.run_controls import go_home_from_run
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
@@ -115,6 +119,33 @@ def _wait_for(
         f"overlay={overlay}; "
         f"last {last_description}"
     )
+
+
+def _ensure_event_bots_top(
+    current: Frame,
+    *,
+    capture_fn: Capture,
+    detector: Detector,
+    event_swipe_fn: Callable[[str], bool],
+    sleep_fn: Callable[[float], None],
+) -> Frame:
+    """Restore retained Event Bots scroll until its preset evidence is visible."""
+
+    for _ in range(4):
+        detection = detector(current)
+        if (
+            detection.get("state") == "EVENT"
+            and "EVENT_BOTS_SCREEN"
+            in set(detection.get("secondary_states") or ())
+        ):
+            return current
+        if detection.get("state") != "EVENT":
+            raise _NavigationFailure("Event Bots top-scroll guard lost EVENT")
+        if not event_swipe_fn("gesture_targets.goto_top:event_bots"):
+            raise _NavigationFailure("Event Bots top swipe failed")
+        sleep_fn(0.6)
+        current, _detection = _capture_detection(capture_fn, detector)
+    raise _NavigationFailure("Event Bots preset evidence remained offscreen")
 
 
 def _guarded_static_tap(
@@ -309,16 +340,20 @@ def run_read_only_gc_preflight(
     tap_visible_fn: Callable[..., bool] = tap_if_visible,
     go_home_fn: Callable[[], bool] = go_home_from_run,
     swipe_fn: Callable[[str, str], None] = swipe_upgrade_menu,
+    event_swipe_fn: Callable[[str], bool] = swipe_now,
     detect_boxes_fn: Callable[
         ..., Mapping[str, list[Any]]
     ] = detect_visible_boxes,
+    ensure_poison_swamp_stun_fn: Callable[
+        ..., PoisonSwampStunResult
+    ] = ensure_poison_swamp_stun_off,
     detect_home_control_fn: HomeControlDetector = detect_home_battle_control,
     sleep_fn: Callable[[float], None] = time.sleep,
     validate_fn: Callable[
         ..., GcSessionPreflightEvidence
     ] = validate_gc_session_preflight_screens,
 ) -> GcLivePreflightResult:
-    """Inspect every GC session requirement and return to the same battle."""
+    """Verify GC requirements, apply safe in-run corrections, and return."""
 
     route_completed = False
     try:
@@ -326,6 +361,22 @@ def run_read_only_gc_preflight(
         if not isinstance(ultimate_requirements, Mapping):
             raise _NavigationFailure(
                 "profile did not supply Ultimate Weapon requirements"
+            )
+        raw_policies = requirements.get("loadout_policies") or {}
+        if not isinstance(raw_policies, Mapping):
+            raise _NavigationFailure("profile loadout policies were invalid")
+        module_mode = str(raw_policies.get("modules") or "enforce").strip().lower()
+        if module_mode not in {"enforce", "observe", "preserve"}:
+            raise _NavigationFailure(
+                f"unsupported module policy {module_mode!r}"
+            )
+        module_requirements = requirements.get("modules")
+        if module_mode != "preserve" and not isinstance(
+            module_requirements,
+            Mapping,
+        ):
+            raise _NavigationFailure(
+                "profile did not supply module requirements"
             )
         _wait_for(
             state="RUNNING",
@@ -429,6 +480,18 @@ def run_read_only_gc_preflight(
             sleep_fn(0.5)
 
         ultimate_observations: dict[str, dict[str, str]] = {}
+        poison_swamp_label: Optional[str] = None
+        poison_swamp_stun_required = False
+        for label, toggles in ultimate_requirements.items():
+            if str(label).strip().lower() != "poison swamp":
+                continue
+            poison_swamp_label = str(label).strip()
+            if isinstance(toggles, Mapping) and str(
+                toggles.get("stun") or ""
+            ).strip().lower() == "off":
+                poison_swamp_stun_required = True
+            break
+        poison_swamp_stun_observed = not poison_swamp_stun_required
         required_labels = {str(label).strip().lower() for label in ultimate_requirements}
         for position in range(6):
             frame = _wait_for(
@@ -445,8 +508,39 @@ def run_read_only_gc_preflight(
                 for box in (column or [])
             ]
             ultimate_observations.update(merge_ultimate_weapon_observations(visible))
+            poison_boxes = [
+                box
+                for box in visible
+                if str(getattr(box, "text", "") or "").strip().lower()
+                == "poison swamp"
+            ]
+            if (
+                poison_swamp_stun_required
+                and not poison_swamp_stun_observed
+                and poison_boxes
+            ):
+                result = ensure_poison_swamp_stun_fn(
+                    screenshot=frame,
+                    capture_fn=capture_fn,
+                    detector=detector,
+                    detect_boxes_fn=detect_boxes_fn,
+                    safe_tap_fn=safe_tap_fn,
+                    tap_visible_fn=tap_visible_fn,
+                    sleep_fn=sleep_fn,
+                )
+                frame = result.screenshot
+                ultimate_observations.setdefault(
+                    poison_swamp_label or "Poison Swamp",
+                    {},
+                )["stun"] = result.evidence.state.value
+                poison_swamp_stun_observed = True
+                log(
+                    "[GC_PREFLIGHT] Poison Swamp Stun verified off"
+                    + (" after correction" if result.changed else ""),
+                    "INFO",
+                )
             observed_labels = {label.lower() for label in ultimate_observations}
-            if required_labels <= observed_labels:
+            if required_labels <= observed_labels and poison_swamp_stun_observed:
                 break
             if position < 5:
                 swipe_fn("towards_bottom", "medium")
@@ -462,6 +556,36 @@ def run_read_only_gc_preflight(
             sleep_fn=sleep_fn,
         )
         _verify_active_home(home, detect_home_control_fn)
+
+        modules = None
+        if module_mode != "preserve":
+            _guarded_static_tap(
+                "navigation.goto_modules_home",
+                allowed_states={"HOME_SCREEN"},
+                capture_fn=capture_fn,
+                detector=detector,
+                safe_tap_fn=safe_tap_fn,
+            )
+            modules = _wait_for(
+                state="MODULES",
+                capture_fn=capture_fn,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
+            _guarded_static_tap(
+                "navigation.goto_home",
+                allowed_states={"MODULES"},
+                capture_fn=capture_fn,
+                detector=detector,
+                safe_tap_fn=safe_tap_fn,
+            )
+            home = _wait_for(
+                state="HOME_SCREEN",
+                capture_fn=capture_fn,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
+            _verify_active_home(home, detect_home_control_fn)
 
         _guarded_static_tap(
             "navigation.goto_workshop_home",
@@ -514,11 +638,18 @@ def run_read_only_gc_preflight(
             detector=detector,
             safe_tap_fn=safe_tap_fn,
         )
+        sleep_fn(0.5)
         bots = _wait_for(
             state="EVENT",
-            secondary="EVENT_BOTS_SCREEN",
             capture_fn=capture_fn,
             detector=detector,
+            sleep_fn=sleep_fn,
+        )
+        bots = _ensure_event_bots_top(
+            bots,
+            capture_fn=capture_fn,
+            detector=detector,
+            event_swipe_fn=event_swipe_fn,
             sleep_fn=sleep_fn,
         )
         _guarded_static_tap(
@@ -599,7 +730,10 @@ def run_read_only_gc_preflight(
             workshop_screen=workshop,
             bots_screen=bots,
             guardians_screen=guardians,
+            modules_screen=modules,
             perks_screen=perks,
+            module_requirements=module_requirements,
+            module_mode=module_mode,
             ultimate_requirements=ultimate_requirements,
             ultimate_observations=ultimate_observations,
             detector=detector,

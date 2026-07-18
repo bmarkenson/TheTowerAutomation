@@ -28,6 +28,7 @@ from tools.strategy_builders.lib import build_strategy_yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILE_NAMES = ("gc_farm_t18", "gc_farm_t19_experiment")
+FARM_PROFILE_NAMES = ("farm_t18", "farm_t19_experiment")
 SOURCE_PATHS = {
     name: ROOT / "config" / "strategies" / f"{name}.source.yaml"
     for name in PROFILE_NAMES
@@ -35,6 +36,14 @@ SOURCE_PATHS = {
 STRATEGY_PATHS = {
     name: ROOT / "config" / "strategies" / f"{name}.strategy.yaml"
     for name in PROFILE_NAMES
+}
+FARM_SOURCE_PATHS = {
+    name: ROOT / "config" / "strategies" / f"{name}.source.yaml"
+    for name in FARM_PROFILE_NAMES
+}
+FARM_STRATEGY_PATHS = {
+    name: ROOT / "config" / "strategies" / f"{name}.strategy.yaml"
+    for name in FARM_PROFILE_NAMES
 }
 
 
@@ -79,9 +88,9 @@ class AdbPortTests(unittest.TestCase):
 
 
 class DefaultStrategyTests(unittest.TestCase):
-    def test_gc_is_the_default_strategy(self):
+    def test_farm_is_the_default_strategy(self):
         config = config_from_args(parse_args([]))
-        self.assertEqual(config.strategy_name, "gc")
+        self.assertEqual(config.strategy_name, "farm")
 
     def test_gc_default_can_be_explicitly_disabled(self):
         config = config_from_args(parse_args(["--strategy", "none"]))
@@ -96,21 +105,24 @@ class DefaultStrategyTests(unittest.TestCase):
         self.assertFalse(manager.run_initialization_pending())
         self.assertFalse(manager.session_preflight_pending())
 
-    def test_named_gc_profiles_are_selectable(self):
-        for profile_name in PROFILE_NAMES:
+    def test_named_farm_and_legacy_profiles_are_selectable(self):
+        for profile_name in (*FARM_PROFILE_NAMES, *PROFILE_NAMES):
             with self.subTest(profile=profile_name):
                 config = config_from_args(parse_args(["--strategy", profile_name]))
                 self.assertEqual(config.strategy_name, profile_name)
 
-    def test_gc_alias_resolves_to_tier_18_profile(self):
+    def test_farm_and_gc_aliases_resolve_to_tier_18_profile(self):
+        farm = get_strategy("farm")
         strategy = get_strategy("gc")
+        self.assertIsInstance(farm, YamlStrategy)
         self.assertIsInstance(strategy, YamlStrategy)
-        self.assertEqual(strategy.name, "gc_farm_t18")
+        self.assertEqual(farm.name, "farm_t18")
+        self.assertEqual(strategy.name, "farm_t18")
 
     def test_tactical_alias_resolves_to_profile_without_seeded_completion(self):
         strategy = get_strategy("gc_manual_target_priority")
         self.assertIsInstance(strategy, YamlStrategy)
-        self.assertEqual(strategy.name, "gc_farm_t19_experiment")
+        self.assertEqual(strategy.name, "farm_t19_experiment")
         self.assertNotIn("target_priority_checked", strategy.vars)
 
 
@@ -173,6 +185,278 @@ class RunBoundaryTests(unittest.TestCase):
         manager.maybe_run_start({"state": "RUNNING"})
 
         self.assertEqual(strategy.run_starts, 2)
+
+
+class FarmProfileTests(unittest.TestCase):
+    def _source(self, name="farm_t18"):
+        return yaml.safe_load(
+            FARM_SOURCE_PATHS[name].read_text(encoding="utf-8")
+        )
+
+    def test_generated_farm_profiles_match_compact_sources(self):
+        for profile_name in FARM_PROFILE_NAMES:
+            with self.subTest(profile=profile_name):
+                generated = yaml.safe_load(
+                    FARM_STRATEGY_PATHS[profile_name].read_text(encoding="utf-8")
+                )
+                self.assertEqual(generated, build_strategy_yaml(self._source(profile_name)))
+
+    def test_farm_profile_resolves_invariants_and_tier_loadout(self):
+        plan = build_strategy_yaml(self._source())
+        requirements = plan["session_preflight"]["requirements"]
+        configuration = plan["run_configuration"]
+
+        self.assertEqual(plan["meta"]["family"], "farm")
+        self.assertEqual(requirements["cards_deck"], "Farm")
+        self.assertEqual(requirements["workshop_preset"], "Farm")
+        self.assertEqual(requirements["bots_preset"], "Farm")
+        self.assertTrue(requirements["auto_pick_perks"])
+        self.assertEqual(
+            requirements["ultimate_weapons"]["Poison Swamp"]["stun"],
+            "off",
+        )
+        self.assertEqual(requirements["loadout_policies"]["modules"], "enforce")
+        self.assertEqual(configuration["profile"], "farm")
+        self.assertEqual(configuration["tier"], 18)
+        self.assertEqual(
+            configuration["loadout"]["modules"]["preset"],
+            "farm_standard",
+        )
+        self.assertEqual(
+            configuration["loadout"]["target_priority"]["preset"],
+            "farm_t18",
+        )
+        self.assertEqual(
+            configuration["loadout"]["damage_slider"],
+            {"mode": "enforce", "value": "1E-22%"},
+        )
+        self.assertIn(
+            "damage_slider_checked",
+            plan["run_initialization"]["complete_when"],
+        )
+        damage_rule = next(
+            rule for rule in plan["rules"]
+            if rule["name"] == "enforce_damage_slider"
+        )
+        self.assertEqual(
+            damage_rule["do"],
+            [
+                {
+                    "type": "damage_slider_configure",
+                    "mode": "enforce",
+                    "value": "1E-22%",
+                }
+            ],
+        )
+        self.assertGreater(
+            plan["rules"].index(damage_rule),
+            next(
+                index for index, rule in enumerate(plan["rules"])
+                if rule["name"] == "initialize_level_skips_fast"
+            ),
+        )
+        self.assertEqual(
+            damage_rule["assert"],
+            ["ehls_completed", "eals_completed", "!damage_slider_checked"],
+        )
+
+    def test_damage_slider_gate_and_evidence_reset_for_every_run(self):
+        strategy = get_strategy("farm")
+        ctx = MissionContext()
+        strategy.on_start(ctx)
+        mv = ctx.data["mission_vars"]
+        mv["damage_slider_checked"] = True
+        mv["damage_slider_observation"] = {"final": "1E-22%"}
+
+        strategy.on_run_start(ctx)
+
+        self.assertFalse(mv["damage_slider_checked"])
+        self.assertEqual(mv["damage_slider_observation"], {})
+
+    def test_runtime_exposes_an_isolated_resolved_configuration_snapshot(self):
+        strategy = get_strategy("farm")
+        self.assertIsInstance(strategy, YamlStrategy)
+
+        configuration = strategy.run_configuration()
+        configuration["loadout"]["modules"]["mode"] = "changed-in-test"
+
+        self.assertEqual(strategy.run_configuration()["profile"], "farm")
+        self.assertEqual(strategy.run_configuration()["tier"], 18)
+        self.assertEqual(
+            strategy.run_configuration()["loadout"]["modules"]["mode"],
+            "enforce",
+        )
+
+    def test_farm_source_cannot_override_invariants(self):
+        source = self._source()
+        source["session_preflight"] = {"cards_deck": "Anything"}
+
+        with self.assertRaisesRegex(ValueError, "derive session_preflight"):
+            build_strategy_yaml(source)
+
+    def test_farm_source_requires_every_variable_policy(self):
+        source = self._source()
+        del source["loadout"]["modules"]
+
+        with self.assertRaisesRegex(ValueError, "must define exactly"):
+            build_strategy_yaml(source)
+
+    def test_damage_slider_rejects_invalid_negative_value(self):
+        source = self._source()
+        source["loadout"]["damage_slider"] = {
+            "mode": "enforce",
+            "value": "-1e22",
+        }
+
+        with self.assertRaisesRegex(ValueError, "invalid Damage Slider"):
+            build_strategy_yaml(source)
+
+    def test_preserved_damage_slider_rejects_a_value(self):
+        source = self._source()
+        source["loadout"]["damage_slider"] = {
+            "mode": "preserve",
+            "value": "1e-22",
+        }
+
+        with self.assertRaisesRegex(ValueError, "must not supply a value"):
+            build_strategy_yaml(source)
+
+    def test_observed_damage_slider_is_nonblocking_and_emits_one_read(self):
+        source = self._source()
+        source["loadout"]["damage_slider"]["mode"] = "observe"
+
+        plan = build_strategy_yaml(source)
+        rule = next(
+            rule for rule in plan["rules"]
+            if rule["name"] == "observe_damage_slider"
+        )
+
+        self.assertNotIn(
+            "damage_slider_checked",
+            plan["run_initialization"]["complete_when"],
+        )
+        self.assertFalse(plan["vars"]["damage_slider_observed"])
+        self.assertEqual(
+            rule["do"],
+            [
+                {
+                    "type": "damage_slider_configure",
+                    "mode": "observe",
+                    "value": "1E-22%",
+                }
+            ],
+        )
+
+    def test_damage_slider_enforcement_result_updates_run_gate(self):
+        plan = build_strategy_yaml(self._source())
+        action = next(
+            rule for rule in plan["rules"]
+            if rule["name"] == "enforce_damage_slider"
+        )["do"][0]
+        ctx = MissionContext()
+        ctx.data["mission_vars"] = {"last_detection_state": "RUNNING"}
+        payload = {
+            "expected": "1E-22%",
+            "final": "1E-22%",
+            "success": True,
+        }
+        result = SimpleNamespace(
+            success=True,
+            expected="1E-22%",
+            initial="1E-21%",
+            final="1E-22%",
+            steps=1,
+            reason="matched",
+            as_dict=lambda: payload,
+        )
+
+        with patch(
+            "core.action_executor.configure_damage_slider",
+            return_value=result,
+        ):
+            execute_actions(object(), [{**action, "_strategy": True}], ctx)
+
+        mv = ctx.data["mission_vars"]
+        self.assertTrue(mv["damage_slider_checked"])
+        self.assertEqual(mv["damage_slider_observation"], payload)
+
+    def test_preserved_modules_are_omitted_from_runtime_requirements(self):
+        source = self._source()
+        source["loadout"]["modules"] = {"mode": "preserve"}
+
+        plan = build_strategy_yaml(source)
+        requirements = plan["session_preflight"]["requirements"]
+
+        self.assertNotIn("modules", requirements)
+        self.assertEqual(requirements["loadout_policies"], {"modules": "preserve"})
+        self.assertEqual(
+            plan["run_configuration"]["loadout"]["modules"],
+            {"mode": "preserve"},
+        )
+
+    def test_observed_modules_retain_expected_preset_without_blocking_policy(self):
+        source = self._source()
+        source["loadout"]["modules"]["mode"] = "observe"
+
+        plan = build_strategy_yaml(source)
+        requirements = plan["session_preflight"]["requirements"]
+
+        self.assertEqual(requirements["loadout_policies"], {"modules": "observe"})
+        self.assertEqual(
+            requirements["modules"]["generator_primary"],
+            "Black Hole Digestor",
+        )
+
+    def test_observed_target_priority_is_nonblocking_and_emits_one_read(self):
+        source = self._source()
+        source["loadout"]["target_priority"]["mode"] = "observe"
+
+        plan = build_strategy_yaml(source)
+        observe_rule = next(
+            rule for rule in plan["rules"]
+            if rule["name"] == "observe_target_priority"
+        )
+
+        self.assertNotIn(
+            "target_priority_checked",
+            plan["run_initialization"]["complete_when"],
+        )
+        self.assertFalse(plan["vars"]["target_priority_observed"])
+        self.assertEqual(
+            observe_rule["do"][0]["type"],
+            "target_priority_observe",
+        )
+
+    def test_target_priority_observation_is_recorded_without_gating(self):
+        source = self._source()
+        source["loadout"]["target_priority"]["mode"] = "observe"
+        plan = build_strategy_yaml(source)
+        action = next(
+            rule for rule in plan["rules"]
+            if rule["name"] == "observe_target_priority"
+        )["do"][0]
+        ctx = MissionContext()
+        ctx.data["mission_vars"] = {"last_detection_state": "RUNNING"}
+        payload = {
+            "observed": True,
+            "matches": False,
+            "actual": ["Basic"],
+        }
+        observation = SimpleNamespace(
+            observed=True,
+            matches=False,
+            as_dict=lambda: payload,
+        )
+
+        with patch(
+            "core.action_executor.observe_target_priority_order",
+            return_value=observation,
+        ):
+            execute_actions(object(), [{**action, "_strategy": True}], ctx)
+
+        mv = ctx.data["mission_vars"]
+        self.assertTrue(mv["target_priority_observed"])
+        self.assertEqual(mv["target_priority_observation"], payload)
 
 
 class GcFarmProfileTests(unittest.TestCase):
@@ -410,6 +694,28 @@ class GcFarmProfileTests(unittest.TestCase):
             tier_19_requirements["ultimate_weapons"]["Golden Tower"]["primary"],
             "off",
         )
+        self.assertEqual(
+            tier_18_requirements["ultimate_weapons"]["Poison Swamp"]["stun"],
+            "off",
+        )
+        self.assertEqual(
+            tier_19_requirements["ultimate_weapons"]["Poison Swamp"]["stun"],
+            "off",
+        )
+
+    def test_session_requirements_reject_unsupported_stun_state(self):
+        source = yaml.safe_load(
+            SOURCE_PATHS["gc_farm_t18"].read_text(encoding="utf-8")
+        )
+        source["session_preflight"]["ultimate_weapons"]["Poison Swamp"][
+            "stun"
+        ] = "on"
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "supports only Poison Swamp stun=off",
+        ):
+            build_strategy_yaml(source)
 
     def test_enforce_profile_rejects_an_incomplete_order(self):
         source = yaml.safe_load(
@@ -512,6 +818,98 @@ class GcFarmProfileTests(unittest.TestCase):
         self.assertTrue(mv["gc_session_preflight_attempted"])
         self.assertFalse(mv["gc_session_preflight_completed"])
         self.assertTrue(mv["gc_session_preflight_blocked"])
+        self.assertFalse(mv["gc_session_preflight_repair_required"])
+
+    def test_session_preflight_no_battle_mismatch_requests_guarded_repair(self):
+        strategy = get_strategy("gc_farm_t19_experiment")
+        ctx = MissionContext()
+        strategy.on_start(ctx)
+        mv = ctx.data["mission_vars"]
+        mv["last_detection_state"] = "RUNNING"
+        mv["gc_no_battle_setup_completed"] = True
+        action = next(
+            rule
+            for rule in strategy.rules
+            if rule["name"] == "validate_gc_session_preflight"
+        )["do"][0]
+        evidence = SimpleNamespace(
+            as_dict=lambda: {"valid": False, "modules": {"valid": False}},
+            requires_no_battle_repair=True,
+        )
+        result = GcLivePreflightResult(
+            GcPreflightNavigationStatus.MISMATCH,
+            "configuration mismatch",
+            evidence,
+        )
+
+        with patch(
+            "core.action_executor.run_read_only_gc_preflight",
+            return_value=result,
+        ):
+            execute_actions(
+                object(),
+                [{**action, "_strategy": True}],
+                ctx,
+            )
+
+        self.assertTrue(mv["gc_session_preflight_attempted"])
+        self.assertFalse(mv["gc_session_preflight_completed"])
+        self.assertTrue(mv["gc_session_preflight_blocked"])
+        self.assertTrue(mv["gc_session_preflight_repair_required"])
+        self.assertFalse(mv["gc_session_preflight_repair_in_progress"])
+        self.assertFalse(mv["gc_no_battle_setup_completed"])
+
+    def test_completed_home_repair_requires_fresh_preflight_on_next_run(self):
+        strategy = get_strategy("gc_farm_t19_experiment")
+        manager = MissionManager(None, strategy)
+        manager.start()
+        mv = manager.ctx.data["mission_vars"]
+        mv.update(
+            gc_session_preflight_attempted=True,
+            gc_session_preflight_completed=False,
+            gc_session_preflight_blocked=True,
+            gc_session_preflight_repair_required=True,
+            gc_session_preflight_repair_in_progress=True,
+        )
+
+        manager.mark_no_battle_setup_complete({"modules": {"valid": True}})
+
+        self.assertTrue(mv["gc_no_battle_setup_completed"])
+        self.assertFalse(mv["gc_session_preflight_attempted"])
+        self.assertFalse(mv["gc_session_preflight_completed"])
+        self.assertFalse(mv["gc_session_preflight_blocked"])
+        self.assertFalse(mv["gc_session_preflight_repair_required"])
+        self.assertFalse(mv["gc_session_preflight_repair_in_progress"])
+
+    def test_app_surrenders_once_for_claimed_gc_home_repair(self):
+        manager = MagicMock()
+        manager.begin_session_preflight_repair.return_value = True
+        app = App.__new__(App)
+        app._auto_start_enabled = True
+        app._session_preflight_repair_denial_logged = False
+        app._mission_mgr = manager
+
+        with patch("core.app.surrender_run", return_value=True) as surrender:
+            app._attempt_session_preflight_repair({"state": "RUNNING"})
+
+        manager.begin_session_preflight_repair.assert_called_once_with()
+        surrender.assert_called_once_with()
+        manager.fail_session_preflight_repair.assert_not_called()
+
+    def test_app_fails_closed_when_guarded_surrender_does_not_complete(self):
+        manager = MagicMock()
+        manager.begin_session_preflight_repair.return_value = True
+        app = App.__new__(App)
+        app._auto_start_enabled = True
+        app._session_preflight_repair_denial_logged = False
+        app._mission_mgr = manager
+
+        with patch("core.app.surrender_run", return_value=False):
+            app._attempt_session_preflight_repair({"state": "RUNNING"})
+
+        manager.fail_session_preflight_repair.assert_called_once_with(
+            "guarded Surrender did not reach Game Over"
+        )
 
     def test_natural_game_over_during_preflight_remains_pending_for_next_run(self):
         strategy = get_strategy("gc_farm_t19_experiment")

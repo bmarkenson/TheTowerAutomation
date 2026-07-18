@@ -31,8 +31,12 @@ from core.upgrade_navigation import (
     find_upgrade,
 )
 from core.upgrade_buy_quantity import BuyQuantity
-from core.target_priority import ensure_target_priority_order
+from core.target_priority import (
+    ensure_target_priority_order,
+    observe_target_priority_order,
+)
 from core.level_skip_initializer import initialize_level_skips
+from core.damage_adjuster import configure_damage_slider
 from core.gc_preflight_navigation import (
     GcPreflightNavigationStatus,
     run_read_only_gc_preflight,
@@ -198,6 +202,34 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                     f"{result.eals_first_tap_elapsed_s}) taps={result.taps_sent}",
                     "INFO" if result.success else "WARN",
                 )
+            elif t == "damage_slider_configure":
+                if is_strategy_action and last_state not in allowed_states:
+                    log_mission(
+                        f"[EXEC] Skip damage_slider_configure while "
+                        f"state={last_state}",
+                        "DEBUG",
+                    )
+                    continue
+                mode = str(act.get("mode") or "").strip().lower()
+                result = configure_damage_slider(
+                    act.get("value"),
+                    mode=mode,
+                )
+                payload = result.as_dict()
+                if mv is not None:
+                    mv["damage_slider_observation"] = payload
+                    if mode == "enforce":
+                        mv["damage_slider_checked"] = result.success
+                    elif mode == "observe":
+                        mv["damage_slider_observed"] = True
+                log_mission(
+                    "[DAMAGE_SLIDER] "
+                    f"mode={mode} expected={result.expected} "
+                    f"initial={result.initial} final={result.final} "
+                    f"steps={result.steps} success={result.success} "
+                    f"reason={result.reason}",
+                    "INFO" if result.success or mode == "observe" else "WARN",
+                )
             elif t == "target_priority_ensure":
                 if is_strategy_action and last_state not in allowed_states:
                     log_mission(f"[EXEC] Skip target_priority_ensure while state={last_state}", "DEBUG")
@@ -210,6 +242,28 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                 if mv is not None:
                     mv["target_priority_checked"] = ok
                 log_mission(f"[EXEC] target_priority_ensure verified={ok}", "INFO" if ok else "WARN")
+            elif t == "target_priority_observe":
+                if is_strategy_action and last_state not in allowed_states:
+                    log_mission(
+                        f"[EXEC] Skip target_priority_observe while state={last_state}",
+                        "DEBUG",
+                    )
+                    continue
+                expected_order = act.get("order")
+                if expected_order is None:
+                    observation = observe_target_priority_order()
+                else:
+                    observation = observe_target_priority_order(
+                        expected=expected_order
+                    )
+                if mv is not None:
+                    mv["target_priority_observed"] = True
+                    mv["target_priority_observation"] = observation.as_dict()
+                log_mission(
+                    "[EXEC] target_priority_observe "
+                    f"observed={observation.observed} matches={observation.matches}",
+                    "INFO" if observation.observed else "WARN",
+                )
             elif t == "gc_session_preflight":
                 if is_strategy_action and last_state not in allowed_states:
                     log_mission(
@@ -240,25 +294,49 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                 if result.status is GcPreflightNavigationStatus.COMPLETE:
                     if mv is not None:
                         mv["gc_session_preflight_completed"] = True
+                        mv["gc_session_preflight_repair_required"] = False
+                        mv["gc_session_preflight_repair_in_progress"] = False
                     log_mission(
                         "[SESSION_PREFLIGHT] Session validation completed: "
                         + json.dumps(evidence_payload, sort_keys=True),
                         "INFO",
                     )
                 elif result.status is GcPreflightNavigationStatus.MISMATCH:
+                    repairable = bool(
+                        result.evidence is not None
+                        and getattr(
+                            result.evidence,
+                            "requires_no_battle_repair",
+                            False,
+                        )
+                    )
                     if mv is not None:
                         mv["gc_session_preflight_completed"] = False
                         mv["gc_session_preflight_blocked"] = True
-                    log_mission(
-                        "[SESSION_PREFLIGHT] Configuration mismatch; automatic "
-                        "correction and Surrender are disabled: "
-                        + json.dumps(evidence_payload, sort_keys=True),
-                        "WARN",
-                    )
+                        mv["gc_session_preflight_repair_required"] = repairable
+                        mv["gc_session_preflight_repair_in_progress"] = False
+                        if repairable:
+                            mv["gc_no_battle_setup_completed"] = False
+                    if repairable:
+                        log_mission(
+                            "[SESSION_PREFLIGHT] No-battle configuration mismatch; "
+                            "guarded stop/repair/restart requested: "
+                            + json.dumps(evidence_payload, sort_keys=True),
+                            "WARN",
+                        )
+                    else:
+                        log_mission(
+                            "[SESSION_PREFLIGHT] Configuration mismatch is not "
+                            "repairable at Home; automation remains blocked: "
+                            + json.dumps(evidence_payload, sort_keys=True),
+                            "WARN",
+                        )
                 else:
                     if mv is not None:
                         mv["gc_session_preflight_completed"] = False
                         mv["gc_session_preflight_attempted"] = False
+                        mv["gc_session_preflight_repair_required"] = False
+                        mv["gc_session_preflight_repair_in_progress"] = False
                     interrupted_level = (
                         "INFO"
                         if result.status

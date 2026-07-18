@@ -94,10 +94,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--strategy",
-        default="gc",
+        default="farm",
         help=(
-            "Runtime strategy: gc (Tier 18 default), gc_farm_t18, "
-            "gc_farm_t19_experiment, or none. Use none for the regular "
+            "Runtime strategy: farm (Tier 18 default), farm_t18, "
+            "farm_t19_experiment, or none. Legacy gc names remain aliases. "
+            "Use none for the regular "
             "handler loop with no strategy actions or startup gates; "
             "--strategy-config overrides this option"
         ),

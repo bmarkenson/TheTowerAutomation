@@ -12,7 +12,7 @@ import numpy as np
 Region = tuple[int, int, int, int]
 
 FARM_PRESET_SLOT: Final[Region] = (12, 185, 210, 98)
-CARDS_GC_PRESET_SLOT: Final[Region] = (12, 371, 210, 98)
+CARDS_FARM_PRESET_SLOT: Final[Region] = (12, 371, 210, 98)
 BOTS_FARM_PRESET_SLOT: Final[Region] = (18, 496, 347, 98)
 INACTIVE_PRESET_SLOTS: Final[tuple[Region, ...]] = (
     (225, 185, 210, 98),
@@ -80,7 +80,7 @@ def measure_preset_slot_selection(
 
 __all__ = [
     "BOTS_FARM_PRESET_SLOT",
-    "CARDS_GC_PRESET_SLOT",
+    "CARDS_FARM_PRESET_SLOT",
     "FARM_PRESET_SLOT",
     "INACTIVE_PRESET_SLOTS",
     "PresetSlotSelection",

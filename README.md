@@ -40,19 +40,19 @@ python main.py \
   --mission-log logs/blender_mission.log
 ```
 
-Bundled GC farming strategies are generated from one shared family builder and
-compact Tier profiles:
+Bundled Farm strategies are generated from a shared invariant baseline, named
+loadout catalogs, and compact Tier profiles:
 
-- `gc` and `gc_farm_t18` select the Tier 18 profile. Its configured Target
+- `farm` and `farm_t18` select the Tier 18 profile. Its configured Target
   Priority order is verified and enforced after EHLS/EALS.
-- `gc_farm_t19_experiment` selects the experimental Tier 19 profile. It runs
+- `farm_t19_experiment` selects the experimental Tier 19 profile. It runs
   EHLS/EALS but preserves the current Target Priority order without inspecting
   it or including it in the startup completion gate.
 
 For example:
 
 ```bash
-.venv/bin/python main.py --adb-port 5555 --strategy gc_farm_t19_experiment
+.venv/bin/python main.py --adb-port 5555 --strategy farm_t19_experiment
 ```
 
 For a gate-free experiment, select the no-strategy mode explicitly:
@@ -63,9 +63,9 @@ For a gate-free experiment, select the no-strategy mode explicitly:
 
 This keeps the regular capture, detection, lifecycle, Game Over, Home, ad-gem,
 Daily Gem, Daily/Event Mission reward, Guild chest, floating-gem, status, and
-recovery handlers running. It loads no GC strategy, so there are no strategy
+recovery handlers running. It loads no Farm strategy, so there are no strategy
 upgrade actions, new-run initialization gate, or session-preflight gate. The
-default remains `gc` when `--strategy` is omitted.
+default remains `farm` when `--strategy` is omitted.
 
 Mission and Guild reward collection uses the in-run menu's attention dot only
 as a reason to inspect. After opening the menu, the handler independently
@@ -82,27 +82,35 @@ Ordinary Daily Mission claims are banked on local Sunday until the server's
 Monday 00:00 UTC weekly reset (17:00 PDT / 16:00 PST). Glowing weekly mission
 chests, Event rewards, and Guild chests remain collectible during that hold.
 
-The former `gc_manual_target_priority` name remains a compatibility alias for
-`gc_farm_t19_experiment` during migration; it no longer seeds a completion
-variable. Edit the matching `.source.yaml` profile and regenerate its explicit
-`.strategy.yaml` plan with:
+The former `gc`, `gc_farm_*`, `glass_cannon`, `gc_skipper`, and
+`gc_manual_target_priority` names remain compatibility aliases. Edit the
+matching compact Farm source and regenerate its explicit `.strategy.yaml` plan
+with:
 
 ```bash
 .venv/bin/python tools/strategy/build_strategy.py \
-  config/strategies/gc_farm_t19_experiment.source.yaml
+  config/strategies/farm_t19_experiment.source.yaml
 ```
 
-Both GC profiles also declare a once-per-process session preflight. After the
-current run's startup gate, it uses guarded read-only navigation to verify the
-GC Cards deck, Farm Workshop and Bots presets, Fetch/Summon/Scout Guardian
-chips, Auto Pick Perks, and the profile's required Ultimate Weapon toggles.
+Every Farm profile inherits the same `Farm` Cards, Workshop, and Bots presets,
+Fetch/Summon/Scout Guardian chips, Auto Pick Perks, and Ultimate Weapon
+requirements. Poison Swamp Stun is the narrow in-battle repair exception:
+when its detail screen authoritatively shows Stun on, preflight switches it off
+and verifies the result without Surrendering or leaving the active run.
 Before a new battle starts, a separate verified no-battle Home route may
-correct Cards `GC`, Workshop `Farm`, Bots `Farm`, and the supported
+correct Cards `Farm`, Workshop `Farm`, Bots `Farm`, and the supported
 Attack/Ally/Scout → Fetch/Summon/Scout Guardian transition. Unknown no-battle
-layouts fail closed. The later in-battle preflight remains read-only; success
-is logged once and persists across run boundaries, while any remaining
-mismatch blocks normal automation without changing equipment or Surrendering
-the run.
+layouts fail closed.
+
+Modules, Damage Slider, and Target Priority are the only per-Tier or
+experimental loadout fields. Each compact profile declares `enforce`, `observe`,
+or `preserve` for all three. `enforce` blocks on mismatch and may use an
+explicit safe repair path; `observe` records evidence without blocking or
+changing it; `preserve` neither inspects nor changes it. Modules and Target
+Priority resolve named presets at build time. Damage Slider profiles use an
+explicit percentage; Tier 18 enforces `1E-22%` during every new-run
+initialization after EHLS/EALS. The fully resolved configuration is embedded in
+the generated plan and copied into each battle's JSON record.
 
 ## Battle statistics
 
@@ -112,8 +120,10 @@ OCR into one durable record. Each battle produces:
 
 - `logs/battles/Battle*.json` — the authoritative versioned source record,
   including named sections/rows, exact copied text, OCR evidence, ordered
-  perks, strategy/runtime context, and derived values;
-- `logs/battles/Battle*.md` — a human-readable view of the same battle.
+  perks, strategy/runtime context, resolved run configuration, and derived
+  values;
+- `logs/battles/Battle*.md` — a human-readable view of the same battle,
+  including the resolved loadout policies, presets, and values.
 
 Every copied label/value row is retained by section; the schema does not limit
 capture to a fixed shortlist. Validation currently requires all 16 known

@@ -20,6 +20,19 @@ Frame = NDArray[np.uint8]
 LATEST_SCREENSHOT = Path("screenshots/latest.png")
 
 
+def is_complete_screenshot(frame: Optional[Frame]) -> bool:
+    """Reject malformed or majority-black 1080x1920 action evidence."""
+
+    return bool(
+        isinstance(frame, np.ndarray)
+        and frame.ndim == 3
+        and frame.shape[0] == 1920
+        and frame.shape[1] == 1080
+        and frame.shape[2] >= 3
+        and float(np.mean(np.max(frame[:, :, :3], axis=2) < 8)) < 0.5
+    )
+
+
 def _decode_raw_screencap(raw_data: bytes) -> Frame:
     """Decode Android ``screencap`` RGBA/RGBX/BGRA framebuffer bytes."""
 

@@ -277,6 +277,20 @@ def _record_event_inventory(
 
 def _claim_guild_chests(screenshot) -> tuple[bool, int]:
     current = screenshot
+    if not _is_state(current, "GUILD"):
+        return False, 0
+    # Guild retains its last selected tab.  Always reselect Members before
+    # interpreting absence of glowing contribution chests as authoritative.
+    if not safe_tap(
+        "navigation.guild:members_tab",
+        require_visible=False,
+        dispatch="now",
+    ):
+        return False, 0
+    current = _wait_for_state("GUILD", settle_s=0.8)
+    if current is None:
+        return False, 0
+
     claimed = 0
     for _ in range(MAX_GUILD_CHESTS):
         if not _is_state(current, "GUILD"):

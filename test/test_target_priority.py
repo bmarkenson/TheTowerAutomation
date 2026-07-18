@@ -4,6 +4,7 @@ from core.target_priority import (
     TARGETS,
     _canonical_target,
     ensure_target_priority_order,
+    observe_target_priority_order,
     target_priority_matches,
 )
 
@@ -33,3 +34,22 @@ def test_enforcer_moves_rows_up_and_verifies():
 def test_priority_comparison_is_case_insensitive_and_ordered():
     assert target_priority_matches(TARGETS, [item.lower() for item in TARGETS])
     assert not target_priority_matches(TARGETS, tuple(reversed(TARGETS)))
+
+
+def test_observer_reads_and_closes_without_reordering():
+    actual = list(reversed(TARGETS))
+    taps = []
+    with (
+        patch("core.target_priority.read_target_priority_order", return_value=actual),
+        patch("core.target_priority.log"),
+    ):
+        observation = observe_target_priority_order(
+            tap_fn=lambda point: taps.append(point) or True,
+            ensure_menu_fn=lambda: True,
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert observation.observed
+    assert observation.matches is False
+    assert observation.actual == tuple(actual)
+    assert taps == [(910, 380), (950, 100)]

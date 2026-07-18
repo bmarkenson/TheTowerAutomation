@@ -7,6 +7,7 @@ Evaluates rules each tick while RUNNING and emits executor actions.
 Supports per-rule cooldown (cooldown_sec) and a small set of conditions.
 """
 
+import copy
 import time
 from typing import Any, Dict, List, Optional
 
@@ -116,6 +117,9 @@ class YamlStrategy(BaseStrategy):
         self._session_preflight_requirements: Dict[str, Any] = dict(
             session_preflight.get("requirements") or {}
         )
+        self._run_configuration: Dict[str, Any] = copy.deepcopy(
+            self.config.get("run_configuration") or {}
+        )
 
     @classmethod
     def from_file(cls, path: str) -> "YamlStrategy":
@@ -132,7 +136,10 @@ class YamlStrategy(BaseStrategy):
         super().on_run_start(ctx)
         mv = ctx.data.setdefault("mission_vars", {})
         for k in self.per_run_reset:
-            mv[k] = False if isinstance(mv.get(k), bool) else 0
+            if k in self.vars:
+                mv[k] = copy.deepcopy(self.vars[k])
+            else:
+                mv[k] = False if isinstance(mv.get(k), bool) else 0
 
     def requires_run_initialization(self) -> bool:
         return bool(self._run_initialization_assertions)
@@ -154,6 +161,9 @@ class YamlStrategy(BaseStrategy):
 
     def session_preflight_requirements(self) -> Dict[str, Any]:
         return dict(self._session_preflight_requirements)
+
+    def run_configuration(self) -> Dict[str, Any]:
+        return copy.deepcopy(self._run_configuration)
 
     # ---------------------------- conditions ---------------------------------
     def _floating_visible(self, screen, name: str) -> bool:

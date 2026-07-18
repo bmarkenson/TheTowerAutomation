@@ -9,12 +9,16 @@ from typing import Any, Callable, Mapping
 
 from core.battle_lifecycle import HomeBattleControl
 from core.home_battle import detect_home_battle_control
-from core.input import safe_tap, tap_if_visible
+from core.gc_module_loadout import (
+    ensure_gc_module_loadout,
+    normalize_gc_module_requirements,
+)
+from core.input import safe_tap, swipe_now, tap_if_visible
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
 from core.workshop_preset import (
     BOTS_FARM_PRESET_SLOT,
-    CARDS_GC_PRESET_SLOT,
+    CARDS_FARM_PRESET_SLOT,
     FARM_PRESET_SLOT,
     measure_preset_slot_selection,
 )
@@ -51,7 +55,9 @@ def run_gc_no_battle_setup(
     detect_home_control_fn: Callable[[Any], Any] = detect_home_battle_control,
     safe_tap_fn: Callable[..., bool] = safe_tap,
     tap_visible_fn: Callable[..., bool] = tap_if_visible,
+    swipe_fn: Callable[[str], bool] = swipe_now,
     measure_selection_fn: Callable[..., Any] = measure_preset_slot_selection,
+    ensure_modules_fn: Callable[..., Any] = ensure_gc_module_loadout,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> GcNoBattleSetupResult:
     """Correct supported persistent GC settings before a new battle starts."""
@@ -63,7 +69,10 @@ def run_gc_no_battle_setup(
             unsupported,
         )
 
-    evidence: dict[str, Any] = {}
+    module_mode = _module_policy(requirements)
+    evidence: dict[str, Any] = {
+        "loadout_policies": {"modules": module_mode},
+    }
     current = screenshot if screenshot is not None else capture_fn()
     try:
         _require_no_battle_home(current, detector, detect_home_control_fn)
@@ -81,16 +90,16 @@ def run_gc_no_battle_setup(
         cards = _ensure_preset(
             cards,
             state="CARDS",
-            slot_secondary="CARDS_GC_SLOT",
-            slot_label="indicators.cards:gc_slot",
-            slot_region=CARDS_GC_PRESET_SLOT,
+            slot_secondary="CARDS_FARM_SLOT",
+            slot_label="indicators.cards:farm_slot",
+            slot_region=CARDS_FARM_PRESET_SLOT,
             capture_fn=capture_fn,
             detector=detector,
             tap_visible_fn=tap_visible_fn,
             measure_selection_fn=measure_selection_fn,
             sleep_fn=sleep_fn,
         )
-        evidence["cards_deck"] = "GC"
+        evidence["cards_deck"] = "Farm"
         current = _return_home(
             cards,
             capture_fn,
@@ -151,7 +160,13 @@ def run_gc_no_battle_setup(
             detector,
             safe_tap_fn,
             sleep_fn,
-            required_secondary="EVENT_BOTS_SCREEN",
+        )
+        bots = _ensure_event_bots_top(
+            bots,
+            capture_fn=capture_fn,
+            detector=detector,
+            swipe_fn=swipe_fn,
+            sleep_fn=sleep_fn,
         )
         bots = _ensure_preset(
             bots,
@@ -204,7 +219,7 @@ def run_gc_no_battle_setup(
             sleep_fn,
         )
         evidence["guardian_chips"] = ["Fetch", "Summon", "Scout"]
-        _return_home(
+        current = _return_home(
             guardians,
             capture_fn,
             detector,
@@ -212,6 +227,45 @@ def run_gc_no_battle_setup(
             safe_tap_fn,
             sleep_fn,
         )
+
+        if module_mode == "enforce":
+            modules = _open_static(
+                current,
+                "navigation.goto_modules_home",
+                "HOME_SCREEN",
+                "MODULES",
+                capture_fn,
+                detector,
+                safe_tap_fn,
+                sleep_fn,
+            )
+            module_evidence = ensure_modules_fn(
+                requirements["modules"],
+                screenshot=modules,
+                capture_fn=capture_fn,
+                detector=detector,
+                safe_tap_fn=safe_tap_fn,
+                swipe_fn=swipe_fn,
+                sleep_fn=sleep_fn,
+            )
+            if not module_evidence.valid:
+                raise _SetupFailure(
+                    "module loadout remained invalid after correction"
+                )
+            evidence["modules"] = module_evidence.as_dict()
+            _return_home(
+                capture_fn(),
+                capture_fn,
+                detector,
+                detect_home_control_fn,
+                safe_tap_fn,
+                sleep_fn,
+            )
+        else:
+            evidence["modules"] = {
+                "mode": module_mode,
+                "checked": False,
+            }
     except Exception as exc:
         _recover_home(
             capture_fn,
@@ -227,7 +281,7 @@ def run_gc_no_battle_setup(
             evidence,
         )
 
-    log("[GC_NO_BATTLE] GC presets verified/corrected before Battle", "INFO")
+    log("[GC_NO_BATTLE] Farm presets verified/corrected before Battle", "INFO")
     return GcNoBattleSetupResult(
         GcNoBattleSetupStatus.COMPLETE,
         "supported no-battle requirements verified",
@@ -237,7 +291,7 @@ def run_gc_no_battle_setup(
 
 def _unsupported_requirement(requirements: Mapping[str, Any]) -> str | None:
     fixed = {
-        "cards_deck": "GC",
+        "cards_deck": "Farm",
         "workshop_preset": "Farm",
         "bots_preset": "Farm",
     }
@@ -247,7 +301,32 @@ def _unsupported_requirement(requirements: Mapping[str, Any]) -> str | None:
     chips = {str(chip).strip() for chip in requirements.get("guardian_chips") or []}
     if chips != {"Fetch", "Summon", "Scout"}:
         return f"unsupported guardian_chips={sorted(chips)!r}"
+    try:
+        module_mode = _module_policy(requirements)
+    except ValueError as exc:
+        return str(exc)
+    if module_mode == "preserve":
+        if "modules" in requirements:
+            return "preserved modules must not supply module requirements"
+    else:
+        try:
+            normalize_gc_module_requirements(requirements.get("modules"))
+        except ValueError as exc:
+            return str(exc)
     return None
+
+
+def _module_policy(requirements: Mapping[str, Any]) -> str:
+    policies = requirements.get("loadout_policies") or {}
+    if not isinstance(policies, Mapping):
+        raise ValueError("loadout_policies must be a mapping")
+    unknown = sorted(set(policies) - {"modules"})
+    if unknown:
+        raise ValueError(f"unsupported loadout policies: {unknown}")
+    mode = str(policies.get("modules") or "enforce").strip().lower()
+    if mode not in {"enforce", "observe", "preserve"}:
+        raise ValueError(f"unsupported modules policy {mode!r}")
+    return mode
 
 
 def _require_no_battle_home(frame, detector, detect_home_control_fn) -> None:
@@ -365,6 +444,37 @@ def _ensure_preset(
     if not measure_selection_fn(updated, slot_region).selected:
         raise _SetupFailure(f"preset did not become selected: {slot_label}")
     return updated
+
+
+def _ensure_event_bots_top(
+    frame,
+    *,
+    capture_fn,
+    detector,
+    swipe_fn,
+    sleep_fn,
+):
+    current = frame
+    for _ in range(4):
+        detection = detector(current)
+        if (
+            detection.get("state") == "EVENT"
+            and "EVENT_BOTS_SCREEN"
+            in set(detection.get("secondary_states") or ())
+        ):
+            return current
+        if detection.get("state") != "EVENT":
+            raise _SetupFailure("Event Bots top-scroll guard lost EVENT")
+        if not swipe_fn("gesture_targets.goto_top:event_bots"):
+            raise _SetupFailure("Event Bots top swipe failed")
+        sleep_fn(0.6)
+        current = _wait_for(
+            state="EVENT",
+            capture_fn=capture_fn,
+            detector=detector,
+            sleep_fn=sleep_fn,
+        )
+    raise _SetupFailure("Event Bots preset evidence remained offscreen")
 
 
 def _ensure_guardian_loadout(

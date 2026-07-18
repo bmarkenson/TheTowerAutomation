@@ -107,8 +107,11 @@ or handoff identifies a different ADB port.
 
 If a natural Game Over appears during inspection, preserve it. Pause or stop
 automation when needed to prevent an unintended terminal action, then pivot to
-the Game Over work that is already in scope. Never use Surrender to create a
-test boundary.
+the Game Over work that is already in scope. Never Surrender a pre-existing or
+operator-owned battle merely to create a development test boundary. A bounded
+agent-owned test battle may be Surrendered only under the ownership and
+authorization rule in `AGENTS.md`; an implemented runtime configuration-gate
+recovery has its own narrower authority there.
 
 ## Preparing a handoff
 

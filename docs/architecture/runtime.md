@@ -27,6 +27,36 @@ Keep `YamlStrategy` and its evaluator generic. Strategy-specific behavior should
 come from compact configuration and explicit generated plans, not strategy-name
 conditionals or duplicated expanded YAML.
 
+## Farm profiles and loadouts
+
+`Farm` is the recurring automated run profile. Glass Cannon describes a
+gameplay style, not a runtime profile: it may also be used for tournaments,
+milestones, or some Dissonance runs, so it does not own Farm configuration.
+Legacy `gc*` strategy names remain aliases during migration.
+
+The Farm baseline owns settings that must be true for every Farm run: the
+`Farm` Cards, Workshop, and Bots presets, Guardian chips, Auto Pick Perks, and
+Ultimate Weapon controls. Compact Tier profiles cannot override those
+invariants.
+
+Only Modules, Damage Slider, and Target Priority vary by Tier or experiment.
+Every compact Farm profile names all three and assigns one of these policies:
+
+| Policy | Runtime contract |
+| --- | --- |
+| `enforce` | Inspect and require the resolved value; a mismatch blocks unless an explicit safe repair contract owns the transition. |
+| `observe` | Inspect and record the resolved expectation and evidence without blocking or changing the setting. |
+| `preserve` | Do not inspect or change the setting. |
+
+Named module and Target Priority presets are resolved at build time into an
+explicit self-contained strategy plan. Damage Slider `observe` and `enforce`
+policies resolve an explicit percentage; Tier 18 enforces `1E-22%` during every
+new-run initialization after the time-sensitive EHLS/EALS setup. `YamlStrategy`
+exposes the plan's resolved
+`run_configuration` generically, and Game Over records copy that snapshot into
+the versioned battle JSON. Runtime code does not inherit configuration or
+branch on a Farm strategy name.
+
 ## State and battle lifecycle
 
 - Visible navigation and battle lifecycle are separate. Home
@@ -51,6 +81,25 @@ conditionals or duplicated expanded YAML.
   runtime action authority implicitly.
 - Every live action requires fresh source-state evidence immediately before the
   input. Transition frames and stale screenshots cannot authorize actions.
+- Farm configuration is inspection-first and profile-driven. A setting may be
+  corrected during the active run only when the profile explicitly owns that
+  setting and its runtime contract declares the transition safe. Session
+  preflight owns verified Poison Swamp Stun `on` → `off`: it opens the detected
+  Poison Swamp detail, taps the freshly matched checked control, verifies
+  `off`, and returns to `RUNNING/UW_MENU` without Surrender or a Home
+  transition. New-run initialization owns Damage Slider enforcement: it
+  requires `RUNNING/ATTACK_MENU`, opens the freshly matched Damage control,
+  reacquires authoritative panel and percentage evidence before every explicit
+  arrow tap, requires strict progress and a verified final value, and returns
+  to `RUNNING/ATTACK_MENU`. Unknown or incomplete evidence remains blocked.
+- Confident mismatches on Home-only configuration may request one app-owned
+  stop/repair/restart sequence; ambiguous or unknown module identity and other
+  non-Home repair classes remain blocked. The matcher reports evidence but
+  never directly authorizes an equipment action.
+- A guarded configuration repair must reach verified Home `NEW_BATTLE`, use
+  fresh detail/name and action guards for module changes, reapply the complete
+  profile-owned no-battle setup, start the next battle, and require fresh
+  session preflight evidence before normal handlers regain authority.
 
 ## Process and control ownership
 

@@ -103,6 +103,27 @@ def test_home_mode_taps_game_stats_home_instead_of_retry():
     tap.assert_called_once_with("buttons.home:game_over", retries=1)
 
 
+def test_guarded_preflight_repair_forces_home_after_control_allows_actions():
+    original_state = AUTOMATION.state
+    original_mode = AUTOMATION.mode
+    AUTOMATION.state = RunState.RUNNING
+    AUTOMATION.mode = ExecMode.RETRY
+    try:
+        with (
+            patch("handlers.game_over_handler.tap_if_visible", return_value=True) as tap,
+            patch("handlers.game_over_handler.time.sleep"),
+        ):
+            handle_game_over(
+                capture_stats=False,
+                return_home_after_battle=True,
+            )
+    finally:
+        AUTOMATION.state = original_state
+        AUTOMATION.mode = original_mode
+
+    tap.assert_called_once_with("buttons.home:game_over", retries=1)
+
+
 def test_game_over_wait_polls_control_and_blocks_retry_while_paused():
     original_state = AUTOMATION.state
     original_mode = AUTOMATION.mode

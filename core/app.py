@@ -30,6 +30,7 @@ from core.run_state import AUTOMATION, ExecMode
 from core.app_setup import AppConfig
 from core.status_report import StateChangeTracker, StatusReporter
 from core.recovery import handle_unknown_state, update_unknown_state
+from core.run_controls import surrender_run
 from automation.missions.manager import MissionManager
 from automation.missions import get_mission
 from automation.missions.yaml_mission import YamlMission
@@ -91,6 +92,7 @@ class App:
         self._blind_tapper_suspended = False
         self._run_initialization_gate_logged = False
         self._session_preflight_gate_logged = False
+        self._session_preflight_repair_denial_logged = False
         rollover_state = Path(config.control_file).parent / "daily_gem_state.json"
         self._daily_gem_scheduler = DailyGemScheduler(rollover_state)
         self._mission_reward_scheduler = MissionRewardScheduler()
@@ -181,7 +183,10 @@ class App:
                     if stop_blind_gem_tapper():
                         self._blind_tapper_suspended = True
                     if not is_paused:
-                        self._mission_mgr.tick(img, detection, strategy_only=True)
+                        if self._mission_mgr.session_preflight_repair_required():
+                            self._attempt_session_preflight_repair(detection)
+                        else:
+                            self._mission_mgr.tick(img, detection, strategy_only=True)
                 elif self._session_preflight_gate_logged:
                     strategy = self._mission_mgr.strategy
                     if (
@@ -198,6 +203,7 @@ class App:
                             console=True,
                         )
                     self._session_preflight_gate_logged = False
+                    self._session_preflight_repair_denial_logged = False
 
                 actions_blocked = (
                     is_paused
@@ -317,6 +323,46 @@ class App:
                 return None
         return img
 
+    def _attempt_session_preflight_repair(
+        self,
+        detection: Dict[str, Any],
+    ) -> None:
+        """End one GC run so Home-only settings can be corrected safely."""
+
+        if not self._auto_start_enabled:
+            if not self._session_preflight_repair_denial_logged:
+                log(
+                    "[SESSION_PREFLIGHT] Repair requires automatic restart, but "
+                    "automatic Battle start is disabled; automation remains blocked",
+                    "ERROR",
+                )
+                self._session_preflight_repair_denial_logged = True
+            return
+        if detection.get("state") != "RUNNING":
+            return
+        if not self._mission_mgr.begin_session_preflight_repair():
+            return
+
+        log(
+            "[SESSION_PREFLIGHT] Ending the active GC run to repair Home-only settings",
+            "WARN",
+            console=True,
+        )
+        if not surrender_run():
+            reason = "guarded Surrender did not reach Game Over"
+            self._mission_mgr.fail_session_preflight_repair(reason)
+            log(
+                f"[SESSION_PREFLIGHT] {reason}; automation remains blocked",
+                "ERROR",
+                console=True,
+            )
+            return
+        log(
+            "[SESSION_PREFLIGHT] GC run ended; Game Over will return Home for repair",
+            "INFO",
+            console=True,
+        )
+
     def _handle_primary_states(
         self,
         new_state: str,
@@ -336,11 +382,18 @@ class App:
         if new_state == "GAME_OVER":
             log("Detected GAME_OVER. Executing handler.", "INFO", console=True)
             strategy = self._mission_mgr.strategy
+            repair_in_progress = (
+                self._mission_mgr.session_preflight_repair_in_progress()
+            )
             handle_game_over(
                 capture_stats=(not self._fast_game_over),
                 control_sync=self._supervisor.apply_control,
+                return_home_after_battle=repair_in_progress,
                 battle_context={
                     "strategy": strategy.name if strategy else None,
+                    "run_configuration": (
+                        strategy.run_configuration() if strategy else {}
+                    ),
                     "last_wave": self._last_wave_value,
                     "last_wave_confidence": self._last_wave_conf,
                     "coins_log_path": self._status_reporter.coins_log_path,

@@ -16,7 +16,7 @@ from core.state_detector import detect_state_and_overlays
 from core.upgrade_box_detector import UpgradeBox
 from core.workshop_preset import (
     BOTS_FARM_PRESET_SLOT,
-    CARDS_GC_PRESET_SLOT,
+    CARDS_FARM_PRESET_SLOT,
     FARM_PRESET_SLOT,
     INACTIVE_PRESET_SLOTS,
     measure_preset_slot_selection,
@@ -24,10 +24,22 @@ from core.workshop_preset import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-GC_ACTIVE_FIXTURE = ROOT / "test" / "fixtures" / "cards_gc_active_20260713.png"
-GC_INACTIVE_FIXTURE = ROOT / "test" / "fixtures" / "cards_gc_inactive_20260715.png"
+FARM_ACTIVE_FIXTURE = (
+    ROOT / "test" / "fixtures" / "cards_farm_active_20260717.png"
+)
+FARM_INACTIVE_FIXTURE = (
+    ROOT / "test" / "fixtures" / "cards_farm_inactive_20260717.png"
+)
+LEGACY_GC_FIXTURE = ROOT / "test" / "fixtures" / "cards_gc_active_20260713.png"
 HOME_NEGATIVE_FIXTURE = (
     ROOT / "test" / "fixtures" / "home_screen_new_day_store_badge_20260713.png"
+)
+HOME_SCROLLED_FIXTURE = (
+    ROOT
+    / "test"
+    / "fixtures"
+    / "gc_module_gate_20260716"
+    / "home_scrolled_new_battle.png"
 )
 BOT_FIXTURE = ROOT / "test" / "fixtures" / "event_bots_farm_active_20260713.png"
 BOT_INACTIVE_FIXTURE = (
@@ -48,6 +60,24 @@ AUTO_PICK_FIXTURE = (
     / "ui_state_20260714"
     / "active_perks_selected_auto_pick_on.png"
 )
+MODULES_FIXTURE = (
+    ROOT
+    / "test"
+    / "fixtures"
+    / "module_inventory_20260716"
+    / "gc_modules_overview.png"
+)
+
+GC_MODULE_REQUIREMENTS = {
+    "cannon_assist": "Being Annihilator",
+    "cannon_primary": "Amplifying Strike",
+    "generator_primary": "Black Hole Digestor",
+    "generator_assist": "Singularity Harness",
+    "armor_assist": "Anti-Cube Portal",
+    "armor_primary": "Orbital Augment",
+    "core_primary": "Multiverse Nexus",
+    "core_assist": "Dimension Core",
+}
 
 GC_ULTIMATE_REQUIREMENTS = {
     "Chain Lightning": {"primary": "on"},
@@ -56,7 +86,7 @@ GC_ULTIMATE_REQUIREMENTS = {
     "Chrono Field": {"primary": "on"},
     "Inner Land Mines": {"primary": "on"},
     "Golden Tower": {"primary": "on"},
-    "Poison Swamp": {"primary": "on"},
+    "Poison Swamp": {"primary": "on", "stun": "off"},
     "Black Hole": {"primary": "on"},
     "Spotlight": {"primary": "on", "missiles": "on"},
 }
@@ -68,27 +98,27 @@ def _load(path: Path):
     return image
 
 
-def test_live_gc_cards_fixture_identifies_active_gc_preset():
-    screen = _load(GC_ACTIVE_FIXTURE)
+def test_live_farm_cards_fixture_identifies_active_farm_preset():
+    screen = _load(FARM_ACTIVE_FIXTURE)
 
     point, confidence = get_match(
-        "indicators.cards:gc_slot",
+        "indicators.cards:farm_slot",
         screenshot=screen,
     )
     detection = detect_state_and_overlays(screen)
-    selection = measure_preset_slot_selection(screen, CARDS_GC_PRESET_SLOT)
+    selection = measure_preset_slot_selection(screen, CARDS_FARM_PRESET_SLOT)
 
     assert point == (118, 420)
     assert confidence >= 0.99
     assert detection["state"] == "CARDS"
-    assert detection["secondary_states"] == ["CARDS_GC_SLOT"]
+    assert detection["secondary_states"] == ["CARDS_FARM_SLOT"]
     assert selection.selected
 
 
-def test_inactive_gc_cards_slot_is_not_claimed_as_active():
-    screen = _load(GC_INACTIVE_FIXTURE)
+def test_inactive_farm_cards_slot_is_not_claimed_as_active():
+    screen = _load(FARM_INACTIVE_FIXTURE)
     detection = detect_state_and_overlays(screen)
-    selection = measure_preset_slot_selection(screen, CARDS_GC_PRESET_SLOT)
+    selection = measure_preset_slot_selection(screen, CARDS_FARM_PRESET_SLOT)
     evidence = validate_gc_preflight_screens(
         cards_screen=screen,
         workshop_screen=_load(WORKSHOP_FIXTURE),
@@ -97,16 +127,16 @@ def test_inactive_gc_cards_slot_is_not_claimed_as_active():
     )
 
     assert detection["state"] == "CARDS"
-    assert detection["secondary_states"] == ["CARDS_GC_SLOT"]
+    assert detection["secondary_states"] == ["CARDS_FARM_SLOT"]
     assert not selection.selected
     assert not evidence.valid
-    assert evidence.cards.missing_secondary == ("CARDS_GC_ACTIVE",)
+    assert evidence.cards.missing_secondary == ("CARDS_FARM_ACTIVE",)
     assert not evidence.cards_selection.selected
 
 
-def test_gc_active_preset_does_not_match_home_screen():
+def test_farm_cards_preset_does_not_match_home_screen():
     point, confidence = get_match(
-        "indicators.cards:gc_slot",
+        "indicators.cards:farm_slot",
         screenshot=_load(HOME_NEGATIVE_FIXTURE),
     )
 
@@ -114,9 +144,19 @@ def test_gc_active_preset_does_not_match_home_screen():
     assert confidence < 0.9
 
 
-def test_live_gc_configuration_fixtures_form_complete_preflight_evidence():
+def test_legacy_gc_cards_preset_does_not_match_farm_identity():
+    point, confidence = get_match(
+        "indicators.cards:farm_slot",
+        screenshot=_load(LEGACY_GC_FIXTURE),
+    )
+
+    assert point is None
+    assert confidence < 0.9
+
+
+def test_live_farm_configuration_fixtures_form_complete_preflight_evidence():
     evidence = validate_gc_preflight_screens(
-        cards_screen=_load(GC_ACTIVE_FIXTURE),
+        cards_screen=_load(FARM_ACTIVE_FIXTURE),
         workshop_screen=_load(WORKSHOP_FIXTURE),
         bots_screen=_load(BOT_FIXTURE),
         guardians_screen=_load(GUARDIAN_FIXTURE),
@@ -137,7 +177,7 @@ def test_inactive_farm_bot_slot_is_not_claimed_as_active():
     detection = detect_state_and_overlays(screen)
     selection = measure_preset_slot_selection(screen, BOTS_FARM_PRESET_SLOT)
     evidence = validate_gc_preflight_screens(
-        cards_screen=_load(GC_ACTIVE_FIXTURE),
+        cards_screen=_load(FARM_ACTIVE_FIXTURE),
         workshop_screen=_load(WORKSHOP_FIXTURE),
         bots_screen=screen,
         guardians_screen=_load(GUARDIAN_FIXTURE),
@@ -156,7 +196,7 @@ def test_inactive_farm_bot_slot_is_not_claimed_as_active():
 
 def test_wrong_tabs_do_not_satisfy_bots_or_guardian_preflight_sections():
     evidence = validate_gc_preflight_screens(
-        cards_screen=_load(GC_ACTIVE_FIXTURE),
+        cards_screen=_load(FARM_ACTIVE_FIXTURE),
         workshop_screen=_load(HOME_NEGATIVE_FIXTURE),
         bots_screen=_load(EVENT_MISSIONS_FIXTURE),
         guardians_screen=_load(GUILD_MEMBERS_FIXTURE),
@@ -204,6 +244,24 @@ def test_home_preflight_destinations_require_visible_identity_evidence():
     assert event_confidence >= 0.95
     assert guild_point == (122, 960)
     assert guild_confidence >= 0.99
+
+
+def test_home_preflight_destinations_allow_retained_vertical_scroll():
+    home = _load(HOME_SCROLLED_FIXTURE)
+
+    event_point, event_confidence = get_match(
+        "navigation.home_event",
+        screenshot=home,
+    )
+    guild_point, guild_confidence = get_match(
+        "navigation.home_guild",
+        screenshot=home,
+    )
+
+    assert event_point == (115, 539)
+    assert event_confidence >= 0.99
+    assert guild_point == (122, 804)
+    assert guild_confidence >= 0.95
 
 
 def test_live_workshop_fixture_identifies_farm_and_selected_border():
@@ -260,7 +318,7 @@ def test_auto_pick_classifier_does_not_invent_enabled_from_empty_region():
 
 def test_ultimate_weapon_evidence_requires_every_requested_toggle():
     observed = {
-        label: {name: "on" for name in toggles}
+        label: dict(toggles)
         for label, toggles in GC_ULTIMATE_REQUIREMENTS.items()
     }
     observed["Spotlight"]["missiles"] = "off"
@@ -298,19 +356,79 @@ def test_ultimate_weapon_boxes_merge_across_scroll_positions():
 
 def test_complete_session_preflight_combines_all_positive_evidence():
     observed = {
-        label: {name: "on" for name in toggles}
+        label: dict(toggles)
         for label, toggles in GC_ULTIMATE_REQUIREMENTS.items()
     }
     evidence = validate_gc_session_preflight_screens(
-        cards_screen=_load(GC_ACTIVE_FIXTURE),
+        cards_screen=_load(FARM_ACTIVE_FIXTURE),
         workshop_screen=_load(WORKSHOP_FIXTURE),
         bots_screen=_load(BOT_FIXTURE),
         guardians_screen=_load(GUARDIAN_FIXTURE),
+        modules_screen=_load(MODULES_FIXTURE),
         perks_screen=_load(AUTO_PICK_FIXTURE),
+        module_requirements=GC_MODULE_REQUIREMENTS,
         ultimate_requirements=GC_ULTIMATE_REQUIREMENTS,
         ultimate_observations=observed,
     )
 
     assert evidence.valid
+    assert evidence.modules.valid
     assert evidence.auto_pick_perks.enabled
     assert evidence.ultimate_weapons.valid
+
+
+def test_observed_module_mismatch_is_reported_without_blocking_preflight():
+    observed = {
+        label: dict(toggles)
+        for label, toggles in GC_ULTIMATE_REQUIREMENTS.items()
+    }
+    expected_modules = dict(GC_MODULE_REQUIREMENTS)
+    expected_modules["generator_primary"] = "Project Funding"
+
+    evidence = validate_gc_session_preflight_screens(
+        cards_screen=_load(FARM_ACTIVE_FIXTURE),
+        workshop_screen=_load(WORKSHOP_FIXTURE),
+        bots_screen=_load(BOT_FIXTURE),
+        guardians_screen=_load(GUARDIAN_FIXTURE),
+        modules_screen=_load(MODULES_FIXTURE),
+        perks_screen=_load(AUTO_PICK_FIXTURE),
+        module_requirements=expected_modules,
+        module_mode="observe",
+        ultimate_requirements=GC_ULTIMATE_REQUIREMENTS,
+        ultimate_observations=observed,
+    )
+
+    payload = evidence.as_dict()
+    assert evidence.valid
+    assert evidence.modules is not None
+    assert not evidence.modules.valid
+    assert not evidence.requires_no_battle_repair
+    assert payload["modules"]["matches_expected"] is False
+    assert payload["modules"]["blocking_valid"] is True
+
+
+def test_preserved_modules_are_neither_opened_nor_required():
+    observed = {
+        label: dict(toggles)
+        for label, toggles in GC_ULTIMATE_REQUIREMENTS.items()
+    }
+
+    evidence = validate_gc_session_preflight_screens(
+        cards_screen=_load(FARM_ACTIVE_FIXTURE),
+        workshop_screen=_load(WORKSHOP_FIXTURE),
+        bots_screen=_load(BOT_FIXTURE),
+        guardians_screen=_load(GUARDIAN_FIXTURE),
+        perks_screen=_load(AUTO_PICK_FIXTURE),
+        module_mode="preserve",
+        ultimate_requirements=GC_ULTIMATE_REQUIREMENTS,
+        ultimate_observations=observed,
+    )
+
+    assert evidence.valid
+    assert evidence.modules is None
+    assert evidence.as_dict()["modules"] == {
+        "mode": "preserve",
+        "checked": False,
+        "matches_expected": None,
+        "blocking_valid": True,
+    }

@@ -1,0 +1,33 @@
+schema_version: 1
+name: farm
+
+invariants:
+  cards_deck: Farm
+  workshop_preset: Farm
+  bots_preset: Farm
+  guardian_chips:
+    - Fetch
+    - Summon
+    - Scout
+  auto_pick_perks: true
+  ultimate_weapons:
+    Chain Lightning:
+      primary: on
+    Smart Missiles:
+      primary: on
+    Death Wave:
+      primary: on
+    Chrono Field:
+      primary: on
+    Inner Land Mines:
+      primary: on
+    Golden Tower:
+      primary: on
+    Poison Swamp:
+      primary: on
+      stun: off
+    Black Hole:
+      primary: on
+    Spotlight:
+      primary: on
+      missiles: on

@@ -177,10 +177,46 @@ def _record(*, source_complete=True, source_reason="edge_reached"):
         battle_id="Battle20260715T120000-0700",
         captured_at=datetime(2026, 7, 15, 12, 0, tzinfo=timezone.utc),
         strategy_name="gc_farm_t19_experiment",
+        run_configuration={
+            "schema_version": 1,
+            "profile": "farm",
+            "tier": 19,
+            "loadout": {
+                "modules": {
+                    "mode": "observe",
+                    "preset": "module_test_a",
+                    "resolved": {"core_primary": "Multiverse Nexus"},
+                },
+                "damage_slider": {"mode": "preserve"},
+                "target_priority": {
+                    "mode": "observe",
+                    "preset": "priority_test_a",
+                    "resolved": ["Fleets", "Boss"],
+                },
+            },
+        },
         runtime_context={"last_wave": 42},
         data_fn=_data_fn,
         game_stats_text_fn=_game_text,
     )
+
+
+def test_battle_record_retains_resolved_run_configuration():
+    record = _record()
+
+    assert record["schema_version"] == 2
+    assert record["run_configuration"]["profile"] == "farm"
+    assert record["run_configuration"]["tier"] == 19
+    assert (
+        record["run_configuration"]["loadout"]["modules"]["preset"]
+        == "module_test_a"
+    )
+    markdown = render_battle_markdown(record)
+    assert "Run configuration: farm Tier 19" in markdown
+    assert "Modules: mode `observe`; preset `module_test_a`" in markdown
+    assert "core_primary=Multiverse Nexus" in markdown
+    assert "Target Priority: mode `observe`; preset `priority_test_a`" in markdown
+    assert "resolved: Fleets > Boss" in markdown
 
 
 def test_tower_number_parser_preserves_case_sensitive_magnitudes():

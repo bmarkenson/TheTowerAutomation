@@ -12,13 +12,22 @@ session_preflight:
   complete_when:
   - gc_session_preflight_completed
   requirements:
-    cards_deck: GC
+    cards_deck: Farm
     workshop_preset: Farm
     bots_preset: Farm
     guardian_chips:
     - Fetch
     - Summon
     - Scout
+    modules:
+      cannon_assist: Being Annihilator
+      cannon_primary: Amplifying Strike
+      generator_primary: Black Hole Digestor
+      generator_assist: Singularity Harness
+      armor_assist: Anti-Cube Portal
+      armor_primary: Orbital Augment
+      core_primary: Multiverse Nexus
+      core_assist: Dimension Core
     auto_pick_perks: true
     ultimate_weapons:
       Chain Lightning:
@@ -35,11 +44,14 @@ session_preflight:
         primary: 'on'
       Poison Swamp:
         primary: 'on'
+        stun: 'off'
       Black Hole:
         primary: 'on'
       Spotlight:
         primary: 'on'
         missiles: 'on'
+    loadout_policies:
+      modules: enforce
 vars:
   run_initialised: false
   fast_loop_active: false
@@ -66,6 +78,8 @@ vars:
   gc_session_preflight_completed: false
   gc_session_preflight_attempted: false
   gc_session_preflight_blocked: false
+  gc_session_preflight_repair_required: false
+  gc_session_preflight_repair_in_progress: false
   gc_session_preflight_last_status: ''
   gc_session_preflight_last_reason: ''
   gc_session_preflight_evidence: {}
@@ -256,13 +270,22 @@ rules:
   do:
   - type: gc_session_preflight
     requirements:
-      cards_deck: GC
+      cards_deck: Farm
       workshop_preset: Farm
       bots_preset: Farm
       guardian_chips:
       - Fetch
       - Summon
       - Scout
+      modules:
+        cannon_assist: Being Annihilator
+        cannon_primary: Amplifying Strike
+        generator_primary: Black Hole Digestor
+        generator_assist: Singularity Harness
+        armor_assist: Anti-Cube Portal
+        armor_primary: Orbital Augment
+        core_primary: Multiverse Nexus
+        core_assist: Dimension Core
       auto_pick_perks: true
       ultimate_weapons:
         Chain Lightning:
@@ -279,8 +302,11 @@ rules:
           primary: 'on'
         Poison Swamp:
           primary: 'on'
+          stun: 'off'
         Black Hole:
           primary: 'on'
         Spotlight:
           primary: 'on'
           missiles: 'on'
+      loadout_policies:
+        modules: enforce

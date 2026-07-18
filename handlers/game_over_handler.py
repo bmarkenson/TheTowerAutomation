@@ -35,6 +35,7 @@ def handle_game_over(
     capture_stats: bool = True,
     battle_context: Optional[Mapping[str, Any]] = None,
     control_sync: Optional[Callable[[], None]] = None,
+    return_home_after_battle: bool = False,
 ):
     """
     Handle the GAME OVER flow: capture stats, close stats, and retry or pause.
@@ -48,7 +49,7 @@ def handle_game_over(
       5) If clipboard acquisition or freshness validation fails, fall back to
          guarded overlapping screenshots and OCR.
       6) Close "More Stats"; if it fails, abort handler.
-      7) Based on AUTOMATION.mode:
+      7) Based on AUTOMATION.mode, unless a guarded preflight repair requires Home:
          - WAIT: loop until mode changes.
          - HOME: tap the Game Stats Home button and return to the home screen.
          - else: tap "Retry"; if it fails, abort handler.
@@ -174,6 +175,8 @@ def handle_game_over(
     if mode is None:
         log("Automation stopped while waiting on Game Over.", "INFO", console=True)
         return
+    if return_home_after_battle:
+        mode = ExecMode.HOME
     if mode == ExecMode.HOME:
         if not tap_if_visible("buttons.home:game_over", retries=1):
             return _abort_handler("Go Home from Game Stats", session_id)
@@ -360,6 +363,7 @@ def _capture_clipboard_battle_record(
 
     context = dict(battle_context or {})
     strategy_name = context.pop("strategy", None)
+    run_configuration = context.pop("run_configuration", None)
     try:
         record = build_battle_record_from_clipboard(
             game_stats_frame,
@@ -367,6 +371,7 @@ def _capture_clipboard_battle_record(
             battle_id=battle_id,
             captured_at=captured_at,
             strategy_name=strategy_name,
+            run_configuration=run_configuration,
             runtime_context=context,
         )
     except Exception as exc:
@@ -414,6 +419,7 @@ def _save_battle_stats_record(
 
     context = dict(battle_context or {})
     strategy_name = context.pop("strategy", None)
+    run_configuration = context.pop("run_configuration", None)
     try:
         record = build_battle_record(
             game_stats_frame,
@@ -423,6 +429,7 @@ def _save_battle_stats_record(
             battle_id=battle_id,
             captured_at=captured_at,
             strategy_name=strategy_name,
+            run_configuration=run_configuration,
             runtime_context=context,
         )
         if perks is not None:

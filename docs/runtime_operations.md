@@ -95,7 +95,23 @@ to wait for an explicit mode change.
 
 ## Live-action authority
 
-- Never Surrender an active battle.
+- Never Surrender a pre-existing or operator-owned battle merely to create a
+  development test boundary. A bounded developer-owned battle may be
+  Surrendered only after the task author has authorized it and ownership was
+  recorded before the battle started.
+- Runtime automation may Surrender an active strategy-owned battle only when a
+  profile-declared gate has authoritative mismatch evidence for settings that
+  cannot be changed during battle. The same guarded workflow must own Game Over
+  → Home, correction, restart, and fresh revalidation. Uncertain evidence and
+  failures outside that repair class remain blocked without Surrender.
+- A profile-declared setting may be repaired in battle only through an explicit
+  safe-transition contract. Poison Swamp Stun `on` → `off` requires a freshly
+  detected Poison Swamp tile, authoritative detail and checked-control matches,
+  verification of `off`, and a verified return to `RUNNING/UW_MENU`. Damage
+  Slider enforcement requires `RUNNING/ATTACK_MENU`, authoritative panel/mode/
+  OCR evidence before every explicit arrow tap, strict progress, final-value
+  verification, and a verified return to `RUNNING/ATTACK_MENU`. Neither path
+  authorizes Surrender or Home traversal.
 - Safe live validation, verified taps, resumable Exit Battle → Go Home
   traversal, and process restarts are allowed only within the user's stated
   task scope.

@@ -217,6 +217,116 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   saw no relevant badges despite an unrelated Modules badge and performed no
   reward action. The battle continued naturally and was never surrendered.
 
+### 2026-07-16 Ancestral module icon index
+
+- Exhaustively reconciled the owned Ancestral inventory into 24 distinct
+  icon/name pairs, six for each module family, including unequipped modules.
+- Added a read-only JSON-backed equipped-module index with separate
+  Primary/Assist geometry, Ancestral-green gating, confidence and runner-up
+  separation, and non-authoritative unknown/ambiguous outcomes.
+- Retained fixture evidence for the confirmed GC overview and Project Funding
+  at both equipped scales. `test/test_module_icon_index.py` verifies all eight
+  equipped identities, catalog completeness, scale normalization, and
+  rejection of ambiguous, unreadable, and non-green evidence.
+
+### 2026-07-16 GC module gate and guarded repair
+
+- Added the exact eight-slot GC module mapping to both generated GC profiles
+  and included Modules overview evidence in the read-only session preflight.
+  Unknown, ambiguous, and non-Ancestral results block without authorizing
+  Surrender or equipment changes; only confidently named wrong modules request
+  the Home-only repair path.
+- Added an app-owned stop → Game Over → Home setup → restart → fresh-preflight
+  lifecycle. Module correction acts only at verified `NEW_BATTLE` Home, ranks
+  the complete Ancestral inventory from normalized icon data, confirms the
+  exact detail name plus Equip/Unequip action, declines level transfer, and
+  revalidates the complete overview after every transition.
+- Added completeness guards for module captures, complete-modal guards for
+  detail OCR, and bounded rewind-to-top behavior for retained Module inventory
+  and Event Bots scroll positions. Regression coverage exercises correct,
+  wrong, swapped, uncertain, incomplete, transition, and retained-scroll cases.
+- Live-validated the full lifecycle with an explicitly developer-owned Tier 18
+  run: Project Funding was detected in the Black Hole Digestor slot while every
+  other preflight requirement passed; automation Surrendered once, restored
+  Black Hole Digestor at Home, restarted, completed EHLS/EALS at waves 20/30,
+  and produced a fully valid fresh preflight with all eight expected modules.
+  The post-validation developer-owned run was then Surrendered for cleanup and
+  the device was left at `NEW_BATTLE` Home under persisted `PAUSED/HOME`.
+
+### 2026-07-17 Poison Swamp Stun preflight correction
+
+- Added profile-owned `Poison Swamp: stun: off` requirements to both GC
+  profiles and restricted the compact strategy schema to that supported state.
+- Added separate retained templates for the Poison Swamp detail title and the
+  checked/empty Stun control. The guarded helper reacquires a complete UW frame,
+  derives the detail action from the uniquely detected Poison Swamp tile,
+  changes only verified `on` to `off`, reverifies the result, and returns to the
+  UW menu. Unknown or incomplete evidence fails closed.
+- Fixture and navigation regression tests cover on → off correction,
+  already-off behavior, template separation, profile propagation, and the
+  preflight evidence merge without ending or leaving the active battle.
+- Live-calibrated both checkbox states on a preserved active run, restored Stun
+  to off, and exercised the production already-off path at confidence `1.0`.
+  The helper dismissed the detail and returned to `RUNNING/UW_MENU`; the
+  existing battle was never Surrendered and automation was resumed afterward.
+
+### 2026-07-17 Farm profile and loadout architecture
+
+- Replaced GC as the public recurring-run profile with `farm`, `farm_t18`, and
+  `farm_t19_experiment`; the former GC names remain compatibility aliases and
+  the command-line default is now `farm`. Glass Cannon is retained only as a
+  gameplay concept that can span Farm, Tournament, Milestone, and Dissonance
+  purposes.
+- Added one non-overridable Farm baseline for Cards, Workshop, Bots, Guardian,
+  Auto Pick Perks, and Ultimate Weapon controls.
+- Restricted per-Tier and experimental loadouts to Modules, Damage Slider, and
+  Target Priority. Compact profiles must explicitly choose `enforce`,
+  `observe`, or `preserve`; module and Target Priority presets resolve into the
+  generated plan at build time. Damage Slider was initially preserve-only
+  pending its guarded setter.
+- Made module observation non-blocking, module preservation skip navigation,
+  and Target Priority observation read-only. Generated plans carry the resolved
+  configuration, and schema-version-2 battle records persist that snapshot.
+- Added focused builder, alias, policy, preflight, action, strategy-isolation,
+  and battle-record regression coverage. This architectural slice was validated
+  offline and did not pause or interact with the active battle.
+
+### 2026-07-17 Tier 18 Damage Slider initialization
+
+- Extended the Farm loadout policy so Damage Slider `observe` and `enforce`
+  modes resolve explicit percentages without strategy-name conditionals. Tier
+  18 now enforces `1E-22%` during every new-run initialization; Tier 19 remains
+  `preserve` for experimentation. The rule waits for the time-sensitive
+  EHLS/EALS initialization before opening the Damage panel.
+- Added guarded Attack-menu navigation and feedback control. The setter opens
+  the freshly matched Damage detail, reacquires authoritative panel and OCR
+  evidence before each explicit arrow tap, requires strict progress toward the
+  requested value, verifies the final value, and restores
+  `RUNNING/ATTACK_MENU`. Ambiguous, unchanged, or regressive feedback fails
+  closed; wrong-sized or majority-black direct ADB frames cannot authorize the
+  panel evidence.
+- Reset each run's gate and structured observation from the strategy's declared
+  defaults, and added fixture-backed normalization, navigation, adjustment,
+  policy, generated-plan, executor, and reset regression coverage.
+- Live validation on an explicitly developer-owned Tier 18 run observed the
+  starting value at `100%`, enforced `1E-22%` in 24 strictly verified steps,
+  independently re-observed the final value, and returned to
+  `RUNNING/ATTACK_MENU` without Surrender.
+
+### 2026-07-17 Farm Cards preset migration
+
+- Fresh inspection found the in-game Cards preset already named `Farm` and
+  selected at a verified no-battle Home boundary. Replaced the stale `GC`
+  baseline value, clickmap identity, state evidence, and no-battle correction
+  target with `Farm`.
+- Retained complete live active and inactive Farm frames plus a dedicated Farm
+  slot template. Regression coverage requires the Farm identity and separately
+  measures its green selected border; the former GC frame is retained as a
+  negative so old text cannot satisfy the new invariant.
+- Temporarily selected Tournament only to capture the inactive Farm border,
+  then verified Farm restored by pixel evidence and returned to `NEW_BATTLE`
+  Home. Automation remained in the operator's pre-existing paused state.
+
 ---
 
 ## 📘 Documentation

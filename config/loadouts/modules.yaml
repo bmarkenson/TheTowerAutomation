@@ -1,0 +1,11 @@
+schema_version: 1
+presets:
+  farm_standard:
+    cannon_assist: Being Annihilator
+    cannon_primary: Amplifying Strike
+    generator_primary: Black Hole Digestor
+    generator_assist: Singularity Harness
+    armor_assist: Anti-Cube Portal
+    armor_primary: Orbital Augment
+    core_primary: Multiverse Nexus
+    core_assist: Dimension Core
