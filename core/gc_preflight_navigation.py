@@ -588,7 +588,9 @@ def run_read_only_gc_preflight(
                 for column in boxes_by_column.values()
                 for box in (column or [])
             ]
-            ultimate_observations.update(merge_ultimate_weapon_observations(visible))
+            visible_observations = merge_ultimate_weapon_observations(visible)
+            for label, toggles in visible_observations.items():
+                ultimate_observations.setdefault(label, {}).update(toggles)
             poison_boxes = [
                 box
                 for box in visible

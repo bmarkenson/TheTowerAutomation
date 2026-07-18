@@ -121,6 +121,16 @@ class MissionManager:
         mv = self.ctx.data.setdefault("mission_vars", {})
         return bool(mv.get("gc_session_preflight_repair_in_progress"))
 
+    def session_preflight_terminally_blocked(self) -> bool:
+        """Return whether validation failed without an owned repair transition."""
+
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        return bool(
+            mv.get("gc_session_preflight_blocked")
+            and not mv.get("gc_session_preflight_repair_required")
+            and not mv.get("gc_session_preflight_repair_in_progress")
+        )
+
     def begin_session_preflight_repair(self) -> bool:
         """Claim the one guarded surrender transition for a repair request."""
 

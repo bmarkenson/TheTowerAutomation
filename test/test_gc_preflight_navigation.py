@@ -217,6 +217,92 @@ def test_read_only_route_returns_to_running_and_never_uses_mutating_controls():
     assert ui.event_swipes == ["gesture_targets.goto_top:event_bots"]
 
 
+def test_stun_evidence_survives_later_primary_only_observation():
+    ui = _FakeUi()
+    positions = iter(
+        (
+            {
+                "left": [
+                    UpgradeBox(
+                        "left",
+                        (0, 0, 1, 1),
+                        text="Golden Tower",
+                        toggles={"primary": "on"},
+                    ),
+                    UpgradeBox(
+                        "left",
+                        (0, 0, 1, 1),
+                        text="Poison Swamp",
+                        toggles={"primary": "on"},
+                    ),
+                ],
+                "right": [],
+            },
+            {
+                "left": [
+                    UpgradeBox(
+                        "left",
+                        (0, 0, 1, 1),
+                        text="Poison Swamp",
+                        toggles={"primary": "on"},
+                    ),
+                    UpgradeBox(
+                        "left",
+                        (0, 0, 1, 1),
+                        text="Black Hole",
+                        toggles={"primary": "on"},
+                    ),
+                ],
+                "right": [
+                    UpgradeBox(
+                        "right",
+                        (0, 0, 1, 1),
+                        text="Spotlight",
+                        toggles={"primary": "on", "missiles": "on"},
+                    ),
+                ],
+            },
+        )
+    )
+    corrections = []
+    validated = {}
+
+    def ensure_stun(**kwargs):
+        corrections.append(kwargs)
+        return _stun_off_result(ui)
+
+    def validate(**kwargs):
+        validated.update(kwargs)
+        return SimpleNamespace(valid=True)
+
+    result = run_read_only_gc_preflight(
+        PREFLIGHT_REQUIREMENTS,
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.safe_tap,
+        tap_visible_fn=ui.visible_tap,
+        go_home_fn=ui.go_home,
+        swipe_fn=ui.swipe,
+        event_swipe_fn=ui.event_swipe,
+        detect_boxes_fn=lambda _frame, **_kwargs: next(positions),
+        ensure_poison_swamp_stun_fn=ensure_stun,
+        detect_home_control_fn=lambda _frame: _home_evidence(),
+        sleep_fn=lambda _seconds: None,
+        validate_fn=validate,
+    )
+
+    assert result.status is GcPreflightNavigationStatus.COMPLETE
+    assert len(corrections) == 1
+    assert validated["ultimate_observations"]["Poison Swamp"] == {
+        "primary": "on",
+        "stun": "off",
+    }
+    assert ui.swipes == [
+        *(("towards_top", "extended"),) * 3,
+        ("towards_bottom", "medium"),
+    ]
+
+
 def test_preserved_modules_skip_module_navigation_and_validation():
     ui = _FakeUi()
     boxes = [

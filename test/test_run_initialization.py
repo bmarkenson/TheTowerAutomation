@@ -764,6 +764,26 @@ class GcFarmProfileTests(unittest.TestCase):
         self.assertTrue(mv["gc_session_preflight_completed"])
         self.assertFalse(manager.session_preflight_pending())
 
+    def test_terminal_preflight_block_excludes_owned_home_repair(self):
+        strategy = get_strategy("gc_farm_t19_experiment")
+        manager = MissionManager(None, strategy)
+        manager.start()
+        mv = manager.ctx.data["mission_vars"]
+
+        mv.update(
+            gc_session_preflight_blocked=True,
+            gc_session_preflight_repair_required=False,
+            gc_session_preflight_repair_in_progress=False,
+        )
+        self.assertTrue(manager.session_preflight_terminally_blocked())
+
+        mv["gc_session_preflight_repair_required"] = True
+        self.assertFalse(manager.session_preflight_terminally_blocked())
+
+        mv["gc_session_preflight_repair_required"] = False
+        mv["gc_session_preflight_repair_in_progress"] = True
+        self.assertFalse(manager.session_preflight_terminally_blocked())
+
     def test_session_preflight_action_records_one_continuous_session_completion(self):
         strategy = get_strategy("gc_farm_t19_experiment")
         ctx = MissionContext()
@@ -1043,6 +1063,7 @@ class PausedStartupObservationTests(unittest.TestCase):
         manager.strategy = strategy
         manager.run_initialization_pending.return_value = False
         manager.session_preflight_pending.return_value = True
+        manager.session_preflight_terminally_blocked.return_value = False
 
         supervisor = MagicMock()
         supervisor.is_paused = True
@@ -1097,6 +1118,78 @@ class PausedStartupObservationTests(unittest.TestCase):
             menu=None,
             secondary=set(),
             overlays=set(),
+            wave=1,
+            wave_conf=99.0,
+            allow_actions=False,
+        )
+
+    def test_terminally_blocked_preflight_allows_only_safe_ad_gem_handler(self):
+        frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+        strategy = _IncompleteSessionPreflightStrategy()
+        manager = MagicMock()
+        manager.ctx = MissionContext(data={"mission_vars": {}})
+        manager.strategy = strategy
+        manager.run_initialization_pending.return_value = False
+        manager.session_preflight_pending.return_value = True
+        manager.session_preflight_terminally_blocked.return_value = True
+
+        supervisor = MagicMock()
+        supervisor.is_paused = False
+        supervisor.auto_return_secs = 900
+
+        app = App.__new__(App)
+        app._config = SimpleNamespace(wait_on_start=False)
+        app._supervisor = supervisor
+        app._mission_mgr = manager
+        app._state_tracker = MagicMock()
+        app._status_reporter = MagicMock()
+        app._event_mission_tracker = MagicMock()
+        app._event_mission_tracker.due_warnings.return_value = ()
+        app._match_trace = False
+        app._last_wave_value = None
+        app._last_wave_conf = -1.0
+        app._last_wave_ts = 0.0
+        app._blind_tapper_suspended = False
+        app._run_initialization_gate_logged = False
+        app._session_preflight_gate_logged = True
+        app._session_preflight_terminal_blocked_logged = False
+        app._session_preflight_repair_denial_logged = False
+        app._capture_frame = MagicMock(side_effect=[frame, KeyboardInterrupt])
+        app._resolve_upgrade_detail_overlay = MagicMock()
+        app._handle_primary_states = MagicMock()
+
+        with (
+            patch("core.app.ensure_adb_connected", return_value=False),
+            patch("core.app.threading.Thread"),
+            patch(
+                "core.app.detect_state_and_overlays",
+                return_value={
+                    "state": "RUNNING",
+                    "overlays": ["AD_GEMS_AVAILABLE"],
+                },
+            ),
+            patch("core.app.detect_wave_number_from_image", return_value=(1, 99.0)),
+            patch("core.app.stop_blind_gem_tapper", return_value=False),
+            patch("core.app.start_blind_gem_tapper") as start_tapper,
+            patch("core.app.handle_ad_gem") as handle_ad_gem,
+            patch("core.app.time.sleep"),
+        ):
+            app.run()
+
+        handle_ad_gem.assert_called_once_with()
+        manager.tick.assert_not_called()
+        manager.handle_overlays.assert_not_called()
+        manager.on_state.assert_not_called()
+        app._resolve_upgrade_detail_overlay.assert_not_called()
+        app._handle_primary_states.assert_not_called()
+        supervisor.auto_return_check.assert_not_called()
+        start_tapper.assert_not_called()
+        app._status_reporter.maybe_report.assert_called_once_with(
+            img=frame,
+            ui_state="RUNNING",
+            menu=None,
+            secondary=set(),
+            overlays={"AD_GEMS_AVAILABLE"},
             wave=1,
             wave_conf=99.0,
             allow_actions=False,

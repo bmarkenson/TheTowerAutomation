@@ -98,6 +98,7 @@ class App:
         self._tournament_results_captured = False
         self._run_initialization_gate_logged = False
         self._session_preflight_gate_logged = False
+        self._session_preflight_terminal_blocked_logged = False
         self._session_preflight_repair_denial_logged = False
         rollover_state = Path(config.control_file).parent / "daily_gem_state.json"
         self._daily_gem_scheduler = DailyGemScheduler(rollover_state)
@@ -171,6 +172,10 @@ class App:
                     not initialization_pending
                     and self._mission_mgr.session_preflight_pending()
                 )
+                session_preflight_terminally_blocked = bool(
+                    session_preflight_pending
+                    and self._mission_mgr.session_preflight_terminally_blocked()
+                )
                 if initialization_pending:
                     if not self._run_initialization_gate_logged:
                         log(
@@ -198,22 +203,37 @@ class App:
                     self._run_initialization_gate_logged = False
 
                 if session_preflight_pending:
-                    if not self._session_preflight_gate_logged:
-                        log(
-                            "[SESSION_PREFLIGHT] Exclusive validation gate active; "
-                            "normal handlers are blocked",
-                            "INFO",
-                            console=True,
-                        )
-                        self._session_preflight_gate_logged = True
-                    if stop_blind_gem_tapper():
-                        self._blind_tapper_suspended = True
-                    if not is_paused:
-                        if self._mission_mgr.session_preflight_repair_required():
-                            self._attempt_session_preflight_repair(detection)
-                        else:
-                            self._mission_mgr.tick(img, detection, strategy_only=True)
-                elif self._session_preflight_gate_logged:
+                    if session_preflight_terminally_blocked:
+                        if not self._session_preflight_terminal_blocked_logged:
+                            log(
+                                "[SESSION_PREFLIGHT] Validation is blocked; "
+                                "strategy actions remain blocked while safe runtime "
+                                "handlers stay available",
+                                "WARN",
+                                console=True,
+                            )
+                            self._session_preflight_terminal_blocked_logged = True
+                    else:
+                        if not self._session_preflight_gate_logged:
+                            log(
+                                "[SESSION_PREFLIGHT] Exclusive validation gate active; "
+                                "normal handlers are blocked",
+                                "INFO",
+                                console=True,
+                            )
+                            self._session_preflight_gate_logged = True
+                        if stop_blind_gem_tapper():
+                            self._blind_tapper_suspended = True
+                        if not is_paused:
+                            if self._mission_mgr.session_preflight_repair_required():
+                                self._attempt_session_preflight_repair(detection)
+                            else:
+                                self._mission_mgr.tick(img, detection, strategy_only=True)
+                elif self._session_preflight_gate_logged or getattr(
+                    self,
+                    "_session_preflight_terminal_blocked_logged",
+                    False,
+                ):
                     strategy = self._mission_mgr.strategy
                     if (
                         strategy
@@ -229,12 +249,21 @@ class App:
                             console=True,
                         )
                     self._session_preflight_gate_logged = False
+                    self._session_preflight_terminal_blocked_logged = False
                     self._session_preflight_repair_denial_logged = False
 
                 actions_blocked = (
                     is_paused
                     or initialization_pending
                     or session_preflight_pending
+                )
+                safe_runtime_actions_blocked = (
+                    is_paused
+                    or initialization_pending
+                    or (
+                        session_preflight_pending
+                        and not session_preflight_terminally_blocked
+                    )
                 )
 
                 if not actions_blocked and self._handler_enabled("upgrade_detail"):
@@ -323,12 +352,17 @@ class App:
 
                 self._sync_floating_gem_tapper(
                     state=new_state,
-                    actions_blocked=actions_blocked,
+                    actions_blocked=safe_runtime_actions_blocked,
                 )
 
                 if not actions_blocked:
                     self._mission_mgr.tick(img, detection)
                     self._handle_primary_states(new_state, overlays, img)
+                elif not safe_runtime_actions_blocked:
+                    self._handle_terminal_preflight_safe_actions(
+                        new_state,
+                        overlays,
+                    )
 
                 sleep_interval = 1.0 if initialization_pending else 5.0
                 try:
@@ -372,6 +406,20 @@ class App:
         if self._blind_tapper_suspended:
             start_blind_gem_tapper(duration=10, interval=1, blocking=False)
             self._blind_tapper_suspended = False
+
+    def _handle_terminal_preflight_safe_actions(
+        self,
+        state: str,
+        overlays: Set[str],
+    ) -> None:
+        """Allow bounded operational actions after a terminal preflight failure."""
+
+        if (
+            state == "RUNNING"
+            and "AD_GEMS_AVAILABLE" in overlays
+            and self._handler_enabled("ad_gem")
+        ):
+            handle_ad_gem()
 
     def _attempt_session_preflight_repair(
         self,
