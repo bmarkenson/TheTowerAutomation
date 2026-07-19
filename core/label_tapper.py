@@ -16,7 +16,7 @@ defaults:
 ---
 """
 
-from core.ss_capture import capture_adb_screenshot
+from core.ss_capture import capture_adb_screenshot, is_complete_screenshot
 from core.clickmap_access import get_clickmap, resolve_dot_path
 from core.adb_utils import adb_shell
 from core.matcher import match_entry_result, normalize_region, resolve_match_region
@@ -67,6 +67,7 @@ def get_label_match(label_key: str, screenshot=None, return_meta=False):
       s: ["adb?", "cv2"]
       e:
         - "ValueError if key missing / region out-of-bounds / threshold fail"
+        - "ValueError if supplied screenshot is incomplete"
         - "FileNotFoundError if template file not found"
         - "RuntimeError if screenshot capture fails"
       params:
@@ -90,6 +91,10 @@ def get_label_match(label_key: str, screenshot=None, return_meta=False):
         screenshot = capture_adb_screenshot()
         if screenshot is None:
             raise RuntimeError("Failed to capture screenshot")
+    if not is_complete_screenshot(screenshot):
+        raise ValueError(
+            f"Match for {label_key} refused an incomplete screenshot"
+        )
     result = match_entry_result(
         screenshot,
         entry,

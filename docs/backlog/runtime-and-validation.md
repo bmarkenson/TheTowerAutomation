@@ -15,9 +15,14 @@ checked-item detail remains in the
   an unlogged crash, and manual-player activity before restarting automation.
 - [ ] Diagnose the intermittent incomplete ADB screenshot frames recorded in
   [`../observed_issues.md`](../observed_issues.md#direct-adb-screenshots-intermittently-returned-incomplete-black-frames).
-  Determine whether current state templates always reject the mostly-black
-  frames. Add an explicit completeness/freshness guard before action authority
-  if partial compositor frames can match actionable evidence.
+  - [x] Close the action-authority gap. A partial frame retaining narrow Game
+    Over strips still matched both state evidence and the visible Home control,
+    so capture now retries once and shared state/action boundaries reject
+    incomplete frames. Regression coverage is in
+    `test/test_incomplete_frame_authority.py` and `test/test_ss_capture.py`.
+  - [ ] Diagnose the compositor or transport source. The ignored retained
+    files no longer reproduce the recorded corruption: all four currently decode
+    as complete, and the Home failed/retry pair is byte-identical.
 - [ ] Live-revalidate the distinct Home Store-badge template at the next daily
   availability. The fixture is canonical, but the badge cleared before that
   template could be exercised live. The in-run badge, Store navigation, active

@@ -20,18 +20,21 @@ for a matching recurrence or historical investigation.
   pixels black. An immediate repeated capture rendered the complete unchanged
   screen both times.
 - **Evidence:** The failed/retry pairs are retained under
-  `screenshots/adb_incomplete_frames_2026-07-16/`.
+  `screenshots/adb_incomplete_frames_2026-07-16/`. A 2026-07-19 reinspection
+  found that the current files no longer reproduce the symptom: all four
+  decode as complete, and the Home failed/retry pair is byte-identical.
 - **Safety response:** Neither incomplete frame was accepted as action
   authority. Navigation waited for a complete repeated frame and a fresh
   project state detection.
-- **Status:** Unresolved. Determine whether this is an emulator compositor race,
-  an ADB capture/transport issue, or another source of partial frames. Verify
-  whether actionable templates always fail closed and add an explicit
-  completeness/freshness guard if they do not. The GC module correction and
-  Damage Slider control paths now reject wrong-sized or majority-black frames
-  before their actions; the latter is covered in
-  `test/test_damage_adjuster.py`. The shared capture/action boundary remains
-  unresolved.
+- **Status:** Source unresolved. A retained-fixture reconstruction confirmed
+  that narrow rendered strips can preserve actionable Game Over state and Home
+  control matches. The current working tree closes that safety gap: direct ADB
+  capture rejects majority-black frames and retries once, while semantic state
+  and visible-control action matching independently fail closed. Regression
+  coverage is in `test/test_incomplete_frame_authority.py` and
+  `test/test_ss_capture.py`. Keep the issue open until the fixing commit exists
+  and the missing original corrupted evidence is recaptured or its loss is
+  otherwise resolved.
 
 ### Automation owner exited without a clean shutdown record
 

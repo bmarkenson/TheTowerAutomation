@@ -32,6 +32,13 @@ Retry through the approved host execution path with a timeout and judge the
 actual result. Do not build a workaround around a false accessibility
 diagnosis.
 
+Project screenshot helpers reject wrong-sized and majority-black decoded
+frames. An incomplete compositor frame triggers one immediate fresh capture;
+if that capture is also incomplete, callers receive no frame. State detection
+and visible-control action matching independently reject incomplete frames, so
+a preserved template strip cannot acquire action authority. Raw manual `adb`
+commands do not provide these guards.
+
 Project code should use `core.adb_utils` so device selection and shell behavior
 remain centralized. The Stats clipboard report is read with Android's clipboard
 service; its working lower-level command is:

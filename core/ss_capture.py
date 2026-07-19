@@ -18,6 +18,7 @@ from core.adb_utils import screencap_png, screencap_raw
 Frame = NDArray[np.uint8]
 
 LATEST_SCREENSHOT = Path("screenshots/latest.png")
+INCOMPLETE_CAPTURE_ATTEMPTS = 2
 
 
 def is_complete_screenshot(frame: Optional[Frame]) -> bool:
@@ -60,21 +61,25 @@ def _decode_raw_screencap(raw_data: bytes) -> Frame:
 
 
 def capture_adb_raw_screenshot() -> Optional[Frame]:
-    """Capture and decode the faster uncompressed Android framebuffer."""
+    """Capture a fresh, complete uncompressed Android framebuffer."""
 
     try:
-        raw_data = screencap_raw()
-        if not raw_data:
-            log("[ADB] Empty raw screenshot data", "ERROR")
-            return None
-        image = _decode_raw_screencap(raw_data)
-        expected_w, expected_h = 1080, 1920
-        if image.shape[1] != expected_w or image.shape[0] != expected_h:
-            raise ValueError(
-                f"Unsupported emulator resolution {image.shape[1]}x{image.shape[0]}; "
-                f"expected {expected_w}x{expected_h}. Update the BlueStacks display settings."
-            )
-        return image
+        for attempt in range(1, INCOMPLETE_CAPTURE_ATTEMPTS + 1):
+            raw_data = screencap_raw()
+            if not raw_data:
+                log("[ADB] Empty raw screenshot data", "ERROR")
+                return None
+            image = _decode_raw_screencap(raw_data)
+            expected_w, expected_h = 1080, 1920
+            if image.shape[1] != expected_w or image.shape[0] != expected_h:
+                raise ValueError(
+                    f"Unsupported emulator resolution {image.shape[1]}x{image.shape[0]}; "
+                    f"expected {expected_w}x{expected_h}. Update the BlueStacks display settings."
+                )
+            if is_complete_screenshot(image):
+                return image
+            _log_incomplete_capture("raw", attempt)
+        return None
     except Exception as exc:
         log(f"[ADB] Raw screenshot capture failed: {exc}", "ERROR")
         return None
@@ -87,12 +92,13 @@ def capture_adb_screenshot() -> Optional[Frame]:
       r: "np.ndarray | None (BGR)"
       s: ["adb", "cv2", "log"]
       e:
-        - "Returns None on capture or decode failure; logs ERROR"
+        - "Returns None on capture/decode failure or two incomplete frames"
       params: {}
       notes:
         - "Uses core.adb_utils.screencap_png() → PNG bytes"
         - "Validates PNG signature before decode"
         - "Decodes via cv2.imdecode to BGR ndarray"
+        - "Retries once when a decoded frame is majority-black"
     ---
     Capture a screenshot from the connected ADB device/emulator and decode to an OpenCV BGR image.
 
@@ -100,32 +106,47 @@ def capture_adb_screenshot() -> Optional[Frame]:
         np.ndarray (BGR) on success, or None on failure.
     """
     try:
-        png_data = screencap_png()
-        if not png_data:
-            log("[ADB] Empty screenshot data", "ERROR")
-            return None
+        for attempt in range(1, INCOMPLETE_CAPTURE_ATTEMPTS + 1):
+            png_data = screencap_png()
+            if not png_data:
+                log("[ADB] Empty screenshot data", "ERROR")
+                return None
 
-        if not png_data.startswith(b'\x89PNG\r\n\x1a\n'):
-            raise ValueError("Invalid screenshot data (not PNG)")
+            if not png_data.startswith(b'\x89PNG\r\n\x1a\n'):
+                raise ValueError("Invalid screenshot data (not PNG)")
 
-        # Convert PNG bytes to OpenCV image
-        img_array = np.frombuffer(png_data, dtype=np.uint8)
-        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-        if img is None:
-            raise ValueError("OpenCV failed to decode image")
+            # Convert PNG bytes to OpenCV image
+            img_array = np.frombuffer(png_data, dtype=np.uint8)
+            img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+            if img is None:
+                raise ValueError("OpenCV failed to decode image")
 
-        expected_w, expected_h = 1080, 1920
-        if img.shape[1] != expected_w or img.shape[0] != expected_h:
-            raise ValueError(
-                f"Unsupported emulator resolution {img.shape[1]}x{img.shape[0]}; "
-                f"expected {expected_w}x{expected_h}. Update the BlueStacks display settings."
-            )
-
-        return img
+            expected_w, expected_h = 1080, 1920
+            if img.shape[1] != expected_w or img.shape[0] != expected_h:
+                raise ValueError(
+                    f"Unsupported emulator resolution {img.shape[1]}x{img.shape[0]}; "
+                    f"expected {expected_w}x{expected_h}. Update the BlueStacks display settings."
+                )
+            if is_complete_screenshot(img):
+                return img
+            _log_incomplete_capture("PNG", attempt)
+        return None
 
     except Exception as e:
         log(f"[ADB] Screenshot capture failed: {e}", "ERROR")
         return None
+
+
+def _log_incomplete_capture(source: str, attempt: int) -> None:
+    if attempt < INCOMPLETE_CAPTURE_ATTEMPTS:
+        outcome = "retrying with a fresh capture"
+    else:
+        outcome = "capture rejected"
+    log(
+        f"[ADB] Incomplete {source} screenshot "
+        f"({attempt}/{INCOMPLETE_CAPTURE_ATTEMPTS}); {outcome}",
+        "WARN",
+    )
 
 
 def capture_and_save_screenshot(path: Path | str = LATEST_SCREENSHOT, *, log_capture: bool = True) -> Optional[Frame]:

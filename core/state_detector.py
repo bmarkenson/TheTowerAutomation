@@ -42,6 +42,7 @@ from utils.template_matcher import match_region
 from utils.logger import log
 from core.clickmap_access import get_clickmap, resolve_dot_path
 from core.matcher import get_match
+from core.ss_capture import is_complete_screenshot
 
 STATE_DEF_PATH = os.path.join(os.path.dirname(__file__), "../config/state_definitions.yaml")
 
@@ -121,20 +122,24 @@ def detect_state_and_overlays(
         - Uses core.matcher.get_match for primary/menu checks (clickmap-backed)
         - Uses utils.template_matcher.match_region for overlay checks
         - Unresolved clickmap keys are WARN-logged and skipped
+        - Incomplete frames return UNKNOWN without running template matches
         - If no primary matches, state remains "UNKNOWN"
     """
-    definitions = state_defs or state_definitions
-    states_config: List[Dict[str, Any]] = definitions.get("states", [])
-    overlays_config: List[Dict[str, Any]] = definitions.get("overlays", [])
-
-    state_lookup = {entry.get("name"): entry for entry in states_config if entry.get("name")}
-
     result: StateDetectionResult = {
         "state": "UNKNOWN",
         "secondary_states": [],
         "overlays": [],
         "menu": None,  # mutually-exclusive menu secondary (from states with type: menu)
     }
+    if not is_complete_screenshot(screen):
+        log("[STATE] Incomplete screenshot rejected before detection", "WARN")
+        return result
+
+    definitions = state_defs or state_definitions
+    states_config: List[Dict[str, Any]] = definitions.get("states", [])
+    overlays_config: List[Dict[str, Any]] = definitions.get("overlays", [])
+
+    state_lookup = {entry.get("name"): entry for entry in states_config if entry.get("name")}
 
     matched_states = []
 

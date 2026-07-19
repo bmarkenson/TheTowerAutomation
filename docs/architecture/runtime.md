@@ -111,6 +111,10 @@ and control remains in `WAIT` for operator direction.
 
 ## Matching and action authority
 
+- Direct ADB capture rejects wrong-sized or majority-black compositor frames
+  and immediately attempts one fresh capture. Semantic state detection and
+  visibility-aware action matching repeat the completeness check so injected
+  or retained incomplete frames cannot bypass the capture boundary.
 - A broad search region is evidence geometry, not permission to tap its center.
 - Visibility-aware actions use the actual matched bounding box.
 - Moving elements may continue to use match-region centers after a fresh match.

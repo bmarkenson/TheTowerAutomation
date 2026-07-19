@@ -92,6 +92,7 @@ def test_label_match_uses_shared_engine_with_legacy_profile():
     with (
         patch.object(label_tapper, "resolve_dot_path", return_value=entry),
         patch.object(label_tapper, "get_clickmap", return_value=clickmap),
+        patch.object(label_tapper, "is_complete_screenshot", return_value=True),
         patch.object(label_tapper, "match_entry_result", return_value=result) as matcher,
     ):
         meta = label_tapper.get_label_match(
