@@ -395,6 +395,7 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 
 ### 2026-07-19 no-battle coverage and generated Farm validation
 
+- Implementation commit: `6ed3b6f`.
 - Completed the safe no-battle Home/submenu traversal from authoritative
   `HOME_SCREEN` plus `NEW_BATTLE` evidence. The existing Workshop, Cards,
   Modules, Lab, Store, Daily Missions, Event, Guild, Tournament, Settings,
@@ -427,6 +428,7 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 
 ### 2026-07-19 Home Daily/Event badge handling
 
+- Implementation commit: `6ed3b6f`.
 - Added separate fixture-backed Daily Mission and Event badge measurement for
   Home. The in-battle route retains its closed-menu attention probe and open
   side-menu badge regions; Home now dispatches directly through visible Daily
@@ -453,6 +455,7 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 
 ### 2026-07-19 Home ad-gem collection
 
+- Implementation commit: `6ed3b6f`.
 - Registered the existing five-gem Home artwork as the explicit
   `HOME_AD_GEMS_AVAILABLE` overlay using tracked available and unavailable Home
   fixtures. Home dispatch collects it before Home handling can start or resume
