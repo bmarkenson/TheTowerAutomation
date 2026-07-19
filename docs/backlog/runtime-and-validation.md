@@ -28,15 +28,8 @@ checked-item detail remains in the
   the initial badge is absent and that persisted completion suppresses a second
   probe after restart.
 
-## Farm run initialization
+## Farm session preflight
 
-- [ ] Live-validate the complete generated `farm` new-run sequence at the next
-  natural new-battle boundary: time-sensitive EHLS/EALS initialization, Tier 18
-  Damage Slider enforcement at `1E-22%`, Target Priority enforcement, complete
-  session preflight, and release to normal automation. Use the actual `farm`
-  strategy rather than direct helper calls, and confirm the resolved run
-  configuration is present in runtime/battle evidence. Do not Surrender the
-  current developer-owned Tier 18 validation run merely to create the boundary.
 - [ ] Decide whether session preflight should validate perk bans and Auto Pick
   Perk order. Keep automation-owned perk selection as a later option.
 

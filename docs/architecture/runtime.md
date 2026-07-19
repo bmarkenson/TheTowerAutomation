@@ -99,6 +99,9 @@ and control remains in `WAIT` for operator direction.
   `TOURNAMENT_RESULTS`, or a verified Home `NEW_BATTLE` ends it.
 - Lifecycle and guarded Home actions share one Home classifier. A handler must
   not infer a new run independently from navigation alone.
+- `HOME_AD_GEMS_AVAILABLE` schedules the five-gem Home claim before Home can
+  start or resume a battle. The handler requires a fresh visible button match,
+  verifies dismissal, and never starts the in-battle floating-gem tapper.
 - Transient `UNKNOWN` observations preserve an owned, incomplete startup gate.
   Initialization completion depends on the strategy assertion, not merely the
   current primary screen.

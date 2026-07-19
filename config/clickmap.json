@@ -893,6 +893,19 @@
         "indicator"
       ]
     },
+    "perks_configuration": {
+      "match_template": "indicators/perks_configuration.png",
+      "match_region": {
+        "x": 390,
+        "y": 90,
+        "w": 330,
+        "h": 140
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
     "settings_stats": {
       "match_template": "indicators/settings_stats.png",
       "match_region": {
@@ -1030,6 +1043,19 @@
         "y": 125,
         "w": 420,
         "h": 130
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "milestones": {
+      "match_template": "indicators/milestones.png",
+      "match_region": {
+        "x": 0,
+        "y": 75,
+        "w": 430,
+        "h": 125
       },
       "match_threshold": 0.9,
       "roles": [
@@ -1283,10 +1309,10 @@
     "claim_ad_gem:home": {
       "match_template": "overlays/claim_ad_gem:home.png",
       "match_region": {
-        "x": 26,
-        "y": 191,
-        "w": 222,
-        "h": 121
+        "x": 0,
+        "y": 180,
+        "w": 260,
+        "h": 145
       },
       "match_threshold": 0.9,
       "roles": [
@@ -1339,6 +1365,32 @@
         "y": 700,
         "w": 490,
         "h": 150
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "overlay"
+      ]
+    },
+    "currencies_dialog": {
+      "match_template": "overlays/currencies_dialog.png",
+      "match_region": {
+        "x": 280,
+        "y": 220,
+        "w": 520,
+        "h": 160
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "overlay"
+      ]
+    },
+    "exit_game_dialog": {
+      "match_template": "overlays/exit_game_dialog.png",
+      "match_region": {
+        "x": 300,
+        "y": 500,
+        "w": 480,
+        "h": 180
       },
       "match_threshold": 0.9,
       "roles": [
@@ -1684,6 +1736,24 @@
       },
       "match_threshold": 0.88
     },
+    "event:missions_tab": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 170,
+        "y": 307
+      },
+      "match_template": "navigation/event:missions_tab.png",
+      "match_region": {
+        "x": 0,
+        "y": 260,
+        "w": 355,
+        "h": 105
+      },
+      "match_threshold": 0.88
+    },
     "guild:guardian_tab": {
       "roles": [
         "navigation"
@@ -1732,6 +1802,19 @@
         "x": 1017,
         "y": 59
       }
+    },
+    "home_daily_missions": {
+      "match_template": "navigation/home_daily_missions.png",
+      "match_region": {
+        "x": 890,
+        "y": 180,
+        "w": 180,
+        "h": 120
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "navigation"
+      ]
     },
     "home_guild": {
       "match_template": "navigation/home_guild.png",
@@ -2267,12 +2350,12 @@
       ]
     },
     "claim_ad_gem:home": {
-      "match_template": "buttons/claim_ad_gem:home.png",
+      "match_template": "overlays/claim_ad_gem:home.png",
       "match_region": {
-        "x": 25,
-        "y": 194,
-        "w": 218,
-        "h": 114
+        "x": 0,
+        "y": 180,
+        "w": 260,
+        "h": 145
       },
       "match_threshold": 0.9,
       "roles": [

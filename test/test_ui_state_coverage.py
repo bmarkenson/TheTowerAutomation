@@ -16,6 +16,18 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "ui_state_20260714"
         ("active_wave_info.png", "WAVE_PANEL", {"MENU_OPEN"}),
         ("active_wave_stats.png", "WAVE_PANEL", {"MENU_OPEN"}),
         ("active_perks_selected_auto_pick_on.png", "PERKS", set()),
+        ("no_battle_perks_configuration_20260719.png", "PERKS", set()),
+        ("no_battle_milestones_20260719.png", "MILESTONES", set()),
+        (
+            "no_battle_tournament_currencies_20260719.png",
+            "TOURNAMENT_SCREEN",
+            {"CURRENCIES_DIALOG"},
+        ),
+        (
+            "no_battle_milestones_exit_game_20260719.png",
+            "MILESTONES",
+            {"EXIT_GAME_DIALOG"},
+        ),
         ("active_settings_stats.png", "SETTINGS", {"MENU_OPEN"}),
         ("active_settings_toggles.png", "SETTINGS", {"MENU_OPEN"}),
         ("active_settings_language.png", "SETTINGS", {"MENU_OPEN"}),

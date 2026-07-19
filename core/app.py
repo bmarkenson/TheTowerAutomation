@@ -21,7 +21,10 @@ from core.event_mission_tracker import EventMissionTracker, format_warning
 from core.home_battle import detect_home_battle_control
 from core.battle_lifecycle import HomeBattleControl
 from core.gc_no_battle_setup import run_gc_no_battle_setup
-from core.menu_reward_badges import menu_reward_alert_visible
+from core.menu_reward_badges import (
+    measure_home_reward_badges,
+    menu_reward_alert_visible,
+)
 from core.mission_reward_scheduler import (
     MissionRewardScheduler,
     daily_mission_claims_allowed,
@@ -40,6 +43,7 @@ from handlers.tournament_result_handler import handle_tournament_results
 from handlers.home_screen_handler import handle_home_screen
 from handlers.ad_gem_handler import (
     handle_ad_gem,
+    handle_home_ad_gem,
     start_blind_gem_tapper,
     stop_blind_gem_tapper,
 )
@@ -484,6 +488,16 @@ class App:
             # The handler traverses several panels and restores RUNNING. Avoid
             # dispatching against the frame captured before that navigation.
             return
+        if (
+            new_state == "HOME_SCREEN"
+            and "HOME_AD_GEMS_AVAILABLE" in overlays
+            and self._handler_enabled("ad_gem")
+        ):
+            # Collect before Home handling can start or resume a battle.  The
+            # handler revalidates the control against a fresh frame, so this
+            # overlay is scheduling evidence rather than tap authority.
+            handle_home_ad_gem()
+            return
 
         if (
             new_state == "TOURNAMENT_RESULTS"
@@ -599,17 +613,23 @@ class App:
             handle_ad_gem()
 
     def _handle_mission_rewards_if_due(self, new_state: str, img: Frame) -> bool:
-        """Inspect relevant side-menu badges when the closed menu requests attention."""
+        """Inspect relevant reward badges from an actionable battle or Home UI."""
 
-        if new_state != "RUNNING":
+        if new_state == "RUNNING":
+            alert_visible = menu_reward_alert_visible(img)
+        elif new_state == "HOME_SCREEN":
+            alert_visible = measure_home_reward_badges(img).any
+        else:
             return False
-        alert_visible = menu_reward_alert_visible(img)
         if not self._mission_reward_scheduler.should_attempt(
             alert_visible=alert_visible,
         ):
             return False
 
-        log("[MISSION_REWARDS] Starting side-menu reward probe", "INFO")
+        log(
+            f"[MISSION_REWARDS] Starting reward probe from {new_state}",
+            "INFO",
+        )
         if stop_blind_gem_tapper():
             self._blind_tapper_suspended = True
         wall_now = datetime.now(timezone.utc)

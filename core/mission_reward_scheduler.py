@@ -1,4 +1,4 @@
-"""Bound reward probes and hold Daily Mission claims until weekly reset."""
+"""Bound reward probes and Sunday Daily Mission claim policy."""
 
 from __future__ import annotations
 
@@ -13,11 +13,13 @@ LOCAL_TIMEZONE = ZoneInfo("America/Los_Angeles")
 
 
 def daily_mission_claims_allowed(now: datetime | None = None) -> bool:
-    """Return whether ordinary Daily Mission rewards may be claimed now.
+    """Return whether ordinary Daily Mission rewards may be claimed freely.
 
     Claims are banked on local Sunday until the server's Monday 00:00 UTC
-    weekly reset.  This is 17:00 PDT and 16:00 PST.  Weekly mission chests,
-    Event rewards, and Guild chests are intentionally outside this policy.
+    weekly reset.  This is 17:00 PDT and 16:00 PST.  While this returns false,
+    the reward handler may release exactly two ordinary claims from
+    authoritatively verified ``8/8`` capacity.  Weekly mission chests, Event
+    rewards, and Guild chests are intentionally outside this policy.
     """
 
     current_utc = _as_utc(now)

@@ -13,9 +13,9 @@ Completed and superseded detail remains in the
   - Ensure expected screens never resolve to `UNKNOWN`.
   - Add regression fixtures for every recognized primary, secondary, menu, and
     overlay state.
-  - The active-battle and Home-with-Resume evidence is recorded in
+  - The active-battle, Home-with-Resume, and completed no-battle Home evidence
+    is recorded in
     [`../ui_state_traversal_2026-07-14.md`](../ui_state_traversal_2026-07-14.md).
-    A full no-battle Home traversal remains pending.
 - [ ] Perform a guided live traversal of every reachable screen and a complete
   farm-run lifecycle to find missing or stale templates.
   - Save one canonical fixture per distinct screen state, not routine gameplay
@@ -54,8 +54,6 @@ Completed and superseded detail remains in the
   - Have an app-owned observer publish a short-lived `RUNNING` lease. The tapper
     should make an O(1) check immediately before each tap and skip stale or
     invalid leases without shifting the absolute monotonic schedule.
-- [ ] Audit the Home `CLAIM` control in available and unavailable states;
-  determine whether its artwork changes and split templates/state rules if so.
 - [ ] Add composite state-definition logic such as `all_of`, `any_of`, and
   explicit exclusions.
   - Preserve simple `match_keys` for straightforward states.

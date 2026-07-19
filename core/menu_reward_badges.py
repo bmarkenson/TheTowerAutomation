@@ -1,4 +1,4 @@
-"""Color evidence for reward badges in the in-battle side menu."""
+"""Color evidence for reward badges in the in-battle and Home interfaces."""
 
 from __future__ import annotations
 
@@ -16,6 +16,10 @@ MENU_REWARD_BADGE_REGIONS: Mapping[str, Region] = {
     "daily_missions": (852, 118, 50, 55),
     "event_missions": (852, 438, 50, 55),
     "guild_chests": (852, 542, 50, 55),
+}
+HOME_REWARD_BADGE_REGIONS: Mapping[str, Region] = {
+    "daily_missions": (895, 220, 70, 80),
+    "event_missions": (140, 600, 80, 100),
 }
 BADGE_PIXEL_THRESHOLD = 250
 
@@ -55,6 +59,26 @@ def measure_menu_reward_badges(screenshot) -> MenuRewardBadges:
     return MenuRewardBadges(**values)
 
 
+def measure_home_reward_badges(screenshot) -> MenuRewardBadges:
+    """Measure Daily and Event badges on a verified Home screen.
+
+    Guild is deliberately excluded until positive Home badge evidence exists;
+    its red static icon would make a broad color region unsafe.
+    """
+
+    values = {}
+    for name, region in HOME_REWARD_BADGE_REGIONS.items():
+        hsv = _hsv_crop(screenshot, region)
+        values[name] = bool(
+            hsv is not None and _red_pixels(hsv) >= BADGE_PIXEL_THRESHOLD
+        )
+    return MenuRewardBadges(
+        daily_missions=values["daily_missions"],
+        event_missions=values["event_missions"],
+        guild_chests=False,
+    )
+
+
 def _hsv_crop(screenshot, region: Region):
     if screenshot is None or not hasattr(screenshot, "shape") or len(screenshot.shape) < 2:
         return None
@@ -91,6 +115,7 @@ def _purple_pixels(hsv) -> int:
 
 __all__ = [
     "MenuRewardBadges",
+    "measure_home_reward_badges",
     "measure_menu_reward_badges",
     "menu_reward_alert_visible",
 ]

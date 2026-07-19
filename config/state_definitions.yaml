@@ -19,11 +19,17 @@ states:
   type: primary
   match_keys:
   - indicators.perks_panel
+  - indicators.perks_configuration
 
 - name: HOME_SCREEN
   type: primary
   match_keys:
   - indicators.home_screen
+
+- name: MILESTONES
+  type: primary
+  match_keys:
+  - indicators.milestones
 
 - name: WORKSHOP
   type: primary
@@ -275,6 +281,10 @@ overlays:
   match_keys:
   - overlays.ad_gem
 
+- name: HOME_AD_GEMS_AVAILABLE
+  match_keys:
+  - overlays.claim_ad_gem:home
+
 - name: MENU_OPEN
   match_keys:
   - overlays.menu_open
@@ -299,3 +309,13 @@ overlays:
   type: overlay
   match_keys:
   - overlays.exit_battle_dialog
+
+- name: CURRENCIES_DIALOG
+  type: overlay
+  match_keys:
+  - overlays.currencies_dialog
+
+- name: EXIT_GAME_DIALOG
+  type: overlay
+  match_keys:
+  - overlays.exit_game_dialog

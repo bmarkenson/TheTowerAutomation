@@ -56,3 +56,54 @@ for a matching recurrence or historical investigation.
   no-battle Home. The user subsequently confirmed that the process had been
   killed, but whether that kill was manual or execution-wrapper lifecycle
   remains unestablished.
+
+### Event reward probe scanned the retained Bots tab as Event Missions
+
+- **Observed:** 2026-07-19 during a badge-triggered reward probe from no-battle
+  Home.
+- **Symptom:** The probe opened the Event parent screen, found no Event Mission
+  claim control, and recorded four apparently incomplete rows even though two
+  Event Mission rewards were claimable. The user correctly rejected that
+  conclusion.
+- **Cause:** Event retains its last-selected child tab. The prior live probe
+  entered Event while Bots was selected, but the reward handler treated the
+  shared `EVENT` parent state as sufficient authority to scan mission content.
+- **Resolution in the current working tree:** The handler now selects the
+  visible `navigation.event:missions_tab` control and revalidates `EVENT`
+  before scrolling, matching, claiming, or inventorying. Regression coverage
+  is in `test/test_mission_reward_handler.py`, including retained-Bots-tab
+  navigation evidence and the explicit tab-selection sequence.
+- **Live validation:** The normal Home runtime selected Missions at 11:29:18,
+  claimed two Event rewards at 11:29:23 and 11:29:26, logged
+  `daily=0 event=2 guild=0`, and returned to complete `HOME_SCREEN` with the
+  Event badge cleared. No battle was started or surrendered.
+- **Status:** Resolved in the current working tree. Keep this entry here until
+  a fixing commit exists; then add that commit and move the complete entry to
+  `docs/issues/resolved-2026.md`.
+
+### Home ad-gem detection could not authorize its corresponding tap
+
+- **Observed:** 2026-07-19 during the first normal-runtime validation of Home
+  ad-gem collection.
+- **Symptom:** State detection repeatedly reported
+  `HOME_AD_GEMS_AVAILABLE`, but the handler's fresh `is_visible` guard rejected
+  the same control and performed no tap.
+- **Cause:** State detection expands configured regions by 12 pixels, while the
+  action matcher deliberately uses zero padding. The stored Home control region
+  began 12 pixels to the right of the observed artwork, so only the detection
+  matcher could reach it.
+- **Safety response:** The guard failed closed, automation was paused, and the
+  first process was stopped without tapping. No blind coordinate or reduced
+  threshold was substituted.
+- **Resolution in the current working tree:** Both Home labels now search a
+  bounded region containing the observed geometry, and the semantic button
+  label reuses the proven full-control template. Regression coverage in
+  `test/test_home_ad_gem.py` exercises positive and negative fixtures plus the
+  zero-padding action matcher.
+- **Live validation:** The restarted normal runtime visibly matched and tapped
+  `buttons.claim_ad_gem:home` at `(124,251)`, increased gems from 3564 to 3569,
+  verified the overlay disappeared, and remained on Home without starting a
+  battle.
+- **Status:** Resolved in the current working tree. Keep this entry here until
+  a fixing commit exists; then add that commit and move the complete entry to
+  `docs/issues/resolved-2026.md`.

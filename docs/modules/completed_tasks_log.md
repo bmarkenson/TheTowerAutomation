@@ -393,6 +393,86 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   normal handlers, and collected the ad gem stranded by the old gate. The
   implementation fix is `453c484`.
 
+### 2026-07-19 no-battle coverage and generated Farm validation
+
+- Completed the safe no-battle Home/submenu traversal from authoritative
+  `HOME_SCREEN` plus `NEW_BATTLE` evidence. The existing Workshop, Cards,
+  Modules, Lab, Store, Daily Missions, Event, Guild, Tournament, Settings,
+  Ranking, Themes, Inbox, Vault, and Battle History states continued to
+  classify without changing claims, purchases, presets, loadouts, or settings.
+- Added explicit fixture-backed coverage for the formerly `UNKNOWN` Home Perks
+  configuration and Milestones screens. The uppercase Perks configuration now
+  shares the `PERKS` primary state, while Milestones has a dedicated
+  `MILESTONES` state. The observed Currencies popup and Android Exit Game
+  confirmation also have explicit overlay states over their existing primary
+  screens. Both primary rules were re-exercised successfully against the live
+  screens after the change; the Exit action was never selected.
+- Live-validated the generated `farm` plan in one fresh process and an
+  explicitly agent-owned Tier 18 battle: Home-only Farm setup passed, EHLS and
+  EALS completed at waves 20/30, Damage Slider verified `1E-22%`, Target
+  Priority matched the complete resolved order, every session-preflight
+  requirement passed, and normal handlers resumed.
+- The authorized guarded cleanup Surrender reached Game Over, persisted the
+  resolved Farm configuration in
+  `logs/battles/Battle20260719T101126-0700.json`, and returned Home without
+  starting another battle. The intentionally short report lacked `killed_by`
+  and `health_regenerated`; the recoverable capture path retained OCR/source
+  evidence, saved the incomplete record, and continued to Home instead of
+  forcing global `WAIT`.
+- Regression coverage is in `test/test_ui_state_coverage.py` and
+  `test/test_game_over_handler.py`. The UI-state suite passed 39 tests,
+  `test/test_clickmap_access.py` passed 5 tests, state-definition validation
+  passed, recursive clickmap/template integrity reported no errors, and the
+  full repository suite passed 332 tests.
+
+### 2026-07-19 Home Daily/Event badge handling
+
+- Added separate fixture-backed Daily Mission and Event badge measurement for
+  Home. The in-battle route retains its closed-menu attention probe and open
+  side-menu badge regions; Home now dispatches directly through visible Daily
+  Missions and Event navigation evidence. Home Guild handling remains excluded
+  until positive badge evidence can distinguish an alert from its static red
+  icon.
+- The first live no-battle Event pass exposed a retained-tab authority defect:
+  Event opened on Bots, but the shared `EVENT` parent state allowed that content
+  to be scanned and misreported as four incomplete missions. The handler now
+  explicitly selects the visible Missions tab and revalidates `EVENT` before
+  any Event Mission scroll, claim match, or inventory capture.
+- The corrected normal Home runtime selected Missions, claimed both available
+  Event rewards with visible claim-button evidence, logged
+  `daily=0 event=2 guild=0`, and returned to complete `HOME_SCREEN` plus
+  `NEW_BATTLE`; the Event badge was then absent while the deferred Daily badge
+  remained. No battle was started or surrendered.
+- Sunday ordinary Daily claims remain banked below capacity, but authoritative
+  `8/8 Missions` panel OCR now releases exactly two ordinary rewards so new
+  missions have room to arrive. Ambiguous or low-confidence capacity evidence
+  fails closed; weekly chests and Event rewards remain eligible without
+  consuming the two-claim relief budget.
+- Regression coverage is in `test/test_mission_reward_handler.py`: its 29 tests
+  passed, and the full repository suite passed 341 tests.
+
+### 2026-07-19 Home ad-gem collection
+
+- Registered the existing five-gem Home artwork as the explicit
+  `HOME_AD_GEMS_AVAILABLE` overlay using tracked available and unavailable Home
+  fixtures. Home dispatch collects it before Home handling can start or resume
+  a battle.
+- Added a Home-specific guarded collection path. It stops any prior bounded
+  in-battle tapper, requires a fresh visible `buttons.claim_ad_gem:home` match,
+  permits no blind fallback, and verifies that the control disappears. The
+  in-battle ad-gem handler retains its existing floating-gem tapper behavior.
+- The first live attempt failed closed because state detection's padded region
+  found the control while the zero-padding action matcher could not. The shared
+  Home control region now covers the observed geometry, and the semantic button
+  label reuses the proven full-control template.
+- Normal-runtime validation matched and tapped the Home claim at `(124,251)`.
+  The gem balance increased from 3564 to 3569, the overlay and action match
+  disappeared, and the UI remained `HOME_SCREEN` plus `NEW_BATTLE`; no battle
+  was started or surrendered.
+- Regression coverage is in `test/test_home_ad_gem.py`. The impacted focused
+  suites passed 105 tests before live validation, the post-correction focused
+  suites passed 13 tests, and the full repository suite passed 345 tests.
+
 ---
 
 ## 📘 Documentation

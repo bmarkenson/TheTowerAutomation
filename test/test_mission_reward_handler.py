@@ -9,6 +9,8 @@ from core.app import App
 from core.event_mission_tracker import EventMissionWarning
 from core.matcher import get_match
 from core.menu_reward_badges import (
+    MenuRewardBadges,
+    measure_home_reward_badges,
     measure_menu_reward_badges,
     menu_reward_alert_visible,
 )
@@ -57,6 +59,36 @@ def test_closed_menu_attention_dot_and_open_menu_section_badges_are_distinct():
     assert not post_claim_badges.any
 
 
+def test_home_daily_and_event_badges_have_distinct_positive_and_negative_evidence():
+    positive = _load("home_screen_new_day_store_badge_20260713.png")
+    negative = _load("home_screen_no_reward_badges_20260714.png")
+
+    badges = measure_home_reward_badges(positive)
+    assert badges.daily_missions
+    assert badges.event_missions
+    assert not badges.guild_chests
+    assert badges.any
+
+    no_badges = measure_home_reward_badges(negative)
+    assert not no_badges.daily_missions
+    assert not no_badges.event_missions
+    assert not no_badges.guild_chests
+    assert not no_badges.any
+
+
+def test_home_daily_mission_navigation_uses_static_header_artwork():
+    for name in (
+        "home_screen_new_day_store_badge_20260713.png",
+        "home_screen_no_reward_badges_20260714.png",
+    ):
+        point, confidence = get_match(
+            "navigation.home_daily_missions",
+            screenshot=_load(name),
+        )
+        assert point == (1006, 214)
+        assert confidence >= 0.99
+
+
 def test_daily_claim_and_weekly_chest_templates_require_available_artwork():
     available = _load("daily_rewards_claimable_20260715.png")
     claimed = _load("daily_weekly_chest_claimed_20260715.png")
@@ -82,6 +114,33 @@ def test_daily_claim_and_weekly_chest_templates_require_available_artwork():
     assert claimed_confidence < 0.9
 
 
+def test_daily_mission_capacity_ocr_distinguishes_full_from_partial():
+    full = rewards._read_daily_mission_capacity(
+        _load("daily_missions_full_20260719.png")
+    )
+    partial = rewards._read_daily_mission_capacity(
+        _load("daily_rewards_claimable_20260715.png")
+    )
+    unknown = rewards._read_daily_mission_capacity(
+        np.zeros((2, 2, 3), dtype=np.uint8)
+    )
+
+    assert (full.current, full.limit) == (8, 8)
+    assert full.confidence >= 90.0
+    assert full.is_authoritative_full
+    assert (partial.current, partial.limit) == (4, 8)
+    assert partial.confidence >= 90.0
+    assert not partial.is_authoritative_full
+    assert (unknown.current, unknown.limit) == (None, None)
+    assert not unknown.is_authoritative_full
+    assert not rewards.DailyMissionCapacity(
+        8,
+        8,
+        rewards.DAILY_MISSION_CAPACITY_MIN_CONFIDENCE - 0.1,
+        "8/8 Missions",
+    ).is_authoritative_full
+
+
 def test_event_claim_template_has_positive_and_incomplete_negative_evidence():
     positive = _load("event_missions_claimable_20260715.png")
     negative = _load("event_missions_20260713.png")
@@ -96,6 +155,18 @@ def test_event_claim_template_has_positive_and_incomplete_negative_evidence():
     assert confidence >= 0.99
     assert negative_point is None
     assert negative_confidence < 0.9
+
+
+def test_event_missions_tab_navigation_is_visible_from_retained_bots_tab():
+    bots = cv2.imread(
+        str(ROOT / "screenshots" / "ui_traversal_2026-07-19" / "no_battle_event.png")
+    )
+    assert bots is not None
+
+    point, confidence = get_match(rewards.EVENT_MISSIONS_TAB, screenshot=bots)
+
+    assert point == (169, 309)
+    assert confidence >= 0.99
 
 
 def test_guild_chest_template_separates_glowing_from_claimed_and_locked():
@@ -313,6 +384,11 @@ def test_sunday_hold_does_not_tap_ordinary_daily_claim():
 
     with (
         patch.object(rewards, "_is_state", return_value=True),
+        patch.object(
+            rewards,
+            "_read_daily_mission_capacity",
+            return_value=rewards.DailyMissionCapacity(6, 8, 95.0, "6/8 Missions"),
+        ),
         patch.object(rewards, "is_visible", side_effect=visible),
         patch.object(rewards, "tap_if_visible") as tap,
     ):
@@ -324,6 +400,89 @@ def test_sunday_hold_does_not_tap_ordinary_daily_claim():
     assert success
     assert claimed == 0
     tap.assert_not_called()
+
+
+def test_sunday_full_capacity_claims_exactly_two_ordinary_rewards():
+    initial = np.zeros((2, 2, 3), dtype=np.uint8)
+    after_first = np.ones((2, 2, 3), dtype=np.uint8)
+    after_second = np.full((2, 2, 3), 2, dtype=np.uint8)
+
+    def visible(label, *, screenshot):
+        return label == rewards.DAILY_MISSION_CLAIM
+
+    with (
+        patch.object(rewards, "_is_state", return_value=True),
+        patch.object(
+            rewards,
+            "_read_daily_mission_capacity",
+            return_value=rewards.DailyMissionCapacity(8, 8, 95.0, "8/8 Missions"),
+        ),
+        patch.object(rewards, "is_visible", side_effect=visible),
+        patch.object(rewards, "tap_if_visible", return_value=True) as tap,
+        patch.object(
+            rewards,
+            "_wait_for_state",
+            side_effect=[after_first, after_second],
+        ),
+    ):
+        success, claimed = rewards._claim_daily_rewards(
+            initial,
+            claim_missions=False,
+        )
+
+    assert success
+    assert claimed == 2
+    assert tap.call_count == 2
+    assert [call.args[0] for call in tap.call_args_list] == [
+        rewards.DAILY_MISSION_CLAIM,
+        rewards.DAILY_MISSION_CLAIM,
+    ]
+
+
+def test_sunday_weekly_chest_does_not_consume_full_capacity_claim_budget():
+    initial = np.zeros((2, 2, 3), dtype=np.uint8)
+    after_chest = np.ones((2, 2, 3), dtype=np.uint8)
+    after_first = np.full((2, 2, 3), 2, dtype=np.uint8)
+    after_second = np.full((2, 2, 3), 3, dtype=np.uint8)
+
+    def visible(label, *, screenshot):
+        value = int(screenshot[0, 0, 0])
+        if label == rewards.WEEKLY_MISSION_CHEST:
+            return value == 0
+        return label == rewards.DAILY_MISSION_CLAIM and value > 0
+
+    with (
+        patch.object(rewards, "_is_state", return_value=True),
+        patch.object(
+            rewards,
+            "_read_daily_mission_capacity",
+            return_value=rewards.DailyMissionCapacity(8, 8, 95.0, "8/8 Missions"),
+        ),
+        patch.object(rewards, "is_visible", side_effect=visible),
+        patch.object(rewards, "tap_if_visible", return_value=True) as tap,
+        patch.object(
+            rewards,
+            "_dismiss_reward_reveal",
+            return_value=after_chest,
+        ),
+        patch.object(
+            rewards,
+            "_wait_for_state",
+            side_effect=[after_first, after_second],
+        ),
+    ):
+        success, claimed = rewards._claim_daily_rewards(
+            initial,
+            claim_missions=False,
+        )
+
+    assert success
+    assert claimed == 3
+    assert [call.args[0] for call in tap.call_args_list] == [
+        rewards.WEEKLY_MISSION_CHEST,
+        rewards.DAILY_MISSION_CLAIM,
+        rewards.DAILY_MISSION_CLAIM,
+    ]
 
 
 def test_app_dispatches_alert_probe_and_records_success():
@@ -360,18 +519,107 @@ def test_app_dispatches_alert_probe_and_records_success():
     assert app._blind_tapper_suspended
 
 
-def test_event_inventory_piggybacks_on_badge_triggered_claim_pass():
+def test_app_dispatches_home_badge_probe_before_home_state_handling():
+    app = App.__new__(App)
+    app._mission_reward_scheduler = Mock()
+    app._mission_reward_scheduler.should_attempt.return_value = True
+    app._event_mission_tracker = Mock()
+    app._blind_tapper_suspended = False
     screenshot = np.zeros((2, 2, 3), dtype=np.uint8)
-    callback = Mock()
-    edge = ScrollResult(False, screenshot, 1, "edge_before_target")
+    badges = MenuRewardBadges(True, True, False)
 
     with (
+        patch("core.app.measure_home_reward_badges", return_value=badges),
+        patch("core.app.daily_mission_claims_allowed", return_value=False),
+        patch("core.app.stop_blind_gem_tapper", return_value=False),
+        patch(
+            "core.app.handle_mission_rewards",
+            return_value=MissionRewardResult.NOTHING_AVAILABLE,
+        ) as handler,
+    ):
+        assert app._handle_mission_rewards_if_due("HOME_SCREEN", screenshot)
+
+    app._mission_reward_scheduler.should_attempt.assert_called_once_with(
+        alert_visible=True,
+    )
+    handler.assert_called_once_with(
+        screenshot=screenshot,
+        claim_daily_missions=False,
+        event_inventory_callback=app._event_mission_tracker.record_inventory,
+    )
+    assert app._mission_reward_scheduler.mark_completed.call_count == 1
+    app._mission_reward_scheduler.mark_failed.assert_not_called()
+
+
+def test_home_reward_handler_uses_direct_navigation_and_does_not_close_menu():
+    home = np.zeros((2, 2, 3), dtype=np.uint8)
+    daily = np.ones((2, 2, 3), dtype=np.uint8)
+    event = np.full((2, 2, 3), 2, dtype=np.uint8)
+    badges = MenuRewardBadges(True, True, False)
+
+    with (
+        patch.object(rewards, "_reward_source_state", return_value="HOME_SCREEN"),
+        patch.object(rewards, "_ensure_reward_hub", return_value=home),
+        patch.object(rewards, "measure_home_reward_badges", return_value=badges),
+        patch.object(rewards, "tap_if_visible", return_value=True) as tap,
+        patch.object(rewards, "_wait_for_state", side_effect=[daily, event]),
+        patch.object(rewards, "_claim_daily_rewards", return_value=(True, 0)),
+        patch.object(rewards, "_claim_event_rewards", return_value=(True, 0)),
+        patch.object(rewards, "_return_to_reward_hub", return_value=home),
+        patch.object(rewards, "_close_menu") as close_menu,
+    ):
+        result = rewards.handle_mission_rewards(home)
+
+    assert result == MissionRewardResult.NOTHING_AVAILABLE
+    assert [call.args[0] for call in tap.call_args_list] == [
+        "navigation.home_daily_missions",
+        "navigation.home_event",
+    ]
+    close_menu.assert_not_called()
+
+
+def test_running_reward_handler_preserves_side_menu_navigation_and_cleanup():
+    menu = np.zeros((2, 2, 3), dtype=np.uint8)
+    daily = np.ones((2, 2, 3), dtype=np.uint8)
+    event = np.full((2, 2, 3), 2, dtype=np.uint8)
+    badges = MenuRewardBadges(True, True, False)
+
+    with (
+        patch.object(rewards, "_reward_source_state", return_value="RUNNING"),
+        patch.object(rewards, "_ensure_reward_hub", return_value=menu),
+        patch.object(rewards, "measure_menu_reward_badges", return_value=badges),
+        patch.object(rewards, "tap_if_visible", return_value=True) as tap,
+        patch.object(rewards, "_wait_for_state", side_effect=[daily, event]),
+        patch.object(rewards, "_claim_daily_rewards", return_value=(True, 0)),
+        patch.object(rewards, "_claim_event_rewards", return_value=(True, 0)),
+        patch.object(rewards, "_return_to_reward_hub", return_value=menu),
+        patch.object(rewards, "_close_menu", return_value=True) as close_menu,
+    ):
+        result = rewards.handle_mission_rewards(menu)
+
+    assert result == MissionRewardResult.NOTHING_AVAILABLE
+    assert [call.args[0] for call in tap.call_args_list] == [
+        "navigation.menu_daily_missions",
+        "navigation.menu_event",
+    ]
+    close_menu.assert_called_once_with(menu)
+
+
+def test_event_inventory_piggybacks_on_badge_triggered_claim_pass():
+    screenshot = np.zeros((2, 2, 3), dtype=np.uint8)
+    missions = np.ones((2, 2, 3), dtype=np.uint8)
+    callback = Mock()
+    edge = ScrollResult(False, missions, 1, "edge_before_target")
+
+    with (
+        patch.object(rewards, "_is_state", return_value=True),
+        patch.object(rewards, "tap_if_visible", return_value=True) as tap,
+        patch.object(rewards, "_wait_for_state", return_value=missions) as wait,
         patch.object(
             rewards,
             "scroll_to_edge",
-            return_value=ScrollResult(True, screenshot, 1, "edge_reached"),
+            return_value=ScrollResult(True, missions, 1, "edge_reached"),
         ),
-        patch.object(rewards, "_is_state", return_value=True),
         patch.object(rewards, "is_visible", return_value=False),
         patch.object(rewards, "scroll_until_visible", return_value=edge),
         patch.object(rewards, "_record_event_inventory") as inventory,
@@ -383,7 +631,13 @@ def test_event_inventory_piggybacks_on_badge_triggered_claim_pass():
 
     assert success
     assert claimed == 0
-    inventory.assert_called_once_with(screenshot, callback)
+    tap.assert_called_once_with(
+        rewards.EVENT_MISSIONS_TAB,
+        screenshot=screenshot,
+        retries=1,
+    )
+    wait.assert_called_once_with("EVENT", settle_s=0.8)
+    inventory.assert_called_once_with(missions, callback)
 
 
 def test_due_event_warning_is_forced_to_stdout_and_action_log():

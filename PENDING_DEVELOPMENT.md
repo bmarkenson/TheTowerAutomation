@@ -8,22 +8,21 @@ is changing. Search this index first, then read the linked domain file.
 
 1. Resolve the active runtime and capture validation gates in
    [`docs/backlog/runtime-and-validation.md`](docs/backlog/runtime-and-validation.md#current-validation-gates).
-2. Continue the GC initialization work, beginning with module evidence and
-   configuration, in
-   [`docs/backlog/runtime-and-validation.md`](docs/backlog/runtime-and-validation.md#gc-run-initialization).
-3. Continue UI-state coverage and recovery work in
+2. Continue UI-state coverage and recovery work in
    [`docs/backlog/state-and-detection.md`](docs/backlog/state-and-detection.md#state-coverage-and-recovery).
+3. Continue runtime and operator-control work in
+   [`docs/backlog/runtime-and-validation.md`](docs/backlog/runtime-and-validation.md#runtime-control).
 
 ## Active domain backlogs
 
 - [`docs/backlog/runtime-and-validation.md`](docs/backlog/runtime-and-validation.md)
-  — current validation gates, GC initialization, runtime control, and operator
-  controls.
+  — current validation gates, Farm session-preflight policy, runtime control,
+  and operator controls.
 - [`docs/backlog/state-and-detection.md`](docs/backlog/state-and-detection.md)
   — state coverage, detection policy, frame capture, action authority, and
   related validation.
-- [`docs/backlog/handlers.md`](docs/backlog/handlers.md) — handler dispatch and
-  remaining Game Over hardening.
+- [`docs/backlog/handlers.md`](docs/backlog/handlers.md) — handler dispatch
+  architecture.
 - [`docs/backlog/tooling-and-maintenance.md`](docs/backlog/tooling-and-maintenance.md)
   — developer tooling, schema validation, repository maintenance, and process
   improvements.

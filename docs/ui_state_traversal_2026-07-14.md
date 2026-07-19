@@ -20,10 +20,42 @@ implemented states are under `test/fixtures/ui_state_20260714/`.
   confirmed that Store retains its scroll position and that the handler should
   test for cooldown before scrolling.
 
-The full Home traversal with no active battle is still deferred until the next
-natural battle boundary. The base no-battle Home control was previously
-validated as `NEW_BATTLE`, but its complete submenu traversal was not repeated
-here because preserving the current battle was the hard safety boundary.
+At the time of this pass, the full Home traversal with no active battle was
+deferred because preserving the current battle was the hard safety boundary.
+That context was completed at the next authorized no-battle boundary on
+2026-07-19, as recorded below.
+
+## 2026-07-19 no-battle completion
+
+The safe Home/submenu audit was repeated from fresh `HOME_SCREEN` plus
+`NEW_BATTLE` evidence on `localhost:5555`. Workshop, Cards, Modules, Lab, Store,
+Daily Missions, Event, Guild, Tournament, Settings, Ranking, Themes, Inbox, The
+Vault, and Battle History retained their existing explicit states. Claims,
+purchases, tournament entry, preset or loadout changes, and external links
+remained excluded.
+
+Two expected read-only screens initially resolved to `UNKNOWN`:
+
+| Screen | Resulting primary state | Notes |
+| --- | --- | --- |
+| Home Perks configuration | `PERKS` | Added the uppercase configuration-title variant; First Perk, Ban Perks, and Auto Pick were not changed. |
+| Milestones | `MILESTONES` | Added a dedicated primary state; no milestone reward or Tier selector was tapped. |
+
+The Currencies popup opened from the global header and the Android Exit Game
+confirmation also gained explicit `CURRENCIES_DIALOG` and `EXIT_GAME_DIALOG`
+overlay states over their existing Tournament and Milestones primaries. The
+Exit Game action itself was never selected.
+
+All four observations have retained 2026-07-19 fixtures in
+`test/fixtures/ui_state_20260714/`, dedicated templates, automated coverage in
+`test/test_ui_state_coverage.py`, and live post-change classification evidence.
+
+The same bounded pass then exercised the actual generated `farm` profile from a
+verified Tier 18 `NEW_BATTLE` boundary. Home-only Farm setup passed, EHLS and
+EALS completed at waves 20 and 30, Damage Slider verified `1E-22%`, Target
+Priority matched the resolved Farm order, and the complete session preflight
+passed before normal handlers resumed. The resolved Farm configuration was
+also persisted in the resulting battle record.
 
 ## State results
 
@@ -88,11 +120,9 @@ precedence over the fallback modal primary.
 
 ## Remaining traversal work
 
-- Repeat the safe Home/submenu audit at a genuine no-battle boundary and save
-  only screens whose presentation or behavior differs from the Resume context.
-- Exercise a complete natural Game Over -> Retry boundary while the default GC
-  strategy is running, as already listed in `PENDING_DEVELOPMENT.md`.
+- Continue the broader farm-lifecycle and transient-dialog audit tracked in
+  `PENDING_DEVELOPMENT.md`; this pass deliberately stayed within the safe
+  no-battle Home and initialization scope.
 - Add explicit recovery policy for known non-running panels as part of the
   planned interruptible non-running recovery work. Recognition alone does not
   grant a handler tap authority.
-

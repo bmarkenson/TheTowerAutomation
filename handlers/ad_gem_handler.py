@@ -184,7 +184,62 @@ def is_blind_gem_tapper_active() -> bool:
     return _blind_tapper_active.is_set()
 
 
-def handle_ad_gem():
+def _collect_visible_ad_gem(
+    label: str,
+    *,
+    allow_fallback_after_retry: bool,
+) -> bool:
+    """Tap one currently visible ad-gem control and verify its dismissal."""
+
+    max_attempts = 3
+    tapped_once = False
+    for attempt in range(1, max_attempts + 1):
+        # Always capture fresh evidence here.  A frame that scheduled the
+        # handler must not remain tap authority after another action or user
+        # input could have changed the screen.
+        if not is_visible(label):
+            if not tapped_once:
+                log(f"[AD_GEM] {label} not visible; skipping tap", "INFO")
+            return tapped_once
+
+        tapped = safe_tap(
+            label,
+            require_visible=True,
+            retries=1,
+            retry_delay=0.4,
+            dispatch="now",
+            allow_fallback=(allow_fallback_after_retry and attempt > 1),
+        )
+        if not tapped:
+            log(f"[AD_GEM] Failed to tap {label} (match missing)", "WARN")
+            return False
+        tapped_once = True
+
+        time.sleep(0.5)
+        if not is_visible(label):
+            return True
+
+        log(f"[AD_GEM] {label} still visible after tap — retrying", "WARN")
+        time.sleep(0.4)
+
+    log(f"[AD_GEM] {label} persisted after multiple tap attempts", "ERROR")
+    return False
+
+
+def handle_home_ad_gem() -> bool:
+    """Collect the visible five-gem control from an actionable Home screen."""
+
+    log("Handling HOME_AD_GEMS_AVAILABLE overlay", "ACTION")
+    # Home cannot host the in-battle floating gem.  Ensure a prior bounded
+    # tapper is winding down and never start a new one from this path.
+    stop_blind_gem_tapper()
+    return _collect_visible_ad_gem(
+        "buttons.claim_ad_gem:home",
+        allow_fallback_after_retry=False,
+    )
+
+
+def handle_ad_gem() -> bool:
     """
     Handle the 'AD_GEMS_AVAILABLE' overlay event.
 
@@ -194,7 +249,7 @@ def handle_ad_gem():
       3. Wait 1 second before returning.
 
     Returns:
-        None
+        bool: True when the overlay was tapped and then disappeared.
 
     Side effects:
         [tap] Sends tap events to the device.
@@ -204,38 +259,14 @@ def handle_ad_gem():
     Notes:
         - Blind tapper runs for 20s with 1s interval.
         - Uses non-reentrant guard to prevent multiple simultaneous tappers.
+        - Home uses ``handle_home_ad_gem`` and never starts this tapper.
     """
     log("Handling AD_GEMS_AVAILABLE overlay", "ACTION")
     start_blind_gem_tapper(duration=20, interval=1, blocking=False)
 
-    overlay_key = "overlays.ad_gem"
-    max_attempts = 3
-    for attempt in range(1, max_attempts + 1):
-        # Skip if overlay has already disappeared (manual tap, etc.)
-        if not is_visible(overlay_key):
-            log("[AD_GEM] Overlay not visible; skipping tap", "INFO")
-            break
-
-        tapped = safe_tap(
-            overlay_key,
-            require_visible=True,
-            retries=1,
-            retry_delay=0.4,
-            dispatch='now',
-            allow_fallback=(attempt > 1),
-        )
-        if not tapped:
-            log("[AD_GEM] Failed to tap overlay (match missing)", "WARN")
-            break
-
-        # Give UI a moment to dismiss overlay
-        time.sleep(0.5)
-        if not is_visible(overlay_key):
-            break
-
-        log("[AD_GEM] Overlay still visible after tap — retrying", "WARN")
-        time.sleep(0.4)
-    else:
-        log("[AD_GEM] Overlay persisted after multiple tap attempts", "ERROR")
-
+    collected = _collect_visible_ad_gem(
+        "overlays.ad_gem",
+        allow_fallback_after_retry=True,
+    )
     time.sleep(1)
+    return collected
