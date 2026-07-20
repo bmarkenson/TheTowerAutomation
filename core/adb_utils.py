@@ -5,6 +5,9 @@ Utility functions for interacting with Android devices or emulators via ADB.
 This module provides:
 - adb_shell(): Run arbitrary shell commands on a connected device/emulator.
 - screencap_png(): Capture a raw PNG screenshot from a connected device/emulator.
+- screencap_raw(): Capture the Android raw framebuffer.
+- input_tap()/input_swipe(): Map canonical UI coordinates to the observed
+  device resolution before injecting input.
 
 Device targeting:
     Functions respect the following precedence when selecting a device:
@@ -24,8 +27,17 @@ import shlex
 import subprocess
 from typing import List, Optional, Union
 
+from core.screen_geometry import canonical_to_device_point
+
 #ADB_DEVICE_ID = "07171JEC203290"  # Or ""
 ADB_DEVICE_ID = "localhost:5555"
+
+
+def resolve_adb_device(device_id: Optional[str] = None) -> str:
+    """Resolve the active ADB target using the project's established precedence."""
+
+    return device_id or os.getenv("ADB_DEVICE") or ADB_DEVICE_ID
+
 
 def adb_shell(
     cmd: Union[str, List[str]],
@@ -65,7 +77,7 @@ def adb_shell(
     cmd_list = shlex.split(cmd) if isinstance(cmd, str) else cmd
 
     # Resolve device selection (explicit > env > module default)
-    target = device_id or os.getenv("ADB_DEVICE") or ADB_DEVICE_ID
+    target = resolve_adb_device(device_id)
 
     base_cmd = ["adb"]
     if target:
@@ -125,7 +137,7 @@ def screencap_png(
     Returns:
         PNG bytes on success, or None on failure.
     """
-    target = device_id or os.getenv("ADB_DEVICE") or ADB_DEVICE_ID
+    target = resolve_adb_device(device_id)
 
     base_cmd = ["adb"]
     if target:
@@ -160,7 +172,7 @@ def screencap_raw(
 ) -> Optional[bytes]:
     """Capture the Android raw framebuffer without device-side PNG encoding."""
 
-    target = device_id or os.getenv("ADB_DEVICE") or ADB_DEVICE_ID
+    target = resolve_adb_device(device_id)
 
     base_cmd = ["adb"]
     if target:
@@ -186,3 +198,70 @@ def screencap_raw(
     except Exception as exc:
         print(f"[ERROR] Unexpected ADB raw screencap exception: {exc}")
         return None
+
+
+def input_tap(
+    x: int | float,
+    y: int | float,
+    *,
+    check: bool = True,
+    device_id: Optional[str] = None,
+):
+    """Tap a canonical UI point after mapping it to device framebuffer pixels."""
+
+    target = resolve_adb_device(device_id)
+    device_x, device_y = canonical_to_device_point(x, y, device_id=target)
+    return adb_shell(
+        ["input", "tap", str(device_x), str(device_y)],
+        check=check,
+        device_id=target,
+    )
+
+
+def input_swipe(
+    x1: int | float,
+    y1: int | float,
+    x2: int | float,
+    y2: int | float,
+    duration_ms: int,
+    *,
+    check: bool = True,
+    device_id: Optional[str] = None,
+):
+    """Swipe between canonical UI points in device framebuffer pixels."""
+
+    target = resolve_adb_device(device_id)
+    device_x1, device_y1 = canonical_to_device_point(
+        x1,
+        y1,
+        device_id=target,
+    )
+    device_x2, device_y2 = canonical_to_device_point(
+        x2,
+        y2,
+        device_id=target,
+    )
+    return adb_shell(
+        [
+            "input",
+            "swipe",
+            str(device_x1),
+            str(device_y1),
+            str(device_x2),
+            str(device_y2),
+            str(int(duration_ms)),
+        ],
+        check=check,
+        device_id=target,
+    )
+
+
+__all__ = [
+    "ADB_DEVICE_ID",
+    "adb_shell",
+    "input_swipe",
+    "input_tap",
+    "resolve_adb_device",
+    "screencap_png",
+    "screencap_raw",
+]

@@ -12,7 +12,11 @@ import numpy as np
 from numpy.typing import NDArray
 
 from utils.logger import log
-from core.adb_utils import screencap_png, screencap_raw
+from core.adb_utils import resolve_adb_device, screencap_png, screencap_raw
+from core.screen_geometry import (
+    CANONICAL_SCREEN_SIZE,
+    record_device_screen_size,
+)
 
 
 Frame = NDArray[np.uint8]
@@ -22,16 +26,48 @@ INCOMPLETE_CAPTURE_ATTEMPTS = 2
 
 
 def is_complete_screenshot(frame: Optional[Frame]) -> bool:
-    """Reject malformed or majority-black 1080x1920 action evidence."""
+    """Reject malformed or majority-black canonical action evidence."""
 
+    canonical_width, canonical_height = CANONICAL_SCREEN_SIZE
     return bool(
         isinstance(frame, np.ndarray)
         and frame.ndim == 3
-        and frame.shape[0] == 1920
-        and frame.shape[1] == 1080
+        and frame.shape[0] == canonical_height
+        and frame.shape[1] == canonical_width
         and frame.shape[2] >= 3
-        and float(np.mean(np.max(frame[:, :, :3], axis=2) < 8)) < 0.5
+        and _has_complete_pixels(frame)
     )
+
+
+def normalize_device_screenshot(
+    frame: Frame,
+    *,
+    device_id: Optional[str] = None,
+) -> Optional[Frame]:
+    """Validate a native frame and normalize supported sizes to 1080x1920."""
+
+    if not isinstance(frame, np.ndarray) or frame.ndim != 3 or frame.shape[2] < 3:
+        raise ValueError("Screenshot must be a color image")
+    source_height, source_width = frame.shape[:2]
+    record_device_screen_size(
+        source_width,
+        source_height,
+        device_id=device_id,
+    )
+    if not _has_complete_pixels(frame):
+        return None
+    canonical_width, canonical_height = CANONICAL_SCREEN_SIZE
+    if (source_width, source_height) == CANONICAL_SCREEN_SIZE:
+        return frame
+    return cv2.resize(
+        frame,
+        (canonical_width, canonical_height),
+        interpolation=cv2.INTER_LINEAR,
+    )
+
+
+def _has_complete_pixels(frame: Frame) -> bool:
+    return float(np.mean(np.max(frame[:, :, :3], axis=2) < 8)) < 0.5
 
 
 def _decode_raw_screencap(raw_data: bytes) -> Frame:
@@ -64,19 +100,17 @@ def capture_adb_raw_screenshot() -> Optional[Frame]:
     """Capture a fresh, complete uncompressed Android framebuffer."""
 
     try:
+        device_id = resolve_adb_device()
         for attempt in range(1, INCOMPLETE_CAPTURE_ATTEMPTS + 1):
             raw_data = screencap_raw()
             if not raw_data:
                 log("[ADB] Empty raw screenshot data", "ERROR")
                 return None
-            image = _decode_raw_screencap(raw_data)
-            expected_w, expected_h = 1080, 1920
-            if image.shape[1] != expected_w or image.shape[0] != expected_h:
-                raise ValueError(
-                    f"Unsupported emulator resolution {image.shape[1]}x{image.shape[0]}; "
-                    f"expected {expected_w}x{expected_h}. Update the BlueStacks display settings."
-                )
-            if is_complete_screenshot(image):
+            image = normalize_device_screenshot(
+                _decode_raw_screencap(raw_data),
+                device_id=device_id,
+            )
+            if image is not None:
                 return image
             _log_incomplete_capture("raw", attempt)
         return None
@@ -106,6 +140,7 @@ def capture_adb_screenshot() -> Optional[Frame]:
         np.ndarray (BGR) on success, or None on failure.
     """
     try:
+        device_id = resolve_adb_device()
         for attempt in range(1, INCOMPLETE_CAPTURE_ATTEMPTS + 1):
             png_data = screencap_png()
             if not png_data:
@@ -121,13 +156,8 @@ def capture_adb_screenshot() -> Optional[Frame]:
             if img is None:
                 raise ValueError("OpenCV failed to decode image")
 
-            expected_w, expected_h = 1080, 1920
-            if img.shape[1] != expected_w or img.shape[0] != expected_h:
-                raise ValueError(
-                    f"Unsupported emulator resolution {img.shape[1]}x{img.shape[0]}; "
-                    f"expected {expected_w}x{expected_h}. Update the BlueStacks display settings."
-                )
-            if is_complete_screenshot(img):
+            img = normalize_device_screenshot(img, device_id=device_id)
+            if img is not None:
                 return img
             _log_incomplete_capture("PNG", attempt)
         return None

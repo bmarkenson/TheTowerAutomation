@@ -9,6 +9,7 @@ import numpy as np
 
 from handlers.game_over_handler import (
     _capture_game_over_perks,
+    _game_stats_visible,
     _save_battle_stats_record,
     _wait_for_game_over_direction,
     handle_game_over,
@@ -21,6 +22,23 @@ from utils.logger import log
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "test" / "fixtures"
+
+
+def test_game_stats_visibility_accepts_more_stats_when_title_is_degraded():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+    with patch(
+        "handlers.game_over_handler.is_visible",
+        side_effect=lambda label, *, screenshot: (
+            label == "buttons.more_stats:game_over"
+        ),
+    ) as visible:
+        assert _game_stats_visible(frame)
+
+    assert [call.args[0] for call in visible.call_args_list] == [
+        "indicators.game_over",
+        "buttons.more_stats:game_over",
+    ]
 
 
 def test_game_over_perks_button_requires_visible_button_artwork():

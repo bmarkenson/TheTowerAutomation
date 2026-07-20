@@ -12,7 +12,7 @@ spec_legend:
 defaults:
   queue_semantics: FIFO ordering preserved per process
   worker: A daemon thread is started on import and processes TAP_QUEUE
-  tap_path: Uses core.adb_utils.adb_shell → "input tap x y"
+  tap_path: Uses core.adb_utils.input_tap to map canonical points to device pixels
   logging: Per-tap logging goes through utils.logger.log when log_it=True
 """
 
@@ -21,7 +21,7 @@ import queue
 import time
 import random
 from utils.logger import log
-from core.adb_utils import adb_shell
+from core.adb_utils import input_tap
 
 TAP_QUEUE = queue.Queue()
 """
@@ -75,7 +75,7 @@ def _tap_worker():
       s: [tap][log]
       e:
         - queue.Empty is handled internally with a short idle wait.
-        - Other exceptions from adb_shell are not re-raised here (same-process resilience).
+        - Other exceptions from input_tap are not re-raised here (same-process resilience).
       notes:
         - Accepts both 4-tuple and legacy 3-tuple items from TAP_QUEUE.
     """
@@ -90,7 +90,7 @@ def _tap_worker():
                 log_it = True
             else:
                 x, y, label, log_it = item
-            adb_shell(["input", "tap", str(x), str(y)])
+            input_tap(x, y)
             if log_it:
                 log_tap(x, y, label)
         except queue.Empty:

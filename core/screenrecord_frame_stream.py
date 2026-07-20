@@ -14,7 +14,9 @@ from typing import Deque, Optional, Tuple
 import cv2
 import numpy as np
 
-from core.adb_utils import ADB_DEVICE_ID
+from core.adb_utils import resolve_adb_device
+from core.screen_geometry import get_device_screen_size
+from core.ss_capture import normalize_device_screenshot
 
 
 Frame = np.ndarray
@@ -28,11 +30,11 @@ class ScreenrecordFrameStream:
         *,
         device_id: Optional[str] = None,
         bit_rate: int = 3_000_000,
-        size: Tuple[int, int] = (1080, 1920),
+        size: Optional[Tuple[int, int]] = None,
     ) -> None:
-        self._device_id = device_id or os.getenv("ADB_DEVICE") or ADB_DEVICE_ID
+        self._device_id = resolve_adb_device(device_id)
         self._bit_rate = max(500_000, int(bit_rate))
-        self._size = size
+        self._size = size or get_device_screen_size(device_id=self._device_id)
         self._fifo_path = Path(tempfile.gettempdir()) / (
             f"thetower-screenrecord-{os.getpid()}-{id(self)}.h264"
         )
@@ -154,6 +156,17 @@ class ScreenrecordFrameStream:
                     if not self._stop.is_set():
                         self._failed.set()
                     return
+
+                try:
+                    frame = normalize_device_screenshot(
+                        frame,
+                        device_id=self._device_id,
+                    )
+                except ValueError:
+                    self._failed.set()
+                    return
+                if frame is None:
+                    continue
 
                 with self._lock:
                     self._latest_sequence += 1

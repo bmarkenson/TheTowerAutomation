@@ -50,6 +50,7 @@ states:
   type: primary
   match_keys:
   - indicators.game_over
+  - buttons.more_stats:game_over
 
 - name: TOURNAMENT_RESULTS
   type: primary

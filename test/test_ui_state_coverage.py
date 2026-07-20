@@ -1,10 +1,12 @@
 from pathlib import Path
+from unittest.mock import patch
 
 import cv2
 import pytest
 
 from core.state_detector import detect_state_and_overlays
 from core.label_tapper import get_label_match
+from core.ss_capture import normalize_device_screenshot
 
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "ui_state_20260714"
@@ -93,6 +95,55 @@ def test_traversal_fixture_has_explicit_state_and_overlays(
 
     assert detection["state"] == expected_state
     assert expected_overlays <= set(detection["overlays"])
+
+    source_720p = cv2.resize(
+        screenshot,
+        (720, 1280),
+        interpolation=cv2.INTER_AREA,
+    )
+    normalized = normalize_device_screenshot(
+        source_720p,
+        device_id="fixture:720p",
+    )
+    assert normalized is not None
+    detection_720p = detect_state_and_overlays(normalized)
+    assert detection_720p["state"] == expected_state
+    assert expected_overlays <= set(detection_720p["overlays"])
+
+
+def test_game_over_can_fall_back_to_its_more_stats_button():
+    definitions = {
+        "states": [
+            {
+                "name": "GAME_OVER",
+                "type": "primary",
+                "match_keys": [
+                    "indicators.game_over",
+                    "buttons.more_stats:game_over",
+                ],
+            }
+        ],
+        "overlays": [],
+    }
+    frame = cv2.imread(
+        str(
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "game_over_stats_20260715.png"
+        )
+    )
+    assert frame is not None
+
+    def match(key, *, screenshot):
+        del screenshot
+        if key == "buttons.more_stats:game_over":
+            return (192, 968), 0.97
+        return None, 0.76
+
+    with patch("core.state_detector.get_match", side_effect=match):
+        detection = detect_state_and_overlays(frame, state_defs=definitions)
+
+    assert detection["state"] == "GAME_OVER"
 
 
 def test_tournament_heat_has_a_dedicated_visible_close_control():

@@ -6,7 +6,7 @@ import time
 from typing import Any, Dict, Literal, Optional, Tuple, Sequence, Union
 
 from utils.logger import log
-from core.adb_utils import adb_shell
+from core.adb_utils import input_swipe, input_tap
 from core.tap_dispatcher import tap as enqueue_tap
 from core.clickmap_access import get_click, get_explicit_tap, get_swipe, resolve_dot_path
 from core.label_tapper import get_label_match
@@ -34,22 +34,11 @@ def _dispatch_tap(x: int, y: int, *, label: Optional[str], dispatch: DispatchMod
     if dispatch == "queue":
         enqueue_tap(x, y, label=label, log_it=False)
     else:
-        adb_shell(["input", "tap", str(x), str(y)], check=False)
+        input_tap(x, y, check=False)
 
 
 def _dispatch_swipe(x1: int, y1: int, x2: int, y2: int, duration_ms: int) -> None:
-    adb_shell(
-        [
-            "input",
-            "swipe",
-            str(x1),
-            str(y1),
-            str(x2),
-            str(y2),
-            str(duration_ms),
-        ],
-        check=False,
-    )
+    input_swipe(x1, y1, x2, y2, duration_ms, check=False)
 
 
 def safe_tap(

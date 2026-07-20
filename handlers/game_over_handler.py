@@ -30,6 +30,18 @@ PERKS_INDICATOR = "indicators.perks_panel"
 PERKS_CONTENT_REGION = (100, 414, 880, 1340)
 
 
+def _game_stats_visible(screenshot) -> bool:
+    """Accept either stable Game Stats title or More Stats button evidence."""
+
+    return is_visible(
+        "indicators.game_over",
+        screenshot=screenshot,
+    ) or is_visible(
+        "buttons.more_stats:game_over",
+        screenshot=screenshot,
+    )
+
+
 def handle_game_over(
     *,
     capture_stats: bool = True,
@@ -219,7 +231,7 @@ def _capture_game_over_perks():
             [],
             True,
         )
-    if not is_visible("indicators.game_over", screenshot=game_stats_screen):
+    if not _game_stats_visible(game_stats_screen):
         return (
             ocr_selected_perks(
                 [],
@@ -249,7 +261,7 @@ def _capture_game_over_perks():
         current = capture_adb_screenshot()
         restored = bool(
             current is not None
-            and is_visible("indicators.game_over", screenshot=current)
+            and _game_stats_visible(current)
         )
         return (
             ocr_selected_perks(

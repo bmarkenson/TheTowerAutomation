@@ -9,7 +9,7 @@ from typing import Literal
 import cv2  # type: ignore
 import numpy as np  # type: ignore
 
-from core.adb_utils import adb_shell
+from core.adb_utils import input_swipe
 from core.clickmap_access import resolve_dot_path
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
@@ -181,15 +181,7 @@ def _perform_swipe(direction: str, span: SwipeSpan = "short") -> None:
     start_y = y + int(h * start_ratio)
     end_y = y + int(h * end_ratio)
 
-    adb_shell([
-        "input",
-        "swipe",
-        str(start_x),
-        str(start_y),
-        str(start_x),
-        str(end_y),
-        "350",
-    ])
+    input_swipe(start_x, start_y, start_x, end_y, 350)
 
 
 def swipe_upgrade_menu(direction: str, span: SwipeSpan = "short") -> None:

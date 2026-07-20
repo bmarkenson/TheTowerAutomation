@@ -316,7 +316,7 @@
         "w": 215,
         "h": 65
       },
-      "match_threshold": 0.9,
+      "match_threshold": 0.85,
       "roles": [
         "indicator"
       ]
@@ -381,7 +381,7 @@
         "w": 394,
         "h": 71
       },
-      "match_threshold": 0.9,
+      "match_threshold": 0.82,
       "roles": [
         "indicator"
       ]
@@ -2853,7 +2853,7 @@
         "EHLS": {
           "match_template": "upgrades/utility/left/EHLS.png",
           "region_ref": "upgrades_left",
-          "match_threshold": 0.9,
+          "match_threshold": 0.82,
           "roles": [
             "upgrade_label"
           ]
@@ -2911,7 +2911,7 @@
         "EALS": {
           "match_template": "upgrades/utility/right/EALS.png",
           "region_ref": "upgrades_right",
-          "match_threshold": 0.9,
+          "match_threshold": 0.82,
           "roles": [
             "upgrade_label"
           ]

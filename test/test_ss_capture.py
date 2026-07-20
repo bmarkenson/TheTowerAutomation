@@ -10,7 +10,19 @@ from core.ss_capture import (
     capture_adb_raw_screenshot,
     capture_adb_screenshot,
     is_complete_screenshot,
+    normalize_device_screenshot,
 )
+from core.screen_geometry import (
+    clear_recorded_device_screen_sizes,
+    get_device_screen_size,
+)
+
+
+@pytest.fixture(autouse=True)
+def _clear_screen_geometry():
+    clear_recorded_device_screen_sizes()
+    yield
+    clear_recorded_device_screen_sizes()
 
 
 def test_complete_screenshot_rejects_wrong_size_and_majority_black_frames():
@@ -42,6 +54,28 @@ def test_png_capture_retries_incomplete_frame_and_returns_fresh_complete_frame()
     assert frame is not None
     assert np.array_equal(frame, complete)
     assert capture.call_count == 2
+
+
+def test_png_capture_normalizes_720p_and_records_input_geometry():
+    source = np.full((1280, 720, 3), 32, dtype=np.uint8)
+    encoded_ok, encoded = cv2.imencode(".png", source)
+    assert encoded_ok
+
+    with patch("core.ss_capture.screencap_png", return_value=encoded.tobytes()):
+        frame = capture_adb_screenshot()
+
+    assert frame is not None
+    assert frame.shape == (1920, 1080, 3)
+    assert np.all(frame == 32)
+    assert get_device_screen_size(device_id="localhost:5555") == (720, 1280)
+
+
+def test_normalization_rejects_unsupported_resolution():
+    with pytest.raises(ValueError, match="Unsupported emulator resolution 900x1600"):
+        normalize_device_screenshot(
+            np.full((1600, 900, 3), 32, dtype=np.uint8),
+            device_id="localhost:5555",
+        )
 
 
 def test_png_capture_returns_none_when_fresh_retry_is_also_incomplete():
@@ -76,6 +110,21 @@ def test_raw_capture_retries_incomplete_frame_before_returning_evidence():
 
     assert frame is complete
     assert capture.call_count == 2
+
+
+def test_raw_capture_normalizes_720p_and_records_input_geometry():
+    source = np.full((1280, 720, 3), 32, dtype=np.uint8)
+
+    with (
+        patch("core.ss_capture.screencap_raw", return_value=b"raw"),
+        patch("core.ss_capture._decode_raw_screencap", return_value=source),
+    ):
+        frame = capture_adb_raw_screenshot()
+
+    assert frame is not None
+    assert frame.shape == (1920, 1080, 3)
+    assert np.all(frame == 32)
+    assert get_device_screen_size(device_id="localhost:5555") == (720, 1280)
 
 
 def test_decode_raw_screencap_rgba_with_16_byte_header():

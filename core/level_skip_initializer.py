@@ -9,7 +9,7 @@ from typing import Callable, Dict, Optional, Tuple
 
 import numpy as np
 
-from core.adb_utils import adb_shell
+from core.adb_utils import input_swipe
 from core.clickmap_access import resolve_dot_path
 from core.input import safe_tap
 from core.label_tapper import get_label_match
@@ -70,17 +70,12 @@ def _default_scroll_to_bottom() -> bool:
     x = int(region["x"]) + int(region["w"]) // 2
     y = int(region["y"])
     h = int(region["h"])
-    result = adb_shell(
-        [
-            "input",
-            "swipe",
-            str(x),
-            str(y + int(h * 0.82)),
-            str(x),
-            str(y + int(h * 0.22)),
-            "220",
-        ],
-        capture_output=False,
+    result = input_swipe(
+        x,
+        y + int(h * 0.82),
+        x,
+        y + int(h * 0.22),
+        220,
         check=False,
     )
     return bool(result and result.returncode == 0)

@@ -18,7 +18,7 @@ defaults:
 
 from core.ss_capture import capture_adb_screenshot, is_complete_screenshot
 from core.clickmap_access import get_clickmap, resolve_dot_path
-from core.adb_utils import adb_shell
+from core.adb_utils import input_swipe
 from core.matcher import match_entry_result, normalize_region, resolve_match_region
 from utils.logger import log
 
@@ -191,7 +191,7 @@ def swipe_relative_in_region(region, start_frac=(0.50, 0.82), end_frac=(0.50, 0.
     ey = int(y0 + max(0.0, min(1.0, end_frac[1])) * h2)
 
     log(f"SWIPE_REL: ({sx},{sy})→({ex},{ey}) in {duration_ms}ms", "ACTION")
-    adb_shell(["input", "swipe", str(sx), str(sy), str(ex), str(ey), str(duration_ms)])
+    input_swipe(sx, sy, ex, ey, duration_ms)
 
 
 def page_column(side: str, direction: str, strength: str = "page", duration_ms: int = 260):
