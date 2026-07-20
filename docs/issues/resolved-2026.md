@@ -8,6 +8,62 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Ubuntu .NET SDK omitted the WindowsDesktop cross-build SDK
+
+- **Observed:** 2026-07-20 while publishing the native Windows control surface
+  on Ubuntu 24.04.
+- **Symptom:** `dotnet publish` failed with `MSB4019` because
+  `Microsoft.NET.Sdk.WindowsDesktop.targets` did not exist below the selected
+  SDK's `Sdks` directory.
+- **Evidence:** `dotnet --info` selected Canonical SDK `8.0.129` under
+  `/usr/lib/dotnet`; its SDK catalog had no
+  `Microsoft.NET.Sdk.WindowsDesktop`. Microsoft's official SDK `8.0.423`,
+  installed side-by-side with `dotnet-install.sh`, contained the missing SDK
+  and successfully produced a 64-bit single-file Windows GUI executable.
+- **Safety response:** The Ubuntu package was not removed or overwritten. The
+  Microsoft SDK was installed to a separate user-local directory, and the
+  first validation publish used isolated temporary restore/output paths.
+- **Cause:** Ubuntu's Canonical SDK package did not ship the WindowsDesktop SDK
+  targets required for a WPF cross-build.
+- **Resolution:** The checked-in Linux publisher selects a side-by-side
+  Microsoft SDK, verifies that WindowsDesktop targets exist before invoking
+  `dotnet publish`, and documents the non-admin installation.
+- **Regression:** `windows/TheTower.ControlSurface/publish-linux.sh` performed
+  a successful self-contained `win-x64` publish during final validation.
+- **Fixed by:** `dd1b0f7`.
+
+### BlueStacks 720p resolution stopped screenshot capture
+
+- **Observed:** 2026-07-19 after BlueStacks was changed from `1080x1920` to
+  `720x1280` for performance troubleshooting.
+- **Symptom:** Every PNG capture was rejected as an unsupported emulator
+  resolution, so the automation could neither synchronize the control file nor
+  detect the active battle.
+- **Evidence:** `logs/actions.log` repeatedly reported `Unsupported emulator
+  resolution 720x1280; expected 1080x1920` from 18:49 until the managed process
+  was stopped under a persistent pause. A fresh native capture measured
+  `720x1280`; after normalization, live detection resolved `RUNNING`,
+  `ATTACK_MENU`, the current wave, and the expected overlays.
+- **Safety response:** The active operator-owned battle was not surrendered.
+  The control state was persisted as `PAUSED` before process replacement, and
+  the replacement remained action-blocked while capture and input geometry
+  were validated.
+- **Cause:** Capture required an exact `1080x1920` framebuffer, while input
+  sent canonical coordinates directly to the emulator without a native-size
+  mapping boundary.
+- **Resolution:** Capture accepts `1080x1920` and `720x1280`, records the native
+  target geometry, and normalizes frames into canonical vision space. The
+  centralized tap/swipe boundary maps canonical actions back to native pixels;
+  affected evidence thresholds and Game Over fallback detection were calibrated
+  against 720p observations.
+- **Live validation:** Retained state fixtures passed after a 720p round trip,
+  and the managed handler captured 24 perks plus all 144 clipboard Stats rows
+  from the live 720p emulator.
+- **Regression:** `test/test_screen_geometry.py`, `test/test_ss_capture.py`,
+  `test/test_ui_state_coverage.py`, and `test/test_game_over_handler.py` cover
+  geometry conversion, capture normalization, detection, and terminal fallback.
+- **Fixed by:** `15b2b8e`.
+
 ### Farm preflight discarded verified Poison Swamp Stun evidence and stranded safe handlers
 
 - **Observed:** 2026-07-18 during the first complete `farm_t18` session

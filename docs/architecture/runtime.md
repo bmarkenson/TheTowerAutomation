@@ -92,6 +92,12 @@ and deliberately has no authority to press the terminal `OK` button. The
 resolved run configuration and validation evidence are included in the record,
 and control remains in `WAIT` for operator direction.
 
+Completed-run classification preserves that terminal distinction. A detected
+`TOURNAMENT_RESULTS` record is Tournament. A standard `GAME_OVER` record under
+the shared Tournament/Milestone profile is Milestone, while Farm
+strategy/profile identity marks Farm. Shared Tournament settings by themselves
+remain insufficient evidence to distinguish Tournament from Milestone.
+
 ## State and battle lifecycle
 
 - Visible navigation and battle lifecycle are separate. Home
@@ -109,12 +115,35 @@ and control remains in `WAIT` for operator direction.
   and read-only status reporting continue. Strategy, handler, mission,
   recovery, and blind-tapper actions remain blocked.
 
+## Completed-run records and evidence
+
+- Structured Battle/Tournament JSON is the canonical completed-run artifact;
+  Markdown and the control-surface report are views over that same record.
+- The record retains copied Stats rows, compact Game Stats-only fields, perks,
+  resolved configuration, observed preflight/runtime evidence, and derived
+  metrics. Consumers must read these fields instead of relying on a terminal
+  screenshot.
+- Periodic valid Coins/min readings are stored as bounded numeric samples with
+  their timestamp, wave, and OCR confidence, then attached to the completed
+  record. The runtime does not maintain a separate per-run Coins CSV or toggle
+  the live display to collect scheduled lifetime-total snapshots.
+- Routine terminal screenshots are not durable artifacts. The handlers retain
+  source frames only when capture, parsing, persistence, or validation fails or
+  remains uncertain. Historical screenshots may remain as evidence, but new
+  code must not require them; previous-wave lookup uses structured records.
+
 ## Matching and action authority
 
-- Direct ADB capture rejects wrong-sized or majority-black compositor frames
-  and immediately attempts one fresh capture. Semantic state detection and
-  visibility-aware action matching repeat the completeness check so injected
-  or retained incomplete frames cannot bypass the capture boundary.
+- Direct ADB capture accepts supported native `1080x1920` and `720x1280`
+  framebuffers, records the source geometry, and normalizes them to the
+  canonical `1080x1920` vision coordinate space. Unsupported or majority-black
+  compositor frames are rejected, with one immediate fresh attempt for an
+  incomplete frame. Semantic state detection and visibility-aware action
+  matching repeat the completeness check so injected or retained incomplete
+  frames cannot bypass the capture boundary.
+- Runtime taps and swipes remain canonical until the centralized ADB input
+  boundary, which scales and clamps them to the last verified native geometry
+  for that ADB target. Capture therefore establishes geometry before action.
 - A broad search region is evidence geometry, not permission to tap its center.
 - Visibility-aware actions use the actual matched bounding box.
 - Moving elements may continue to use match-region centers after a fresh match.
@@ -151,9 +180,35 @@ and control remains in `WAIT` for operator direction.
   that its PID is still alive.
 - Pause blocks every strategy and handler action while allowing observation and
   status reporting.
+- Control synchronization precedes capture, so an ADB outage cannot prevent a
+  Pause acknowledgement or a paused target-handoff request. The watchdog may
+  retry connectivity while paused but may not foreground or restart the game.
+- An acknowledged paused runtime may migrate its localhost ADB target without
+  process replacement. It acquires the new per-target lock first, temporarily
+  selects that endpoint, requires successful connection and supported capture,
+  then releases the old lock and acknowledges the directive. Failure restores
+  the previous target and retains Pause. Existing mission, strategy, and gate
+  state stays in memory throughout.
+- Process startup has an explicit gate policy. `immediate` retains the normal
+  behavior in which the first observed active battle is a new-run boundary.
+  `next_run` adopts the first active/resumable battle and structurally
+  suppresses plan rules tagged `run_initialization` or `session_preflight`.
+  It does not seed their completion variables. Game Over, Tournament Results,
+  or Home `NEW_BATTLE` arms the gates, and the next `RUNNING` observation emits
+  the normal run-start hooks. Home `RESUME_BATTLE` and transient Unknown states
+  preserve the attachment.
 - Process replacement must verify the existing owner and safe UI boundary,
   then verify the replacement PID, refreshed lock, startup log, control
   consumption, and first state report.
+- Remote lifecycle control is limited to the configured
+  `thetower-automation.service` systemd user unit. A start crosses the process
+  boundary under persisted `PAUSED` and may publish `RUNNING` only after the
+  unit is active. A stop persists `STOPPED` before systemd signals the unit.
+  A stopped request may persist one validated localhost ADB TCP port and one
+  validated startup-gate policy for the next start; an acknowledged paused
+  runtime may apply that same restricted port as a live target handoff. Remote
+  requests cannot supply a PID, unit name, executable, host, path, or shell
+  command.
 
 ## Planned evolution
 

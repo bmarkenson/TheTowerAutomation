@@ -8,8 +8,8 @@ Completed and superseded detail remains in the
 ## State coverage and recovery
 
 - [ ] Audit every reachable menu, popup, overlay, and transition.
-  - Exercise each state on a live 1080x1920 device and save representative
-    screenshots/templates where appropriate.
+  - Exercise each state on live supported `1080x1920` and `720x1280` devices
+    and save representative screenshots/templates where appropriate.
   - Ensure expected screens never resolve to `UNKNOWN`.
   - Add regression fixtures for every recognized primary, secondary, menu, and
     overlay state.
@@ -33,6 +33,16 @@ Completed and superseded detail remains in the
 
 ## Detection architecture
 
+- [ ] Harden runtime wave consumption against isolated OCR rollbacks.
+  - Preserve stateless per-frame OCR; do not restore fixed progression-rate,
+    digit-width, or wave-ceiling assumptions.
+  - Add battle-aware or cross-frame confirmation before a lower observation
+    replaces the app's accepted wave, with an explicit new-battle reset path.
+  - Automatically retain the rejected frame, crop, candidate support, and
+    confidence so the underlying visual failure can be reproduced.
+  - Cover the 1070 -> false 80 -> 1270 sequence and genuine new-battle reset in
+    regression tests. The originating anomaly is recorded in
+    [`../observed_issues.md`](../observed_issues.md).
 - [ ] Finish matcher API and policy consolidation after fixture coverage is
   broad enough to make the compatibility decision safely.
   - Migrate remaining `utils.template_matcher` shim callers to `core.matcher`.

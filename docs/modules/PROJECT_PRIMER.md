@@ -169,7 +169,7 @@ tools/*
 utils/*
 - logger.log(msg, level="INFO") — S [fs][log].
 - ocr_utils.preprocess_binary/ocr_text/ocr_digits — S [cv2].
-- previous_wave.get_previous_run_wave(matches_dir="screenshots/matches") — R int|None; S [cv2][fs].
+- previous_wave.get_previous_run_wave(records_dir="logs/battles") — R int|None; S [fs].
 - wave_detector.detect_wave_number_from_image(img, dot_path="_shared_match_regions.wave_number", debug_out=None) — R tuple|None; S [cv2][fs].
   detect_wave_number(...), get_wave_number(...), main(--dot-path --debug-out) — may S [adb][cv2][fs].
 

@@ -32,12 +32,15 @@ Retry through the approved host execution path with a timeout and judge the
 actual result. Do not build a workaround around a false accessibility
 diagnosis.
 
-Project screenshot helpers reject wrong-sized and majority-black decoded
-frames. An incomplete compositor frame triggers one immediate fresh capture;
-if that capture is also incomplete, callers receive no frame. State detection
-and visible-control action matching independently reject incomplete frames, so
-a preserved template strip cannot acquire action authority. Raw manual `adb`
-commands do not provide these guards.
+Project screenshot helpers accept native portrait framebuffers at `1080x1920`
+or `720x1280` and normalize them into the canonical `1080x1920` vision space.
+Runtime taps and swipes are converted back into the observed native geometry at
+the centralized input boundary. Other sizes and majority-black decoded frames
+are rejected. An incomplete compositor frame triggers one immediate fresh
+capture; if that capture is also incomplete, callers receive no frame. State
+detection and visible-control action matching independently reject incomplete
+frames, so a preserved template strip cannot acquire action authority. Raw
+manual `adb` commands do not provide these guards or coordinate conversion.
 
 Project code should use `core.adb_utils` so device selection and shell behavior
 remain centralized. The Stats clipboard report is read with Android's clipboard
@@ -100,6 +103,110 @@ The Game Over handler polls the same control file while waiting. `PAUSED`
 blocks Retry/Home, `STOPPED` exits without a terminal tap, and `WAIT` continues
 to wait for an explicit mode change.
 
+### Native Windows control surface
+
+Install the checked-in user units once. They assume the repository is at
+`~/dev/python/TheTower`; edit the copied units if it is elsewhere:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp deploy/systemd/thetower-automation.service ~/.config/systemd/user/
+cp deploy/systemd/thetower-control-surface.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now thetower-control-surface.service
+```
+
+Do not enable `thetower-automation.service` unless automation should launch
+automatically at Linux login. The control surface can start that fixed service
+paused or running and can completely stop it. Stop persists `STOPPED` before
+systemd signals the process; start persists `PAUSED` until systemd reports the
+unit active.
+
+The Windows controls can select the localhost ADB port, bundled strategy, and
+startup-gate policy used by the next managed start. While automation is
+stopped, select the new values and then start paused or running. The API
+persists the validated settings in
+`~/.config/thetower/automation-adb.env`; the systemd unit reads that file at
+start. An absent file defaults to port `5555`, strategy `farm`, and immediate
+startup gates. Explicit manual `main.py --adb-port PORT --strategy NAME
+--startup-gates POLICY` arguments still win.
+
+When replacing automation during a battle, select **Attach to current battle;
+run gates next battle** before starting. The new process observes and controls
+that existing run normally but suppresses only rules tagged as run
+initialization or session preflight. The suppression survives transient
+Unknown screens and Home `RESUME_BATTLE`. It ends only at Game Over, Tournament
+Results, or verified Home `NEW_BATTLE`; the following battle then performs the
+real gates. Do not select this for a process that is expected to configure a
+newly started battle immediately.
+
+The ADB port can also move without replacing a live automation process or
+rerunning its in-memory startup/session gates:
+
+1. Select indefinite **Pause** and wait until the GUI shows the runtime
+   acknowledgement. A timed pause is not accepted for a target handoff.
+2. Move the emulator, enter its new localhost ADB port, and select **Switch**.
+3. Wait until runtime evidence shows the new active target and the handoff is
+   acknowledged.
+4. Verify the fresh observed screen, then select **Resume** when appropriate.
+
+The runtime acquires ownership of the new target before attempting `adb
+connect`, accepts it only after a supported screenshot succeeds, and releases
+the old target lock only after that validation. A failed handoff remains paused
+and retains the old target. Strategy selection remains stopped-only because it
+changes process-initialized policy rather than transport.
+
+The API also verifies that the installed unit advertises this file through
+systemd. If it reports that the unit does not load the file, copy the current
+checked-in automation unit over the installed user unit and run
+`systemctl --user daemon-reload` before starting automation. At runtime, the
+automation attempts `adb connect localhost:PORT` before its first capture and
+retries a disconnected target without changing the configured port.
+
+Build the native WPF application on Windows with the .NET 8 SDK by running
+`windows\TheTower.ControlSurface\publish.ps1`, or cross-publish the same
+`win-x64` target from Linux with
+`windows/TheTower.ControlSurface/publish-linux.sh` after following the
+[Windows client README](../windows/TheTower.ControlSurface/README.md#publish).
+Linux can compile the Windows-targeted project but cannot run its WPF UI. The
+self-contained single-file output is
+`windows\TheTower.ControlSurface\publish\win-x64\TheTower.ControlSurface.exe`.
+
+The app can own the SSH tunnel itself. Enter the Linux SSH destination
+(`host`, SSH config alias, or `user@host`), keep local and remote ports at 8787,
+and select **Start tunnel**. It launches Windows `ssh.exe` in BatchMode with
+forward-failure and keepalive checks, then connects the API to
+`http://127.0.0.1:8787`. Establish host-key trust once from PowerShell before
+using the non-interactive app tunnel:
+
+```powershell
+ssh <linux-user>@<linux-host>
+```
+
+The application uses the same persistent control file as
+`tools/automation_ctl.py`. The selected state and Game Over mode are visibly
+highlighted; amber indicates that a live runtime has not acknowledged a new
+directive yet. It also shows runtime evidence, independently refreshed and
+level-filterable recent activity, and
+unified Battle/Tournament records; filters by type, Tier, waves, strategy, and
+quality; and displays Coins/hour, Cells/hour, captured perks, resolved settings,
+and preflight evidence. A directive is shown separately from its runtime
+acknowledgement; wait for acknowledgement before assuming a live process is
+paused or resumed.
+
+The Linux service still serves the browser client at
+`http://127.0.0.1:8787/` as a fallback. For a manual tunnel:
+
+```powershell
+ssh -N -L 8787:127.0.0.1:8787 <linux-user>@<linux-host>
+```
+
+The loopback listener plus SSH tunnel is the recommended transport. A direct
+non-loopback bind requires a bearer token in `THETOWER_CONTROL_TOKEN`, but the
+built-in server is plain HTTP and should not be exposed to an untrusted LAN.
+See [`architecture/control_surface.md`](architecture/control_surface.md) for
+the API, authority boundaries, and planned capabilities.
+
 ## Live-action authority
 
 - Never Surrender a pre-existing or operator-owned battle merely to create a
@@ -137,6 +244,9 @@ to wait for an explicit mode change.
 - Runtime actions and state: `logs/actions.log`
 - Persistent control: `logs/automation_ctl.json`
 - Per-battle records: `logs/battles/Battle*.json` and `Battle*.md`
+- Tournament records: `logs/tournaments/Tournament*.json` and `Tournament*.md`
+- During-run Coins/min progression: embedded numeric samples in the applicable
+  completed record (not a separate CSV or screenshot series)
 - Failure/OCR evidence: `screenshots/matches/`
 - Canonical regression fixtures: `test/fixtures/`
 - Actionable backlog: `PENDING_DEVELOPMENT.md`

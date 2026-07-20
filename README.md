@@ -55,6 +55,19 @@ For example:
 .venv/bin/python main.py --adb-port 5555 --strategy farm_t19_experiment
 ```
 
+To replace automation while retaining the battle already in progress, use the
+explicit next-run startup policy:
+
+```bash
+.venv/bin/python main.py --adb-port 5555 --strategy farm_t18 --startup-gates next_run
+```
+
+This attaches to the existing/resumable battle and suppresses only tagged
+new-run initialization and session-preflight rules. Normal automation remains
+active. Game Over, Tournament Results, or verified Home `NEW_BATTLE` evidence
+re-arms the gates for the following battle. The default `immediate` policy
+retains normal first-battle startup gating.
+
 For a gate-free experiment, select the no-strategy mode explicitly:
 
 ```bash
@@ -160,8 +173,8 @@ OCR into one durable record. Each battle produces:
 
 - `logs/battles/Battle*.json` — the authoritative versioned source record,
   including named sections/rows, exact copied text, OCR evidence, ordered
-  perks, strategy/runtime context, resolved run configuration, and derived
-  values;
+  perks, strategy/runtime context, resolved run configuration, derived values,
+  and timestamped/wave-indexed Coins/min progression samples;
 - `logs/battles/Battle*.md` — a human-readable view of the same battle,
   including the resolved loadout policies, presets, and values.
 
@@ -187,6 +200,13 @@ shares, death defies, estimated start time, and any discrepancy between
 final-wave OCR and the runtime wave hint. Game values keep both their original
 text and parsed case-sensitive magnitude (`q`, `Q`, `D`, `aa`, `ab`, and later
 suffixes).
+
+The periodic live status sample remains the source for Coins/min in the
+operational display. Valid numeric samples are accumulated for the current
+battle and folded into its JSON and Markdown record at the terminal boundary,
+so there is no separate per-run Coins CSV or scheduled lifetime-total display
+toggle. An attached replacement process records the portion of the battle it
+observes.
 
 If clipboard acquisition or validation fails, the handler falls back to
 overlapping, guarded OCR viewports of the scrolling More Stats page. Source
@@ -216,6 +236,14 @@ A plain `pause` is indefinite and survives automation restarts. Pass
 `--minutes N` to request a timed pause instead. Its deadline is stored in the
 same authoritative control file, so the supervisor persists `RUNNING` before
 resuming and cannot race against a stale `PAUSED` directive.
+
+A standalone native Windows GUI now exposes these controls, managed automation
+start/stop, runtime health, recent activity, filters, and structured completed
+Battle/Tournament records through a loopback Linux service. It can own the
+passwordless OpenSSH tunnel itself; the browser client remains available as a
+fallback. See the
+[`native Windows control surface`](docs/runtime_operations.md#native-windows-control-surface)
+procedure.
 
 ## Development backlog
 

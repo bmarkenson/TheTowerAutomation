@@ -476,6 +476,47 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   suites passed 105 tests before live validation, the post-correction focused
   suites passed 13 tests, and the full repository suite passed 345 tests.
 
+### 2026-07-20 720p emulator compatibility
+
+- Implementation commit: `15b2b8e`.
+- Added a centralized screen-geometry boundary that accepts native
+  `1080x1920` and `720x1280` captures, records geometry per ADB target,
+  normalizes frames into canonical vision space, and maps canonical taps and
+  swipes back to native device pixels.
+- Calibrated affected Upgrade and Game Over evidence without replacing exact
+  visible-action requirements. Retained fixture round trips and a live 720p
+  terminal capture verified state detection, 24 ordered perks, and all 144
+  clipboard Stats rows.
+- Focused geometry, capture, state, clickmap, and Game Over validation passed
+  72 tests.
+
+### 2026-07-20 structured battle records and classification
+
+- Implementation commit: `78b37d5`.
+- Made structured Battle/Tournament records the canonical completed-run
+  artifact and classified Farm, Tournament, and Milestone from strategy plus
+  terminal evidence. Reports include resolved settings, ordered perks,
+  derived rates, and bounded Coins/min progression; previous-wave lookup now
+  reads the records rather than routine terminal screenshots.
+- Extended the shared case-sensitive Tower-number scale through named
+  magnitudes and `aa` onward. Focused record, classification, and Tournament
+  validation passed 33 tests.
+
+### 2026-07-20 managed native Windows control surface
+
+- Implementation commit: `dd1b0f7`.
+- Added a loopback versioned Linux API, fixed systemd user-service lifecycle,
+  authoritative control acknowledgements, process/PID evidence, persisted
+  strategy and ADB settings, guarded paused live-target handoff, and a
+  next-run startup-gate policy for attaching to an existing battle.
+- Added the self-contained WPF client with an owned passwordless OpenSSH
+  tunnel, resizable operational layout, active-state highlighting, current and
+  completed battle telemetry, report filters, runtime evidence, independent
+  activity filtering, and selectable/copyable log rows. The browser client
+  remains available as a fallback.
+- The full Python suite passed 431 tests, and the Linux publisher produced a
+  self-contained `win-x64` executable with Microsoft's WindowsDesktop SDK.
+
 ---
 
 ## 📘 Documentation

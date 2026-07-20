@@ -11,6 +11,149 @@ for a matching recurrence or historical investigation.
 
 ## Open
 
+### Coins/min OCR dropped the magnitude suffix from quadrillion readings
+
+- **Observed:** 2026-07-20 at 09:23:29 during an active Farm battle, with an
+  earlier matching event at 08:47:41.
+- **Symptom:** The runtime logged an implausible drop from `36.7q` to `37.19`
+  (roughly one quadrillion-fold) even though the adjacent accepted readings
+  progressed normally from `36.7q` at 09:22:28 to `40.7q` at 09:24:33.
+- **Evidence:** `logs/actions.log` preserves the three consecutive status
+  samples and the rejected OCR confidence of 75.0. The parsed bare value is
+  consistent with OCR omitting the trailing `q`, making the intended reading
+  `37.19q`; the earlier event similarly read `28.19` between quadrillion-scale
+  samples. Static inspection also found that live parsing stopped at `Q` even
+  though battle reports already support the game's later case-sensitive
+  suffixes, and `/min` cleanup could consume an uppercase `M` suffix.
+- **Safety response:** The existing plausibility guard retained the prior
+  trusted `36.7q` rate, and no gameplay action depends on the rejected value.
+- **Status:** Fixed in `dd1b0f7`. The live parser reuses the complete
+  case-sensitive Tower-number scale, preserves `M` before `/min`, and recovers
+  a missing suffix only when the reconstructed rate fits the same
+  scale-independent plausibility window. Regression coverage is in
+  `test/test_coin_detector.py`. Keep this issue open until the repair is
+  observed in the running automation.
+
+### Live ADB target move could not be applied by a paused runtime
+
+- **Observed:** 2026-07-20 after BlueStacks was moved while the managed
+  automation process was still running.
+- **Symptom:** Saving the new GUI port changed only the next-start environment
+  file. Pause/Resume did not recreate the automation process, so its
+  process-local `ADB_DEVICE` and target lock remained on the former port.
+  After that target became unreachable, the main loop also failed to
+  acknowledge `PAUSED` because it synchronized control only after a successful
+  screenshot.
+- **Evidence:** Fresh control, systemd, lock, and log inspection found one live
+  owner locked to `localhost:5565`, an empty `adb devices` result, repeated
+  capture failures, and no current Pause acknowledgement. The watchdog then
+  treated failed ADB process queries as evidence that the game was absent and
+  attempted its restart path even though no device was reachable.
+- **Safety response:** The operator-owned run remains under the persisted Pause;
+  no Resume, Surrender, process replacement, or device input was performed.
+- **Status:** Fixed in `dd1b0f7`. Control now synchronizes before capture, the
+  watchdog fails closed on lost ADB and remains action-free while paused, and
+  an acknowledged paused runtime can perform a guarded live-target handoff.
+  The handoff acquires the new target lock, connects and validates a screenshot,
+  then releases the old lock; failure retains the old target and Pause.
+  Regression coverage is in
+  `test/test_automation_control.py`, `test/test_automation_process.py`,
+  `test/test_single_instance.py`, and `test/test_watchdog.py`. Keep this issue
+  open until the updated Linux runtime/API and Windows client are deployed and
+  a real emulator move is verified.
+
+### Wave OCR dropped the leading digits from wave 1180
+
+- **Observed:** 2026-07-19 at 20:40:18 during an active Tier 18 battle.
+- **Symptom:** The runtime reported wave 80 between wave 1070 at 20:39:11 and
+  wave 1270 at 20:41:19. The surrounding progression and retained suffix make
+  wave 1180 the expected reading.
+- **Evidence:** `logs/actions.log` and
+  `logs/coins_per_min_20260719-202523.csv` retain the three consecutive status
+  observations. A wave result requires agreement from at least two processed
+  versions of the same configured crop, so the accepted 80 was a correlated
+  omission across variants rather than a lone OCR candidate. The app then
+  replaced its last accepted wave with every non-null per-frame result. The
+  source frame was not retained because wave sample capture was not enabled.
+- **Safety response:** No runtime action was logged around the bad observation,
+  and the next status recovered to 1270 without intervention. Diagnosis used
+  read-only process, ADB-state, and screenshot inspection; no game action was
+  taken.
+- **Status:** Unresolved. The exact visual trigger cannot be reconstructed
+  without the source frame. Any repair must reject or separately confirm a
+  single-frame rollback without restoring the stale fixed-rate hint that was
+  removed in `b945118`, and should retain evidence automatically when the
+  continuity check rejects a result.
+
+### Saved GUI ADB port was ignored by an outdated installed systemd unit
+
+- **Observed:** 2026-07-19 after the Windows control surface saved port `5565`
+  and started the managed automation service.
+- **Symptom:** Recent Activity still logged `ADB target = localhost:5555` and
+  attempted `adb connect localhost:5555` even though the GUI and API reported
+  that `localhost:5565` had been configured.
+- **Evidence:** The API audit recorded two successful `5565` configuration
+  requests, and `~/.config/thetower/automation-adb.env` contained
+  `THETOWER_ADB_PORT=5565`. The installed automation unit lacked its
+  `EnvironmentFile` directive, while the checked-in unit contained it, so
+  `main.py` received no managed port and used its documented `5555` default.
+- **Safety response:** The failed process was completely stopped. The installed
+  unit was replaced while inactive and systemd was reloaded; automation was not
+  restarted. A direct `adb connect localhost:5565` then succeeded and
+  `get-state` returned `device`.
+- **Status:** The installed unit now advertises the correct managed environment
+  file. Commit `dd1b0f7` makes the API expose and reject this deployment
+  mismatch rather than silently accepting a port it cannot deliver, and the
+  Windows runtime detail shows the installed-unit evidence. Keep this issue
+  open until the next managed start confirms `ADB target = localhost:5565`.
+
+### Tier 18 Farm ended at wave 2644 without completed session preflight
+
+- **Observed:** 2026-07-19 while live-validating the 720p compatibility fix.
+  The run ended at wave 2644 even though its prior highest wave was 9355 and the
+  two preceding complete Tier 18 Farm records ended at waves 9137 and 9355.
+- **Symptom:** The Game Stats screen reported `Killed By Scatter` and 14 Death
+  Defies after only 1h 14m 45s of real battle time.
+- **Evidence:** The battle initialized EHLS/EALS and target priority normally,
+  but session preflight timed out at wave 80 after reaching
+  `UPGRADE_DETAIL`; its evidence never became valid. The process was stopped
+  shortly afterward. Its later 18:49 restart rejected every 720p frame until
+  the resolution work, so no subsequent runtime validation existed. The valid
+  record `Battle20260719T194741-0700` captured 24 perks versus 28 in each of the
+  preceding long runs; its defensive perks were also less developed, but that
+  may be an effect of the early ending rather than its cause.
+- **Safety response:** Retry was not selected. The fixed detector captured a
+  complete 144-row report and parked the runtime on Game Over with mode `WAIT`.
+- **Status:** Exact gameplay cause unresolved. The evidence establishes that
+  the battle ran without a completed configuration preflight and through a long
+  automation outage; it does not distinguish an unverified loadout from perk
+  ordering/RNG or another gameplay cause.
+
+### Native control polling reset pending mode selections and delayed activity
+
+- **Observed:** 2026-07-19 in the Windows control surface. The operator reported
+  that selecting `HOME` repeatedly returned to `RETRY`, and Recent Activity
+  appeared substantially behind the live action log.
+- **Symptom:** A five-second status refresh assigned the server's current mode
+  back into the editable combo box, so it could replace a locally selected mode
+  before **Set mode** was clicked. The same refresh awaited status, the complete
+  battle list, and activity together before rendering any of them, coupling log
+  visibility to the slowest request.
+- **Evidence:** Static inspection found the unconditional selection assignment
+  in `MainWindow.RenderStatus` and the three-request `Task.WhenAll` in its shared
+  refresh path. The Linux mode writer itself preserves `HOME`; the regression in
+  `test/test_control_surface.py` verifies it remains `HOME` on a later status
+  read. A related acknowledgement bug compared an unchanged mode against a
+  later state-update timestamp, which could falsely display it as pending.
+- **Safety response:** No direct taps or process actions were inferred from the
+  display. The persistent control file remained authoritative throughout.
+- **Status:** Fixed in `dd1b0f7`. Mode controls apply immediately, use
+  field-specific acknowledgement timestamps, and activity has an independent
+  one-second refresh with server-side level filters. The WPF client also holds
+  selected rows long enough to copy them. The full 431-test Python suite passes
+  and the self-contained Windows application publishes on Linux; keep this
+  issue open until the operator verifies the updated client on Windows.
+
 ### Direct ADB screenshots intermittently returned incomplete black frames
 
 - **Observed:** 2026-07-16 while preserving a natural Game Over boundary and
@@ -28,13 +171,12 @@ for a matching recurrence or historical investigation.
   project state detection.
 - **Status:** Source unresolved. A retained-fixture reconstruction confirmed
   that narrow rendered strips can preserve actionable Game Over state and Home
-  control matches. The current working tree closes that safety gap: direct ADB
-  capture rejects majority-black frames and retries once, while semantic state
-  and visible-control action matching independently fail closed. Regression
-  coverage is in `test/test_incomplete_frame_authority.py` and
-  `test/test_ss_capture.py`. Keep the issue open until the fixing commit exists
-  and the missing original corrupted evidence is recaptured or its loss is
-  otherwise resolved.
+  control matches. Commits `194e383` and `15b2b8e` close the safety gap: direct
+  ADB capture rejects majority-black frames and retries once, while semantic
+  state and visible-control action matching independently fail closed.
+  Regression coverage is in `test/test_incomplete_frame_authority.py` and
+  `test/test_ss_capture.py`. Keep the issue open until the missing original
+  corrupted evidence is recaptured or its loss is otherwise resolved.
 
 ### Automation owner exited without a clean shutdown record
 
