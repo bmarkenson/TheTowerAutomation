@@ -28,13 +28,12 @@ for a matching recurrence or historical investigation.
   indefinite Pause and authoritative no-battle Workshop, the two fixed Linux
   services were restarted to load it. Pause and `localhost:5555` were
   preserved, the emulator was not tapped, and no battle was started or altered.
-- **Status:** A working-tree repair adds an allowlisted, versioned strategy
+- **Status:** Commit `86b5cec` adds an allowlisted, versioned strategy
   directive; boundary-aware runtime adoption; current/pending acknowledgement;
   immediate WPF acceptance feedback; and focused regression coverage. A Linux
   self-contained WPF publish succeeds, and the restarted runtime freshly
   reports `WORKSHOP/PAUSED` under the replacement PID. Keep this issue open
-  until the operator verifies the native behavior on Windows and a fixing
-  commit is recorded.
+  until the operator verifies the native behavior on Windows.
 
 ### A second native-client launch produced a misleading runtime prompt
 
@@ -52,7 +51,7 @@ for a matching recurrence or historical investigation.
   rather than starting another WPF process remains unconfirmed.
 - **Safety response:** Diagnosis and repair are Windows-client-only; no Linux
   automation control, process, ADB target, or emulator state was changed.
-- **Status:** A working-tree repair now uses a per-session named mutex. A second
+- **Status:** Commit `86b5cec` uses a per-session named mutex. A second
   managed launch restores and foregrounds the existing main window, falling back
   to a taskbar flash or an informational message. Keep this issue open until the
   operator verifies the exact SMB second-launch path; a prompt that occurs before
@@ -77,7 +76,7 @@ for a matching recurrence or historical investigation.
   collection-view refresh.
 - **Safety response:** Investigation and repair were client-only. No automation
   control, process, ADB target, or emulator state was changed.
-- **Status:** A revised working-tree repair removes the new in-place
+- **Status:** Commit `86b5cec` removes the new in-place
   reconciliation, retains the previously working population path only for
   changed responses, and defers updates while a filter popup is open. It also
   contains window-construction failures at the button boundary, enlarges the
@@ -109,11 +108,11 @@ for a matching recurrence or historical investigation.
   the reward handler already accepts a verified open side menu.
 - **Safety response:** Diagnosis used read-only capture and process inspection.
   The active battle was not paused, tapped, restarted, exited, or Surrendered.
-- **Status:** Cause confirmed and a working-tree repair now selects badge
+- **Status:** Cause confirmed and commit `2b4315d` selects badge
   evidence according to the verified `MENU_OPEN`/`MENU_CLOSED` overlay.
   Regression coverage is in `test/test_mission_reward_handler.py`. Keep this
-  issue open until the repair has a fixing commit and the updated runtime
-  claims a reward from an open in-battle menu.
+  issue open until the updated runtime claims a reward from an open in-battle
+  menu.
 
 ### Coins/min OCR dropped the magnitude suffix from quadrillion readings
 

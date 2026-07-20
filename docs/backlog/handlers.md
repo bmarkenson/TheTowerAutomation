@@ -7,7 +7,7 @@ completion evidence remains in the
 ## Mission rewards
 
 - [ ] Deploy and live-verify open-menu Mission reward scheduling at a safe
-  process boundary. The working-tree repair uses section badges when the
+  process boundary. Commit `2b4315d` uses section badges when the
   in-battle menu is verified open and retains the attention-dot trigger when it
   is verified closed.
 
