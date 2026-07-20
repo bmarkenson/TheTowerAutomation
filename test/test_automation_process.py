@@ -1,0 +1,592 @@
+from __future__ import annotations
+
+import fcntl
+from datetime import datetime
+import json
+import os
+from pathlib import Path
+import subprocess
+import stat
+
+import pytest
+
+from core.automation_process import (
+    AutomationProcessError,
+    SystemdAutomationManager,
+)
+from core.app_setup import parse_args
+from core.control_surface import ControlSurfaceRequestError, ControlSurfaceService
+
+
+class FakeManager:
+    def __init__(self, *, active: bool = False, fail_start: bool = False) -> None:
+        self.active = active
+        self.fail_start = fail_start
+        self.adb_port = 5555
+        self.strategy = "farm"
+        self.startup_gate_policy = "immediate"
+        self.calls: list[str] = []
+        self.on_start = None
+        self.on_stop = None
+
+    def status(self):
+        return {
+            "manager": "fake",
+            "service": "thetower-automation.service",
+            "available": True,
+            "active": self.active,
+            "active_state": "active" if self.active else "inactive",
+            "sub_state": "running" if self.active else "dead",
+            "main_pid": 1234 if self.active else None,
+            "adb_port": self.adb_port,
+            "adb_target": f"localhost:{self.adb_port}",
+            "strategy": self.strategy,
+            "startup_gate_policy": self.startup_gate_policy,
+            "error": None,
+        }
+
+    def set_adb_port(self, port):
+        self.calls.append(f"set_adb_port:{port}")
+        if self.active:
+            raise AutomationProcessError(
+                "Completely stop automation before changing the ADB port"
+            )
+        self.adb_port = port
+        return self.status()
+
+    def persist_adb_port(self, port):
+        self.calls.append(f"persist_adb_port:{port}")
+        self.adb_port = port
+        return self.status()
+
+    def set_strategy(self, strategy):
+        self.calls.append(f"set_strategy:{strategy}")
+        if self.active:
+            raise AutomationProcessError(
+                "Completely stop automation before changing the strategy"
+            )
+        if strategy not in {
+            "farm_t18",
+            "farm_t19_experiment",
+            "tournament",
+            "none",
+        }:
+            raise AutomationProcessError("invalid strategy")
+        self.strategy = strategy
+        return self.status()
+
+    def set_startup_gate_policy(self, policy):
+        self.calls.append(f"set_startup_gate_policy:{policy}")
+        if self.active:
+            raise AutomationProcessError(
+                "Completely stop automation before changing startup gates"
+            )
+        if policy not in {"immediate", "next_run"}:
+            raise AutomationProcessError("invalid startup gate policy")
+        self.startup_gate_policy = policy
+        return self.status()
+
+    def start(self):
+        self.calls.append("start")
+        if self.on_start:
+            self.on_start()
+        if self.fail_start:
+            raise AutomationProcessError("simulated start failure")
+        self.active = True
+        return self.status()
+
+    def stop(self):
+        self.calls.append("stop")
+        if self.on_stop:
+            self.on_stop()
+        self.active = False
+        return self.status()
+
+
+def _service(tmp_path, manager=None):
+    return ControlSurfaceService(
+        repository_root=tmp_path,
+        process_manager=manager,
+    )
+
+
+def test_runtime_strategy_defaults_from_managed_environment(monkeypatch):
+    monkeypatch.setenv("THETOWER_STRATEGY", "tournament")
+
+    assert parse_args([]).strategy == "tournament"
+
+
+def test_startup_gate_policy_defaults_from_managed_environment(monkeypatch):
+    monkeypatch.setenv("THETOWER_STARTUP_GATES", "next_run")
+
+    assert parse_args([]).startup_gates == "next_run"
+
+
+def test_systemd_manager_uses_only_the_fixed_named_service(tmp_path):
+    active = False
+    commands: list[list[str]] = []
+
+    def runner(command, **kwargs):
+        nonlocal active
+        commands.append(command)
+        assert kwargs == {
+            "capture_output": True,
+            "text": True,
+            "timeout": 15.0,
+            "check": False,
+        }
+        if command[2] == "start":
+            active = True
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if command[2] == "stop":
+            active = False
+            return subprocess.CompletedProcess(command, 0, "", "")
+        assert command[2] == "show"
+        output = (
+            "LoadState=loaded\n"
+            f"ActiveState={'active' if active else 'inactive'}\n"
+            f"SubState={'running' if active else 'dead'}\n"
+            "UnitFileState=enabled\n"
+            f"MainPID={4321 if active else 0}\n"
+            "ExecMainStatus=0\n"
+            f"EnvironmentFiles={tmp_path / 'automation-adb.env'} "
+            "(ignore_errors=yes)\n"
+        )
+        return subprocess.CompletedProcess(command, 0, output, "")
+
+    manager = SystemdAutomationManager(
+        runner=runner,
+        adb_environment_file=tmp_path / "automation-adb.env",
+    )
+    assert not manager.status()["active"]
+    assert manager.start()["main_pid"] == 4321
+    assert manager.stop()["active"] is False
+    assert all(command[-1] == "thetower-automation.service" for command in commands)
+    assert commands[1] == [
+        "systemctl",
+        "--user",
+        "start",
+        "thetower-automation.service",
+    ]
+
+
+def test_systemd_manager_persists_stopped_adb_target_atomically(tmp_path):
+    environment_file = tmp_path / "config" / "automation-adb.env"
+
+    def runner(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            "LoadState=loaded\nActiveState=inactive\nSubState=dead\n"
+            "UnitFileState=disabled\nMainPID=0\nExecMainStatus=0\n"
+            f"EnvironmentFiles={environment_file} (ignore_errors=yes)\n",
+            "",
+        )
+
+    manager = SystemdAutomationManager(
+        runner=runner,
+        adb_environment_file=environment_file,
+    )
+
+    assert manager.status()["adb_target"] == "localhost:5555"
+    status = manager.set_adb_port(5565)
+
+    assert environment_file.read_text(encoding="utf-8") == (
+        "THETOWER_ADB_PORT=5565\n"
+        "THETOWER_STRATEGY=farm\n"
+        "THETOWER_STARTUP_GATES=immediate\n"
+    )
+    assert stat.S_IMODE(environment_file.stat().st_mode) == 0o600
+    assert status["adb_port"] == 5565
+    assert status["adb_target"] == "localhost:5565"
+    assert status["adb_port_source"] == "environment-file"
+
+
+def test_systemd_manager_persists_strategy_and_preserves_adb_port(tmp_path):
+    environment_file = tmp_path / "config" / "automation-adb.env"
+    environment_file.parent.mkdir(parents=True)
+    environment_file.write_text(
+        "THETOWER_ADB_PORT=5565\nTHETOWER_STRATEGY=farm_t18\n",
+        encoding="utf-8",
+    )
+
+    def runner(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            "LoadState=loaded\nActiveState=inactive\nSubState=dead\n"
+            "UnitFileState=disabled\nMainPID=0\nExecMainStatus=0\n"
+            f"EnvironmentFiles={environment_file} (ignore_errors=yes)\n",
+            "",
+        )
+
+    manager = SystemdAutomationManager(
+        runner=runner,
+        adb_environment_file=environment_file,
+    )
+
+    status = manager.set_strategy("tournament")
+
+    assert environment_file.read_text(encoding="utf-8") == (
+        "THETOWER_ADB_PORT=5565\n"
+        "THETOWER_STRATEGY=tournament\n"
+        "THETOWER_STARTUP_GATES=immediate\n"
+    )
+    assert status["adb_port"] == 5565
+
+
+def test_systemd_manager_can_persist_live_handoff_port_while_active(tmp_path):
+    environment_file = tmp_path / "automation-adb.env"
+    environment_file.write_text(
+        "THETOWER_ADB_PORT=5565\nTHETOWER_STRATEGY=tournament\n",
+        encoding="utf-8",
+    )
+
+    def runner(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            "LoadState=loaded\nActiveState=active\nSubState=running\n"
+            "UnitFileState=enabled\nMainPID=1234\nExecMainStatus=0\n"
+            f"EnvironmentFiles={environment_file} (ignore_errors=yes)\n",
+            "",
+        )
+
+    manager = SystemdAutomationManager(
+        runner=runner,
+        adb_environment_file=environment_file,
+    )
+
+    status = manager.persist_adb_port(5575)
+
+    assert status["active"] is True
+    assert status["adb_port"] == 5575
+    assert status["adb_target"] == "localhost:5575"
+    assert status["strategy"] == "tournament"
+    assert status["strategy_source"] == "environment-file"
+
+
+def test_systemd_manager_persists_startup_gate_policy_and_other_settings(tmp_path):
+    environment_file = tmp_path / "automation-adb.env"
+    environment_file.write_text(
+        "THETOWER_ADB_PORT=5565\nTHETOWER_STRATEGY=tournament\n",
+        encoding="utf-8",
+    )
+
+    def runner(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            "LoadState=loaded\nActiveState=inactive\nSubState=dead\n"
+            "UnitFileState=enabled\nMainPID=0\nExecMainStatus=0\n"
+            f"EnvironmentFiles={environment_file} (ignore_errors=yes)\n",
+            "",
+        )
+
+    manager = SystemdAutomationManager(
+        runner=runner,
+        adb_environment_file=environment_file,
+    )
+
+    status = manager.set_startup_gate_policy("next_run")
+
+    assert environment_file.read_text(encoding="utf-8") == (
+        "THETOWER_ADB_PORT=5565\n"
+        "THETOWER_STRATEGY=tournament\n"
+        "THETOWER_STARTUP_GATES=next_run\n"
+    )
+    assert status["startup_gate_policy"] == "next_run"
+    assert status["startup_gate_policy_source"] == "environment-file"
+
+
+def test_systemd_manager_rejects_adb_change_while_active(tmp_path):
+    environment_file = tmp_path / "automation-adb.env"
+
+    def runner(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            "LoadState=loaded\nActiveState=active\nSubState=running\n"
+            "UnitFileState=disabled\nMainPID=1234\nExecMainStatus=0\n"
+            f"EnvironmentFiles={environment_file} (ignore_errors=yes)\n",
+            "",
+        )
+
+    manager = SystemdAutomationManager(
+        runner=runner,
+        adb_environment_file=environment_file,
+    )
+
+    with pytest.raises(AutomationProcessError, match="Completely stop"):
+        manager.set_adb_port(5565)
+
+
+def test_systemd_manager_reports_installed_unit_missing_managed_environment(tmp_path):
+    environment_file = tmp_path / "automation-adb.env"
+
+    def runner(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            "LoadState=loaded\nActiveState=inactive\nSubState=dead\n"
+            "UnitFileState=disabled\nMainPID=0\nExecMainStatus=0\n",
+            "",
+        )
+
+    manager = SystemdAutomationManager(
+        runner=runner,
+        adb_environment_file=environment_file,
+    )
+
+    status = manager.status()
+
+    assert status["automation_environment_file_loaded"] is False
+    assert "does not load" in status["adb_port_error"]
+    with pytest.raises(AutomationProcessError, match="does not load"):
+        manager.set_adb_port(5565)
+
+
+def test_checked_in_systemd_unit_loads_managed_automation_environment():
+    repository_root = Path(__file__).resolve().parents[1]
+    unit = (
+        repository_root / "deploy" / "systemd" / "thetower-automation.service"
+    ).read_text(encoding="utf-8")
+
+    assert "EnvironmentFile=-%h/.config/thetower/automation-adb.env" in unit
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["", "automation", "../evil.service", "one.service;reboot", "/x.service"],
+)
+def test_systemd_manager_rejects_non_unit_names(name):
+    with pytest.raises(ValueError):
+        SystemdAutomationManager(name)
+
+
+def test_start_running_crosses_new_process_boundary_paused(tmp_path):
+    manager = FakeManager()
+    service = _service(tmp_path, manager)
+    manager.on_start = lambda: (
+        service.control_store.read()["state"] == "PAUSED"
+        or pytest.fail("service was not paused before process start")
+    )
+
+    response = service.apply_process_action(
+        {"action": "start", "run_state": "RUNNING"}
+    )
+
+    assert manager.calls == ["start"]
+    assert service.control_store.read()["state"] == "RUNNING"
+    assert response["process_service"]["active"]
+    assert response["request"] == {"accepted": True, "action": "start"}
+
+
+def test_start_can_attach_current_battle_and_persists_policy_before_start(tmp_path):
+    manager = FakeManager()
+    service = _service(tmp_path, manager)
+    manager.on_start = lambda: (
+        manager.startup_gate_policy == "next_run"
+        or pytest.fail("startup gate policy was not persisted before start")
+    )
+
+    response = service.apply_process_action(
+        {
+            "action": "start",
+            "run_state": "RUNNING",
+            "startup_gate_policy": "next_run",
+        }
+    )
+
+    assert manager.calls == ["set_startup_gate_policy:next_run", "start"]
+    assert response["process_service"]["startup_gate_policy"] == "next_run"
+    assert response["request"] == {
+        "accepted": True,
+        "action": "start",
+        "startup_gate_policy": "next_run",
+    }
+
+
+@pytest.mark.parametrize("policy", ["", "later", 1, True])
+def test_start_rejects_invalid_startup_gate_policy(tmp_path, policy):
+    manager = FakeManager()
+
+    with pytest.raises(ControlSurfaceRequestError):
+        _service(tmp_path, manager).apply_process_action(
+            {
+                "action": "start",
+                "run_state": "RUNNING",
+                "startup_gate_policy": policy,
+            }
+        )
+
+    assert manager.calls == []
+
+
+def test_start_paused_and_complete_stop_preserve_safe_ordering(tmp_path):
+    manager = FakeManager()
+    service = _service(tmp_path, manager)
+    service.apply_process_action({"action": "start", "run_state": "PAUSED"})
+    assert service.control_store.read()["state"] == "PAUSED"
+
+    manager.on_stop = lambda: (
+        service.control_store.read()["state"] == "STOPPED"
+        or pytest.fail("STOPPED was not persisted before systemd stop")
+    )
+    response = service.apply_process_action({"action": "stop"})
+
+    assert manager.calls == ["start", "stop"]
+    assert service.control_store.read()["state"] == "STOPPED"
+    assert response["process_service"]["active"] is False
+
+
+def test_start_failure_falls_back_to_stopped_intent(tmp_path):
+    manager = FakeManager(fail_start=True)
+    service = _service(tmp_path, manager)
+
+    with pytest.raises(ControlSurfaceRequestError) as exc_info:
+        service.apply_process_action({"action": "start", "run_state": "RUNNING"})
+
+    assert exc_info.value.status == 503
+    assert service.control_store.read()["state"] == "STOPPED"
+
+
+def test_control_surface_configures_adb_port_only_while_stopped(tmp_path):
+    manager = FakeManager()
+    service = _service(tmp_path, manager)
+
+    response = service.apply_process_action(
+        {"action": "set_adb_port", "adb_port": 5565}
+    )
+
+    assert manager.calls == ["set_adb_port:5565"]
+    assert response["process_service"]["adb_target"] == "localhost:5565"
+    assert response["request"] == {
+        "accepted": True,
+        "action": "set_adb_port",
+        "adb_port": 5565,
+    }
+
+    manager.active = True
+    with pytest.raises(ControlSurfaceRequestError) as exc_info:
+        service.apply_process_action(
+            {"action": "set_adb_port", "adb_port": 5575}
+        )
+    assert exc_info.value.status == 409
+
+
+def test_control_surface_requests_live_adb_handoff_only_after_pause_ack(tmp_path):
+    manager = FakeManager(active=True)
+    service = _service(tmp_path, manager)
+    service.apply_control({"action": "pause"})
+    requested_at = service.control_store.read()["state_updated_at"]
+    timestamp = datetime.fromisoformat(requested_at).strftime("%Y-%m-%d %H:%M:%S")
+    service.action_log.parent.mkdir(parents=True, exist_ok=True)
+    with service.action_log.open("a", encoding="utf-8") as handle:
+        handle.write(
+            f"[INFO {timestamp}] [CTRL] State set to PAUSED via control file\n"
+        )
+
+    response = service.apply_process_action(
+        {"action": "set_adb_port", "adb_port": 5575}
+    )
+
+    assert manager.calls == ["persist_adb_port:5575"]
+    assert service.control_store.read()["adb_port"] == 5575
+    assert response["request"]["adb_port"] == 5575
+
+
+def test_control_surface_rejects_live_handoff_under_timed_pause(tmp_path):
+    manager = FakeManager(active=True)
+    service = _service(tmp_path, manager)
+    service.apply_control({"action": "pause", "minutes": 15})
+    requested_at = service.control_store.read()["state_updated_at"]
+    timestamp = datetime.fromisoformat(requested_at).strftime("%Y-%m-%d %H:%M:%S")
+    service.action_log.parent.mkdir(parents=True, exist_ok=True)
+    with service.action_log.open("a", encoding="utf-8") as handle:
+        handle.write(
+            f"[INFO {timestamp}] [CTRL] State set to PAUSED via control file\n"
+        )
+
+    with pytest.raises(ControlSurfaceRequestError, match="Indefinitely pause"):
+        service.apply_process_action(
+            {"action": "set_adb_port", "adb_port": 5575}
+        )
+
+    assert manager.calls == []
+
+
+def test_control_surface_configures_strategy_only_while_stopped(tmp_path):
+    manager = FakeManager()
+    service = _service(tmp_path, manager)
+
+    response = service.apply_process_action(
+        {"action": "set_strategy", "strategy": "tournament"}
+    )
+
+    assert manager.calls == ["set_strategy:tournament"]
+    assert response["process_service"]["strategy"] == "tournament"
+    assert response["request"] == {
+        "accepted": True,
+        "action": "set_strategy",
+        "strategy": "tournament",
+    }
+
+    manager.active = True
+    with pytest.raises(ControlSurfaceRequestError) as exc_info:
+        service.apply_process_action(
+            {"action": "set_strategy", "strategy": "farm_t18"}
+        )
+    assert exc_info.value.status == 409
+
+
+@pytest.mark.parametrize("strategy", [None, "", "unknown", 123])
+def test_control_surface_rejects_invalid_strategy(tmp_path, strategy):
+    manager = FakeManager()
+    with pytest.raises(ControlSurfaceRequestError):
+        _service(tmp_path, manager).apply_process_action(
+            {"action": "set_strategy", "strategy": strategy}
+        )
+
+
+def test_control_surface_rejects_adb_change_for_active_unmanaged_runtime(tmp_path):
+    manager = FakeManager()
+    service = _service(tmp_path, manager)
+    lock_path = tmp_path / "logs" / "automation-localhost_5565.lock"
+    lock_path.parent.mkdir(parents=True)
+    lock_path.write_text(
+        json.dumps(
+            {
+                "pid": os.getpid(),
+                "target": "localhost:5565",
+                "started_at": "2026-07-19T17:00:00-07:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with lock_path.open("r", encoding="utf-8") as lock_handle:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(ControlSurfaceRequestError) as exc_info:
+            service.apply_process_action(
+                {"action": "set_adb_port", "adb_port": 5575}
+            )
+
+    assert exc_info.value.status == 409
+    assert manager.calls == []
+
+
+@pytest.mark.parametrize("port", [True, 0, 65536, "5565", 55.5])
+def test_control_surface_rejects_invalid_adb_port(tmp_path, port):
+    manager = FakeManager()
+    with pytest.raises(ControlSurfaceRequestError):
+        _service(tmp_path, manager).apply_process_action(
+            {"action": "set_adb_port", "adb_port": port}
+        )
+    assert manager.calls == []
+
+
+def test_process_action_requires_a_configured_manager(tmp_path):
+    with pytest.raises(ControlSurfaceRequestError) as exc_info:
+        _service(tmp_path).apply_process_action({"action": "start"})
+    assert exc_info.value.status == 503

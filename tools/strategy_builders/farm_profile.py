@@ -88,10 +88,21 @@ def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
         target_priority["order"] = copy.deepcopy(target_policy["resolved"])
 
     run_configuration = {
-        "schema_version": 1,
+        "schema_version": 2,
         "profile": "farm",
         "profile_version": int(profile.get("schema_version") or 1),
         "tier": tier,
+        "settings": {
+            key: copy.deepcopy(requirements[key])
+            for key in (
+                "cards_deck",
+                "workshop_preset",
+                "bots_preset",
+                "guardian_chips",
+                "auto_pick_perks",
+                "ultimate_weapons",
+            )
+        },
         "loadout": {
             "modules": module_policy,
             "damage_slider": damage_policy,

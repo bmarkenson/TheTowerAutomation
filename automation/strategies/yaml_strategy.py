@@ -247,6 +247,12 @@ class YamlStrategy(BaseStrategy):
         last_fire: Dict[str, float] = ctx.data.setdefault("rule_last_fire", {})
 
         for idx, rule in enumerate(self.rules):
+            gate_phase = str(rule.get("gate_phase") or "").strip()
+            if (
+                ctx.data.get("startup_gates_deferred")
+                and gate_phase in {"run_initialization", "session_preflight"}
+            ):
+                continue
             when = dict(rule.get("when") or {})
             if "assert" in rule:
                 when["assert"] = rule["assert"]

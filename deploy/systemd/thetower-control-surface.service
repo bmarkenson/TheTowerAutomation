@@ -1,0 +1,16 @@
+[Unit]
+Description=TheTower loopback control-surface API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/dev/python/TheTower
+EnvironmentFile=-%h/.config/thetower/control-surface.env
+ExecStart=%h/dev/python/TheTower/.venv/bin/python %h/dev/python/TheTower/tools/control_surface_server.py --bind 127.0.0.1 --port 8787 --automation-service thetower-automation.service
+Restart=on-failure
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

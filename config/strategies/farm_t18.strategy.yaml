@@ -182,6 +182,7 @@ rules:
     var: damage_slider_observation
     value: {}
 - name: initialise_fast_loop
+  gate_phase: run_initialization
   when:
     state: RUNNING
   assert:
@@ -254,6 +255,7 @@ rules:
     var: damage_slider_observation
     value: {}
 - name: disable_fast_loop
+  gate_phase: run_initialization
   when:
     state: RUNNING
   assert:
@@ -268,6 +270,7 @@ rules:
     var: loop_sleep_override_sec
     value: 0.0
 - name: initialize_level_skips_fast
+  gate_phase: run_initialization
   when:
     state: RUNNING
   assert:
@@ -277,6 +280,7 @@ rules:
   do:
   - type: level_skip_initialize
 - name: enforce_damage_slider
+  gate_phase: run_initialization
   when:
     state: RUNNING
   assert:
@@ -289,6 +293,7 @@ rules:
     mode: enforce
     value: 1E-22%
 - name: ensure_target_priority
+  gate_phase: run_initialization
   when:
     state: RUNNING
   assert:
@@ -310,6 +315,7 @@ rules:
     - Fast
     - Basic
 - name: validate_gc_session_preflight
+  gate_phase: session_preflight
   when:
     state: RUNNING
   assert:
@@ -364,10 +370,40 @@ rules:
         core_primary: Multiverse Nexus
         core_assist: Dimension Core
 run_configuration:
-  schema_version: 1
+  schema_version: 2
   profile: farm
   profile_version: 1
   tier: 18
+  settings:
+    cards_deck: Farm
+    workshop_preset: Farm
+    bots_preset: Farm
+    guardian_chips:
+    - Fetch
+    - Summon
+    - Scout
+    auto_pick_perks: true
+    ultimate_weapons:
+      Chain Lightning:
+        primary: 'on'
+      Smart Missiles:
+        primary: 'on'
+      Death Wave:
+        primary: 'on'
+      Chrono Field:
+        primary: 'on'
+      Inner Land Mines:
+        primary: 'on'
+      Golden Tower:
+        primary: 'on'
+      Poison Swamp:
+        primary: 'on'
+        stun: 'off'
+      Black Hole:
+        primary: 'on'
+      Spotlight:
+        primary: 'on'
+        missiles: 'on'
   loadout:
     modules:
       mode: enforce

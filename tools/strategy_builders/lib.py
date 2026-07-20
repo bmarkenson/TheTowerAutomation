@@ -295,6 +295,7 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
         },
         {
             "name": "initialise_fast_loop",
+            "gate_phase": "run_initialization",
             "when": {"state": "RUNNING"},
             "assert": ["!run_initialised"],
             "do": [
@@ -304,6 +305,7 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
         },
         {
             "name": "disable_fast_loop",
+            "gate_phase": "run_initialization",
             "when": {"state": "RUNNING"},
             "assert": ["fast_loop_active", "ehls_completed", "eals_completed"],
             "do": [
@@ -316,6 +318,7 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
     rules.append(
         {
             "name": "initialize_level_skips_fast",
+            "gate_phase": "run_initialization",
             "when": {"state": "RUNNING"},
             "assert": ["fast_loop_active", "!eals_completed"],
             "cooldown_sec": 0.25,
@@ -332,6 +335,7 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
         rules.append(
             {
                 "name": f"{damage_slider_mode}_damage_slider",
+                "gate_phase": "run_initialization",
                 "when": {"state": "RUNNING"},
                 "assert": [
                     "ehls_completed",
@@ -353,6 +357,7 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
         rules.append(
             {
                 "name": "ensure_target_priority",
+                "gate_phase": "run_initialization",
                 "when": {"state": "RUNNING"},
                 "assert": [
                     "ehls_completed",
@@ -372,6 +377,7 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
         rules.append(
             {
                 "name": "observe_target_priority",
+                "gate_phase": "run_initialization",
                 "when": {"state": "RUNNING"},
                 "assert": [
                     "ehls_completed",
@@ -391,6 +397,7 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
     rules.append(
         {
             "name": "validate_gc_session_preflight",
+            "gate_phase": "session_preflight",
             "when": {"state": "RUNNING"},
             "assert": [
                 *complete_when,
@@ -420,7 +427,17 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
     }
     run_configuration = source.get("run_configuration")
     if isinstance(run_configuration, dict):
-        plan["run_configuration"] = copy.deepcopy(run_configuration)
+        resolved_configuration = copy.deepcopy(run_configuration)
+        configured_settings = resolved_configuration.get("settings")
+        if isinstance(configured_settings, dict):
+            # Report the same normalized values that the runtime validator
+            # consumes (not YAML's implicit bool representation of on/off).
+            for key in configured_settings:
+                if key in session_requirements:
+                    configured_settings[key] = copy.deepcopy(
+                        session_requirements[key]
+                    )
+        plan["run_configuration"] = resolved_configuration
     return plan
 
 

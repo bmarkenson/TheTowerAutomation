@@ -8,10 +8,9 @@ import os
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
-from typing import Iterable, Optional, Set, Tuple
+from typing import Iterable, Optional, Set
 
 import cv2
 import numpy as np
@@ -21,7 +20,7 @@ from utils.logger import log, log_status
 from utils.wave_detector import detect_wave_number_from_image
 from utils.coin_detector import detect_coins_from_image, format_compact_decimal
 from core.clickmap_access import get_clickmap, resolve_dot_path
-from core.automation_supervisor import AutomationSupervisor, CoinsTotalSnapshot
+from core.automation_supervisor import AutomationSupervisor
 
 
 Frame = NDArray[np.uint8]
@@ -84,7 +83,7 @@ class SamplePaths:
 
 
 class StatusReporter:
-    """Periodic RUNNING-state heartbeat with OCR samples and CSV logging."""
+    """Periodic RUNNING-state heartbeat with optional diagnostic samples."""
 
     def __init__(
         self,
@@ -93,38 +92,25 @@ class StatusReporter:
         supervisor: AutomationSupervisor,
         save_wave_samples: Optional[str],
         save_coin_samples: Optional[str],
-        coins_log_base: str,
-        coins_log_enabled: bool,
     ) -> None:
         self._interval = max(0, int(interval_secs))
         self._supervisor = supervisor
         self._save_wave_samples = Path(save_wave_samples) if save_wave_samples else None
         self._save_coin_samples = Path(save_coin_samples) if save_coin_samples else None
-        self._coins_log_enabled = coins_log_enabled
-        self._coins_log_base = coins_log_base
 
         self._last_status_ts: float = 0.0
-        self._coins_session_id = datetime.now().strftime("%Y%m%d-%H%M%S")
-        self._coins_log_path: Optional[str] = None
-        if self._coins_log_enabled:
-            self._coins_log_path = self._make_coins_log_path(self._coins_session_id)
-
-        self._coins_last_total_value: Optional[Decimal] = None
-        self._coins_last_total_ts: Optional[float] = None
-        self._coins_last_total_str: Optional[str] = None
-        self._coins_hourly_rate: Optional[Decimal] = None
-        self._coins_last_run_gain: Optional[Decimal] = None
+        self._coin_rate_samples: list[dict[str, object]] = []
 
     @property
-    def coins_log_path(self) -> Optional[str]:
-        return self._coins_log_path
+    def coin_rate_samples(self) -> list[dict[str, object]]:
+        """Return a detached copy of the current battle's numeric rate history."""
 
-    def rotate_coins_log(self) -> Optional[str]:
-        if not self._coins_log_enabled:
-            return None
-        self._coins_session_id = datetime.now().strftime("%Y%m%d-%H%M%S")
-        self._coins_log_path = self._make_coins_log_path(self._coins_session_id)
-        return self._coins_log_path
+        return [dict(sample) for sample in self._coin_rate_samples]
+
+    def reset_coin_rate_samples(self) -> None:
+        """Start a fresh rate history after an authoritative run boundary."""
+
+        self._coin_rate_samples.clear()
 
     def maybe_report(
         self,
@@ -150,9 +136,7 @@ class StatusReporter:
         coins_conf = -1.0
         coins_eff = None
         has_min = False
-        total_snapshot: Optional[CoinsTotalSnapshot] = None
         coins_debug_tmp: Optional[Path] = None
-        per_min_refresh: Optional[Tuple[Optional[Decimal], float, bool]] = None
 
         if ui_state != "RUNNING":
             wave = None
@@ -178,17 +162,6 @@ class StatusReporter:
                     img, debug_out=str(coins_debug_tmp) if coins_debug_tmp else None
                 )
 
-                if allow_actions and self._supervisor.should_capture_total(now):
-                    total_snapshot, per_min_refresh = self._supervisor.capture_total_snapshot(
-                        current_img=img,
-                        current_value=coins_val,
-                        current_confidence=coins_conf,
-                        current_has_min=has_min,
-                        debug_out=str(coins_debug_tmp) if coins_debug_tmp else None,
-                    )
-                    if per_min_refresh is not None:
-                        coins_val, coins_conf, has_min = per_min_refresh
-
                 coins_val, coins_conf, has_min, coins_eff = self._supervisor.process_coins(
                     img,
                     coins_val,
@@ -199,16 +172,6 @@ class StatusReporter:
                 )
             except Exception:
                 coins_val, coins_conf, coins_eff = None, -1.0, None
-                total_snapshot = None
-
-        if total_snapshot is not None:
-            self._handle_total_snapshot(
-                total_snapshot,
-                ui_state=ui_state,
-                menu=menu,
-                secondary=secondary,
-                overlays=overlays,
-            )
 
         wave_str = str(wave) if wave is not None else "—"
         coins_str = format_compact_decimal(coins_eff) if coins_eff is not None else "—"
@@ -221,6 +184,21 @@ class StatusReporter:
             f"State={state_str} | Wave={wave_str} | Coins/min={coins_str} | Menu={menu_str} | "
             f"Secondary=[{sec_str}] | Overlays=[{ovl_str}]"
         )
+
+        if ui_state == "RUNNING" and has_min and coins_eff is not None:
+            self._coin_rate_samples.append(
+                {
+                    "captured_at": datetime.fromtimestamp(now).astimezone().isoformat(
+                        timespec="seconds"
+                    ),
+                    "wave": wave,
+                    "coins_per_minute_decimal": str(coins_eff),
+                    "display": coins_str,
+                    "confidence": round(float(coins_conf), 1),
+                }
+            )
+            # A missed terminal boundary must not grow process memory forever.
+            del self._coin_rate_samples[:-4096]
 
         if self._save_wave_samples:
             self._persist_sample(
@@ -255,123 +233,7 @@ class StatusReporter:
                 ],
             )
 
-        if self._coins_log_path:
-            try:
-                os.makedirs(os.path.dirname(self._coins_log_path) or ".", exist_ok=True)
-                ts_iso = datetime.now().isoformat(timespec="seconds")
-                epoch = int(now)
-                with open(self._coins_log_path, "a", encoding="utf-8") as handle:
-                    if handle.tell() == 0:
-                        handle.write("time_iso,epoch,wave,coins_decimal,conf,pretty\n")
-                    coins_decimal = str(coins_eff) if coins_eff is not None else ""
-                    handle.write(
-                        f"{ts_iso},{epoch},{wave_str},{coins_decimal},{coins_conf:.1f},{coins_str}\n"
-                    )
-            except Exception:
-                pass
-
         self._last_status_ts = now
-
-    def _handle_total_snapshot(
-        self,
-        snapshot: CoinsTotalSnapshot,
-        *,
-        ui_state: str,
-        menu: Optional[str],
-        secondary: Set[str],
-        overlays: Set[str],
-    ) -> None:
-        self._coins_last_total_value = snapshot.value
-        self._coins_last_total_ts = snapshot.timestamp
-        self._coins_last_total_str = format_compact_decimal(snapshot.value)
-
-        delta_prev: Optional[Decimal] = None
-        delta_hours: Optional[float] = None
-        coins_hr: Optional[Decimal] = None
-
-        if snapshot.previous_value is not None and snapshot.previous_timestamp is not None:
-            delta_prev = snapshot.value - snapshot.previous_value
-            dt_seconds = snapshot.timestamp - snapshot.previous_timestamp
-            if dt_seconds > 0:
-                delta_hours = dt_seconds / 3600.0
-                try:
-                    hours_decimal = Decimal(str(dt_seconds)) / Decimal("3600")
-                    if hours_decimal > 0:
-                        coins_hr = delta_prev / hours_decimal
-                except Exception:
-                    coins_hr = None
-
-        self._coins_hourly_rate = coins_hr
-
-        run_gain: Optional[Decimal] = None
-        if snapshot.previous_run_start_value is not None:
-            run_gain = snapshot.value - snapshot.previous_run_start_value
-        self._coins_last_run_gain = run_gain
-
-        def _fmt_signed(val: Optional[Decimal]) -> str:
-            if val is None:
-                return "—"
-            sign = "+" if val >= 0 else "-"
-            return f"{sign}{format_compact_decimal(val.copy_abs())}"
-
-        report_total = snapshot.reason in {"startup", "hourly"}
-        report_rate = snapshot.reason == "hourly" and coins_hr is not None
-
-        if report_total:
-            total_parts = [f"Total={self._coins_last_total_str}"]
-            if run_gain is not None:
-                total_parts.append(f"RunΔ={_fmt_signed(run_gain)}")
-            if delta_prev is not None and delta_hours is not None and snapshot.reason == "hourly":
-                total_parts.append(f"Δprev={_fmt_signed(delta_prev)} over {delta_hours:.2f}h")
-            log_status(" | ".join(total_parts))
-
-        if report_rate and delta_hours is not None:
-            rate_str = format_compact_decimal(coins_hr)
-            log_status(f"Coins/hr≈{rate_str} over {delta_hours:.2f}h")
-
-        if snapshot.reason not in {"startup", "hourly"}:
-            parts = [f"Total={self._coins_last_total_str}"]
-            if run_gain is not None:
-                parts.append(f"RunΔ={_fmt_signed(run_gain)}")
-            log(
-                f"[COINS] Total snapshot ({snapshot.reason}) — " + " | ".join(parts),
-                "INFO",
-            )
-
-        if self._save_coin_samples and snapshot.image is not None:
-            menu_str = menu or "—"
-            sec_str = ", ".join(sorted(secondary)) if secondary else "—"
-            ovl_str = ", ".join(sorted(overlays)) if overlays else "—"
-            descriptor = f"total-{snapshot.reason}-{self._coins_last_total_str}"
-            try:
-                self._persist_sample(
-                    img=snapshot.image,
-                    paths=self._build_sample_paths(self._save_coin_samples, descriptor),
-                    overlay_paths=[("_shared_match_regions.coins", (0, 255, 0))],
-                    note_lines=[
-                        f"state={ui_state}",
-                        f"menu={menu_str}",
-                        f"secondary={sec_str}",
-                        f"overlays={ovl_str}",
-                        f"reason={snapshot.reason}",
-                        f"total={self._coins_last_total_str}",
-                        f"delta_prev={_fmt_signed(delta_prev)}",
-                        f"coins_hr={format_compact_decimal(coins_hr) if coins_hr is not None else '—'}",
-                        f"run_gain={_fmt_signed(run_gain)}",
-                    ],
-                )
-            except Exception:
-                pass
-
-    def _make_coins_log_path(self, session_id: str) -> str:
-        base = self._coins_log_base or ""
-        root, ext = os.path.splitext(base)
-        if ext.lower() == ".csv":
-            directory = os.path.dirname(root) or "."
-            name = os.path.basename(root)
-            return os.path.join(directory, f"{name}_{session_id}.csv")
-        directory = base or "."
-        return os.path.join(directory, f"coins_{session_id}.csv")
 
     def _prepare_tmp_path(self, root: Optional[Path], tmp_name: str) -> Optional[Path]:
         if root is None:

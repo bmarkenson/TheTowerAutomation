@@ -1,0 +1,95 @@
+<Application x:Class="TheTower.ControlSurface.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="MainWindow.xaml">
+  <Application.Resources>
+    <SolidColorBrush x:Key="PanelBrush" Color="#111827" />
+    <SolidColorBrush x:Key="PanelAltBrush" Color="#151F31" />
+    <SolidColorBrush x:Key="BorderBrush" Color="#263349" />
+    <SolidColorBrush x:Key="MutedBrush" Color="#93A4BB" />
+    <SolidColorBrush x:Key="AccentBrush" Color="#20B9F3" />
+    <Style TargetType="Button">
+      <Setter Property="Background" Value="#182338" />
+      <Setter Property="Foreground" Value="#EDF2F7" />
+      <Setter Property="BorderBrush" Value="#344660" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Padding" Value="12,8" />
+      <Setter Property="Margin" Value="4" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Background" Value="#20B9F3" />
+      <Setter Property="Foreground" Value="#031019" />
+      <Setter Property="BorderBrush" Value="#20B9F3" />
+    </Style>
+    <Style x:Key="SuccessButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Background" Value="#174C3D" />
+      <Setter Property="Foreground" Value="#9CF0CD" />
+      <Setter Property="BorderBrush" Value="#318767" />
+    </Style>
+    <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Background" Value="#4A202A" />
+      <Setter Property="Foreground" Value="#FFACB9" />
+      <Setter Property="BorderBrush" Value="#8D4050" />
+    </Style>
+    <Style x:Key="ActiveSelectionButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Background" Value="#0E4E67" />
+      <Setter Property="Foreground" Value="#BCEEFF" />
+      <Setter Property="BorderBrush" Value="#62D5FF" />
+      <Setter Property="BorderThickness" Value="2" />
+    </Style>
+    <Style x:Key="PendingSelectionButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Background" Value="#554017" />
+      <Setter Property="Foreground" Value="#FFE3A6" />
+      <Setter Property="BorderBrush" Value="#F1BF5B" />
+      <Setter Property="BorderThickness" Value="2" />
+    </Style>
+    <Style TargetType="TextBox">
+      <Setter Property="Background" Value="#182338" />
+      <Setter Property="Foreground" Value="#EDF2F7" />
+      <Setter Property="BorderBrush" Value="#344660" />
+      <Setter Property="Padding" Value="8,6" />
+    </Style>
+    <Style TargetType="PasswordBox">
+      <Setter Property="Background" Value="#182338" />
+      <Setter Property="Foreground" Value="#EDF2F7" />
+      <Setter Property="BorderBrush" Value="#344660" />
+      <Setter Property="Padding" Value="8,6" />
+    </Style>
+    <Style TargetType="ComboBox">
+      <Setter Property="Background" Value="#182338" />
+      <Setter Property="Foreground" Value="#111827" />
+      <Setter Property="Padding" Value="6" />
+    </Style>
+    <Style TargetType="DataGrid">
+      <Setter Property="Background" Value="#111827" />
+      <Setter Property="Foreground" Value="#EDF2F7" />
+      <Setter Property="BorderBrush" Value="#263349" />
+      <Setter Property="RowBackground" Value="#111827" />
+      <Setter Property="AlternatingRowBackground" Value="#151F31" />
+      <Setter Property="HorizontalGridLinesBrush" Value="#263349" />
+      <Setter Property="VerticalGridLinesBrush" Value="#263349" />
+      <Setter Property="HeadersVisibility" Value="Column" />
+      <Setter Property="AutoGenerateColumns" Value="False" />
+      <Setter Property="IsReadOnly" Value="True" />
+      <Setter Property="CanUserAddRows" Value="False" />
+      <Setter Property="CanUserDeleteRows" Value="False" />
+    </Style>
+    <Style TargetType="DataGridColumnHeader">
+      <Setter Property="Background" Value="#172338" />
+      <Setter Property="Foreground" Value="#93A4BB" />
+      <Setter Property="Padding" Value="8" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style TargetType="TabItem">
+      <Setter Property="Background" Value="#151F31" />
+      <Setter Property="Foreground" Value="#EDF2F7" />
+      <Setter Property="Padding" Value="14,7" />
+    </Style>
+    <Style x:Key="PanelSplitter" TargetType="GridSplitter">
+      <Setter Property="Background" Value="#263349" />
+      <Setter Property="Margin" Value="2" />
+      <Setter Property="ShowsPreview" Value="True" />
+    </Style>
+  </Application.Resources>
+</Application>

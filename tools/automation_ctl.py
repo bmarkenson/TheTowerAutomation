@@ -24,49 +24,33 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
+from pathlib import Path
 import sys
 import time
-from datetime import datetime
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from core.control_directives import (
+    ControlDirectiveError,
+    ControlDirectiveStore,
+    VALID_MODES,
+    VALID_STATES,
+)
 
 
 DEFAULT_CTRL_PATH = "logs/automation_ctl.json"
-
-
-VALID_STATES = {"RUNNING", "PAUSED", "STOPPED"}
-VALID_MODES = {"RETRY", "WAIT", "HOME"}
-
-
-def _read_json(path: str) -> dict:
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f) or {}
-    except FileNotFoundError:
-        return {}
-    except Exception as e:
-        print(f"[WARN] Failed to read {path}: {e}", file=sys.stderr)
-        return {}
-
-
-def _atomic_write_json(path: str, data: dict) -> None:
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    tmp = f"{path}.tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-    os.replace(tmp, path)
 
 
 def _set_state(path: str, state: str, *, resume_at: float | None = None) -> None:
     s = state.upper()
     if s not in VALID_STATES:
         raise SystemExit(f"Invalid state: {state}. Use one of {sorted(VALID_STATES)}")
-    data = _read_json(path)
-    data["state"] = s
-    data.pop("resume_at", None)
-    if s == "PAUSED" and resume_at is not None:
-        data["resume_at"] = resume_at
-    data["updated_at"] = datetime.now().isoformat(timespec="seconds")
-    _atomic_write_json(path, data)
+    try:
+        ControlDirectiveStore(path).set_state(s, resume_at=resume_at, source="cli")
+    except ControlDirectiveError as exc:
+        raise SystemExit(f"Unable to update automation control: {exc}") from exc
     print(f"[OK] State set to {s} @ {path}")
 
 
@@ -74,10 +58,10 @@ def _set_mode(path: str, mode: str) -> None:
     m = mode.upper()
     if m not in VALID_MODES:
         raise SystemExit(f"Invalid mode: {mode}. Use one of {sorted(VALID_MODES)}")
-    data = _read_json(path)
-    data["mode"] = m
-    data["updated_at"] = datetime.now().isoformat(timespec="seconds")
-    _atomic_write_json(path, data)
+    try:
+        ControlDirectiveStore(path).set_mode(m, source="cli")
+    except ControlDirectiveError as exc:
+        raise SystemExit(f"Unable to update automation control: {exc}") from exc
     print(f"[OK] Mode set to {m} @ {path}")
 
 
@@ -123,23 +107,16 @@ def main(argv=None):
         _set_mode(ctrl, cmd[2])
         return 0
     if cmd[0] == "status" and len(cmd) == 1:
-        data = _read_json(ctrl)
-        # Defaults if file missing/empty
-        st = (data.get("state") or "RUNNING").upper()
-        md = (data.get("mode") or "RETRY").upper()
-        upd = data.get("updated_at") or "<never>"
-        resume_at = data.get("resume_at")
-        remaining_seconds = None
-        if isinstance(resume_at, (int, float)) and math.isfinite(resume_at):
-            remaining_seconds = max(0, round(resume_at - time.time()))
-        print(json.dumps({
-            "state": st,
-            "mode": md,
-            "resume_at": resume_at,
-            "remaining_seconds": remaining_seconds,
-            "updated_at": upd,
-            "path": ctrl,
-        }, indent=2))
+        try:
+            status = ControlDirectiveStore(ctrl).status()
+        except ControlDirectiveError as exc:
+            p.error(str(exc))
+        status.pop("exists", None)
+        status.pop("updated_by", None)
+        status.pop("state_updated_at", None)
+        status.pop("mode_updated_at", None)
+        status["updated_at"] = status.get("updated_at") or "<never>"
+        print(json.dumps(status, indent=2))
         return 0
 
     p.print_help()

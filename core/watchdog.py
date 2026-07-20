@@ -28,6 +28,7 @@ import time
 import subprocess
 from core.run_state import AUTOMATION, RunState
 from core.adb_utils import adb_shell, ADB_DEVICE_ID
+from core.adb_target_session import ADB_TARGET_OPERATION_LOCK
 from utils.logger import log
 
 GAME_PACKAGE = "com.TechTreeGames.TheTower"
@@ -270,6 +271,34 @@ def ensure_adb_connected() -> bool:
     return False
 
 
+def _watchdog_process_check_once() -> None:
+    """Run one fail-closed watchdog inspection for the current target."""
+
+    # Serialize against a target migration. Failure to reach ADB is not
+    # evidence that the Android game process is absent.
+    with ADB_TARGET_OPERATION_LOCK:
+        connected = ensure_adb_connected()
+        if not connected:
+            return
+        time.sleep(2)
+
+        # Pause blocks watchdog input/recovery as well as main-loop strategy
+        # and handler actions. Connectivity checks may continue so a moved
+        # emulator can come back online.
+        if AUTOMATION.state in {RunState.PAUSED, RunState.STOPPED}:
+            return
+
+        pid_running = _pid_running(GAME_PACKAGE)
+        foregrounded = is_game_foregrounded()
+
+        if not pid_running:
+            log("[WATCHDOG] Game process not running. Restarting.", "WARN")
+            restart_game()
+        elif not foregrounded:
+            log("[WATCHDOG] Game is backgrounded. Bringing to foreground.", "WARN")
+            bring_to_foreground()
+
+
 def watchdog_process_check(interval=30):
     """
     spec:
@@ -286,19 +315,7 @@ def watchdog_process_check(interval=30):
     """
     while True:
         try:
-            # Ensure ADB connectivity to target (best-effort)
-            if ensure_adb_connected():
-                time.sleep(2)
-
-            pid_running = _pid_running(GAME_PACKAGE)
-            foregrounded = is_game_foregrounded()
-
-            if not pid_running:
-                log("[WATCHDOG] Game process not running. Restarting.", "WARN")
-                restart_game()
-            elif not foregrounded:
-                log("[WATCHDOG] Game is backgrounded. Bringing to foreground.", "WARN")
-                bring_to_foreground()
+            _watchdog_process_check_once()
 
         except Exception as e:
             log(f"[WATCHDOG ERROR] {e}", "ERROR")

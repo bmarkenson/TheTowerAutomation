@@ -1,0 +1,17 @@
+[Unit]
+Description=TheTower automation runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/dev/python/TheTower
+EnvironmentFile=-%h/.config/thetower/automation-adb.env
+ExecStart=%h/dev/python/TheTower/.venv/bin/python %h/dev/python/TheTower/main.py
+KillSignal=SIGINT
+TimeoutStopSec=30
+Restart=no
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

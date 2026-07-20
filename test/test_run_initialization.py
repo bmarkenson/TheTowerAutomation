@@ -1,4 +1,5 @@
 import copy
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -75,10 +76,26 @@ class _IncompleteSessionPreflightStrategy(BaseStrategy):
 
 class AdbPortTests(unittest.TestCase):
     def test_adb_port_defaults_to_5555(self):
-        config = config_from_args(parse_args([]))
+        with patch.dict("os.environ", {}, clear=True):
+            config = config_from_args(parse_args([]))
         self.assertEqual(config.adb_port, 5555)
 
+    def test_adb_port_uses_managed_environment_default(self):
+        with patch.dict("os.environ", {"THETOWER_ADB_PORT": "5565"}):
+            config = config_from_args(parse_args([]))
+        self.assertEqual(config.adb_port, 5565)
+
     def test_adb_port_accepts_override(self):
+        with patch.dict("os.environ", {"THETOWER_ADB_PORT": "5565"}):
+            config = config_from_args(parse_args(["--adb-port", "5575"]))
+        self.assertEqual(config.adb_port, 5575)
+
+    def test_adb_port_rejects_invalid_managed_environment_default(self):
+        with patch.dict("os.environ", {"THETOWER_ADB_PORT": "invalid"}):
+            with self.assertRaises(SystemExit):
+                parse_args([])
+
+    def test_adb_port_accepts_original_override(self):
         config = config_from_args(parse_args(["--adb-port", "5565"]))
         self.assertEqual(config.adb_port, 5565)
 
@@ -198,6 +215,120 @@ class RunBoundaryTests(unittest.TestCase):
         self.assertEqual(strategy.run_starts, 2)
 
 
+class DeferredStartupGateTests(unittest.TestCase):
+    @staticmethod
+    def _strategy():
+        return YamlStrategy(
+            {
+                "vars": {
+                    "startup_gate_done": False,
+                    "session_gate_done": False,
+                },
+                "per_run_reset": ["startup_gate_done", "session_gate_done"],
+                "run_initialization": {
+                    "complete_when": ["startup_gate_done"],
+                },
+                "session_preflight": {
+                    "complete_when": ["session_gate_done"],
+                    "requirements": {"cards_deck": "Farm"},
+                },
+                "rules": [
+                    {
+                        "name": "startup_gate",
+                        "gate_phase": "run_initialization",
+                        "when": {"state": "RUNNING"},
+                        "assert": ["!startup_gate_done"],
+                        "do": [
+                            {
+                                "type": "set",
+                                "var": "startup_gate_done",
+                                "value": True,
+                            }
+                        ],
+                    },
+                    {
+                        "name": "session_gate",
+                        "gate_phase": "session_preflight",
+                        "when": {"state": "RUNNING"},
+                        "assert": ["!session_gate_done"],
+                        "do": [
+                            {
+                                "type": "set",
+                                "var": "session_gate_done",
+                                "value": True,
+                            }
+                        ],
+                    },
+                    {
+                        "name": "normal_automation",
+                        "when": {"state": "RUNNING"},
+                        "do": [{"type": "normal_action"}],
+                    },
+                ],
+            }
+        )
+
+    def test_existing_battle_skips_only_gate_rules(self):
+        strategy = self._strategy()
+        manager = MissionManager(
+            None,
+            strategy,
+            defer_startup_gates_until_next_run=True,
+        )
+        manager.start()
+
+        manager.maybe_run_start({"state": "RUNNING"})
+        actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
+
+        self.assertEqual(actions, [{"type": "normal_action"}])
+        self.assertFalse(manager.ctx.data["mission_vars"]["startup_gate_done"])
+        self.assertFalse(manager.ctx.data["mission_vars"]["session_gate_done"])
+        self.assertFalse(manager.run_initialization_pending())
+        self.assertFalse(manager.session_preflight_pending())
+        self.assertEqual(manager.no_battle_setup_requirements(), {})
+
+    def test_terminal_boundary_rearms_gates_for_next_battle(self):
+        strategy = self._strategy()
+        manager = MissionManager(
+            None,
+            strategy,
+            defer_startup_gates_until_next_run=True,
+        )
+        manager.start()
+        manager.maybe_run_start({"state": "RUNNING"})
+
+        manager.maybe_run_start({"state": "GAME_OVER"})
+        manager.maybe_run_start({"state": "RUNNING"})
+
+        self.assertTrue(manager.run_initialization_pending())
+        strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
+        self.assertTrue(manager.ctx.data["mission_vars"]["startup_gate_done"])
+        self.assertTrue(manager.ctx.data["mission_vars"]["session_gate_done"])
+        self.assertFalse(manager.run_initialization_pending())
+        self.assertFalse(manager.session_preflight_pending())
+
+    def test_resume_home_preserves_attachment_but_new_battle_arms_gates(self):
+        strategy = _RunCountingStrategy()
+        manager = MissionManager(
+            None,
+            strategy,
+            defer_startup_gates_until_next_run=True,
+        )
+        manager.start()
+
+        manager.maybe_run_start(
+            {"state": "HOME_SCREEN", "home_battle_control": "RESUME_BATTLE"}
+        )
+        manager.maybe_run_start({"state": "RUNNING"})
+        self.assertEqual(strategy.run_starts, 0)
+
+        manager.maybe_run_start(
+            {"state": "HOME_SCREEN", "home_battle_control": "NEW_BATTLE"}
+        )
+        manager.maybe_run_start({"state": "RUNNING"})
+        self.assertEqual(strategy.run_starts, 1)
+
+
 class FarmProfileTests(unittest.TestCase):
     def _source(self, name="farm_t18"):
         return yaml.safe_load(
@@ -229,6 +360,17 @@ class FarmProfileTests(unittest.TestCase):
         self.assertEqual(requirements["loadout_policies"]["modules"], "enforce")
         self.assertEqual(configuration["profile"], "farm")
         self.assertEqual(configuration["tier"], 18)
+        self.assertEqual(configuration["schema_version"], 2)
+        self.assertEqual(configuration["settings"]["cards_deck"], "Farm")
+        self.assertEqual(configuration["settings"]["bots_preset"], "Farm")
+        self.assertEqual(
+            configuration["settings"]["guardian_chips"],
+            ["Fetch", "Summon", "Scout"],
+        )
+        self.assertEqual(
+            configuration["settings"]["ultimate_weapons"]["Poison Swamp"]["stun"],
+            "off",
+        )
         self.assertEqual(
             configuration["loadout"]["modules"]["preset"],
             "farm_standard",
@@ -1201,15 +1343,12 @@ class PausedStartupObservationTests(unittest.TestCase):
             control_file="logs/unused-test-control.json",
             auto_return_enabled=False,
         )
-        supervisor.schedule_total_snapshot("test")
         supervisor._last_coins_val = Decimal("1")
         reporter = StatusReporter(
             interval_secs=1,
             supervisor=supervisor,
             save_wave_samples=None,
             save_coin_samples=None,
-            coins_log_base="logs/unused-test-coins.csv",
-            coins_log_enabled=False,
         )
 
         original_state = AUTOMATION.state
@@ -1220,7 +1359,6 @@ class PausedStartupObservationTests(unittest.TestCase):
                     "core.status_report.detect_coins_from_image",
                     return_value=(Decimal("100"), 99.0, False),
                 ),
-                patch.object(supervisor, "capture_total_snapshot") as total_snapshot,
                 patch("core.automation_supervisor.tap_if_visible") as tap,
                 patch("core.status_report.log_status") as status_log,
             ):
@@ -1238,9 +1376,55 @@ class PausedStartupObservationTests(unittest.TestCase):
         finally:
             AUTOMATION.state = original_state
 
-        total_snapshot.assert_not_called()
         tap.assert_not_called()
         status_log.assert_called_once()
+
+    def test_status_reporting_collects_structured_coin_rate_samples(self):
+        frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+        supervisor = AutomationSupervisor(
+            control_file="logs/unused-test-control.json",
+            auto_return_enabled=False,
+        )
+        reporter = StatusReporter(
+            interval_secs=1,
+            supervisor=supervisor,
+            save_wave_samples=None,
+            save_coin_samples=None,
+        )
+
+        original_state = AUTOMATION.state
+        try:
+            AUTOMATION.state = RunState.RUNNING
+            with (
+                patch(
+                    "core.status_report.detect_coins_from_image",
+                    return_value=(Decimal("1230000"), 98.5, True),
+                ),
+                patch("core.status_report.log_status"),
+            ):
+                reporter.maybe_report(
+                    img=frame,
+                    ui_state="RUNNING",
+                    menu=None,
+                    secondary=set(),
+                    overlays=set(),
+                    wave=321,
+                    wave_conf=99.0,
+                    now_ts=1_700_000_000.0,
+                    allow_actions=False,
+                )
+        finally:
+            AUTOMATION.state = original_state
+
+        assert len(reporter.coin_rate_samples) == 1
+        sample = reporter.coin_rate_samples[0]
+        assert datetime.fromisoformat(str(sample["captured_at"])).timestamp() == 1_700_000_000.0
+        assert sample["wave"] == 321
+        assert sample["coins_per_minute_decimal"] == "1230000"
+        assert sample["display"] == "1.23M"
+        assert sample["confidence"] == 98.5
+        reporter.reset_coin_rate_samples()
+        assert reporter.coin_rate_samples == []
 
 
 if __name__ == "__main__":

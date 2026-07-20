@@ -225,8 +225,7 @@ def test_tournament_game_over_waits_and_records_profile_evidence():
     app._last_wave_conf = 99.0
     app._supervisor = MagicMock()
     app._status_reporter = MagicMock()
-    app._status_reporter.coins_log_path = "logs/tournament.csv"
-    app._status_reporter.rotate_coins_log.return_value = None
+    app._status_reporter.coin_rate_samples = []
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
     previous_mode = AUTOMATION.mode
 
@@ -244,7 +243,7 @@ def test_tournament_game_over_waits_and_records_profile_evidence():
         "valid": True
     }
     manager.on_game_over.assert_called_once_with()
-    app._supervisor.record_run_restart.assert_called_once_with()
+    app._status_reporter.reset_coin_rate_samples.assert_called_once_with()
 
 
 def test_tournament_results_are_recorded_once_without_dismissing_dialog():
@@ -257,8 +256,7 @@ def test_tournament_results_are_recorded_once_without_dismissing_dialog():
     app._mission_mgr = manager
     app._supervisor = MagicMock()
     app._status_reporter = MagicMock()
-    app._status_reporter.coins_log_path = "logs/tournament.csv"
-    app._status_reporter.rotate_coins_log.return_value = None
+    app._status_reporter.coin_rate_samples = []
     app._last_wave_value = 2028
     app._last_wave_conf = 99.0
     app._tournament_results_captured = False
@@ -285,4 +283,4 @@ def test_tournament_results_are_recorded_once_without_dismissing_dialog():
     )
     normal_game_over.assert_not_called()
     manager.on_game_over.assert_called_once_with()
-    app._supervisor.record_run_restart.assert_not_called()
+    app._status_reporter.reset_coin_rate_samples.assert_called_once_with()

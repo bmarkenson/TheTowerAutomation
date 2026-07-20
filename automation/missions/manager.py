@@ -5,7 +5,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional
 from utils.logger import log, log_mission
 from automation.missions.base import BaseMission, MissionContext
 from automation.strategies.base import BaseStrategy
-from core.battle_lifecycle import BattleLifecycle
+from core.battle_lifecycle import BattleLifecycle, HomeBattleControl
 from core.action_executor import execute_actions
 
 
@@ -13,14 +13,23 @@ Detection = Dict[str, Any]
 
 
 class MissionManager:
-    def __init__(self, mission: Optional[BaseMission], strategy: Optional[BaseStrategy]):
+    def __init__(
+        self,
+        mission: Optional[BaseMission],
+        strategy: Optional[BaseStrategy],
+        *,
+        defer_startup_gates_until_next_run: bool = False,
+    ):
         self.mission = mission
         self.strategy = strategy
         self.ctx = MissionContext()
         self._started = False
         self._last_state = None
         self._mission_was_complete = False
-        self._battle_lifecycle = BattleLifecycle()
+        self._startup_gates_deferred = bool(defer_startup_gates_until_next_run)
+        self._battle_lifecycle = BattleLifecycle(
+            adopt_initial_battle=self._startup_gates_deferred,
+        )
 
     def start(self) -> None:
         if self._started:
@@ -33,17 +42,36 @@ class MissionManager:
                 self._mission_was_complete = False
         if self.strategy:
             self.strategy.on_start(self.ctx)
+        self.ctx.data["startup_gates_deferred"] = self._startup_gates_deferred
         self._started = True
 
     def maybe_run_start(self, detection: Detection) -> None:
         """Emit run-start hooks only when the battle lifecycle starts anew."""
 
         state = detection.get("state")
+        control = detection.get("home_battle_control", "UNKNOWN")
+        normalized_state = str(state or "UNKNOWN").upper()
+        if self._startup_gates_deferred and (
+            normalized_state in {"GAME_OVER", "TOURNAMENT_RESULTS"}
+            or (
+                normalized_state in {"HOME", "HOME_SCREEN"}
+                and HomeBattleControl.parse(control) is HomeBattleControl.NEW_BATTLE
+            )
+        ):
+            self._arm_startup_gates()
         battle_started = self._battle_lifecycle.observe(
             state,
-            home_control=detection.get("home_battle_control", "UNKNOWN"),
+            home_control=control,
         )
+        if self._battle_lifecycle.last_observation_adopted:
+            log(
+                "[RUN_INIT] Attached to existing battle; startup gates deferred "
+                "until the next run boundary",
+                "INFO",
+                console=True,
+            )
         if battle_started:
+            self._arm_startup_gates()
             if self.mission:
                 self.mission.on_run_start(self.ctx)
                 try:
@@ -53,6 +81,17 @@ class MissionManager:
             if self.strategy:
                 self.strategy.on_run_start(self.ctx)
         self._last_state = state
+
+    def _arm_startup_gates(self) -> None:
+        if not self._startup_gates_deferred:
+            return
+        self._startup_gates_deferred = False
+        self.ctx.data["startup_gates_deferred"] = False
+        log(
+            "[RUN_INIT] Run boundary observed; startup gates armed for the next battle",
+            "INFO",
+            console=True,
+        )
 
     def handle_overlays(self, detection: Detection) -> None:
         if not self.mission:
@@ -92,7 +131,11 @@ class MissionManager:
     def run_initialization_pending(self) -> bool:
         """Return whether the active battle still requires initialization."""
 
-        if not self._battle_lifecycle.active_battle_observed or not self.strategy:
+        if (
+            self._startup_gates_deferred
+            or not self._battle_lifecycle.active_battle_observed
+            or not self.strategy
+        ):
             return False
         if not self.strategy.requires_run_initialization():
             return False
@@ -101,7 +144,11 @@ class MissionManager:
     def session_preflight_pending(self) -> bool:
         """Return whether the active battle is waiting on session validation."""
 
-        if not self._battle_lifecycle.active_battle_observed or not self.strategy:
+        if (
+            self._startup_gates_deferred
+            or not self._battle_lifecycle.active_battle_observed
+            or not self.strategy
+        ):
             return False
         if self.run_initialization_pending():
             return False
@@ -155,6 +202,8 @@ class MissionManager:
         """Return profile settings still needing a verified no-battle pass."""
 
         if not self.strategy:
+            return {}
+        if self._startup_gates_deferred:
             return {}
         mv = self.ctx.data.setdefault("mission_vars", {})
         if mv.get("gc_no_battle_setup_completed"):

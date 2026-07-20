@@ -34,6 +34,8 @@ class BattleLifecycle:
     """
 
     active_battle_observed: bool = False
+    adopt_initial_battle: bool = False
+    last_observation_adopted: bool = False
 
     def observe(
         self,
@@ -45,18 +47,25 @@ class BattleLifecycle:
 
         state = str(ui_state or "UNKNOWN").upper()
         control = HomeBattleControl.parse(home_control)
+        self.last_observation_adopted = False
 
         if state == "RUNNING":
             if not self.active_battle_observed:
                 self.active_battle_observed = True
+                if self.adopt_initial_battle:
+                    self.adopt_initial_battle = False
+                    self.last_observation_adopted = True
+                    return False
                 return True
             return False
 
         if state in {"GAME_OVER", "TOURNAMENT_RESULTS"}:
             self.active_battle_observed = False
+            self.adopt_initial_battle = False
         elif state in {"HOME", "HOME_SCREEN"}:
             if control is HomeBattleControl.NEW_BATTLE:
                 self.active_battle_observed = False
+                self.adopt_initial_battle = False
             # RESUME_BATTLE and UNKNOWN preserve the current battle identity.
 
         return False

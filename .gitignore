@@ -34,3 +34,8 @@ logs/
 
 # tmp
 tmp/
+
+# Native Windows build output
+windows/**/bin/
+windows/**/obj/
+windows/**/publish/

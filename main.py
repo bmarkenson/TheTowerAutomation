@@ -10,7 +10,8 @@ from typing import Sequence
 from utils.logger import log
 from core.app_setup import parse_args, config_from_args
 from core.app import App
-from core.single_instance import InstanceAlreadyRunning, SingleInstanceLock
+from core.single_instance import InstanceAlreadyRunning
+from core.adb_target_session import AdbTargetSession
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -22,10 +23,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     log(f"ADB target = {os.environ['ADB_DEVICE']}", "DEBUG")
 
     try:
-        with SingleInstanceLock(os.environ["ADB_DEVICE"]):
+        with AdbTargetSession(os.environ["ADB_DEVICE"]) as target_session:
             log(f"AUTO_START_ENABLED = {config.auto_start_enabled}", "DEBUG")
 
-            app = App(config)
+            app = App(config, adb_target_session=target_session)
             app.run()
             return 0
     except InstanceAlreadyRunning as exc:

@@ -13,6 +13,7 @@ from numpy.typing import NDArray
 
 from utils.logger import log, set_mission_log_path
 from core.watchdog import watchdog_process_check, ensure_adb_connected
+from core.adb_target_session import AdbTargetSession
 from core.ss_capture import capture_and_save_screenshot
 from core.state_detector import detect_state_and_overlays
 from core.automation_supervisor import AutomationSupervisor
@@ -59,8 +60,14 @@ Frame = NDArray[np.uint8]
 class App:
     """Main automation orchestrator wrapping capture → detect → dispatch."""
 
-    def __init__(self, config: AppConfig) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        *,
+        adb_target_session: Optional[AdbTargetSession] = None,
+    ) -> None:
         self._config = config
+        self._adb_target_session = adb_target_session
         set_mission_log_path(config.mission_log_path)
         self._supervisor = AutomationSupervisor(
             control_file=config.control_file,
@@ -71,11 +78,22 @@ class App:
             coins_conf_floor=config.coins_conf_floor,
             coins_max_jump_factor=config.coins_max_jump_factor,
             coins_jump_conf_floor=config.coins_jump_conf_floor,
+            adb_port_handoff=(
+                self._handoff_adb_port if adb_target_session is not None else None
+            ),
         )
-        self._supervisor.schedule_total_snapshot("startup")
-
-        self._mission_mgr = MissionManager(self._load_mission(config), self._load_strategy(config))
+        self._mission_mgr = MissionManager(
+            self._load_mission(config),
+            self._load_strategy(config),
+            defer_startup_gates_until_next_run=(
+                config.startup_gate_policy == "next_run"
+            ),
+        )
         self._mission_mgr.start()
+        log(
+            f"[RUN_INIT] Startup gate policy={config.startup_gate_policy}",
+            "INFO",
+        )
 
         self._state_tracker = StateChangeTracker()
         self._status_reporter = StatusReporter(
@@ -83,8 +101,6 @@ class App:
             supervisor=self._supervisor,
             save_wave_samples=config.save_wave_samples,
             save_coin_samples=config.save_coin_samples,
-            coins_log_base=config.coins_log_base,
-            coins_log_enabled=config.coins_log_enabled,
         )
 
         self._match_trace = config.match_trace
@@ -134,11 +150,6 @@ class App:
 
     def run(self) -> None:
         log("Starting main heartbeat loop.", level="INFO", console=True)
-        if ensure_adb_connected():
-            time.sleep(2)
-
-        threading.Thread(target=watchdog_process_check, daemon=True).start()
-
         if self._config.wait_on_start:
             try:
                 AUTOMATION.mode = ExecMode.WAIT
@@ -146,14 +157,28 @@ class App:
             except Exception:
                 pass
 
+        self._supervisor.apply_control()
+        if self._supervisor.is_paused:
+            if stop_blind_gem_tapper():
+                self._blind_tapper_suspended = True
+        if ensure_adb_connected():
+            time.sleep(2)
+
+        threading.Thread(target=watchdog_process_check, daemon=True).start()
+
         try:
             while True:
+                # Control synchronization must not depend on a working ADB
+                # connection. This both acknowledges Pause during an outage
+                # and permits a paused live target handoff before capture.
+                self._supervisor.apply_control()
+                is_paused = self._supervisor.is_paused
+                if is_paused and stop_blind_gem_tapper():
+                    self._blind_tapper_suspended = True
+
                 img = self._capture_frame()
                 if img is None:
                     continue
-
-                self._supervisor.apply_control()
-                is_paused = self._supervisor.is_paused
 
                 detection = detect_state_and_overlays(img, log_matches=self._match_trace)
                 if detection.get("state") == "HOME_SCREEN":
@@ -395,6 +420,29 @@ class App:
                 return None
         return img
 
+    def _handoff_adb_port(self, port: int) -> bool:
+        """Move a paused live runtime to another localhost ADB endpoint."""
+
+        session = self._adb_target_session
+        if session is None:
+            return False
+        if stop_blind_gem_tapper():
+            self._blind_tapper_suspended = True
+        target = f"localhost:{port}"
+        log(f"[CTRL] Validating paused ADB target handoff to {target}", "INFO")
+
+        def validate() -> bool:
+            if not ensure_adb_connected():
+                return False
+            time.sleep(1)
+            return capture_and_save_screenshot(log_capture=False) is not None
+
+        try:
+            return session.handoff(target, validate=validate)
+        except Exception as exc:
+            log(f"[CTRL] Unable to hand off ADB target to {target}: {exc}", "WARN")
+            return False
+
     def _sync_floating_gem_tapper(
         self,
         *,
@@ -522,12 +570,13 @@ class App:
                 img,
                 battle_context={
                     "strategy": strategy.name if strategy else None,
+                    "terminal_state": "TOURNAMENT_RESULTS",
                     "run_configuration": (
                         strategy.run_configuration() if strategy else {}
                     ),
                     "last_wave": self._last_wave_value,
                     "last_wave_confidence": self._last_wave_conf,
-                    "coins_log_path": self._status_reporter.coins_log_path,
+                    "coin_rate_samples": self._status_reporter.coin_rate_samples,
                     "session_preflight_evidence": dict(
                         self._mission_mgr.ctx.data.get("mission_vars", {}).get(
                             "gc_session_preflight_evidence",
@@ -539,9 +588,7 @@ class App:
             if record is not None:
                 self._tournament_results_captured = True
                 self._mission_mgr.on_game_over()
-                new_path = self._status_reporter.rotate_coins_log()
-                if new_path:
-                    log(f"[COINS] Started new coins log: {new_path}", "INFO")
+                self._status_reporter.reset_coin_rate_samples()
             return
 
         if new_state == "GAME_OVER" and self._handler_enabled("game_over"):
@@ -567,12 +614,13 @@ class App:
                 return_home_after_battle=repair_in_progress,
                 battle_context={
                     "strategy": strategy.name if strategy else None,
+                    "terminal_state": "GAME_OVER",
                     "run_configuration": (
                         strategy.run_configuration() if strategy else {}
                     ),
                     "last_wave": self._last_wave_value,
                     "last_wave_confidence": self._last_wave_conf,
-                    "coins_log_path": self._status_reporter.coins_log_path,
+                    "coin_rate_samples": self._status_reporter.coin_rate_samples,
                     "session_preflight_evidence": dict(
                         self._mission_mgr.ctx.data.get("mission_vars", {}).get(
                             "gc_session_preflight_evidence",
@@ -582,10 +630,7 @@ class App:
                 },
             )
             self._mission_mgr.on_game_over()
-            self._supervisor.record_run_restart()
-            new_path = self._status_reporter.rotate_coins_log()
-            if new_path:
-                log(f"[COINS] Started new coins log: {new_path}", "INFO")
+            self._status_reporter.reset_coin_rate_samples()
         elif new_state == "HOME_SCREEN" and self._handler_enabled("home"):
             log("Detected HOME_SCREEN. Executing handler.", "INFO")
             home_control = detect_home_battle_control(img).control

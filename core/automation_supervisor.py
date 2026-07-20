@@ -6,7 +6,7 @@ focused on capture → detect → dispatch.
 
 Features:
 - Persistent control-file polling for explicit pause/resume/mode directives
-- Coins toggle debounce and plausibility (jump) gate
+- Coins/min display recovery and plausibility (jump) gate
 - Auto "Return to Game" after sustained visibility, with logs and fallback match
 
 Public usage (simplified):
@@ -20,19 +20,17 @@ Public usage (simplified):
 
 from __future__ import annotations
 
-import json
 import math
 import os
 import time
-from dataclasses import dataclass
-from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
 
+from core.control_directives import ControlDirectiveError, ControlDirectiveStore
 from utils.logger import log
 from core.run_state import AUTOMATION
 from core.input import tap_if_visible
@@ -44,20 +42,6 @@ from utils.coin_detector import detect_coins_from_image, format_compact_decimal
 
 Frame = NDArray[np.uint8]
 
-
-@dataclass
-class CoinsTotalSnapshot:
-    value: Decimal
-    confidence: float
-    timestamp: float
-    reason: str
-    image: Optional[Frame]
-    previous_value: Optional[Decimal]
-    previous_timestamp: Optional[float]
-    previous_run_start_value: Optional[Decimal]
-    previous_run_start_timestamp: Optional[float]
-    session_start_value: Optional[Decimal]
-    session_start_timestamp: Optional[float]
 
 _ALLOWED_STATES = {"RUNNING", "PAUSED", "STOPPED"}
 _ALLOWED_MODES = {"RETRY", "WAIT", "HOME"}
@@ -75,8 +59,10 @@ class AutomationSupervisor:
         coins_conf_floor: float = 60.0,
         coins_max_jump_factor: float = 8.0,
         coins_jump_conf_floor: float = 90.0,
+        adb_port_handoff: Optional[Callable[[int], bool]] = None,
     ) -> None:
         self.control_file = Path(control_file)
+        self._control_store = ControlDirectiveStore(self.control_file)
         self.auto_return_secs = max(0, int(auto_return_secs))
         self.auto_return_enabled = bool(auto_return_enabled)
         self.auto_return_conf_threshold = float(auto_return_conf_threshold)
@@ -85,26 +71,21 @@ class AutomationSupervisor:
         self.coins_conf_floor = float(coins_conf_floor)
         self.coins_max_jump_factor = Decimal(str(coins_max_jump_factor))
         self.coins_jump_conf_floor = float(coins_jump_conf_floor)
+        self._adb_port_handoff = adb_port_handoff
 
         # Internal state
         self._last_applied_state: Optional[str] = None
         self._last_applied_mode: Optional[str] = None
         self._pause_resume_at: Optional[float] = None
         self._last_invalid_resume_at: object = None
+        self._last_applied_adb_request: Optional[Tuple[int, object]] = None
+        self._last_deferred_adb_request: Optional[Tuple[int, object]] = None
+        self._next_adb_handoff_attempt_at = 0.0
 
         self._last_coins_toggle_ts: float = 0.0
         self._coins_has_min_miss: int = 0
         self._last_coins_val: Optional[Decimal] = None
         self._coins_ignore_plausibility_once: bool = False
-
-        self._coins_pending_total_reason: Optional[str] = None
-        self._coins_next_hourly_check_ts: Optional[float] = None
-        self._coins_last_total: Optional[Decimal] = None
-        self._coins_last_total_ts: Optional[float] = None
-        self._coins_total_session_start: Optional[Decimal] = None
-        self._coins_total_session_start_ts: Optional[float] = None
-        self._coins_run_start_total: Optional[Decimal] = None
-        self._coins_run_start_ts: Optional[float] = None
 
         self._rtg_visible_since_ts: Optional[float] = None
 
@@ -122,6 +103,10 @@ class AutomationSupervisor:
             self._apply_state(directives.get("state"))
             self._apply_mode(directives.get("mode"))
             self._sync_pause_deadline(directives)
+            self._apply_adb_port(
+                directives.get("adb_port"),
+                directives.get("adb_port_updated_at"),
+            )
 
         self._auto_resume_if_needed()
 
@@ -134,12 +119,10 @@ class AutomationSupervisor:
                 f"Unsupported automation mode {mode!r}; "
                 f"expected one of {sorted(_ALLOWED_MODES)}"
             )
-        directives = self._load_control_directive()
-        directives["mode"] = normalized
-        directives["updated_at"] = datetime.now().astimezone().isoformat(
-            timespec="seconds"
-        )
-        if not self._write_control_directive(directives):
+        try:
+            self._control_store.set_mode(normalized, source="runtime")
+        except ControlDirectiveError as exc:
+            log(f"[CTRL] Failed writing control file: {exc}", "WARN")
             return False
         self._last_applied_mode = None
         self._apply_mode(normalized)
@@ -148,160 +131,53 @@ class AutomationSupervisor:
     def format_state(self, ui_state: str) -> str:
         return f"{ui_state}/PAUSED" if self.is_paused else ui_state
 
-    # --------------------- coins: total snapshots --------------------------
-    def schedule_total_snapshot(self, reason: str = "scheduled") -> None:
-        self._coins_pending_total_reason = reason
-
-    def record_run_restart(self) -> None:
-        self.schedule_total_snapshot("run_restart")
-
-    def should_capture_total(self, now: Optional[float] = None) -> bool:
-        if self._coins_pending_total_reason:
-            return True
-        if self._coins_next_hourly_check_ts is None:
-            return False
-        ts = time.time() if now is None else float(now)
-        return ts >= self._coins_next_hourly_check_ts
-
-    def _capture_coins_frame(self) -> Optional[Frame]:
-        try:
-            return capture_and_save_screenshot(log_capture=False)
-        except Exception:
-            return None
-
-    def _detect_coins_from_frame(
-        self, frame: Optional[Frame], debug_out: Optional[str] = None
-    ) -> Tuple[Optional[Decimal], float, bool]:
-        if frame is None:
-            return None, -1.0, False
-        try:
-            val, conf, has_min = detect_coins_from_image(frame, debug_out=debug_out)
-            return val, conf, has_min
-        except Exception:
-            return None, -1.0, False
-
-    def _toggle_for_total(self) -> Tuple[Optional[Decimal], float, Optional[Frame], int]:
-        toggles = 0
-        if not tap_if_visible("buttons.coin_toggle", retries=1):
-            log("[COINS] Failed to toggle coin display for total snapshot", "WARN")
-            return None, -1.0, None, toggles
-
-        toggles = 1
-        total_val: Optional[Decimal] = None
-        total_conf = -1.0
-        total_img: Optional[Frame] = None
-
-        for _ in range(3):
-            time.sleep(0.4)
-            frame = self._capture_coins_frame()
-            if frame is None:
-                continue
-            val, conf, has_min = self._detect_coins_from_frame(frame)
-            if val is not None and not has_min:
-                total_val, total_conf, total_img = val, conf, frame
-                break
-
-        if total_img is None:
-            log("[COINS] Unable to read total coins after toggle", "WARN")
-            if tap_if_visible("buttons.coin_toggle", retries=1):
-                toggles += 1
-                time.sleep(0.4)
-            return None, -1.0, None, toggles
-
-        return total_val, total_conf, total_img, toggles
-
-    def capture_total_snapshot(
-        self,
-        *,
-        current_img: Optional[Frame],
-        current_value: Optional[Decimal],
-        current_confidence: float,
-        current_has_min: bool,
-        debug_out: Optional[str] = None,
-    ) -> Tuple[Optional[CoinsTotalSnapshot], Optional[Tuple[Optional[Decimal], float, bool]]]:
-        now = time.time()
-        reason = self._coins_pending_total_reason or "hourly"
-
-        prev_value = self._coins_last_total
-        prev_ts = self._coins_last_total_ts
-        prev_run_start_val = self._coins_run_start_total
-        prev_run_start_ts = self._coins_run_start_ts
-
-        total_val: Optional[Decimal] = None
-        total_conf = -1.0
-        total_img: Optional[Frame] = None
-        toggles = 0
-
-        if not current_has_min and current_img is not None and current_value is not None:
-            total_val = current_value
-            total_conf = current_confidence
-            total_img = current_img
-            toggles = 0
-        else:
-            total_val, total_conf, total_img, toggles = self._toggle_for_total()
-            if total_val is None or total_img is None:
-                return None, None
-
-        restore_toggle = 1 if (toggles % 2 == 1 or not current_has_min) else 0
-        per_min_frame: Optional[Frame] = None
-
-        if restore_toggle:
-            if tap_if_visible("buttons.coin_toggle", retries=1):
-                toggles += 1
-                time.sleep(0.4)
-                per_min_frame = self._capture_coins_frame()
-            else:
-                log("[COINS] Failed to restore coins/min display after total snapshot", "WARN")
-        else:
-            per_min_frame = self._capture_coins_frame()
-
-        per_min_val, per_min_conf, per_min_has_min = self._detect_coins_from_frame(
-            per_min_frame, debug_out=debug_out
-        )
-
-        if per_min_has_min:
-            self._coins_has_min_miss = 0
-        else:
-            log("[COINS] Post-snapshot detection missing '/min'; downstream toggle may retry", "WARN")
-
-        if restore_toggle or toggles > 0:
-            self._coins_ignore_plausibility_once = True
-            self._last_coins_toggle_ts = now
-
-        if total_val is None:
-            # Keep pending reason so we retry on next cycle.
-            return None, (per_min_val, per_min_conf, per_min_has_min)
-
-        if self._coins_total_session_start is None:
-            self._coins_total_session_start = total_val
-            self._coins_total_session_start_ts = now
-
-        snapshot = CoinsTotalSnapshot(
-            value=total_val,
-            confidence=total_conf,
-            timestamp=now,
-            reason=reason,
-            image=total_img,
-            previous_value=prev_value,
-            previous_timestamp=prev_ts,
-            previous_run_start_value=prev_run_start_val,
-            previous_run_start_timestamp=prev_run_start_ts,
-            session_start_value=self._coins_total_session_start,
-            session_start_timestamp=self._coins_total_session_start_ts,
-        )
-
-        self._coins_last_total = total_val
-        self._coins_last_total_ts = now
-        self._coins_pending_total_reason = None
-        self._coins_next_hourly_check_ts = now + 3600.0
-
-        if reason in {"startup", "run_restart"}:
-            self._coins_run_start_total = total_val
-            self._coins_run_start_ts = now
-
-        return snapshot, (per_min_val, per_min_conf, per_min_has_min)
-
     # --------------------- coins: toggle + plausibility ----------------------
+    def _recover_missing_coin_magnitude(
+        self,
+        coins_val: Optional[Decimal],
+        coins_conf: float,
+        has_min: bool,
+    ) -> Optional[Decimal]:
+        """Recover a magnitude suffix omitted from an otherwise valid rate OCR."""
+
+        reference = self._last_coins_val
+        if (
+            not has_min
+            or coins_val is None
+            or coins_val <= 0
+            or coins_val >= 1000
+            or reference is None
+            or reference < 1000
+        ):
+            return coins_val
+
+        reference_exponent = max(3, (reference.adjusted() // 3) * 3)
+        candidates = []
+        for exponent in {
+            max(0, reference_exponent - 3),
+            reference_exponent,
+            reference_exponent + 3,
+        }:
+            candidate = coins_val * (Decimal(10) ** exponent)
+            if candidate <= 0:
+                continue
+            factor = max(candidate / reference, reference / candidate)
+            candidates.append((factor, candidate))
+
+        factor, recovered = min(candidates, key=lambda item: item[0])
+        if factor > self.coins_max_jump_factor or recovered == coins_val:
+            return coins_val
+
+        log(
+            "[COINS] Recovered missing magnitude suffix "
+            f"{format_compact_decimal(coins_val)} → "
+            f"{format_compact_decimal(recovered)} using prior "
+            f"{format_compact_decimal(reference)} "
+            f"(factor={factor:.2f}, conf={coins_conf:.1f})",
+            "WARN",
+        )
+        return recovered
+
     def _apply_plausibility(self, coins_val: Optional[Decimal], coins_conf: float) -> Optional[Decimal]:
         coins_eff = coins_val
         try:
@@ -352,6 +228,15 @@ class AutomationSupervisor:
         supervisor itself is not paused, such as during an exclusive startup
         gate. Returns updated ``(val, conf, has_min, eff)``.
         """
+        # Restore a dropped OCR suffix before comparing the reading with the
+        # last trusted rate. The recovery is limited to a parsed /min display
+        # and must itself fall within the normal plausibility window.
+        coins_val = self._recover_missing_coin_magnitude(
+            coins_val,
+            coins_conf,
+            has_min,
+        )
+
         # Plausibility first
         coins_eff = self._apply_plausibility(coins_val, coins_conf)
 
@@ -401,6 +286,11 @@ class AutomationSupervisor:
                         if img2 is not None:
                             try:
                                 coins_val, coins_conf, has_min = detect_coins_from_image(img2, debug_out=debug_out)
+                                coins_val = self._recover_missing_coin_magnitude(
+                                    coins_val,
+                                    coins_conf,
+                                    has_min,
+                                )
                                 coins_eff = self._apply_plausibility(coins_val, coins_conf)
                             except Exception:
                                 pass
@@ -477,15 +367,11 @@ class AutomationSupervisor:
 
     # ------------------------------ helpers ---------------------------------
     def _load_control_directive(self) -> Dict[str, object]:
-        if not self.control_file.exists():
-            return {}
         try:
-            with self.control_file.open("r", encoding="utf-8") as handle:
-                data = json.load(handle) or {}
-        except (OSError, json.JSONDecodeError) as exc:
+            return self._control_store.read()
+        except ControlDirectiveError as exc:
             log(f"[CTRL] Failed reading control file: {exc}", "WARN")
             return {}
-        return data if isinstance(data, dict) else {}
 
     def _apply_state(self, state: object) -> None:
         if not isinstance(state, str) or not state:
@@ -521,6 +407,60 @@ class AutomationSupervisor:
         except Exception as exc:
             log(f"[CTRL] Failed to set mode={normalized}: {exc}", "WARN")
 
+    def _apply_adb_port(self, port: object, updated_at: object) -> None:
+        if isinstance(port, bool) or not isinstance(port, int):
+            return
+        if not 1 <= port <= 65535 or self._adb_port_handoff is None:
+            return
+
+        request = (port, updated_at)
+        if request == self._last_applied_adb_request:
+            return
+        target = f"localhost:{port}"
+        if os.getenv("ADB_DEVICE") == target:
+            self._last_applied_adb_request = request
+            log(
+                f"[CTRL] ADB target set to {target} via control file",
+                "INFO",
+                console=True,
+            )
+            return
+        if not self.is_paused:
+            if request != self._last_deferred_adb_request:
+                log(
+                    f"[CTRL] Deferring ADB target {target}; "
+                    "runtime must be PAUSED",
+                    "WARN",
+                    console=True,
+                )
+                self._last_deferred_adb_request = request
+            return
+
+        now = time.monotonic()
+        if (
+            request == self._last_deferred_adb_request
+            and now < self._next_adb_handoff_attempt_at
+        ):
+            return
+        self._last_deferred_adb_request = request
+        if self._adb_port_handoff(port):
+            self._last_applied_adb_request = request
+            self._next_adb_handoff_attempt_at = 0.0
+            log(
+                f"[CTRL] ADB target set to {target} via control file",
+                "INFO",
+                console=True,
+            )
+            return
+
+        self._next_adb_handoff_attempt_at = now + 10.0
+        log(
+            f"[CTRL] ADB target handoff to localhost:{port} failed; "
+            "remaining PAUSED and retaining the previous target",
+            "WARN",
+            console=True,
+        )
+
     @staticmethod
     def _parse_resume_at(value: object) -> Optional[float]:
         if value is None:
@@ -553,15 +493,9 @@ class AutomationSupervisor:
 
     def _write_control_directive(self, directives: Dict[str, object]) -> bool:
         try:
-            self.control_file.parent.mkdir(parents=True, exist_ok=True)
-            temp_path = self.control_file.with_name(
-                f".{self.control_file.name}.{os.getpid()}.tmp"
-            )
-            with temp_path.open("w", encoding="utf-8") as handle:
-                json.dump(directives, handle, indent=2, ensure_ascii=False)
-            os.replace(temp_path, self.control_file)
+            self._control_store.replace(directives)
             return True
-        except OSError as exc:
+        except ControlDirectiveError as exc:
             log(f"[CTRL] Failed writing control file: {exc}", "WARN")
             return False
 
@@ -570,25 +504,17 @@ class AutomationSupervisor:
         if not self.is_paused or deadline is None or time.time() < deadline:
             return
 
-        # Re-read immediately before writing so a manual resume, extension, or
-        # replacement with an indefinite pause wins over this cached deadline.
-        directives = self._load_control_directive()
-        state = directives.get("state")
-        current_deadline = self._parse_resume_at(directives.get("resume_at"))
-        if (
-            not isinstance(state, str)
-            or state.upper() != "PAUSED"
-            or current_deadline != deadline
-        ):
-            self._sync_pause_deadline(directives)
+        try:
+            resumed = self._control_store.resume_expired_pause(
+                expected_resume_at=deadline,
+                now=time.time(),
+            )
+        except ControlDirectiveError as exc:
+            log(f"[CTRL] Failed writing control file: {exc}", "WARN")
             return
-
-        directives["state"] = "RUNNING"
-        directives.pop("resume_at", None)
-        directives["updated_at"] = datetime.now().astimezone().isoformat(
-            timespec="seconds"
-        )
-        if not self._write_control_directive(directives):
+        if resumed is None:
+            directives = self._load_control_directive()
+            self._sync_pause_deadline(directives)
             return
 
         self._apply_state("RUNNING")
@@ -604,10 +530,9 @@ try:
     from core.run_state import RunState, ExecMode
     __all__ = [
         "AutomationSupervisor",
-        "CoinsTotalSnapshot",
         "AUTOMATION",
         "RunState",
         "ExecMode",
     ]
 except Exception:
-    __all__ = ["AutomationSupervisor", "CoinsTotalSnapshot", "AUTOMATION"]
+    __all__ = ["AutomationSupervisor", "AUTOMATION"]

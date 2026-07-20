@@ -57,6 +57,7 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
         "rules": [
             {
                 "name": "validate_tournament_session_preflight",
+                "gate_phase": "session_preflight",
                 "when": {"state": "RUNNING"},
                 "assert": ["!gc_session_preflight_attempted"],
                 "cooldown_sec": 30.0,
@@ -71,9 +72,20 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
             }
         ],
         "run_configuration": {
-            "schema_version": 1,
+            "schema_version": 2,
             "profile": "tournament",
             "profile_version": 1,
+            "settings": {
+                key: copy.deepcopy(requirements[key])
+                for key in (
+                    "cards_deck",
+                    "workshop_preset",
+                    "bots_preset",
+                    "guardian_chips",
+                    "auto_pick_perks",
+                    "ultimate_weapons",
+                )
+            },
             "loadout": {
                 "modules": {
                     "mode": "enforce",

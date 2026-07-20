@@ -1,8 +1,10 @@
 import json
+import os
 
 import pytest
 
 from core.single_instance import InstanceAlreadyRunning, SingleInstanceLock
+from core.adb_target_session import AdbTargetSession
 
 
 def test_second_lock_for_same_target_is_rejected(tmp_path):
@@ -30,3 +32,51 @@ def test_lock_can_be_reacquired_after_release(tmp_path):
 
     with second:
         pass
+
+
+def test_adb_target_session_handoff_acquires_new_lock_before_releasing_old(
+    tmp_path,
+    monkeypatch,
+):
+    def lock_factory(target):
+        port = target.rsplit(":", 1)[-1]
+        return SingleInstanceLock(target, tmp_path / f"automation-{port}.lock")
+
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    session = AdbTargetSession("localhost:5555", lock_factory=lock_factory)
+    with session:
+        assert session.handoff("localhost:5565", validate=lambda: True)
+        assert session.target == "localhost:5565"
+        assert os.environ["ADB_DEVICE"] == "localhost:5565"
+        with SingleInstanceLock(
+            "localhost:5555",
+            tmp_path / "automation-5555.lock",
+        ):
+            pass
+        contender = SingleInstanceLock(
+            "localhost:5565",
+            tmp_path / "automation-5565.lock",
+        )
+        with pytest.raises(InstanceAlreadyRunning):
+            contender.acquire()
+
+
+def test_adb_target_session_failed_validation_retains_old_target(
+    tmp_path,
+    monkeypatch,
+):
+    def lock_factory(target):
+        port = target.rsplit(":", 1)[-1]
+        return SingleInstanceLock(target, tmp_path / f"automation-{port}.lock")
+
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    session = AdbTargetSession("localhost:5555", lock_factory=lock_factory)
+    with session:
+        assert not session.handoff("localhost:5565", validate=lambda: False)
+        assert session.target == "localhost:5555"
+        assert os.environ["ADB_DEVICE"] == "localhost:5555"
+        with SingleInstanceLock(
+            "localhost:5565",
+            tmp_path / "automation-5565.lock",
+        ):
+            pass

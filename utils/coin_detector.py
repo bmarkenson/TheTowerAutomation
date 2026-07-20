@@ -10,21 +10,13 @@ import cv2
 import numpy as np
 
 from core.clickmap_access import resolve_dot_path, get_clickmap
+from core.battle_stats import format_tower_number, parse_tower_number
 from utils.ocr_utils import ocr_text_and_conf
 
 # Use enough precision for big idle numbers
 getcontext().prec = 28
 
-# Compact suffix multipliers (case-insensitive)
-_SUFFIX = {
-    "K": Decimal("1e3"),
-    "M": Decimal("1e6"),
-    "B": Decimal("1e9"),
-    "T": Decimal("1e12"),
-    "q": Decimal("1e15"),   # quadrillion
-    "Q": Decimal("1e18"),   # quintillion
-    # Extend as the game introduces larger magnitudes (e.g., sextillion)
-}
+_SUFFIX_PATTERN = r"(?:[KMBTqQsSOND]|[a-z]{2})"
 
 # Allow per-character filter to keep '/', so '/min' survives until we strip it
 _ALLOWED_CHARS_RE = re.compile(r"[0-9\.\,\s\$\w/]+")
@@ -66,15 +58,28 @@ def parse_compact_number(text: str) -> Optional[Decimal]:
     s = s.replace(",", "").replace("$", "").strip()
     # Drop leading currency/label letters like 'C' or 'Coins'
     s = re.sub(r"^[A-Za-z]+\s*", "", s)
-    # Drop trailing '/min' or 'min' (with or without slash; tolerate '/mi')
-    s = re.sub(r"(?:/\s*)?m(?:in)?\b.*$", "", s, flags=re.IGNORECASE)
+    # Drop trailing '/min' or 'min' (tolerate '/m' and '/mi'). Requiring the
+    # slash for abbreviated forms prevents an uppercase M magnitude suffix
+    # from being mistaken for the start of "min".
+    s = re.sub(
+        r"(?:/\s*m(?:i(?:n)?)?|\bmin)\b.*$",
+        "",
+        s,
+        flags=re.IGNORECASE,
+    )
 
-    # Extract all occurrences of number + optional one-letter suffix anywhere in the string
-    matches = list(re.finditer(r"([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z])?", s))
+    # Extract all occurrences of number plus an optional Tower suffix. Suffix
+    # case is significant: q/Q and s/S are different magnitudes.
+    matches = list(
+        re.finditer(
+            rf"([0-9]+(?:\.[0-9]+)?)\s*({_SUFFIX_PATTERN})?",
+            s,
+        )
+    )
     if not matches:
         return None
 
-    # Choose best: prefer longer numeric token; tie-break by known suffix (K/M/B/T/Q/q)
+    # Choose best: prefer longer numeric token; tie-break by a known suffix.
     best_num, best_suf = None, ""
     for m in matches:
         num_s = m.group(1)
@@ -82,49 +87,22 @@ def parse_compact_number(text: str) -> Optional[Decimal]:
         if (
             best_num is None
             or len(num_s) > len(best_num)
-            or (len(num_s) == len(best_num) and bool(_SUFFIX.get(suf)) and not _SUFFIX.get(best_suf))
+            or (
+                len(num_s) == len(best_num)
+                and bool(suf)
+                and not best_suf
+            )
         ):
             best_num, best_suf = num_s, suf
 
-    try:
-        base = Decimal(best_num)
-    except Exception:
-        return None
-
-    if not best_suf:
-        return base
-    mult = _SUFFIX.get(best_suf)
-    return base if mult is None else base * mult
+    return parse_tower_number(f"{best_num}{best_suf}")
 
 def format_compact_decimal(value: Decimal) -> str:
     """
     Format a Decimal into a compact string with suffix, keeping up to 2 decimals
     but dropping trailing ".00" (e.g., 862.28M, 1T, 987.5K, 123).
     """
-    if value is None:
-        return "—"
-
-    def _fmt_2dp_trim(d: Decimal) -> str:
-        s = str(d.quantize(Decimal("0.01")))
-        if "." in s:
-            s = s.rstrip("0").rstrip(".")
-        return s
-
-    abs_val = value.copy_abs()
-    for suf, mult in [
-        ("Q", Decimal("1e18")),
-        ("q", Decimal("1e15")),
-        ("T", Decimal("1e12")),
-        ("B", Decimal("1e9")),
-        ("M", Decimal("1e6")),
-        ("K", Decimal("1e3")),
-    ]:
-        if abs_val >= mult:
-            out = (value / mult)
-            return f"{_fmt_2dp_trim(out)}{suf}"
-    return _fmt_2dp_trim(value)
-
-_SUFFIX_KEYS = {k.upper() for k in _SUFFIX.keys()}
+    return "—" if value is None else format_tower_number(value)
 
 
 def is_coin_token(token: str) -> bool:
@@ -132,11 +110,14 @@ def is_coin_token(token: str) -> bool:
 
 
 def _has_coin_suffix(raw: str, tokens: List[str]) -> bool:
-    if raw and re.search(r"([0-9]+(?:\.[0-9]+)?)\s*([kmbtq])\b", raw, re.IGNORECASE):
+    if raw and re.search(
+        rf"([0-9]+(?:\.[0-9]+)?)\s*{_SUFFIX_PATTERN}(?=\s*(?:/|$))",
+        raw,
+    ):
         return True
     for tok in tokens:
         norm = tok.strip().replace("/", "")
-        if len(norm) == 1 and norm.upper() in _SUFFIX_KEYS:
+        if re.fullmatch(_SUFFIX_PATTERN, norm):
             return True
     return False
 

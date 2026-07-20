@@ -170,6 +170,7 @@ rules:
     var: level_skip_last_reason
     value: ''
 - name: initialise_fast_loop
+  gate_phase: run_initialization
   when:
     state: RUNNING
   assert:
@@ -236,6 +237,7 @@ rules:
     var: level_skip_last_reason
     value: ''
 - name: disable_fast_loop
+  gate_phase: run_initialization
   when:
     state: RUNNING
   assert:
@@ -250,6 +252,7 @@ rules:
     var: loop_sleep_override_sec
     value: 0.0
 - name: initialize_level_skips_fast
+  gate_phase: run_initialization
   when:
     state: RUNNING
   assert:
@@ -259,6 +262,7 @@ rules:
   do:
   - type: level_skip_initialize
 - name: validate_gc_session_preflight
+  gate_phase: session_preflight
   when:
     state: RUNNING
   assert:

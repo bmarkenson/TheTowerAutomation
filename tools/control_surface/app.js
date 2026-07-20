@@ -1,0 +1,522 @@
+"use strict";
+
+const state = {
+  token: sessionStorage.getItem("thetowerControlToken") || "",
+  refreshing: false,
+  timer: null,
+  lastStatus: null,
+};
+
+const byId = (id) => document.getElementById(id);
+const dash = "—";
+
+function authHeaders() {
+  return state.token ? { Authorization: `Bearer ${state.token}` } : {};
+}
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    cache: "no-store",
+    ...options,
+    headers: {
+      ...authHeaders(),
+      ...(options.headers || {}),
+    },
+  });
+  let payload = {};
+  try {
+    payload = await response.json();
+  } catch (_error) {
+    payload = { error: `Unexpected response (${response.status})` };
+  }
+  if (response.status === 401) {
+    showAuthDialog();
+    throw new Error("Access token required");
+  }
+  if (!response.ok) {
+    throw new Error(payload.error || `Request failed (${response.status})`);
+  }
+  return payload;
+}
+
+function setText(id, value) {
+  byId(id).textContent = value ?? dash;
+}
+
+function setBadge(element, text, kind = "neutral") {
+  element.textContent = text;
+  element.className = `mini-badge ${kind}`;
+}
+
+function formatDate(value) {
+  if (!value) return dash;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.valueOf()) ? value : parsed.toLocaleString();
+}
+
+function formatAge(seconds) {
+  if (seconds == null) return "unknown age";
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m ago`;
+}
+
+function formatRemaining(seconds) {
+  if (seconds == null) return "indefinite";
+  if (seconds <= 0) return "expiry pending";
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  if (hours) return `${hours}h ${minutes}m remaining`;
+  if (minutes) return `${minutes}m ${secs}s remaining`;
+  return `${secs}s remaining`;
+}
+
+function renderStatus(payload) {
+  state.lastStatus = payload;
+  const control = payload.control || {};
+  const observation = payload.observation;
+  const runtime = payload.runtime || { instances: [] };
+  const processService = payload.process_service;
+  const directive = control.state || "UNKNOWN";
+
+  setText("directiveState", directive);
+  byId("directiveState").className = `state-pill ${directive.toLowerCase()}`;
+  let directiveDetail = control.updated_at ? `Updated ${formatDate(control.updated_at)}` : "No persisted update time";
+  if (directive === "PAUSED") directiveDetail = `Paused ${formatRemaining(control.remaining_seconds)}`;
+  if (control.error) directiveDetail = control.error;
+  setText("directiveDetail", directiveDetail);
+  setText("currentMode", control.mode);
+  setText("controlUpdated", formatDate(control.updated_at));
+  byId("modeSelect").value = ["RETRY", "WAIT", "HOME"].includes(control.mode) ? control.mode : "RETRY";
+
+  if (observation) {
+    setText("observedState", observation.state_label);
+    setText("observedWave", observation.wave);
+    setText("observedCoins", observation.coins_per_minute);
+    setText("lastObserved", `${formatDate(observation.observed_at)} · ${formatAge(observation.age_seconds)}`);
+    setText("observedMenu", observation.menu);
+    setText("observedSecondary", observation.secondary?.join(", ") || dash);
+    setText("observedOverlays", observation.overlays?.join(", ") || dash);
+    setBadge(byId("heartbeatBadge"), observation.stale ? "Stale" : "Fresh", observation.stale ? "warn" : "good");
+    byId("staleWarning").hidden = !observation.stale;
+  } else {
+    ["observedState", "observedWave", "observedCoins", "lastObserved", "observedMenu", "observedSecondary", "observedOverlays"].forEach((id) => setText(id, dash));
+    setBadge(byId("heartbeatBadge"), "No heartbeat", "bad");
+    byId("staleWarning").hidden = false;
+  }
+
+  const active = (runtime.instances || []).find((instance) => instance.active) || (runtime.instances || [])[0];
+  setText("runtimeTarget", active?.target);
+  setText("runtimePid", active?.pid);
+  setText("runtimeStarted", formatDate(active?.started_at));
+  setText("processService", processService?.service);
+  setText(
+    "processState",
+    processService?.available
+      ? `${processService.active_state || dash} / ${processService.sub_state || dash}`
+      : processService?.error || "Not configured",
+  );
+  if (runtime.active) setBadge(byId("runtimeBadge"), "Owner active", "good");
+  else if (active) setBadge(byId("runtimeBadge"), "Stale lock", "warn");
+  else setBadge(byId("runtimeBadge"), "No owner", "bad");
+
+  const stateAck = payload.acknowledgements?.state;
+  if (stateAck?.acknowledges_current) setBadge(byId("ackBadge"), "Applied by runtime", "good");
+  else if (directive === "STOPPED" && !runtime.active) setBadge(byId("ackBadge"), "Runtime stopped", "good");
+  else setBadge(byId("ackBadge"), "Awaiting runtime", "warn");
+
+  const connection = byId("connectionBadge");
+  connection.className = `connection-badge ${payload.healthy ? "is-healthy" : "is-warning"}`;
+  setText("connectionText", payload.healthy ? "Linux host healthy" : "Host needs attention");
+
+  document.querySelectorAll("[data-control-action]").forEach((button) => {
+    button.disabled = Boolean(control.error);
+  });
+  document.querySelectorAll("[data-process-action]").forEach((button) => {
+    button.disabled = Boolean(control.error) || !processService?.available;
+  });
+}
+
+function renderBattles(payload) {
+  const tbody = byId("battleRows");
+  tbody.replaceChildren();
+  setBadge(byId("battleCount"), `${payload.total || 0} record${payload.total === 1 ? "" : "s"}`, payload.errors?.length ? "warn" : "neutral");
+  if (!payload.items?.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 9;
+    cell.className = "empty-state";
+    cell.textContent = payload.errors?.length ? "Battle records could not be read." : "No completed battle records yet.";
+    row.append(cell);
+    tbody.append(row);
+    return;
+  }
+  for (const battle of payload.items) {
+    const row = document.createElement("tr");
+    row.dataset.battleId = battle.battle_id;
+    row.tabIndex = 0;
+    row.title = "Open full battle record";
+    const values = [
+      formatDate(battle.captured_at),
+      battle.battle_type_label || humanize(battle.battle_type || "unknown"),
+      battle.strategy || battle.profile || dash,
+      battle.tier ?? dash,
+      battle.wave ?? dash,
+      battle.real_time || dash,
+      battle.coins_earned || dash,
+      battle.cells_earned || dash,
+    ];
+    for (const value of values) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.append(cell);
+    }
+    const quality = document.createElement("td");
+    quality.textContent = battle.quality?.valid ? "Valid" : "Review";
+    quality.className = battle.quality?.valid ? "quality-good" : "quality-bad";
+    row.append(quality);
+    tbody.append(row);
+  }
+}
+
+function renderActivity(payload) {
+  const list = byId("activityList");
+  list.replaceChildren();
+  const items = payload.items || [];
+  if (!items.length) {
+    const item = document.createElement("li");
+    item.className = "empty-state";
+    item.textContent = "No recent activity is available.";
+    list.append(item);
+    return;
+  }
+  for (const entry of [...items].reverse()) {
+    const item = document.createElement("li");
+    const time = document.createElement("span");
+    const level = document.createElement("span");
+    const message = document.createElement("span");
+    time.className = "activity-time";
+    level.className = `activity-level ${entry.level}`;
+    time.textContent = entry.timestamp;
+    level.textContent = entry.level;
+    message.textContent = entry.message;
+    item.append(time, level, message);
+    list.append(item);
+  }
+}
+
+async function refresh() {
+  if (state.refreshing) return;
+  state.refreshing = true;
+  try {
+    const [status, battles, activity] = await Promise.all([
+      api("/api/v1/status"),
+      api("/api/v1/battles?limit=30"),
+      api("/api/v1/activity?limit=70"),
+    ]);
+    renderStatus(status);
+    renderBattles(battles);
+    renderActivity(activity);
+  } catch (error) {
+    const connection = byId("connectionBadge");
+    connection.className = "connection-badge is-error";
+    setText("connectionText", error.message || "Connection failed");
+  } finally {
+    state.refreshing = false;
+  }
+}
+
+async function sendControl(payload, successMessage) {
+  setControlsBusy(true);
+  try {
+    const response = await api("/api/v1/control", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    renderStatus(response);
+    toast(successMessage);
+    await refresh();
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    setControlsBusy(false);
+  }
+}
+
+async function sendProcess(payload, successMessage) {
+  setControlsBusy(true);
+  try {
+    const response = await api("/api/v1/process", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    renderStatus(response);
+    toast(successMessage);
+    await refresh();
+  } catch (error) {
+    toast(error.message, true);
+    await refresh();
+  } finally {
+    setControlsBusy(false);
+  }
+}
+
+function setControlsBusy(busy) {
+  document.querySelectorAll("[data-control-action], [data-process-action], #applyModeButton, #customPauseForm button").forEach((button) => {
+    button.disabled = busy;
+  });
+  if (!busy && state.lastStatus) renderStatus(state.lastStatus);
+}
+
+function createDetailCard(label, value) {
+  const card = document.createElement("div");
+  card.className = "detail-card";
+  const name = document.createElement("span");
+  const result = document.createElement("strong");
+  name.textContent = label;
+  result.textContent = value ?? dash;
+  card.append(name, result);
+  return card;
+}
+
+function rowsByKey(record) {
+  const result = new Map();
+  const stats = record.more_stats || record.detailed_stats;
+  for (const section of stats?.sections || []) {
+    for (const row of section.rows || []) result.set(`${section.key}.${row.key}`, row);
+  }
+  return result;
+}
+
+async function openBattle(battleId) {
+  const dialog = byId("battleDialog");
+  const body = byId("battleDialogBody");
+  setText("battleDialogTitle", battleId);
+  body.replaceChildren(createDetailCard("Loading", "Battle record…"));
+  dialog.showModal();
+  try {
+    const record = await api(`/api/v1/battles/${encodeURIComponent(battleId)}`);
+    renderBattleDetail(record);
+  } catch (error) {
+    body.replaceChildren(createDetailCard("Unable to load", error.message));
+  }
+}
+
+function renderBattleDetail(record) {
+  const body = byId("battleDialogBody");
+  body.replaceChildren();
+  const rows = rowsByKey(record);
+  const value = (key) => rows.get(key)?.value_raw || dash;
+  const cards = document.createElement("div");
+  cards.className = "detail-card-grid";
+  [
+    ["Captured", formatDate(record.captured_at)],
+    ["Type", record.battle_type_analysis?.label || humanize(record.battle_type || "unknown")],
+    ["Strategy", record.strategy || record.run_configuration?.profile],
+    ["Tier", value("battle_report.tier")],
+    ["Wave", value("battle_report.wave")],
+    ["Real time", value("battle_report.real_time")],
+    ["Coins", value("battle_report.coins_earned")],
+    ["Coins/hour", value("battle_report.coins_per_hour")],
+    ["Cells", value("battle_report.cells_earned")],
+    ["Cells/hour", value("battle_report.cells_per_hour")],
+    ["Capture", record.quality?.valid ? "Valid" : "Review needed"],
+  ].forEach(([label, cardValue]) => cards.append(createDetailCard(label, cardValue)));
+  body.append(cards);
+
+  if (record.quality?.warnings?.length) {
+    const warnings = document.createElement("ul");
+    warnings.className = "warning-list";
+    for (const warning of record.quality.warnings) {
+      const item = document.createElement("li");
+      item.textContent = warning;
+      warnings.append(item);
+    }
+    body.append(warnings);
+  }
+
+  appendPerksSection(body, record.perks);
+  appendStructuredSection(body, "Battle type analysis", record.battle_type_analysis, true);
+  appendStructuredSection(body, "Run configuration", record.run_configuration, true);
+  appendStructuredSection(
+    body,
+    "Verified preflight evidence",
+    record.runtime?.session_preflight_evidence,
+    false,
+  );
+
+  const derivedEntries = Object.entries(record.derived || {}).filter(([, entryValue]) => typeof entryValue !== "object");
+  if (derivedEntries.length) {
+    const details = document.createElement("details");
+    details.className = "record-section";
+    details.open = true;
+    const summary = document.createElement("summary");
+    summary.textContent = "Derived performance";
+    const table = makeKeyValueTable(derivedEntries.map(([key, entryValue]) => [humanize(key), String(entryValue)]));
+    details.append(summary, table);
+    body.append(details);
+  }
+
+  const stats = record.more_stats || record.detailed_stats;
+  for (const section of stats?.sections || []) {
+    const details = document.createElement("details");
+    details.className = "record-section";
+    const summary = document.createElement("summary");
+    summary.textContent = section.name || humanize(section.key);
+    const pairs = (section.rows || []).map((row) => [row.label || humanize(row.key), row.value_raw ?? dash]);
+    details.append(summary, makeKeyValueTable(pairs));
+    body.append(details);
+  }
+}
+
+function appendPerksSection(container, perks) {
+  if (!perks) return;
+  const details = document.createElement("details");
+  details.className = "record-section";
+  details.open = true;
+  const summary = document.createElement("summary");
+  const selected = perks.selected || [];
+  summary.textContent = `Selected perks (${selected.length})`;
+  const pairs = selected.map((perk) => [
+    `#${perk.latest_selection_rank ?? dash} · ${perk.color || "unknown"}`,
+    `${perk.display_text || dash}${perk.confidence != null ? ` (${Number(perk.confidence).toFixed(1)}%)` : ""}`,
+  ]);
+  if (!pairs.length) {
+    pairs.push(["Capture", perks.quality?.source_reason || "No perks recognized"]);
+  }
+  details.append(summary, makeKeyValueTable(pairs));
+  container.append(details);
+}
+
+function appendStructuredSection(container, title, value, open) {
+  if (!value || typeof value !== "object" || !Object.keys(value).length) return;
+  const pairs = [];
+  flattenObject(value, "", pairs);
+  if (!pairs.length) return;
+  const details = document.createElement("details");
+  details.className = "record-section";
+  details.open = open;
+  const summary = document.createElement("summary");
+  summary.textContent = title;
+  details.append(summary, makeKeyValueTable(pairs));
+  container.append(details);
+}
+
+function flattenObject(value, prefix, pairs) {
+  for (const [key, child] of Object.entries(value || {})) {
+    if (["schema_version", "profile_version", "raw_text"].includes(key)) continue;
+    const label = prefix ? `${prefix} / ${humanize(key)}` : humanize(key);
+    if (Array.isArray(child)) {
+      pairs.push([label, child.map((item) => typeof item === "object" ? JSON.stringify(item) : String(item)).join(" → ") || dash]);
+    } else if (child && typeof child === "object") {
+      flattenObject(child, label, pairs);
+    } else {
+      pairs.push([label, typeof child === "boolean" ? (child ? "Yes" : "No") : String(child ?? dash)]);
+    }
+  }
+}
+
+function makeKeyValueTable(pairs) {
+  const table = document.createElement("table");
+  const tbody = document.createElement("tbody");
+  for (const [key, value] of pairs) {
+    const row = document.createElement("tr");
+    const name = document.createElement("td");
+    const result = document.createElement("td");
+    name.textContent = key;
+    result.textContent = value;
+    row.append(name, result);
+    tbody.append(row);
+  }
+  table.append(tbody);
+  return table;
+}
+
+function humanize(value) {
+  return String(value).replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function showAuthDialog() {
+  const dialog = byId("authDialog");
+  byId("tokenInput").value = state.token;
+  if (!dialog.open) dialog.showModal();
+}
+
+let toastTimer;
+function toast(message, isError = false) {
+  const element = byId("toast");
+  element.textContent = message;
+  element.className = `toast${isError ? " error" : ""}`;
+  element.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { element.hidden = true; }, 4500);
+}
+
+document.addEventListener("click", (event) => {
+  const process = event.target.closest("[data-process-action]");
+  if (process) {
+    const action = process.dataset.processAction;
+    if (action === "stop" && !window.confirm("Persist STOPPED and stop the managed Linux automation service?")) return;
+    const payload = { action };
+    if (process.dataset.runState) payload.run_state = process.dataset.runState;
+    sendProcess(
+      payload,
+      action === "stop"
+        ? "Automation service stopped"
+        : `Automation service started ${payload.run_state.toLowerCase()}`,
+    );
+    return;
+  }
+  const control = event.target.closest("[data-control-action]");
+  if (control) {
+    const action = control.dataset.controlAction;
+    if (action === "stop" && !window.confirm("Persist STOPPED for the automation runtime?")) return;
+    const payload = { action };
+    if (control.dataset.minutes) payload.minutes = Number(control.dataset.minutes);
+    sendControl(payload, action === "pause" ? "Pause directive saved" : `${humanize(action)} directive saved`);
+    return;
+  }
+  const close = event.target.closest("[data-close-dialog]");
+  if (close) byId(close.dataset.closeDialog).close();
+});
+
+byId("customPauseForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const minutes = Number(byId("customPauseMinutes").value);
+  sendControl({ action: "pause", minutes }, `Paused for ${minutes} minutes`);
+});
+
+byId("applyModeButton").addEventListener("click", () => {
+  const mode = byId("modeSelect").value;
+  sendControl({ action: "mode", mode }, `Mode set to ${mode}`);
+});
+
+byId("battleRows").addEventListener("click", (event) => {
+  const row = event.target.closest("tr[data-battle-id]");
+  if (row) openBattle(row.dataset.battleId);
+});
+
+byId("battleRows").addEventListener("keydown", (event) => {
+  const row = event.target.closest("tr[data-battle-id]");
+  if (row && (event.key === "Enter" || event.key === " ")) {
+    event.preventDefault();
+    openBattle(row.dataset.battleId);
+  }
+});
+
+byId("authButton").addEventListener("click", showAuthDialog);
+byId("authForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  state.token = byId("tokenInput").value.trim();
+  if (state.token) sessionStorage.setItem("thetowerControlToken", state.token);
+  else sessionStorage.removeItem("thetowerControlToken");
+  byId("authDialog").close();
+  refresh();
+});
+byId("refreshButton").addEventListener("click", refresh);
+
+refresh();
+state.timer = window.setInterval(refresh, 5000);

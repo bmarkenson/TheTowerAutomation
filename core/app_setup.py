@@ -4,15 +4,28 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import os
 from typing import Optional, Sequence
 
 
-DEFAULT_COINS_LOG_PATH = "logs/coins_per_min.csv"
 DEFAULT_AUTO_RETURN_CONF_THRESHOLD = 0.85
 DEFAULT_COINS_TOGGLE_COOLDOWN = 15.0
 DEFAULT_COINS_CONF_FLOOR = 60.0
 DEFAULT_COINS_MAX_JUMP_FACTOR = 8.0
 DEFAULT_COINS_JUMP_CONF_FLOOR = 90.0
+DEFAULT_ADB_PORT = 5555
+ADB_PORT_ENVIRONMENT_VARIABLE = "THETOWER_ADB_PORT"
+DEFAULT_STRATEGY = "farm"
+STRATEGY_ENVIRONMENT_VARIABLE = "THETOWER_STRATEGY"
+DEFAULT_STARTUP_GATE_POLICY = "immediate"
+STARTUP_GATE_POLICY_ENVIRONMENT_VARIABLE = "THETOWER_STARTUP_GATES"
+STARTUP_GATE_POLICIES = ("immediate", "next_run")
+CONFIGURABLE_STRATEGIES = (
+    "farm_t18",
+    "farm_t19_experiment",
+    "tournament",
+    "none",
+)
 
 
 @dataclass
@@ -22,8 +35,6 @@ class AppConfig:
     status_interval: int
     save_wave_samples: Optional[str]
     save_coin_samples: Optional[str]
-    coins_log_base: str
-    coins_log_enabled: bool
     control_file: str
     auto_return_enabled: bool
     auto_return_secs: int
@@ -42,6 +53,7 @@ class AppConfig:
     full_game_over: bool
     mission_log_path: Optional[str]
     adb_port: int
+    startup_gate_policy: str
 
 
 def _adb_port(value: str) -> int:
@@ -62,9 +74,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--adb-port",
         type=_adb_port,
-        default=5555,
+        default=os.getenv(
+            ADB_PORT_ENVIRONMENT_VARIABLE,
+            str(DEFAULT_ADB_PORT),
+        ),
         metavar="PORT",
-        help="BlueStacks ADB TCP port (default: 5555)",
+        help=(
+            "BlueStacks ADB TCP port "
+            f"(default: ${ADB_PORT_ENVIRONMENT_VARIABLE} or {DEFAULT_ADB_PORT})"
+        ),
     )
     parser.add_argument("--no-restart", action="store_true", help="Disable auto restart on home screen")
     parser.add_argument("--match-trace", action="store_true", help="Emit per-frame match logs from detector")
@@ -73,10 +91,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help="Directory to save per-status wave samples: raw frame (and bin winner). Filename encodes wave.")
     parser.add_argument("--save-coin-samples", default=None,
                         help="Directory to save per-status coin samples: raw frame (and bin winner). Filename encodes coins.")
-    parser.add_argument("--coins-log", default=DEFAULT_COINS_LOG_PATH,
-                        help=f"CSV path to append coins/min samples (default: {DEFAULT_COINS_LOG_PATH})")
-    parser.add_argument("--no-coins-log", action="store_true",
-                        help="Disable coins/min CSV logging")
     parser.add_argument("--no-auto-return", action="store_true",
                         help="Disable auto 'Return to Game' press when stuck (default: enabled)")
     parser.add_argument("--auto-return-minutes", type=int, default=15,
@@ -94,7 +108,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--strategy",
-        default="farm",
+        default=os.getenv(STRATEGY_ENVIRONMENT_VARIABLE, DEFAULT_STRATEGY),
         help=(
             "Runtime strategy: farm (Tier 18 default), farm_t18, "
             "farm_t19_experiment, tournament observer, or none. "
@@ -102,6 +116,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "Use none for the regular "
             "handler loop with no strategy actions or startup gates; "
             "--strategy-config overrides this option"
+        ),
+    )
+    parser.add_argument(
+        "--startup-gates",
+        choices=STARTUP_GATE_POLICIES,
+        default=os.getenv(
+            STARTUP_GATE_POLICY_ENVIRONMENT_VARIABLE,
+            DEFAULT_STARTUP_GATE_POLICY,
+        ),
+        help=(
+            "Startup-gate policy: immediate treats the first observed battle "
+            "as a new run; next_run attaches to an existing battle and arms "
+            "gates only after its next authoritative run boundary"
         ),
     )
     parser.add_argument("--mission-log", default=None,
@@ -123,14 +150,11 @@ def config_from_args(args: argparse.Namespace) -> AppConfig:
     """Convert parsed CLI arguments to an `AppConfig` dataclass."""
 
     auto_return_secs = max(0, int(args.auto_return_minutes)) * 60
-    coins_log_base = args.coins_log or DEFAULT_COINS_LOG_PATH
     return AppConfig(
         auto_start_enabled=not args.no_restart,
         status_interval=max(0, int(args.status_interval)),
         save_wave_samples=args.save_wave_samples,
         save_coin_samples=args.save_coin_samples,
-        coins_log_base=coins_log_base,
-        coins_log_enabled=not args.no_coins_log,
         control_file=args.control_file,
         auto_return_enabled=not args.no_auto_return,
         auto_return_secs=auto_return_secs,
@@ -149,12 +173,20 @@ def config_from_args(args: argparse.Namespace) -> AppConfig:
         full_game_over=bool(args.full_game_over),
         mission_log_path=args.mission_log,
         adb_port=args.adb_port,
+        startup_gate_policy=args.startup_gates,
     )
 
 
 __all__ = [
+    "ADB_PORT_ENVIRONMENT_VARIABLE",
     "AppConfig",
-    "DEFAULT_COINS_LOG_PATH",
+    "CONFIGURABLE_STRATEGIES",
+    "DEFAULT_ADB_PORT",
+    "DEFAULT_STRATEGY",
+    "DEFAULT_STARTUP_GATE_POLICY",
+    "STARTUP_GATE_POLICIES",
+    "STARTUP_GATE_POLICY_ENVIRONMENT_VARIABLE",
+    "STRATEGY_ENVIRONMENT_VARIABLE",
     "build_arg_parser",
     "config_from_args",
     "parse_args",

@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>TheTower Control Surface</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">T</span>
+      <div>
+        <h1>TheTower</h1>
+        <p>Automation control surface</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <div id="connectionBadge" class="connection-badge is-loading" role="status">
+        <span class="status-dot"></span>
+        <span id="connectionText">Connecting</span>
+      </div>
+      <button id="authButton" class="icon-button" type="button" title="Set access token" aria-label="Set access token">Key</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="status-strip" aria-label="Current automation summary">
+      <div>
+        <span class="eyebrow">Operator directive</span>
+        <div class="headline-row">
+          <strong id="directiveState" class="state-pill">—</strong>
+          <span id="directiveDetail">Waiting for the Linux host</span>
+        </div>
+      </div>
+      <div class="status-strip-meta">
+        <div><span>Observed UI</span><strong id="observedState">—</strong></div>
+        <div><span>Wave</span><strong id="observedWave">—</strong></div>
+        <div><span>Coins/min</span><strong id="observedCoins">—</strong></div>
+        <div><span>Mode</span><strong id="currentMode">—</strong></div>
+      </div>
+    </section>
+
+    <section class="dashboard-grid">
+      <article class="panel control-panel">
+        <div class="panel-heading">
+          <div>
+            <span class="eyebrow">Authority</span>
+            <h2>Automation control</h2>
+          </div>
+          <span id="ackBadge" class="mini-badge neutral">Unconfirmed</span>
+        </div>
+        <p class="muted">Pause blocks automation actions while capture, detection, and status reporting continue.</p>
+
+        <div class="button-grid">
+          <button class="action-button primary" type="button" data-control-action="pause">Pause indefinitely</button>
+          <button class="action-button" type="button" data-control-action="pause" data-minutes="15">Pause 15 min</button>
+          <button class="action-button" type="button" data-control-action="pause" data-minutes="30">Pause 30 min</button>
+          <button class="action-button success" type="button" data-control-action="resume">Resume</button>
+        </div>
+
+        <form id="customPauseForm" class="inline-form">
+          <label for="customPauseMinutes">Custom timed pause</label>
+          <div>
+            <input id="customPauseMinutes" name="minutes" type="number" min="1" max="10080" step="1" value="60" required>
+            <button type="submit">Apply</button>
+          </div>
+        </form>
+
+        <div class="mode-control">
+          <label for="modeSelect">Game Over mode</label>
+          <div>
+            <select id="modeSelect">
+              <option value="RETRY">Retry</option>
+              <option value="WAIT">Wait</option>
+              <option value="HOME">Home</option>
+            </select>
+            <button id="applyModeButton" type="button">Set mode</button>
+          </div>
+        </div>
+
+        <div class="lifecycle-control">
+          <label>Linux automation service</label>
+          <div class="button-grid compact">
+            <button type="button" data-process-action="start" data-run-state="PAUSED">Start paused</button>
+            <button class="success" type="button" data-process-action="start" data-run-state="RUNNING">Start running</button>
+          </div>
+        </div>
+
+        <div class="danger-zone">
+          <div>
+            <strong>Completely stop automation</strong>
+            <span>Persists STOPPED, then stops the fixed systemd user service.</span>
+          </div>
+          <button class="danger" type="button" data-process-action="stop">Stop service</button>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-heading">
+          <div>
+            <span class="eyebrow">Read-only observation</span>
+            <h2>Current battle</h2>
+          </div>
+          <span id="heartbeatBadge" class="mini-badge neutral">No heartbeat</span>
+        </div>
+        <dl class="detail-list">
+          <div><dt>Last observed</dt><dd id="lastObserved">—</dd></div>
+          <div><dt>Menu</dt><dd id="observedMenu">—</dd></div>
+          <div><dt>Secondary</dt><dd id="observedSecondary">—</dd></div>
+          <div><dt>Overlays</dt><dd id="observedOverlays">—</dd></div>
+        </dl>
+        <div id="staleWarning" class="callout warning" hidden>
+          This observation is stale. Do not treat the displayed screen or wave as current.
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-heading">
+          <div>
+            <span class="eyebrow">Linux host</span>
+            <h2>Runtime health</h2>
+          </div>
+          <span id="runtimeBadge" class="mini-badge neutral">Unknown</span>
+        </div>
+        <dl class="detail-list">
+          <div><dt>Target</dt><dd id="runtimeTarget">—</dd></div>
+          <div><dt>Owner PID</dt><dd id="runtimePid">—</dd></div>
+          <div><dt>Managed service</dt><dd id="processService">—</dd></div>
+          <div><dt>Service state</dt><dd id="processState">—</dd></div>
+          <div><dt>Started</dt><dd id="runtimeStarted">—</dd></div>
+          <div><dt>Control updated</dt><dd id="controlUpdated">—</dd></div>
+        </dl>
+        <p class="fine-print">A held target lock plus a live PID is process evidence. A fresh heartbeat is required before the overall connection is shown as healthy.</p>
+      </article>
+    </section>
+
+    <section class="panel wide-panel">
+      <div class="panel-heading">
+        <div>
+          <span class="eyebrow">Durable records</span>
+          <h2>Completed battles</h2>
+        </div>
+        <span id="battleCount" class="mini-badge neutral">0 records</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Captured</th>
+              <th>Type</th>
+              <th>Strategy</th>
+              <th>Tier</th>
+              <th>Wave</th>
+              <th>Real time</th>
+              <th>Coins</th>
+              <th>Cells</th>
+              <th>Quality</th>
+            </tr>
+          </thead>
+          <tbody id="battleRows">
+            <tr><td colspan="9" class="empty-state">Loading battle history…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel wide-panel">
+      <div class="panel-heading">
+        <div>
+          <span class="eyebrow">Host evidence</span>
+          <h2>Recent activity</h2>
+        </div>
+        <button id="refreshButton" type="button">Refresh</button>
+      </div>
+      <ol id="activityList" class="activity-list">
+        <li class="empty-state">Loading recent activity…</li>
+      </ol>
+    </section>
+  </main>
+
+  <dialog id="battleDialog" class="battle-dialog">
+    <div class="dialog-heading">
+      <div>
+        <span class="eyebrow">Completed battle</span>
+        <h2 id="battleDialogTitle">Battle details</h2>
+      </div>
+      <button class="icon-button" type="button" data-close-dialog="battleDialog" aria-label="Close battle details">Close</button>
+    </div>
+    <div id="battleDialogBody" class="dialog-body"></div>
+  </dialog>
+
+  <dialog id="authDialog" class="auth-dialog">
+    <form id="authForm" method="dialog">
+      <span class="eyebrow">Remote access</span>
+      <h2>Bearer token</h2>
+      <p class="muted">The token stays in this browser tab and is sent only to this control-surface origin.</p>
+      <label for="tokenInput">Access token</label>
+      <input id="tokenInput" type="password" autocomplete="off">
+      <div class="dialog-actions">
+        <button type="button" data-close-dialog="authDialog">Cancel</button>
+        <button class="primary" type="submit">Save and connect</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>
