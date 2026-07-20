@@ -502,7 +502,11 @@ def test_app_dispatches_alert_probe_and_records_success():
             return_value=MissionRewardResult.CLAIMED,
         ) as handler,
     ):
-        assert app._handle_mission_rewards_if_due("RUNNING", screenshot)
+        assert app._handle_mission_rewards_if_due(
+            "RUNNING",
+            screenshot,
+            {"MENU_CLOSED"},
+        )
 
     app._mission_reward_scheduler.should_attempt.assert_called_once_with(
         alert_visible=True,
@@ -517,6 +521,40 @@ def test_app_dispatches_alert_probe_and_records_success():
     assert wall_now.tzinfo is timezone.utc
     app._mission_reward_scheduler.mark_failed.assert_not_called()
     assert app._blind_tapper_suspended
+
+
+def test_app_dispatches_reward_probe_from_verified_open_menu_badge():
+    app = App.__new__(App)
+    app._mission_reward_scheduler = Mock()
+    app._mission_reward_scheduler.should_attempt.return_value = True
+    app._event_mission_tracker = Mock()
+    app._blind_tapper_suspended = False
+    screenshot = _load("running_menu_reward_badges_20260715.png")
+
+    with (
+        patch("core.app.daily_mission_claims_allowed", return_value=True),
+        patch("core.app.stop_blind_gem_tapper", return_value=False),
+        patch(
+            "core.app.handle_mission_rewards",
+            return_value=MissionRewardResult.CLAIMED,
+        ) as handler,
+    ):
+        assert app._handle_mission_rewards_if_due(
+            "RUNNING",
+            screenshot,
+            {"MENU_OPEN"},
+        )
+
+    app._mission_reward_scheduler.should_attempt.assert_called_once_with(
+        alert_visible=True,
+    )
+    handler.assert_called_once_with(
+        screenshot=screenshot,
+        claim_daily_missions=True,
+        event_inventory_callback=app._event_mission_tracker.record_inventory,
+    )
+    app._mission_reward_scheduler.mark_completed.assert_called_once()
+    app._mission_reward_scheduler.mark_failed.assert_not_called()
 
 
 def test_app_dispatches_home_badge_probe_before_home_state_handling():

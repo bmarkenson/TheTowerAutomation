@@ -24,6 +24,7 @@ from core.battle_lifecycle import HomeBattleControl
 from core.gc_no_battle_setup import run_gc_no_battle_setup
 from core.menu_reward_badges import (
     measure_home_reward_badges,
+    measure_menu_reward_badges,
     menu_reward_alert_visible,
 )
 from core.mission_reward_scheduler import (
@@ -531,7 +532,7 @@ class App:
             return
         if (
             self._handler_enabled("mission_rewards")
-            and self._handle_mission_rewards_if_due(new_state, img)
+            and self._handle_mission_rewards_if_due(new_state, img, overlays)
         ):
             # The handler traverses several panels and restores RUNNING. Avoid
             # dispatching against the frame captured before that navigation.
@@ -657,11 +658,22 @@ class App:
         ):
             handle_ad_gem()
 
-    def _handle_mission_rewards_if_due(self, new_state: str, img: Frame) -> bool:
+    def _handle_mission_rewards_if_due(
+        self,
+        new_state: str,
+        img: Frame,
+        overlays: Optional[Set[str]] = None,
+    ) -> bool:
         """Inspect relevant reward badges from an actionable battle or Home UI."""
 
         if new_state == "RUNNING":
-            alert_visible = menu_reward_alert_visible(img)
+            current_overlays = set(overlays or ())
+            if "MENU_OPEN" in current_overlays:
+                alert_visible = measure_menu_reward_badges(img).any
+            elif "MENU_CLOSED" in current_overlays:
+                alert_visible = menu_reward_alert_visible(img)
+            else:
+                alert_visible = False
         elif new_state == "HOME_SCREEN":
             alert_visible = measure_home_reward_badges(img).any
         else:
