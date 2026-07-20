@@ -69,6 +69,17 @@ def test_tournament_result_persists_summary_and_exact_detailed_report(tmp_path):
         captured_at=datetime.fromisoformat("2026-07-18T06:20:00-07:00"),
         strategy_name="tournament",
         run_configuration={"profile": "tournament", "tier": "17+"},
+        runtime_context={
+            "terminal_state": "TOURNAMENT_RESULTS",
+            "coin_rate_samples": [
+                {
+                    "captured_at": "2026-07-18T05:00:00-07:00",
+                    "wave": 1500,
+                    "display": "2.50T",
+                    "confidence": 97.0,
+                }
+            ],
+        },
         summary_text_fn=summary_text,
     )
     json_path, markdown_path = persist_tournament_result(
@@ -77,6 +88,7 @@ def test_tournament_result_persists_summary_and_exact_detailed_report(tmp_path):
     )
 
     assert record["quality"]["valid"]
+    assert record["battle_type"] == "tournament"
     assert record["quality"]["identity"] == {
         "summary_wave": 2558,
         "detailed_wave": 2558,
@@ -88,6 +100,8 @@ def test_tournament_result_persists_summary_and_exact_detailed_report(tmp_path):
     assert "Rank at completion: 4" in markdown
     assert "## Battle Report" in markdown
     assert "| Wave | 2558 |" in markdown
+    assert "## Coins/min progression" in markdown
+    assert "| 2026-07-18T05:00:00-07:00 | 1500 | 2.50T | 97.0% |" in markdown
 
     matched = find_recent_tournament_result(
         frame,

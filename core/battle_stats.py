@@ -14,6 +14,7 @@ from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 import cv2
 import numpy as np
 
+from core.battle_classification import analyze_battle_type
 from utils.ocr_utils import ocr_text_and_conf
 
 try:
@@ -580,13 +581,22 @@ def _assemble_battle_record(
         "missing_required_fields": missing_game_fields,
         "coin_breakdown": coin_breakdown,
     }
+    runtime = dict(runtime_context or {})
+    classification = analyze_battle_type(
+        strategy_name=strategy_name,
+        run_configuration=run_configuration,
+        terminal_state=runtime.get("terminal_state"),
+        record_id=battle_id,
+    )
     record = {
         "schema_version": SCHEMA_VERSION,
         "battle_id": battle_id,
         "captured_at": captured_at.isoformat(timespec="seconds"),
         "strategy": strategy_name,
+        "battle_type": classification["type"],
+        "battle_type_analysis": classification,
         "run_configuration": copy.deepcopy(dict(run_configuration or {})),
-        "runtime": dict(runtime_context or {}),
+        "runtime": runtime,
         "game_stats": game_stats,
         "more_stats": more_stats,
     }
@@ -894,6 +904,11 @@ def render_battle_markdown(record: Mapping[str, Any]) -> str:
     lines.append(f"Captured: {record.get('captured_at', 'unknown')}")
     if record.get("strategy"):
         lines.append(f"Strategy: {record['strategy']}")
+    classification = record.get("battle_type_analysis") or {}
+    if record.get("battle_type"):
+        confidence = classification.get("confidence")
+        suffix = f" ({confidence} confidence)" if confidence else ""
+        lines.append(f"Battle type: {str(record['battle_type']).title()}{suffix}")
     run_configuration = record.get("run_configuration") or {}
     if run_configuration:
         lines.append(
@@ -904,8 +919,41 @@ def render_battle_markdown(record: Mapping[str, Any]) -> str:
     source_method = record.get("more_stats", {}).get("source_method", "ocr")
     lines.append(f"Stats source: {_display_source_method(str(source_method))}")
     if run_configuration:
-        loadout = run_configuration.get("loadout") or {}
         lines.extend(["", "## Run Configuration", ""])
+        settings = run_configuration.get("settings") or {}
+        if settings:
+            lines.extend(["### Profile Settings", ""])
+            for key, label in (
+                ("cards_deck", "Cards deck"),
+                ("workshop_preset", "Workshop preset"),
+                ("bots_preset", "Bots preset"),
+                ("guardian_chips", "Guardian chips"),
+                ("auto_pick_perks", "Auto Pick Perks"),
+            ):
+                if key not in settings:
+                    continue
+                value = settings[key]
+                if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+                    rendered = " > ".join(str(item) for item in value)
+                elif isinstance(value, bool):
+                    rendered = "enabled" if value else "disabled"
+                else:
+                    rendered = str(value)
+                lines.append(f"- {label}: {rendered}")
+            ultimate_weapons = settings.get("ultimate_weapons")
+            if isinstance(ultimate_weapons, Mapping):
+                lines.append("- Ultimate Weapons:")
+                for weapon, toggles in ultimate_weapons.items():
+                    if isinstance(toggles, Mapping):
+                        rendered = ", ".join(
+                            f"{name}={value}" for name, value in toggles.items()
+                        )
+                    else:
+                        rendered = str(toggles)
+                    lines.append(f"  - {weapon}: {rendered}")
+
+        loadout = run_configuration.get("loadout") or {}
+        lines.extend(["", "### Loadout", ""])
         for key, label in (
             ("modules", "Modules"),
             ("damage_slider", "Damage Slider"),
@@ -953,6 +1001,12 @@ def render_battle_markdown(record: Mapping[str, Any]) -> str:
                 f"- {rate['label']}/hour: "
                 f"{format_tower_number(Decimal(str(rate['value_decimal'])))}"
             )
+
+    lines.extend(
+        render_coin_rate_samples_markdown(
+            record.get("runtime", {}).get("coin_rate_samples", [])
+        )
+    )
 
     game_fields = record.get("game_stats", {}).get("fields", {})
     lines.extend(["", "## Game Stats-only fields", "", "| Stat | Value |", "| --- | ---: |"])
@@ -1004,6 +1058,40 @@ def render_battle_markdown(record: Mapping[str, Any]) -> str:
     for warning in quality.get("warnings", []):
         lines.append(f"- {warning}")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def render_coin_rate_samples_markdown(samples: Any) -> list[str]:
+    """Render numeric during-run Coins/min observations as a report table."""
+
+    if not isinstance(samples, Sequence) or isinstance(samples, (str, bytes)):
+        return []
+    valid_samples = [sample for sample in samples if isinstance(sample, Mapping)]
+    if not valid_samples:
+        return []
+
+    lines = [
+        "",
+        "## Coins/min progression",
+        "",
+        "| Captured | Wave | Coins/min | OCR confidence |",
+        "| --- | ---: | ---: | ---: |",
+    ]
+    for sample in valid_samples:
+        rate = sample.get("display")
+        if not rate:
+            try:
+                rate = format_tower_number(
+                    Decimal(str(sample.get("coins_per_minute_decimal")))
+                )
+            except Exception:
+                rate = ""
+        confidence = sample.get("confidence")
+        confidence_text = f"{float(confidence):.1f}%" if confidence is not None else ""
+        lines.append(
+            f"| {sample.get('captured_at', '')} | {sample.get('wave', '')} | "
+            f"{rate} | {confidence_text} |"
+        )
+    return lines
 
 
 def _default_ocr_data(frame: Frame) -> Mapping[str, Sequence[Any]]:
@@ -1691,4 +1779,5 @@ __all__ = [
     "parse_tower_number",
     "persist_battle_record",
     "render_battle_markdown",
+    "render_coin_rate_samples_markdown",
 ]

@@ -1,0 +1,118 @@
+"""Evidence-based classification for completed Battle, Tournament, and Milestone runs."""
+
+from __future__ import annotations
+
+from typing import Any, Mapping, Optional
+
+
+KNOWN_BATTLE_TYPES = {"farm", "tournament", "milestone", "unknown"}
+
+
+def analyze_battle_type(
+    *,
+    strategy_name: Optional[str],
+    run_configuration: Optional[Mapping[str, Any]],
+    terminal_state: Optional[str] = None,
+    record_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """Classify a completed run without treating shared settings as identity.
+
+    Tournament and Milestone runs intentionally share the Tournament loadout.
+    Their terminal screens are distinct, so the terminal state is the deciding
+    signal between those two types. Farm strategy/profile identity is the
+    strongest Farm signal.
+    """
+
+    configuration = run_configuration or {}
+    profile = str(configuration.get("profile") or "").strip().lower()
+    family = str(configuration.get("family") or "").strip().lower()
+    strategy = str(strategy_name or "").strip().lower()
+    terminal = str(terminal_state or "").strip().upper()
+    identifier = str(record_id or "")
+
+    signals: list[str] = []
+    if terminal:
+        signals.append(f"terminal_state:{terminal}")
+    elif identifier.startswith("Tournament"):
+        terminal = "TOURNAMENT_RESULTS"
+        signals.append("record_identity:tournament_result")
+    elif identifier.startswith("Battle"):
+        # Battle records are produced only by the guarded GAME_OVER handler.
+        terminal = "GAME_OVER"
+        signals.append("record_identity:game_over")
+
+    farm_identity = profile == "farm" or family == "farm" or "farm" in strategy
+    tournament_identity = (
+        profile == "tournament"
+        or family == "tournament"
+        or strategy == "tournament"
+    )
+    if farm_identity:
+        signals.append("strategy_identity:farm")
+    if tournament_identity:
+        signals.append("shared_loadout_identity:tournament_or_milestone")
+
+    if terminal == "TOURNAMENT_RESULTS":
+        kind = "tournament"
+        confidence = "high"
+        reason = "The distinct Tournament Results terminal screen was detected."
+    elif terminal == "GAME_OVER" and farm_identity:
+        kind = "farm"
+        confidence = "high"
+        reason = "A Farm strategy/profile ended at the standard Game Over screen."
+    elif terminal == "GAME_OVER" and tournament_identity:
+        kind = "milestone"
+        confidence = "high"
+        reason = (
+            "Tournament/Milestone settings were active, but the run ended at "
+            "standard Game Over rather than Tournament Results."
+        )
+    elif farm_identity:
+        kind = "farm"
+        confidence = "medium"
+        reason = "The strategy/profile identifies a Farm run."
+    else:
+        kind = "unknown"
+        confidence = "low"
+        reason = (
+            "Tournament settings alone cannot distinguish Tournament from "
+            "Milestone, and no authoritative terminal-screen evidence exists."
+        )
+
+    return {
+        "type": kind,
+        "label": kind.title(),
+        "confidence": confidence,
+        "reason": reason,
+        "signals": signals,
+    }
+
+
+def classification_for_record(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Return stored classification or analyze a historical record."""
+
+    stored_type = str(record.get("battle_type") or "").strip().lower()
+    stored_analysis = record.get("battle_type_analysis")
+    if stored_type in KNOWN_BATTLE_TYPES and isinstance(stored_analysis, Mapping):
+        result = dict(stored_analysis)
+        result["type"] = stored_type
+        result.setdefault("label", stored_type.title())
+        return result
+
+    record_id = record.get("battle_id") or record.get("tournament_id")
+    runtime = record.get("runtime")
+    terminal_state = runtime.get("terminal_state") if isinstance(runtime, Mapping) else None
+    configuration = record.get("run_configuration")
+    return analyze_battle_type(
+        strategy_name=record.get("strategy"),
+        run_configuration=configuration if isinstance(configuration, Mapping) else {},
+        terminal_state=terminal_state,
+        record_id=str(record_id or ""),
+    )
+
+
+__all__ = [
+    "KNOWN_BATTLE_TYPES",
+    "analyze_battle_type",
+    "classification_for_record",
+]

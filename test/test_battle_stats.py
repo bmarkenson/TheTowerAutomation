@@ -178,9 +178,19 @@ def _record(*, source_complete=True, source_reason="edge_reached"):
         captured_at=datetime(2026, 7, 15, 12, 0, tzinfo=timezone.utc),
         strategy_name="gc_farm_t19_experiment",
         run_configuration={
-            "schema_version": 1,
+            "schema_version": 2,
             "profile": "farm",
             "tier": 19,
+            "settings": {
+                "cards_deck": "Farm",
+                "workshop_preset": "Farm",
+                "bots_preset": "Farm",
+                "guardian_chips": ["Fetch", "Summon", "Scout"],
+                "auto_pick_perks": True,
+                "ultimate_weapons": {
+                    "Poison Swamp": {"primary": "on", "stun": "off"},
+                },
+            },
             "loadout": {
                 "modules": {
                     "mode": "observe",
@@ -195,7 +205,19 @@ def _record(*, source_complete=True, source_reason="edge_reached"):
                 },
             },
         },
-        runtime_context={"last_wave": 42},
+        runtime_context={
+            "last_wave": 42,
+            "terminal_state": "GAME_OVER",
+            "coin_rate_samples": [
+                {
+                    "captured_at": "2026-07-15T11:00:00-07:00",
+                    "wave": 1000,
+                    "coins_per_minute_decimal": "1250000000000",
+                    "display": "1.25T",
+                    "confidence": 98.5,
+                }
+            ],
+        },
         data_fn=_data_fn,
         game_stats_text_fn=_game_text,
     )
@@ -205,6 +227,8 @@ def test_battle_record_retains_resolved_run_configuration():
     record = _record()
 
     assert record["schema_version"] == 2
+    assert record["battle_type"] == "farm"
+    assert record["battle_type_analysis"]["confidence"] == "high"
     assert record["run_configuration"]["profile"] == "farm"
     assert record["run_configuration"]["tier"] == 19
     assert (
@@ -217,6 +241,12 @@ def test_battle_record_retains_resolved_run_configuration():
     assert "core_primary=Multiverse Nexus" in markdown
     assert "Target Priority: mode `observe`; preset `priority_test_a`" in markdown
     assert "resolved: Fleets > Boss" in markdown
+    assert "Bots preset: Farm" in markdown
+    assert "Guardian chips: Fetch > Summon > Scout" in markdown
+    assert "Auto Pick Perks: enabled" in markdown
+    assert "Poison Swamp: primary=on, stun=off" in markdown
+    assert "## Coins/min progression" in markdown
+    assert "| 2026-07-15T11:00:00-07:00 | 1000 | 1.25T | 98.5% |" in markdown
 
 
 def test_tower_number_parser_preserves_case_sensitive_magnitudes():
@@ -374,7 +404,7 @@ def test_missing_current_more_stats_sections_retain_source_evidence():
     assert "cash" in record["more_stats"]["quality"]["missing_required_sections"]
 
 
-def test_record_persists_json_markdown_and_replaces_previous_wave_screenshot(tmp_path):
+def test_record_persists_json_markdown_and_supports_previous_wave_lookup(tmp_path):
     record = _record()
     json_path, markdown_path = persist_battle_record(record, records_dir=tmp_path)
 
@@ -391,10 +421,7 @@ def test_record_persists_json_markdown_and_replaces_previous_wave_screenshot(tmp
     assert "Common Modules/hour: 4" in markdown
     assert "Cells Earned/hour" not in markdown
     assert (
-        get_previous_run_wave(
-            matches_dir=str(tmp_path / "missing-screenshots"),
-            records_dir=str(tmp_path),
-        )
+        get_previous_run_wave(records_dir=str(tmp_path))
         == 2000
     )
 

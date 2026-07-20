@@ -11,7 +11,12 @@ from typing import Any, Callable, Mapping, Optional
 
 import numpy as np
 
-from core.battle_stats import parse_more_stats_clipboard, parse_tower_number
+from core.battle_classification import analyze_battle_type
+from core.battle_stats import (
+    parse_more_stats_clipboard,
+    parse_tower_number,
+    render_coin_rate_samples_markdown,
+)
 from utils.ocr_utils import ocr_text_and_conf
 
 
@@ -152,13 +157,22 @@ def build_tournament_result(
         and detailed["quality"]["valid"]
         and not identity["mismatch"]
     )
+    runtime = dict(runtime_context or {})
+    classification = analyze_battle_type(
+        strategy_name=strategy_name,
+        run_configuration=run_configuration,
+        terminal_state=runtime.get("terminal_state") or "TOURNAMENT_RESULTS",
+        record_id=tournament_id,
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "tournament_id": tournament_id or make_tournament_id(when),
         "captured_at": when.isoformat(timespec="seconds"),
         "strategy": strategy_name,
+        "battle_type": classification["type"],
+        "battle_type_analysis": classification,
         "run_configuration": copy.deepcopy(dict(run_configuration or {})),
-        "runtime": dict(runtime_context or {}),
+        "runtime": runtime,
         "summary": summary,
         "detailed_stats": detailed,
         "quality": {
@@ -278,6 +292,8 @@ def render_tournament_markdown(record: Mapping[str, Any]) -> str:
     lines.append(f"Captured: {record.get('captured_at', 'unknown')}")
     if record.get("strategy"):
         lines.append(f"Strategy: {record['strategy']}")
+    if record.get("battle_type"):
+        lines.append(f"Battle type: {str(record['battle_type']).title()}")
     fields = record.get("summary", {}).get("fields", {})
     lines.extend(["", "## Result", ""])
     for key, label in (
@@ -302,6 +318,12 @@ def render_tournament_markdown(record: Mapping[str, Any]) -> str:
             lines.append(
                 f"| {row.get('label', '')} | {row.get('value_raw', '')} |"
             )
+
+    lines.extend(
+        render_coin_rate_samples_markdown(
+            record.get("runtime", {}).get("coin_rate_samples", [])
+        )
+    )
 
     warnings = record.get("quality", {}).get("warnings", [])
     lines.extend(["", "## Quality", ""])
