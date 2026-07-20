@@ -105,15 +105,19 @@ with:
   config/strategies/farm_t19_experiment.source.yaml
 ```
 
-Every Farm profile inherits the same `Farm` Cards, Workshop, and Bots presets,
-Fetch/Summon/Scout Guardian chips, Auto Pick Perks, and Ultimate Weapon
-requirements. Poison Swamp Stun is the narrow in-battle repair exception:
+Every Farm profile inherits the same `Farm` Cards, Workshop, and Bots presets;
+Shockwave Size, Bounce Shot Targets, and Bounce Shot Range Free Upgrade locks;
+Fetch/Summon/Scout Guardian chips; Auto Pick Perks; and Ultimate Weapon
+requirements. During session preflight, an authoritatively unchecked Free
+Upgrade lock is a Home-only mismatch that requests the guarded
+Surrender/repair/restart sequence; ambiguous lock evidence blocks without
+Surrendering. Poison Swamp Stun is the narrow in-battle repair exception:
 when its detail screen authoritatively shows Stun on, preflight switches it off
 and verifies the result without Surrendering or leaving the active run.
 Before a new battle starts, a separate verified no-battle Home route may
-correct Cards `Farm`, Workshop `Farm`, Bots `Farm`, and the supported
-Attack/Ally/Scout → Fetch/Summon/Scout Guardian transition. Unknown no-battle
-layouts fail closed.
+correct Cards `Farm`, Workshop `Farm`, the three Free Upgrade locks, Bots
+`Farm`, and the supported Attack/Ally/Scout → Fetch/Summon/Scout Guardian
+transition. Unknown no-battle layouts fail closed.
 
 Modules, Damage Slider, and Target Priority are the only per-Tier or
 experimental loadout fields. Each compact profile declares `enforce`, `observe`,

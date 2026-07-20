@@ -6,6 +6,7 @@ import cv2
 
 from core.app import App
 from core.battle_lifecycle import HomeBattleControl
+from core.free_upgrade_locks import FARM_FREE_UPGRADE_LOCKS
 from core.gc_no_battle_setup import (
     GcNoBattleSetupResult,
     GcNoBattleSetupStatus,
@@ -237,6 +238,51 @@ def test_no_battle_setup_leaves_already_correct_settings_untouched():
         "navigation.home_event",
         "navigation.home_guild",
     ]
+
+
+def test_no_battle_setup_enforces_free_upgrade_locks_after_farm_preset():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+    requirements = {
+        **REQUIREMENTS,
+        "free_upgrade_locks": list(FARM_FREE_UPGRADE_LOCKS),
+    }
+    calls = []
+    lock_evidence = SimpleNamespace(
+        valid=True,
+        as_dict=lambda: {"valid": True, "locks": []},
+    )
+
+    def ensure_locks(lock_requirements, **kwargs):
+        calls.append((lock_requirements, kwargs))
+        return SimpleNamespace(
+            evidence=lock_evidence,
+            screenshot="workshop",
+        )
+
+    result = run_gc_no_battle_setup(
+        requirements,
+        screenshot="home",
+        capture_fn=router.capture,
+        detector=router.detect,
+        detect_home_control_fn=router.home_control,
+        safe_tap_fn=router.static_tap,
+        tap_visible_fn=router.visible_tap,
+        swipe_fn=router.swipe,
+        measure_selection_fn=router.measure,
+        ensure_modules_fn=router.ensure_modules,
+        ensure_free_upgrade_locks_fn=ensure_locks,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.complete
+    assert len(calls) == 1
+    assert calls[0][0] == list(FARM_FREE_UPGRADE_LOCKS)
+    assert calls[0][1]["screenshot"] == "workshop"
+    assert calls[0][1]["enforce"] is True
+    assert result.evidence["free_upgrade_locks"] == {
+        "valid": True,
+        "locks": [],
+    }
 
 
 def test_no_battle_setup_restores_retained_bots_scroll_before_preset_check():

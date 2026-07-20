@@ -8,6 +8,10 @@ import time
 from typing import Any, Callable, Mapping
 
 from core.battle_lifecycle import HomeBattleControl
+from core.free_upgrade_locks import (
+    inspect_free_upgrade_locks,
+    normalize_free_upgrade_lock_requirements,
+)
 from core.home_battle import detect_home_battle_control
 from core.gc_module_loadout import (
     ensure_gc_module_loadout,
@@ -16,6 +20,7 @@ from core.gc_module_loadout import (
 from core.input import safe_tap, swipe_now, tap_if_visible
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
+from core.upgrade_navigation import swipe_upgrade_menu
 from core.workshop_preset import (
     BOTS_FARM_PRESET_SLOT,
     CARDS_FARM_PRESET_SLOT,
@@ -56,8 +61,10 @@ def run_gc_no_battle_setup(
     safe_tap_fn: Callable[..., bool] = safe_tap,
     tap_visible_fn: Callable[..., bool] = tap_if_visible,
     swipe_fn: Callable[[str], bool] = swipe_now,
+    workshop_swipe_fn: Callable[[str, str], None] = swipe_upgrade_menu,
     measure_selection_fn: Callable[..., Any] = measure_preset_slot_selection,
     ensure_modules_fn: Callable[..., Any] = ensure_gc_module_loadout,
+    ensure_free_upgrade_locks_fn: Callable[..., Any] = inspect_free_upgrade_locks,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> GcNoBattleSetupResult:
     """Correct supported persistent GC settings before a new battle starts."""
@@ -132,6 +139,24 @@ def run_gc_no_battle_setup(
             sleep_fn=sleep_fn,
         )
         evidence["workshop_preset"] = "Farm"
+        free_upgrade_lock_requirements = requirements.get("free_upgrade_locks")
+        if free_upgrade_lock_requirements is not None:
+            lock_result = ensure_free_upgrade_locks_fn(
+                free_upgrade_lock_requirements,
+                screenshot=workshop,
+                enforce=True,
+                capture_fn=capture_fn,
+                detector=detector,
+                safe_tap_fn=safe_tap_fn,
+                swipe_fn=workshop_swipe_fn,
+                sleep_fn=sleep_fn,
+            )
+            if not lock_result.evidence.valid:
+                raise _SetupFailure(
+                    "Free Upgrade locks remained invalid after correction"
+                )
+            workshop = lock_result.screenshot
+            evidence["free_upgrade_locks"] = lock_result.evidence.as_dict()
         current = _return_home(
             workshop,
             capture_fn,
@@ -281,7 +306,10 @@ def run_gc_no_battle_setup(
             evidence,
         )
 
-    log("[GC_NO_BATTLE] Farm presets verified/corrected before Battle", "INFO")
+    log(
+        "[GC_NO_BATTLE] Farm Home settings verified/corrected before Battle",
+        "INFO",
+    )
     return GcNoBattleSetupResult(
         GcNoBattleSetupStatus.COMPLETE,
         "supported no-battle requirements verified",
@@ -301,6 +329,14 @@ def _unsupported_requirement(requirements: Mapping[str, Any]) -> str | None:
     chips = {str(chip).strip() for chip in requirements.get("guardian_chips") or []}
     if chips != {"Fetch", "Summon", "Scout"}:
         return f"unsupported guardian_chips={sorted(chips)!r}"
+    if "free_upgrade_locks" in requirements:
+        try:
+            normalize_free_upgrade_lock_requirements(
+                requirements["free_upgrade_locks"],
+                require_farm_set=True,
+            )
+        except ValueError as exc:
+            return str(exc)
     try:
         module_mode = _module_policy(requirements)
     except ValueError as exc:

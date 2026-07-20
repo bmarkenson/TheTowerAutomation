@@ -1474,6 +1474,26 @@
         "navigation"
       ]
     },
+    "workshop:attack": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 135,
+        "y": 1685
+      }
+    },
+    "workshop:defense": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 405,
+        "y": 1685
+      }
+    },
     "goto_utility": {
       "match_template": "navigation/goto_utility.png",
       "match_region": {
@@ -2065,6 +2085,16 @@
         "type": "tap",
         "x": 730,
         "y": 1070
+      }
+    },
+    "free_upgrade_lock:checkbox": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 257,
+        "y": 998
       }
     },
     "damage_adjuster:attack": {

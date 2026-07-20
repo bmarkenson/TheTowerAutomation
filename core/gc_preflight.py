@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, Callable, Iterable, Mapping, Optional
+from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
 from core.auto_pick_perks import AutoPickPerksEvidence, measure_auto_pick_perks
+from core.free_upgrade_locks import (
+    FreeUpgradeLocksEvidence,
+    normalize_free_upgrade_lock_requirements,
+)
 from core.gc_module_loadout import (
     GcModuleLoadoutEvidence,
     evaluate_gc_module_loadout,
@@ -91,6 +95,8 @@ class UltimateWeaponEvidence:
 @dataclass(frozen=True)
 class GcSessionPreflightEvidence:
     configuration: GcPreflightEvidence
+    free_upgrade_lock_requirements: tuple[str, ...]
+    free_upgrade_locks: Optional[FreeUpgradeLocksEvidence]
     module_mode: str
     modules: Optional[GcModuleLoadoutEvidence]
     auto_pick_perks_required: bool
@@ -108,9 +114,20 @@ class GcSessionPreflightEvidence:
         return not self.auto_pick_perks_required or self.auto_pick_perks.enabled
 
     @property
+    def free_upgrade_locks_valid(self) -> bool:
+        if not self.free_upgrade_lock_requirements:
+            return True
+        if self.free_upgrade_locks is None or not self.free_upgrade_locks.valid:
+            return False
+        return tuple(
+            lock.label for lock in self.free_upgrade_locks.locks
+        ) == self.free_upgrade_lock_requirements
+
+    @property
     def valid(self) -> bool:
         return (
             self.configuration.valid
+            and self.free_upgrade_locks_valid
             and self.modules_blocking_valid
             and self.auto_pick_perks_valid
             and self.ultimate_weapons.valid
@@ -123,6 +140,11 @@ class GcSessionPreflightEvidence:
         return (
             not self.configuration.valid
             or bool(
+                self.free_upgrade_lock_requirements
+                and self.free_upgrade_locks is not None
+                and self.free_upgrade_locks.has_authoritative_mismatch
+            )
+            or bool(
                 self.module_mode == "enforce"
                 and self.modules is not None
                 and self.modules.has_authoritative_mismatch
@@ -132,6 +154,19 @@ class GcSessionPreflightEvidence:
     def as_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["configuration"]["valid"] = self.configuration.valid
+        if self.free_upgrade_locks is None:
+            payload["free_upgrade_locks"] = {
+                "required": list(self.free_upgrade_lock_requirements),
+                "checked": False,
+                "valid": self.free_upgrade_locks_valid,
+            }
+        else:
+            payload["free_upgrade_locks"] = self.free_upgrade_locks.as_dict()
+            payload["free_upgrade_locks"].update(
+                required=list(self.free_upgrade_lock_requirements),
+                checked=True,
+                valid=self.free_upgrade_locks_valid,
+            )
         if self.modules is None:
             payload["modules"] = {
                 "mode": self.module_mode,
@@ -385,11 +420,19 @@ def validate_gc_session_preflight_screens(
     module_mode: str = "enforce",
     ultimate_requirements: Mapping[str, Mapping[str, Any]],
     ultimate_observations: Mapping[str, Mapping[str, Any]],
+    free_upgrade_lock_requirements: Optional[Sequence[Any]] = None,
+    free_upgrade_locks: Optional[FreeUpgradeLocksEvidence] = None,
     detector: Detector = detect_state_and_overlays,
     section_specs: Mapping[str, GcSectionSpec] = GC_SECTION_SPECS,
     auto_pick_perks_required: bool = True,
 ) -> GcSessionPreflightEvidence:
     """Validate every currently implemented read-only session requirement."""
+
+    normalized_free_upgrade_locks = (
+        normalize_free_upgrade_lock_requirements(free_upgrade_lock_requirements)
+        if free_upgrade_lock_requirements is not None
+        else ()
+    )
 
     configuration = validate_gc_preflight_screens(
         cards_screen=cards_screen,
@@ -423,6 +466,8 @@ def validate_gc_session_preflight_screens(
         )
     return GcSessionPreflightEvidence(
         configuration=configuration,
+        free_upgrade_lock_requirements=normalized_free_upgrade_locks,
+        free_upgrade_locks=free_upgrade_locks,
         module_mode=module_mode,
         modules=modules,
         auto_pick_perks_required=auto_pick_perks_required,

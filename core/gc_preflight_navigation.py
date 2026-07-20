@@ -14,6 +14,10 @@ from core.gc_preflight import (
     merge_ultimate_weapon_observations,
     validate_gc_session_preflight_screens,
 )
+from core.free_upgrade_locks import (
+    FreeUpgradeLockInspectionResult,
+    inspect_free_upgrade_locks,
+)
 from core.battle_lifecycle import HomeBattleControl
 from core.home_battle import HomeBattleEvidence, detect_home_battle_control
 from core.input import safe_tap, swipe_now, tap_if_visible
@@ -436,6 +440,9 @@ def run_read_only_gc_preflight(
     ensure_poison_swamp_stun_fn: Callable[
         ..., PoisonSwampStunResult
     ] = ensure_poison_swamp_stun_off,
+    inspect_free_upgrade_locks_fn: Callable[
+        ..., FreeUpgradeLockInspectionResult
+    ] = inspect_free_upgrade_locks,
     detect_home_control_fn: HomeControlDetector = detect_home_battle_control,
     sleep_fn: Callable[[float], None] = time.sleep,
     validate_fn: Callable[
@@ -779,6 +786,22 @@ def run_read_only_gc_preflight(
             detector=detector,
             sleep_fn=sleep_fn,
         )
+        free_upgrade_lock_requirements = requirements.get("free_upgrade_locks")
+        free_upgrade_locks = None
+        if free_upgrade_lock_requirements is not None:
+            lock_result = inspect_free_upgrade_locks_fn(
+                free_upgrade_lock_requirements,
+                screenshot=workshop,
+                enforce=False,
+                capture_fn=capture_fn,
+                detector=detector,
+                safe_tap_fn=safe_tap_fn,
+                swipe_fn=swipe_fn,
+                detect_boxes_fn=detect_boxes_fn,
+                sleep_fn=sleep_fn,
+            )
+            workshop = lock_result.screenshot
+            free_upgrade_locks = lock_result.evidence
         _guarded_static_tap(
             "navigation.goto_home",
             allowed_states={"WORKSHOP"},
@@ -807,7 +830,7 @@ def run_read_only_gc_preflight(
         )
         route_completed = True
 
-        evidence = validate_fn(
+        validation_args = dict(
             cards_screen=cards,
             workshop_screen=workshop,
             bots_screen=bots,
@@ -820,6 +843,12 @@ def run_read_only_gc_preflight(
             ultimate_observations=ultimate_observations,
             detector=detector,
         )
+        if free_upgrade_lock_requirements is not None:
+            validation_args.update(
+                free_upgrade_lock_requirements=free_upgrade_lock_requirements,
+                free_upgrade_locks=free_upgrade_locks,
+            )
+        evidence = validate_fn(**validation_args)
         status = (
             GcPreflightNavigationStatus.COMPLETE
             if evidence.valid

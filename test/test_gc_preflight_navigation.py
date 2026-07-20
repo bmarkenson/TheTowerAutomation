@@ -3,6 +3,13 @@ from types import SimpleNamespace
 import numpy as np
 
 from core.battle_lifecycle import HomeBattleControl
+from core.free_upgrade_locks import (
+    FARM_FREE_UPGRADE_LOCKS,
+    FreeUpgradeLockEvidence,
+    FreeUpgradeLockInspectionResult,
+    FreeUpgradeLockState,
+    FreeUpgradeLocksEvidence,
+)
 from core.gc_preflight_navigation import (
     GcPreflightNavigationStatus,
     _guarded_visible_tap,
@@ -215,6 +222,73 @@ def test_read_only_route_returns_to_running_and_never_uses_mutating_controls():
     assert validated["ultimate_observations"]["Poison Swamp"]["stun"] == "off"
     assert ui.swipes == [("towards_top", "extended")] * 3
     assert ui.event_swipes == ["gesture_targets.goto_top:event_bots"]
+
+
+def test_farm_route_inspects_home_locks_and_passes_evidence_to_validator():
+    ui = _FakeUi()
+    boxes = [
+        UpgradeBox(
+            "left",
+            (0, 0, 1, 1),
+            text=label,
+            toggles={name: "on" for name in toggles if name != "stun"},
+        )
+        for label, toggles in ULTIMATE_REQUIREMENTS.items()
+    ]
+    locks = FreeUpgradeLocksEvidence(
+        tuple(
+            FreeUpgradeLockEvidence(
+                label,
+                FreeUpgradeLockState.CHECKED,
+                label,
+                96.0,
+                "Lock Level (1)",
+                95.0,
+                1_800,
+                650,
+            )
+            for label in FARM_FREE_UPGRADE_LOCKS
+        )
+    )
+    inspections = []
+    validated = {}
+
+    def inspect(requirements, **kwargs):
+        inspections.append((requirements, kwargs))
+        return FreeUpgradeLockInspectionResult(locks, ui.frame)
+
+    def validate(**kwargs):
+        validated.update(kwargs)
+        return SimpleNamespace(valid=True)
+
+    result = run_read_only_gc_preflight(
+        {
+            **PREFLIGHT_REQUIREMENTS,
+            "free_upgrade_locks": list(FARM_FREE_UPGRADE_LOCKS),
+        },
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.safe_tap,
+        tap_visible_fn=ui.visible_tap,
+        go_home_fn=ui.go_home,
+        swipe_fn=ui.swipe,
+        event_swipe_fn=ui.event_swipe,
+        detect_boxes_fn=lambda _frame, **_kwargs: {"left": boxes, "right": []},
+        ensure_poison_swamp_stun_fn=lambda **_kwargs: _stun_off_result(ui),
+        inspect_free_upgrade_locks_fn=inspect,
+        detect_home_control_fn=lambda _frame: _home_evidence(),
+        sleep_fn=lambda _seconds: None,
+        validate_fn=validate,
+    )
+
+    assert result.status is GcPreflightNavigationStatus.COMPLETE
+    assert len(inspections) == 1
+    assert inspections[0][0] == list(FARM_FREE_UPGRADE_LOCKS)
+    assert inspections[0][1]["enforce"] is False
+    assert validated["free_upgrade_lock_requirements"] == list(
+        FARM_FREE_UPGRADE_LOCKS
+    )
+    assert validated["free_upgrade_locks"] is locks
 
 
 def test_stun_evidence_survives_later_primary_only_observation():

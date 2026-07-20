@@ -461,6 +461,18 @@ def _normalize_gc_session_preflight(raw: Any) -> Dict[str, Any]:
             )
         requirements[key] = actual
 
+    if "free_upgrade_locks" in requirements:
+        from core.free_upgrade_locks import (
+            normalize_free_upgrade_lock_requirements,
+        )
+
+        requirements["free_upgrade_locks"] = list(
+            normalize_free_upgrade_lock_requirements(
+                requirements["free_upgrade_locks"],
+                require_farm_set=True,
+            )
+        )
+
     guardian_chips = requirements.get("guardian_chips")
     if not isinstance(guardian_chips, list) or {
         str(chip).strip() for chip in guardian_chips

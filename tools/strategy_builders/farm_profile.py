@@ -97,6 +97,7 @@ def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
             for key in (
                 "cards_deck",
                 "workshop_preset",
+                "free_upgrade_locks",
                 "bots_preset",
                 "guardian_chips",
                 "auto_pick_perks",

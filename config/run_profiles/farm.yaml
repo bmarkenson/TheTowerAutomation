@@ -4,6 +4,10 @@ name: farm
 invariants:
   cards_deck: Farm
   workshop_preset: Farm
+  free_upgrade_locks:
+    - Shockwave Size
+    - Bounce Shot Targets
+    - Bounce Shot Range
   bots_preset: Farm
   guardian_chips:
     - Fetch

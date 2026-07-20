@@ -35,7 +35,8 @@ milestones, or some Dissonance runs, so it does not own Farm configuration.
 Legacy `gc*` strategy names remain aliases during migration.
 
 The Farm baseline owns settings that must be true for every Farm run: the
-`Farm` Cards, Workshop, and Bots presets, Guardian chips, Auto Pick Perks, and
+`Farm` Cards, Workshop, and Bots presets; Shockwave Size, Bounce Shot Targets,
+and Bounce Shot Range Free Upgrade locks; Guardian chips; Auto Pick Perks; and
 Ultimate Weapon controls. Compact Tier profiles cannot override those
 invariants.
 
@@ -163,6 +164,14 @@ remain insufficient evidence to distinguish Tournament from Milestone.
   reacquires authoritative panel and percentage evidence before every explicit
   arrow tap, requires strict progress and a verified final value, and returns
   to `RUNNING/ATTACK_MENU`. Unknown or incomplete evidence remains blocked.
+- Farm session preflight reaches the resumable Home Workshop and opens the
+  Shockwave Size, Bounce Shot Targets, and Bounce Shot Range details from
+  freshly OCR-identified label halves. A title-verified `Lock Level` checkbox
+  with an absent checkmark is an authoritative Home-only mismatch and requests
+  the existing guarded Surrender/repair/restart sequence. Ambiguous title,
+  checkbox, or checkmark evidence blocks without Surrender. At verified
+  no-battle Home, the complete setup checks any authoritatively unchecked lock
+  and verifies it before the replacement battle may start.
 - Confident mismatches on Home-only configuration may request one app-owned
   stop/repair/restart sequence; ambiguous or unknown module identity and other
   non-Home repair classes remain blocked. The matcher reports evidence but
