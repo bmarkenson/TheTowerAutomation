@@ -89,6 +89,27 @@ def test_control_store_preserves_fields_and_resumes_only_matching_deadline(tmp_p
     assert resumed["updated_by"] == "timed-pause-expiry"
 
 
+def test_control_store_persists_strategy_without_changing_other_directives(tmp_path):
+    path = tmp_path / "automation_ctl.json"
+    path.write_text(
+        json.dumps({"state": "PAUSED", "mode": "WAIT", "adb_port": 5565}),
+        encoding="utf-8",
+    )
+
+    saved = ControlDirectiveStore(path).set_strategy(
+        "tournament",
+        source="test",
+    )
+
+    assert saved["state"] == "PAUSED"
+    assert saved["mode"] == "WAIT"
+    assert saved["adb_port"] == 5565
+    assert saved["strategy"] == "tournament"
+    assert saved["strategy_updated_at"]
+    assert saved["strategy_request_id"]
+    assert ControlDirectiveStore(path).status()["strategy"] == "tournament"
+
+
 def test_control_store_will_not_overwrite_malformed_authority(tmp_path):
     path = tmp_path / "automation_ctl.json"
     path.write_text("{not json", encoding="utf-8")
@@ -114,9 +135,11 @@ def test_status_separates_fresh_observation_from_control_and_lock_evidence(tmp_p
                 "state": "PAUSED",
                 "mode": "WAIT",
                 "adb_port": 5555,
+                "strategy": "farm_t18",
                 "updated_at": now.isoformat(),
                 "state_updated_at": now.isoformat(),
                 "adb_port_updated_at": now.isoformat(),
+                "strategy_updated_at": now.isoformat(),
             }
         ),
         encoding="utf-8",
@@ -125,6 +148,7 @@ def test_status_separates_fresh_observation_from_control_and_lock_evidence(tmp_p
         f"[INFO {earlier_timestamp}] [CTRL] Mode set to WAIT via control file\n"
         f"[INFO {timestamp}] [CTRL] State set to PAUSED via control file\n"
         f"[INFO {timestamp}] [CTRL] ADB target set to localhost:5555 via control file\n"
+        f"[INFO {timestamp}] [CTRL] Strategy set to farm_t18 via control file\n"
         f"[STATUS {timestamp}] State=RUNNING/PAUSED | Wave=520 | "
         "Coins/min=1.2T | Menu=UW_MENU | Secondary=[PERKS] | "
         "Overlays=[MENU_OPEN]\n",
@@ -165,6 +189,8 @@ def test_status_separates_fresh_observation_from_control_and_lock_evidence(tmp_p
     assert status["acknowledgements"]["state"]["acknowledges_current"]
     assert status["acknowledgements"]["mode"]["acknowledges_current"]
     assert status["acknowledgements"]["adb_target"]["acknowledges_current"]
+    assert status["acknowledgements"]["strategy"]["value"] == "farm_t18"
+    assert status["acknowledgements"]["strategy"]["acknowledges_current"]
 
 
 def test_battle_list_is_compact_and_full_record_requires_exact_id(tmp_path):

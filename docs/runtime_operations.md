@@ -158,8 +158,27 @@ rerunning its in-memory startup/session gates:
 The runtime acquires ownership of the new target before attempting `adb
 connect`, accepts it only after a supported screenshot succeeds, and releases
 the old target lock only after that validation. A failed handoff remains paused
-and retains the old target. Strategy selection remains stopped-only because it
-changes process-initialized policy rather than transport.
+and retains the old target.
+
+Bundled strategy selection also works without replacing an active process.
+The GUI reports whether the request was accepted and shows current and pending
+strategies independently:
+
+1. Select `farm_t18`, `farm_t19_experiment`, `tournament`, or `none`.
+2. During a battle, the request is queued for the next authoritative boundary;
+   selecting another strategy replaces it. Select the displayed current
+   strategy to cancel a different pending selection.
+3. The existing strategy remains responsible for the completed battle record
+   and its Game Over hook. The queued strategy is applied before terminal
+   navigation or the next run's first actionable observation.
+4. At verified Home **New Battle** or Workshop, the request applies immediately,
+   including while Pause blocks runtime actions. Home **Resume Battle** is not
+   a boundary and leaves the request pending.
+
+The same selection is persisted in the managed environment so a process
+restart cannot silently restore the old strategy. A strategy acknowledgement,
+not the accepted API response alone, is evidence that the live runtime applied
+the request.
 
 The API also verifies that the installed unit advertises this file through
 systemd. If it reports that the unit does not load the file, copy the current

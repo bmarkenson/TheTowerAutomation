@@ -30,6 +30,7 @@ from typing import Callable, Dict, Optional, Tuple
 import numpy as np
 from numpy.typing import NDArray
 
+from core.app_setup import CONFIGURABLE_STRATEGIES
 from core.control_directives import ControlDirectiveError, ControlDirectiveStore
 from utils.logger import log
 from core.run_state import AUTOMATION
@@ -63,6 +64,9 @@ class AutomationSupervisor:
     ) -> None:
         self.control_file = Path(control_file)
         self._control_store = ControlDirectiveStore(self.control_file)
+        self._strategy_request = self._parse_strategy_request(
+            self._load_control_directive()
+        )
         self.auto_return_secs = max(0, int(auto_return_secs))
         self.auto_return_enabled = bool(auto_return_enabled)
         self.auto_return_conf_threshold = float(auto_return_conf_threshold)
@@ -95,11 +99,18 @@ class AutomationSupervisor:
         st = getattr(AUTOMATION, "state", None)
         return str(st) == "RunState.PAUSED" or st == "PAUSED"
 
+    @property
+    def strategy_request(self) -> Optional[Tuple[str, object]]:
+        """Return the latest validated strategy directive and its identity."""
+
+        return self._strategy_request
+
     def apply_control(self) -> None:
         """Apply persistent directives and expire an optional timed pause."""
 
         directives = self._load_control_directive()
         if directives:
+            self._strategy_request = self._parse_strategy_request(directives)
             self._apply_state(directives.get("state"))
             self._apply_mode(directives.get("mode"))
             self._sync_pause_deadline(directives)
@@ -109,6 +120,18 @@ class AutomationSupervisor:
             )
 
         self._auto_resume_if_needed()
+
+    @staticmethod
+    def _parse_strategy_request(
+        directives: Dict[str, object],
+    ) -> Optional[Tuple[str, object]]:
+        strategy = str(directives.get("strategy") or "").strip().lower()
+        if strategy not in CONFIGURABLE_STRATEGIES:
+            return None
+        identity = directives.get("strategy_request_id") or directives.get(
+            "strategy_updated_at"
+        )
+        return strategy, identity
 
     def persist_mode(self, mode: str) -> bool:
         """Persist and apply a runtime-owned terminal mode transition."""

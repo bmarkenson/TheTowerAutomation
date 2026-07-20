@@ -240,3 +240,22 @@ def test_running_runtime_acknowledges_already_selected_adb_target(
         == "[CTRL] ADB target set to localhost:5565 via control file"
         for call in runtime_log.call_args_list
     )
+
+
+def test_runtime_exposes_latest_valid_strategy_request(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    store.set_strategy("farm_t18", source="test")
+    supervisor = _supervisor(control_file)
+
+    first_request = supervisor.strategy_request
+    assert first_request is not None
+    assert first_request[0] == "farm_t18"
+
+    store.set_strategy("tournament", source="test")
+    supervisor.apply_control()
+
+    second_request = supervisor.strategy_request
+    assert second_request is not None
+    assert second_request[0] == "tournament"
+    assert second_request[1] != first_request[1]

@@ -21,6 +21,9 @@ public sealed class StatusResponse
 
     [JsonPropertyName("process_service")]
     public ProcessServiceStatus? ProcessService { get; set; }
+
+    [JsonPropertyName("request")]
+    public RequestStatus? Request { get; set; }
 }
 
 public sealed class AcknowledgementStatus
@@ -33,6 +36,27 @@ public sealed class AcknowledgementStatus
 
     [JsonPropertyName("adb_target")]
     public DirectiveAcknowledgement? AdbTarget { get; set; }
+
+    [JsonPropertyName("strategy")]
+    public DirectiveAcknowledgement? Strategy { get; set; }
+}
+
+public sealed class RequestStatus
+{
+    [JsonPropertyName("accepted")]
+    public bool Accepted { get; set; }
+
+    [JsonPropertyName("action")]
+    public string? Action { get; set; }
+
+    [JsonPropertyName("strategy")]
+    public string? Strategy { get; set; }
+
+    [JsonPropertyName("disposition")]
+    public string? Disposition { get; set; }
+
+    [JsonPropertyName("warning")]
+    public string? Warning { get; set; }
 }
 
 public sealed class DirectiveAcknowledgement
@@ -63,6 +87,12 @@ public sealed class ControlStatus
 
     [JsonPropertyName("adb_port_updated_at")]
     public string? AdbPortUpdatedAt { get; set; }
+
+    [JsonPropertyName("strategy")]
+    public string? Strategy { get; set; }
+
+    [JsonPropertyName("strategy_updated_at")]
+    public string? StrategyUpdatedAt { get; set; }
 
     [JsonPropertyName("updated_at")]
     public string? UpdatedAt { get; set; }
@@ -250,6 +280,9 @@ public sealed class BattleSummary
     [JsonPropertyName("wave")]
     public int? Wave { get; set; }
 
+    [JsonPropertyName("killed_by")]
+    public string? KilledBy { get; set; }
+
     [JsonPropertyName("league")]
     public string? League { get; set; }
 
@@ -321,4 +354,15 @@ public sealed class ClientSettings
     public string SshDestination { get; set; } = "";
     public int LocalTunnelPort { get; set; } = 8787;
     public int RemoteApiPort { get; set; } = 8787;
+    public WindowPlacementSettings? MainWindowPlacement { get; set; }
+    public WindowPlacementSettings? BattleHistoryWindowPlacement { get; set; }
+}
+
+public sealed class WindowPlacementSettings
+{
+    public double Left { get; set; }
+    public double Top { get; set; }
+    public double Width { get; set; }
+    public double Height { get; set; }
+    public bool Maximized { get; set; }
 }

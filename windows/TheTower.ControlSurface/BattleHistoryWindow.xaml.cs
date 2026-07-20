@@ -1,9 +1,13 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.IO;
+using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Threading;
+using Microsoft.Win32;
 
 namespace TheTower.ControlSurface;
 
@@ -14,8 +18,10 @@ public partial class BattleHistoryWindow : Window
     private readonly ObservableCollection<ReportRow> _reportRows = [];
     private readonly ObservableCollection<ReportRow> _settingsRows = [];
     private readonly ObservableCollection<PerkRow> _perks = [];
+    private readonly ObservableCollection<string> _strategyOptions = ["All"];
     private readonly System.ComponentModel.ICollectionView _battleView;
     private CancellationTokenSource? _detailCancellation;
+    private BattleListResponse? _pendingBattleResponse;
     private bool _updatingBattles;
     private string? _selectedBattleId;
     private string? _loadedBattleId;
@@ -23,7 +29,7 @@ public partial class BattleHistoryWindow : Window
     private int? _tierFilter;
     private int? _minWaveFilter;
     private int? _maxWaveFilter;
-    private string _strategyFilter = "";
+    private string _strategyFilter = "all";
     private string _qualityFilter = "all";
 
     public BattleHistoryWindow(ControlSurfaceApi api)
@@ -36,11 +42,31 @@ public partial class BattleHistoryWindow : Window
         ReportRowsGrid.ItemsSource = _reportRows;
         SettingsGrid.ItemsSource = _settingsRows;
         PerksGrid.ItemsSource = _perks;
+        StrategyFilterBox.ItemsSource = _strategyOptions;
+        StrategyFilterBox.SelectedIndex = 0;
         Closed += (_, _) => _detailCancellation?.Cancel();
     }
 
-    public void UpdateBattles(BattleListResponse response)
+    public bool UpdateBattles(BattleListResponse response)
     {
+        if (AnyBattleFilterDropDownOpen())
+        {
+            _pendingBattleResponse = response;
+            return false;
+        }
+
+        _pendingBattleResponse = null;
+        ApplyBattleUpdate(response);
+        return true;
+    }
+
+    private void ApplyBattleUpdate(BattleListResponse response)
+    {
+        if (BattleListsEqual(_battles, response.Items))
+        {
+            return;
+        }
+
         var requestedId = (BattlesGrid.SelectedItem as BattleSummary)?.BattleId
             ?? _selectedBattleId;
         _updatingBattles = true;
@@ -52,6 +78,7 @@ public partial class BattleHistoryWindow : Window
                 _battles.Add(battle);
             }
             _battleView.Refresh();
+            UpdateStrategyFilterOptions();
             UpdateFilterCount();
 
             var selected = requestedId is null
@@ -59,11 +86,22 @@ public partial class BattleHistoryWindow : Window
                 : _battleView.Cast<BattleSummary>()
                     .FirstOrDefault(battle => battle.BattleId == requestedId)
                     ?? _battleView.Cast<BattleSummary>().FirstOrDefault();
-            BattlesGrid.SelectedItem = selected;
+            if (!ReferenceEquals(BattlesGrid.SelectedItem, selected))
+            {
+                BattlesGrid.SelectedItem = selected;
+            }
             _selectedBattleId = selected?.BattleId;
             if (selected is not null && selected.BattleId != _loadedBattleId)
             {
                 _ = LoadBattleAsync(selected);
+            }
+            else if (selected is not null)
+            {
+                RenderBattleBanner(selected);
+            }
+            else if (selected is null)
+            {
+                ClearBattleReport();
             }
         }
         finally
@@ -72,14 +110,121 @@ public partial class BattleHistoryWindow : Window
         }
     }
 
+    private void UpdateStrategyFilterOptions()
+    {
+        var selected = SelectedText(StrategyFilterBox);
+        var strategies = _battles
+            .Select(battle => battle.StrategyDisplay)
+            .Where(strategy => !string.IsNullOrWhiteSpace(strategy) && strategy != "-")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(strategy => strategy, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        PreserveStrategyOption(strategies, selected);
+        PreserveStrategyOption(strategies, _strategyFilter);
+        strategies.Sort(StringComparer.OrdinalIgnoreCase);
+
+        var desired = new[] { "All" }.Concat(strategies).ToList();
+        if (!_strategyOptions.SequenceEqual(desired, StringComparer.Ordinal))
+        {
+            _strategyOptions.Clear();
+            foreach (var strategy in desired)
+            {
+                _strategyOptions.Add(strategy);
+            }
+        }
+
+        StrategyFilterBox.SelectedItem = desired.FirstOrDefault(
+            strategy => string.Equals(strategy, selected, StringComparison.OrdinalIgnoreCase))
+            ?? "All";
+    }
+
+    private static void PreserveStrategyOption(ICollection<string> strategies, string strategy)
+    {
+        if (string.IsNullOrWhiteSpace(strategy)
+            || string.Equals(strategy, "all", StringComparison.OrdinalIgnoreCase)
+            || strategies.Contains(strategy, StringComparer.OrdinalIgnoreCase))
+        {
+            return;
+        }
+        strategies.Add(strategy);
+    }
+
+    private static bool BattleListsEqual(
+        IReadOnlyList<BattleSummary> current,
+        IReadOnlyList<BattleSummary> incoming)
+    {
+        if (current.Count != incoming.Count)
+        {
+            return false;
+        }
+        for (var index = 0; index < current.Count; index++)
+        {
+            if (!BattleSummariesEqual(current[index], incoming[index]))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static bool BattleSummariesEqual(BattleSummary left, BattleSummary right) =>
+        string.Equals(left.BattleId, right.BattleId, StringComparison.Ordinal)
+        && string.Equals(left.CapturedAt, right.CapturedAt, StringComparison.Ordinal)
+        && string.Equals(left.Strategy, right.Strategy, StringComparison.Ordinal)
+        && string.Equals(left.BattleType, right.BattleType, StringComparison.Ordinal)
+        && string.Equals(left.BattleTypeLabel, right.BattleTypeLabel, StringComparison.Ordinal)
+        && string.Equals(
+            left.BattleTypeConfidence,
+            right.BattleTypeConfidence,
+            StringComparison.Ordinal)
+        && string.Equals(left.Profile, right.Profile, StringComparison.Ordinal)
+        && left.Tier == right.Tier
+        && left.Wave == right.Wave
+        && string.Equals(left.KilledBy, right.KilledBy, StringComparison.Ordinal)
+        && string.Equals(left.League, right.League, StringComparison.Ordinal)
+        && left.Rank == right.Rank
+        && string.Equals(left.RealTime, right.RealTime, StringComparison.Ordinal)
+        && string.Equals(left.CoinsEarned, right.CoinsEarned, StringComparison.Ordinal)
+        && string.Equals(left.CoinsPerHour, right.CoinsPerHour, StringComparison.Ordinal)
+        && string.Equals(left.CellsEarned, right.CellsEarned, StringComparison.Ordinal)
+        && string.Equals(left.CellsPerHour, right.CellsPerHour, StringComparison.Ordinal)
+        && left.Quality?.Valid == right.Quality?.Valid;
+
+    private void BattleFilter_DropDownClosed(object sender, EventArgs e)
+    {
+        _ = Dispatcher.BeginInvoke(ApplyPendingBattleUpdate, DispatcherPriority.ContextIdle);
+    }
+
+    private void ApplyPendingBattleUpdate()
+    {
+        if (_pendingBattleResponse is null || AnyBattleFilterDropDownOpen())
+        {
+            return;
+        }
+
+        var response = _pendingBattleResponse;
+        _pendingBattleResponse = null;
+        ApplyBattleUpdate(response);
+        if (HistoryStatusText.Text == "Update pending while a filter menu is open")
+        {
+            HistoryStatusText.Text = "Updated";
+        }
+    }
+
+    private bool AnyBattleFilterDropDownOpen() =>
+        BattleTypeFilter.IsDropDownOpen
+        || StrategyFilterBox.IsDropDownOpen
+        || QualityFilter.IsDropDownOpen;
+
     private async void Refresh_Click(object sender, RoutedEventArgs e)
     {
         try
         {
             HistoryStatusText.Text = "Refreshing...";
             var response = await _api.GetBattlesAsync(CancellationToken.None);
-            UpdateBattles(response);
-            HistoryStatusText.Text = "Updated";
+            HistoryStatusText.Text = UpdateBattles(response)
+                ? "Updated"
+                : "Update pending while a filter menu is open";
         }
         catch (Exception exc)
         {
@@ -103,9 +248,10 @@ public partial class BattleHistoryWindow : Window
             {
                 throw new ArgumentException("Minimum wave cannot be greater than maximum wave.");
             }
-            _strategyFilter = StrategyFilterBox.Text.Trim();
+            _strategyFilter = SelectedText(StrategyFilterBox);
             _battleView.Refresh();
             UpdateFilterCount();
+            EnsureFilteredSelection();
         }
         catch (Exception exc)
         {
@@ -120,15 +266,16 @@ public partial class BattleHistoryWindow : Window
         TierFilterBox.Clear();
         MinWaveFilterBox.Clear();
         MaxWaveFilterBox.Clear();
-        StrategyFilterBox.Clear();
+        StrategyFilterBox.SelectedIndex = 0;
         _typeFilter = "all";
         _qualityFilter = "all";
         _tierFilter = null;
         _minWaveFilter = null;
         _maxWaveFilter = null;
-        _strategyFilter = "";
+        _strategyFilter = "all";
         _battleView.Refresh();
         UpdateFilterCount();
+        EnsureFilteredSelection();
     }
 
     private bool BattleMatchesFilter(object item)
@@ -156,8 +303,11 @@ public partial class BattleHistoryWindow : Window
         {
             return false;
         }
-        if (!string.IsNullOrEmpty(_strategyFilter)
-            && !battle.StrategyDisplay.Contains(_strategyFilter, StringComparison.OrdinalIgnoreCase))
+        if (_strategyFilter != "all"
+            && !string.Equals(
+                battle.StrategyDisplay,
+                _strategyFilter,
+                StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
@@ -171,7 +321,127 @@ public partial class BattleHistoryWindow : Window
 
     private void UpdateFilterCount()
     {
-        FilterCountText.Text = $"{_battleView.Cast<object>().Count()} of {_battles.Count}";
+        var filteredCount = _battleView.Cast<object>().Count();
+        FilterCountText.Text = $"{filteredCount} of {_battles.Count}";
+        ExportCsvButton.IsEnabled = filteredCount > 0;
+    }
+
+    private void EnsureFilteredSelection()
+    {
+        if (BattlesGrid.SelectedItem is BattleSummary selected
+            && _battleView.Cast<BattleSummary>().Contains(selected))
+        {
+            return;
+        }
+
+        var first = _battleView.Cast<BattleSummary>().FirstOrDefault();
+        BattlesGrid.SelectedItem = first;
+        if (first is null)
+        {
+            ClearBattleReport();
+        }
+    }
+
+    private void ClearBattleReport()
+    {
+        _detailCancellation?.Cancel();
+        _detailCancellation?.Dispose();
+        _detailCancellation = null;
+        _selectedBattleId = null;
+        _loadedBattleId = null;
+        BattleTitleText.Text = "No completed battle matches the current filters";
+        ReportTypeText.Text = "-";
+        ReportTierText.Text = "-";
+        ReportWaveText.Text = "-";
+        ReportTimeText.Text = "-";
+        ReportCoinsText.Text = "-";
+        ReportCoinsHourText.Text = "-";
+        ReportCellsText.Text = "-";
+        ReportCellsHourText.Text = "-";
+        ReportQualityText.Text = "-";
+        _reportRows.Clear();
+        _settingsRows.Clear();
+        _perks.Clear();
+    }
+
+    private void ExportCsv_Click(object sender, RoutedEventArgs e)
+    {
+        var rows = _battleView.Cast<BattleSummary>().ToList();
+        if (rows.Count == 0)
+        {
+            return;
+        }
+
+        var dialog = new SaveFileDialog
+        {
+            AddExtension = true,
+            DefaultExt = ".csv",
+            FileName = $"thetower-battles-{DateTime.Now:yyyyMMdd-HHmmss}.csv",
+            Filter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*",
+            OverwritePrompt = true,
+            Title = "Export completed battles",
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        try
+        {
+            var csv = new StringBuilder();
+            AppendCsvRow(
+                csv,
+                "Captured",
+                "Battle ID",
+                "Type",
+                "Strategy",
+                "Tier",
+                "Wave",
+                "Real time",
+                "Coins",
+                "Coins/hour",
+                "Cells",
+                "Cells/hour",
+                "Quality",
+                "Killed by",
+                "League",
+                "Rank");
+            foreach (var battle in rows)
+            {
+                AppendCsvRow(
+                    csv,
+                    battle.CapturedDisplay,
+                    battle.BattleId,
+                    battle.BattleTypeDisplay,
+                    battle.StrategyDisplay,
+                    battle.Tier?.ToString(CultureInfo.InvariantCulture),
+                    battle.Wave?.ToString(CultureInfo.InvariantCulture),
+                    battle.RealTime,
+                    battle.CoinsEarned,
+                    battle.CoinsPerHour,
+                    battle.CellsEarned,
+                    battle.CellsPerHour,
+                    battle.QualityDisplay,
+                    battle.KilledBy,
+                    battle.League,
+                    battle.Rank?.ToString(CultureInfo.InvariantCulture));
+            }
+            File.WriteAllText(dialog.FileName, csv.ToString(), new UTF8Encoding(true));
+            HistoryStatusText.Text = $"Exported {rows.Count} rows";
+        }
+        catch (Exception exc)
+        {
+            HistoryStatusText.Text = exc.Message;
+            ShowError(exc);
+        }
+    }
+
+    private static void AppendCsvRow(StringBuilder destination, params string?[] values)
+    {
+        destination.AppendJoin(
+            ',',
+            values.Select(value => $"\"{(value ?? "").Replace("\"", "\"\"")}\""));
+        destination.Append("\r\n");
     }
 
     private async void BattlesGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -434,8 +704,12 @@ public partial class BattleHistoryWindow : Window
     private static string Humanize(string value) => CultureInfo.InvariantCulture.TextInfo
         .ToTitleCase(value.Replace('_', ' '));
 
-    private static string SelectedText(ComboBox comboBox) =>
-        (comboBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "All";
+    private static string SelectedText(ComboBox comboBox) => comboBox.SelectedItem switch
+    {
+        ComboBoxItem item => item.Content?.ToString() ?? "All",
+        string value => value,
+        _ => "All",
+    };
 
     private static int? ParseOptionalNonNegativeInteger(string value, string label)
     {

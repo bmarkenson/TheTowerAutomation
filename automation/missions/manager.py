@@ -128,6 +128,24 @@ class MissionManager:
             except Exception:
                 log("[STRATEGY] on_game_over handler error", "ERROR")
 
+    def replace_strategy_at_boundary(
+        self,
+        strategy: Optional[BaseStrategy],
+    ) -> None:
+        """Replace strategy-owned state after the prior run is finalized."""
+
+        old_vars = getattr(self.strategy, "vars", {}) if self.strategy else {}
+        mission_vars = self.ctx.data.setdefault("mission_vars", {})
+        if isinstance(old_vars, Mapping):
+            for key in old_vars:
+                mission_vars.pop(str(key), None)
+        self.ctx.data["rule_last_fire"] = {}
+        self._startup_gates_deferred = False
+        self.ctx.data["startup_gates_deferred"] = False
+        self.strategy = strategy
+        if self.strategy:
+            self.strategy.on_start(self.ctx)
+
     def run_initialization_pending(self) -> bool:
         """Return whether the active battle still requires initialization."""
 

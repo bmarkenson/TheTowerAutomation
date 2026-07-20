@@ -11,6 +11,9 @@ import os
 from pathlib import Path
 import tempfile
 from typing import Any, Callable, Iterator, Mapping, Optional
+from uuid import uuid4
+
+from core.app_setup import CONFIGURABLE_STRATEGIES
 
 
 VALID_STATES = frozenset({"RUNNING", "PAUSED", "STOPPED"})
@@ -60,6 +63,9 @@ class ControlDirectiveStore:
             "state_updated_at": data.get("state_updated_at"),
             "mode_updated_at": data.get("mode_updated_at"),
             "adb_port_updated_at": data.get("adb_port_updated_at"),
+            "strategy": _valid_strategy(data.get("strategy")),
+            "strategy_updated_at": data.get("strategy_updated_at"),
+            "strategy_request_id": data.get("strategy_request_id"),
             "path": str(self.path),
             "exists": self.path.exists(),
         }
@@ -138,6 +144,32 @@ class ControlDirectiveStore:
             data["mode"] = normalized
             data["updated_at"] = timestamp
             data["mode_updated_at"] = timestamp
+            if source:
+                data["updated_by"] = source
+            return data
+
+        return self.update(mutate)
+
+    def set_strategy(
+        self,
+        strategy: str,
+        *,
+        source: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Persist a validated runtime strategy request."""
+
+        normalized = str(strategy).strip().lower()
+        if normalized not in CONFIGURABLE_STRATEGIES:
+            raise ValueError(
+                "Strategy must be one of: " + ", ".join(CONFIGURABLE_STRATEGIES)
+            )
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            timestamp = _updated_at()
+            data["strategy"] = normalized
+            data["updated_at"] = timestamp
+            data["strategy_updated_at"] = timestamp
+            data["strategy_request_id"] = uuid4().hex
             if source:
                 data["updated_by"] = source
             return data
@@ -270,6 +302,11 @@ def _valid_port(value: object) -> Optional[int]:
     if isinstance(value, bool) or not isinstance(value, int):
         return None
     return value if 1 <= value <= 65535 else None
+
+
+def _valid_strategy(value: object) -> Optional[str]:
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in CONFIGURABLE_STRATEGIES else None
 
 
 def _updated_at() -> str:

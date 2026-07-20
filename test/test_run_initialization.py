@@ -74,6 +74,19 @@ class _IncompleteSessionPreflightStrategy(BaseStrategy):
         return False
 
 
+class _BoundaryStrategy(BaseStrategy):
+    def __init__(self, name, variable):
+        super().__init__()
+        self.name = name
+        self.vars = {variable: False}
+        self.variable = variable
+        self.starts = 0
+
+    def on_start(self, ctx: MissionContext) -> None:
+        self.starts += 1
+        ctx.data.setdefault("mission_vars", {})[self.variable] = True
+
+
 class AdbPortTests(unittest.TestCase):
     def test_adb_port_defaults_to_5555(self):
         with patch.dict("os.environ", {}, clear=True):
@@ -144,6 +157,76 @@ class DefaultStrategyTests(unittest.TestCase):
 
 
 class RunBoundaryTests(unittest.TestCase):
+    def test_strategy_replacement_clears_old_owned_state_and_starts_new_strategy(self):
+        old_strategy = _BoundaryStrategy("farm_t18", "old_owned")
+        new_strategy = _BoundaryStrategy("tournament", "new_owned")
+        manager = MissionManager(None, old_strategy)
+        manager.start()
+        mission_vars = manager.ctx.data["mission_vars"]
+        mission_vars["unrelated"] = "keep"
+        manager.ctx.data["rule_last_fire"] = {"old-rule": 123.0}
+
+        manager.replace_strategy_at_boundary(new_strategy)
+
+        self.assertIs(manager.strategy, new_strategy)
+        self.assertNotIn("old_owned", mission_vars)
+        self.assertTrue(mission_vars["new_owned"])
+        self.assertEqual(mission_vars["unrelated"], "keep")
+        self.assertEqual(manager.ctx.data["rule_last_fire"], {})
+        self.assertEqual(new_strategy.starts, 1)
+
+    def test_app_applies_pending_strategy_on_paused_workshop_boundary(self):
+        app = App.__new__(App)
+        app._mission_mgr = MagicMock()
+        app._mission_mgr.strategy = SimpleNamespace(name="farm_t18")
+        app._supervisor = MagicMock()
+        app._supervisor.strategy_request = ("tournament", "request-1")
+        app._config = SimpleNamespace(strategy_name="farm_t18")
+        app._last_strategy_request = None
+        app._pending_strategy_request = None
+        app._strategy_boundary_confirmed = False
+        app._run_initialization_gate_logged = True
+        app._session_preflight_gate_logged = True
+        app._session_preflight_terminal_blocked_logged = True
+        app._session_preflight_repair_denial_logged = True
+        new_strategy = SimpleNamespace(name="tournament")
+
+        with (
+            patch("core.app.get_strategy", return_value=new_strategy),
+            patch("core.app.log"),
+        ):
+            app._observe_strategy_request()
+            app._process_strategy_boundary({"state": "WORKSHOP"})
+
+        app._mission_mgr.replace_strategy_at_boundary.assert_called_once_with(
+            new_strategy
+        )
+        self.assertEqual(app._config.strategy_name, "tournament")
+        self.assertIsNone(app._pending_strategy_request)
+
+    def test_app_does_not_apply_pending_strategy_at_resumable_home(self):
+        app = App.__new__(App)
+        app._mission_mgr = MagicMock()
+        app._mission_mgr.strategy = SimpleNamespace(name="farm_t18")
+        app._supervisor = MagicMock()
+        app._supervisor.strategy_request = ("tournament", "request-1")
+        app._config = SimpleNamespace(strategy_name="farm_t18")
+        app._last_strategy_request = None
+        app._pending_strategy_request = None
+        app._strategy_boundary_confirmed = False
+
+        with patch("core.app.log"):
+            app._observe_strategy_request()
+            app._process_strategy_boundary(
+                {
+                    "state": "HOME_SCREEN",
+                    "home_battle_control": "RESUME_BATTLE",
+                }
+            )
+
+        app._mission_mgr.replace_strategy_at_boundary.assert_not_called()
+        self.assertEqual(app._pending_strategy_request[0], "tournament")
+
     def test_unknown_frame_does_not_create_a_second_run_start(self):
         strategy = _RunCountingStrategy()
         manager = MissionManager(None, strategy)

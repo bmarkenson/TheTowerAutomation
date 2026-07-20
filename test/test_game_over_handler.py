@@ -142,6 +142,36 @@ def test_guarded_preflight_repair_forces_home_after_control_allows_actions():
     tap.assert_called_once_with("buttons.home:game_over", retries=1)
 
 
+def test_game_over_finalizes_boundary_before_terminal_navigation():
+    original_state = AUTOMATION.state
+    original_mode = AUTOMATION.mode
+    AUTOMATION.state = RunState.RUNNING
+    AUTOMATION.mode = ExecMode.RETRY
+    events = []
+
+    def tap(*args, **kwargs):
+        events.append(("tap", args[0]))
+        return True
+
+    try:
+        with (
+            patch("handlers.game_over_handler.tap_if_visible", side_effect=tap),
+            patch("handlers.game_over_handler.time.sleep"),
+        ):
+            handle_game_over(
+                capture_stats=False,
+                before_terminal_action=lambda: events.append(("boundary", None)),
+            )
+    finally:
+        AUTOMATION.state = original_state
+        AUTOMATION.mode = original_mode
+
+    assert events == [
+        ("boundary", None),
+        ("tap", "buttons.retry:game_over"),
+    ]
+
+
 def test_game_over_wait_polls_control_and_blocks_retry_while_paused():
     original_state = AUTOMATION.state
     original_mode = AUTOMATION.mode

@@ -12,7 +12,7 @@ import re
 import threading
 from typing import Any, Mapping, Optional, Sequence
 
-from core.app_setup import STARTUP_GATE_POLICIES
+from core.app_setup import CONFIGURABLE_STRATEGIES, STARTUP_GATE_POLICIES
 from core.automation_process import AutomationProcessError, SystemdAutomationManager
 from core.battle_classification import classification_for_record
 from core.control_directives import ControlDirectiveError, ControlDirectiveStore
@@ -41,6 +41,11 @@ _MODE_ACK_RE = re.compile(
 )
 _ADB_TARGET_ACK_RE = re.compile(
     r"^\[CTRL] ADB target set to (?P<value>localhost:(?:[1-9]\d{0,4})) via control file$"
+)
+_STRATEGY_ACK_RE = re.compile(
+    r"^\[CTRL] Strategy set to (?P<value>"
+    + "|".join(re.escape(value) for value in CONFIGURABLE_STRATEGIES)
+    + r") via control file$"
 )
 
 
@@ -93,6 +98,9 @@ class ControlSurfaceService:
                 "remaining_seconds": None,
                 "updated_at": None,
                 "adb_port_updated_at": None,
+                "strategy": None,
+                "strategy_updated_at": None,
+                "strategy_request_id": None,
                 "exists": self.control_path.exists(),
             }
         control["path"] = self._display_path(self.control_path)
@@ -280,12 +288,6 @@ class ControlSurfaceService:
             runtime_active = self._runtime_evidence()["active"]
             manager_status = manager.status()
             process_active = bool(runtime_active or manager_status.get("active"))
-            if action == "set_strategy" and process_active:
-                raise ControlSurfaceRequestError(
-                    "Completely stop the active automation runtime before "
-                    "changing its next-start configuration",
-                    status=409,
-                )
             if action == "set_adb_port":
                 adb_port = request.get("adb_port")
                 if isinstance(adb_port, bool) or not isinstance(adb_port, int):
@@ -334,12 +336,23 @@ class ControlSurfaceService:
                         "strategy must be a non-empty string"
                     )
                 try:
-                    manager.set_strategy(strategy)
-                except AutomationProcessError as exc:
+                    if process_active:
+                        manager.persist_strategy(strategy)
+                    else:
+                        manager.set_strategy(strategy)
+                    self.control_store.set_strategy(
+                        strategy.strip().lower(),
+                        source="control-surface-strategy",
+                    )
+                except (AutomationProcessError, ControlDirectiveError) as exc:
                     self._append_audit(f"Failed to configure strategy: {exc}")
                     raise ControlSurfaceRequestError(str(exc), status=409) from exc
                 strategy = strategy.strip().lower()
-                audit = f"Configured next-start strategy {strategy}"
+                audit = (
+                    f"Queued strategy {strategy} for the next run boundary"
+                    if process_active
+                    else f"Configured next-start strategy {strategy}"
+                )
         else:
             raise ControlSurfaceRequestError(
                 "action must be start, stop, set_adb_port, or set_strategy"
@@ -354,6 +367,9 @@ class ControlSurfaceService:
             response["request"]["adb_port"] = adb_port
         elif action == "set_strategy":
             response["request"]["strategy"] = strategy
+            response["request"]["disposition"] = (
+                "queued" if process_active else "saved"
+            )
         if audit_warning:
             response["request"]["warning"] = audit_warning
         return response
@@ -509,9 +525,11 @@ class ControlSurfaceService:
         state_ack = None
         mode_ack = None
         adb_target_ack = None
+        strategy_ack = None
         state_updated_at = control.get("state_updated_at")
         mode_updated_at = control.get("mode_updated_at")
         adb_port_updated_at = control.get("adb_port_updated_at")
+        strategy_updated_at = control.get("strategy_updated_at")
         legacy_updated_at = (
             control.get("updated_at")
             if (
@@ -554,16 +572,27 @@ class ControlSurfaceService:
                     expected_target,
                     adb_port_updated_at,
                 )
+            if strategy_ack is None and (
+                match := _STRATEGY_ACK_RE.fullmatch(entry["message"])
+            ):
+                strategy_ack = _ack_entry(
+                    entry,
+                    match.group("value"),
+                    control.get("strategy"),
+                    strategy_updated_at,
+                )
             if (
                 state_ack is not None
                 and mode_ack is not None
                 and (control.get("adb_port") is None or adb_target_ack is not None)
+                and (control.get("strategy") is None or strategy_ack is not None)
             ):
                 break
         return {
             "state": state_ack,
             "mode": mode_ack,
             "adb_target": adb_target_ack,
+            "strategy": strategy_ack,
         }
 
     def _runtime_evidence(self) -> dict[str, Any]:

@@ -12,43 +12,59 @@ public partial class MainWindow : Window
 {
     private readonly ControlSurfaceApi _api = new();
     private readonly SshTunnelManager _sshTunnel = new();
+    private readonly ClientSettings _settings;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(5) };
     private readonly DispatcherTimer _activityTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
+    private readonly SemaphoreSlim _battleRefreshGate = new(1, 1);
     private readonly SemaphoreSlim _activityRefreshGate = new(1, 1);
     private readonly ObservableCollection<ActivityEntry> _activity = [];
     private BattleListResponse _latestBattles = new();
     private BattleHistoryWindow? _battleHistoryWindow;
     private CancellationTokenSource? _refreshCancellation;
+    private CancellationTokenSource? _battleRefreshCancellation;
     private CancellationTokenSource? _activityRefreshCancellation;
     private bool _startupGatePolicyDirty;
+    private string _strategyRequestMessage = "";
 
     public MainWindow()
     {
         InitializeComponent();
         ActivityGrid.ItemsSource = _activity;
 
-        var settings = SettingsStore.Load();
-        BaseUrlBox.Text = settings.BaseUrl;
-        SshDestinationBox.Text = settings.SshDestination;
-        LocalTunnelPortBox.Text = settings.LocalTunnelPort.ToString(CultureInfo.InvariantCulture);
-        RemoteApiPortBox.Text = settings.RemoteApiPort.ToString(CultureInfo.InvariantCulture);
-        _api.Configure(settings.BaseUrl, "");
+        _settings = SettingsStore.Load();
+        BaseUrlBox.Text = _settings.BaseUrl;
+        SshDestinationBox.Text = _settings.SshDestination;
+        LocalTunnelPortBox.Text = _settings.LocalTunnelPort.ToString(CultureInfo.InvariantCulture);
+        RemoteApiPortBox.Text = _settings.RemoteApiPort.ToString(CultureInfo.InvariantCulture);
+        WindowPlacementStore.Restore(this, _settings.MainWindowPlacement);
+        _api.Configure(_settings.BaseUrl, "");
         _sshTunnel.Exited += Tunnel_Exited;
-        _timer.Tick += async (_, _) => await RefreshAsync();
+        _timer.Tick += async (_, _) => await Task.WhenAll(
+            RefreshStatusAsync(),
+            RefreshBattlesAsync());
         _activityTimer.Tick += async (_, _) => await RefreshActivityAsync();
         ActivityLevelFilter.SelectionChanged += ActivityLevelFilter_SelectionChanged;
         Loaded += async (_, _) =>
         {
             _timer.Start();
             _activityTimer.Start();
-            await Task.WhenAll(RefreshAsync(), RefreshActivityAsync());
+            await Task.WhenAll(
+                RefreshStatusAsync(),
+                RefreshBattlesAsync(),
+                RefreshActivityAsync());
+        };
+        Closing += (_, _) =>
+        {
+            CaptureWindowPlacement();
+            SaveSettingsBestEffort();
         };
         Closed += (_, _) =>
         {
             _timer.Stop();
             _activityTimer.Stop();
             _refreshCancellation?.Cancel();
+            _battleRefreshCancellation?.Cancel();
             _activityRefreshCancellation?.Cancel();
             _battleHistoryWindow?.Close();
             _sshTunnel.Dispose();
@@ -63,7 +79,8 @@ public partial class MainWindow : Window
             _api.Configure(BaseUrlBox.Text, TokenBox.Password);
             SaveSettings();
             await Task.WhenAll(
-                RefreshAsync(force: true),
+                RefreshStatusAsync(force: true),
+                RefreshBattlesAsync(force: true),
                 RefreshActivityAsync(force: true));
         }
         catch (Exception exc)
@@ -88,20 +105,31 @@ public partial class MainWindow : Window
 
             BaseUrlBox.Text = $"http://127.0.0.1:{localPort}";
             _api.Configure(BaseUrlBox.Text, TokenBox.Password);
+
+            using var probeCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+            var status = await _api.GetStatusAsync(probeCancellation.Token);
+            RenderStatus(status);
             SaveSettings();
             TunnelStatusText.Text = $"Connected: localhost:{localPort} -> {SshDestinationBox.Text.Trim()}:{remotePort}";
             TunnelStatusText.Foreground = new SolidColorBrush(Color.FromRgb(73, 214, 157));
+            ConnectionText.Text = "Linux service connected";
+            ConnectionText.Foreground = new SolidColorBrush(Color.FromRgb(73, 214, 157));
             StopTunnelButton.IsEnabled = true;
             await Task.WhenAll(
-                RefreshAsync(force: true),
+                RefreshBattlesAsync(force: true),
                 RefreshActivityAsync(force: true));
         }
         catch (Exception exc)
         {
-            StartTunnelButton.IsEnabled = true;
-            StopTunnelButton.IsEnabled = _sshTunnel.IsRunning;
-            TunnelStatusText.Text = exc.Message;
+            var tunnelRunning = _sshTunnel.IsRunning;
+            StartTunnelButton.IsEnabled = !tunnelRunning;
+            StopTunnelButton.IsEnabled = tunnelRunning;
+            TunnelStatusText.Text = tunnelRunning
+                ? $"Tunnel running, but the Linux API is unavailable: {exc.Message}"
+                : exc.Message;
             TunnelStatusText.Foreground = new SolidColorBrush(Color.FromRgb(255, 113, 135));
+            ConnectionText.Text = "Tunnel API unavailable";
+            ConnectionText.Foreground = new SolidColorBrush(Color.FromRgb(255, 113, 135));
             ShowError(exc);
         }
     }
@@ -114,6 +142,8 @@ public partial class MainWindow : Window
             await _sshTunnel.StopAsync();
             TunnelStatusText.Text = "Stopped";
             TunnelStatusText.Foreground = (Brush)FindResource("MutedBrush");
+            ConnectionText.Text = "Tunnel stopped";
+            ConnectionText.Foreground = new SolidColorBrush(Color.FromRgb(241, 191, 91));
         }
         catch (Exception exc)
         {
@@ -138,6 +168,8 @@ public partial class MainWindow : Window
             if (!args.Expected)
             {
                 LastErrorText.Text = args.Message;
+                ConnectionText.Text = "Tunnel exited";
+                ConnectionText.Foreground = new SolidColorBrush(Color.FromRgb(255, 113, 135));
             }
         });
     }
@@ -201,16 +233,32 @@ public partial class MainWindow : Window
         }
         try
         {
+            StrategySelectionText.Text = $"Sending {strategy} strategy request...";
             var response = await _api.PostProcessAsync(
                 new { action = "set_strategy", strategy },
                 CancellationToken.None);
+            if (response.Request is { Accepted: true } request)
+            {
+                var requested = NormalizeStrategy(request.Strategy) ?? strategy;
+                _strategyRequestMessage = request.Disposition switch
+                {
+                    "queued" => $"Accepted {requested}; queued for the next confirmed run boundary.",
+                    "saved" => $"Accepted {requested}; saved for the next process start.",
+                    _ => $"Accepted {requested} strategy request.",
+                };
+                if (!string.IsNullOrWhiteSpace(request.Warning))
+                {
+                    _strategyRequestMessage += $" Audit warning: {request.Warning}";
+                }
+            }
             RenderStatus(response);
             await RefreshActivityAsync(force: true);
         }
         catch (Exception exc)
         {
+            _strategyRequestMessage = $"Strategy request was not accepted: {exc.Message}";
             ShowError(exc);
-            await RefreshAsync(force: true);
+            await RefreshStatusAsync(force: true);
         }
     }
 
@@ -261,7 +309,7 @@ public partial class MainWindow : Window
         catch (Exception exc)
         {
             ShowError(exc);
-            await RefreshAsync(force: true);
+            await RefreshStatusAsync(force: true);
         }
     }
 
@@ -282,11 +330,11 @@ public partial class MainWindow : Window
         catch (Exception exc)
         {
             ShowError(exc);
-            await RefreshAsync(force: true);
+            await RefreshStatusAsync(force: true);
         }
     }
 
-    private async Task RefreshAsync(bool force = false)
+    private async Task RefreshStatusAsync(bool force = false)
     {
         bool entered;
         if (force)
@@ -308,12 +356,7 @@ public partial class MainWindow : Window
         var cancellationToken = _refreshCancellation.Token;
         try
         {
-            var statusTask = _api.GetStatusAsync(cancellationToken);
-            var battlesTask = _api.GetBattlesAsync(cancellationToken);
-            await Task.WhenAll(statusTask, battlesTask);
-
-            RenderStatus(await statusTask);
-            RenderBattles(await battlesTask);
+            RenderStatus(await _api.GetStatusAsync(cancellationToken));
             ConnectionText.Text = "Linux service connected";
             ConnectionText.Foreground = new SolidColorBrush(Color.FromRgb(73, 214, 157));
         }
@@ -334,6 +377,45 @@ public partial class MainWindow : Window
         finally
         {
             _refreshGate.Release();
+        }
+    }
+
+    private async Task RefreshBattlesAsync(bool force = false)
+    {
+        bool entered;
+        if (force)
+        {
+            _battleRefreshCancellation?.Cancel();
+            await _battleRefreshGate.WaitAsync();
+            entered = true;
+        }
+        else
+        {
+            entered = await _battleRefreshGate.WaitAsync(0);
+        }
+        if (!entered)
+        {
+            return;
+        }
+
+        _battleRefreshCancellation?.Dispose();
+        _battleRefreshCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(14));
+        try
+        {
+            RenderBattles(await _api.GetBattlesAsync(_battleRefreshCancellation.Token));
+        }
+        catch (OperationCanceledException)
+        {
+            // A later forced refresh owns the completed-battle view.
+        }
+        catch (Exception exc)
+        {
+            LatestBattleTitleText.Text = "Completed battles unavailable";
+            LastErrorText.Text = $"Battle history: {exc.Message}";
+        }
+        finally
+        {
+            _battleRefreshGate.Release();
         }
     }
 
@@ -483,8 +565,8 @@ public partial class MainWindow : Window
         ProcessPidText.Text = processPid?.ToString(CultureInfo.InvariantCulture) ?? "-";
         var lifecycleAvailable = service?.Available == true;
         var processActive = service?.Active == true || status.Runtime.Active;
-        StartPausedButton.IsEnabled = lifecycleAvailable && service?.Active != true;
-        StartRunningButton.IsEnabled = lifecycleAvailable && service?.Active != true;
+        StartPausedButton.IsEnabled = lifecycleAvailable && !processActive;
+        StartRunningButton.IsEnabled = lifecycleAvailable && !processActive;
         AttachCurrentBattleBox.IsEnabled = lifecycleAvailable && !processActive;
         CompleteStopButton.IsEnabled = lifecycleAvailable && service?.Active == true;
         var pausedAndAcknowledged = processActive
@@ -502,10 +584,10 @@ public partial class MainWindow : Window
             : pausedAndAcknowledged
                 ? "Switches the live runtime in place; it remains paused and does not rerun startup gates."
                 : "Indefinitely pause automation and wait for its acknowledgement before switching the live ADB port.";
-        FarmT18StrategyButton.IsEnabled = lifecycleAvailable && !processActive;
-        FarmT19StrategyButton.IsEnabled = lifecycleAvailable && !processActive;
-        TournamentStrategyButton.IsEnabled = lifecycleAvailable && !processActive;
-        NoStrategyButton.IsEnabled = lifecycleAvailable && !processActive;
+        FarmT18StrategyButton.IsEnabled = lifecycleAvailable;
+        FarmT19StrategyButton.IsEnabled = lifecycleAvailable;
+        TournamentStrategyButton.IsEnabled = lifecycleAvailable;
+        NoStrategyButton.IsEnabled = lifecycleAvailable;
         if (!AdbPortBox.IsKeyboardFocusWithin && service?.AdbPort is not null)
         {
             AdbPortBox.Text = service.AdbPort.Value.ToString(CultureInfo.InvariantCulture);
@@ -519,9 +601,9 @@ public partial class MainWindow : Window
         }
 
         var statePending = processActive
-            && status.Acknowledgements.State is { AcknowledgesCurrent: false };
+            && status.Acknowledgements.State is not { AcknowledgesCurrent: true };
         var modePending = processActive
-            && status.Acknowledgements.Mode is { AcknowledgesCurrent: false };
+            && status.Acknowledgements.Mode is not { AcknowledgesCurrent: true };
         var adbTargetPending = processActive
             && status.Control.AdbPort is not null
             && status.Acknowledgements.AdbTarget is not { AcknowledgesCurrent: true };
@@ -547,10 +629,52 @@ public partial class MainWindow : Window
             modePending);
 
         var configuredStrategy = NormalizeStrategy(service?.Strategy);
-        SetSelectionStyle(FarmT18StrategyButton, configuredStrategy == "farm_t18");
-        SetSelectionStyle(FarmT19StrategyButton, configuredStrategy == "farm_t19_experiment");
-        SetSelectionStyle(TournamentStrategyButton, configuredStrategy == "tournament");
-        SetSelectionStyle(NoStrategyButton, configuredStrategy == "none");
+        var requestedStrategy = NormalizeStrategy(status.Control.Strategy)
+            ?? configuredStrategy;
+        var strategyPending = processActive
+            && status.Control.Strategy is not null
+            && status.Acknowledgements.Strategy is not { AcknowledgesCurrent: true };
+        var currentStrategy = !processActive
+            ? null
+            : status.Control.Strategy is null
+                ? configuredStrategy
+                : NormalizeStrategy(status.Acknowledgements.Strategy?.Value);
+        var pendingStrategy = strategyPending ? requestedStrategy : null;
+        SetStrategySelectionStyle(
+            FarmT18StrategyButton,
+            "farm_t18",
+            processActive,
+            configuredStrategy,
+            currentStrategy,
+            pendingStrategy);
+        SetStrategySelectionStyle(
+            FarmT19StrategyButton,
+            "farm_t19_experiment",
+            processActive,
+            configuredStrategy,
+            currentStrategy,
+            pendingStrategy);
+        SetStrategySelectionStyle(
+            TournamentStrategyButton,
+            "tournament",
+            processActive,
+            configuredStrategy,
+            currentStrategy,
+            pendingStrategy);
+        SetStrategySelectionStyle(
+            NoStrategyButton,
+            "none",
+            processActive,
+            configuredStrategy,
+            currentStrategy,
+            pendingStrategy);
+        var strategyState = !processActive
+            ? $"Process inactive | Next start: {configuredStrategy ?? "unknown"}"
+            : $"Current: {currentStrategy ?? "awaiting runtime evidence"} | "
+                + $"Pending: {pendingStrategy ?? "none"}";
+        StrategySelectionText.Text = string.IsNullOrWhiteSpace(_strategyRequestMessage)
+            ? strategyState
+            : $"{strategyState} | {_strategyRequestMessage}";
         var stateDisposition = !processActive
             ? "saved; process inactive"
             : statePending ? "awaiting runtime" : "active directive";
@@ -567,7 +691,6 @@ public partial class MainWindow : Window
             $"State: {status.Control.State} ({stateDisposition}) | "
             + $"Mode: {status.Control.Mode} ({modeDisposition}) | "
             + $"ADB target: {requestedAdbTarget} ({adbDisposition}) | "
-            + $"Strategy: {configuredStrategy ?? "unknown"} (next start) | "
             + $"Startup gates: {service?.StartupGatePolicy ?? "unknown"}";
 
         var pidAgreement = service?.MainPid is not null && runtime?.Pid is not null
@@ -596,7 +719,9 @@ public partial class MainWindow : Window
                 $"ADB target file: {service?.AdbEnvironmentFile ?? "-"}",
                 $"Installed unit reads target file: {YesNo(service?.AutomationEnvironmentFileLoaded)}",
                 $"Systemd EnvironmentFiles: {service?.ServiceEnvironmentFiles ?? "-"}",
-                $"Next-start strategy: {service?.Strategy ?? "-"}",
+                $"Current runtime strategy: {currentStrategy ?? "-"}",
+                $"Pending boundary strategy: {pendingStrategy ?? "-"}",
+                $"Configured next-start strategy: {service?.Strategy ?? "-"}",
                 $"Strategy source: {service?.StrategySource ?? "-"}",
                 $"Strategy file: {service?.StrategyEnvironmentFile ?? "-"}",
                 $"Next-start gate policy: {service?.StartupGatePolicy ?? "-"}",
@@ -674,22 +799,46 @@ public partial class MainWindow : Window
 
     private void OpenBattleHistory_Click(object sender, RoutedEventArgs e)
     {
-        if (_battleHistoryWindow is not null)
+        try
         {
-            if (_battleHistoryWindow.WindowState == WindowState.Minimized)
+            if (_battleHistoryWindow is not null)
             {
-                _battleHistoryWindow.WindowState = WindowState.Normal;
+                if (_battleHistoryWindow.WindowState == WindowState.Minimized)
+                {
+                    _battleHistoryWindow.WindowState = WindowState.Normal;
+                }
+                _battleHistoryWindow.Activate();
+                return;
             }
-            _battleHistoryWindow.Activate();
-            return;
+
+            var historyWindow = new BattleHistoryWindow(_api)
+            {
+                Owner = this,
+            };
+            WindowPlacementStore.Restore(
+                historyWindow,
+                _settings.BattleHistoryWindowPlacement);
+            historyWindow.UpdateBattles(_latestBattles);
+            historyWindow.Closing += (_, _) =>
+            {
+                var placement = WindowPlacementStore.Capture(historyWindow);
+                if (placement is not null)
+                {
+                    _settings.BattleHistoryWindowPlacement = placement;
+                    SaveSettingsBestEffort();
+                }
+            };
+            historyWindow.Closed += (_, _) => _battleHistoryWindow = null;
+            historyWindow.Show();
+            _battleHistoryWindow = historyWindow;
         }
-        _battleHistoryWindow = new BattleHistoryWindow(_api)
+        catch (Exception exc)
         {
-            Owner = this,
-        };
-        _battleHistoryWindow.Closed += (_, _) => _battleHistoryWindow = null;
-        _battleHistoryWindow.UpdateBattles(_latestBattles);
-        _battleHistoryWindow.Show();
+            _battleHistoryWindow = null;
+            ShowError(new InvalidOperationException(
+                $"Unable to open Battle History: {exc.Message}",
+                exc));
+        }
     }
 
     private static string Join(IEnumerable<string>? values) =>
@@ -704,6 +853,25 @@ public partial class MainWindow : Window
         }
         button.Style = (Style)FindResource(
             pending ? "PendingSelectionButton" : "ActiveSelectionButton");
+    }
+
+    private void SetStrategySelectionStyle(
+        Button button,
+        string strategy,
+        bool processActive,
+        string? configuredStrategy,
+        string? currentStrategy,
+        string? pendingStrategy)
+    {
+        var pending = string.Equals(
+            pendingStrategy,
+            strategy,
+            StringComparison.OrdinalIgnoreCase);
+        var selected = pending || string.Equals(
+            processActive ? currentStrategy : configuredStrategy,
+            strategy,
+            StringComparison.OrdinalIgnoreCase);
+        SetSelectionStyle(button, selected, pending);
     }
 
     private static string? NormalizeStrategy(string? strategy) =>
@@ -751,13 +919,41 @@ public partial class MainWindow : Window
     {
         var localPort = ParsePort(LocalTunnelPortBox.Text, "Local tunnel port");
         var remotePort = ParsePort(RemoteApiPortBox.Text, "Remote API port");
-        SettingsStore.Save(new ClientSettings
+        _settings.BaseUrl = BaseUrlBox.Text.Trim();
+        _settings.SshDestination = SshDestinationBox.Text.Trim();
+        _settings.LocalTunnelPort = localPort;
+        _settings.RemoteApiPort = remotePort;
+        SettingsStore.Save(_settings);
+    }
+
+    private void CaptureWindowPlacement()
+    {
+        var mainPlacement = WindowPlacementStore.Capture(this);
+        if (mainPlacement is not null)
         {
-            BaseUrl = BaseUrlBox.Text.Trim(),
-            SshDestination = SshDestinationBox.Text.Trim(),
-            LocalTunnelPort = localPort,
-            RemoteApiPort = remotePort,
-        });
+            _settings.MainWindowPlacement = mainPlacement;
+        }
+
+        if (_battleHistoryWindow is not null)
+        {
+            var historyPlacement = WindowPlacementStore.Capture(_battleHistoryWindow);
+            if (historyPlacement is not null)
+            {
+                _settings.BattleHistoryWindowPlacement = historyPlacement;
+            }
+        }
+    }
+
+    private void SaveSettingsBestEffort()
+    {
+        try
+        {
+            SettingsStore.Save(_settings);
+        }
+        catch (Exception exc)
+        {
+            LastErrorText.Text = $"Unable to save local window settings: {exc.Message}";
+        }
     }
 
     private void ShowError(Exception exception)

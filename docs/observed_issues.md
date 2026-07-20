@@ -11,6 +11,110 @@ for a matching recurrence or historical investigation.
 
 ## Open
 
+### Native strategy selection did not report acceptance or live disposition
+
+- **Observed:** 2026-07-20 in the native Windows control surface while the
+  managed runtime was active.
+- **Symptom:** Selecting a value under **Next start strategy** produced no
+  visible accepted-request result. The controls were disabled for an active
+  runtime, and the client could only highlight the managed environment value;
+  it could not distinguish the current runtime strategy from a pending one.
+- **Evidence:** Static inspection confirmed that the API response already
+  included `request.accepted`, but the WPF response model discarded `request`.
+  The Linux endpoint also rejected every active strategy change and only wrote
+  the next-start environment when the process was inactive.
+- **Safety response:** The repair was implemented and automatically validated
+  before any live change. After a fresh inspection confirmed acknowledged
+  indefinite Pause and authoritative no-battle Workshop, the two fixed Linux
+  services were restarted to load it. Pause and `localhost:5555` were
+  preserved, the emulator was not tapped, and no battle was started or altered.
+- **Status:** A working-tree repair adds an allowlisted, versioned strategy
+  directive; boundary-aware runtime adoption; current/pending acknowledgement;
+  immediate WPF acceptance feedback; and focused regression coverage. A Linux
+  self-contained WPF publish succeeds, and the restarted runtime freshly
+  reports `WORKSHOP/PAUSED` under the replacement PID. Keep this issue open
+  until the operator verifies the native behavior on Windows and a fixing
+  commit is recorded.
+
+### A second native-client launch produced a misleading runtime prompt
+
+- **Observed:** 2026-07-20 while launching the self-contained native Windows
+  control surface directly from its SMB publish path.
+- **Symptom:** A launch displayed a request to install the .NET Desktop Runtime
+  even though the selected executable was the approximately 69 MiB
+  self-contained artifact and another control-surface process was already
+  running unnoticed.
+- **Evidence:** The operator identified the existing first process. The selected
+  SMB file matched the expected self-contained artifact size. A clean publish
+  to a new Linux directory was byte-for-byte identical to the normal publish,
+  and static inspection confirmed that the bundle contains the Desktop runtime
+  payload. The exact reason the second host invocation showed the runtime prompt
+  rather than starting another WPF process remains unconfirmed.
+- **Safety response:** Diagnosis and repair are Windows-client-only; no Linux
+  automation control, process, ADB target, or emulator state was changed.
+- **Status:** A working-tree repair now uses a per-session named mutex. A second
+  managed launch restores and foregrounds the existing main window, falling back
+  to a taskbar flash or an informational message. Keep this issue open until the
+  operator verifies the exact SMB second-launch path; a prompt that occurs before
+  managed startup would require a packaging-level guard instead.
+
+### Battle History filter dropdowns required repeated clicks
+
+- **Observed:** 2026-07-20 in the native Windows control surface.
+- **Symptom:** The Type and capture-quality dropdowns opened only
+  intermittently; the operator sometimes had to click repeatedly and in
+  different parts of a control before its popup appeared. The first working-tree
+  repair then caused the complete app to terminate when the operator selected
+  **Open battle history...**.
+- **Evidence:** Operator observation confirms the Windows symptom. Static
+  inspection found that the main window polled completed battles every five
+  seconds and the history window cleared, repopulated, and refreshed its entire
+  observable collection for every response, including unchanged responses.
+  That unnecessary UI churn was a credible contributor, but the exact causal
+  interaction has not been reproduced outside the operator's Windows session.
+  The crashing revision had also replaced the previously working initial list
+  population with new in-place collection reconciliation using a deferred WPF
+  collection-view refresh.
+- **Safety response:** Investigation and repair were client-only. No automation
+  control, process, ADB target, or emulator state was changed.
+- **Status:** A revised working-tree repair removes the new in-place
+  reconciliation, retains the previously working population path only for
+  changed responses, and defers updates while a filter popup is open. It also
+  contains window-construction failures at the button boundary, enlarges the
+  hit targets, and explicitly labels the Quality filter. The self-contained
+  application publishes successfully on Linux. Keep this issue open until the
+  operator verifies that the window opens without terminating the app and that
+  one-click mouse and keyboard behavior survives repeated live refreshes.
+- **Recurrence:** The later Strategy-dropdown change accidentally restored the
+  in-place reconciliation with `_battleView.DeferRefresh()`. Selecting **Open
+  battle history...** then produced the caught WPF error `Cannot change or
+  check the contents or Current position of CollectionView while Refresh is
+  being deferred.` The deferred collection-view mutation has been removed
+  again, the known-working changed-response population path is restored, and
+  the self-contained Linux publish succeeds. Windows confirmation remains
+  pending.
+
+### Open in-battle side menu suppressed Mission reward scheduling
+
+- **Observed:** 2026-07-20 at 13:01 during an active Tier 18 Farm battle.
+- **Symptom:** The in-battle Mission control displayed a red badge with four
+  pending rewards, but the running automation made no Mission reward probe or
+  claim attempt.
+- **Evidence:** Fresh control, owner-PID, ADB, screenshot, and action-log
+  inspection confirmed a live `RUNNING` process on `localhost:5555`. The frame
+  was authoritatively classified as `RUNNING/MENU_OPEN`; the open-menu badge
+  detector reported Daily Missions available, while the scheduler's
+  closed-menu attention-dot detector correctly reported false. Static tracing
+  found that orchestration always used the closed-menu detector even though
+  the reward handler already accepts a verified open side menu.
+- **Safety response:** Diagnosis used read-only capture and process inspection.
+  The active battle was not paused, tapped, restarted, exited, or Surrendered.
+- **Status:** Cause confirmed and a working-tree repair now selects badge
+  evidence according to the verified `MENU_OPEN`/`MENU_CLOSED` overlay.
+  Regression coverage is in `test/test_mission_reward_handler.py`. Keep this
+  issue open until the repair has a fixing commit and the updated runtime
+  claims a reward from an open in-battle menu.
+
 ### Coins/min OCR dropped the magnitude suffix from quadrillion readings
 
 - **Observed:** 2026-07-20 at 09:23:29 during an active Farm battle, with an

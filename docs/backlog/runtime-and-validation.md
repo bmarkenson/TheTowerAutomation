@@ -51,8 +51,6 @@ checked-item detail remains in the
   - [x] Make operator intent, runtime acknowledgement, and stale observation
     visibly distinct.
   - [ ] Ensure detected manual input automatically yields automation authority.
-  - [ ] Support extending or cancelling pending recovery timers. Indefinite and
-    persisted timed pauses are already implemented.
 - [ ] Detect likely manual player activity and automatically yield tap authority.
   - Treat unexpected Go Home/manual navigation during an active run as operator
     activity rather than an error to undo immediately.
@@ -85,10 +83,115 @@ checked-item detail remains in the
     wave range, strategy, and capture quality.
   - [x] Show Coins/hour and Cells/hour in the report banner, plus captured
     perks, resolved settings, and observed preflight evidence.
+  - [x] Export the currently filtered completed-battle summaries as a local
+    UTF-8 CSV without expanding the Linux API authority surface.
   - [x] Make structured completed records the canonical end-of-battle artifact:
     include bounded Coins/min progression, Game Stats-only fields, derived
     values, and runtime evidence; retain terminal screenshots only for problems.
-  - [ ] Publish a structured atomic runtime-status snapshot so the GUI does not
-    use action-log parsing as its primary live-status source.
-  - [ ] Add return-now and recovery extension/cancellation only through explicit
-    runtime directives with freshness and ownership checks.
+  - [ ] Validate single-instance behavior on Windows.
+    - [x] Add a per-session instance mutex and have a repeated launch restore and
+      foreground, or at least flash, the existing main window.
+    - [ ] Confirm that a second launch from the SMB publish path reaches the
+      guard without showing a host/runtime prompt and creates no second client.
+
+### Agreed operator-control sequence
+
+The first implementation target is Battle History filter reliability. The
+remaining order is provisional and can change as operator use supplies better
+evidence.
+
+1. [ ] Stabilize Battle History filter input.
+   - [x] Do not clear and repopulate an unchanged record collection on every
+     poll. Apply genuine changes only while the filter menus are closed, retain
+     the selected battle by ID, and defer an update while any filter menu is
+     open.
+   - [x] Label the post-Strategy combo box as `Quality`, enlarge all three
+     combo-box hit targets, and retain native keyboard text search and
+     accessibility names.
+   - [x] Contain Battle History construction and initial-data failures at the
+     button boundary so an error is reported without terminating the main app.
+   - [x] Publish the self-contained Windows application successfully from
+     Linux after the change.
+   - [ ] On Windows, verify that the window opens without terminating the app,
+     a single click opens all three combo boxes, each popup remains usable across
+     multiple independent refreshes, and mouse and keyboard selection work
+     normally.
+2. [ ] Preserve an ineligible live ADB-port edit as an explicit draft instead
+   of silently replacing it with the active port.
+   - Explain that a live switch requires an acknowledged indefinite Pause and
+     has not yet been applied.
+   - Reset the draft only after a successful switch or an explicit operator
+     revert; keep the existing validation and rollback behavior.
+3. [ ] Publish a structured atomic runtime-status snapshot and revise the
+   normal Status presentation around operator-relevant fields.
+   - Make directive, acknowledgement, process evidence, run state, wave,
+     current Coins/min, and pause/recovery state authoritative API fields so
+     the GUI no longer derives live status primarily from action-log text.
+   - Keep menu, secondary-state, overlay, match, and similar detector detail in
+     diagnostic telemetry rather than the default Status line.
+4. [ ] Separate concise operational activity from diagnostic detail without
+   discarding either record.
+   - Emit operator-facing `ACTION` and `STATUS` summaries for intent and
+     outcome, with paired `DEBUG` detail where coordinates, matches, retries,
+     or `TAP_SAFE` evidence remains useful.
+   - Retain both forms in the complete log, default Recent Activity to the
+     operational view, and keep diagnostics available through filters.
+5. [ ] Publish and display Peak Coins/min for the active and completed run.
+   - Maintain the active peak within an authoritative run boundary and expose
+     it through the runtime snapshot; after a mid-battle attach, label a peak
+     that cannot be recovered as `since attach`.
+   - Derive the completed peak from accepted `coin_rate_samples` and include it
+     in the battle report. Do not label Coins/min multiplied by 60 as realized
+     Coins/hour.
+6. [ ] Generalize the guarded return-to-game timer to known recoverable panels,
+   including Wave Stats (`WAVE_PANEL`).
+   - Validate an authoritative close control and post-action return to the
+     running battle for each supported panel instead of assuming the existing
+     Return to Game strip is present.
+   - Run timers only while control is `RUNNING`; Pause must block action. Log
+     timer start, cancellation, expiry, target, and outcome, and expose the
+     countdown or Pause block in the runtime snapshot and GUI.
+   - Add return-now, extend, and cancel only as explicit runtime directives
+     with freshness and ownership checks.
+7. [ ] Support boundary-aware strategy changes without restarting automation.
+   - [x] Allow an active run to queue, replace, or cancel a pending strategy while
+     showing current strategy, pending strategy, and acknowledgement separately.
+   - [x] Finalize the current report with the current strategy, then apply the
+     pending strategy after the terminal boundary and before the next run's
+     first actionable observation.
+   - [x] Apply immediately when an authoritative no-battle Home boundary is
+     already established, including while paused for manual tournament setup;
+     do not treat a resumable Home battle as a new-run boundary.
+   - [ ] On Windows, verify immediate accepted-request feedback, current/pending
+     highlights, pending replacement/cancellation during a battle, and an
+     acknowledged paused Workshop application without changing Pause.
+8. [ ] Rework Battle History filters after the input defect is fixed and their
+   real behavior can be evaluated.
+   - [x] Populate the Strategy dropdown with `All` plus distinct strategies
+     from the currently loaded records, use exact matching, and preserve the
+     selected or applied strategy across refreshes.
+   - Prioritize useful distinctions such as type, Tier, strategy, outcome,
+     quality, and date range. Retain wave range only if operator use justifies
+     it, otherwise move it to an advanced view or remove it.
+   - Make filter semantics clear when the client has loaded only a bounded
+     newest-record page.
+9. [ ] Define and implement report disposition for short, interrupted,
+   configuration-repair, surrendered, and manually aborted battles.
+   - Classify these outcomes first and exclude non-representative runs from the
+     normal history and analytics by default without erasing evidence.
+   - If operator use still requires permanent discard, expose only a confirmed,
+     audited exact-record operation through the versioned API. Never add
+     arbitrary path or file-deletion authority and never delete automatically.
+10. [ ] Add configurable dashboard layout, covering panel placement and size
+    as well as splitter and top-level window geometry.
+    - [x] Persist the main and Battle History window positions, sizes, and
+      maximized states locally; reject unusable off-screen placement and never
+      reopen minimized.
+    - [ ] Allow the fixed operational panels to be moved, resized, collapsed,
+      or hidden, and persist the panel arrangement and splitter positions.
+    - Preserve minimum usable sizes for safety-critical controls and provide a
+      Reset Layout action.
+11. [ ] Make the optional connection Token field self-explanatory and advanced.
+    Explain that it is an in-memory bearer credential for an explicitly
+    authenticated adapter or reverse proxy and should remain blank for the
+    normal loopback SSH-tunnel configuration.

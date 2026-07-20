@@ -91,6 +91,10 @@ class App:
             ),
         )
         self._mission_mgr.start()
+        self._last_strategy_request: Optional[Tuple[str, object]] = None
+        self._pending_strategy_request: Optional[Tuple[str, object]] = None
+        self._strategy_boundary_confirmed = False
+        self._observe_strategy_request()
         log(
             f"[RUN_INIT] Startup gate policy={config.startup_gate_policy}",
             "INFO",
@@ -139,6 +143,89 @@ class App:
             return {}
         return dict(policy) if isinstance(policy, Mapping) else {}
 
+    def _current_strategy_name(self) -> str:
+        strategy = self._mission_mgr.strategy
+        return str(strategy.name if strategy else "none").strip().lower()
+
+    def _observe_strategy_request(self) -> None:
+        request = self._supervisor.strategy_request
+        if not isinstance(request, tuple) or len(request) != 2:
+            return
+        if request == getattr(self, "_last_strategy_request", None):
+            return
+        self._last_strategy_request = request
+        requested_name = request[0]
+        if requested_name == self._current_strategy_name():
+            self._pending_strategy_request = None
+            log(
+                f"[CTRL] Strategy set to {requested_name} via control file",
+                "INFO",
+                console=True,
+            )
+            return
+        self._pending_strategy_request = request
+        log(
+            f"[CTRL] Strategy {requested_name} queued for the next run boundary",
+            "INFO",
+            console=True,
+        )
+
+    def _process_strategy_boundary(self, detection: Mapping[str, Any]) -> None:
+        state = str(detection.get("state") or "UNKNOWN").upper()
+        control = HomeBattleControl.parse(
+            detection.get("home_battle_control", "UNKNOWN")
+        )
+        if state in {"GAME_OVER", "TOURNAMENT_RESULTS"}:
+            self._strategy_boundary_confirmed = True
+            return
+        if state in {"HOME", "HOME_SCREEN"}:
+            if control is HomeBattleControl.NEW_BATTLE:
+                self._strategy_boundary_confirmed = True
+            elif control is HomeBattleControl.RESUME_BATTLE:
+                self._strategy_boundary_confirmed = False
+        elif state == "WORKSHOP":
+            # Workshop is not available from an active or resumable battle.
+            # This is authoritative no-battle evidence even when the operator
+            # navigated here manually while Pause blocks runtime actions.
+            self._strategy_boundary_confirmed = True
+
+        if getattr(self, "_strategy_boundary_confirmed", False):
+            self._apply_pending_strategy()
+        if state == "RUNNING":
+            self._strategy_boundary_confirmed = False
+
+    def _apply_pending_strategy(self) -> bool:
+        request = getattr(self, "_pending_strategy_request", None)
+        if request is None or not getattr(
+            self,
+            "_strategy_boundary_confirmed",
+            False,
+        ):
+            return False
+        requested_name = request[0]
+        try:
+            strategy = get_strategy(requested_name)
+            self._mission_mgr.replace_strategy_at_boundary(strategy)
+        except Exception as exc:
+            log(
+                f"[CTRL] Failed to apply strategy {requested_name}: {exc}",
+                "ERROR",
+                console=True,
+            )
+            return False
+        self._config.strategy_name = requested_name
+        self._pending_strategy_request = None
+        self._run_initialization_gate_logged = False
+        self._session_preflight_gate_logged = False
+        self._session_preflight_terminal_blocked_logged = False
+        self._session_preflight_repair_denial_logged = False
+        log(
+            f"[CTRL] Strategy set to {requested_name} via control file",
+            "INFO",
+            console=True,
+        )
+        return True
+
     def _handler_enabled(self, name: str) -> bool:
         """Honor an optional strategy handler allowlist; legacy plans allow all."""
 
@@ -159,6 +246,7 @@ class App:
                 pass
 
         self._supervisor.apply_control()
+        self._observe_strategy_request()
         if self._supervisor.is_paused:
             if stop_blind_gem_tapper():
                 self._blind_tapper_suspended = True
@@ -173,6 +261,7 @@ class App:
                 # connection. This both acknowledges Pause during an outage
                 # and permits a paused live target handoff before capture.
                 self._supervisor.apply_control()
+                self._observe_strategy_request()
                 is_paused = self._supervisor.is_paused
                 if is_paused and stop_blind_gem_tapper():
                     self._blind_tapper_suspended = True
@@ -191,6 +280,8 @@ class App:
                         f"confidence={home_evidence.confidence:.2f}",
                         "DEBUG",
                     )
+
+                self._process_strategy_boundary(detection)
 
                 # Update battle identity independently of screen navigation,
                 # then give a genuinely initializing strategy exclusive tap
@@ -590,6 +681,8 @@ class App:
                 self._tournament_results_captured = True
                 self._mission_mgr.on_game_over()
                 self._status_reporter.reset_coin_rate_samples()
+                self._strategy_boundary_confirmed = True
+                self._apply_pending_strategy()
             return
 
         if new_state == "GAME_OVER" and self._handler_enabled("game_over"):
@@ -609,9 +702,26 @@ class App:
             repair_in_progress = (
                 self._mission_mgr.session_preflight_repair_in_progress()
             )
+            boundary_finalized = False
+
+            def finalize_run_boundary() -> None:
+                nonlocal boundary_finalized
+                if boundary_finalized:
+                    return
+                self._mission_mgr.on_game_over()
+                self._status_reporter.reset_coin_rate_samples()
+                self._strategy_boundary_confirmed = True
+                self._apply_pending_strategy()
+                boundary_finalized = True
+
+            def sync_terminal_control() -> None:
+                self._supervisor.apply_control()
+                self._observe_strategy_request()
+
             handle_game_over(
                 capture_stats=(not self._fast_game_over),
-                control_sync=self._supervisor.apply_control,
+                control_sync=sync_terminal_control,
+                before_terminal_action=finalize_run_boundary,
                 return_home_after_battle=repair_in_progress,
                 battle_context={
                     "strategy": strategy.name if strategy else None,
@@ -630,8 +740,7 @@ class App:
                     ),
                 },
             )
-            self._mission_mgr.on_game_over()
-            self._status_reporter.reset_coin_rate_samples()
+            finalize_run_boundary()
         elif new_state == "HOME_SCREEN" and self._handler_enabled("home"):
             log("Detected HOME_SCREEN. Executing handler.", "INFO")
             home_control = detect_home_battle_control(img).control

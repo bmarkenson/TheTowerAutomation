@@ -20,14 +20,17 @@
           <RowDefinition Height="*" />
         </Grid.RowDefinitions>
         <Grid Grid.Row="0">
-          <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
           <TextBlock Text="COMPLETED BATTLES" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4" VerticalAlignment="Center" />
           <TextBlock Grid.Column="1" x:Name="HistoryStatusText" Text="" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="8,4" />
-          <Button Grid.Column="2" Content="Refresh" Click="Refresh_Click" />
+          <Button Grid.Column="2" x:Name="ExportCsvButton" Content="Export CSV..." Click="ExportCsv_Click" IsEnabled="False" />
+          <Button Grid.Column="3" Content="Refresh" Click="Refresh_Click" />
         </Grid>
         <WrapPanel Grid.Row="1" Margin="0,0,0,8" VerticalAlignment="Center">
           <TextBlock Text="Type" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Margin="4" />
-          <ComboBox x:Name="BattleTypeFilter" Width="105" SelectedIndex="0">
+          <ComboBox x:Name="BattleTypeFilter" Width="105" MinHeight="32" SelectedIndex="0"
+                    IsTextSearchEnabled="True" AutomationProperties.Name="Battle type"
+                    DropDownClosed="BattleFilter_DropDownClosed">
             <ComboBoxItem Content="All" />
             <ComboBoxItem Content="Farm" />
             <ComboBoxItem Content="Tournament" />
@@ -41,8 +44,13 @@
           <TextBlock Text="to" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Margin="4" />
           <TextBox x:Name="MaxWaveFilterBox" Width="65" ToolTip="Maximum wave" />
           <TextBlock Text="Strategy" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Margin="8,4,4,4" />
-          <TextBox x:Name="StrategyFilterBox" Width="120" />
-          <ComboBox x:Name="QualityFilter" Width="85" SelectedIndex="0" Margin="8,0,0,0">
+          <ComboBox x:Name="StrategyFilterBox" Width="180" MinHeight="32"
+                    IsTextSearchEnabled="True" AutomationProperties.Name="Strategy"
+                    DropDownClosed="BattleFilter_DropDownClosed" />
+          <TextBlock Text="Quality" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Margin="8,4,4,4" />
+          <ComboBox x:Name="QualityFilter" Width="85" MinHeight="32" SelectedIndex="0"
+                    IsTextSearchEnabled="True" AutomationProperties.Name="Capture quality"
+                    DropDownClosed="BattleFilter_DropDownClosed">
             <ComboBoxItem Content="All" />
             <ComboBoxItem Content="Valid" />
             <ComboBoxItem Content="Review" />

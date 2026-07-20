@@ -172,6 +172,21 @@ class SystemdAutomationManager:
     def set_strategy(self, strategy: object) -> dict[str, Any]:
         """Persist a validated strategy for the next inactive-service start."""
 
+        return self._persist_strategy(strategy, require_inactive=True)
+
+    def persist_strategy(self, strategy: object) -> dict[str, Any]:
+        """Persist a strategy that an active runtime will adopt at a boundary."""
+
+        return self._persist_strategy(strategy, require_inactive=False)
+
+    def _persist_strategy(
+        self,
+        strategy: object,
+        *,
+        require_inactive: bool,
+    ) -> dict[str, Any]:
+        """Persist and verify one allowlisted bundled strategy."""
+
         normalized = str(strategy).strip().lower()
         if normalized not in CONFIGURABLE_STRATEGIES:
             raise AutomationProcessError(
@@ -184,7 +199,7 @@ class SystemdAutomationManager:
                 raise AutomationProcessError(
                     f"Cannot configure strategy while {self.service_name} is unavailable"
                 )
-            if before["active"]:
+            if require_inactive and before["active"]:
                 raise AutomationProcessError(
                     "Completely stop automation before changing the strategy"
                 )

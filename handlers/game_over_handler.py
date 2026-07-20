@@ -47,6 +47,7 @@ def handle_game_over(
     capture_stats: bool = True,
     battle_context: Optional[Mapping[str, Any]] = None,
     control_sync: Optional[Callable[[], None]] = None,
+    before_terminal_action: Optional[Callable[[], None]] = None,
     return_home_after_battle: bool = False,
 ):
     """
@@ -187,6 +188,8 @@ def handle_game_over(
     if mode is None:
         log("Automation stopped while waiting on Game Over.", "INFO", console=True)
         return
+    if before_terminal_action is not None:
+        before_terminal_action()
     if return_home_after_battle:
         mode = ExecMode.HOME
     if mode == ExecMode.HOME:

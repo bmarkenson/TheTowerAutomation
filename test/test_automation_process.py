@@ -75,6 +75,18 @@ class FakeManager:
         self.strategy = strategy
         return self.status()
 
+    def persist_strategy(self, strategy):
+        self.calls.append(f"persist_strategy:{strategy}")
+        if strategy not in {
+            "farm_t18",
+            "farm_t19_experiment",
+            "tournament",
+            "none",
+        }:
+            raise AutomationProcessError("invalid strategy")
+        self.strategy = strategy
+        return self.status()
+
     def set_startup_gate_policy(self, policy):
         self.calls.append(f"set_startup_gate_policy:{policy}")
         if self.active:
@@ -233,6 +245,40 @@ def test_systemd_manager_persists_strategy_and_preserves_adb_port(tmp_path):
         "THETOWER_STARTUP_GATES=immediate\n"
     )
     assert status["adb_port"] == 5565
+
+
+def test_systemd_manager_can_persist_strategy_while_active(tmp_path):
+    environment_file = tmp_path / "config" / "automation-adb.env"
+    environment_file.parent.mkdir(parents=True)
+    environment_file.write_text(
+        "THETOWER_ADB_PORT=5565\nTHETOWER_STRATEGY=farm_t18\n",
+        encoding="utf-8",
+    )
+
+    def runner(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            "LoadState=loaded\nActiveState=active\nSubState=running\n"
+            "UnitFileState=enabled\nMainPID=1234\nExecMainStatus=0\n"
+            f"EnvironmentFiles={environment_file} (ignore_errors=yes)\n",
+            "",
+        )
+
+    manager = SystemdAutomationManager(
+        runner=runner,
+        adb_environment_file=environment_file,
+    )
+
+    status = manager.persist_strategy("tournament")
+
+    assert status["active"] is True
+    assert status["strategy"] == "tournament"
+    assert environment_file.read_text(encoding="utf-8") == (
+        "THETOWER_ADB_PORT=5565\n"
+        "THETOWER_STRATEGY=tournament\n"
+        "THETOWER_STARTUP_GATES=immediate\n"
+    )
 
 
 def test_systemd_manager_can_persist_live_handoff_port_while_active(tmp_path):
@@ -516,7 +562,7 @@ def test_control_surface_rejects_live_handoff_under_timed_pause(tmp_path):
     assert manager.calls == []
 
 
-def test_control_surface_configures_strategy_only_while_stopped(tmp_path):
+def test_control_surface_saves_or_queues_strategy_by_process_state(tmp_path):
     manager = FakeManager()
     service = _service(tmp_path, manager)
 
@@ -530,14 +576,23 @@ def test_control_surface_configures_strategy_only_while_stopped(tmp_path):
         "accepted": True,
         "action": "set_strategy",
         "strategy": "tournament",
+        "disposition": "saved",
     }
+    assert service.control_store.status()["strategy"] == "tournament"
 
     manager.active = True
-    with pytest.raises(ControlSurfaceRequestError) as exc_info:
-        service.apply_process_action(
-            {"action": "set_strategy", "strategy": "farm_t18"}
-        )
-    assert exc_info.value.status == 409
+    response = service.apply_process_action(
+        {"action": "set_strategy", "strategy": "farm_t18"}
+    )
+
+    assert manager.calls[-1] == "persist_strategy:farm_t18"
+    assert service.control_store.status()["strategy"] == "farm_t18"
+    assert response["request"] == {
+        "accepted": True,
+        "action": "set_strategy",
+        "strategy": "farm_t18",
+        "disposition": "queued",
+    }
 
 
 @pytest.mark.parametrize("strategy", [None, "", "unknown", 123])

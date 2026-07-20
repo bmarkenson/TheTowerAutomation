@@ -43,8 +43,9 @@ agnostic.
   identifies a Milestone; Farm strategy/profile identity identifies Farm.
   Tournament settings alone never decide between Tournament and Milestone.
 - The allowlisted write surface is pause, timed pause, resume, mode,
-  stopped-only strategy configuration, stopped or acknowledged-paused ADB-port
-  configuration, and fixed managed-service start/stop.
+  bundled-strategy selection, stopped or acknowledged-paused ADB-port
+  configuration, and fixed managed-service start/stop. An active strategy
+  request is a declarative boundary handoff, not immediate action authority.
   There is no arbitrary tap, shell command, process kill, Surrender, file-path,
   or ADB endpoint.
 - Complete stop persists `STOPPED` before asking the fixed systemd user service
@@ -56,6 +57,14 @@ agnostic.
   initialization or session preflight remain suppressed. A terminal result or
   verified Home `NEW_BATTLE` boundary removes the suppression, so the next
   battle runs its real gates without fabricated completion state.
+- An active strategy request persists the next-start setting and a versioned
+  control directive. During a battle it remains pending. The current strategy
+  first finalizes the terminal report and its Game Over hook; the pending
+  strategy is then installed before Retry/Home navigation or before the next
+  run's first actionable observation. Verified Home `NEW_BATTLE` and Workshop
+  are authoritative no-battle boundaries, including while paused. Home
+  `RESUME_BATTLE` never authorizes a switch. Selecting the current strategy
+  replaces and thereby cancels a different pending request.
 - The API never accepts a PID, executable, service name, or command from the
   Windows client. The Linux server is configured with one validated unit name.
 - A malformed control file is reported and preserved rather than overwritten.
@@ -95,7 +104,7 @@ memory only. The API deliberately sends no CORS permission.
 | --- | --- | --- |
 | `GET` | `/api/v1/status` | Control intent, acknowledgement, latest observation, and runtime evidence |
 | `POST` | `/api/v1/control` | Allowlisted control mutation |
-| `POST` | `/api/v1/process` | Start/stop the fixed systemd automation unit, select its startup-gate policy, configure its stopped strategy, or configure/safely hand off its ADB port |
+| `POST` | `/api/v1/process` | Start/stop the fixed systemd automation unit, select its startup-gate policy, save/queue a bundled strategy, or configure/safely hand off its ADB port |
 | `GET` | `/api/v1/battles?limit=N` | Newest Battle and Tournament summaries |
 | `GET` | `/api/v1/battles/{battle_id}` | One full structured battle record |
 | `GET` | `/api/v1/activity?limit=N&levels=ERROR,WARN` | Recent structured action-log entries, optionally filtered by level |
@@ -136,8 +145,11 @@ Process request examples:
   while the runtime has acknowledged `PAUSED`. The API accepts only an integer
   TCP port; the runtime keeps Pause and its former target if new-target
   connection or screenshot validation fails.
-- Validated next-start strategy selection (`farm_t18`,
-  `farm_t19_experiment`, `tournament`, or `none`) while automation is stopped.
+- Validated strategy selection (`farm_t18`, `farm_t19_experiment`,
+  `tournament`, or `none`). A stopped selection is saved for the next start;
+  an active selection is queued for a confirmed run boundary. The native GUI
+  reports request acceptance immediately and shows current and pending
+  strategies separately; cyan is current/saved and amber is pending.
 - Native control of a passwordless Windows OpenSSH tunnel.
 - Separate operator-directive and observed-UI state, with acknowledgement and
   stale-heartbeat indicators.
@@ -153,8 +165,15 @@ Process request examples:
   Coins/hour, Cells/hour, capture quality, full sections, captured perks,
   resolved settings, and preflight evidence.
 - Local filters for type, Tier, minimum/maximum wave, strategy, and quality.
+- Local export of the currently filtered completed-battle summaries as UTF-8
+  CSV.
 - Draggable layout dividers across the operational control sections and between
   the history list and selected-battle report.
+- Local persistence of the main and Battle History window positions, sizes, and
+  maximized states. Invalid or off-screen placement is ignored, and minimized
+  state is never restored.
+- A per-Windows-session instance guard. A repeated launch restores and activates
+  the existing operational window rather than creating competing clients.
 - Independently refreshed recent activity with newest-entry following and
   server-side level/preset filters, without granting general log-file access.
 - A responsive browser fallback served by the Linux adapter.
@@ -174,8 +193,8 @@ These are the next useful additions, in approximate priority order:
    show the grace-period countdown and ownership in the GUI.
 4. Add an optional current screenshot with capture time and a prominent stale
    watermark. It should remain read-only and rate-limited.
-5. Add battle comparisons, trend charts, CSV export, and aggregate rates by
-   strategy, tier, profile, battle type, and date range.
+5. Add battle comparisons, trend charts, and aggregate rates by strategy, tier,
+   profile, battle type, and date range.
 6. Add opt-in notifications for battle completion, invalid capture quality,
    stale runtime, control acknowledgement timeout, and blocked preflight.
 7. Extend next-start strategy selection to safe custom YAML plans. Such changes
