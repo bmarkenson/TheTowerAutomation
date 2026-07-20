@@ -1,0 +1,3 @@
+# TheTower talks to the host ADB server for emulator inspection and control.
+[sandbox_workspace_write]
+network_access = true

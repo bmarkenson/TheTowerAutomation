@@ -23,14 +23,19 @@ timeout 8s adb -s localhost:5555 get-state
 timeout 10s adb -s localhost:5555 exec-out screencap -p > /tmp/thetower_current.png
 ```
 
-The expected connection response is `device`. A command executed inside an
-isolated network environment may try to start a second ADB server and fail with
-an error such as `could not install *smartsocket* listener: Operation not
-permitted`. That result describes the invocation environment; it does **not**
-prove that the established host ADB server or emulator target is unavailable.
-Retry through the approved host execution path with a timeout and judge the
-actual result. Do not build a workaround around a false accessibility
-diagnosis.
+The expected connection response is `device`. The trusted project's
+`.codex/config.toml` enables network access in the normal `workspace-write`
+sandbox so it can reach the established host ADB server. Start new Codex
+sessions after changing that configuration so the project layer is reloaded.
+
+Run the bounded ADB check once through the normal workspace sandbox; do not
+preflight it with a separate known-failing invocation. If a Codex surface does
+not load the project configuration, its isolated command may try to start a
+second ADB server and fail with an error such as `could not install
+*smartsocket* listener: Operation not permitted`. Retry that command through
+the approved host execution path. The isolated failure describes the
+invocation environment; it does **not** prove that the established host ADB
+server or emulator target is unavailable.
 
 Project screenshot helpers accept native portrait framebuffers at `1080x1920`
 or `720x1280` and normalize them into the canonical `1080x1920` vision space.
