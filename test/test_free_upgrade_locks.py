@@ -22,7 +22,7 @@ from core.gc_preflight import (
     UltimateWeaponEvidence,
     UltimateWeaponResult,
 )
-from core.upgrade_box_detector import UpgradeBox
+from core.upgrade_box_detector import UpgradeBox, detect_visible_boxes
 from core.workshop_preset import PresetSlotSelection
 
 
@@ -122,6 +122,23 @@ def test_workshop_lock_action_coordinates_are_explicit():
     assert get_click("buttons.free_upgrade_lock:checkbox") == (257, 998)
 
 
+def test_workshop_scan_region_finds_shockwave_above_battle_viewport():
+    image = _load("shockwave_size_visible_workshop_20260720.png")
+
+    boxes = detect_visible_boxes(
+        image,
+        menu="defense",
+        column_regions={
+            "left": (26, 490, 511, 1125),
+            "right": (546, 490, 513, 1125),
+        },
+    )
+
+    shockwave = next(box for box in boxes["left"] if box.text == "Shockwave Size")
+    assert shockwave.rect[1] < 1253
+    assert shockwave.confidence >= 95.0
+
+
 class _WorkshopUi:
     def __init__(self, states):
         self.frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
@@ -144,7 +161,11 @@ class _WorkshopUi:
     def measure_menu(self, _frame):
         return None if self.detail_label else self.menu
 
-    def detect_boxes(self, _frame, *, menu):
+    def detect_boxes(self, _frame, *, menu, column_regions=None):
+        assert column_regions == {
+            "left": (26, 490, 511, 1125),
+            "right": (546, 490, 513, 1125),
+        }
         specs = {
             "Shockwave Size": ("defense", "left", (26, 1320, 511, 240)),
             "Bounce Shot Targets": ("attack", "right", (546, 1320, 509, 240)),
@@ -257,6 +278,46 @@ def test_transient_unchecked_frame_does_not_authorize_repair():
         action == "buttons.free_upgrade_lock:checkbox"
         for action, _label in ui.actions
     )
+
+
+def test_reconfirmation_uses_fresh_position_after_workshop_scroll_settles():
+    ui = _WorkshopUi(
+        {label: FreeUpgradeLockState.CHECKED for label in FARM_FREE_UPGRADE_LOCKS}
+    )
+    base_detect = ui.detect_boxes
+    shockwave_scans = 0
+
+    def settling_detect(frame, *, menu, column_regions=None):
+        nonlocal shockwave_scans
+        boxes = base_detect(
+            frame,
+            menu=menu,
+            column_regions=column_regions,
+        )
+        if menu == "defense":
+            shockwave_scans += 1
+            if shockwave_scans >= 2:
+                box = boxes["left"][0]
+                x, y, width, height = box.rect
+                box.rect = (x, y - 80, width, height)
+        return boxes
+
+    result = inspect_free_upgrade_locks(
+        FARM_FREE_UPGRADE_LOCKS,
+        screenshot=ui.frame,
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.tap,
+        swipe_fn=lambda *_args: None,
+        detect_boxes_fn=settling_detect,
+        measure_menu_fn=ui.measure_menu,
+        measure_lock_fn=ui.measure_lock,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.evidence.valid
+    assert shockwave_scans == 2
+    assert ui.actions[1][0] == (153, 1360)
 
 
 def test_no_battle_enforcement_checks_only_authoritative_mismatch():

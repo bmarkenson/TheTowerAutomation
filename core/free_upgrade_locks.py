@@ -41,6 +41,10 @@ _WORKSHOP_MENU_ACTIONS = {
 }
 
 _WORKSHOP_MENU_TITLE_REGION = (20, 400, 680, 90)
+_WORKSHOP_UPGRADE_COLUMN_REGIONS = {
+    "left": (26, 490, 511, 1125),
+    "right": (546, 490, 513, 1125),
+}
 _DETAIL_TITLE_REGION = (260, 300, 570, 110)
 _LOCK_LABEL_REGION = (300, 950, 350, 100)
 _CHECKBOX_REGION = (205, 945, 105, 105)
@@ -259,7 +263,7 @@ def inspect_free_upgrade_locks(
                 measure_menu_fn=measure_menu_fn,
                 sleep_fn=sleep_fn,
             )
-            box, current = _locate_workshop_upgrade(
+            _box, current = _locate_workshop_upgrade(
                 label,
                 menu,
                 column,
@@ -271,25 +275,16 @@ def inspect_free_upgrade_locks(
                 measure_menu_fn=measure_menu_fn,
                 sleep_fn=sleep_fn,
             )
-            current = _reconfirm_workshop_upgrade(
+            confirmed, current = _reconfirm_workshop_upgrade(
                 label,
                 menu,
                 column,
-                box,
                 capture_fn=capture_fn,
                 detector=detector,
                 detect_boxes_fn=detect_boxes_fn,
                 measure_menu_fn=measure_menu_fn,
+                sleep_fn=sleep_fn,
             )
-            confirmed = _matching_box(
-                detect_boxes_fn(current, menu=menu).get(column, ()),
-                label,
-                reference=box.rect,
-            )
-            if confirmed is None:
-                raise FreeUpgradeLockInspectionError(
-                    f"could not reconfirm {label} before opening details"
-                )
             x, y, width, height = confirmed.rect
             if not safe_tap_fn(
                 (x + width // 4, y + height // 2),
@@ -465,15 +460,10 @@ def _select_workshop_menu(
     )
 
 
-def _matching_box(boxes, label, *, reference=None):
+def _matching_box(boxes, label):
     for box in boxes or ():
         if str(getattr(box, "text", "") or "").strip() != label:
             continue
-        if reference is not None:
-            x, y, _width, _height = box.rect
-            rx, ry, _rwidth, _rheight = reference
-            if abs(x - rx) > 24 or abs(y - ry) > 24:
-                continue
         return box
     return None
 
@@ -492,7 +482,14 @@ def _locate_workshop_upgrade(
     sleep_fn,
 ):
     current = _require_workshop(current, detector, measure_menu_fn, menu=menu)
-    found = _matching_box(detect_boxes_fn(current, menu=menu).get(column, ()), label)
+    found = _matching_box(
+        detect_boxes_fn(
+            current,
+            menu=menu,
+            column_regions=_WORKSHOP_UPGRADE_COLUMN_REGIONS,
+        ).get(column, ()),
+        label,
+    )
     if found is not None:
         return found, current
 
@@ -508,7 +505,12 @@ def _locate_workshop_upgrade(
             capture_fn(), detector, measure_menu_fn, menu=menu
         )
         found = _matching_box(
-            detect_boxes_fn(current, menu=menu).get(column, ()), label
+            detect_boxes_fn(
+                current,
+                menu=menu,
+                column_regions=_WORKSHOP_UPGRADE_COLUMN_REGIONS,
+            ).get(column, ()),
+            label,
         )
         if found is not None:
             return found, current
@@ -524,25 +526,33 @@ def _reconfirm_workshop_upgrade(
     label,
     menu,
     column,
-    reference,
     *,
     capture_fn,
     detector,
     detect_boxes_fn,
     measure_menu_fn,
+    sleep_fn,
+    attempts=4,
 ):
-    current = _require_workshop(
-        capture_fn(), detector, measure_menu_fn, menu=menu
-    )
-    if _matching_box(
-        detect_boxes_fn(current, menu=menu).get(column, ()),
-        label,
-        reference=reference.rect,
-    ) is None:
-        raise FreeUpgradeLockInspectionError(
-            f"{label} moved or disappeared before its detail tap"
+    for attempt in range(attempts):
+        current = _require_workshop(
+            capture_fn(), detector, measure_menu_fn, menu=menu
         )
-    return current
+        confirmed = _matching_box(
+            detect_boxes_fn(
+                current,
+                menu=menu,
+                column_regions=_WORKSHOP_UPGRADE_COLUMN_REGIONS,
+            ).get(column, ()),
+            label,
+        )
+        if confirmed is not None:
+            return confirmed, current
+        if attempt < attempts - 1:
+            sleep_fn(0.15)
+    raise FreeUpgradeLockInspectionError(
+        f"could not reconfirm {label} before opening details"
+    )
 
 
 def _is_expected_detail(frame, detector, lock):

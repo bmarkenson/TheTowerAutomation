@@ -6,7 +6,7 @@ from difflib import SequenceMatcher
 from functools import lru_cache
 import os
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -67,6 +67,8 @@ ULTIMATE_TOGGLE_SAT_THRESHOLD = 120.0
 ULTIMATE_TOGGLE_SAT_RATIO_THRESHOLD = 0.75
 _ULTIMATE_TOGGLE_BRIGHT_VALUE = 170
 
+ColumnRegions = Mapping[str, Tuple[int, int, int, int]]
+
 
 def _get_column_rect(column: str) -> Tuple[int, int, int, int]:
     entry = resolve_dot_path(f"_shared_match_regions.upgrades_{column}")
@@ -74,6 +76,23 @@ def _get_column_rect(column: str) -> Tuple[int, int, int, int]:
         raise RuntimeError(f"Missing column region for {column}")
     region = entry["match_region"]
     return int(region["x"]), int(region["y"]), int(region["w"]), int(region["h"])
+
+
+def _resolve_column_rect(
+    column: str,
+    column_regions: Optional[ColumnRegions],
+) -> Tuple[int, int, int, int]:
+    if column_regions is None:
+        return _get_column_rect(column)
+    if column not in column_regions:
+        raise ValueError(f"Missing scan region for {column} upgrade column")
+    values = tuple(column_regions[column])
+    if len(values) != 4:
+        raise ValueError(f"Invalid scan region for {column} upgrade column")
+    x, y, width, height = (int(value) for value in values)
+    if x < 0 or y < 0 or width <= 0 or height <= 0:
+        raise ValueError(f"Invalid scan region for {column} upgrade column")
+    return x, y, width, height
 
 
 def _to_bright_mask(roi: np.ndarray) -> np.ndarray:
@@ -586,12 +605,14 @@ def _detect_boxes_for_column(
 
 def detect_visible_box_rects(
     screenshot: np.ndarray,
+    *,
+    column_regions: Optional[ColumnRegions] = None,
 ) -> Dict[str, List[Tuple[int, int, int, int]]]:
-    """Detect visible upgrade tile geometry without running label OCR."""
+    """Detect visible tile geometry in the default or supplied column regions."""
 
     detected: Dict[str, List[Tuple[int, int, int, int]]] = {}
     for column in ("left", "right"):
-        x, y, w, h = _get_column_rect(column)
+        x, y, w, h = _resolve_column_rect(column, column_regions)
         roi = screenshot[y : y + h, x : x + w]
         mask = _to_bright_mask(roi)
         bands = _find_horizontal_bands(mask, w)
@@ -603,7 +624,10 @@ def detect_visible_boxes(
     screenshot: Optional[np.ndarray] = None,
     *,
     menu: Optional[str] = None,
+    column_regions: Optional[ColumnRegions] = None,
 ) -> Dict[str, List[UpgradeBox]]:
+    """Detect and OCR upgrade tiles in the default or supplied column regions."""
+
     if screenshot is None:
         screenshot = capture_adb_screenshot()
         if screenshot is None:
@@ -619,8 +643,8 @@ def detect_visible_boxes(
         except Exception:
             resolved_menu = None
 
-    left_rect = _get_column_rect("left")
-    right_rect = _get_column_rect("right")
+    left_rect = _resolve_column_rect("left", column_regions)
+    right_rect = _resolve_column_rect("right", column_regions)
     return {
         "left": _detect_boxes_for_column(screenshot, left_rect, "left", resolved_menu),
         "right": _detect_boxes_for_column(screenshot, right_rect, "right", resolved_menu),
