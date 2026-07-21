@@ -75,6 +75,15 @@ for a matching recurrence or historical investigation.
   self-contained WPF publish succeeds, and the restarted runtime freshly
   reports `WORKSHOP/PAUSED` under the replacement PID. Keep this issue open
   until the operator verifies the native behavior on Windows.
+- **Recurrence:** On 2026-07-21, the operator found that a highlighted Current
+  strategy made the adoption checkbox ambiguous: the checkbox only modified a
+  later strategy-button click, while clicking the already-highlighted strategy
+  did not read as an intentional action. Commit `88b603c` replaces the strategy
+  buttons and checkbox with one dropdown plus explicit queue/adopt actions,
+  preserves an unsent selection across refreshes, and disables no-op adoption
+  of Current. The self-contained Linux publish succeeds. Diagnosis and repair
+  used only read-only process/device inspection; Windows confirmation remains
+  pending.
 
 ### Native top bar retained a running directive after automation stopped
 

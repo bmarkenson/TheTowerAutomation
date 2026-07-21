@@ -109,17 +109,17 @@ The Automation Control panel uses selection highlights instead of permanently
 colored Pause and Resume actions. Cyan is the saved state or Game Over mode;
 amber means a live runtime has not acknowledged that directive yet. Mode buttons
 apply immediately, which prevents a periodic status refresh from replacing an
-unsaved combo-box selection. The same panel selects a bundled strategy while
-automation is stopped or active. A stopped selection is saved for the next
-managed start. An active selection is accepted as a next-boundary request;
-another click replaces it, and selecting the displayed current strategy
-cancels a different pending request. Select **Adopt for the active battle**
-before choosing a strategy to request adoption after fresh running or
-resumable-Home evidence. This changes normal strategy behavior and Battle End
-identity without a restart, while new-run initialization, session preflight,
-and Home-only gates wait for the next genuine boundary. The panel reports
-request acceptance immediately, shows current and pending values separately,
-and uses amber for a pending runtime acknowledgement.
+unsaved combo-box selection. The strategy dropdown likewise preserves an
+unsent choice across refreshes and does not apply it merely because it is
+selected. Choose **Queue for next boundary** to leave the current battle's
+strategy in place, or **Adopt for active battle** to request adoption after
+fresh running or resumable-Home evidence. Adoption changes normal strategy
+behavior and Battle End identity without a restart, while new-run
+initialization, session preflight, and Home-only gates wait for the next
+genuine boundary. Selecting the displayed Current strategy and queueing it
+cancels a different pending request. Actions that would be no-ops are disabled;
+the panel reports request acceptance immediately and shows selected, current,
+and pending values separately.
 
 **Configure run...** is an optional pre-start dialog populated from the
 selected strategy's declared checks. Check a requirement to skip it once, or

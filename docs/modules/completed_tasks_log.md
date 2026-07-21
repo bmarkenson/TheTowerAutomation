@@ -546,6 +546,11 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   genuine boundary. The full suite passed 492 sandbox tests plus the separately
   permitted localhost-socket test, for 493 total; the repository-root Linux
   publisher also completed successfully.
+- Commit `88b603c` replaced command-like strategy buttons and the adoption
+  checkbox with a strategy dropdown and explicit queue/adopt actions. The
+  client preserves an unsent choice across status refreshes, distinguishes
+  selected/current/pending identity, and disables requests that would be
+  no-ops. The repository-root Linux publisher completed successfully.
 
 ---
 

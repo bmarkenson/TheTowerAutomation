@@ -192,10 +192,14 @@ evidence.
      identity without restarting, while deferring every new-run gate until the
      next genuine boundary. Preserve boundary replacement when `NEW_BATTLE` is
      observed first (`5cd9efe`).
+   - [x] Replace the command-like strategy buttons and adoption checkbox with a
+     strategy dropdown plus explicit queue/adopt actions. Preserve unsent
+     selection across refreshes and disable no-op adoption of the displayed
+     Current strategy (`88b603c`).
    - [ ] On Windows, verify immediate accepted-request feedback, current/pending
-     highlights, pending replacement/cancellation during a battle, explicit
-     active-battle adoption, and an acknowledged paused Workshop application
-     without changing Pause.
+     display, dropdown selection retention, pending replacement/cancellation
+     during a battle, explicit active-battle adoption, and an acknowledged
+     paused Workshop application without changing Pause.
 8. [ ] Rework Battle History filters after the input defect is fixed and their
    real behavior can be evaluated.
    - [x] Populate the Strategy dropdown with `All` plus distinct strategies

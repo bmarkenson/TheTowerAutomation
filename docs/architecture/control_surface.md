@@ -189,11 +189,12 @@ Process request examples:
 - Validated strategy selection (`farm_t18`, `farm_t19_experiment`,
   `tournament`, or `none`). A stopped selection is saved for the next start;
   an active selection is queued for a confirmed run boundary by default. The
-  native GUI offers an explicit **Adopt for the active battle** option that
-  applies normal behavior and report identity after fresh active-battle
-  evidence while deferring new-run gates. It reports request acceptance
-  immediately and shows current and pending strategies separately; cyan is
-  current/saved and amber is pending.
+  native GUI separates a strategy dropdown from explicit **Queue for next
+  boundary** and **Adopt for active battle** actions. The latter applies normal
+  behavior and report identity after fresh active-battle evidence while
+  deferring new-run gates. The dropdown preserves an unsent selection across
+  status refreshes, action buttons disable requests that would be no-ops, and
+  status reports selected, current, and pending strategies separately.
 - Native control of a passwordless Windows OpenSSH tunnel.
 - Separate operator-directive and observed-UI state, with acknowledgement and
   stale-heartbeat indicators.
