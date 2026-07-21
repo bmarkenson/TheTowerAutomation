@@ -8,6 +8,42 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Farm session preflight repeated the Home-only Free Upgrade lock gate
+
+- **Observed:** Reported by the operator on 2026-07-21 after Shockwave Size
+  lock detection failed during a running Farm battle.
+- **Symptom:** Session preflight attempted to validate the Shockwave Size lock
+  after the battle had started, although the Free Upgrade lock controls are
+  authoritative only at the no-battle run boundary.
+- **Evidence:** Static tracing confirmed that `run_read_only_gc_preflight()`
+  left the active battle through guarded Go Home, verified the resumable Home
+  state, opened Workshop, and invoked
+  `inspect_free_upgrade_locks(enforce=False)`. Missing or invalid evidence then
+  made `free_upgrade_locks_valid` false and could request a no-battle repair.
+  The earlier full-viewport repair addressed scanning at a real no-battle
+  boundary but did not correct this ownership and timing defect.
+- **Safety response:** Diagnosis made no process or device changes and relied
+  on the operator report plus repository-local tracing.
+- **Cause:** Lock inspection participated in both complete no-battle setup and
+  active session preflight, so the active route treated missing Home-only
+  controls as new authority instead of consuming boundary-owned evidence.
+- **Resolution:** Complete no-battle setup remains the only lock scanner and
+  enforces all three Farm locks after verified Home `NEW_BATTLE` evidence.
+  Active session preflight consumes retained boundary proof without scanning
+  or requesting lock repair. A battle attachment without proof records the
+  check as `unavailable_deferred`, and only a later genuine `NEW_BATTLE`
+  boundary rearms it; `RESUME_BATTLE` does not.
+- **Regression:** `test/test_gc_no_battle_setup.py`,
+  `test/test_gc_preflight_navigation.py`,
+  `test/test_gc_preflight_templates.py`, and
+  `test/test_run_initialization.py` cover enforced setup, scanner exclusion,
+  evidence retention and completed-run reporting, mismatch blocking, deferred
+  attachment, and next-boundary rearming. The retained full-Workshop fixture
+  coverage remains in `test/test_free_upgrade_locks.py`.
+- **Validation:** 484 sandbox tests passed plus the separately permitted
+  localhost-socket test, for 485 total.
+- **Fixed by:** `ef41ab9`.
+
 ### Farm startup gate skipped visible Workshop upgrades above the battle viewport
 
 - **Observed:** 2026-07-20 while starting a fresh Tier 18 Farm run from

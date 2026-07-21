@@ -164,14 +164,16 @@ remain insufficient evidence to distinguish Tournament from Milestone.
   reacquires authoritative panel and percentage evidence before every explicit
   arrow tap, requires strict progress and a verified final value, and returns
   to `RUNNING/ATTACK_MENU`. Unknown or incomplete evidence remains blocked.
-- Farm session preflight reaches the resumable Home Workshop and opens the
-  Shockwave Size, Bounce Shot Targets, and Bounce Shot Range details from
-  freshly OCR-identified label halves. A title-verified `Lock Level` checkbox
-  with an absent checkmark is an authoritative Home-only mismatch and requests
-  the existing guarded Surrender/repair/restart sequence. Ambiguous title,
-  checkbox, or checkmark evidence blocks without Surrender. At verified
-  no-battle Home, the complete setup checks any authoritatively unchecked lock
-  and verifies it before the replacement battle may start.
+- Farm session preflight still reaches the resumable Home Workshop to validate
+  the unrelated Workshop preset, but it never invokes the Free Upgrade lock
+  scanner. Shockwave Size, Bounce Shot Targets, and Bounce Shot Range are
+  inspected and enforced only by complete no-battle setup after verified Home
+  `NEW_BATTLE` evidence and before Battle may start. That boundary-owned proof
+  is retained in session evidence and completed-run reporting. Attaching to an
+  existing battle without such proof records `unavailable_deferred` without a
+  pass, failure, Home repair, or Surrender request; Home `RESUME_BATTLE`
+  preserves the attachment, and the lock gate rearms at the next genuine
+  `NEW_BATTLE` boundary.
 - Confident mismatches on Home-only configuration may request one app-owned
   stop/repair/restart sequence; ambiguous or unknown module identity and other
   non-Home repair classes remain blocked. The matcher reports evidence but

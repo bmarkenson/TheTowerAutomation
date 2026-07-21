@@ -532,6 +532,13 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   decisions, a Farm Flame fallback, and optional strategy-aware Configure Run
   dialogs and CLI controls. The full Python suite passed 482 tests, and the
   repository-root Linux publisher produced the self-contained WPF executable.
+- Commit `ef41ab9` made verified Home `NEW_BATTLE` setup the sole authority for
+  all three Farm Free Upgrade locks, carried its evidence into session and run
+  reports, and recorded missing attachment evidence as non-blocking
+  `unavailable_deferred` until the next real boundary. Active preflight retains
+  every unrelated requirement without invoking the lock scanner. Validation
+  passed 484 sandbox tests plus the separately permitted localhost-socket test,
+  for 485 total.
 
 ---
 

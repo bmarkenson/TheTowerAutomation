@@ -11,28 +11,6 @@ for a matching recurrence or historical investigation.
 
 ## Open
 
-### Farm session preflight repeated the Home-only Free Upgrade lock gate
-
-- **Observed:** Reported by the operator on 2026-07-21 after Shockwave Size
-  lock detection failed during a running Farm battle.
-- **Symptom:** Session preflight attempted to validate the Shockwave Size lock
-  after the battle had started, although the Free Upgrade lock controls are
-  authoritative only at the no-battle run boundary.
-- **Evidence:** Static tracing confirms that `run_read_only_gc_preflight()`
-  leaves the active battle through guarded Go Home, verifies the resumable Home
-  state, opens Workshop, and invokes `inspect_free_upgrade_locks(enforce=False)`.
-  Missing or invalid evidence then makes `free_upgrade_locks_valid` false and
-  can request a no-battle repair. The earlier full-viewport repair addresses
-  scanning at a real no-battle boundary but does not correct this ownership and
-  timing defect.
-- **Safety response:** This handoff preparation made no process or device
-  changes and relied on the operator report plus repository-local tracing.
-- **Status:** Open. Move this check wholly to the authoritative no-battle setup,
-  retain its evidence for the run, and ensure active-battle session preflight
-  neither navigates to Workshop for this check nor interprets its absence as a
-  mismatch. The active task is in
-  [`backlog/runtime-and-validation.md`](backlog/runtime-and-validation.md#current-validation-gates).
-
 ### Farm Bot preset switch required more Event medals than were available
 
 - **Observed:** 2026-07-20 during the same authorized fresh Tier 18 Farm

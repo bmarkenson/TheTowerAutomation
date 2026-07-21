@@ -8,12 +8,6 @@ checked-item detail remains in the
 
 ## Current validation gates
 
-- [ ] Restrict the Farm Free Upgrade lock gate to an authoritative no-battle
-  run boundary. Shockwave Size, Bounce Shot Targets, and Bounce Shot Range can
-  be inspected only from the Home Workshop before a battle starts; an active
-  battle/session preflight must neither try to re-run that inspection nor fail
-  because the Workshop state is unavailable. Preserve the full Workshop-region
-  scan and carry its boundary-owned evidence into the run report.
 - [ ] Diagnose the unexpectedly early Tier 18 Farm ending recorded in
   [`../observed_issues.md`](../observed_issues.md#tier-18-farm-ended-at-wave-2644-without-completed-session-preflight).
   Reproduce a clean, fully validated Farm start at 720p before attributing the
