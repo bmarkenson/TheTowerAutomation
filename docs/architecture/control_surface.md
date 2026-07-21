@@ -8,6 +8,7 @@ served by that same API.
 ```text
 Native Windows app
       │ starts/stops passwordless Windows OpenSSH
+      │ confirmed fixed SSH restart ──► thetower-control-surface.service
       │ local-forward (recommended)
       ▼
 Linux loopback HTTP server
@@ -79,6 +80,13 @@ agnostic.
 - The API never accepts a PID, executable, service name, or command from the
   Windows client. The Linux server is configured with one validated unit name.
 - A malformed control file is reported and preserved rather than overwritten.
+- Status advertises a monotonic server revision and explicit capabilities.
+  Connecting the Windows client remains read-only: missing required
+  capabilities disable unsupported actions and show a deployment warning.
+  With confirmation, the client may use its validated SSH destination to run
+  only the fixed `systemctl --user restart thetower-control-surface.service`
+  command, then must reconnect and verify the required capabilities. This path
+  cannot select another unit or command and never restarts main automation.
 
 Control writers use a companion advisory lock and atomic replacement. Timed
 pause expiry revalidates its exact deadline while holding that writer lock, so
@@ -113,7 +121,7 @@ memory only. The API deliberately sends no CORS permission.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/v1/status` | Control intent, acknowledgement, latest observation, and runtime evidence |
+| `GET` | `/api/v1/status` | Server revision/capabilities, control intent, acknowledgement, latest observation, and runtime evidence |
 | `POST` | `/api/v1/control` | Allowlisted control mutation |
 | `POST` | `/api/v1/process` | Start/stop the fixed systemd automation unit, select its startup-gate policy, save/queue/adopt a bundled strategy, or configure/safely hand off its ADB port |
 | `GET` | `/api/v1/battles?limit=N` | Newest Battle and Tournament summaries |

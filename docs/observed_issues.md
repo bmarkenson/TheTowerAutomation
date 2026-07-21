@@ -85,6 +85,34 @@ for a matching recurrence or historical investigation.
   used only read-only process/device inspection; Windows confirmation remains
   pending.
 
+### Windows client could not identify or reload a stale Linux control service
+
+- **Observed:** 2026-07-21 after main automation was restarted during an
+  existing battle but the independent Linux control-surface service was not.
+- **Symptom:** The current automation process loaded active-battle strategy
+  adoption, while the reachable Linux API omitted `strategy_apply_mode` and
+  had no way to tell the Windows client that it predated that feature. Opening
+  the client could therefore expose an adoption interaction the server would
+  silently reduce to boundary queueing, and recovery required a manual Linux
+  service restart.
+- **Evidence:** Read-only inspection found the live automation owner started at
+  13:05 on the current code, while `thetower-control-surface.service` had
+  remained active since 21:26 the previous day. Its status response lacked the
+  new strategy apply-mode field even though it acknowledged Farm and reported
+  the attached active battle normally.
+- **Safety response:** Diagnosis used control/status reads, host PID checks, and
+  one read-only device capture. The Linux service, main automation, control
+  directives, and active battle were not changed.
+- **Status:** Commit `2c06a66` adds server revision/capability metadata and a
+  Windows compatibility banner that disables unsupported adoption. With
+  confirmation, the client can run only the fixed
+  `systemctl --user restart thetower-control-surface.service` command through
+  its validated SSH destination, then requires the capability to appear after
+  reconnection. Focused validation passed 55 sandbox tests plus the separately
+  permitted localhost HTTP test, and the self-contained Linux publish
+  succeeded. Keep this issue open until the warning, fixed restart, and
+  reconnect verification are exercised from Windows.
+
 ### Native top bar retained a running directive after automation stopped
 
 - **Observed:** Reported by the operator on 2026-07-21 in the native Windows

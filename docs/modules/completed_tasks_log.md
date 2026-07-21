@@ -551,6 +551,13 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   client preserves an unsent choice across status refreshes, distinguishes
   selected/current/pending identity, and disables requests that would be
   no-ops. The repository-root Linux publisher completed successfully.
+- Commit `2c06a66` made client/server compatibility explicit through Linux API
+  revision and capability metadata. The Windows client disables unsupported
+  adoption and, only after confirmation, can restart the one fixed Linux
+  control-surface unit over its validated SSH destination before verifying the
+  capability after reconnection. Focused validation passed 55 sandbox tests
+  plus the separately permitted localhost HTTP test, for 56 total; the
+  repository-root Linux publisher also completed successfully.
 
 ---
 
