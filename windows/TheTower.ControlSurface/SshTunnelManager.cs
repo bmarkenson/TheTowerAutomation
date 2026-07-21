@@ -6,6 +6,7 @@ namespace TheTower.ControlSurface;
 
 public sealed class SshTunnelManager : IDisposable
 {
+    private const string ControlSurfaceService = "thetower-control-surface.service";
     private static readonly Regex DestinationPattern = new(
         "^[A-Za-z0-9][A-Za-z0-9_.@-]*$",
         RegexOptions.CultureInvariant);
@@ -35,7 +36,7 @@ public sealed class SshTunnelManager : IDisposable
         CancellationToken cancellationToken)
     {
         destination = destination.Trim();
-        if (!DestinationPattern.IsMatch(destination))
+        if (!IsValidDestination(destination))
         {
             throw new ArgumentException(
                 "SSH destination must be a host, SSH alias, or user@host using only letters, numbers, '.', '_', and '-'.");
@@ -162,6 +163,89 @@ public sealed class SshTunnelManager : IDisposable
             process.Dispose();
         }
     }
+
+    public async Task RestartControlSurfaceServiceAsync(
+        string destination,
+        CancellationToken cancellationToken)
+    {
+        destination = destination.Trim();
+        if (!IsValidDestination(destination))
+        {
+            throw new ArgumentException(
+                "SSH destination must be a host, SSH alias, or user@host using only letters, numbers, '.', '_', and '-'.");
+        }
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "ssh.exe",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        foreach (var argument in new[]
+                 {
+                     "-o", "BatchMode=yes",
+                     "-o", "StrictHostKeyChecking=yes",
+                     "-o", "ConnectTimeout=10",
+                     destination,
+                     "systemctl", "--user", "restart", ControlSurfaceService,
+                 })
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = new Process { StartInfo = startInfo };
+        try
+        {
+            if (!process.Start())
+            {
+                throw new InvalidOperationException("Windows OpenSSH did not start.");
+            }
+        }
+        catch (Exception exc) when (
+            exc is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            throw new InvalidOperationException(
+                "Unable to start ssh.exe. Install the Windows OpenSSH Client optional feature.",
+                exc);
+        }
+
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync(CancellationToken.None);
+            }
+            throw;
+        }
+
+        var stdout = (await stdoutTask).Trim();
+        var stderr = (await stderrTask).Trim();
+        if (process.ExitCode == 0)
+        {
+            return;
+        }
+        var detail = string.IsNullOrWhiteSpace(stderr) ? stdout : stderr;
+        if (detail.Length > 2000)
+        {
+            detail = detail[..2000];
+        }
+        throw new InvalidOperationException(
+            string.IsNullOrWhiteSpace(detail)
+                ? $"Linux control-surface restart failed with SSH exit code {process.ExitCode}."
+                : $"Linux control-surface restart failed with SSH exit code {process.ExitCode}: {detail}");
+    }
+
+    public static bool IsValidDestination(string destination) =>
+        DestinationPattern.IsMatch(destination.Trim());
 
     private void OnProcessExited(Process process)
     {

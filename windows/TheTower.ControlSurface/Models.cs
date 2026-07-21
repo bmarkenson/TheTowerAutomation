@@ -4,6 +4,15 @@ namespace TheTower.ControlSurface;
 
 public sealed class StatusResponse
 {
+    [JsonPropertyName("api_version")]
+    public int ApiVersion { get; set; }
+
+    [JsonPropertyName("server_revision")]
+    public int ServerRevision { get; set; }
+
+    [JsonPropertyName("capabilities")]
+    public List<string> Capabilities { get; set; } = [];
+
     [JsonPropertyName("healthy")]
     public bool Healthy { get; set; }
 

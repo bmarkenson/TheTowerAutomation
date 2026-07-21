@@ -21,6 +21,11 @@ from core.gate_decisions import startup_gate_context_for_strategy
 
 MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
+CONTROL_SURFACE_REVISION = 2
+CONTROL_SURFACE_CAPABILITIES = (
+    "active_battle_strategy_adoption",
+    "explicit_strategy_disposition",
+)
 _BATTLE_ID_RE = re.compile(r"(?:Battle|Tournament)\d{8}T\d{6}[+-]\d{4}")
 _LOG_RE = re.compile(
     r"^\[(?P<level>[A-Z_]+) (?P<timestamp>[^\]]+)] (?P<message>.*)$"
@@ -132,6 +137,8 @@ class ControlSurfaceService:
 
         return {
             "api_version": 1,
+            "server_revision": CONTROL_SURFACE_REVISION,
+            "capabilities": list(CONTROL_SURFACE_CAPABILITIES),
             "server_time": datetime.fromtimestamp(current_time).astimezone().isoformat(
                 timespec="seconds"
             ),
@@ -978,6 +985,8 @@ def _pid_alive(pid: object) -> Optional[bool]:
 
 
 __all__ = [
+    "CONTROL_SURFACE_CAPABILITIES",
+    "CONTROL_SURFACE_REVISION",
     "ControlSurfaceRequestError",
     "ControlSurfaceService",
     "DEFAULT_STALE_AFTER_SECONDS",

@@ -72,7 +72,7 @@
             <StackPanel>
               <TextBlock Text="SSH TUNNEL" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4" />
               <TextBlock Text="Linux destination (host, alias, or user@host)" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="4,5,4,2" />
-              <TextBox x:Name="SshDestinationBox" />
+              <TextBox x:Name="SshDestinationBox" TextChanged="SshDestinationBox_TextChanged" />
               <UniformGrid Columns="2" Margin="0,5,0,0">
                 <StackPanel Margin="4">
                   <TextBlock Text="Local port" Foreground="{StaticResource MutedBrush}" FontSize="11" />
@@ -88,6 +88,8 @@
                 <Button x:Name="StopTunnelButton" Content="Stop tunnel" Click="StopTunnel_Click" IsEnabled="False" />
               </UniformGrid>
               <TextBlock x:Name="TunnelStatusText" Text="Stopped" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="6,5,6,2" />
+              <TextBlock x:Name="LinuxServiceCompatibilityText" Text="Waiting for Linux API capability status." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,3,6,0" />
+              <Button x:Name="RestartControlSurfaceButton" Content="Restart Linux control service" Click="RestartControlSurface_Click" Style="{StaticResource PrimaryButton}" IsEnabled="False" Visibility="Collapsed" Margin="4,3,4,2" />
               <TextBlock Text="Destination and ports are saved after a successful start. The tunnel does not auto-start." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,2" />
             </StackPanel>
           </ScrollViewer>

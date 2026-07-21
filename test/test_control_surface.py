@@ -12,7 +12,12 @@ from unittest.mock import patch
 import pytest
 
 from core.control_directives import ControlDirectiveError, ControlDirectiveStore
-from core.control_surface import ControlSurfaceRequestError, ControlSurfaceService
+from core.control_surface import (
+    CONTROL_SURFACE_CAPABILITIES,
+    CONTROL_SURFACE_REVISION,
+    ControlSurfaceRequestError,
+    ControlSurfaceService,
+)
 from core.gate_decisions import build_gate_decision_options
 from tools.control_surface_server import ControlSurfaceHTTPServer, STATIC_DIR, main
 
@@ -201,6 +206,8 @@ def test_status_separates_fresh_observation_from_control_and_lock_evidence(tmp_p
         fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         status = _service(tmp_path).status(now=now.timestamp())
 
+    assert status["server_revision"] == CONTROL_SURFACE_REVISION
+    assert status["capabilities"] == list(CONTROL_SURFACE_CAPABILITIES)
     assert status["healthy"]
     assert status["control"]["state"] == "PAUSED"
     assert status["observation"] == {

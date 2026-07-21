@@ -10,6 +10,11 @@ namespace TheTower.ControlSurface;
 
 public partial class MainWindow : Window
 {
+    private static readonly string[] RequiredControlSurfaceCapabilities =
+    [
+        "active_battle_strategy_adoption",
+        "explicit_strategy_disposition",
+    ];
     private readonly ControlSurfaceApi _api = new();
     private readonly SshTunnelManager _sshTunnel = new();
     private readonly ClientSettings _settings;
@@ -36,6 +41,10 @@ public partial class MainWindow : Window
     private string? _requestedStrategy;
     private string? _pendingStrategy;
     private string _strategyApplyMode = "next_boundary";
+    private bool _serverCompatibilityKnown;
+    private bool _serverSupportsRequiredCapabilities;
+    private int _serverRevision;
+    private bool _controlSurfaceRestartInFlight;
     private StartupGateContext? _startupGateContext;
     private IReadOnlyDictionary<string, StartupGateWaiverStatus> _startupGateWaivers
         = new Dictionary<string, StartupGateWaiverStatus>();
@@ -103,6 +112,90 @@ public partial class MainWindow : Window
         {
             ShowError(exc);
         }
+    }
+
+    private void SshDestinationBox_TextChanged(
+        object sender,
+        TextChangedEventArgs e) => UpdateControlSurfaceCompatibility();
+
+    private async void RestartControlSurface_Click(object sender, RoutedEventArgs e)
+    {
+        var destination = SshDestinationBox.Text.Trim();
+        if (!SshTunnelManager.IsValidDestination(destination))
+        {
+            ShowError(new InvalidOperationException(
+                "Enter a valid Linux SSH destination before restarting the service."));
+            return;
+        }
+        if (MessageBox.Show(
+                this,
+                "Restart the fixed thetower-control-surface.service on Linux?\n\n"
+                + "This briefly interrupts the control API. It does not restart "
+                + "the main automation process or alter the active battle.",
+                "Restart Linux control service",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question) != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        _controlSurfaceRestartInFlight = true;
+        UpdateControlSurfaceCompatibility();
+        LinuxServiceCompatibilityText.Text =
+            "Restarting the fixed Linux control service over SSH...";
+        try
+        {
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(35));
+            await _sshTunnel.RestartControlSurfaceServiceAsync(
+                destination,
+                cancellation.Token);
+            LinuxServiceCompatibilityText.Text =
+                "Linux service restarted; waiting for the required capability...";
+            var status = await WaitForRequiredCapabilityAsync(cancellation.Token);
+            RenderStatus(status);
+            ConnectionText.Text = "Linux service connected";
+            ConnectionText.Foreground = new SolidColorBrush(Color.FromRgb(73, 214, 157));
+            SaveSettings();
+            await RefreshActivityAsync(force: true);
+        }
+        catch (Exception exc)
+        {
+            LastErrorText.Text = exc.Message;
+            ShowError(exc);
+        }
+        finally
+        {
+            _controlSurfaceRestartInFlight = false;
+            UpdateControlSurfaceCompatibility();
+        }
+    }
+
+    private async Task<StatusResponse> WaitForRequiredCapabilityAsync(
+        CancellationToken cancellationToken)
+    {
+        Exception? lastFailure = null;
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var status = await _api.GetStatusAsync(cancellationToken);
+                if (SupportsRequiredCapability(status))
+                {
+                    return status;
+                }
+                lastFailure = new InvalidOperationException(
+                    "The restarted Linux service still lacks required client capabilities.");
+            }
+            catch (Exception exc) when (exc is not OperationCanceledException)
+            {
+                lastFailure = exc;
+            }
+            await Task.Delay(TimeSpan.FromMilliseconds(750), cancellationToken);
+        }
+        throw new InvalidOperationException(
+            "The Linux control service did not return with the required capability.",
+            lastFailure);
     }
 
     private async void StartTunnel_Click(object sender, RoutedEventArgs e)
@@ -673,6 +766,10 @@ public partial class MainWindow : Window
 
     private void RenderStatus(StatusResponse status)
     {
+        _serverCompatibilityKnown = true;
+        _serverSupportsRequiredCapabilities = SupportsRequiredCapability(status);
+        _serverRevision = status.ServerRevision;
+        UpdateControlSurfaceCompatibility();
         DirectiveText.Text = status.Control.State;
         ModeText.Text = status.Control.Mode;
         ObservedStateText.Text = status.Observation?.StateLabel ?? "-";
@@ -1107,6 +1204,7 @@ public partial class MainWindow : Window
             && !_strategyRequestInFlight;
         AdoptStrategyButton.IsEnabled = _strategyLifecycleAvailable
             && _strategyProcessActive
+            && _serverSupportsRequiredCapabilities
             && hasSelection
             && !string.Equals(
                 selected,
@@ -1114,6 +1212,46 @@ public partial class MainWindow : Window
                 StringComparison.OrdinalIgnoreCase)
             && !adoptionAlreadyRequested
             && !_strategyRequestInFlight;
+    }
+
+    private static bool SupportsRequiredCapability(StatusResponse status) =>
+        status.Capabilities is not null
+        && RequiredControlSurfaceCapabilities.All(capability =>
+            status.Capabilities.Contains(capability, StringComparer.Ordinal));
+
+    private void UpdateControlSurfaceCompatibility()
+    {
+        if (!_serverCompatibilityKnown)
+        {
+            LinuxServiceCompatibilityText.Text =
+                "Waiting for Linux API capability status.";
+            LinuxServiceCompatibilityText.Foreground =
+                (Brush)FindResource("MutedBrush");
+            RestartControlSurfaceButton.Visibility = Visibility.Collapsed;
+            RestartControlSurfaceButton.IsEnabled = false;
+            return;
+        }
+        if (_serverSupportsRequiredCapabilities)
+        {
+            LinuxServiceCompatibilityText.Text =
+                $"Linux API revision {_serverRevision} supports this client.";
+            LinuxServiceCompatibilityText.Foreground =
+                new SolidColorBrush(Color.FromRgb(73, 214, 157));
+            RestartControlSurfaceButton.Visibility = Visibility.Collapsed;
+            RestartControlSurfaceButton.IsEnabled = false;
+            return;
+        }
+
+        var destinationValid = SshTunnelManager.IsValidDestination(
+            SshDestinationBox.Text);
+        LinuxServiceCompatibilityText.Text = destinationValid
+            ? "Linux API update/restart required: active-battle strategy adoption is unavailable."
+            : "Linux API update/restart required. Enter an SSH destination to enable the fixed-service restart.";
+        LinuxServiceCompatibilityText.Foreground =
+            new SolidColorBrush(Color.FromRgb(241, 191, 91));
+        RestartControlSurfaceButton.Visibility = Visibility.Visible;
+        RestartControlSurfaceButton.IsEnabled =
+            destinationValid && !_controlSurfaceRestartInFlight;
     }
 
     private static string? NormalizeStrategy(string? strategy) =>
