@@ -113,9 +113,13 @@ unsaved combo-box selection. The same panel selects a bundled strategy while
 automation is stopped or active. A stopped selection is saved for the next
 managed start. An active selection is accepted as a next-boundary request;
 another click replaces it, and selecting the displayed current strategy
-cancels a different pending request. The panel reports request acceptance
-immediately, shows current and pending values separately, and uses amber for a
-pending runtime acknowledgement.
+cancels a different pending request. Select **Adopt for the active battle**
+before choosing a strategy to request adoption after fresh running or
+resumable-Home evidence. This changes normal strategy behavior and Battle End
+identity without a restart, while new-run initialization, session preflight,
+and Home-only gates wait for the next genuine boundary. The panel reports
+request acceptance immediately, shows current and pending values separately,
+and uses amber for a pending runtime acknowledgement.
 
 **Configure run...** is an optional pre-start dialog populated from the
 selected strategy's declared checks. Check a requirement to skip it once, or

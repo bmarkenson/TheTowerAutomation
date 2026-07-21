@@ -539,6 +539,13 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   every unrelated requirement without invoking the lock scanner. Validation
   passed 484 sandbox tests plus the separately permitted localhost-socket test,
   for 485 total.
+- Commit `5cd9efe` added explicit mid-run strategy adoption after fresh active
+  battle evidence. It updates normal behavior and completed-run Farm identity
+  without a restart, preserves default next-boundary queueing, and defers
+  run-initialization, session-preflight, and Home-only gates until the next
+  genuine boundary. The full suite passed 492 sandbox tests plus the separately
+  permitted localhost-socket test, for 493 total; the repository-root Linux
+  publisher also completed successfully.
 
 ---
 

@@ -187,9 +187,15 @@ evidence.
    - [x] Apply immediately when an authoritative no-battle Home boundary is
      already established, including while paused for manual tournament setup;
      do not treat a resumable Home battle as a new-run boundary.
+   - [x] Add an explicit active-battle adoption mode. After fresh `RUNNING` or
+     resumable-Home evidence, change normal behavior and completed-run strategy
+     identity without restarting, while deferring every new-run gate until the
+     next genuine boundary. Preserve boundary replacement when `NEW_BATTLE` is
+     observed first (`5cd9efe`).
    - [ ] On Windows, verify immediate accepted-request feedback, current/pending
-     highlights, pending replacement/cancellation during a battle, and an
-     acknowledged paused Workshop application without changing Pause.
+     highlights, pending replacement/cancellation during a battle, explicit
+     active-battle adoption, and an acknowledged paused Workshop application
+     without changing Pause.
 8. [ ] Rework Battle History filters after the input defect is fixed and their
    real behavior can be evaluated.
    - [x] Populate the Strategy dropdown with `All` plus distinct strategies

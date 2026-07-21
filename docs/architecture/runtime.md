@@ -208,6 +208,12 @@ remain insufficient evidence to distinguish Tournament from Milestone.
   or Home `NEW_BATTLE` arms the gates, and the next `RUNNING` observation emits
   the normal run-start hooks. Home `RESUME_BATTLE` and transient Unknown states
   preserve the attachment.
+- Explicit mid-run strategy adoption uses the same attachment boundary. Fresh
+  `RUNNING` or Home `RESUME_BATTLE` evidence may replace normal strategy
+  behavior and report identity without a restart, but run initialization,
+  session preflight, and Home-only checks stay deferred. A request encountered
+  at Home `NEW_BATTLE` follows normal boundary replacement instead and runs the
+  complete startup-gate sequence.
 - Process replacement must verify the existing owner and safe UI boundary,
   then verify the replacement PID, refreshed lock, startup log, control
   consumption, and first state report.

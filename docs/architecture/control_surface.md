@@ -47,8 +47,8 @@ agnostic.
   optional strategy-scoped one-run check configuration,
   bundled-strategy selection, stopped or
   acknowledged-paused ADB-port
-  configuration, and fixed managed-service start/stop. An active strategy
-  request is a declarative boundary handoff, not immediate action authority.
+  configuration, and fixed managed-service start/stop. Active strategy
+  requests are declarative runtime configuration, not direct tap authority.
   There is no arbitrary tap, shell command, process kill, Surrender, file-path,
   or ADB endpoint.
 - Complete stop persists `STOPPED` before asking the fixed systemd user service
@@ -61,13 +61,21 @@ agnostic.
   verified Home `NEW_BATTLE` boundary removes the suppression, so the next
   battle runs its real gates without fabricated completion state.
 - An active strategy request persists the next-start setting and a versioned
-  control directive. During a battle it remains pending. The current strategy
-  first finalizes the terminal report and its Game Over hook; the pending
-  strategy is then installed before Retry/Home navigation or before the next
-  run's first actionable observation. Verified Home `NEW_BATTLE` and Workshop
-  are authoritative no-battle boundaries, including while paused. Home
-  `RESUME_BATTLE` never authorizes a switch. Selecting the current strategy
-  replaces and thereby cancels a different pending request.
+  control directive. By default it remains pending during a battle. The
+  current strategy first finalizes the terminal report and its Game Over hook;
+  the pending strategy is then installed before Retry/Home navigation or
+  before the next run's first actionable observation. Verified Home
+  `NEW_BATTLE` and Workshop are authoritative no-battle boundaries, including
+  while paused. Home `RESUME_BATTLE` never authorizes a boundary switch.
+  Selecting the current strategy replaces and thereby cancels a different
+  pending request.
+- An explicit `apply_to_active_run` strategy request may instead be adopted
+  after fresh `RUNNING` or Home `RESUME_BATTLE` evidence. Adoption changes
+  normal strategy behavior and the strategy/profile identity used by Battle
+  End reporting, but uses attachment semantics: run initialization, session
+  preflight, and Home-only gates remain deferred until the next genuine
+  new-run boundary. If `NEW_BATTLE` is observed first, the request follows the
+  normal boundary-install path and all new-run gates remain active.
 - The API never accepts a PID, executable, service name, or command from the
   Windows client. The Linux server is configured with one validated unit name.
 - A malformed control file is reported and preserved rather than overwritten.
@@ -107,7 +115,7 @@ memory only. The API deliberately sends no CORS permission.
 | --- | --- | --- |
 | `GET` | `/api/v1/status` | Control intent, acknowledgement, latest observation, and runtime evidence |
 | `POST` | `/api/v1/control` | Allowlisted control mutation |
-| `POST` | `/api/v1/process` | Start/stop the fixed systemd automation unit, select its startup-gate policy, save/queue a bundled strategy, or configure/safely hand off its ADB port |
+| `POST` | `/api/v1/process` | Start/stop the fixed systemd automation unit, select its startup-gate policy, save/queue/adopt a bundled strategy, or configure/safely hand off its ADB port |
 | `GET` | `/api/v1/battles?limit=N` | Newest Battle and Tournament summaries |
 | `GET` | `/api/v1/battles/{battle_id}` | One full structured battle record |
 | `GET` | `/api/v1/activity?limit=N&levels=ERROR,WARN` | Recent structured action-log entries, optionally filtered by level |
@@ -148,6 +156,7 @@ Process request examples:
 {"action": "stop"}
 {"action": "set_adb_port", "adb_port": 5565}
 {"action": "set_strategy", "strategy": "tournament"}
+{"action": "set_strategy", "strategy": "farm_t18", "apply_to_active_run": true}
 ```
 
 ## Current GUI capabilities
@@ -179,9 +188,12 @@ Process request examples:
   connection or screenshot validation fails.
 - Validated strategy selection (`farm_t18`, `farm_t19_experiment`,
   `tournament`, or `none`). A stopped selection is saved for the next start;
-  an active selection is queued for a confirmed run boundary. The native GUI
-  reports request acceptance immediately and shows current and pending
-  strategies separately; cyan is current/saved and amber is pending.
+  an active selection is queued for a confirmed run boundary by default. The
+  native GUI offers an explicit **Adopt for the active battle** option that
+  applies normal behavior and report identity after fresh active-battle
+  evidence while deferring new-run gates. It reports request acceptance
+  immediately and shows current and pending strategies separately; cyan is
+  current/saved and amber is pending.
 - Native control of a passwordless Windows OpenSSH tunnel.
 - Separate operator-directive and observed-UI state, with acknowledgement and
   stale-heartbeat indicators.
