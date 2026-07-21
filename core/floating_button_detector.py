@@ -57,8 +57,12 @@ def tap_floating_button(name: str, buttons: Iterable[Dict[str, Any]]) -> bool:
                 x, y = int(tap_point["x"]), int(tap_point["y"])
             except Exception:
                 continue
-            log(f"TAP_FLOATING: {name} at ({x},{y})", "ACTION")
-            safe_tap((x, y), require_visible=False, dispatch="now", log_label=f"floating_button:{name}")
+            safe_tap(
+                (x, y),
+                require_visible=False,
+                dispatch="now",
+                log_label=f"floating_button:{name}",
+            )
             return True
     return False
 

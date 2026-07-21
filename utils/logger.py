@@ -5,11 +5,13 @@ from __future__ import annotations
 
 from datetime import datetime
 import os
-from typing import Optional
+import threading
+from typing import Optional, Sequence
 
 
 _MISSION_LOG_PATH: Optional[str] = None
 DEFAULT_ACTION_LOG_PATH = os.path.join("logs", "actions.log")
+_WRITE_LOCK = threading.Lock()
 
 
 def get_action_log_path() -> str:
@@ -46,16 +48,53 @@ def set_mission_log_path(path: Optional[str]) -> None:
     _MISSION_LOG_PATH = path if path else None
 
 
-def _write_entry(entry: str, *, extra_path: Optional[str] = None) -> None:
-    """Append a log entry to the primary log and optional extra path."""
+def _write_entries(entries: Sequence[str], *, extra_path: Optional[str] = None) -> None:
+    """Append one atomic group of entries to the primary and optional logs."""
+
+    if not entries:
+        return
+    text = "".join(f"{entry}\n" for entry in entries)
     primary_path = get_action_log_path()
-    os.makedirs(os.path.dirname(primary_path) or ".", exist_ok=True)
-    with open(primary_path, "a", encoding="utf-8") as f:
-        f.write(entry + "\n")
-    if extra_path:
-        os.makedirs(os.path.dirname(extra_path) or ".", exist_ok=True)
-        with open(extra_path, "a", encoding="utf-8") as extra:
-            extra.write(entry + "\n")
+    with _WRITE_LOCK:
+        os.makedirs(os.path.dirname(primary_path) or ".", exist_ok=True)
+        with open(primary_path, "a", encoding="utf-8") as f:
+            f.write(text)
+        if extra_path:
+            os.makedirs(os.path.dirname(extra_path) or ".", exist_ok=True)
+            with open(extra_path, "a", encoding="utf-8") as extra:
+                extra.write(text)
+
+
+def _write_entry(entry: str, *, extra_path: Optional[str] = None) -> None:
+    """Append a single log entry to the primary log and optional extra path."""
+
+    _write_entries([entry], extra_path=extra_path)
+
+
+def _paired_log(
+    summary: str,
+    summary_level: str,
+    detail: str,
+    *,
+    extra_path: Optional[str] = None,
+    console: Optional[bool] = None,
+) -> None:
+    """Write an operator summary and its diagnostic detail as one log group."""
+
+    normalized_level = summary_level.upper()
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    entries = [
+        f"[{normalized_level} {timestamp}] {summary}",
+        f"[DEBUG {timestamp}] {detail}",
+    ]
+    emit_console = (
+        _should_print_to_console(normalized_level, summary)
+        if console is None
+        else console
+    )
+    if emit_console:
+        print(entries[0])
+    _write_entries(entries, extra_path=extra_path)
 
 
 def log(
@@ -98,6 +137,31 @@ def log_mission(msg: str, level: str = "INFO") -> None:
     log(msg, level, extra_path=_MISSION_LOG_PATH)
 
 
-def log_status(msg: str) -> None:
-    """Helper for status updates that should appear on the console."""
-    log(msg, "STATUS")
+def log_action(
+    summary: str,
+    *,
+    detail: Optional[str] = None,
+    extra_path: Optional[str] = None,
+    console: Optional[bool] = None,
+) -> None:
+    """Log an operator-facing action with optional paired diagnostic detail."""
+
+    if detail is None:
+        log(summary, "ACTION", extra_path=extra_path, console=console)
+        return
+    _paired_log(
+        summary,
+        "ACTION",
+        detail,
+        extra_path=extra_path,
+        console=console,
+    )
+
+
+def log_status(msg: str, *, detail: Optional[str] = None) -> None:
+    """Log an operator status heartbeat with optional diagnostic detail."""
+
+    if detail is None:
+        log(msg, "STATUS")
+        return
+    _paired_log(msg, "STATUS", detail)

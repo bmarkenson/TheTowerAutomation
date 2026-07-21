@@ -223,8 +223,8 @@
             <WrapPanel Grid.Row="1" Margin="4,0,4,6" VerticalAlignment="Center">
               <TextBlock Text="Show" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,6,0" />
               <ComboBox x:Name="ActivityLevelFilter" Width="220" SelectedIndex="0">
-                <ComboBoxItem Content="All levels" Tag="" />
                 <ComboBoxItem Content="Operational" Tag="STATUS,ACTION,INFO,WARN,ERROR,FAIL" />
+                <ComboBoxItem Content="All levels" Tag="" />
                 <ComboBoxItem Content="Warnings and errors" Tag="WARN,ERROR,FAIL" />
                 <ComboBoxItem Content="Errors and failures" Tag="ERROR,FAIL" />
                 <ComboBoxItem Content="Diagnostics" Tag="DEBUG,MATCH,STATE" />

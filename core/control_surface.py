@@ -33,6 +33,12 @@ _STATUS_RE = re.compile(
     r"Secondary=\[(?P<secondary>.*?)]\s*\|\s*"
     r"Overlays=\[(?P<overlays>.*?)]\s*$"
 )
+_STATUS_SUMMARY_RE = re.compile(
+    r"^State=(?P<state>[^|]+?)\s*\|\s*"
+    r"Wave=(?P<wave>[^|]+?)\s*\|\s*"
+    r"Coins/min=(?P<coins>[^|]+?)\s*$"
+)
+_STATUS_DETAIL_PREFIX = "[STATUS_DETAIL] "
 _STATE_ACK_RE = re.compile(
     r"^\[CTRL] State set to (?P<value>RUNNING|PAUSED|STOPPED) via control file$"
 )
@@ -486,12 +492,31 @@ class ControlSurfaceService:
         *,
         now: float,
     ) -> Optional[dict[str, Any]]:
+        details_by_timestamp: dict[str, re.Match[str]] = {}
+        for line in lines:
+            entry = _parse_log_line(line)
+            if (
+                not entry
+                or entry["level"] != "DEBUG"
+                or not entry["message"].startswith(_STATUS_DETAIL_PREFIX)
+            ):
+                continue
+            detail_match = _STATUS_RE.fullmatch(
+                entry["message"][len(_STATUS_DETAIL_PREFIX) :]
+            )
+            if detail_match:
+                details_by_timestamp[entry["timestamp"]] = detail_match
+
         for line in reversed(lines):
             entry = _parse_log_line(line)
             if not entry or entry["level"] != "STATUS":
                 continue
             match = _STATUS_RE.fullmatch(entry["message"])
-            if not match:
+            detail_match = match
+            if match is None:
+                match = _STATUS_SUMMARY_RE.fullmatch(entry["message"])
+                detail_match = details_by_timestamp.get(entry["timestamp"])
+            if match is None:
                 continue
             observed_at = _parse_timestamp(entry["timestamp"])
             age_seconds = None
@@ -505,9 +530,15 @@ class ControlSurfaceService:
                 "state_label": state_label,
                 "wave": int(wave_text) if wave_text.isdigit() else None,
                 "coins_per_minute": _none_if_dash(match.group("coins")),
-                "menu": _none_if_dash(match.group("menu")),
-                "secondary": _split_status_list(match.group("secondary")),
-                "overlays": _split_status_list(match.group("overlays")),
+                "menu": _none_if_dash(detail_match.group("menu"))
+                if detail_match
+                else None,
+                "secondary": _split_status_list(detail_match.group("secondary"))
+                if detail_match
+                else [],
+                "overlays": _split_status_list(detail_match.group("overlays"))
+                if detail_match
+                else [],
                 "observed_at": observed_at.isoformat(timespec="seconds")
                 if observed_at
                 else entry["timestamp"],

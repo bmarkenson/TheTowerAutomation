@@ -193,6 +193,45 @@ def test_status_separates_fresh_observation_from_control_and_lock_evidence(tmp_p
     assert status["acknowledgements"]["strategy"]["acknowledges_current"]
 
 
+def test_status_reads_concise_heartbeat_with_paired_diagnostic_detail(tmp_path):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+    log_path = tmp_path / "logs" / "actions.log"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text(
+        f"[STATUS {timestamp}] State=RUNNING/PAUSED | Wave=521 | Coins/min=1.3T\n"
+        f"[DEBUG {timestamp}] [STATUS_DETAIL] State=RUNNING/PAUSED | Wave=521 | "
+        "Coins/min=1.3T | Menu=UW_MENU | Secondary=[PERKS] | "
+        "Overlays=[MENU_OPEN]\n",
+        encoding="utf-8",
+    )
+
+    service = _service(tmp_path)
+    status = service.status(now=now.timestamp())
+
+    assert status["observation"] == {
+        "state": "RUNNING",
+        "paused": True,
+        "state_label": "RUNNING/PAUSED",
+        "wave": 521,
+        "coins_per_minute": "1.3T",
+        "menu": "UW_MENU",
+        "secondary": ["PERKS"],
+        "overlays": ["MENU_OPEN"],
+        "observed_at": now.isoformat(timespec="seconds"),
+        "age_seconds": 0,
+        "stale": False,
+    }
+    operational = service.activity(
+        levels=["STATUS", "ACTION", "INFO", "WARN", "ERROR", "FAIL"],
+    )
+    assert [entry["level"] for entry in operational["items"]] == ["STATUS"]
+    assert [entry["level"] for entry in service.activity()["items"]] == [
+        "STATUS",
+        "DEBUG",
+    ]
+
+
 def test_battle_list_is_compact_and_full_record_requires_exact_id(tmp_path):
     _write_battle(tmp_path)
     service = _service(tmp_path)

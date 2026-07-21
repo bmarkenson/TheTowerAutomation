@@ -20,7 +20,7 @@ from core.ss_capture import capture_adb_screenshot, is_complete_screenshot
 from core.clickmap_access import get_clickmap, resolve_dot_path
 from core.adb_utils import input_swipe
 from core.matcher import match_entry_result, normalize_region, resolve_match_region
-from utils.logger import log
+from utils.logger import log, log_action
 
 
 def _normalize_region(r):
@@ -190,7 +190,10 @@ def swipe_relative_in_region(region, start_frac=(0.50, 0.82), end_frac=(0.50, 0.
     ex = int(x0 + max(0.0, min(1.0, end_frac[0])) * w2)
     ey = int(y0 + max(0.0, min(1.0, end_frac[1])) * h2)
 
-    log(f"SWIPE_REL: ({sx},{sy})→({ex},{ey}) in {duration_ms}ms", "ACTION")
+    log_action(
+        "Swipe requested within detected region",
+        detail=f"SWIPE_REL: ({sx},{sy})→({ex},{ey}) in {duration_ms}ms",
+    )
     input_swipe(sx, sy, ex, ey, duration_ms)
 
 

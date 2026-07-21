@@ -20,7 +20,7 @@ import threading
 import queue
 import time
 import random
-from utils.logger import log
+from utils.logger import log, log_action
 from core.adb_utils import input_tap
 
 TAP_QUEUE = queue.Queue()
@@ -42,9 +42,37 @@ def log_tap(x, y, label):
       r: null
       s: [log]
       notes:
-        - Emits a single ACTION-level line with coordinates and optional label.
+        - Emits a concise ACTION line plus DEBUG coordinate detail.
     """
-    log(f"TAP {label or ''} at ({x},{y})", level="ACTION")
+    log_action(
+        f"Tap dispatched: {label or 'unlabeled target'}",
+        detail=f"TAP {label or ''} at ({x},{y})",
+    )
+
+
+def _execute_tap(x, y, label, *, log_it: bool) -> bool:
+    """Dispatch one queued tap and report success only when ADB accepted it."""
+
+    error = None
+    try:
+        dispatched = input_tap(x, y) is not None
+    except Exception as exc:
+        dispatched = False
+        error = exc
+
+    if not log_it:
+        return dispatched
+    if dispatched:
+        log_tap(x, y, label)
+        return True
+
+    display_label = label or "unlabeled target"
+    log(f"Queued tap failed: {display_label}", "WARN")
+    detail = f"TAP failed label={label or ''} at ({x},{y})"
+    if error is not None:
+        detail += f" error={error!r}"
+    log(detail, "DEBUG")
+    return False
 
 
 def tap(x, y, label=None, *, log_it: bool = True):
@@ -90,9 +118,7 @@ def _tap_worker():
                 log_it = True
             else:
                 x, y, label, log_it = item
-            input_tap(x, y)
-            if log_it:
-                log_tap(x, y, label)
+            _execute_tap(x, y, label, log_it=log_it)
         except queue.Empty:
             pass  # nothing to do
 

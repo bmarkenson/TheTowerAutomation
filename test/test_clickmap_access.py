@@ -29,6 +29,29 @@ def test_runtime_blind_tap_rejects_derived_region_center():
     dispatch.assert_not_called()
 
 
+def test_safe_tap_separates_operator_summary_from_coordinate_detail(
+    tmp_path,
+    monkeypatch,
+):
+    action_log = tmp_path / "actions.log"
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(action_log))
+
+    with patch("core.input._dispatch_tap") as dispatch:
+        assert safe_tap(
+            (10, 20),
+            require_visible=False,
+            dispatch="queue",
+            log_label="test_target",
+        )
+
+    dispatch.assert_called_once_with(10, 20, label="test_target", dispatch="queue")
+    lines = action_log.read_text(encoding="utf-8").splitlines()
+    assert lines[0].endswith("] Tap queued: Test target")
+    assert lines[1].endswith(
+        "] TAP_SAFE now=False label=test_target at (10,20) vis=False"
+    )
+
+
 def test_blind_navigation_targets_have_explicit_tap_geometry():
     assert get_click("navigation.goto_attack") == (136, 1864)
     assert get_click("navigation.goto_defense") == (406, 1868)

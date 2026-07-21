@@ -68,7 +68,7 @@ def handle_upgrade_detail_popup(
         log(
             f"[UPGRADE_DETAIL] Dismissing detail popup (attempt {attempt}) "
             f"with tap at ({tap_x},{tap_y})",
-            "ACTION",
+            "DEBUG",
         )
 
         if attempt == 1:

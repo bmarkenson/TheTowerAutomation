@@ -419,10 +419,15 @@ def _tap_purchase_area(
 
     log(
         f"[UPGRADE_NAV] Tapping purchase area at ({tap_x},{tap_y}) for '{confirmed_box.text or 'unknown'}'",
-        "ACTION",
+        "DEBUG",
     )
 
-    safe_tap((tap_x, tap_y), require_visible=False, dispatch="now", log_label="upgrade_purchase")
+    safe_tap(
+        (tap_x, tap_y),
+        require_visible=False,
+        dispatch="now",
+        log_label=f"upgrade_purchase:{confirmed_box.text or target_text}",
+    )
 
 
 def _select_span(
@@ -1175,8 +1180,13 @@ def _tap_ultimate_toggle(rect: Tuple[int, int, int, int], toggle_name: str) -> N
     tap_x = x + int(round(w * center_x))
     tap_y = y + int(round(h * center_y))
 
-    log(f"[UPGRADE_NAV] Toggling '{toggle_name}' at ({tap_x},{tap_y})", "ACTION")
-    safe_tap((tap_x, tap_y), require_visible=False, dispatch="now", log_label=f"ultimate_toggle:{toggle_name}")
+    log(f"[UPGRADE_NAV] Toggling '{toggle_name}' at ({tap_x},{tap_y})", "DEBUG")
+    safe_tap(
+        (tap_x, tap_y),
+        require_visible=False,
+        dispatch="now",
+        log_label=f"ultimate_toggle:{toggle_name}",
+    )
 
 
 def _ultimate_toggle_is_on(

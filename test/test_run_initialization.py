@@ -1460,7 +1460,13 @@ class PausedStartupObservationTests(unittest.TestCase):
             AUTOMATION.state = original_state
 
         tap.assert_not_called()
-        status_log.assert_called_once()
+        status_log.assert_called_once_with(
+            "State=RUNNING | Wave=1 | Coins/min=1",
+            detail=(
+                "[STATUS_DETAIL] State=RUNNING | Wave=1 | Coins/min=1 | "
+                "Menu=— | Secondary=[—] | Overlays=[—]"
+            ),
+        )
 
     def test_status_reporting_collects_structured_coin_rate_samples(self):
         frame = np.zeros((1920, 1080, 3), dtype=np.uint8)

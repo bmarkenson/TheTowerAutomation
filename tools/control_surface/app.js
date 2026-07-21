@@ -213,7 +213,7 @@ async function refresh() {
     const [status, battles, activity] = await Promise.all([
       api("/api/v1/status"),
       api("/api/v1/battles?limit=30"),
-      api("/api/v1/activity?limit=70"),
+      api("/api/v1/activity?limit=70&levels=STATUS,ACTION,INFO,WARN,ERROR,FAIL"),
     ]);
     renderStatus(status);
     renderBattles(battles);

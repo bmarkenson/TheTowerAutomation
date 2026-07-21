@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, Literal, Optional, Tuple, Sequence, Union
 
-from utils.logger import log
+from utils.logger import log, log_action
 from core.adb_utils import input_swipe, input_tap
 from core.tap_dispatcher import tap as enqueue_tap
 from core.clickmap_access import get_click, get_explicit_tap, get_swipe, resolve_dot_path
@@ -41,6 +41,22 @@ def _dispatch_swipe(x1: int, y1: int, x2: int, y2: int, duration_ms: int) -> Non
     input_swipe(x1, y1, x2, y2, duration_ms, check=False)
 
 
+def _operator_label(label: str) -> str:
+    path, separator, context = label.partition(":")
+    display = path.rsplit(".", 1)[-1].replace("_", " ")
+    if display.startswith("goto "):
+        display = f"go to {display[len('goto '):]}"
+    display = display[:1].upper() + display[1:]
+    if separator and context:
+        display += f" ({context.replace('_', ' ')})"
+    return display
+
+
+def _tap_summary(label: str, dispatch: DispatchMode) -> str:
+    verb = "queued" if dispatch == "queue" else "requested"
+    return f"Tap {verb}: {_operator_label(label)}"
+
+
 def safe_tap(
     name: Union[str, Coord],
     *,
@@ -56,14 +72,18 @@ def safe_tap(
         tap_x = int(name[0])
         tap_y = int(name[1])
         label = log_label or f"tap@{tap_x},{tap_y}"
+        summary_label = log_label or "screen target"
         if require_visible:
             log(
                 f"[WARN] TAP_SAFE coordinate path called with require_visible=True; forcing False",
                 "WARN",
             )
-        log(
-            f"TAP_SAFE now={dispatch=='now'} label={label} at ({tap_x},{tap_y}) vis=False",
-            "ACTION",
+        log_action(
+            _tap_summary(summary_label, dispatch),
+            detail=(
+                f"TAP_SAFE now={dispatch=='now'} label={label} "
+                f"at ({tap_x},{tap_y}) vis=False"
+            ),
         )
         _dispatch_tap(tap_x, tap_y, label=label, dispatch=dispatch)
         return True
@@ -84,9 +104,13 @@ def safe_tap(
                 offset = _compute_offset(entry or {})
                 tap_x = x + (offset[0] if offset else w // 2)
                 tap_y = y + (offset[1] if offset else h // 2)
-                log(
-                    f"TAP_SAFE now={dispatch=='now'} label={label} at ({tap_x},{tap_y}) vis=True attempt={attempt+1}/{attempts}",
-                    "ACTION",
+                log_action(
+                    _tap_summary(label, dispatch),
+                    detail=(
+                        f"TAP_SAFE now={dispatch=='now'} label={label} "
+                        f"at ({tap_x},{tap_y}) vis=True "
+                        f"attempt={attempt+1}/{attempts}"
+                    ),
                 )
                 _dispatch_tap(tap_x, tap_y, label=label, dispatch=dispatch)
                 return True
@@ -97,9 +121,12 @@ def safe_tap(
         if allow_fallback:
             coords = get_explicit_tap(name)
             if coords:
-                log(
-                    f"TAP_SAFE now={dispatch=='now'} label={label} at {coords} vis=False fallback=True",
-                    "ACTION",
+                log_action(
+                    _tap_summary(label, dispatch),
+                    detail=(
+                        f"TAP_SAFE now={dispatch=='now'} label={label} "
+                        f"at {coords} vis=False fallback=True"
+                    ),
                 )
                 _dispatch_tap(coords[0], coords[1], label=label, dispatch=dispatch)
                 return True
@@ -111,7 +138,13 @@ def safe_tap(
     if not coords:
         log(f"[SKIP] TAP_SAFE blind path has no coords for {label}", "WARN")
         return False
-    log(f"TAP_SAFE now={dispatch=='now'} label={label} at {coords} vis=False", "ACTION")
+    log_action(
+        _tap_summary(label, dispatch),
+        detail=(
+            f"TAP_SAFE now={dispatch=='now'} label={label} "
+            f"at {coords} vis=False"
+        ),
+    )
     _dispatch_tap(coords[0], coords[1], label=label, dispatch=dispatch)
     return True
 
@@ -145,7 +178,10 @@ def tap_now(name: str) -> bool:
         log(f"[INPUT] tap_now: missing coords for '{name}'", "ERROR")
         return False
     _dispatch_tap(coords[0], coords[1], label=name, dispatch="now")
-    log(f"TAP_NOW: {name} at {coords}", "ACTION")
+    log_action(
+        f"Tap requested: {_operator_label(name)}",
+        detail=f"TAP_NOW: {name} at {coords}",
+    )
     return True
 
 
@@ -162,7 +198,10 @@ def swipe_now(name: str) -> bool:
         log(f"[INPUT] swipe_now: invalid swipe data for '{name}'", "ERROR")
         return False
     _dispatch_swipe(x1, y1, x2, y2, duration)
-    log(f"SWIPE_NOW: {name} ({x1},{y1})→({x2},{y2}) in {duration}ms", "ACTION")
+    log_action(
+        f"Swipe requested: {_operator_label(name)}",
+        detail=f"SWIPE_NOW: {name} ({x1},{y1})→({x2},{y2}) in {duration}ms",
+    )
     return True
 
 

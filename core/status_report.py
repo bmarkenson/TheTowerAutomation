@@ -180,9 +180,15 @@ class StatusReporter:
         ovl_str = ", ".join(sorted(overlays)) if overlays else "—"
         state_str = self._supervisor.format_state(ui_state)
 
+        status_summary = (
+            f"State={state_str} | Wave={wave_str} | Coins/min={coins_str}"
+        )
         log_status(
-            f"State={state_str} | Wave={wave_str} | Coins/min={coins_str} | Menu={menu_str} | "
-            f"Secondary=[{sec_str}] | Overlays=[{ovl_str}]"
+            status_summary,
+            detail=(
+                f"[STATUS_DETAIL] {status_summary} | Menu={menu_str} | "
+                f"Secondary=[{sec_str}] | Overlays=[{ovl_str}]"
+            ),
         )
 
         if ui_state == "RUNNING" and has_min and coins_eff is not None:
