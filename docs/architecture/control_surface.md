@@ -43,7 +43,10 @@ agnostic.
   identifies a Milestone; Farm strategy/profile identity identifies Farm.
   Tournament settings alone never decide between Tournament and Milestone.
 - The allowlisted write surface is pause, timed pause, resume, mode,
-  bundled-strategy selection, stopped or acknowledged-paused ADB-port
+  resolution of a runtime-published startup-gate decision,
+  optional strategy-scoped one-run check configuration,
+  bundled-strategy selection, stopped or
+  acknowledged-paused ADB-port
   configuration, and fixed managed-service start/stop. An active strategy
   request is a declarative boundary handoff, not immediate action authority.
   There is no arbitrary tap, shell command, process kill, Surrender, file-path,
@@ -109,6 +112,22 @@ memory only. The API deliberately sends no CORS permission.
 | `GET` | `/api/v1/battles/{battle_id}` | One full structured battle record |
 | `GET` | `/api/v1/activity?limit=N&levels=ERROR,WARN` | Recent structured action-log entries, optionally filtered by level |
 
+## Activity log audiences
+
+The complete `logs/actions.log` remains the durable diagnostic stream. Normal
+operator activity uses `STATUS`, `ACTION`, `INFO`, `WARN`, `ERROR`, and `FAIL`;
+coordinate, match, retry, detector, and raw input evidence uses `DEBUG`,
+`MATCH`, and `STATE`. An operation may therefore write a concise operator line
+and an adjacent diagnostic line with the same timestamp instead of forcing one
+message to serve both audiences.
+
+The periodic operator heartbeat contains state, wave, and Coins/min. Its paired
+`[STATUS_DETAIL]` diagnostic retains menu, secondary-state, and overlay
+evidence. Until the planned atomic runtime snapshot replaces log-derived live
+status, the Linux adapter accepts both this paired format and the earlier
+all-in-one `STATUS` format so existing log tails remain usable across an
+upgrade.
+
 Control request examples:
 
 ```json
@@ -116,6 +135,8 @@ Control request examples:
 {"action": "pause", "minutes": 30}
 {"action": "resume"}
 {"action": "mode", "mode": "WAIT"}
+{"action": "resolve_gate", "request_id": "...", "decision_id": "retry"}
+{"action": "configure_run", "skip_checks": ["bots_preset"]}
 ```
 
 Process request examples:
@@ -136,6 +157,17 @@ Process request examples:
 - Resume and Game Over mode selection (`RETRY`, `WAIT`, or `HOME`). State and
   mode controls highlight the saved selection; amber means a live runtime has
   not yet acknowledged the latest directive.
+- Automatic startup-gate decision dialogs for requests published by the
+  runtime. The API accepts only an option contained in the matching pending
+  request. Retry re-runs the check with fresh evidence; a bypass or configured
+  fallback waives only the named requirement for the current run, so unrelated
+  checks such as Auto Pick Perks remain authoritative. Closing the dialog
+  leaves automation blocked and the request pending.
+- An optional **Configure run...** dialog populated from the selected
+  strategy's actual preflight requirements. Unchecked checks retain their
+  defaults; checked checks create strategy-bound one-run waivers. The dialog
+  never opens automatically, saving does not start automation, and changing
+  strategy clears staged exceptions.
 - Complete automation-service start (paused or running) and stop through a
   fixed systemd user unit.
 - Optional attachment to an existing battle on process start. The selected
@@ -174,8 +206,9 @@ Process request examples:
   state is never restored.
 - A per-Windows-session instance guard. A repeated launch restores and activates
   the existing operational window rather than creating competing clients.
-- Independently refreshed recent activity with newest-entry following and
-  server-side level/preset filters, without granting general log-file access.
+- Independently refreshed recent activity that defaults to concise operational
+  entries, with newest-entry following and server-side diagnostic/all-level
+  filters, without granting general log-file access.
 - A responsive browser fallback served by the Linux adapter.
 
 ## Deliberately deferred capabilities

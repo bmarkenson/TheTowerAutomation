@@ -8,6 +8,103 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Farm startup gate skipped visible Workshop upgrades above the battle viewport
+
+- **Observed:** 2026-07-20 while starting a fresh Tier 18 Farm run from
+  no-battle Home.
+- **Symptom:** The Free Upgrade lock gate repeatedly blocked Battle start with
+  `could not locate Shockwave Size in Workshop defense`, even though Shockwave
+  Size was visibly centered in the Workshop list.
+- **Evidence:** Fresh control, host owner-PID, `localhost:5565` ADB, screenshot,
+  and action-log inspection confirmed an acknowledged no-battle Home boundary
+  and four matching failures. The retained failure frame places Shockwave Size
+  at y=740--986, while `detect_visible_boxes()` used the in-battle upgrade
+  region beginning at y=1253 and detected only Wall Health/Wall Rebuild.
+- **Safety response:** The runtime was allowed to finish its active guarded
+  Home handler, then acknowledged an agent-owned indefinite Pause. No battle
+  was started, exited, or Surrendered during diagnosis.
+- **Cause:** The shared upgrade scanner owned only the lower in-battle upgrade
+  viewport, not the taller Workshop list, and its post-scroll reconfirmation
+  rejected a row that settled more than 24 pixels from its first position.
+- **Resolution:** The scanner accepts explicit per-column regions, the Workshop
+  gate scans y=490--1615, and reconfirmation retries fresh frames and uses the
+  freshly detected row position.
+- **Live validation:** Shockwave Size, Bounce Shot Targets, and Bounce Shot
+  Range were all located and authoritatively measured as checked at the
+  no-battle Home boundary.
+- **Regression:** `test/test_free_upgrade_locks.py` covers the retained
+  `shockwave_size_visible_workshop_20260720.png` frame and an 80-pixel settling
+  shift.
+- **Fixed by:** `5c6519a`.
+
+### One-battle Force Continue bypassed Auto Pick Perks validation
+
+- **Observed:** 2026-07-20 in the authorized Flame Bot-preset exception run.
+- **Symptom:** The run completed at wave 1850 with no recognized selected
+  perks, consistent with the operator's observation that Auto Pick Perks had
+  remained disabled. The Farm profile required `auto_pick_perks: true`, so the
+  normal session preflight should have rejected the run before normal handlers
+  resumed.
+- **Evidence:** Battle record
+  `logs/battles/Battle20260720T215056-0700.json` contains forced-continue
+  evidence only through the Home-side Workshop lock checks, with no Auto Pick
+  Perks observation, followed by an empty selected-perks list. The action log
+  has no `[SESSION_PREFLIGHT]` pass between Force Continue entering the battle
+  at 21:23:13 and completing at Game Over at 21:51:15. Source inspection found
+  `MissionManager.apply_force_continue_override()` setting both
+  `gc_session_preflight_attempted` and `gc_session_preflight_completed` true;
+  the former regression test explicitly required that broad bypass.
+- **Cause:** Force Continue was implemented as completion of the entire session
+  preflight, although the accepted exception concerned only the unavailable
+  Farm Bot preset. That suppressed independent in-battle validation including
+  Auto Pick Perks.
+- **Safety response:** Diagnosis was read-only. The automation owner was
+  already stopped/failed, its control state was `PAUSED`, and no current ADB
+  target was reachable; no device or process action was attempted.
+- **Resolution:** The broad override was replaced by a requirement-scoped
+  decision shared by the runtime, CLI, browser client, and native Windows app.
+  Retry, one-check bypass, and profile-declared fallbacks re-run the applicable
+  boundary with fresh evidence. A Bot-preset waiver cannot complete or waive
+  the independent session preflight.
+- **Regression:** `test/test_gc_preflight_templates.py` proves that disabled
+  Auto Pick Perks still rejects a run under a Bot-only waiver. Directive,
+  prompt, API, Home retry, and run-reset coverage is in
+  `test/test_automation_control.py`, `test/test_control_surface.py`, and
+  `test/test_gc_no_battle_setup.py`.
+- **Fixed by:** `4ab91eb`.
+
+### Event Mission claim search skipped past the claimable row
+
+- **Observed:** 2026-07-20 during a badge-triggered Mission reward probe in an
+  active Farm battle.
+- **Symptom:** The handler claimed the available Daily Mission reward but
+  reported zero Event Mission claims even though the Event badge was present.
+  The operator observed that the Event list scrolled too far.
+- **Evidence:** Fresh control, owner-PID, ADB, screenshot, and action-log
+  inspection found that the Event route reached the top, then traversed the
+  complete list in three `650`-pixel, `260`-ms swipes without matching the
+  claim control. The immediately following inventory pass found all four
+  incomplete mission rows and reached the bottom successfully, confirming the
+  route and list identity while reproducing the overly coarse traversal.
+- **Safety response:** Initial diagnosis was read-only while the current device
+  showed an operator-open Perks screen. After the operator explicitly
+  authorized a bounded live validation, a host process check confirmed the
+  owner, the runtime acknowledged an agent-owned Pause, and the active battle
+  was not exited or Surrendered. The handler returned to the verified battle
+  and closed the menu before the pause was restored to `RUNNING`; the live
+  process acknowledged the resume.
+- **Cause:** Consecutive 650-pixel downward gestures did not preserve enough
+  viewport overlap to guarantee that a claim control remained visible in a
+  sampled frame.
+- **Resolution:** The Event downward search gesture is 250 pixels, matching the
+  overlapping traversal used by Perks and module inventory.
+- **Live validation:** The first short step exposed the claim control, all four
+  available Event rewards were claimed, the remaining short steps reached the
+  list edge, and the closed-menu reward dot cleared.
+- **Regression:** `test/test_mission_reward_handler.py` asserts the exact short
+  overlapping gesture.
+- **Fixed by:** `e14999c`.
+
 ### Ubuntu .NET SDK omitted the WindowsDesktop cross-build SDK
 
 - **Observed:** 2026-07-20 while publishing the native Windows control surface

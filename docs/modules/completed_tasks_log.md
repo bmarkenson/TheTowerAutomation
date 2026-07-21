@@ -517,6 +517,22 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - The full Python suite passed 431 tests, and the Linux publisher produced a
   self-contained `win-x64` executable with Microsoft's WindowsDesktop SDK.
 
+### 2026-07-21 startup gates and operator evidence
+
+- Commit `e14999c` shortened Event Mission traversal to overlapping viewports;
+  its focused handler suite passed 31 tests.
+- Commit `5c6519a` generalized upgrade scanning to explicit column regions and
+  repaired full-height Workshop Free Upgrade lock detection using a retained
+  Shockwave fixture; its focused suite passed 13 tests.
+- Commit `372cff3` separated concise operator `ACTION`/`STATUS` entries from
+  paired diagnostic detail, made queued-tap success reporting authoritative,
+  and defaulted browser/native activity to operational levels. Its focused
+  validation passed 87 tests, including the separately permitted socket test.
+- Commit `4ab91eb` replaced broad Force Continue with requirement-scoped gate
+  decisions, a Farm Flame fallback, and optional strategy-aware Configure Run
+  dialogs and CLI controls. The full Python suite passed 482 tests, and the
+  repository-root Linux publisher produced the self-contained WPF executable.
+
 ---
 
 ## 📘 Documentation

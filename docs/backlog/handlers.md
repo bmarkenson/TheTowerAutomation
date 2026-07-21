@@ -10,6 +10,10 @@ completion evidence remains in the
   process boundary. Commit `2b4315d` uses section badges when the
   in-battle menu is verified open and retains the attention-dot trigger when it
   is verified closed.
+- [ ] Deploy commit `e14999c` at a safe process boundary and confirm that a
+  scheduler-owned Event Mission pass uses overlapping downward viewports. A
+  paused one-off live pass with the repair claimed all four available Event
+  rewards and returned to the active battle.
 
 ## Dispatch architecture
 

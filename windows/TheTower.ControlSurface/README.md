@@ -117,15 +117,35 @@ cancels a different pending request. The panel reports request acceptance
 immediately, shows current and pending values separately, and uses amber for a
 pending runtime acknowledgement.
 
+**Configure run...** is an optional pre-start dialog populated from the
+selected strategy's declared checks. Check a requirement to skip it once, or
+leave every item unchecked to retain the complete strategy defaults. Saving
+only stages the configuration; it does not start automation. The dialog never
+opens automatically. Pause a live runtime before configuring it. Staged skips
+are displayed under the button, are consumed by the next applicable run, and
+are cleared if the selected strategy changes.
+
+When a startup requirement fails, the runtime publishes the failed check,
+expected value, and allowed responses. The app opens **Startup check needs a
+decision** automatically; **Review blocked startup** reopens the current
+request. **Apply choice** resolves only that request, while **Decide later**
+leaves automation blocked without changing anything. **Retry check** captures
+fresh evidence. A configured fallback or **Bypass only this check for this
+run** waives only the displayed requirement for the current run; all unrelated
+preflight checks still execute. The same pending decision is visible to the
+browser and CLI because the Linux control file remains authoritative.
+
 Recent Activity refreshes independently once per second, follows the newest
-entry by default, and can be filtered by operational, warning/error,
-diagnostic, or individual log levels. Battle/status loading therefore cannot
-delay the log display; live status and completed-battle refreshes are also
-isolated from one another. Select one or more rows and use **Copy selected**,
-right-click **Copy selected**, or press **Ctrl+C** to copy log-formatted lines.
-Automatic rendering holds the visible rows while a selection exists so an
-incoming refresh cannot clear it; copying or clearing the selection resumes
-the live display.
+entry, and defaults to the concise **Operational** levels. Use **Diagnostics**
+for detector/input detail or **All levels** for the complete interleaved log;
+warning/error and individual-level filters remain available. Browser fallback
+activity also defaults to the operational levels. Battle/status loading
+therefore cannot delay the log display; live status and completed-battle
+refreshes are also isolated from one another. Select one or more rows and use
+**Copy selected**, right-click **Copy selected**, or press **Ctrl+C** to copy
+log-formatted lines. Automatic rendering holds the visible rows while a
+selection exists so an incoming refresh cannot clear it; copying or clearing
+the selection resumes the live display.
 
 The live banner shows the PID only when systemd or the active runtime lock
 identifies a currently live process. The Runtime Evidence panel shows the

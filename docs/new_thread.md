@@ -44,6 +44,11 @@ Before editing:
 3. Read the directly relevant source, callers, tests, documentation, and only
    the task-specific references identified below.
 4. Preserve unrelated tracked and untracked work.
+5. After a coherent behavior is validated, review and selectively stage only
+   its owned files or hunks, then commit it before beginning the next coherent
+   task. Do not accumulate several verified changes merely because the shared
+   worktree contains unrelated modifications; report a real ownership or
+   validation blocker if one prevents the commit.
 
 Run automated validation proportionate to the remaining uncertainty. Code-only
 work does not require ADB access or inspection of a live automation process.
@@ -78,6 +83,12 @@ Read these only when their condition applies:
   dated history only when its evidence or decision provenance matters.
 - [`ui_state_traversal_2026-07-14.md`](ui_state_traversal_2026-07-14.md): read
   the relevant sections when changing UI-state coverage or traversal.
+- [`../windows/TheTower.ControlSurface/README.md`](../windows/TheTower.ControlSurface/README.md):
+  read the publish section when changing the native WPF client. Linux
+  cross-publishing is supported; from the repository root, validate with
+  `windows/TheTower.ControlSurface/publish-linux.sh` instead of treating a
+  direct `dotnet build` failure as proof that the Windows client cannot be
+  built on Linux.
 
 ## Live runtime or device work
 

@@ -72,6 +72,10 @@ timeout 8s adb -s localhost:5555 get-state
   crash. Confirm its PID against the host process table before treating it as a
   live owner.
 - `actions.log` records what the automation actually observed and dispatched.
+  It retains both concise operator entries and paired diagnostic evidence;
+  control-surface Recent Activity defaults to the operational levels, while
+  `Diagnostics` or `All levels` exposes coordinates, detector state, retries,
+  and other low-level detail.
 - A fresh screenshot is authoritative for the visible UI and can disprove a
   stale wave/status hint.
 - Never infer `RUNNING`, `PAUSED`, Game Over, or Home solely from a dated
@@ -107,6 +111,77 @@ treating the replacement as live.
 The Game Over handler polls the same control file while waiting. `PAUSED`
 blocks Retry/Home, `STOPPED` exits without a terminal tap, and `WAIT` continues
 to wait for an explicit mode change.
+
+### Resolve a blocked startup gate
+
+Before starting a run, the native app's optional **Configure run...** button
+shows only the preflight checks declared by the selected strategy. Check any
+requirement that should be skipped once, then save. Leaving the dialog unopened
+or saving it with no checks selected uses every strategy default. The dialog
+does not open automatically and does not start the run. When the automation
+process is active, Pause it before opening or saving this configuration; this
+prevents a run boundary from claiming the selections while the dialog is open.
+
+The text equivalent is:
+
+```bash
+.venv/bin/python tools/automation_ctl.py configure-run
+.venv/bin/python tools/automation_ctl.py configure-run skip bots_preset
+.venv/bin/python tools/automation_ctl.py configure-run default bots_preset
+```
+
+The interactive form dynamically lists the selected strategy's checks and
+toggles their one-run state. A staged skip is bound to that strategy, claimed
+only at an applicable run boundary, and removed from the pending control record
+when claimed. Its evidence remains attached to that run. Normal validation is
+rearmed after Game Over. Changing the selected strategy clears staged skips so
+an exception cannot silently carry into a different configuration.
+
+When a startup check fails, the runtime publishes a decision containing the
+specific failed requirement, the expected value, and its allowed choices. It
+remains blocked until an operator retries the check or explicitly waives that
+one requirement for the current run. The native Windows app and browser
+fallback open a decision dialog automatically. Closing it with **Decide later**
+leaves the gate pending and performs no action.
+
+A direct interactive `main.py` launch presents the same choices in the
+terminal. For a service or another non-interactive launch, inspect or resolve
+the shared request with:
+
+```bash
+.venv/bin/python tools/automation_ctl.py status
+.venv/bin/python tools/automation_ctl.py gate
+.venv/bin/python tools/automation_ctl.py gate retry
+```
+
+`gate` without a choice prompts on stdin. `gate <choice-id>` is suitable for a
+script or remote shell. `force-continue` remains only as a compatibility alias
+for `gate bypass_once`; it cannot create an exception before a real failure and
+it no longer skips the complete preflight.
+
+Every decision is requirement-scoped. For example, accepting the configured
+Flame fallback waives only `bots_preset`; Workshop locks, Modules, Cards,
+Guardian Chips, Ultimate Weapons, and Auto Pick Perks still run normally. A
+retry or waiver captures fresh evidence and resumes at the appropriate setup
+boundary. The decision, selected option, fallback value, and observed failure
+remain in the shared control record, while the in-memory waiver is cleared at
+the run boundary.
+
+Profiles can add named choices under `gate_fallbacks`. The Farm profile
+currently offers **Continue with Flame for this run** for `bots_preset`:
+
+```yaml
+gate_fallbacks:
+  bots_preset:
+    - id: flame
+      label: Continue with Flame for this run
+      value: Flame
+      description: Keep Flame and waive only the Farm Bot preset check.
+```
+
+Configured choices are displayed alongside the universal **Retry check** and
+**Bypass only this check for this run** choices. Fallbacks must be declared for
+a known preflight check and are copied into the generated strategy plan.
 
 ### Native Windows control surface
 

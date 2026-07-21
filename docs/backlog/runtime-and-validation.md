@@ -8,6 +8,12 @@ checked-item detail remains in the
 
 ## Current validation gates
 
+- [ ] Restrict the Farm Free Upgrade lock gate to an authoritative no-battle
+  run boundary. Shockwave Size, Bounce Shot Targets, and Bounce Shot Range can
+  be inspected only from the Home Workshop before a battle starts; an active
+  battle/session preflight must neither try to re-run that inspection nor fail
+  because the Workshop state is unavailable. Preserve the full Workshop-region
+  scan and carry its boundary-owned evidence into the run report.
 - [ ] Diagnose the unexpectedly early Tier 18 Farm ending recorded in
   [`../observed_issues.md`](../observed_issues.md#tier-18-farm-ended-at-wave-2644-without-completed-session-preflight).
   Reproduce a clean, fully validated Farm start at 720p before attributing the
@@ -36,6 +42,13 @@ checked-item detail remains in the
   game-day boundary. Confirm that direct Store navigation claims the gem when
   the initial badge is absent and that persisted completion suppresses a second
   probe after restart.
+- [ ] Verify the operator's apparent Event Mission sequence: scan the complete
+  list, claim one reward, return to the top, then scan the complete list again.
+  Correlate logs, retained captures, and handler control flow before accepting
+  that sequence as fact. Distinguish an intentional claim-all convergence pass,
+  a separate inventory pass, or another dispatch from redundant post-claim
+  scanning; log the continuation reason and stop promptly once fresh evidence
+  proves that no additional claim is available.
 
 ## Farm session preflight
 
@@ -129,13 +142,31 @@ evidence.
      the GUI no longer derives live status primarily from action-log text.
    - Keep menu, secondary-state, overlay, match, and similar detector detail in
      diagnostic telemetry rather than the default Status line.
+   - Make the top bar reflect that automation is stopped from authoritative
+     process evidence instead of leaving a stale running state visible.
+   - Include the active running strategy in the top bar, keeping a queued
+     next-boundary strategy visibly distinct.
+   - Include elapsed run time and an expected run duration derived from
+     representative prior runs. Define the comparison cohort and exclude
+     configuration repairs, surrendered runs, and other non-representative
+     outcomes from the estimate.
 4. [ ] Separate concise operational activity from diagnostic detail without
    discarding either record.
-   - Emit operator-facing `ACTION` and `STATUS` summaries for intent and
+   - [x] Emit operator-facing `ACTION` and `STATUS` summaries for intent and
      outcome, with paired `DEBUG` detail where coordinates, matches, retries,
      or `TAP_SAFE` evidence remains useful.
-   - Retain both forms in the complete log, default Recent Activity to the
+   - [x] Retain both forms in the complete log, default Recent Activity to the
      operational view, and keep diagnostics available through filters.
+     Commit `372cff3` implements the paired operator/diagnostic log stream.
+   - [ ] On Windows, verify that the default view remains concise during normal
+     automation, `Diagnostics` exposes the paired status/input evidence, and
+     `All levels` preserves the complete ordering.
+   - [ ] Before a guarded or multi-step operation, log a human-readable intent
+     summary describing what automation is trying to accomplish and why, not
+     only the individual actions it performs.
+   - [ ] Give every startup, session-preflight, and recovery check a concise
+     human-readable result that includes the requirement, expected and observed
+     state, and final disposition such as passed, failed, waived, or fallback.
 5. [ ] Publish and display Peak Coins/min for the active and completed run.
    - Maintain the active peak within an authoritative run boundary and expose
      it through the runtime snapshot; after a mid-battle attach, label a peak

@@ -33,6 +33,10 @@ Completed and superseded detail remains in the
 
 ## Detection architecture
 
+- [ ] Revalidate and harden Coins/min OCR for the case-sensitive `q` and `Q`
+  magnitude suffixes. Retain the relevant crop and OCR candidates when a
+  suffix is absent or ambiguous, cover both suffixes with fixtures, and verify
+  the accepted live value cannot silently lose or change its scale.
 - [ ] Harden runtime wave consumption against isolated OCR rollbacks.
   - Preserve stateless per-frame OCR; do not restore fixed progression-rate,
     digit-width, or wave-ceiling assumptions.
