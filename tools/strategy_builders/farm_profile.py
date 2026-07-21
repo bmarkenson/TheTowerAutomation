@@ -77,6 +77,10 @@ def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
     damage_policy = _resolve_damage_slider_policy(loadout["damage_slider"])
 
     requirements = invariants
+    gate_fallbacks = _normalize_gate_fallbacks(
+        profile.get("gate_fallbacks"),
+        supported_checks=set(requirements) | {"modules"},
+    )
     requirements["loadout_policies"] = {
         "modules": module_policy["mode"],
     }
@@ -109,6 +113,7 @@ def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
             "damage_slider": damage_policy,
             "target_priority": target_policy,
         },
+        "gate_fallbacks": copy.deepcopy(gate_fallbacks),
     }
 
     return {
@@ -119,8 +124,51 @@ def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
             "target_priority": target_priority,
         },
         "session_preflight": requirements,
+        "gate_fallbacks": gate_fallbacks,
         "run_configuration": run_configuration,
     }
+
+
+def _normalize_gate_fallbacks(
+    raw: Any,
+    *,
+    supported_checks: set[str],
+) -> dict[str, list[dict[str, str]]]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, Mapping):
+        raise ValueError("Farm gate_fallbacks must be a mapping")
+    unknown = sorted(str(key) for key in set(raw) - supported_checks)
+    if unknown:
+        raise ValueError(
+            "Farm gate_fallbacks has unsupported checks: " + ", ".join(unknown)
+        )
+    normalized: dict[str, list[dict[str, str]]] = {}
+    for check_id, configured in raw.items():
+        if not isinstance(configured, list) or not configured:
+            raise ValueError(f"Farm gate_fallbacks.{check_id} must be a non-empty list")
+        choices: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for option in configured:
+            if not isinstance(option, Mapping):
+                raise ValueError(
+                    f"Farm gate_fallbacks.{check_id} choices must be mappings"
+                )
+            option_id = str(option.get("id") or "").strip().lower()
+            label = str(option.get("label") or "").strip()
+            if not option_id or not label or option_id in seen:
+                raise ValueError(
+                    f"Farm gate_fallbacks.{check_id} choices need unique ids and labels"
+                )
+            choice = {"id": option_id, "label": label}
+            for key in ("value", "description"):
+                value = str(option.get(key) or "").strip()
+                if value:
+                    choice[key] = value
+            choices.append(choice)
+            seen.add(option_id)
+        normalized[str(check_id)] = choices
+    return normalized
 
 
 def _resolve_preset_policy(

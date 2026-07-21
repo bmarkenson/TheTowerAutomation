@@ -6,7 +6,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Dict, Any, Mapping, Set, Tuple
+from typing import Optional, Callable, Dict, Any, Mapping, Set, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
@@ -22,6 +22,10 @@ from core.event_mission_tracker import EventMissionTracker, format_warning
 from core.home_battle import detect_home_battle_control
 from core.battle_lifecycle import HomeBattleControl
 from core.gc_no_battle_setup import run_gc_no_battle_setup
+from core.gate_decisions import (
+    build_gate_decision_options,
+    startup_gate_check_catalog,
+)
 from core.menu_reward_badges import (
     measure_home_reward_badges,
     measure_menu_reward_badges,
@@ -66,6 +70,9 @@ class App:
         config: AppConfig,
         *,
         adb_target_session: Optional[AdbTargetSession] = None,
+        gate_decision_prompt: Optional[
+            Callable[[Mapping[str, Any]], Optional[str]]
+        ] = None,
     ) -> None:
         self._config = config
         self._adb_target_session = adb_target_session
@@ -91,6 +98,9 @@ class App:
             ),
         )
         self._mission_mgr.start()
+        self._gate_decision_prompt = gate_decision_prompt
+        self._gate_prompted_request_id: Optional[str] = None
+        self._startup_gate_waivers: Dict[str, Dict[str, Any]] = {}
         self._last_strategy_request: Optional[Tuple[str, object]] = None
         self._pending_strategy_request: Optional[Tuple[str, object]] = None
         self._strategy_boundary_confirmed = False
@@ -146,6 +156,224 @@ class App:
     def _current_strategy_name(self) -> str:
         strategy = self._mission_mgr.strategy
         return str(strategy.name if strategy else "none").strip().lower()
+
+    def _gate_decision_directive(self) -> Optional[Dict[str, Any]]:
+        directive = self._supervisor.gate_decision
+        if not isinstance(directive, Mapping):
+            return None
+        request_id = str(directive.get("request_id") or "").strip()
+        status = str(directive.get("status") or "").strip().lower()
+        if not request_id or status not in {"pending", "resolved", "consumed"}:
+            return None
+        return dict(directive)
+
+    def _publish_gate_decision(
+        self,
+        *,
+        phase: str,
+        check_id: str,
+        reason: str,
+        expected: object,
+    ) -> Optional[Dict[str, Any]]:
+        options = build_gate_decision_options(
+            check_id,
+            self._mission_mgr.gate_fallbacks(check_id),
+        )
+        directive = self._supervisor.publish_gate_decision(
+            strategy=self._current_strategy_name(),
+            phase=phase,
+            check_id=check_id,
+            reason=reason,
+            expected=expected,
+            options=options,
+        )
+        if not isinstance(directive, Mapping):
+            return None
+        if directive and directive.get("status") == "pending":
+            log(
+                f"[GATE_DECISION] Waiting for {check_id}: {reason}",
+                "WARN",
+                console=True,
+            )
+        return dict(directive)
+
+    def _prompt_for_gate_decision(
+        self,
+        directive: Mapping[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        prompt = getattr(self, "_gate_decision_prompt", None)
+        request_id = str(directive.get("request_id") or "")
+        if (
+            prompt is None
+            or not request_id
+            or request_id == getattr(self, "_gate_prompted_request_id", None)
+        ):
+            return dict(directive)
+        self._gate_prompted_request_id = request_id
+        decision_id = prompt(directive)
+        if not decision_id:
+            return dict(directive)
+        resolved = self._supervisor.resolve_gate_decision(
+            request_id,
+            decision_id,
+            source="runtime-cli",
+        )
+        return dict(resolved) if resolved else dict(directive)
+
+    def _matching_gate_decision(
+        self,
+        phase: str,
+    ) -> Optional[Dict[str, Any]]:
+        directive = self._gate_decision_directive()
+        if not directive or directive.get("status") == "consumed":
+            return None
+        if (
+            str(directive.get("strategy") or "").lower()
+            != self._current_strategy_name()
+            or str(directive.get("phase") or "").lower() != phase
+        ):
+            return None
+        if directive.get("status") == "pending":
+            directive = self._prompt_for_gate_decision(directive) or directive
+        return directive
+
+    def _apply_gate_decision(
+        self,
+        directive: Mapping[str, Any],
+        *,
+        phase: str,
+    ) -> bool:
+        """Apply a resolved choice; return whether its gate may retry."""
+
+        if str(directive.get("status") or "").lower() != "resolved":
+            return False
+        request_id = str(directive.get("request_id") or "")
+        check_id = str(directive.get("check_id") or "startup_setup")
+        selected = directive.get("selected_option")
+        if not isinstance(selected, Mapping):
+            return False
+        action = str(selected.get("action") or "").lower()
+        if action == "waive":
+            waiver = {
+                "request_id": request_id,
+                "decision_id": str(directive.get("decision_id") or ""),
+                "label": str(selected.get("label") or ""),
+                "kind": str(selected.get("kind") or "standard"),
+                "value": str(selected.get("value") or ""),
+                "reason": str(directive.get("reason") or ""),
+            }
+            if phase == "home_setup":
+                waivers = getattr(self, "_startup_gate_waivers", {})
+                waivers[check_id] = waiver
+                self._startup_gate_waivers = waivers
+            else:
+                self._mission_mgr.waive_session_preflight_check(check_id, waiver)
+            completion_reason = f"waived {check_id} for this run"
+        elif action == "retry":
+            if phase == "session_preflight":
+                self._mission_mgr.retry_session_preflight()
+            completion_reason = f"retrying {check_id} without a waiver"
+        else:
+            return False
+        self._supervisor.consume_gate_decision(
+            request_id,
+            completion_reason=completion_reason,
+        )
+        log(
+            f"[GATE_DECISION] {completion_reason}",
+            "WARN" if action == "waive" else "INFO",
+            console=True,
+        )
+        return True
+
+    def _handle_terminal_session_gate_decision(self) -> None:
+        checks = self._mission_mgr.session_preflight_failure_checks()
+        check_id = checks[0] if checks else "session_preflight"
+        directive = self._matching_gate_decision("session_preflight")
+        if directive is None:
+            requirements = self._mission_mgr.strategy.session_preflight_requirements()
+            reason = str(
+                self._mission_mgr.ctx.data.get("mission_vars", {}).get(
+                    "gc_session_preflight_last_reason",
+                    "session preflight mismatch",
+                )
+            )
+            directive = self._publish_gate_decision(
+                phase="session_preflight",
+                check_id=check_id,
+                reason=reason,
+                expected=requirements.get(check_id),
+            )
+            if directive and directive.get("status") == "pending":
+                directive = self._prompt_for_gate_decision(directive) or directive
+        if directive:
+            self._apply_gate_decision(directive, phase="session_preflight")
+
+    def _claim_proactive_gate_waivers(
+        self,
+        *,
+        for_home_setup: bool,
+        requirements: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Apply staged one-run skips supported by the active strategy."""
+
+        strategy = self._mission_mgr.strategy
+        if not strategy:
+            return {}
+        if requirements is None:
+            requirement_fn = getattr(
+                strategy,
+                "session_preflight_requirements",
+                None,
+            )
+            if not callable(requirement_fn):
+                return {}
+            requirements = requirement_fn()
+        if not isinstance(requirements, Mapping):
+            return {}
+        check_ids = [
+            entry["id"] for entry in startup_gate_check_catalog(requirements)
+        ]
+        claimed = self._supervisor.claim_startup_gate_waivers(
+            check_ids,
+            strategy=self._current_strategy_name(),
+        )
+        if not isinstance(claimed, Mapping):
+            return {}
+        applied: Dict[str, Dict[str, Any]] = {}
+        for check_id, directive in claimed.items():
+            waiver = {
+                "request_id": str(directive.get("request_id") or ""),
+                "decision_id": "proactive_skip",
+                "label": str(directive.get("label") or check_id),
+                "kind": "proactive",
+                "value": "",
+                "reason": "configured before the run",
+            }
+            if for_home_setup:
+                self._startup_gate_waivers[check_id] = waiver
+            else:
+                self._mission_mgr.waive_session_preflight_check(check_id, waiver)
+            applied[check_id] = waiver
+            pending = self._gate_decision_directive()
+            if (
+                pending
+                and pending.get("status") in {"pending", "resolved"}
+                and pending.get("check_id") == check_id
+            ):
+                self._supervisor.consume_gate_decision(
+                    str(pending["request_id"]),
+                    completion_reason=(
+                        f"superseded by proactive {check_id} skip"
+                    ),
+                )
+            log(
+                f"[GATE_WAIVER] Skipping {check_id} for this run by "
+                "advance operator configuration",
+                "WARN",
+                console=True,
+            )
+        return applied
 
     def _observe_strategy_request(self) -> None:
         request = self._supervisor.strategy_request
@@ -219,6 +447,7 @@ class App:
         self._session_preflight_gate_logged = False
         self._session_preflight_terminal_blocked_logged = False
         self._session_preflight_repair_denial_logged = False
+        self._startup_gate_waivers = {}
         log(
             f"[CTRL] Strategy set to {requested_name} via control file",
             "INFO",
@@ -287,16 +516,39 @@ class App:
                 # then give a genuinely initializing strategy exclusive tap
                 # authority. No overlay handler, recovery tap, mission action,
                 # or blind tapper may run before this gate clears.
-                self._mission_mgr.maybe_run_start(detection)
+                battle_started = self._mission_mgr.maybe_run_start(detection)
+                if battle_started is True:
+                    self._claim_proactive_gate_waivers(
+                        for_home_setup=False
+                    )
                 initialization_pending = self._mission_mgr.run_initialization_pending()
                 session_preflight_pending = (
                     not initialization_pending
                     and self._mission_mgr.session_preflight_pending()
                 )
+                if initialization_pending or session_preflight_pending:
+                    if self._claim_proactive_gate_waivers(for_home_setup=False):
+                        initialization_pending = (
+                            self._mission_mgr.run_initialization_pending()
+                        )
+                        session_preflight_pending = (
+                            not initialization_pending
+                            and self._mission_mgr.session_preflight_pending()
+                        )
                 session_preflight_terminally_blocked = bool(
                     session_preflight_pending
                     and self._mission_mgr.session_preflight_terminally_blocked()
                 )
+                if session_preflight_terminally_blocked:
+                    self._handle_terminal_session_gate_decision()
+                    session_preflight_pending = (
+                        not initialization_pending
+                        and self._mission_mgr.session_preflight_pending()
+                    )
+                    session_preflight_terminally_blocked = bool(
+                        session_preflight_pending
+                        and self._mission_mgr.session_preflight_terminally_blocked()
+                    )
                 if initialization_pending:
                     if not self._run_initialization_gate_logged:
                         log(
@@ -750,14 +1002,75 @@ class App:
                 and home_control is HomeBattleControl.NEW_BATTLE
                 and requirements
             ):
-                setup = run_gc_no_battle_setup(requirements, screenshot=img)
-                if not setup.complete:
-                    log(
-                        f"[GC_NO_BATTLE] Blocking Battle start: {setup.reason}",
-                        "ERROR",
-                    )
+                self._claim_proactive_gate_waivers(
+                    for_home_setup=True,
+                    requirements=requirements,
+                )
+                directive = self._matching_gate_decision("home_setup")
+                if directive and not self._apply_gate_decision(
+                    directive,
+                    phase="home_setup",
+                ):
                     return
-                self._mission_mgr.mark_no_battle_setup_complete(setup.evidence)
+                waivers = dict(getattr(self, "_startup_gate_waivers", {}))
+                setup_kwargs: Dict[str, Any] = {"screenshot": img}
+                if waivers:
+                    setup_kwargs["waivers"] = waivers
+                setup = run_gc_no_battle_setup(requirements, **setup_kwargs)
+                if not setup.complete:
+                    check_id = setup.failed_check or "startup_setup"
+                    directive = self._publish_gate_decision(
+                        phase="home_setup",
+                        check_id=check_id,
+                        reason=setup.reason,
+                        expected=requirements.get(check_id),
+                    )
+                    if directive and directive.get("status") == "pending":
+                        directive = (
+                            self._prompt_for_gate_decision(directive) or directive
+                        )
+                    if not directive or not self._apply_gate_decision(
+                        directive,
+                        phase="home_setup",
+                    ):
+                        log(
+                            f"[GC_NO_BATTLE] Blocking Battle start at "
+                            f"{check_id}: {setup.reason}",
+                            "ERROR",
+                        )
+                        return
+                    fresh = self._capture_frame()
+                    if fresh is None:
+                        return
+                    waivers = dict(
+                        getattr(self, "_startup_gate_waivers", {})
+                    )
+                    retry_kwargs: Dict[str, Any] = {"screenshot": fresh}
+                    if waivers:
+                        retry_kwargs["waivers"] = waivers
+                    setup = run_gc_no_battle_setup(requirements, **retry_kwargs)
+                    if not setup.complete:
+                        next_check = setup.failed_check or "startup_setup"
+                        self._publish_gate_decision(
+                            phase="home_setup",
+                            check_id=next_check,
+                            reason=setup.reason,
+                            expected=requirements.get(next_check),
+                        )
+                        log(
+                            f"[GC_NO_BATTLE] Blocking Battle start at "
+                            f"{next_check}: {setup.reason}",
+                            "ERROR",
+                        )
+                        return
+                if waivers:
+                    self._mission_mgr.mark_no_battle_setup_complete(
+                        setup.evidence,
+                        waivers=waivers,
+                    )
+                else:
+                    self._mission_mgr.mark_no_battle_setup_complete(setup.evidence)
+                self._startup_gate_waivers = {}
             handle_home_screen(restart_enabled=self._auto_start_enabled)
             self._mission_mgr.on_home()
 

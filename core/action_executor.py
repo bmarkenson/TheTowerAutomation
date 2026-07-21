@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Mapping, Optional
 
 from utils.logger import log, log_mission
 from core.input import tap_if_visible
@@ -291,13 +291,18 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                 if mv is not None:
                     mv["gc_session_preflight_attempted"] = True
                     mv["gc_session_preflight_blocked"] = False
+                effective_requirements = dict(requirements)
+                if mv is not None:
+                    waivers = mv.get("gc_session_preflight_waivers")
+                    if isinstance(waivers, Mapping) and waivers:
+                        effective_requirements["_gate_waivers"] = dict(waivers)
                 if validator == "tournament":
                     result = run_read_only_gc_preflight(
-                        requirements,
+                        effective_requirements,
                         validate_fn=validate_tournament_session_preflight_screens,
                     )
                 else:
-                    result = run_read_only_gc_preflight(requirements)
+                    result = run_read_only_gc_preflight(effective_requirements)
                 evidence_payload = (
                     result.evidence.as_dict()
                     if result.evidence is not None
@@ -310,6 +315,7 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                 if result.status is GcPreflightNavigationStatus.COMPLETE:
                     if mv is not None:
                         mv["gc_session_preflight_completed"] = True
+                        mv["gc_session_preflight_failed_checks"] = []
                         mv["gc_session_preflight_repair_required"] = False
                         mv["gc_session_preflight_repair_in_progress"] = False
                     log_mission(
@@ -330,6 +336,9 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                     if mv is not None:
                         mv["gc_session_preflight_completed"] = False
                         mv["gc_session_preflight_blocked"] = True
+                        mv["gc_session_preflight_failed_checks"] = list(
+                            getattr(result.evidence, "failed_checks", ())
+                        )
                         mv["gc_session_preflight_repair_required"] = repairable
                         mv["gc_session_preflight_repair_in_progress"] = False
                         if repairable:
@@ -354,6 +363,7 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                         mv["gc_session_preflight_attempted"] = False
                         mv["gc_session_preflight_repair_required"] = False
                         mv["gc_session_preflight_repair_in_progress"] = False
+                        mv["gc_session_preflight_failed_checks"] = []
                     interrupted_level = (
                         "INFO"
                         if result.status

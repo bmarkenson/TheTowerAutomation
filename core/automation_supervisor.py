@@ -25,7 +25,7 @@ import os
 import time
 from decimal import Decimal
 from pathlib import Path
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Dict, Mapping, Optional, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
@@ -64,8 +64,11 @@ class AutomationSupervisor:
     ) -> None:
         self.control_file = Path(control_file)
         self._control_store = ControlDirectiveStore(self.control_file)
-        self._strategy_request = self._parse_strategy_request(
-            self._load_control_directive()
+        initial_directives = self._load_control_directive()
+        self._strategy_request = self._parse_strategy_request(initial_directives)
+        self._gate_decision = self._parse_gate_decision(initial_directives)
+        self._startup_gate_waivers = self._parse_startup_gate_waivers(
+            initial_directives
         )
         self.auto_return_secs = max(0, int(auto_return_secs))
         self.auto_return_enabled = bool(auto_return_enabled)
@@ -105,12 +108,31 @@ class AutomationSupervisor:
 
         return self._strategy_request
 
+    @property
+    def gate_decision(self) -> Optional[Dict[str, object]]:
+        """Return the latest validated startup-gate decision directive."""
+
+        return dict(self._gate_decision) if self._gate_decision else None
+
+    @property
+    def startup_gate_waivers(self) -> Dict[str, Dict[str, object]]:
+        """Return proactive check waivers still waiting for an applicable run."""
+
+        return {
+            check_id: dict(waiver)
+            for check_id, waiver in self._startup_gate_waivers.items()
+        }
+
     def apply_control(self) -> None:
         """Apply persistent directives and expire an optional timed pause."""
 
         directives = self._load_control_directive()
         if directives:
             self._strategy_request = self._parse_strategy_request(directives)
+            self._gate_decision = self._parse_gate_decision(directives)
+            self._startup_gate_waivers = self._parse_startup_gate_waivers(
+                directives
+            )
             self._apply_state(directives.get("state"))
             self._apply_mode(directives.get("mode"))
             self._sync_pause_deadline(directives)
@@ -132,6 +154,136 @@ class AutomationSupervisor:
             "strategy_updated_at"
         )
         return strategy, identity
+
+    @staticmethod
+    def _parse_gate_decision(
+        directives: Mapping[str, object],
+    ) -> Optional[Dict[str, object]]:
+        value = directives.get("gate_decision")
+        if not isinstance(value, Mapping):
+            return None
+        request_id = str(value.get("request_id") or "").strip()
+        status = str(value.get("status") or "").strip().lower()
+        options = value.get("options")
+        if (
+            not request_id
+            or status not in {"pending", "resolved", "consumed"}
+            or not isinstance(options, list)
+        ):
+            return None
+        parsed = dict(value)
+        parsed["request_id"] = request_id
+        parsed["status"] = status
+        return parsed
+
+    @staticmethod
+    def _parse_startup_gate_waivers(
+        directives: Mapping[str, object],
+    ) -> Dict[str, Dict[str, object]]:
+        raw = directives.get("startup_gate_waivers")
+        if not isinstance(raw, Mapping):
+            return {}
+        parsed: Dict[str, Dict[str, object]] = {}
+        for raw_check, value in raw.items():
+            check_id = str(raw_check or "").strip().lower()
+            if not check_id or not isinstance(value, Mapping):
+                continue
+            if str(value.get("status") or "").strip().lower() != "pending":
+                continue
+            request_id = str(value.get("request_id") or "").strip()
+            if not request_id:
+                continue
+            parsed[check_id] = dict(value)
+        return parsed
+
+    def publish_gate_decision(
+        self,
+        *,
+        strategy: str,
+        phase: str,
+        check_id: str,
+        reason: str,
+        expected: object,
+        options,
+    ) -> Optional[Dict[str, object]]:
+        try:
+            directive = self._control_store.publish_gate_decision(
+                strategy=strategy,
+                phase=phase,
+                check_id=check_id,
+                reason=reason,
+                expected=expected,
+                options=options,
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(f"[GATE_DECISION] Failed publishing request: {exc}", "WARN")
+            return None
+        self._gate_decision = dict(directive)
+        return dict(directive)
+
+    def resolve_gate_decision(
+        self,
+        request_id: str,
+        decision_id: str,
+        *,
+        source: str,
+    ) -> Optional[Dict[str, object]]:
+        try:
+            directive = self._control_store.resolve_gate_decision(
+                request_id,
+                decision_id,
+                source=source,
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(f"[GATE_DECISION] Failed resolving request: {exc}", "WARN")
+            return None
+        self._gate_decision = dict(directive) if directive else None
+        return dict(directive) if directive else None
+
+    def consume_gate_decision(
+        self,
+        request_id: str,
+        *,
+        completion_reason: str,
+    ) -> Optional[Dict[str, object]]:
+        try:
+            directive = self._control_store.consume_gate_decision(
+                request_id,
+                completion_reason=completion_reason,
+            )
+        except ControlDirectiveError as exc:
+            log(f"[GATE_DECISION] Failed consuming request: {exc}", "WARN")
+            return None
+        self._gate_decision = dict(directive) if directive else None
+        return dict(directive) if directive else None
+
+    def claim_startup_gate_waivers(
+        self,
+        check_ids,
+        *,
+        strategy: str,
+    ) -> Dict[str, Dict[str, object]]:
+        """Claim proactive waivers that the active strategy actually declares."""
+
+        try:
+            claimed = self._control_store.claim_startup_gate_waivers(
+                check_ids,
+                strategy=strategy,
+            )
+        except ControlDirectiveError as exc:
+            log(f"[GATE_WAIVER] Failed claiming staged checks: {exc}", "WARN")
+            return {}
+        if claimed:
+            claimed_ids = set(claimed)
+            self._startup_gate_waivers = {
+                check_id: waiver
+                for check_id, waiver in self._startup_gate_waivers.items()
+                if check_id not in claimed_ids
+            }
+        return {
+            check_id: dict(waiver)
+            for check_id, waiver in claimed.items()
+        }
 
     def persist_mode(self, mode: str) -> bool:
         """Persist and apply a runtime-owned terminal mode transition."""

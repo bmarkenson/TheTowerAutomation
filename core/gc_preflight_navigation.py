@@ -843,6 +843,9 @@ def run_read_only_gc_preflight(
             ultimate_observations=ultimate_observations,
             detector=detector,
         )
+        waivers = requirements.get("_gate_waivers")
+        if isinstance(waivers, Mapping) and waivers:
+            validation_args["waivers"] = dict(waivers)
         if free_upgrade_lock_requirements is not None:
             validation_args.update(
                 free_upgrade_lock_requirements=free_upgrade_lock_requirements,

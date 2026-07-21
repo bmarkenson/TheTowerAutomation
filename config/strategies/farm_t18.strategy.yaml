@@ -57,6 +57,13 @@ session_preflight:
       armor_primary: Orbital Augment
       core_primary: Multiverse Nexus
       core_assist: Dimension Core
+  fallbacks:
+    bots_preset:
+    - id: flame
+      label: Continue with Flame for this run
+      value: Flame
+      description: Keep the currently selected Flame Bot preset and waive only the
+        Farm Bot preset check.
 vars:
   run_initialised: false
   fast_loop_active: false
@@ -91,6 +98,8 @@ vars:
   gc_session_preflight_last_status: ''
   gc_session_preflight_last_reason: ''
   gc_session_preflight_evidence: {}
+  gc_session_preflight_failed_checks: []
+  gc_session_preflight_waivers: {}
 per_run_reset:
 - run_initialised
 - fast_loop_active
@@ -446,3 +455,10 @@ run_configuration:
       - Protector
       - Fast
       - Basic
+  gate_fallbacks:
+    bots_preset:
+    - id: flame
+      label: Continue with Flame for this run
+      value: Flame
+      description: Keep the currently selected Flame Bot preset and waive only the
+        Farm Bot preset check.

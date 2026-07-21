@@ -54,6 +54,11 @@ class BaseStrategy:
 
         return {}
 
+    def session_preflight_gate_fallbacks(self) -> Mapping[str, Any]:
+        """Return configured operator fallback choices keyed by requirement."""
+
+        return {}
+
     def run_configuration(self) -> Mapping[str, Any]:
         """Return the resolved configuration recorded with battle results."""
 

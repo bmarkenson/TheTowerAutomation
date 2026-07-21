@@ -35,3 +35,10 @@ invariants:
     Spotlight:
       primary: on
       missiles: on
+
+gate_fallbacks:
+  bots_preset:
+    - id: flame
+      label: Continue with Flame for this run
+      value: Flame
+      description: Keep the currently selected Flame Bot preset and waive only the Farm Bot preset check.

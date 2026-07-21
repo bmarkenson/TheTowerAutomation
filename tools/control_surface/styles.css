@@ -198,7 +198,12 @@ dialog::backdrop { background: rgba(1, 4, 10, .78); backdrop-filter: blur(3px); 
 .dialog-heading { position: sticky; top: 0; z-index: 2; justify-content: space-between; padding: 1.2rem 1.35rem; border-bottom: 1px solid var(--border); background: rgba(16, 24, 39, .96); }
 .dialog-body { padding: 1.35rem; }
 .auth-dialog { width: min(430px, calc(100vw - 2rem)); padding: 1.4rem; }
+.gate-dialog { width: min(620px, calc(100vw - 2rem)); padding: 1.4rem; }
 .auth-dialog input { margin-bottom: 1rem; }
+.gate-options { display: grid; gap: .65rem; margin: 1rem 0; }
+.gate-option { display: grid; grid-template-columns: auto 1fr; gap: .7rem; align-items: start; padding: .8rem; border: 1px solid var(--border); border-radius: .7rem; background: var(--panel-2); }
+.gate-option strong, .gate-option span { display: block; }
+.gate-option span { color: var(--muted); font-size: .75rem; margin-top: .2rem; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: .6rem; }
 .detail-card-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: .7rem; margin-bottom: 1rem; }
 .detail-card { padding: .85rem; border: 1px solid var(--border); border-radius: .7rem; background: var(--panel-2); }

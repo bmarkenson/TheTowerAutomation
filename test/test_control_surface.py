@@ -7,11 +7,13 @@ import json
 import os
 from pathlib import Path
 import threading
+from unittest.mock import patch
 
 import pytest
 
 from core.control_directives import ControlDirectiveError, ControlDirectiveStore
 from core.control_surface import ControlSurfaceRequestError, ControlSurfaceService
+from core.gate_decisions import build_gate_decision_options
 from tools.control_surface_server import ControlSurfaceHTTPServer, STATIC_DIR, main
 
 
@@ -335,6 +337,93 @@ def test_control_requests_are_allowlisted_and_audited(tmp_path):
         service.apply_control({"action": "tap", "x": 10, "y": 10})
     with pytest.raises(ControlSurfaceRequestError):
         service.apply_control({"action": "pause", "minutes": 0})
+
+
+def test_control_surface_resolves_only_an_offered_pending_gate_choice(tmp_path):
+    service = _service(tmp_path)
+    directive = service.control_store.publish_gate_decision(
+        strategy="farm_t18",
+        phase="home_setup",
+        check_id="bots_preset",
+        reason="Farm preset requires 240 medals",
+        expected="Farm",
+        options=build_gate_decision_options(
+            "bots_preset",
+            [{"id": "flame", "label": "Continue with Flame", "value": "Flame"}],
+        ),
+    )
+
+    response = service.apply_control(
+        {
+            "action": "resolve_gate",
+            "request_id": directive["request_id"],
+            "decision_id": "flame",
+        }
+    )
+
+    resolved = service.control_store.status()["gate_decision"]
+    assert resolved is not None
+    assert resolved["status"] == "resolved"
+    assert resolved["decision_id"] == "flame"
+    assert response["request"] == {
+        "accepted": True,
+        "action": "resolve_gate",
+        "request_id": directive["request_id"],
+        "decision_id": "flame",
+    }
+
+    with pytest.raises(ControlSurfaceRequestError, match="no longer pending"):
+        service.apply_control(
+            {
+                "action": "resolve_gate",
+                "request_id": directive["request_id"],
+                "decision_id": "retry",
+            }
+        )
+
+
+def test_control_surface_configures_run_from_selected_strategy_checks(tmp_path):
+    service = _service(tmp_path)
+    initial = service.status()["control"]
+    assert initial["startup_gate_waivers"] == {}
+    context = initial["startup_gate_context"]
+    assert context["strategy"] == "farm_t18"
+    assert "bots_preset" in {check["id"] for check in context["checks"]}
+
+    response = service.apply_control(
+        {
+            "action": "configure_run",
+            "skip_checks": ["bots_preset", "auto_pick_perks"],
+        }
+    )
+    staged = response["control"]["startup_gate_waivers"]
+    assert set(staged) == {"bots_preset", "auto_pick_perks"}
+    assert all(waiver["strategy"] == "farm_t18" for waiver in staged.values())
+
+    defaults = service.apply_control(
+        {"action": "configure_run", "skip_checks": []}
+    )
+    assert defaults["control"]["startup_gate_waivers"] == {}
+
+    with patch.object(
+        service,
+        "_runtime_evidence",
+        return_value={"active": True, "instances": []},
+    ):
+        with pytest.raises(ControlSurfaceRequestError, match="Pause automation"):
+            service.apply_control(
+                {"action": "configure_run", "skip_checks": ["bots_preset"]}
+            )
+
+    service.control_store.set_strategy("none", source="test")
+    assert service.status()["control"]["startup_gate_context"] == {
+        "strategy": "none",
+        "checks": [],
+    }
+    with pytest.raises(ControlSurfaceRequestError, match="not configurable"):
+        service.apply_control(
+            {"action": "configure_run", "skip_checks": ["bots_preset"]}
+        )
 
 
 def test_activity_filters_levels_before_applying_limit(tmp_path):

@@ -45,7 +45,7 @@ class MissionManager:
         self.ctx.data["startup_gates_deferred"] = self._startup_gates_deferred
         self._started = True
 
-    def maybe_run_start(self, detection: Detection) -> None:
+    def maybe_run_start(self, detection: Detection) -> bool:
         """Emit run-start hooks only when the battle lifecycle starts anew."""
 
         state = detection.get("state")
@@ -81,6 +81,7 @@ class MissionManager:
             if self.strategy:
                 self.strategy.on_run_start(self.ctx)
         self._last_state = state
+        return battle_started
 
     def _arm_startup_gates(self) -> None:
         if not self._startup_gates_deferred:
@@ -127,6 +128,23 @@ class MissionManager:
                 self.strategy.on_game_over(self.ctx)
             except Exception:
                 log("[STRATEGY] on_game_over handler error", "ERROR")
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        waivers = mv.get("gc_session_preflight_waivers")
+        if isinstance(waivers, Mapping) and waivers:
+            # Session preflight is normally retained for the process, but a
+            # waived result is valid for only the run the operator accepted.
+            mv["gc_no_battle_setup_completed"] = False
+            mv["gc_no_battle_setup_evidence"] = {}
+            mv["gc_session_preflight_attempted"] = False
+            mv["gc_session_preflight_completed"] = False
+            mv["gc_session_preflight_blocked"] = False
+            mv["gc_session_preflight_repair_required"] = False
+            mv["gc_session_preflight_repair_in_progress"] = False
+            mv["gc_session_preflight_last_status"] = ""
+            mv["gc_session_preflight_last_reason"] = ""
+            mv["gc_session_preflight_evidence"] = {}
+        mv["gc_session_preflight_waivers"] = {}
+        mv["gc_session_preflight_failed_checks"] = []
 
     def replace_strategy_at_boundary(
         self,
@@ -196,6 +214,49 @@ class MissionManager:
             and not mv.get("gc_session_preflight_repair_in_progress")
         )
 
+    def session_preflight_failure_checks(self) -> list[str]:
+        """Return requirement ids from the last authoritative mismatch."""
+
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        raw = mv.get("gc_session_preflight_failed_checks") or []
+        if not isinstance(raw, list):
+            return []
+        return [str(check).strip() for check in raw if str(check).strip()]
+
+    def session_preflight_waivers(self) -> Dict[str, Any]:
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        raw = mv.get("gc_session_preflight_waivers") or {}
+        return dict(raw) if isinstance(raw, Mapping) else {}
+
+    def waive_session_preflight_check(
+        self,
+        check_id: str,
+        waiver: Mapping[str, Any],
+    ) -> None:
+        """Apply one explicit run-scoped waiver and re-arm validation."""
+
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        waivers = self.session_preflight_waivers()
+        waivers[str(check_id).strip()] = dict(waiver)
+        mv["gc_session_preflight_waivers"] = waivers
+        mv["gc_session_preflight_attempted"] = False
+        mv["gc_session_preflight_completed"] = False
+        mv["gc_session_preflight_blocked"] = False
+        mv["gc_session_preflight_repair_required"] = False
+        mv["gc_session_preflight_repair_in_progress"] = False
+        mv["gc_session_preflight_failed_checks"] = []
+
+    def retry_session_preflight(self) -> None:
+        """Re-arm an unchanged session preflight after operator direction."""
+
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        mv["gc_session_preflight_attempted"] = False
+        mv["gc_session_preflight_completed"] = False
+        mv["gc_session_preflight_blocked"] = False
+        mv["gc_session_preflight_repair_required"] = False
+        mv["gc_session_preflight_repair_in_progress"] = False
+        mv["gc_session_preflight_failed_checks"] = []
+
     def begin_session_preflight_repair(self) -> bool:
         """Claim the one guarded surrender transition for a repair request."""
 
@@ -228,7 +289,25 @@ class MissionManager:
             return {}
         return dict(self.strategy.session_preflight_requirements())
 
-    def mark_no_battle_setup_complete(self, evidence: Mapping[str, Any]) -> None:
+    def gate_fallbacks(self, check_id: str) -> list[Dict[str, Any]]:
+        """Return profile-declared choices for one failed gate."""
+
+        if not self.strategy:
+            return []
+        configured = self.strategy.session_preflight_gate_fallbacks()
+        if not isinstance(configured, Mapping):
+            return []
+        raw = configured.get(str(check_id or "").strip())
+        if not isinstance(raw, list):
+            return []
+        return [dict(option) for option in raw if isinstance(option, Mapping)]
+
+    def mark_no_battle_setup_complete(
+        self,
+        evidence: Mapping[str, Any],
+        *,
+        waivers: Optional[Mapping[str, Any]] = None,
+    ) -> None:
         mv = self.ctx.data.setdefault("mission_vars", {})
         repairing = bool(
             mv.get("gc_session_preflight_repair_required")
@@ -236,6 +315,10 @@ class MissionManager:
         )
         mv["gc_no_battle_setup_completed"] = True
         mv["gc_no_battle_setup_evidence"] = dict(evidence)
+        mv["gc_session_preflight_waivers"] = {
+            str(key): dict(value) if isinstance(value, Mapping) else value
+            for key, value in (waivers or {}).items()
+        }
         mv["gc_session_preflight_repair_required"] = False
         mv["gc_session_preflight_repair_in_progress"] = False
         if repairing:

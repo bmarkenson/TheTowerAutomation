@@ -387,6 +387,35 @@ def test_complete_session_preflight_combines_all_positive_evidence():
     assert evidence.ultimate_weapons.valid
 
 
+def test_bots_waiver_does_not_waive_auto_pick_perks():
+    observed = {
+        label: dict(toggles)
+        for label, toggles in GC_ULTIMATE_REQUIREMENTS.items()
+    }
+    evidence = validate_gc_session_preflight_screens(
+        cards_screen=_load(FARM_ACTIVE_FIXTURE),
+        workshop_screen=_load(WORKSHOP_FIXTURE),
+        bots_screen=_load(BOT_INACTIVE_FIXTURE),
+        guardians_screen=_load(GUARDIAN_FIXTURE),
+        modules_screen=_load(MODULES_FIXTURE),
+        perks_screen=np.zeros((1920, 1080, 3), dtype=np.uint8),
+        module_requirements=GC_MODULE_REQUIREMENTS,
+        ultimate_requirements=GC_ULTIMATE_REQUIREMENTS,
+        ultimate_observations=observed,
+        waivers={"bots_preset": {"decision_id": "flame"}},
+    )
+
+    payload = evidence.as_dict()
+    assert not evidence.configuration.bots.valid
+    assert evidence.configuration_valid
+    assert not evidence.valid
+    assert evidence.failed_checks == ("auto_pick_perks",)
+    assert payload["configuration"]["blocking_valid"] is True
+    assert payload["waivers"] == {
+        "bots_preset": {"decision_id": "flame"}
+    }
+
+
 def test_observed_module_mismatch_is_reported_without_blocking_preflight():
     observed = {
         label: dict(toggles)

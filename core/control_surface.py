@@ -16,6 +16,7 @@ from core.app_setup import CONFIGURABLE_STRATEGIES, STARTUP_GATE_POLICIES
 from core.automation_process import AutomationProcessError, SystemdAutomationManager
 from core.battle_classification import classification_for_record
 from core.control_directives import ControlDirectiveError, ControlDirectiveStore
+from core.gate_decisions import startup_gate_context_for_strategy
 
 
 MAX_PAUSE_MINUTES = 7 * 24 * 60
@@ -107,6 +108,8 @@ class ControlSurfaceService:
                 "strategy": None,
                 "strategy_updated_at": None,
                 "strategy_request_id": None,
+                "gate_decision": None,
+                "startup_gate_waivers": {},
                 "exists": self.control_path.exists(),
             }
         control["path"] = self._display_path(self.control_path)
@@ -119,6 +122,10 @@ class ControlSurfaceService:
         runtime = self._runtime_evidence()
         process_service = (
             self.process_manager.status() if self.process_manager is not None else None
+        )
+        control["startup_gate_context"] = self._startup_gate_context(
+            control,
+            process_service,
         )
         healthy = bool(runtime["active"] and observation and not observation["stale"])
 
@@ -182,9 +189,81 @@ class ControlSurfaceService:
                 mode = str(request.get("mode") or "").strip().upper()
                 self.control_store.set_mode(mode, source="control-surface")
                 audit = f"Requested mode {mode}"
+            elif action == "resolve_gate":
+                request_id = str(request.get("request_id") or "").strip()
+                decision_id = str(request.get("decision_id") or "").strip().lower()
+                if not request_id or not decision_id:
+                    raise ControlSurfaceRequestError(
+                        "resolve_gate requires request_id and decision_id"
+                    )
+                directive = self.control_store.resolve_gate_decision(
+                    request_id,
+                    decision_id,
+                    source="control-surface",
+                )
+                if directive is None:
+                    raise ControlSurfaceRequestError(
+                        "Gate decision is no longer pending",
+                        status=409,
+                    )
+                audit = (
+                    f"Resolved startup gate {directive['check_id']} with "
+                    f"{directive['decision_id']} ({directive['request_id']})"
+                )
+            elif action == "configure_run":
+                raw_checks = request.get("skip_checks")
+                if not isinstance(raw_checks, list):
+                    raise ControlSurfaceRequestError(
+                        "configure_run requires a skip_checks array"
+                    )
+                skip_checks = {
+                    str(check_id or "").strip().lower()
+                    for check_id in raw_checks
+                }
+                current = self.status()
+                process_service = current.get("process_service") or {}
+                process_active = bool(
+                    current.get("runtime", {}).get("active")
+                    or process_service.get("active")
+                )
+                if (
+                    process_active
+                    and current["control"].get("state") != "PAUSED"
+                ):
+                    raise ControlSurfaceRequestError(
+                        "Pause automation before configuring the run",
+                        status=409,
+                    )
+                context = current["control"].get("startup_gate_context") or {}
+                allowed = {
+                    str(check.get("id") or "")
+                    for check in context.get("checks") or []
+                    if isinstance(check, Mapping)
+                }
+                unsupported = skip_checks - allowed
+                if unsupported:
+                    raise ControlSurfaceRequestError(
+                        "Checks are not configurable for strategy "
+                        f"{context.get('strategy') or 'none'}: "
+                        + ", ".join(sorted(unsupported))
+                    )
+                configured = self.control_store.configure_startup_gate_waivers(
+                    sorted(skip_checks),
+                    strategy=str(context.get("strategy") or ""),
+                    source="control-surface",
+                )
+                audit = (
+                    f"Configured next {context.get('strategy') or 'strategy'} run: "
+                    + (
+                        "skip " + ", ".join(sorted(configured))
+                        if configured
+                        else "strategy defaults"
+                    )
+                )
             else:
                 raise ControlSurfaceRequestError(
-                    "action must be one of pause, resume, stop, or mode"
+                    "action must be pause, resume, stop, mode, resolve_gate, "
+                    "or configure_run"
                 )
         except ControlDirectiveError as exc:
             raise ControlSurfaceRequestError(str(exc), status=409) from exc
@@ -196,9 +275,28 @@ class ControlSurfaceService:
         audit_warning = self._append_audit(audit)
         response = self.status()
         response["request"] = {"accepted": True, "action": action}
+        if action == "resolve_gate":
+            response["request"]["request_id"] = directive["request_id"]
+            response["request"]["decision_id"] = directive["decision_id"]
+        elif action == "configure_run":
+            response["request"]["skip_checks"] = sorted(configured)
         if audit_warning:
             response["request"]["warning"] = audit_warning
         return response
+
+    @staticmethod
+    def _startup_gate_context(
+        control: Mapping[str, Any],
+        process_service: Optional[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        strategy = str(control.get("strategy") or "").strip().lower()
+        if not strategy and isinstance(process_service, Mapping):
+            strategy = str(process_service.get("strategy") or "").strip().lower()
+        strategy = strategy or "farm"
+        try:
+            return startup_gate_context_for_strategy(strategy)
+        except (OSError, TypeError, ValueError):
+            return {"strategy": strategy, "checks": []}
 
     def apply_process_action(self, request: Mapping[str, Any]) -> dict[str, Any]:
         """Start or stop the configured automation service at a safe boundary."""

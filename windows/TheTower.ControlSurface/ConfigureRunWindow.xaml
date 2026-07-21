@@ -1,0 +1,56 @@
+<Window x:Class="TheTower.ControlSurface.ConfigureRunWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Configure next run"
+        Width="680" Height="600" MinWidth="540" MinHeight="440"
+        WindowStartupLocation="CenterOwner"
+        Background="#0A0E16" Foreground="#EDF2F7"
+        ShowInTaskbar="False">
+  <Grid Margin="18">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <StackPanel>
+      <TextBlock Text="Configure run" FontSize="20" FontWeight="SemiBold" />
+      <TextBlock x:Name="StrategyText" Foreground="#93A4BB" Margin="0,5,0,0" />
+    </StackPanel>
+    <Border Grid.Row="1" Background="#111827" BorderBrush="#263349"
+            BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,14,0,10">
+      <TextBlock TextWrapping="Wrap"
+                 Text="Checked items will be skipped once for this strategy. Unchecked items use the strategy default. This dialog is optional and does not start the run." />
+    </Border>
+    <ListBox Grid.Row="2" x:Name="ChecksList" Background="#111827"
+             BorderBrush="#263349" Foreground="#EDF2F7" Padding="4">
+      <ListBox.ItemTemplate>
+        <DataTemplate>
+          <CheckBox IsChecked="{Binding Skip, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                    Margin="8,7" VerticalContentAlignment="Top">
+            <StackPanel>
+              <TextBlock Text="{Binding Label}" FontWeight="SemiBold" TextWrapping="Wrap" />
+              <TextBlock Text="{Binding ExpectedText}" Foreground="#93A4BB"
+                         FontSize="11" TextWrapping="Wrap" Margin="0,3,0,0" />
+            </StackPanel>
+          </CheckBox>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+    <Grid Grid.Row="3" Margin="0,14,0,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+      <TextBlock Text="Selections are consumed by the next applicable run."
+                 Foreground="#93A4BB" FontSize="11" VerticalAlignment="Center" />
+      <Button Grid.Column="1" Content="Use all defaults" Click="Defaults_Click" />
+      <Button Grid.Column="2" Content="Cancel" Click="Cancel_Click" />
+      <Button Grid.Column="3" Content="Save configuration" Click="Save_Click"
+              Style="{StaticResource PrimaryButton}" />
+    </Grid>
+  </Grid>
+</Window>

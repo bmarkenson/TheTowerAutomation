@@ -1,8 +1,9 @@
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import cv2
+import numpy as np
 
 from core.app import App
 from core.battle_lifecycle import HomeBattleControl
@@ -10,8 +11,10 @@ from core.free_upgrade_locks import FARM_FREE_UPGRADE_LOCKS
 from core.gc_no_battle_setup import (
     GcNoBattleSetupResult,
     GcNoBattleSetupStatus,
+    _is_not_enough_medals_dialog,
     run_gc_no_battle_setup,
 )
+from core.gate_decisions import build_gate_decision_options
 from core.home_battle import HomeBattleEvidence
 from core.matcher import get_match
 from core.workshop_preset import (
@@ -49,6 +52,7 @@ class _NoBattleRouter:
         selected: bool = False,
         correct_guardians: bool = False,
         bots_offscreen: bool = False,
+        deny_bots_preset: bool = False,
     ):
         self.state = "home"
         self.selected = {
@@ -65,6 +69,7 @@ class _NoBattleRouter:
         self.visible_actions = []
         self.module_checks = []
         self.bots_offscreen = bots_offscreen
+        self.deny_bots_preset = deny_bots_preset
         self.swipes = []
 
     def capture(self):
@@ -91,6 +96,11 @@ class _NoBattleRouter:
             return {
                 "state": "EVENT",
                 "secondary_states": secondary,
+            }
+        if frame == "medals_dialog":
+            return {
+                "state": "EVENT",
+                "secondary_states": ["EVENT_BOTS_SCREEN", "BOTS_FARM_SLOT"],
             }
         if frame == "guild":
             return {"state": "GUILD", "secondary_states": []}
@@ -119,6 +129,9 @@ class _NoBattleRouter:
 
     def static_tap(self, label, **_kwargs):
         self.static_actions.append(label)
+        if label == (540, 1100) and self.state == "medals_dialog":
+            self.state = "bots"
+            return True
         transitions = {
             ("home", "navigation.goto_cards_home"): "cards",
             ("home", "navigation.goto_workshop_home"): "workshop",
@@ -163,7 +176,13 @@ class _NoBattleRouter:
             self.state = "event"
             return True
         if self.state == "bots" and label == "indicators.bots:farm_slot":
+            if self.deny_bots_preset:
+                self.state = "medals_dialog"
+                return True
             self.selected[BOTS_FARM_PRESET_SLOT] = True
+            return True
+        if self.state in {"bots", "guardians"} and label == "buttons.return_to_game":
+            self.state = "home"
             return True
         if self.state == "home" and label == "navigation.home_guild":
             self.state = "guild"
@@ -188,10 +207,11 @@ class _NoBattleRouter:
         return True
 
 
-def _run(router, requirements=REQUIREMENTS):
+def _run(router, requirements=REQUIREMENTS, *, waivers=None):
     return run_gc_no_battle_setup(
         requirements,
         screenshot="home",
+        waivers=waivers,
         capture_fn=router.capture,
         detector=router.detect,
         detect_home_control_fn=router.home_control,
@@ -219,11 +239,13 @@ def test_no_battle_setup_corrects_supported_farm_presets_and_guardians():
         "indicators.workshop:farm_slot",
         "navigation.home_event",
         "indicators.bots:farm_slot",
+        "buttons.return_to_game",
         "navigation.home_guild",
         "indicators.guardian:attack_equipped",
         "buttons.guardian:fetch_inventory",
         "indicators.guardian:ally_equipped",
         "buttons.guardian:summon_inventory",
+        "buttons.return_to_game",
     ]
 
 
@@ -236,8 +258,77 @@ def test_no_battle_setup_leaves_already_correct_settings_untouched():
     assert router.module_checks == [REQUIREMENTS["modules"]]
     assert router.visible_actions == [
         "navigation.home_event",
+        "buttons.return_to_game",
         "navigation.home_guild",
+        "buttons.return_to_game",
     ]
+
+
+def test_not_enough_medals_dialog_requires_exact_high_confidence_text():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+    assert _is_not_enough_medals_dialog(
+        frame,
+        text_fn=lambda *_args, **_kwargs: (
+            "NOT ENOUGH MEDALS You need 240 medals to switch presets",
+            95.7,
+        ),
+    )
+    assert not _is_not_enough_medals_dialog(
+        frame,
+        text_fn=lambda *_args, **_kwargs: ("Not enough currency", 99.0),
+    )
+    assert not _is_not_enough_medals_dialog(
+        frame,
+        text_fn=lambda *_args, **_kwargs: (
+            "NOT ENOUGH MEDALS You need 240 medals to switch presets",
+            60.0,
+        ),
+    )
+
+
+def test_failed_bots_preset_dismisses_exact_medals_dialog_and_restores_home():
+    router = _NoBattleRouter(
+        selected=True,
+        correct_guardians=True,
+        deny_bots_preset=True,
+    )
+    router.selected[BOTS_FARM_PRESET_SLOT] = False
+
+    with patch("core.gc_no_battle_setup._is_not_enough_medals_dialog", return_value=True):
+        result = _run(router)
+
+    assert result.status is GcNoBattleSetupStatus.FAILED
+    assert result.reason == "preset did not become selected: indicators.bots:farm_slot"
+    assert router.state == "home"
+    assert (540, 1100) in router.static_actions
+    assert router.visible_actions[-1] == "buttons.return_to_game"
+
+
+def test_scoped_bots_waiver_preserves_current_preset_and_runs_later_checks():
+    router = _NoBattleRouter(
+        selected=True,
+        correct_guardians=True,
+        deny_bots_preset=True,
+    )
+    router.selected[BOTS_FARM_PRESET_SLOT] = False
+    waiver = {
+        "request_id": "gate-1",
+        "decision_id": "flame",
+        "value": "Flame",
+    }
+
+    result = _run(router, waivers={"bots_preset": waiver})
+
+    assert result.complete
+    assert "indicators.bots:farm_slot" not in router.visible_actions
+    assert router.module_checks == [REQUIREMENTS["modules"]]
+    assert result.evidence["bots_preset"] == {
+        "status": "waived",
+        "check_id": "bots_preset",
+        "required": "Farm",
+        "waiver": waiver,
+    }
 
 
 def test_no_battle_setup_enforces_free_upgrade_locks_after_farm_preset():
@@ -446,3 +537,279 @@ def test_app_blocks_battle_start_when_no_battle_setup_fails():
     manager.mark_no_battle_setup_complete.assert_not_called()
     handle_home.assert_not_called()
     manager.on_home.assert_not_called()
+
+
+def test_app_configured_fallback_waives_only_failed_check_and_retries_setup():
+    frame = object()
+    recovered_home = object()
+    manager = Mock()
+    manager.strategy = SimpleNamespace(name="farm_t18")
+    manager.no_battle_setup_requirements.return_value = REQUIREMENTS
+    manager.gate_fallbacks.return_value = [
+        {
+            "id": "flame",
+            "label": "Continue with Flame for this run",
+            "value": "Flame",
+        }
+    ]
+    supervisor = Mock()
+    supervisor.gate_decision = None
+    pending = {
+        "request_id": "gate-1",
+        "status": "pending",
+        "strategy": "farm_t18",
+        "phase": "home_setup",
+        "check_id": "bots_preset",
+        "reason": "preset did not become selected",
+        "options": [
+            {
+                "id": "flame",
+                "label": "Continue with Flame for this run",
+                "value": "Flame",
+                "kind": "fallback",
+                "action": "waive",
+            }
+        ],
+    }
+    resolved = {
+        **pending,
+        "status": "resolved",
+        "decision_id": "flame",
+        "selected_option": pending["options"][0],
+    }
+    supervisor.publish_gate_decision.return_value = pending
+    supervisor.resolve_gate_decision.return_value = resolved
+    app = App.__new__(App)
+    app._auto_start_enabled = True
+    app._mission_mgr = manager
+    app._supervisor = supervisor
+    app._gate_decision_prompt = lambda _decision: "flame"
+    app._gate_prompted_request_id = None
+    app._startup_gate_waivers = {}
+    app._fast_game_over = False
+    app._last_wave_value = None
+    app._last_wave_conf = -1.0
+    app._status_reporter = Mock()
+    app._handle_daily_gem_if_due = Mock(return_value=False)
+    app._handle_mission_rewards_if_due = Mock(return_value=False)
+    app._capture_frame = Mock(return_value=recovered_home)
+    setup = GcNoBattleSetupResult(
+        GcNoBattleSetupStatus.FAILED,
+        "preset did not become selected: indicators.bots:farm_slot",
+        {"cards_deck": "Farm", "workshop_preset": "Farm"},
+        "bots_preset",
+    )
+    completed = GcNoBattleSetupResult(
+        GcNoBattleSetupStatus.COMPLETE,
+        "ok",
+        {"bots_preset": {"status": "waived"}},
+    )
+
+    with (
+        patch(
+            "core.app.detect_home_battle_control",
+            return_value=HomeBattleEvidence(
+                HomeBattleControl.NEW_BATTLE,
+                "test",
+                100.0,
+            ),
+        ),
+        patch(
+            "core.app.run_gc_no_battle_setup",
+            side_effect=[setup, completed],
+        ) as run_setup,
+        patch("core.app.handle_home_screen") as handle_home,
+    ):
+        app._handle_primary_states("HOME_SCREEN", set(), frame)
+
+    supervisor.publish_gate_decision.assert_called_once()
+    supervisor.resolve_gate_decision.assert_called_once_with(
+        "gate-1",
+        "flame",
+        source="runtime-cli",
+    )
+    waiver = {
+        "request_id": "gate-1",
+        "decision_id": "flame",
+        "label": "Continue with Flame for this run",
+        "kind": "fallback",
+        "value": "Flame",
+        "reason": "preset did not become selected",
+    }
+    assert run_setup.call_args_list == [
+        call(REQUIREMENTS, screenshot=frame),
+        call(
+            REQUIREMENTS,
+            screenshot=recovered_home,
+            waivers={"bots_preset": waiver},
+        ),
+    ]
+    manager.mark_no_battle_setup_complete.assert_called_once_with(
+        completed.evidence,
+        waivers={"bots_preset": waiver},
+    )
+    supervisor.consume_gate_decision.assert_called_once_with(
+        "gate-1",
+        completion_reason="waived bots_preset for this run",
+    )
+    handle_home.assert_called_once_with(restart_enabled=True)
+    manager.on_home.assert_called_once_with()
+
+
+def test_app_claims_optional_configured_skip_before_home_setup():
+    frame = object()
+    manager = Mock()
+    manager.strategy = SimpleNamespace(name="farm_t18")
+    manager.no_battle_setup_requirements.return_value = REQUIREMENTS
+    supervisor = Mock()
+    supervisor.gate_decision = None
+    supervisor.claim_startup_gate_waivers.return_value = {
+        "bots_preset": {
+            "request_id": "proactive-1",
+            "check_id": "bots_preset",
+            "label": "Bot preset",
+            "status": "claimed",
+            "strategy": "farm_t18",
+        }
+    }
+    app = App.__new__(App)
+    app._auto_start_enabled = True
+    app._mission_mgr = manager
+    app._supervisor = supervisor
+    app._startup_gate_waivers = {}
+    app._fast_game_over = False
+    app._last_wave_value = None
+    app._last_wave_conf = -1.0
+    app._status_reporter = Mock()
+    app._handle_daily_gem_if_due = Mock(return_value=False)
+    app._handle_mission_rewards_if_due = Mock(return_value=False)
+    setup = GcNoBattleSetupResult(
+        GcNoBattleSetupStatus.COMPLETE,
+        "ok",
+        {"bots_preset": {"status": "waived"}},
+    )
+
+    with (
+        patch(
+            "core.app.detect_home_battle_control",
+            return_value=HomeBattleEvidence(
+                HomeBattleControl.NEW_BATTLE,
+                "test",
+                100.0,
+            ),
+        ),
+        patch(
+            "core.app.run_gc_no_battle_setup",
+            return_value=setup,
+        ) as run_setup,
+        patch("core.app.handle_home_screen") as handle_home,
+    ):
+        app._handle_primary_states("HOME_SCREEN", set(), frame)
+
+    waiver = {
+        "request_id": "proactive-1",
+        "decision_id": "proactive_skip",
+        "label": "Bot preset",
+        "kind": "proactive",
+        "value": "",
+        "reason": "configured before the run",
+    }
+    run_setup.assert_called_once_with(
+        REQUIREMENTS,
+        screenshot=frame,
+        waivers={"bots_preset": waiver},
+    )
+    manager.mark_no_battle_setup_complete.assert_called_once_with(
+        setup.evidence,
+        waivers={"bots_preset": waiver},
+    )
+    handle_home.assert_called_once_with(restart_enabled=True)
+
+
+def test_app_claims_optional_session_only_skip_for_active_run():
+    manager = Mock()
+    manager.strategy = SimpleNamespace(
+        name="farm_t18",
+        session_preflight_requirements=lambda: {
+            "bots_preset": "Farm",
+            "auto_pick_perks": True,
+        },
+    )
+    supervisor = Mock()
+    supervisor.gate_decision = None
+    supervisor.claim_startup_gate_waivers.return_value = {
+        "auto_pick_perks": {
+            "request_id": "proactive-auto",
+            "check_id": "auto_pick_perks",
+            "label": "Auto Pick Perks",
+            "status": "claimed",
+            "strategy": "farm_t18",
+        }
+    }
+    app = App.__new__(App)
+    app._mission_mgr = manager
+    app._supervisor = supervisor
+    app._startup_gate_waivers = {}
+
+    applied = app._claim_proactive_gate_waivers(for_home_setup=False)
+
+    assert set(applied) == {"auto_pick_perks"}
+    manager.waive_session_preflight_check.assert_called_once_with(
+        "auto_pick_perks",
+        applied["auto_pick_perks"],
+    )
+    manager.waive_session_preflight_check.assert_called_once()
+
+
+def test_terminal_session_bypass_rearms_only_the_failed_auto_pick_check():
+    manager = Mock()
+    manager.strategy = SimpleNamespace(
+        name="farm_t18",
+        session_preflight_requirements=lambda: {"auto_pick_perks": True},
+    )
+    manager.session_preflight_failure_checks.return_value = ["auto_pick_perks"]
+    manager.gate_fallbacks.return_value = []
+    manager.ctx.data = {
+        "mission_vars": {
+            "gc_session_preflight_last_reason": "configuration mismatch",
+        }
+    }
+    options = build_gate_decision_options("auto_pick_perks")
+    pending = {
+        "request_id": "gate-auto-pick",
+        "status": "pending",
+        "strategy": "farm_t18",
+        "phase": "session_preflight",
+        "check_id": "auto_pick_perks",
+        "reason": "configuration mismatch",
+        "expected": "True",
+        "options": options,
+    }
+    resolved = {
+        **pending,
+        "status": "resolved",
+        "decision_id": "bypass_once",
+        "selected_option": next(
+            option for option in options if option["id"] == "bypass_once"
+        ),
+    }
+    supervisor = Mock()
+    supervisor.gate_decision = None
+    supervisor.publish_gate_decision.return_value = pending
+    supervisor.resolve_gate_decision.return_value = resolved
+    app = App.__new__(App)
+    app._mission_mgr = manager
+    app._supervisor = supervisor
+    app._gate_decision_prompt = lambda _decision: "bypass_once"
+    app._gate_prompted_request_id = None
+
+    app._handle_terminal_session_gate_decision()
+
+    manager.waive_session_preflight_check.assert_called_once()
+    check_id, waiver = manager.waive_session_preflight_check.call_args.args
+    assert check_id == "auto_pick_perks"
+    assert waiver["decision_id"] == "bypass_once"
+    supervisor.consume_gate_decision.assert_called_once_with(
+        "gate-auto-pick",
+        completion_reason="waived auto_pick_perks for this run",
+    )

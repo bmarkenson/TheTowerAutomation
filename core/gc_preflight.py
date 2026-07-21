@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
 from core.auto_pick_perks import AutoPickPerksEvidence, measure_auto_pick_perks
@@ -102,19 +102,44 @@ class GcSessionPreflightEvidence:
     auto_pick_perks_required: bool
     auto_pick_perks: AutoPickPerksEvidence
     ultimate_weapons: UltimateWeaponEvidence
+    waivers: Mapping[str, Any] = field(default_factory=dict)
+
+    def is_waived(self, check_id: str) -> bool:
+        return str(check_id) in self.waivers
+
+    @property
+    def configuration_valid(self) -> bool:
+        return (
+            (self.configuration.cards.valid or self.is_waived("cards_deck"))
+            and (
+                self.configuration.workshop.valid
+                or self.is_waived("workshop_preset")
+            )
+            and (self.configuration.bots.valid or self.is_waived("bots_preset"))
+            and (
+                self.configuration.guardians.valid
+                or self.is_waived("guardian_chips")
+            )
+        )
 
     @property
     def modules_blocking_valid(self) -> bool:
-        return self.module_mode != "enforce" or bool(
+        return self.is_waived("modules") or self.module_mode != "enforce" or bool(
             self.modules is not None and self.modules.valid
         )
 
     @property
     def auto_pick_perks_valid(self) -> bool:
-        return not self.auto_pick_perks_required or self.auto_pick_perks.enabled
+        return (
+            self.is_waived("auto_pick_perks")
+            or not self.auto_pick_perks_required
+            or self.auto_pick_perks.enabled
+        )
 
     @property
     def free_upgrade_locks_valid(self) -> bool:
+        if self.is_waived("free_upgrade_locks"):
+            return True
         if not self.free_upgrade_lock_requirements:
             return True
         if self.free_upgrade_locks is None or not self.free_upgrade_locks.valid:
@@ -126,26 +151,52 @@ class GcSessionPreflightEvidence:
     @property
     def valid(self) -> bool:
         return (
-            self.configuration.valid
+            self.configuration_valid
             and self.free_upgrade_locks_valid
             and self.modules_blocking_valid
             and self.auto_pick_perks_valid
-            and self.ultimate_weapons.valid
+            and (
+                self.ultimate_weapons.valid
+                or self.is_waived("ultimate_weapons")
+            )
         )
+
+    @property
+    def failed_checks(self) -> tuple[str, ...]:
+        failures = []
+        for check_id, valid in (
+            ("cards_deck", self.configuration.cards.valid),
+            ("workshop_preset", self.configuration.workshop.valid),
+            ("bots_preset", self.configuration.bots.valid),
+            ("guardian_chips", self.configuration.guardians.valid),
+            ("free_upgrade_locks", self.free_upgrade_locks_valid),
+            ("modules", self.modules_blocking_valid),
+            ("auto_pick_perks", self.auto_pick_perks_valid),
+            (
+                "ultimate_weapons",
+                self.ultimate_weapons.valid
+                or self.is_waived("ultimate_weapons"),
+            ),
+        ):
+            if not valid and not self.is_waived(check_id):
+                failures.append(check_id)
+        return tuple(failures)
 
     @property
     def requires_no_battle_repair(self) -> bool:
         """Whether a mismatch belongs to a no-battle configuration surface."""
 
         return (
-            not self.configuration.valid
+            not self.configuration_valid
             or bool(
-                self.free_upgrade_lock_requirements
+                not self.is_waived("free_upgrade_locks")
+                and self.free_upgrade_lock_requirements
                 and self.free_upgrade_locks is not None
                 and self.free_upgrade_locks.has_authoritative_mismatch
             )
             or bool(
-                self.module_mode == "enforce"
+                not self.is_waived("modules")
+                and self.module_mode == "enforce"
                 and self.modules is not None
                 and self.modules.has_authoritative_mismatch
             )
@@ -188,6 +239,8 @@ class GcSessionPreflightEvidence:
             valid=self.auto_pick_perks_valid,
         )
         payload["ultimate_weapons"]["valid"] = self.ultimate_weapons.valid
+        payload["configuration"]["blocking_valid"] = self.configuration_valid
+        payload["failed_checks"] = list(self.failed_checks)
         payload["valid"] = self.valid
         return payload
 
@@ -425,6 +478,7 @@ def validate_gc_session_preflight_screens(
     detector: Detector = detect_state_and_overlays,
     section_specs: Mapping[str, GcSectionSpec] = GC_SECTION_SPECS,
     auto_pick_perks_required: bool = True,
+    waivers: Optional[Mapping[str, Any]] = None,
 ) -> GcSessionPreflightEvidence:
     """Validate every currently implemented read-only session requirement."""
 
@@ -476,6 +530,7 @@ def validate_gc_session_preflight_screens(
             ultimate_requirements,
             ultimate_observations,
         ),
+        waivers=dict(waivers or {}),
     )
 
 

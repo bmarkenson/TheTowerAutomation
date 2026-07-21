@@ -26,6 +26,12 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _activityRefreshCancellation;
     private bool _startupGatePolicyDirty;
     private string _strategyRequestMessage = "";
+    private StartupGateContext? _startupGateContext;
+    private IReadOnlyDictionary<string, StartupGateWaiverStatus> _startupGateWaivers
+        = new Dictionary<string, StartupGateWaiverStatus>();
+    private GateDecisionStatus? _currentGateDecision;
+    private string? _autoPromptedGateRequestId;
+    private bool _gateDecisionDialogOpen;
 
     public MainWindow()
     {
@@ -222,6 +228,86 @@ public partial class MainWindow : Window
         catch (Exception exc)
         {
             ShowError(exc);
+        }
+    }
+
+    private async void ConfigureRun_Click(object sender, RoutedEventArgs e)
+    {
+        if (_startupGateContext is not { Checks.Count: > 0 } context)
+        {
+            return;
+        }
+        try
+        {
+            var dialog = new ConfigureRunWindow(
+                context,
+                _startupGateWaivers)
+            {
+                Owner = this,
+            };
+            if (dialog.ShowDialog() != true)
+            {
+                return;
+            }
+            var response = await _api.PostControlAsync(
+                new
+                {
+                    action = "configure_run",
+                    skip_checks = dialog.SelectedSkipIds,
+                },
+                CancellationToken.None);
+            RenderStatus(response);
+            await RefreshActivityAsync(force: true);
+        }
+        catch (Exception exc)
+        {
+            ShowError(exc);
+            await RefreshStatusAsync(force: true);
+        }
+    }
+
+    private async void GateDecision_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentGateDecision is not { Status: "pending" } decision)
+        {
+            return;
+        }
+        await ShowGateDecisionAsync(decision);
+    }
+
+    private async Task ShowGateDecisionAsync(GateDecisionStatus decision)
+    {
+        if (_gateDecisionDialogOpen)
+        {
+            return;
+        }
+        _gateDecisionDialogOpen = true;
+        try
+        {
+            var dialog = new GateDecisionWindow(decision) { Owner = this };
+            if (dialog.ShowDialog() != true || dialog.SelectedOption is null)
+            {
+                return;
+            }
+            var response = await _api.PostControlAsync(
+                new
+                {
+                    action = "resolve_gate",
+                    request_id = decision.RequestId,
+                    decision_id = dialog.SelectedOption.Id,
+                },
+                CancellationToken.None);
+            RenderStatus(response);
+            await RefreshActivityAsync(force: true);
+        }
+        catch (Exception exc)
+        {
+            ShowError(exc);
+            await RefreshStatusAsync(force: true);
+        }
+        finally
+        {
+            _gateDecisionDialogOpen = false;
         }
     }
 
@@ -576,6 +662,49 @@ public partial class MainWindow : Window
                 StringComparison.OrdinalIgnoreCase)
             && status.Control.RemainingSeconds is null
             && status.Acknowledgements.State?.AcknowledgesCurrent == true;
+        _startupGateContext = status.Control.StartupGateContext;
+        _startupGateWaivers = status.Control.StartupGateWaivers;
+        var canConfigureRun = !processActive
+            || string.Equals(
+                status.Control.State,
+                "PAUSED",
+                StringComparison.OrdinalIgnoreCase);
+        ConfigureRunButton.IsEnabled = canConfigureRun
+            && _startupGateContext?.Checks.Count > 0;
+        var configuredSkips = _startupGateContext is null
+            ? new List<string>()
+            : _startupGateContext.Checks
+                .Where(check => _startupGateWaivers.TryGetValue(check.Id, out var waiver)
+                    && string.Equals(
+                        waiver.Strategy,
+                        _startupGateContext.Strategy,
+                        StringComparison.OrdinalIgnoreCase))
+                .Select(check => check.Label)
+                .ToList();
+        ConfigureRunText.Text = configuredSkips.Count > 0
+            ? "Skip once: " + string.Join(", ", configuredSkips)
+            : !canConfigureRun
+                ? "Pause automation to configure one-run skips."
+            : "Strategy defaults; no one-run skips staged.";
+        _currentGateDecision = status.Control.GateDecision;
+        var pendingGate = status.Control.GateDecision is
+            { Status: "pending" } gate ? gate : null;
+        GateDecisionButton.IsEnabled = pendingGate is not null;
+        GateDecisionText.Text = status.Control.GateDecision switch
+        {
+            { Status: "pending" } decision =>
+                $"{decision.CheckId}: {decision.Reason}",
+            { Status: "resolved" } decision =>
+                $"{decision.CheckId}: {decision.DecisionId}; waiting for runtime.",
+            _ => "No startup gate is waiting for direction.",
+        };
+        if (pendingGate is not null
+            && pendingGate.RequestId != _autoPromptedGateRequestId)
+        {
+            _autoPromptedGateRequestId = pendingGate.RequestId;
+            Dispatcher.BeginInvoke(new Action(async () =>
+                await ShowGateDecisionAsync(pendingGate)));
+        }
         SetAdbPortButton.IsEnabled = lifecycleAvailable
             && (!processActive || pausedAndAcknowledged);
         SetAdbPortButton.Content = processActive ? "Switch" : "Save";
@@ -691,7 +820,9 @@ public partial class MainWindow : Window
             $"State: {status.Control.State} ({stateDisposition}) | "
             + $"Mode: {status.Control.Mode} ({modeDisposition}) | "
             + $"ADB target: {requestedAdbTarget} ({adbDisposition}) | "
-            + $"Startup gates: {service?.StartupGatePolicy ?? "unknown"}";
+            + $"Startup gates: {service?.StartupGatePolicy ?? "unknown"} | "
+            + $"One-run skips: {configuredSkips.Count} | "
+            + $"Gate decision: {status.Control.GateDecision?.Status ?? "none"}";
 
         var pidAgreement = service?.MainPid is not null && runtime?.Pid is not null
             ? service.MainPid == runtime.Pid ? "match" : "MISMATCH"

@@ -5,6 +5,7 @@ const state = {
   refreshing: false,
   timer: null,
   lastStatus: null,
+  lastGatePrompted: null,
 };
 
 const byId = (id) => document.getElementById(id);
@@ -136,6 +137,102 @@ function renderStatus(payload) {
   document.querySelectorAll("[data-process-action]").forEach((button) => {
     button.disabled = Boolean(control.error) || !processService?.available;
   });
+  renderRunConfiguration(
+    control,
+    Boolean(runtime.active || processService?.active),
+  );
+  renderGateDecision(control.gate_decision);
+}
+
+function matchingRunSkips(control) {
+  const context = control.startup_gate_context || { strategy: "none", checks: [] };
+  const staged = control.startup_gate_waivers || {};
+  return (context.checks || []).filter((check) => {
+    const waiver = staged[check.id];
+    return waiver && waiver.strategy === context.strategy;
+  });
+}
+
+function renderRunConfiguration(control, processActive) {
+  const context = control.startup_gate_context || { strategy: "none", checks: [] };
+  const skips = matchingRunSkips(control);
+  const canConfigure = !processActive || control.state === "PAUSED";
+  byId("configureRunButton").disabled = !context.checks?.length || !canConfigure;
+  byId("configureRunSummary").textContent = skips.length
+    ? `Skip once: ${skips.map((check) => check.label).join(", ")}`
+    : !canConfigure
+      ? "Pause automation to configure one-run skips."
+    : "Strategy defaults; no one-run skips staged.";
+}
+
+function openRunConfiguration() {
+  const control = state.lastStatus?.control || {};
+  const context = control.startup_gate_context || { strategy: "none", checks: [] };
+  if (!context.checks?.length) return;
+  const staged = control.startup_gate_waivers || {};
+  byId("configureRunStrategy").textContent = `Strategy: ${context.strategy}`;
+  const options = byId("configureRunOptions");
+  options.replaceChildren();
+  for (const check of context.checks) {
+    const label = document.createElement("label");
+    label.className = "gate-option";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.name = "runSkip";
+    checkbox.value = check.id;
+    checkbox.checked = Boolean(
+      staged[check.id] && staged[check.id].strategy === context.strategy
+    );
+    const copy = document.createElement("span");
+    const title = document.createElement("strong");
+    const description = document.createElement("span");
+    title.textContent = check.label;
+    description.textContent = check.expected
+      ? `Required by default: ${check.expected}`
+      : "Uses the strategy's required value.";
+    copy.append(title, description);
+    label.append(checkbox, copy);
+    options.append(label);
+  }
+  const dialog = byId("configureRunDialog");
+  dialog.dataset.strategy = context.strategy;
+  dialog.showModal();
+}
+
+function renderGateDecision(decision) {
+  const dialog = byId("gateDialog");
+  if (!decision || decision.status !== "pending") {
+    if (dialog.open) dialog.close();
+    return;
+  }
+  if (decision.request_id === state.lastGatePrompted) return;
+  state.lastGatePrompted = decision.request_id;
+  byId("gateTitle").textContent = `${humanize(decision.check_id)} needs direction`;
+  byId("gateReason").textContent = decision.reason || "The requirement failed.";
+  byId("gateExpected").textContent = decision.expected
+    ? `Required: ${decision.expected}`
+    : "";
+  const choices = byId("gateOptions");
+  choices.replaceChildren();
+  for (const [index, option] of (decision.options || []).entries()) {
+    const label = document.createElement("label");
+    label.className = "gate-option";
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = "gateDecision";
+    radio.value = option.id;
+    radio.checked = index === 0;
+    const copy = document.createElement("span");
+    const title = document.createElement("strong");
+    const description = document.createElement("span");
+    title.textContent = option.label;
+    description.textContent = option.description || "";
+    copy.append(title, description);
+    label.append(radio, copy);
+    choices.append(label);
+  }
+  dialog.dataset.requestId = decision.request_id;
+  if (!dialog.open) dialog.showModal();
 }
 
 function renderBattles(payload) {
@@ -265,7 +362,7 @@ async function sendProcess(payload, successMessage) {
 }
 
 function setControlsBusy(busy) {
-  document.querySelectorAll("[data-control-action], [data-process-action], #applyModeButton, #customPauseForm button").forEach((button) => {
+  document.querySelectorAll("[data-control-action], [data-process-action], #applyModeButton, #customPauseForm button, #configureRunButton").forEach((button) => {
     button.disabled = busy;
   });
   if (!busy && state.lastStatus) renderStatus(state.lastStatus);
@@ -508,6 +605,7 @@ byId("battleRows").addEventListener("keydown", (event) => {
 });
 
 byId("authButton").addEventListener("click", showAuthDialog);
+byId("configureRunButton").addEventListener("click", openRunConfiguration);
 byId("authForm").addEventListener("submit", (event) => {
   event.preventDefault();
   state.token = byId("tokenInput").value.trim();
@@ -515,6 +613,33 @@ byId("authForm").addEventListener("submit", (event) => {
   else sessionStorage.removeItem("thetowerControlToken");
   byId("authDialog").close();
   refresh();
+});
+byId("gateForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const dialog = byId("gateDialog");
+  const selected = dialog.querySelector('input[name="gateDecision"]:checked');
+  if (!selected) return;
+  const requestId = dialog.dataset.requestId;
+  dialog.close();
+  sendControl(
+    { action: "resolve_gate", request_id: requestId, decision_id: selected.value },
+    `Startup gate resolved with ${humanize(selected.value)}`,
+  );
+});
+byId("configureRunForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const dialog = byId("configureRunDialog");
+  const skipChecks = Array.from(
+    dialog.querySelectorAll('input[name="runSkip"]:checked'),
+    (input) => input.value,
+  );
+  dialog.close();
+  sendControl(
+    { action: "configure_run", skip_checks: skipChecks },
+    skipChecks.length
+      ? `Configured ${skipChecks.length} one-run skip${skipChecks.length === 1 ? "" : "s"}`
+      : "Run restored to strategy defaults",
+  );
 });
 byId("refreshButton").addEventListener("click", refresh);
 

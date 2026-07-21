@@ -104,6 +104,8 @@
                 <Button Content="Pause 15 min" Tag="pause:15" Click="Control_Click" />
                 <Button Content="Pause 30 min" Tag="pause:30" Click="Control_Click" />
               </UniformGrid>
+              <Button x:Name="GateDecisionButton" Content="Review blocked startup" Click="GateDecision_Click" Style="{StaticResource DangerButton}" IsEnabled="False" Margin="4,8,4,2" />
+              <TextBlock x:Name="GateDecisionText" Text="No startup gate is waiting for direction." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,0,6,4" />
               <TextBlock Text="GAME OVER MODE" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4,10,4,0" />
               <UniformGrid Columns="3">
                 <Button x:Name="RetryModeButton" Content="Retry" Tag="RETRY" Click="Mode_Click" />
@@ -119,6 +121,8 @@
               </UniformGrid>
               <TextBlock x:Name="StrategySelectionText" Text="Waiting for strategy status." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,4,6,0" />
               <TextBlock Text="During a battle, a selection replaces the pending next-boundary strategy. Select the current strategy to cancel a pending change." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,2,6,4" />
+              <Button x:Name="ConfigureRunButton" Content="Configure run..." Click="ConfigureRun_Click" Style="{StaticResource PrimaryButton}" IsEnabled="False" Margin="4,4,4,2" />
+              <TextBlock x:Name="ConfigureRunText" Text="Strategy defaults; no one-run skips staged." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,0,6,4" />
               <TextBlock x:Name="ControlSelectionText" Text="Waiting for control status." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,4" />
             </StackPanel>
           </ScrollViewer>

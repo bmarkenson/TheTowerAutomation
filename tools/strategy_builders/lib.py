@@ -164,6 +164,9 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
     session_requirements = _normalize_gc_session_preflight(
         source.get("session_preflight")
     )
+    gate_fallbacks = copy.deepcopy(source.get("gate_fallbacks") or {})
+    if not isinstance(gate_fallbacks, dict):
+        raise ValueError("gc_farm gate_fallbacks must be a mapping")
 
     complete_when = ["ehls_completed", "eals_completed"]
     vars_block: Dict[str, Any] = {
@@ -212,6 +215,8 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
         gc_session_preflight_last_status="",
         gc_session_preflight_last_reason="",
         gc_session_preflight_evidence={},
+        gc_session_preflight_failed_checks=[],
+        gc_session_preflight_waivers={},
     )
 
     per_run_reset = [
@@ -420,6 +425,7 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
         "session_preflight": {
             "complete_when": ["gc_session_preflight_completed"],
             "requirements": copy.deepcopy(session_requirements),
+            "fallbacks": gate_fallbacks,
         },
         "vars": vars_block,
         "per_run_reset": per_run_reset,

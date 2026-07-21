@@ -68,6 +68,9 @@
           </div>
         </form>
 
+        <button id="configureRunButton" class="primary" type="button" disabled>Configure run...</button>
+        <p id="configureRunSummary" class="fine-print">Strategy defaults; no one-run skips staged.</p>
+
         <div class="mode-control">
           <label for="modeSelect">Game Over mode</label>
           <div>
@@ -201,6 +204,36 @@
       <div class="dialog-actions">
         <button type="button" data-close-dialog="authDialog">Cancel</button>
         <button class="primary" type="submit">Save and connect</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="gateDialog" class="gate-dialog">
+    <form id="gateForm">
+      <span class="eyebrow">Startup gate</span>
+      <h2 id="gateTitle">Direction required</h2>
+      <p id="gateReason"></p>
+      <p id="gateExpected" class="muted"></p>
+      <div id="gateOptions" class="gate-options"></div>
+      <p class="fine-print">Closing this dialog leaves automation blocked at this check.</p>
+      <div class="dialog-actions">
+        <button type="button" data-close-dialog="gateDialog">Decide later</button>
+        <button class="primary" type="submit">Apply choice</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="configureRunDialog" class="gate-dialog">
+    <form id="configureRunForm">
+      <span class="eyebrow">Optional one-run settings</span>
+      <h2>Configure run</h2>
+      <p id="configureRunStrategy"></p>
+      <p class="muted">Checked requirements will be skipped once. Leave everything unchecked to use the strategy defaults.</p>
+      <div id="configureRunOptions" class="gate-options"></div>
+      <p class="fine-print">Saving does not start the run.</p>
+      <div class="dialog-actions">
+        <button type="button" data-close-dialog="configureRunDialog">Cancel</button>
+        <button class="primary" type="submit">Save configuration</button>
       </div>
     </form>
   </dialog>

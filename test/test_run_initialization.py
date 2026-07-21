@@ -447,6 +447,22 @@ class FarmProfileTests(unittest.TestCase):
         self.assertEqual(configuration["settings"]["cards_deck"], "Farm")
         self.assertEqual(configuration["settings"]["bots_preset"], "Farm")
         self.assertEqual(
+            plan["session_preflight"]["fallbacks"]["bots_preset"][0],
+            {
+                "id": "flame",
+                "label": "Continue with Flame for this run",
+                "value": "Flame",
+                "description": (
+                    "Keep the currently selected Flame Bot preset and waive only "
+                    "the Farm Bot preset check."
+                ),
+            },
+        )
+        self.assertEqual(
+            configuration["gate_fallbacks"],
+            plan["session_preflight"]["fallbacks"],
+        )
+        self.assertEqual(
             configuration["settings"]["guardian_chips"],
             ["Fetch", "Summon", "Scout"],
         )

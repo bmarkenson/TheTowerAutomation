@@ -117,6 +117,9 @@ class YamlStrategy(BaseStrategy):
         self._session_preflight_requirements: Dict[str, Any] = dict(
             session_preflight.get("requirements") or {}
         )
+        self._session_preflight_gate_fallbacks: Dict[str, Any] = copy.deepcopy(
+            session_preflight.get("fallbacks") or {}
+        )
         self._run_configuration: Dict[str, Any] = copy.deepcopy(
             self.config.get("run_configuration") or {}
         )
@@ -164,6 +167,9 @@ class YamlStrategy(BaseStrategy):
 
     def session_preflight_requirements(self) -> Dict[str, Any]:
         return dict(self._session_preflight_requirements)
+
+    def session_preflight_gate_fallbacks(self) -> Dict[str, Any]:
+        return copy.deepcopy(self._session_preflight_gate_fallbacks)
 
     def run_configuration(self) -> Dict[str, Any]:
         return copy.deepcopy(self._run_configuration)

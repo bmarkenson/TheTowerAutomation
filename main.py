@@ -12,6 +12,7 @@ from core.app_setup import parse_args, config_from_args
 from core.app import App
 from core.single_instance import InstanceAlreadyRunning
 from core.adb_target_session import AdbTargetSession
+from core.gate_decisions import prompt_for_gate_decision
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -26,7 +27,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         with AdbTargetSession(os.environ["ADB_DEVICE"]) as target_session:
             log(f"AUTO_START_ENABLED = {config.auto_start_enabled}", "DEBUG")
 
-            app = App(config, adb_target_session=target_session)
+            app = App(
+                config,
+                adb_target_session=target_session,
+                gate_decision_prompt=(
+                    prompt_for_gate_decision
+                    if sys.stdin.isatty() and sys.stdout.isatty()
+                    else None
+                ),
+            )
             app.run()
             return 0
     except InstanceAlreadyRunning as exc:

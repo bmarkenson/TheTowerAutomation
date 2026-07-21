@@ -57,6 +57,12 @@ public sealed class RequestStatus
 
     [JsonPropertyName("warning")]
     public string? Warning { get; set; }
+
+    [JsonPropertyName("request_id")]
+    public string? RequestId { get; set; }
+
+    [JsonPropertyName("decision_id")]
+    public string? DecisionId { get; set; }
 }
 
 public sealed class DirectiveAcknowledgement
@@ -94,11 +100,110 @@ public sealed class ControlStatus
     [JsonPropertyName("strategy_updated_at")]
     public string? StrategyUpdatedAt { get; set; }
 
+    [JsonPropertyName("gate_decision")]
+    public GateDecisionStatus? GateDecision { get; set; }
+
+    [JsonPropertyName("startup_gate_waivers")]
+    public Dictionary<string, StartupGateWaiverStatus> StartupGateWaivers { get; set; } = [];
+
+    [JsonPropertyName("startup_gate_context")]
+    public StartupGateContext? StartupGateContext { get; set; }
+
     [JsonPropertyName("updated_at")]
     public string? UpdatedAt { get; set; }
 
     [JsonPropertyName("error")]
     public string? Error { get; set; }
+}
+
+public sealed class GateDecisionStatus
+{
+    [JsonPropertyName("request_id")]
+    public string RequestId { get; set; } = "";
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "unknown";
+
+    [JsonPropertyName("strategy")]
+    public string Strategy { get; set; } = "";
+
+    [JsonPropertyName("phase")]
+    public string Phase { get; set; } = "";
+
+    [JsonPropertyName("check_id")]
+    public string CheckId { get; set; } = "";
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    [JsonPropertyName("expected")]
+    public string? Expected { get; set; }
+
+    [JsonPropertyName("decision_id")]
+    public string? DecisionId { get; set; }
+
+    [JsonPropertyName("options")]
+    public List<GateDecisionOption> Options { get; set; } = [];
+}
+
+public sealed class GateDecisionOption
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("label")]
+    public string Label { get; set; } = "";
+
+    [JsonPropertyName("description")]
+    public string? Description { get; set; }
+
+    [JsonPropertyName("action")]
+    public string Action { get; set; } = "";
+
+    [JsonPropertyName("kind")]
+    public string Kind { get; set; } = "";
+
+    [JsonPropertyName("value")]
+    public string? Value { get; set; }
+}
+
+public sealed class StartupGateContext
+{
+    [JsonPropertyName("strategy")]
+    public string Strategy { get; set; } = "none";
+
+    [JsonPropertyName("checks")]
+    public List<StartupGateCheck> Checks { get; set; } = [];
+}
+
+public sealed class StartupGateCheck
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("label")]
+    public string Label { get; set; } = "";
+
+    [JsonPropertyName("expected")]
+    public string? Expected { get; set; }
+}
+
+public sealed class StartupGateWaiverStatus
+{
+    [JsonPropertyName("request_id")]
+    public string RequestId { get; set; } = "";
+
+    [JsonPropertyName("check_id")]
+    public string CheckId { get; set; } = "";
+
+    [JsonPropertyName("label")]
+    public string Label { get; set; } = "";
+
+    [JsonPropertyName("strategy")]
+    public string Strategy { get; set; } = "";
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "pending";
 }
 
 public sealed class ObservationStatus

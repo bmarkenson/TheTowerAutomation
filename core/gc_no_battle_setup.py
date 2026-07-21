@@ -28,6 +28,11 @@ from core.workshop_preset import (
     measure_preset_slot_selection,
 )
 from utils.logger import log
+from utils.ocr_utils import ocr_text_and_conf
+
+
+NOT_ENOUGH_MEDALS_REGION = (100, 650, 880, 550)
+NOT_ENOUGH_MEDALS_OK = (540, 1100)
 
 
 class GcNoBattleSetupStatus(str, Enum):
@@ -41,6 +46,7 @@ class GcNoBattleSetupResult:
     status: GcNoBattleSetupStatus
     reason: str
     evidence: Mapping[str, Any] = field(default_factory=dict)
+    failed_check: str | None = None
 
     @property
     def complete(self) -> bool:
@@ -55,6 +61,7 @@ def run_gc_no_battle_setup(
     requirements: Mapping[str, Any],
     *,
     screenshot=None,
+    waivers: Mapping[str, Any] | None = None,
     capture_fn: Callable[[], Any] = capture_adb_screenshot,
     detector: Callable[[Any], Mapping[str, Any]] = detect_state_and_overlays,
     detect_home_control_fn: Callable[[Any], Any] = detect_home_battle_control,
@@ -77,13 +84,17 @@ def run_gc_no_battle_setup(
         )
 
     module_mode = _module_policy(requirements)
+    active_waivers = dict(waivers or {})
     evidence: dict[str, Any] = {
         "loadout_policies": {"modules": module_mode},
+        "waivers": active_waivers,
     }
     current = screenshot if screenshot is not None else capture_fn()
+    current_check = "home_boundary"
     try:
         _require_no_battle_home(current, detector, detect_home_control_fn)
 
+        current_check = "cards_deck"
         cards = _open_static(
             current,
             "navigation.goto_cards_home",
@@ -94,28 +105,37 @@ def run_gc_no_battle_setup(
             safe_tap_fn,
             sleep_fn,
         )
-        cards = _ensure_preset(
-            cards,
-            state="CARDS",
-            slot_secondary="CARDS_FARM_SLOT",
-            slot_label="indicators.cards:farm_slot",
-            slot_region=CARDS_FARM_PRESET_SLOT,
-            capture_fn=capture_fn,
-            detector=detector,
-            tap_visible_fn=tap_visible_fn,
-            measure_selection_fn=measure_selection_fn,
-            sleep_fn=sleep_fn,
-        )
-        evidence["cards_deck"] = "Farm"
+        if current_check in active_waivers:
+            evidence[current_check] = _waived_evidence(
+                current_check,
+                requirements.get(current_check),
+                active_waivers[current_check],
+            )
+        else:
+            cards = _ensure_preset(
+                cards,
+                state="CARDS",
+                slot_secondary="CARDS_FARM_SLOT",
+                slot_label="indicators.cards:farm_slot",
+                slot_region=CARDS_FARM_PRESET_SLOT,
+                capture_fn=capture_fn,
+                detector=detector,
+                tap_visible_fn=tap_visible_fn,
+                measure_selection_fn=measure_selection_fn,
+                sleep_fn=sleep_fn,
+            )
+            evidence[current_check] = "Farm"
         current = _return_home(
             cards,
             capture_fn,
             detector,
             detect_home_control_fn,
             safe_tap_fn,
+            tap_visible_fn,
             sleep_fn,
         )
 
+        current_check = "workshop_preset"
         workshop = _open_static(
             current,
             "navigation.goto_workshop_home",
@@ -126,21 +146,35 @@ def run_gc_no_battle_setup(
             safe_tap_fn,
             sleep_fn,
         )
-        workshop = _ensure_preset(
-            workshop,
-            state="WORKSHOP",
-            slot_secondary="WORKSHOP_FARM_SLOT",
-            slot_label="indicators.workshop:farm_slot",
-            slot_region=FARM_PRESET_SLOT,
-            capture_fn=capture_fn,
-            detector=detector,
-            tap_visible_fn=tap_visible_fn,
-            measure_selection_fn=measure_selection_fn,
-            sleep_fn=sleep_fn,
-        )
-        evidence["workshop_preset"] = "Farm"
+        if current_check in active_waivers:
+            evidence[current_check] = _waived_evidence(
+                current_check,
+                requirements.get(current_check),
+                active_waivers[current_check],
+            )
+        else:
+            workshop = _ensure_preset(
+                workshop,
+                state="WORKSHOP",
+                slot_secondary="WORKSHOP_FARM_SLOT",
+                slot_label="indicators.workshop:farm_slot",
+                slot_region=FARM_PRESET_SLOT,
+                capture_fn=capture_fn,
+                detector=detector,
+                tap_visible_fn=tap_visible_fn,
+                measure_selection_fn=measure_selection_fn,
+                sleep_fn=sleep_fn,
+            )
+            evidence[current_check] = "Farm"
+        current_check = "free_upgrade_locks"
         free_upgrade_lock_requirements = requirements.get("free_upgrade_locks")
-        if free_upgrade_lock_requirements is not None:
+        if current_check in active_waivers:
+            evidence[current_check] = _waived_evidence(
+                current_check,
+                free_upgrade_lock_requirements,
+                active_waivers[current_check],
+            )
+        elif free_upgrade_lock_requirements is not None:
             lock_result = ensure_free_upgrade_locks_fn(
                 free_upgrade_lock_requirements,
                 screenshot=workshop,
@@ -163,9 +197,11 @@ def run_gc_no_battle_setup(
             detector,
             detect_home_control_fn,
             safe_tap_fn,
+            tap_visible_fn,
             sleep_fn,
         )
 
+        current_check = "bots_preset"
         event = _open_visible(
             current,
             "navigation.home_event",
@@ -193,28 +229,37 @@ def run_gc_no_battle_setup(
             swipe_fn=swipe_fn,
             sleep_fn=sleep_fn,
         )
-        bots = _ensure_preset(
-            bots,
-            state="EVENT",
-            slot_secondary="BOTS_FARM_SLOT",
-            slot_label="indicators.bots:farm_slot",
-            slot_region=BOTS_FARM_PRESET_SLOT,
-            capture_fn=capture_fn,
-            detector=detector,
-            tap_visible_fn=tap_visible_fn,
-            measure_selection_fn=measure_selection_fn,
-            sleep_fn=sleep_fn,
-        )
-        evidence["bots_preset"] = "Farm"
+        if current_check in active_waivers:
+            evidence[current_check] = _waived_evidence(
+                current_check,
+                requirements.get(current_check),
+                active_waivers[current_check],
+            )
+        else:
+            bots = _ensure_preset(
+                bots,
+                state="EVENT",
+                slot_secondary="BOTS_FARM_SLOT",
+                slot_label="indicators.bots:farm_slot",
+                slot_region=BOTS_FARM_PRESET_SLOT,
+                capture_fn=capture_fn,
+                detector=detector,
+                tap_visible_fn=tap_visible_fn,
+                measure_selection_fn=measure_selection_fn,
+                sleep_fn=sleep_fn,
+            )
+            evidence[current_check] = "Farm"
         current = _return_home(
             bots,
             capture_fn,
             detector,
             detect_home_control_fn,
             safe_tap_fn,
+            tap_visible_fn,
             sleep_fn,
         )
 
+        current_check = "guardian_chips"
         guild = _open_visible(
             current,
             "navigation.home_guild",
@@ -236,24 +281,39 @@ def run_gc_no_battle_setup(
             sleep_fn,
             required_secondary="GUILD_GUARDIAN_SCREEN",
         )
-        guardians = _ensure_guardian_loadout(
-            guardians,
-            capture_fn,
-            detector,
-            tap_visible_fn,
-            sleep_fn,
-        )
-        evidence["guardian_chips"] = ["Fetch", "Summon", "Scout"]
+        if current_check in active_waivers:
+            evidence[current_check] = _waived_evidence(
+                current_check,
+                requirements.get(current_check),
+                active_waivers[current_check],
+            )
+        else:
+            guardians = _ensure_guardian_loadout(
+                guardians,
+                capture_fn,
+                detector,
+                tap_visible_fn,
+                sleep_fn,
+            )
+            evidence[current_check] = ["Fetch", "Summon", "Scout"]
         current = _return_home(
             guardians,
             capture_fn,
             detector,
             detect_home_control_fn,
             safe_tap_fn,
+            tap_visible_fn,
             sleep_fn,
         )
 
-        if module_mode == "enforce":
+        current_check = "modules"
+        if current_check in active_waivers:
+            evidence[current_check] = _waived_evidence(
+                current_check,
+                requirements.get(current_check),
+                active_waivers[current_check],
+            )
+        elif module_mode == "enforce":
             modules = _open_static(
                 current,
                 "navigation.goto_modules_home",
@@ -284,6 +344,7 @@ def run_gc_no_battle_setup(
                 detector,
                 detect_home_control_fn,
                 safe_tap_fn,
+                tap_visible_fn,
                 sleep_fn,
             )
         else:
@@ -297,6 +358,7 @@ def run_gc_no_battle_setup(
             detector,
             detect_home_control_fn,
             safe_tap_fn,
+            tap_visible_fn,
             sleep_fn,
         )
         log(f"[GC_NO_BATTLE] Setup failed: {exc}", "ERROR")
@@ -304,6 +366,7 @@ def run_gc_no_battle_setup(
             GcNoBattleSetupStatus.FAILED,
             str(exc),
             evidence,
+            current_check,
         )
 
     log(
@@ -315,6 +378,20 @@ def run_gc_no_battle_setup(
         "supported no-battle requirements verified",
         evidence,
     )
+
+
+def _waived_evidence(
+    check_id: str,
+    required: object,
+    waiver: object,
+) -> dict[str, Any]:
+    payload = dict(waiver) if isinstance(waiver, Mapping) else {"value": waiver}
+    return {
+        "status": "waived",
+        "check_id": check_id,
+        "required": required,
+        "waiver": payload,
+    }
 
 
 def _unsupported_requirement(requirements: Mapping[str, Any]) -> str | None:
@@ -596,12 +673,27 @@ def _return_home(
     detector,
     detect_home_control_fn,
     safe_tap_fn,
+    tap_visible_fn,
     sleep_fn,
 ):
     if detector(frame).get("state") == "HOME_SCREEN":
         _require_no_battle_home(frame, detector, detect_home_control_fn)
         return frame
-    if not safe_tap_fn("navigation.goto_home", require_visible=False, dispatch="now"):
+    state = detector(frame).get("state")
+    returned = False
+    if state in {"EVENT", "GUILD"}:
+        returned = tap_visible_fn(
+            "buttons.return_to_game",
+            screenshot=frame,
+            retries=1,
+        )
+    if not returned:
+        returned = safe_tap_fn(
+            "navigation.goto_home",
+            require_visible=False,
+            dispatch="now",
+        )
+    if not returned:
         raise _SetupFailure("Home navigation failed")
     home = _wait_for(
         state="HOME_SCREEN",
@@ -618,10 +710,21 @@ def _recover_home(
     detector,
     detect_home_control_fn,
     safe_tap_fn,
+    tap_visible_fn,
     sleep_fn,
 ) -> None:
     try:
         frame = capture_fn()
+        if _is_not_enough_medals_dialog(frame):
+            if not safe_tap_fn(
+                NOT_ENOUGH_MEDALS_OK,
+                require_visible=False,
+                dispatch="now",
+                log_label="not_enough_medals_ok",
+            ):
+                return
+            sleep_fn(0.8)
+            frame = capture_fn()
         if detector(frame).get("state") == "HOME_SCREEN":
             return
         _return_home(
@@ -630,10 +733,36 @@ def _recover_home(
             detector,
             detect_home_control_fn,
             safe_tap_fn,
+            tap_visible_fn,
             sleep_fn,
         )
     except Exception:
         pass
+
+
+def _is_not_enough_medals_dialog(
+    frame,
+    *,
+    text_fn: Callable[..., tuple[str, float]] = ocr_text_and_conf,
+) -> bool:
+    """Recognize the exact preset-switch rejection before dismissing it."""
+
+    if frame is None or not hasattr(frame, "shape") or len(frame.shape) < 2:
+        return False
+    x, y, w, h = NOT_ENOUGH_MEDALS_REGION
+    screen_h, screen_w = frame.shape[:2]
+    if x < 0 or y < 0 or x + w > screen_w or y + h > screen_h:
+        return False
+    try:
+        raw_text, confidence = text_fn(frame[y : y + h, x : x + w], psm=6)
+    except Exception:
+        return False
+    normalized = " ".join(str(raw_text).upper().split())
+    return (
+        float(confidence) >= 70.0
+        and "NOT ENOUGH MEDALS" in normalized
+        and "MEDALS TO SWITCH PRESETS" in normalized
+    )
 
 
 __all__ = [
