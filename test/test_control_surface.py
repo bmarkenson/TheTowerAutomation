@@ -107,9 +107,38 @@ def test_control_store_persists_strategy_without_changing_other_directives(tmp_p
     assert saved["mode"] == "WAIT"
     assert saved["adb_port"] == 5565
     assert saved["strategy"] == "tournament"
+    assert saved["strategy_apply_mode"] == "next_boundary"
     assert saved["strategy_updated_at"]
     assert saved["strategy_request_id"]
     assert ControlDirectiveStore(path).status()["strategy"] == "tournament"
+    assert (
+        ControlDirectiveStore(path).status()["strategy_apply_mode"]
+        == "next_boundary"
+    )
+
+
+def test_control_store_persists_active_battle_strategy_adoption(tmp_path):
+    path = tmp_path / "automation_ctl.json"
+
+    saved = ControlDirectiveStore(path).set_strategy(
+        "farm_t18",
+        apply_mode="active_battle",
+        source="test",
+    )
+
+    assert saved["strategy"] == "farm_t18"
+    assert saved["strategy_apply_mode"] == "active_battle"
+    assert ControlDirectiveStore(path).status()["strategy_apply_mode"] == (
+        "active_battle"
+    )
+
+
+def test_control_store_rejects_unknown_strategy_apply_mode(tmp_path):
+    with pytest.raises(ValueError, match="Strategy apply mode"):
+        ControlDirectiveStore(tmp_path / "automation_ctl.json").set_strategy(
+            "farm_t18",
+            apply_mode="immediate",
+        )
 
 
 def test_control_store_will_not_overwrite_malformed_authority(tmp_path):

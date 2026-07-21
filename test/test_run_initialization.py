@@ -192,6 +192,134 @@ class RunBoundaryTests(unittest.TestCase):
         self.assertEqual(manager.ctx.data["rule_last_fire"], {})
         self.assertEqual(new_strategy.starts, 1)
 
+    def test_active_battle_strategy_adoption_defers_gates_until_next_boundary(self):
+        manager = MissionManager(None, None)
+        manager.start()
+        manager.maybe_run_start({"state": "RUNNING"})
+        strategy = get_strategy("farm_t18")
+
+        manager.adopt_strategy_for_active_battle(strategy)
+        mv = manager.ctx.data["mission_vars"]
+
+        self.assertIs(manager.strategy, strategy)
+        self.assertTrue(manager.ctx.data["startup_gates_deferred"])
+        self.assertFalse(manager.run_initialization_pending())
+        self.assertFalse(manager.session_preflight_pending())
+        self.assertEqual(
+            mv["gc_session_preflight_evidence"]["free_upgrade_locks"]["status"],
+            "unavailable_deferred",
+        )
+
+        manager.maybe_run_start(
+            {"state": "HOME_SCREEN", "home_battle_control": "RESUME_BATTLE"}
+        )
+        manager.maybe_run_start({"state": "RUNNING"})
+        self.assertTrue(manager.ctx.data["startup_gates_deferred"])
+
+        manager.maybe_run_start({"state": "GAME_OVER"})
+        manager.maybe_run_start(
+            {"state": "HOME_SCREEN", "home_battle_control": "NEW_BATTLE"}
+        )
+        self.assertFalse(manager.ctx.data["startup_gates_deferred"])
+        self.assertEqual(
+            manager.no_battle_setup_requirements()["free_upgrade_locks"],
+            list(FARM_FREE_UPGRADE_LOCKS),
+        )
+
+    def test_app_adopts_requested_strategy_on_fresh_running_evidence(self):
+        app = App.__new__(App)
+        app._mission_mgr = MagicMock()
+        app._mission_mgr.strategy = None
+        app._supervisor = MagicMock()
+        app._supervisor.strategy_request = (
+            "farm_t18",
+            "request-active",
+            "active_battle",
+        )
+        app._config = SimpleNamespace(strategy_name="none")
+        app._last_strategy_request = None
+        app._pending_strategy_request = None
+        app._strategy_boundary_confirmed = False
+        app._run_initialization_gate_logged = True
+        app._session_preflight_gate_logged = True
+        app._session_preflight_terminal_blocked_logged = True
+        app._session_preflight_repair_denial_logged = True
+        app._startup_gate_waivers = {"bots_preset": {"status": "claimed"}}
+        new_strategy = SimpleNamespace(name="farm_t18")
+
+        with (
+            patch("core.app.get_strategy", return_value=new_strategy),
+            patch("core.app.log"),
+        ):
+            app._observe_strategy_request()
+            app._process_strategy_boundary({"state": "RUNNING"})
+
+        app._mission_mgr.adopt_strategy_for_active_battle.assert_called_once_with(
+            new_strategy
+        )
+        app._mission_mgr.replace_strategy_at_boundary.assert_not_called()
+        self.assertEqual(app._config.strategy_name, "farm_t18")
+        self.assertIsNone(app._pending_strategy_request)
+        self.assertEqual(app._startup_gate_waivers, {})
+
+    def test_app_adopts_requested_strategy_at_resumable_home(self):
+        app = App.__new__(App)
+        app._mission_mgr = MagicMock()
+        app._pending_strategy_request = (
+            "farm_t18",
+            "request-active",
+            "active_battle",
+        )
+        app._strategy_boundary_confirmed = False
+        app._config = SimpleNamespace(strategy_name="none")
+        app._startup_gate_waivers = {}
+        new_strategy = SimpleNamespace(name="farm_t18")
+
+        with (
+            patch("core.app.get_strategy", return_value=new_strategy),
+            patch("core.app.log"),
+        ):
+            app._process_strategy_boundary(
+                {
+                    "state": "HOME_SCREEN",
+                    "home_battle_control": "RESUME_BATTLE",
+                }
+            )
+
+        app._mission_mgr.adopt_strategy_for_active_battle.assert_called_once_with(
+            new_strategy
+        )
+        app._mission_mgr.replace_strategy_at_boundary.assert_not_called()
+
+    def test_active_adoption_request_at_new_battle_uses_boundary_replacement(self):
+        app = App.__new__(App)
+        app._mission_mgr = MagicMock()
+        app._pending_strategy_request = (
+            "farm_t18",
+            "request-active",
+            "active_battle",
+        )
+        app._strategy_boundary_confirmed = False
+        app._config = SimpleNamespace(strategy_name="none")
+        app._startup_gate_waivers = {}
+        new_strategy = SimpleNamespace(name="farm_t18")
+
+        with (
+            patch("core.app.get_strategy", return_value=new_strategy),
+            patch("core.app.log"),
+        ):
+            app._process_strategy_boundary(
+                {
+                    "state": "HOME_SCREEN",
+                    "home_battle_control": "NEW_BATTLE",
+                }
+            )
+
+        app._mission_mgr.replace_strategy_at_boundary.assert_called_once_with(
+            new_strategy
+        )
+        app._mission_mgr.adopt_strategy_for_active_battle.assert_not_called()
+
     def test_app_applies_pending_strategy_on_paused_workshop_boundary(self):
         app = App.__new__(App)
         app._mission_mgr = MagicMock()
@@ -1172,6 +1300,32 @@ class GcFarmProfileTests(unittest.TestCase):
         ]
         self.assertEqual(reported["free_upgrade_locks"], boundary_evidence)
         manager.on_game_over.assert_called_once_with()
+
+    def test_mid_run_farm_adoption_supplies_battle_end_identity(self):
+        manager = MissionManager(None, None)
+        manager.start()
+        manager.maybe_run_start({"state": "RUNNING"})
+        manager.adopt_strategy_for_active_battle(get_strategy("farm_t18"))
+        app = App.__new__(App)
+        app._mission_mgr = manager
+        app._fast_game_over = False
+        app._last_wave_value = 1800
+        app._last_wave_conf = 99.0
+        app._supervisor = MagicMock()
+        app._status_reporter = MagicMock()
+        app._status_reporter.coin_rate_samples = []
+        app._pending_strategy_request = None
+        app._strategy_boundary_confirmed = False
+        app._handle_daily_gem_if_due = MagicMock(return_value=False)
+        app._handle_mission_rewards_if_due = MagicMock(return_value=False)
+        frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+        with patch("core.app.handle_game_over") as game_over:
+            app._handle_primary_states("GAME_OVER", set(), frame)
+
+        battle_context = game_over.call_args.kwargs["battle_context"]
+        self.assertEqual(battle_context["strategy"], "farm_t18")
+        self.assertEqual(battle_context["run_configuration"]["profile"], "farm")
 
     def test_session_preflight_mismatch_blocks_without_correction(self):
         strategy = get_strategy("gc_farm_t19_experiment")

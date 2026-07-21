@@ -106,6 +106,7 @@ class ControlSurfaceService:
                 "updated_at": None,
                 "adb_port_updated_at": None,
                 "strategy": None,
+                "strategy_apply_mode": "next_boundary",
                 "strategy_updated_at": None,
                 "strategy_request_id": None,
                 "gate_decision": None,
@@ -439,6 +440,19 @@ class ControlSurfaceService:
                     raise ControlSurfaceRequestError(
                         "strategy must be a non-empty string"
                     )
+                apply_to_active_run = request.get("apply_to_active_run", False)
+                if not isinstance(apply_to_active_run, bool):
+                    raise ControlSurfaceRequestError(
+                        "apply_to_active_run must be a boolean"
+                    )
+                if apply_to_active_run and not process_active:
+                    raise ControlSurfaceRequestError(
+                        "apply_to_active_run requires an active automation runtime",
+                        status=409,
+                    )
+                apply_mode = (
+                    "active_battle" if apply_to_active_run else "next_boundary"
+                )
                 try:
                     if process_active:
                         manager.persist_strategy(strategy)
@@ -446,17 +460,19 @@ class ControlSurfaceService:
                         manager.set_strategy(strategy)
                     self.control_store.set_strategy(
                         strategy.strip().lower(),
+                        apply_mode=apply_mode,
                         source="control-surface-strategy",
                     )
                 except (AutomationProcessError, ControlDirectiveError) as exc:
                     self._append_audit(f"Failed to configure strategy: {exc}")
                     raise ControlSurfaceRequestError(str(exc), status=409) from exc
                 strategy = strategy.strip().lower()
-                audit = (
-                    f"Queued strategy {strategy} for the next run boundary"
-                    if process_active
-                    else f"Configured next-start strategy {strategy}"
-                )
+                if apply_to_active_run:
+                    audit = f"Requested strategy {strategy} for the active battle"
+                elif process_active:
+                    audit = f"Queued strategy {strategy} for the next run boundary"
+                else:
+                    audit = f"Configured next-start strategy {strategy}"
         else:
             raise ControlSurfaceRequestError(
                 "action must be start, stop, set_adb_port, or set_strategy"
@@ -471,9 +487,12 @@ class ControlSurfaceService:
             response["request"]["adb_port"] = adb_port
         elif action == "set_strategy":
             response["request"]["strategy"] = strategy
-            response["request"]["disposition"] = (
-                "queued" if process_active else "saved"
-            )
+            if apply_to_active_run:
+                response["request"]["disposition"] = "active_battle_requested"
+            else:
+                response["request"]["disposition"] = (
+                    "queued" if process_active else "saved"
+                )
         if audit_warning:
             response["request"]["warning"] = audit_warning
         return response

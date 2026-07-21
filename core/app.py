@@ -101,8 +101,8 @@ class App:
         self._gate_decision_prompt = gate_decision_prompt
         self._gate_prompted_request_id: Optional[str] = None
         self._startup_gate_waivers: Dict[str, Dict[str, Any]] = {}
-        self._last_strategy_request: Optional[Tuple[str, object]] = None
-        self._pending_strategy_request: Optional[Tuple[str, object]] = None
+        self._last_strategy_request: Optional[Tuple[str, object, str]] = None
+        self._pending_strategy_request: Optional[Tuple[str, object, str]] = None
         self._strategy_boundary_confirmed = False
         self._observe_strategy_request()
         log(
@@ -377,12 +377,20 @@ class App:
 
     def _observe_strategy_request(self) -> None:
         request = self._supervisor.strategy_request
-        if not isinstance(request, tuple) or len(request) != 2:
+        if not isinstance(request, tuple) or len(request) not in {2, 3}:
             return
-        if request == getattr(self, "_last_strategy_request", None):
+        apply_mode = (
+            str(request[2] or "next_boundary").strip().lower()
+            if len(request) == 3
+            else "next_boundary"
+        )
+        if apply_mode not in {"next_boundary", "active_battle"}:
+            apply_mode = "next_boundary"
+        normalized_request = (request[0], request[1], apply_mode)
+        if normalized_request == getattr(self, "_last_strategy_request", None):
             return
-        self._last_strategy_request = request
-        requested_name = request[0]
+        self._last_strategy_request = normalized_request
+        requested_name = normalized_request[0]
         if requested_name == self._current_strategy_name():
             self._pending_strategy_request = None
             log(
@@ -391,12 +399,17 @@ class App:
                 console=True,
             )
             return
-        self._pending_strategy_request = request
-        log(
-            f"[CTRL] Strategy {requested_name} queued for the next run boundary",
-            "INFO",
-            console=True,
-        )
+        self._pending_strategy_request = normalized_request
+        if apply_mode == "active_battle":
+            message = (
+                f"[CTRL] Strategy {requested_name} requested for the active battle; "
+                "waiting for fresh active-battle evidence"
+            )
+        else:
+            message = (
+                f"[CTRL] Strategy {requested_name} queued for the next run boundary"
+            )
+        log(message, "INFO", console=True)
 
     def _process_strategy_boundary(self, detection: Mapping[str, Any]) -> None:
         state = str(detection.get("state") or "UNKNOWN").upper()
@@ -416,6 +429,22 @@ class App:
             # This is authoritative no-battle evidence even when the operator
             # navigated here manually while Pause blocks runtime actions.
             self._strategy_boundary_confirmed = True
+
+        pending = getattr(self, "_pending_strategy_request", None)
+        if (
+            pending is not None
+            and pending[2] == "active_battle"
+            and (
+                state == "RUNNING"
+                or (
+                    state in {"HOME", "HOME_SCREEN"}
+                    and control is HomeBattleControl.RESUME_BATTLE
+                )
+            )
+        ):
+            self._apply_pending_strategy_to_active_battle()
+            self._strategy_boundary_confirmed = False
+            return
 
         if getattr(self, "_strategy_boundary_confirmed", False):
             self._apply_pending_strategy()
@@ -441,6 +470,46 @@ class App:
                 console=True,
             )
             return False
+        self._complete_strategy_application(requested_name)
+        log(
+            f"[CTRL] Strategy set to {requested_name} via control file",
+            "INFO",
+            console=True,
+        )
+        return True
+
+    def _apply_pending_strategy_to_active_battle(self) -> bool:
+        request = getattr(self, "_pending_strategy_request", None)
+        if request is None or request[2] != "active_battle":
+            return False
+        requested_name = request[0]
+        try:
+            strategy = get_strategy(requested_name)
+            self._mission_mgr.adopt_strategy_for_active_battle(strategy)
+        except Exception as exc:
+            log(
+                f"[CTRL] Failed to adopt strategy {requested_name} for active battle: "
+                f"{exc}",
+                "ERROR",
+                console=True,
+            )
+            return False
+        self._complete_strategy_application(requested_name)
+        log(
+            f"[CTRL] Adopted strategy {requested_name} for active battle; "
+            "startup gates deferred until the next run boundary",
+            "INFO",
+            console=True,
+        )
+        # Keep the established exact acknowledgement entry for status clients.
+        log(
+            f"[CTRL] Strategy set to {requested_name} via control file",
+            "INFO",
+            console=True,
+        )
+        return True
+
+    def _complete_strategy_application(self, requested_name: str) -> None:
         self._config.strategy_name = requested_name
         self._pending_strategy_request = None
         self._run_initialization_gate_logged = False
@@ -448,12 +517,6 @@ class App:
         self._session_preflight_terminal_blocked_logged = False
         self._session_preflight_repair_denial_logged = False
         self._startup_gate_waivers = {}
-        log(
-            f"[CTRL] Strategy set to {requested_name} via control file",
-            "INFO",
-            console=True,
-        )
-        return True
 
     def _handler_enabled(self, name: str) -> bool:
         """Honor an optional strategy handler allowlist; legacy plans allow all."""

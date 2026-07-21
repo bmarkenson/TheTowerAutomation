@@ -120,6 +120,8 @@
                 <Button x:Name="NoStrategyButton" Content="No strategy" Tag="none" Click="Strategy_Click" IsEnabled="False" />
               </UniformGrid>
               <TextBlock x:Name="StrategySelectionText" Text="Waiting for strategy status." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,4,6,0" />
+              <CheckBox x:Name="ApplyStrategyToActiveRunCheckBox" Content="Adopt for the active battle" IsEnabled="False" Margin="8,6,6,0" />
+              <TextBlock Text="Adoption updates strategy behavior and Battle End identity now. New-run initialization, session preflight, and Home-only gates wait for the next genuine boundary." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="24,2,6,4" />
               <TextBlock Text="During a battle, a selection replaces the pending next-boundary strategy. Select the current strategy to cancel a pending change." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,2,6,4" />
               <Button x:Name="ConfigureRunButton" Content="Configure run..." Click="ConfigureRun_Click" Style="{StaticResource PrimaryButton}" IsEnabled="False" Margin="4,4,4,2" />
               <TextBlock x:Name="ConfigureRunText" Text="Strategy defaults; no one-run skips staged." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,0,6,4" />

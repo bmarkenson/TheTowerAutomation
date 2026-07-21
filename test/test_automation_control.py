@@ -257,14 +257,20 @@ def test_runtime_exposes_latest_valid_strategy_request(tmp_path):
     first_request = supervisor.strategy_request
     assert first_request is not None
     assert first_request[0] == "farm_t18"
+    assert first_request[2] == "next_boundary"
 
-    store.set_strategy("tournament", source="test")
+    store.set_strategy(
+        "tournament",
+        apply_mode="active_battle",
+        source="test",
+    )
     supervisor.apply_control()
 
     second_request = supervisor.strategy_request
     assert second_request is not None
     assert second_request[0] == "tournament"
     assert second_request[1] != first_request[1]
+    assert second_request[2] == "active_battle"
 
 
 def test_gate_decision_has_guarded_lifecycle(tmp_path):

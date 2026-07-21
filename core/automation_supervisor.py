@@ -103,7 +103,7 @@ class AutomationSupervisor:
         return str(st) == "RunState.PAUSED" or st == "PAUSED"
 
     @property
-    def strategy_request(self) -> Optional[Tuple[str, object]]:
+    def strategy_request(self) -> Optional[Tuple[str, object, str]]:
         """Return the latest validated strategy directive and its identity."""
 
         return self._strategy_request
@@ -146,14 +146,19 @@ class AutomationSupervisor:
     @staticmethod
     def _parse_strategy_request(
         directives: Dict[str, object],
-    ) -> Optional[Tuple[str, object]]:
+    ) -> Optional[Tuple[str, object, str]]:
         strategy = str(directives.get("strategy") or "").strip().lower()
         if strategy not in CONFIGURABLE_STRATEGIES:
             return None
         identity = directives.get("strategy_request_id") or directives.get(
             "strategy_updated_at"
         )
-        return strategy, identity
+        apply_mode = str(
+            directives.get("strategy_apply_mode") or "next_boundary"
+        ).strip().lower()
+        if apply_mode not in {"next_boundary", "active_battle"}:
+            apply_mode = "next_boundary"
+        return strategy, identity, apply_mode
 
     @staticmethod
     def _parse_gate_decision(

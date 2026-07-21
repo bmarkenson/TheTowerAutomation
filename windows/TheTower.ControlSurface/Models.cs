@@ -97,6 +97,9 @@ public sealed class ControlStatus
     [JsonPropertyName("strategy")]
     public string? Strategy { get; set; }
 
+    [JsonPropertyName("strategy_apply_mode")]
+    public string StrategyApplyMode { get; set; } = "next_boundary";
+
     [JsonPropertyName("strategy_updated_at")]
     public string? StrategyUpdatedAt { get; set; }
 

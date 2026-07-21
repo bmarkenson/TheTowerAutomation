@@ -319,9 +319,13 @@ public partial class MainWindow : Window
         }
         try
         {
+            var adoptActiveBattle = ApplyStrategyToActiveRunCheckBox.IsChecked == true;
             StrategySelectionText.Text = $"Sending {strategy} strategy request...";
+            object payload = adoptActiveBattle
+                ? new { action = "set_strategy", strategy, apply_to_active_run = true }
+                : new { action = "set_strategy", strategy };
             var response = await _api.PostProcessAsync(
-                new { action = "set_strategy", strategy },
+                payload,
                 CancellationToken.None);
             if (response.Request is { Accepted: true } request)
             {
@@ -330,8 +334,10 @@ public partial class MainWindow : Window
                 {
                     "queued" => $"Accepted {requested}; queued for the next confirmed run boundary.",
                     "saved" => $"Accepted {requested}; saved for the next process start.",
+                    "active_battle_requested" => $"Accepted {requested}; waiting for the runtime to adopt it for the active battle.",
                     _ => $"Accepted {requested} strategy request.",
                 };
+                ApplyStrategyToActiveRunCheckBox.IsChecked = false;
                 if (!string.IsNullOrWhiteSpace(request.Warning))
                 {
                     _strategyRequestMessage += $" Audit warning: {request.Warning}";
@@ -717,6 +723,7 @@ public partial class MainWindow : Window
         FarmT19StrategyButton.IsEnabled = lifecycleAvailable;
         TournamentStrategyButton.IsEnabled = lifecycleAvailable;
         NoStrategyButton.IsEnabled = lifecycleAvailable;
+        ApplyStrategyToActiveRunCheckBox.IsEnabled = processActive;
         if (!AdbPortBox.IsKeyboardFocusWithin && service?.AdbPort is not null)
         {
             AdbPortBox.Text = service.AdbPort.Value.ToString(CultureInfo.InvariantCulture);
@@ -769,6 +776,12 @@ public partial class MainWindow : Window
                 ? configuredStrategy
                 : NormalizeStrategy(status.Acknowledgements.Strategy?.Value);
         var pendingStrategy = strategyPending ? requestedStrategy : null;
+        var pendingStrategyLabel = strategyPending && string.Equals(
+            status.Control.StrategyApplyMode,
+            "active_battle",
+            StringComparison.OrdinalIgnoreCase)
+            ? "Pending active adoption"
+            : "Pending boundary";
         SetStrategySelectionStyle(
             FarmT18StrategyButton,
             "farm_t18",
@@ -800,7 +813,7 @@ public partial class MainWindow : Window
         var strategyState = !processActive
             ? $"Process inactive | Next start: {configuredStrategy ?? "unknown"}"
             : $"Current: {currentStrategy ?? "awaiting runtime evidence"} | "
-                + $"Pending: {pendingStrategy ?? "none"}";
+                + $"{pendingStrategyLabel}: {pendingStrategy ?? "none"}";
         StrategySelectionText.Text = string.IsNullOrWhiteSpace(_strategyRequestMessage)
             ? strategyState
             : $"{strategyState} | {_strategyRequestMessage}";
@@ -851,7 +864,8 @@ public partial class MainWindow : Window
                 $"Installed unit reads target file: {YesNo(service?.AutomationEnvironmentFileLoaded)}",
                 $"Systemd EnvironmentFiles: {service?.ServiceEnvironmentFiles ?? "-"}",
                 $"Current runtime strategy: {currentStrategy ?? "-"}",
-                $"Pending boundary strategy: {pendingStrategy ?? "-"}",
+                $"{pendingStrategyLabel}: {pendingStrategy ?? "-"}",
+                $"Strategy request mode: {status.Control.StrategyApplyMode}",
                 $"Configured next-start strategy: {service?.Strategy ?? "-"}",
                 $"Strategy source: {service?.StrategySource ?? "-"}",
                 $"Strategy file: {service?.StrategyEnvironmentFile ?? "-"}",

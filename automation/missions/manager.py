@@ -208,15 +208,34 @@ class MissionManager:
     ) -> None:
         """Replace strategy-owned state after the prior run is finalized."""
 
+        self._replace_strategy(strategy)
+        self._startup_gates_deferred = False
+        self._new_battle_home_observed = False
+        self.ctx.data["startup_gates_deferred"] = False
+
+    def adopt_strategy_for_active_battle(
+        self,
+        strategy: Optional[BaseStrategy],
+    ) -> None:
+        """Adopt reporting and normal rules without inventing a run boundary."""
+
+        self._replace_strategy(strategy)
+        self._startup_gates_deferred = True
+        self._new_battle_home_observed = False
+        self.ctx.data["startup_gates_deferred"] = True
+        self._battle_lifecycle.active_battle_observed = True
+        self._battle_lifecycle.adopt_initial_battle = False
+        self._record_deferred_free_upgrade_lock_evidence()
+
+    def _replace_strategy(self, strategy: Optional[BaseStrategy]) -> None:
+        """Replace strategy-owned variables without choosing boundary policy."""
+
         old_vars = getattr(self.strategy, "vars", {}) if self.strategy else {}
         mission_vars = self.ctx.data.setdefault("mission_vars", {})
         if isinstance(old_vars, Mapping):
             for key in old_vars:
                 mission_vars.pop(str(key), None)
         self.ctx.data["rule_last_fire"] = {}
-        self._startup_gates_deferred = False
-        self._new_battle_home_observed = False
-        self.ctx.data["startup_gates_deferred"] = False
         self.strategy = strategy
         if self.strategy:
             self.strategy.on_start(self.ctx)

@@ -22,6 +22,7 @@ from core.gate_decisions import (
 
 VALID_STATES = frozenset({"RUNNING", "PAUSED", "STOPPED"})
 VALID_MODES = frozenset({"RETRY", "WAIT", "HOME"})
+STRATEGY_APPLY_MODES = frozenset({"next_boundary", "active_battle"})
 GATE_DECISION_STATUSES = frozenset({"pending", "resolved", "consumed"})
 
 
@@ -69,6 +70,9 @@ class ControlDirectiveStore:
             "mode_updated_at": data.get("mode_updated_at"),
             "adb_port_updated_at": data.get("adb_port_updated_at"),
             "strategy": _valid_strategy(data.get("strategy")),
+            "strategy_apply_mode": _valid_strategy_apply_mode(
+                data.get("strategy_apply_mode")
+            ),
             "strategy_updated_at": data.get("strategy_updated_at"),
             "strategy_request_id": data.get("strategy_request_id"),
             "gate_decision": _valid_gate_decision(data.get("gate_decision")),
@@ -163,6 +167,7 @@ class ControlDirectiveStore:
         self,
         strategy: str,
         *,
+        apply_mode: str = "next_boundary",
         source: Optional[str] = None,
     ) -> dict[str, Any]:
         """Persist a validated runtime strategy request."""
@@ -172,11 +177,18 @@ class ControlDirectiveStore:
             raise ValueError(
                 "Strategy must be one of: " + ", ".join(CONFIGURABLE_STRATEGIES)
             )
+        normalized_apply_mode = str(apply_mode or "").strip().lower()
+        if normalized_apply_mode not in STRATEGY_APPLY_MODES:
+            raise ValueError(
+                "Strategy apply mode must be one of: "
+                + ", ".join(sorted(STRATEGY_APPLY_MODES))
+            )
 
         def mutate(data: dict[str, Any]) -> dict[str, Any]:
             timestamp = _updated_at()
             previous = _valid_strategy(data.get("strategy"))
             data["strategy"] = normalized
+            data["strategy_apply_mode"] = normalized_apply_mode
             if previous != normalized:
                 data["startup_gate_waivers"] = {}
             data["updated_at"] = timestamp
@@ -622,6 +634,11 @@ def _valid_port(value: object) -> Optional[int]:
 def _valid_strategy(value: object) -> Optional[str]:
     normalized = str(value or "").strip().lower()
     return normalized if normalized in CONFIGURABLE_STRATEGIES else None
+
+
+def _valid_strategy_apply_mode(value: object) -> str:
+    normalized = str(value or "next_boundary").strip().lower()
+    return normalized if normalized in STRATEGY_APPLY_MODES else "next_boundary"
 
 
 def _valid_gate_options(value: object) -> list[dict[str, str]]:

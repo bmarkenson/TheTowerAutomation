@@ -594,6 +594,40 @@ def test_control_surface_saves_or_queues_strategy_by_process_state(tmp_path):
         "disposition": "queued",
     }
 
+    response = service.apply_process_action(
+        {
+            "action": "set_strategy",
+            "strategy": "farm_t19_experiment",
+            "apply_to_active_run": True,
+        }
+    )
+
+    assert manager.calls[-1] == "persist_strategy:farm_t19_experiment"
+    control = service.control_store.status()
+    assert control["strategy"] == "farm_t19_experiment"
+    assert control["strategy_apply_mode"] == "active_battle"
+    assert response["request"] == {
+        "accepted": True,
+        "action": "set_strategy",
+        "strategy": "farm_t19_experiment",
+        "disposition": "active_battle_requested",
+    }
+
+
+def test_control_surface_rejects_active_battle_adoption_without_runtime(tmp_path):
+    manager = FakeManager(active=False)
+
+    with pytest.raises(ControlSurfaceRequestError, match="active automation"):
+        _service(tmp_path, manager).apply_process_action(
+            {
+                "action": "set_strategy",
+                "strategy": "farm_t18",
+                "apply_to_active_run": True,
+            }
+        )
+
+    assert manager.calls == []
+
 
 @pytest.mark.parametrize("strategy", [None, "", "unknown", 123])
 def test_control_surface_rejects_invalid_strategy(tmp_path, strategy):
