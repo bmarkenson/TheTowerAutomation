@@ -26,6 +26,16 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _activityRefreshCancellation;
     private bool _startupGatePolicyDirty;
     private string _strategyRequestMessage = "";
+    private bool _updatingStrategySelection;
+    private bool _strategySelectionDirty;
+    private bool _strategyRequestInFlight;
+    private bool _strategyLifecycleAvailable;
+    private bool _strategyProcessActive;
+    private string? _configuredStrategy;
+    private string? _currentStrategy;
+    private string? _requestedStrategy;
+    private string? _pendingStrategy;
+    private string _strategyApplyMode = "next_boundary";
     private StartupGateContext? _startupGateContext;
     private IReadOnlyDictionary<string, StartupGateWaiverStatus> _startupGateWaivers
         = new Dictionary<string, StartupGateWaiverStatus>();
@@ -311,16 +321,43 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void Strategy_Click(object sender, RoutedEventArgs e)
+    private void StrategySelectionBox_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
     {
-        if (sender is not Button button || button.Tag is not string strategy)
+        if (_updatingStrategySelection)
         {
             return;
         }
+
+        _strategySelectionDirty = true;
+        _strategyRequestMessage = "";
+        UpdateStrategyActionAvailability();
+    }
+
+    private async void QueueStrategy_Click(object sender, RoutedEventArgs e) =>
+        await SubmitSelectedStrategyAsync(adoptActiveBattle: false);
+
+    private async void AdoptStrategy_Click(object sender, RoutedEventArgs e) =>
+        await SubmitSelectedStrategyAsync(adoptActiveBattle: true);
+
+    private async Task SubmitSelectedStrategyAsync(bool adoptActiveBattle)
+    {
+        var strategy = SelectedStrategy();
+        if (strategy is null)
+        {
+            return;
+        }
+
+        _strategyRequestInFlight = true;
+        UpdateStrategyActionAvailability();
         try
         {
-            var adoptActiveBattle = ApplyStrategyToActiveRunCheckBox.IsChecked == true;
-            StrategySelectionText.Text = $"Sending {strategy} strategy request...";
+            var action = adoptActiveBattle
+                ? "active-battle adoption"
+                : _strategyProcessActive ? "boundary queue" : "next-start save";
+            StrategySelectionText.Text =
+                $"Sending {StrategyDisplayName(strategy)} {action} request...";
             object payload = adoptActiveBattle
                 ? new { action = "set_strategy", strategy, apply_to_active_run = true }
                 : new { action = "set_strategy", strategy };
@@ -330,14 +367,15 @@ public partial class MainWindow : Window
             if (response.Request is { Accepted: true } request)
             {
                 var requested = NormalizeStrategy(request.Strategy) ?? strategy;
+                var requestedLabel = StrategyDisplayName(requested);
                 _strategyRequestMessage = request.Disposition switch
                 {
-                    "queued" => $"Accepted {requested}; queued for the next confirmed run boundary.",
-                    "saved" => $"Accepted {requested}; saved for the next process start.",
-                    "active_battle_requested" => $"Accepted {requested}; waiting for the runtime to adopt it for the active battle.",
-                    _ => $"Accepted {requested} strategy request.",
+                    "queued" => $"Accepted {requestedLabel}; queued for the next confirmed run boundary.",
+                    "saved" => $"Accepted {requestedLabel}; saved for the next process start.",
+                    "active_battle_requested" => $"Accepted {requestedLabel}; waiting for active-battle adoption.",
+                    _ => $"Accepted {requestedLabel} strategy request.",
                 };
-                ApplyStrategyToActiveRunCheckBox.IsChecked = false;
+                _strategySelectionDirty = false;
                 if (!string.IsNullOrWhiteSpace(request.Warning))
                 {
                     _strategyRequestMessage += $" Audit warning: {request.Warning}";
@@ -351,6 +389,11 @@ public partial class MainWindow : Window
             _strategyRequestMessage = $"Strategy request was not accepted: {exc.Message}";
             ShowError(exc);
             await RefreshStatusAsync(force: true);
+        }
+        finally
+        {
+            _strategyRequestInFlight = false;
+            UpdateStrategyActionAvailability();
         }
     }
 
@@ -719,11 +762,6 @@ public partial class MainWindow : Window
             : pausedAndAcknowledged
                 ? "Switches the live runtime in place; it remains paused and does not rerun startup gates."
                 : "Indefinitely pause automation and wait for its acknowledgement before switching the live ADB port.";
-        FarmT18StrategyButton.IsEnabled = lifecycleAvailable;
-        FarmT19StrategyButton.IsEnabled = lifecycleAvailable;
-        TournamentStrategyButton.IsEnabled = lifecycleAvailable;
-        NoStrategyButton.IsEnabled = lifecycleAvailable;
-        ApplyStrategyToActiveRunCheckBox.IsEnabled = processActive;
         if (!AdbPortBox.IsKeyboardFocusWithin && service?.AdbPort is not null)
         {
             AdbPortBox.Text = service.AdbPort.Value.ToString(CultureInfo.InvariantCulture);
@@ -782,38 +820,33 @@ public partial class MainWindow : Window
             StringComparison.OrdinalIgnoreCase)
             ? "Pending active adoption"
             : "Pending boundary";
-        SetStrategySelectionStyle(
-            FarmT18StrategyButton,
-            "farm_t18",
-            processActive,
-            configuredStrategy,
-            currentStrategy,
-            pendingStrategy);
-        SetStrategySelectionStyle(
-            FarmT19StrategyButton,
-            "farm_t19_experiment",
-            processActive,
-            configuredStrategy,
-            currentStrategy,
-            pendingStrategy);
-        SetStrategySelectionStyle(
-            TournamentStrategyButton,
-            "tournament",
-            processActive,
-            configuredStrategy,
-            currentStrategy,
-            pendingStrategy);
-        SetStrategySelectionStyle(
-            NoStrategyButton,
-            "none",
-            processActive,
-            configuredStrategy,
-            currentStrategy,
-            pendingStrategy);
+        _strategyLifecycleAvailable = lifecycleAvailable;
+        _strategyProcessActive = processActive;
+        _configuredStrategy = configuredStrategy;
+        _currentStrategy = currentStrategy;
+        _requestedStrategy = requestedStrategy;
+        _pendingStrategy = pendingStrategy;
+        _strategyApplyMode = status.Control.StrategyApplyMode;
+        if (!_strategySelectionDirty)
+        {
+            SelectStrategy(
+                pendingStrategy
+                ?? (processActive ? currentStrategy : configuredStrategy)
+                ?? requestedStrategy);
+        }
+        UpdateStrategyActionAvailability();
+        var selectedStrategy = SelectedStrategy();
+        var configuredStrategyLabel = configuredStrategy is null
+            ? "unknown"
+            : StrategyDisplayName(configuredStrategy);
+        var currentStrategyLabel = currentStrategy is null
+            ? "awaiting runtime evidence"
+            : StrategyDisplayName(currentStrategy);
         var strategyState = !processActive
-            ? $"Process inactive | Next start: {configuredStrategy ?? "unknown"}"
-            : $"Current: {currentStrategy ?? "awaiting runtime evidence"} | "
-                + $"{pendingStrategyLabel}: {pendingStrategy ?? "none"}";
+            ? $"Process inactive | Next start: {configuredStrategyLabel}"
+            : $"Current: {currentStrategyLabel} | "
+                + $"{pendingStrategyLabel}: {StrategyDisplayName(pendingStrategy)}";
+        strategyState += $" | Selected: {StrategyDisplayName(selectedStrategy)}";
         StrategySelectionText.Text = string.IsNullOrWhiteSpace(_strategyRequestMessage)
             ? strategyState
             : $"{strategyState} | {_strategyRequestMessage}";
@@ -1000,23 +1033,87 @@ public partial class MainWindow : Window
             pending ? "PendingSelectionButton" : "ActiveSelectionButton");
     }
 
-    private void SetStrategySelectionStyle(
-        Button button,
-        string strategy,
-        bool processActive,
-        string? configuredStrategy,
-        string? currentStrategy,
-        string? pendingStrategy)
+    private string? SelectedStrategy() =>
+        StrategySelectionBox.SelectedItem is ComboBoxItem item
+            ? NormalizeStrategy(item.Tag?.ToString())
+            : null;
+
+    private void SelectStrategy(string? strategy)
     {
-        var pending = string.Equals(
-            pendingStrategy,
-            strategy,
-            StringComparison.OrdinalIgnoreCase);
-        var selected = pending || string.Equals(
-            processActive ? currentStrategy : configuredStrategy,
-            strategy,
-            StringComparison.OrdinalIgnoreCase);
-        SetSelectionStyle(button, selected, pending);
+        var normalized = NormalizeStrategy(strategy);
+        var item = StrategySelectionBox.Items
+            .OfType<ComboBoxItem>()
+            .FirstOrDefault(candidate => string.Equals(
+                NormalizeStrategy(candidate.Tag?.ToString()),
+                normalized,
+                StringComparison.OrdinalIgnoreCase));
+        if (item is null || ReferenceEquals(StrategySelectionBox.SelectedItem, item))
+        {
+            return;
+        }
+
+        _updatingStrategySelection = true;
+        try
+        {
+            StrategySelectionBox.SelectedItem = item;
+        }
+        finally
+        {
+            _updatingStrategySelection = false;
+        }
+    }
+
+    private void UpdateStrategyActionAvailability()
+    {
+        var selected = SelectedStrategy();
+        var hasSelection = selected is not null;
+        var hasPending = _pendingStrategy is not null;
+        var queueAlreadyRequested = _strategyProcessActive
+            ? hasPending
+                ? string.Equals(
+                    selected,
+                    _requestedStrategy,
+                    StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(
+                        _strategyApplyMode,
+                        "next_boundary",
+                        StringComparison.OrdinalIgnoreCase)
+                : string.Equals(
+                    selected,
+                    _currentStrategy,
+                    StringComparison.OrdinalIgnoreCase)
+            : string.Equals(
+                selected,
+                _configuredStrategy,
+                StringComparison.OrdinalIgnoreCase);
+        var adoptionAlreadyRequested = hasPending
+            && string.Equals(
+                selected,
+                _requestedStrategy,
+                StringComparison.OrdinalIgnoreCase)
+            && string.Equals(
+                _strategyApplyMode,
+                "active_battle",
+                StringComparison.OrdinalIgnoreCase);
+
+        StrategySelectionBox.IsEnabled =
+            _strategyLifecycleAvailable && !_strategyRequestInFlight;
+        QueueStrategyButton.Content = _strategyProcessActive
+            ? "Queue for next boundary"
+            : "Save for next start";
+        QueueStrategyButton.IsEnabled = _strategyLifecycleAvailable
+            && hasSelection
+            && !queueAlreadyRequested
+            && !_strategyRequestInFlight;
+        AdoptStrategyButton.IsEnabled = _strategyLifecycleAvailable
+            && _strategyProcessActive
+            && hasSelection
+            && !string.Equals(
+                selected,
+                _currentStrategy,
+                StringComparison.OrdinalIgnoreCase)
+            && !adoptionAlreadyRequested
+            && !_strategyRequestInFlight;
     }
 
     private static string? NormalizeStrategy(string? strategy) =>
@@ -1028,6 +1125,17 @@ public partial class MainWindow : Window
             "tournament" => "tournament",
             "none" => "none",
             _ => strategy,
+        };
+
+    private static string StrategyDisplayName(string? strategy) =>
+        NormalizeStrategy(strategy) switch
+        {
+            "farm_t18" => "Farm T18",
+            "farm_t19_experiment" => "Farm T19 experiment",
+            "tournament" => "Tournament",
+            "none" => "No strategy",
+            null => "none",
+            var value => value,
         };
 
     private static string YesNo(bool? value) => value switch
