@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 
 from core.app import App
+from core.clickmap_access import get_swipe
 from core.event_mission_tracker import EventMissionWarning
 from core.matcher import get_match
 from core.menu_reward_badges import (
@@ -155,6 +156,16 @@ def test_event_claim_template_has_positive_and_incomplete_negative_evidence():
     assert confidence >= 0.99
     assert negative_point is None
     assert negative_confidence < 0.9
+
+
+def test_event_mission_search_uses_short_overlapping_scroll_steps():
+    assert get_swipe("gesture_targets.goto_next:event_missions") == {
+        "x1": 540,
+        "y1": 1600,
+        "x2": 540,
+        "y2": 1350,
+        "duration_ms": 250,
+    }
 
 
 def test_event_missions_tab_navigation_is_visible_from_retained_bots_tab():
