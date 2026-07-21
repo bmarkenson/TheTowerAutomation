@@ -18,6 +18,7 @@ from core.app import App
 from core.action_executor import execute_actions
 from core.app_setup import config_from_args, parse_args
 from core.automation_supervisor import AutomationSupervisor
+from core.free_upgrade_locks import FARM_FREE_UPGRADE_LOCKS
 from core.gc_preflight_navigation import (
     GcLivePreflightResult,
     GcPreflightNavigationStatus,
@@ -46,6 +47,22 @@ FARM_STRATEGY_PATHS = {
     name: ROOT / "config" / "strategies" / f"{name}.strategy.yaml"
     for name in FARM_PROFILE_NAMES
 }
+
+
+def _free_upgrade_lock_boundary_evidence():
+    return {
+        "status": "verified",
+        "boundary": "NEW_BATTLE",
+        "required": list(FARM_FREE_UPGRADE_LOCKS),
+        "checked": True,
+        "valid": True,
+        "has_authoritative_mismatch": False,
+        "locks": [
+            {"label": label, "state": "checked", "valid": True}
+            for label in FARM_FREE_UPGRADE_LOCKS
+        ],
+        "changed_labels": [],
+    }
 
 
 class _RunCountingStrategy(BaseStrategy):
@@ -410,6 +427,57 @@ class DeferredStartupGateTests(unittest.TestCase):
         )
         manager.maybe_run_start({"state": "RUNNING"})
         self.assertEqual(strategy.run_starts, 1)
+
+    def test_attached_farm_defers_lock_evidence_until_new_battle_boundary(self):
+        strategy = get_strategy("farm_t18")
+        manager = MissionManager(
+            None,
+            strategy,
+            defer_startup_gates_until_next_run=True,
+        )
+        manager.start()
+        mv = manager.ctx.data["mission_vars"]
+        deferred = mv["gc_session_preflight_evidence"]["free_upgrade_locks"]
+
+        self.assertEqual(deferred["status"], "unavailable_deferred")
+        self.assertIsNone(deferred["valid"])
+        self.assertTrue(deferred["blocking_valid"])
+        self.assertFalse(manager.session_preflight_repair_required())
+
+        manager.maybe_run_start(
+            {"state": "HOME_SCREEN", "home_battle_control": "RESUME_BATTLE"}
+        )
+        manager.maybe_run_start({"state": "RUNNING"})
+        self.assertEqual(
+            mv["gc_session_preflight_evidence"]["free_upgrade_locks"],
+            deferred,
+        )
+        self.assertEqual(manager.no_battle_setup_requirements(), {})
+
+        manager.maybe_run_start(
+            {"state": "HOME_SCREEN", "home_battle_control": "NEW_BATTLE"}
+        )
+        self.assertNotIn(
+            "free_upgrade_locks",
+            mv["gc_session_preflight_evidence"],
+        )
+        self.assertEqual(
+            manager.no_battle_setup_requirements()["free_upgrade_locks"],
+            list(FARM_FREE_UPGRADE_LOCKS),
+        )
+
+        boundary_evidence = _free_upgrade_lock_boundary_evidence()
+        manager.mark_no_battle_setup_complete(
+            {"free_upgrade_locks": boundary_evidence}
+        )
+        manager.maybe_run_start(
+            {"state": "HOME_SCREEN", "home_battle_control": "NEW_BATTLE"}
+        )
+        self.assertEqual(manager.no_battle_setup_requirements(), {})
+        self.assertEqual(
+            mv["gc_session_preflight_evidence"]["free_upgrade_locks"],
+            boundary_evidence,
+        )
 
 
 class FarmProfileTests(unittest.TestCase):
@@ -1026,11 +1094,15 @@ class GcFarmProfileTests(unittest.TestCase):
         self.assertFalse(manager.session_preflight_terminally_blocked())
 
     def test_session_preflight_action_records_one_continuous_session_completion(self):
-        strategy = get_strategy("gc_farm_t19_experiment")
+        strategy = get_strategy("farm_t19_experiment")
         ctx = MissionContext()
         strategy.on_start(ctx)
         mv = ctx.data["mission_vars"]
         mv["last_detection_state"] = "RUNNING"
+        boundary_evidence = _free_upgrade_lock_boundary_evidence()
+        mv["gc_no_battle_setup_evidence"] = {
+            "free_upgrade_locks": boundary_evidence
+        }
         action = next(
             rule
             for rule in strategy.rules
@@ -1053,11 +1125,53 @@ class GcFarmProfileTests(unittest.TestCase):
                 ctx,
             )
 
-        run_preflight.assert_called_once_with(action["requirements"])
+        run_preflight.assert_called_once_with(
+            action["requirements"],
+            free_upgrade_lock_boundary_evidence=boundary_evidence,
+        )
         self.assertTrue(mv["gc_session_preflight_attempted"])
         self.assertTrue(mv["gc_session_preflight_completed"])
         self.assertFalse(mv["gc_session_preflight_blocked"])
         self.assertEqual(mv["gc_session_preflight_evidence"], {"valid": True})
+
+    def test_completed_farm_run_reports_new_battle_lock_evidence(self):
+        strategy = get_strategy("farm_t18")
+        boundary_evidence = _free_upgrade_lock_boundary_evidence()
+        manager = MagicMock()
+        manager.strategy = strategy
+        manager.ctx = MissionContext(
+            data={
+                "mission_vars": {
+                    "gc_session_preflight_evidence": {
+                        "valid": True,
+                        "free_upgrade_locks": boundary_evidence,
+                    }
+                }
+            }
+        )
+        manager.session_preflight_repair_in_progress.return_value = False
+        app = App.__new__(App)
+        app._mission_mgr = manager
+        app._fast_game_over = False
+        app._last_wave_value = 2500
+        app._last_wave_conf = 99.0
+        app._supervisor = MagicMock()
+        app._status_reporter = MagicMock()
+        app._status_reporter.coin_rate_samples = []
+        app._pending_strategy_request = None
+        app._strategy_boundary_confirmed = False
+        app._handle_daily_gem_if_due = MagicMock(return_value=False)
+        app._handle_mission_rewards_if_due = MagicMock(return_value=False)
+        frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+        with patch("core.app.handle_game_over") as game_over:
+            app._handle_primary_states("GAME_OVER", set(), frame)
+
+        reported = game_over.call_args.kwargs["battle_context"][
+            "session_preflight_evidence"
+        ]
+        self.assertEqual(reported["free_upgrade_locks"], boundary_evidence)
+        manager.on_game_over.assert_called_once_with()
 
     def test_session_preflight_mismatch_blocks_without_correction(self):
         strategy = get_strategy("gc_farm_t19_experiment")

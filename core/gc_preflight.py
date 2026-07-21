@@ -7,7 +7,6 @@ from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
 from core.auto_pick_perks import AutoPickPerksEvidence, measure_auto_pick_perks
 from core.free_upgrade_locks import (
-    FreeUpgradeLocksEvidence,
     normalize_free_upgrade_lock_requirements,
 )
 from core.gc_module_loadout import (
@@ -96,7 +95,7 @@ class UltimateWeaponEvidence:
 class GcSessionPreflightEvidence:
     configuration: GcPreflightEvidence
     free_upgrade_lock_requirements: tuple[str, ...]
-    free_upgrade_locks: Optional[FreeUpgradeLocksEvidence]
+    free_upgrade_locks: Mapping[str, Any]
     module_mode: str
     modules: Optional[GcModuleLoadoutEvidence]
     auto_pick_perks_required: bool
@@ -137,22 +136,19 @@ class GcSessionPreflightEvidence:
         )
 
     @property
-    def free_upgrade_locks_valid(self) -> bool:
-        if self.is_waived("free_upgrade_locks"):
+    def free_upgrade_locks_valid(self) -> Optional[bool]:
+        """Return boundary validity, or None when that check was unavailable."""
+
+        status = str(self.free_upgrade_locks.get("status") or "").strip()
+        if status in {"not_required", "waived"}:
             return True
-        if not self.free_upgrade_lock_requirements:
-            return True
-        if self.free_upgrade_locks is None or not self.free_upgrade_locks.valid:
-            return False
-        return tuple(
-            lock.label for lock in self.free_upgrade_locks.locks
-        ) == self.free_upgrade_lock_requirements
+        valid = self.free_upgrade_locks.get("valid")
+        return valid if isinstance(valid, bool) else None
 
     @property
     def valid(self) -> bool:
         return (
             self.configuration_valid
-            and self.free_upgrade_locks_valid
             and self.modules_blocking_valid
             and self.auto_pick_perks_valid
             and (
@@ -169,7 +165,6 @@ class GcSessionPreflightEvidence:
             ("workshop_preset", self.configuration.workshop.valid),
             ("bots_preset", self.configuration.bots.valid),
             ("guardian_chips", self.configuration.guardians.valid),
-            ("free_upgrade_locks", self.free_upgrade_locks_valid),
             ("modules", self.modules_blocking_valid),
             ("auto_pick_perks", self.auto_pick_perks_valid),
             (
@@ -183,17 +178,17 @@ class GcSessionPreflightEvidence:
         return tuple(failures)
 
     @property
+    def deferred_checks(self) -> tuple[str, ...]:
+        if self.free_upgrade_locks.get("status") == "unavailable_deferred":
+            return ("free_upgrade_locks",)
+        return ()
+
+    @property
     def requires_no_battle_repair(self) -> bool:
         """Whether a mismatch belongs to a no-battle configuration surface."""
 
         return (
             not self.configuration_valid
-            or bool(
-                not self.is_waived("free_upgrade_locks")
-                and self.free_upgrade_lock_requirements
-                and self.free_upgrade_locks is not None
-                and self.free_upgrade_locks.has_authoritative_mismatch
-            )
             or bool(
                 not self.is_waived("modules")
                 and self.module_mode == "enforce"
@@ -205,19 +200,8 @@ class GcSessionPreflightEvidence:
     def as_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["configuration"]["valid"] = self.configuration.valid
-        if self.free_upgrade_locks is None:
-            payload["free_upgrade_locks"] = {
-                "required": list(self.free_upgrade_lock_requirements),
-                "checked": False,
-                "valid": self.free_upgrade_locks_valid,
-            }
-        else:
-            payload["free_upgrade_locks"] = self.free_upgrade_locks.as_dict()
-            payload["free_upgrade_locks"].update(
-                required=list(self.free_upgrade_lock_requirements),
-                checked=True,
-                valid=self.free_upgrade_locks_valid,
-            )
+        payload["free_upgrade_locks"] = dict(self.free_upgrade_locks)
+        payload["free_upgrade_locks"]["blocking_valid"] = True
         if self.modules is None:
             payload["modules"] = {
                 "mode": self.module_mode,
@@ -241,6 +225,7 @@ class GcSessionPreflightEvidence:
         payload["ultimate_weapons"]["valid"] = self.ultimate_weapons.valid
         payload["configuration"]["blocking_valid"] = self.configuration_valid
         payload["failed_checks"] = list(self.failed_checks)
+        payload["deferred_checks"] = list(self.deferred_checks)
         payload["valid"] = self.valid
         return payload
 
@@ -461,6 +446,75 @@ def evaluate_ultimate_weapon_state(
     return UltimateWeaponEvidence(tuple(results))
 
 
+def _free_upgrade_lock_boundary_evidence(
+    requirements: tuple[str, ...],
+    evidence: Optional[Mapping[str, Any]],
+    *,
+    waiver: Any = None,
+) -> dict[str, Any]:
+    """Normalize run-boundary lock proof without turning absence into a pass."""
+
+    required = list(requirements)
+    if not requirements:
+        return {
+            "status": "not_required",
+            "boundary": "NEW_BATTLE",
+            "required": required,
+            "checked": False,
+            "valid": True,
+        }
+    if waiver is not None:
+        return {
+            "status": "waived",
+            "boundary": "NEW_BATTLE",
+            "required": required,
+            "checked": False,
+            "valid": None,
+            "waiver": dict(waiver) if isinstance(waiver, Mapping) else waiver,
+        }
+
+    candidate = dict(evidence) if isinstance(evidence, Mapping) else {}
+    raw_locks = candidate.get("locks")
+    locks = list(raw_locks) if isinstance(raw_locks, (list, tuple)) else []
+    labels = tuple(
+        str(lock.get("label") or "").strip()
+        for lock in locks
+        if isinstance(lock, Mapping)
+    )
+    locks_verified = len(locks) == len(requirements) and all(
+        isinstance(lock, Mapping)
+        and str(lock.get("state") or "").strip().lower() == "checked"
+        and lock.get("valid") is True
+        for lock in locks
+    )
+    verified = bool(
+        candidate.get("status") == "verified"
+        and candidate.get("boundary") == "NEW_BATTLE"
+        and candidate.get("checked") is True
+        and candidate.get("valid") is True
+        and tuple(candidate.get("required") or ()) == requirements
+        and labels == requirements
+        and locks_verified
+    )
+    if verified:
+        candidate["required"] = required
+        candidate["blocking_valid"] = True
+        return candidate
+
+    return {
+        "status": "unavailable_deferred",
+        "boundary": "NEW_BATTLE",
+        "required": required,
+        "checked": False,
+        "valid": None,
+        "blocking_valid": True,
+        "reason": (
+            "authoritative no-battle NEW_BATTLE lock evidence was not "
+            "available for this run"
+        ),
+    }
+
+
 def validate_gc_session_preflight_screens(
     *,
     cards_screen,
@@ -474,7 +528,7 @@ def validate_gc_session_preflight_screens(
     ultimate_requirements: Mapping[str, Mapping[str, Any]],
     ultimate_observations: Mapping[str, Mapping[str, Any]],
     free_upgrade_lock_requirements: Optional[Sequence[Any]] = None,
-    free_upgrade_locks: Optional[FreeUpgradeLocksEvidence] = None,
+    free_upgrade_lock_boundary_evidence: Optional[Mapping[str, Any]] = None,
     detector: Detector = detect_state_and_overlays,
     section_specs: Mapping[str, GcSectionSpec] = GC_SECTION_SPECS,
     auto_pick_perks_required: bool = True,
@@ -486,6 +540,12 @@ def validate_gc_session_preflight_screens(
         normalize_free_upgrade_lock_requirements(free_upgrade_lock_requirements)
         if free_upgrade_lock_requirements is not None
         else ()
+    )
+    active_waivers = dict(waivers or {})
+    free_upgrade_locks = _free_upgrade_lock_boundary_evidence(
+        normalized_free_upgrade_locks,
+        free_upgrade_lock_boundary_evidence,
+        waiver=active_waivers.get("free_upgrade_locks"),
     )
 
     configuration = validate_gc_preflight_screens(
@@ -530,7 +590,7 @@ def validate_gc_session_preflight_screens(
             ultimate_requirements,
             ultimate_observations,
         ),
-        waivers=dict(waivers or {}),
+        waivers=active_waivers,
     )
 
 

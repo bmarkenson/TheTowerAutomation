@@ -1,15 +1,10 @@
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 
 from core.battle_lifecycle import HomeBattleControl
-from core.free_upgrade_locks import (
-    FARM_FREE_UPGRADE_LOCKS,
-    FreeUpgradeLockEvidence,
-    FreeUpgradeLockInspectionResult,
-    FreeUpgradeLockState,
-    FreeUpgradeLocksEvidence,
-)
+from core.free_upgrade_locks import FARM_FREE_UPGRADE_LOCKS
 from core.gc_preflight_navigation import (
     GcPreflightNavigationStatus,
     _guarded_visible_tap,
@@ -132,6 +127,23 @@ def _stun_off_result(ui, *, changed=False):
     )
 
 
+def _lock_boundary_evidence():
+    locks = [
+        {"label": label, "state": "checked", "valid": True}
+        for label in FARM_FREE_UPGRADE_LOCKS
+    ]
+    return {
+        "status": "verified",
+        "boundary": "NEW_BATTLE",
+        "required": list(FARM_FREE_UPGRADE_LOCKS),
+        "checked": True,
+        "valid": True,
+        "has_authoritative_mismatch": False,
+        "locks": locks,
+        "changed_labels": [],
+    }
+
+
 def test_game_over_observation_aborts_without_sending_input():
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
     static_taps = []
@@ -224,7 +236,7 @@ def test_read_only_route_returns_to_running_and_never_uses_mutating_controls():
     assert ui.event_swipes == ["gesture_targets.goto_top:event_bots"]
 
 
-def test_farm_route_inspects_home_locks_and_passes_evidence_to_validator():
+def test_active_farm_route_never_inspects_locks_and_carries_boundary_evidence():
     ui = _FakeUi()
     boxes = [
         UpgradeBox(
@@ -235,60 +247,43 @@ def test_farm_route_inspects_home_locks_and_passes_evidence_to_validator():
         )
         for label, toggles in ULTIMATE_REQUIREMENTS.items()
     ]
-    locks = FreeUpgradeLocksEvidence(
-        tuple(
-            FreeUpgradeLockEvidence(
-                label,
-                FreeUpgradeLockState.CHECKED,
-                label,
-                96.0,
-                "Lock Level (1)",
-                95.0,
-                1_800,
-                650,
-            )
-            for label in FARM_FREE_UPGRADE_LOCKS
-        )
-    )
-    inspections = []
+    boundary_evidence = _lock_boundary_evidence()
     validated = {}
-
-    def inspect(requirements, **kwargs):
-        inspections.append((requirements, kwargs))
-        return FreeUpgradeLockInspectionResult(locks, ui.frame)
 
     def validate(**kwargs):
         validated.update(kwargs)
         return SimpleNamespace(valid=True)
 
-    result = run_read_only_gc_preflight(
-        {
-            **PREFLIGHT_REQUIREMENTS,
-            "free_upgrade_locks": list(FARM_FREE_UPGRADE_LOCKS),
-        },
-        capture_fn=ui.capture,
-        detector=ui.detect,
-        safe_tap_fn=ui.safe_tap,
-        tap_visible_fn=ui.visible_tap,
-        go_home_fn=ui.go_home,
-        swipe_fn=ui.swipe,
-        event_swipe_fn=ui.event_swipe,
-        detect_boxes_fn=lambda _frame, **_kwargs: {"left": boxes, "right": []},
-        ensure_poison_swamp_stun_fn=lambda **_kwargs: _stun_off_result(ui),
-        inspect_free_upgrade_locks_fn=inspect,
-        detect_home_control_fn=lambda _frame: _home_evidence(),
-        sleep_fn=lambda _seconds: None,
-        validate_fn=validate,
-    )
+    with patch("core.free_upgrade_locks.inspect_free_upgrade_locks") as inspect:
+        result = run_read_only_gc_preflight(
+            {
+                **PREFLIGHT_REQUIREMENTS,
+                "free_upgrade_locks": list(FARM_FREE_UPGRADE_LOCKS),
+            },
+            capture_fn=ui.capture,
+            detector=ui.detect,
+            safe_tap_fn=ui.safe_tap,
+            tap_visible_fn=ui.visible_tap,
+            go_home_fn=ui.go_home,
+            swipe_fn=ui.swipe,
+            event_swipe_fn=ui.event_swipe,
+            detect_boxes_fn=lambda _frame, **_kwargs: {
+                "left": boxes,
+                "right": [],
+            },
+            ensure_poison_swamp_stun_fn=lambda **_kwargs: _stun_off_result(ui),
+            free_upgrade_lock_boundary_evidence=boundary_evidence,
+            detect_home_control_fn=lambda _frame: _home_evidence(),
+            sleep_fn=lambda _seconds: None,
+            validate_fn=validate,
+        )
 
     assert result.status is GcPreflightNavigationStatus.COMPLETE
-    assert len(inspections) == 1
-    assert inspections[0][0] == list(FARM_FREE_UPGRADE_LOCKS)
-    assert inspections[0][1]["enforce"] is False
+    inspect.assert_not_called()
     assert validated["free_upgrade_lock_requirements"] == list(
         FARM_FREE_UPGRADE_LOCKS
     )
-    assert validated["free_upgrade_locks"] is locks
+    assert validated["free_upgrade_lock_boundary_evidence"] == boundary_evidence
 
 
 def test_stun_evidence_survives_later_primary_only_observation():

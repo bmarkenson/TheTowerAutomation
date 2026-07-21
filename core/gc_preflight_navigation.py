@@ -14,10 +14,6 @@ from core.gc_preflight import (
     merge_ultimate_weapon_observations,
     validate_gc_session_preflight_screens,
 )
-from core.free_upgrade_locks import (
-    FreeUpgradeLockInspectionResult,
-    inspect_free_upgrade_locks,
-)
 from core.battle_lifecycle import HomeBattleControl
 from core.home_battle import HomeBattleEvidence, detect_home_battle_control
 from core.input import safe_tap, swipe_now, tap_if_visible
@@ -440,9 +436,7 @@ def run_read_only_gc_preflight(
     ensure_poison_swamp_stun_fn: Callable[
         ..., PoisonSwampStunResult
     ] = ensure_poison_swamp_stun_off,
-    inspect_free_upgrade_locks_fn: Callable[
-        ..., FreeUpgradeLockInspectionResult
-    ] = inspect_free_upgrade_locks,
+    free_upgrade_lock_boundary_evidence: Optional[Mapping[str, Any]] = None,
     detect_home_control_fn: HomeControlDetector = detect_home_battle_control,
     sleep_fn: Callable[[float], None] = time.sleep,
     validate_fn: Callable[
@@ -759,9 +753,10 @@ def run_read_only_gc_preflight(
             sleep_fn=sleep_fn,
         )
 
-        # Workshop is the only persistent section unavailable from the active
-        # battle. Leave through the verified resumable Home route only after
-        # every in-run read-only section has been captured.
+        # The Workshop preset remains an active session requirement, so it is
+        # inspected through the verified resumable Home route. Free Upgrade
+        # locks are deliberately excluded: only NEW_BATTLE no-battle setup can
+        # inspect or enforce them authoritatively.
         if not go_home_fn():
             _capture_detection(capture_fn, detector)
             raise _NavigationFailure("guarded Go Home failed")
@@ -787,21 +782,6 @@ def run_read_only_gc_preflight(
             sleep_fn=sleep_fn,
         )
         free_upgrade_lock_requirements = requirements.get("free_upgrade_locks")
-        free_upgrade_locks = None
-        if free_upgrade_lock_requirements is not None:
-            lock_result = inspect_free_upgrade_locks_fn(
-                free_upgrade_lock_requirements,
-                screenshot=workshop,
-                enforce=False,
-                capture_fn=capture_fn,
-                detector=detector,
-                safe_tap_fn=safe_tap_fn,
-                swipe_fn=swipe_fn,
-                detect_boxes_fn=detect_boxes_fn,
-                sleep_fn=sleep_fn,
-            )
-            workshop = lock_result.screenshot
-            free_upgrade_locks = lock_result.evidence
         _guarded_static_tap(
             "navigation.goto_home",
             allowed_states={"WORKSHOP"},
@@ -849,7 +829,9 @@ def run_read_only_gc_preflight(
         if free_upgrade_lock_requirements is not None:
             validation_args.update(
                 free_upgrade_lock_requirements=free_upgrade_lock_requirements,
-                free_upgrade_locks=free_upgrade_locks,
+                free_upgrade_lock_boundary_evidence=(
+                    free_upgrade_lock_boundary_evidence
+                ),
             )
         evidence = validate_fn(**validation_args)
         status = (
@@ -857,7 +839,12 @@ def run_read_only_gc_preflight(
             if evidence.valid
             else GcPreflightNavigationStatus.MISMATCH
         )
-        reason = "all requirements verified" if evidence.valid else "configuration mismatch"
+        if not evidence.valid:
+            reason = "configuration mismatch"
+        elif getattr(evidence, "deferred_checks", ()):
+            reason = "active requirements verified; boundary checks deferred"
+        else:
+            reason = "all requirements verified"
         return GcLivePreflightResult(status, reason, evidence)
     except _BattleEnded as exc:
         return GcLivePreflightResult(

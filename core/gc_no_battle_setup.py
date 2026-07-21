@@ -169,11 +169,17 @@ def run_gc_no_battle_setup(
         current_check = "free_upgrade_locks"
         free_upgrade_lock_requirements = requirements.get("free_upgrade_locks")
         if current_check in active_waivers:
-            evidence[current_check] = _waived_evidence(
+            waived_locks = _waived_evidence(
                 current_check,
                 free_upgrade_lock_requirements,
                 active_waivers[current_check],
             )
+            waived_locks.update(
+                boundary=HomeBattleControl.NEW_BATTLE.value,
+                checked=False,
+                valid=None,
+            )
+            evidence[current_check] = waived_locks
         elif free_upgrade_lock_requirements is not None:
             lock_result = ensure_free_upgrade_locks_fn(
                 free_upgrade_lock_requirements,
@@ -185,12 +191,33 @@ def run_gc_no_battle_setup(
                 swipe_fn=workshop_swipe_fn,
                 sleep_fn=sleep_fn,
             )
+            normalized_lock_requirements = normalize_free_upgrade_lock_requirements(
+                free_upgrade_lock_requirements,
+                require_farm_set=True,
+            )
+            lock_evidence = lock_result.evidence
+            lock_payload = lock_evidence.as_dict()
+            lock_payload.update(
+                boundary=HomeBattleControl.NEW_BATTLE.value,
+                checked=True,
+                required=list(normalized_lock_requirements),
+                status=(
+                    "verified"
+                    if lock_evidence.valid
+                    else "mismatch"
+                    if lock_evidence.has_authoritative_mismatch
+                    else "unavailable"
+                ),
+                changed_labels=list(
+                    getattr(lock_result, "changed_labels", ()) or ()
+                ),
+            )
+            evidence["free_upgrade_locks"] = lock_payload
             if not lock_result.evidence.valid:
                 raise _SetupFailure(
                     "Free Upgrade locks remained invalid after correction"
                 )
             workshop = lock_result.screenshot
-            evidence["free_upgrade_locks"] = lock_result.evidence.as_dict()
         current = _return_home(
             workshop,
             capture_fn,

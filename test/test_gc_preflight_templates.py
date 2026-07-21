@@ -5,6 +5,7 @@ import numpy as np
 
 from core.auto_pick_perks import measure_auto_pick_perks
 from core.clickmap_access import get_click
+from core.free_upgrade_locks import FARM_FREE_UPGRADE_LOCKS
 from core.gc_preflight import (
     evaluate_ultimate_weapon_state,
     merge_ultimate_weapon_observations,
@@ -385,6 +386,78 @@ def test_complete_session_preflight_combines_all_positive_evidence():
     assert evidence.modules.valid
     assert evidence.auto_pick_perks.enabled
     assert evidence.ultimate_weapons.valid
+
+
+def test_session_preflight_retains_verified_new_battle_lock_evidence():
+    observed = {
+        label: dict(toggles)
+        for label, toggles in GC_ULTIMATE_REQUIREMENTS.items()
+    }
+    boundary_evidence = {
+        "status": "verified",
+        "boundary": "NEW_BATTLE",
+        "required": list(FARM_FREE_UPGRADE_LOCKS),
+        "checked": True,
+        "valid": True,
+        "has_authoritative_mismatch": False,
+        "locks": [
+            {"label": label, "state": "checked", "valid": True}
+            for label in FARM_FREE_UPGRADE_LOCKS
+        ],
+        "changed_labels": [],
+    }
+
+    evidence = validate_gc_session_preflight_screens(
+        cards_screen=_load(FARM_ACTIVE_FIXTURE),
+        workshop_screen=_load(WORKSHOP_FIXTURE),
+        bots_screen=_load(BOT_FIXTURE),
+        guardians_screen=_load(GUARDIAN_FIXTURE),
+        modules_screen=_load(MODULES_FIXTURE),
+        perks_screen=_load(AUTO_PICK_FIXTURE),
+        module_requirements=GC_MODULE_REQUIREMENTS,
+        ultimate_requirements=GC_ULTIMATE_REQUIREMENTS,
+        ultimate_observations=observed,
+        free_upgrade_lock_requirements=FARM_FREE_UPGRADE_LOCKS,
+        free_upgrade_lock_boundary_evidence=boundary_evidence,
+    )
+
+    assert evidence.valid
+    assert evidence.free_upgrade_locks_valid is True
+    assert evidence.as_dict()["free_upgrade_locks"] == {
+        **boundary_evidence,
+        "blocking_valid": True,
+    }
+
+
+def test_missing_boundary_lock_evidence_is_deferred_without_session_failure():
+    observed = {
+        label: dict(toggles)
+        for label, toggles in GC_ULTIMATE_REQUIREMENTS.items()
+    }
+
+    evidence = validate_gc_session_preflight_screens(
+        cards_screen=_load(FARM_ACTIVE_FIXTURE),
+        workshop_screen=_load(WORKSHOP_FIXTURE),
+        bots_screen=_load(BOT_FIXTURE),
+        guardians_screen=_load(GUARDIAN_FIXTURE),
+        modules_screen=_load(MODULES_FIXTURE),
+        perks_screen=_load(AUTO_PICK_FIXTURE),
+        module_requirements=GC_MODULE_REQUIREMENTS,
+        ultimate_requirements=GC_ULTIMATE_REQUIREMENTS,
+        ultimate_observations=observed,
+        free_upgrade_lock_requirements=FARM_FREE_UPGRADE_LOCKS,
+    )
+
+    payload = evidence.as_dict()["free_upgrade_locks"]
+    assert evidence.valid
+    assert evidence.free_upgrade_locks_valid is None
+    assert "free_upgrade_locks" not in evidence.failed_checks
+    assert evidence.deferred_checks == ("free_upgrade_locks",)
+    assert not evidence.requires_no_battle_repair
+    assert payload["status"] == "unavailable_deferred"
+    assert payload["checked"] is False
+    assert payload["valid"] is None
+    assert payload["blocking_valid"] is True
 
 
 def test_bots_waiver_does_not_waive_auto_pick_perks():

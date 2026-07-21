@@ -296,13 +296,29 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                     waivers = mv.get("gc_session_preflight_waivers")
                     if isinstance(waivers, Mapping) and waivers:
                         effective_requirements["_gate_waivers"] = dict(waivers)
+                preflight_kwargs: Dict[str, Any] = {}
+                if mv is not None:
+                    setup_evidence = mv.get("gc_no_battle_setup_evidence")
+                    lock_evidence = (
+                        setup_evidence.get("free_upgrade_locks")
+                        if isinstance(setup_evidence, Mapping)
+                        else None
+                    )
+                    if isinstance(lock_evidence, Mapping):
+                        preflight_kwargs["free_upgrade_lock_boundary_evidence"] = (
+                            dict(lock_evidence)
+                        )
                 if validator == "tournament":
                     result = run_read_only_gc_preflight(
                         effective_requirements,
                         validate_fn=validate_tournament_session_preflight_screens,
+                        **preflight_kwargs,
                     )
                 else:
-                    result = run_read_only_gc_preflight(effective_requirements)
+                    result = run_read_only_gc_preflight(
+                        effective_requirements,
+                        **preflight_kwargs,
+                    )
                 evidence_payload = (
                     result.evidence.as_dict()
                     if result.evidence is not None

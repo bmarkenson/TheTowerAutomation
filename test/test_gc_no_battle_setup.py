@@ -340,6 +340,7 @@ def test_no_battle_setup_enforces_free_upgrade_locks_after_farm_preset():
     calls = []
     lock_evidence = SimpleNamespace(
         valid=True,
+        has_authoritative_mismatch=False,
         as_dict=lambda: {"valid": True, "locks": []},
     )
 
@@ -373,7 +374,54 @@ def test_no_battle_setup_enforces_free_upgrade_locks_after_farm_preset():
     assert result.evidence["free_upgrade_locks"] == {
         "valid": True,
         "locks": [],
+        "boundary": "NEW_BATTLE",
+        "checked": True,
+        "required": list(FARM_FREE_UPGRADE_LOCKS),
+        "status": "verified",
+        "changed_labels": [],
     }
+
+
+def test_no_battle_lock_mismatch_blocks_new_battle_boundary():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+    requirements = {
+        **REQUIREMENTS,
+        "free_upgrade_locks": list(FARM_FREE_UPGRADE_LOCKS),
+    }
+    lock_evidence = SimpleNamespace(
+        valid=False,
+        has_authoritative_mismatch=True,
+        as_dict=lambda: {
+            "valid": False,
+            "has_authoritative_mismatch": True,
+            "locks": [],
+        },
+    )
+
+    result = run_gc_no_battle_setup(
+        requirements,
+        screenshot="home",
+        capture_fn=router.capture,
+        detector=router.detect,
+        detect_home_control_fn=router.home_control,
+        safe_tap_fn=router.static_tap,
+        tap_visible_fn=router.visible_tap,
+        swipe_fn=router.swipe,
+        measure_selection_fn=router.measure,
+        ensure_modules_fn=router.ensure_modules,
+        ensure_free_upgrade_locks_fn=lambda *_args, **_kwargs: SimpleNamespace(
+            evidence=lock_evidence,
+            screenshot="workshop",
+            changed_labels=(),
+        ),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.status is GcNoBattleSetupStatus.FAILED
+    assert result.failed_check == "free_upgrade_locks"
+    assert result.evidence["free_upgrade_locks"]["status"] == "mismatch"
+    assert result.evidence["free_upgrade_locks"]["boundary"] == "NEW_BATTLE"
+    assert result.evidence["free_upgrade_locks"]["valid"] is False
 
 
 def test_no_battle_setup_restores_retained_bots_scroll_before_preset_check():

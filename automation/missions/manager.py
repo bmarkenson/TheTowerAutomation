@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from utils.logger import log, log_mission
@@ -27,6 +28,7 @@ class MissionManager:
         self._last_state = None
         self._mission_was_complete = False
         self._startup_gates_deferred = bool(defer_startup_gates_until_next_run)
+        self._new_battle_home_observed = False
         self._battle_lifecycle = BattleLifecycle(
             adopt_initial_battle=self._startup_gates_deferred,
         )
@@ -43,6 +45,8 @@ class MissionManager:
         if self.strategy:
             self.strategy.on_start(self.ctx)
         self.ctx.data["startup_gates_deferred"] = self._startup_gates_deferred
+        if self._startup_gates_deferred:
+            self._record_deferred_free_upgrade_lock_evidence()
         self._started = True
 
     def maybe_run_start(self, detection: Detection) -> bool:
@@ -51,14 +55,21 @@ class MissionManager:
         state = detection.get("state")
         control = detection.get("home_battle_control", "UNKNOWN")
         normalized_state = str(state or "UNKNOWN").upper()
+        parsed_control = HomeBattleControl.parse(control)
+        new_battle_home = bool(
+            normalized_state in {"HOME", "HOME_SCREEN"}
+            and parsed_control is HomeBattleControl.NEW_BATTLE
+        )
         if self._startup_gates_deferred and (
             normalized_state in {"GAME_OVER", "TOURNAMENT_RESULTS"}
-            or (
-                normalized_state in {"HOME", "HOME_SCREEN"}
-                and HomeBattleControl.parse(control) is HomeBattleControl.NEW_BATTLE
-            )
+            or new_battle_home
         ):
             self._arm_startup_gates()
+        if new_battle_home and not self._new_battle_home_observed:
+            self._rearm_free_upgrade_lock_gate()
+            self._new_battle_home_observed = True
+        elif normalized_state == "RUNNING":
+            self._new_battle_home_observed = False
         battle_started = self._battle_lifecycle.observe(
             state,
             home_control=control,
@@ -93,6 +104,51 @@ class MissionManager:
             "INFO",
             console=True,
         )
+
+    def _free_upgrade_lock_requirements(self) -> list[Any]:
+        if not self.strategy:
+            return []
+        requirements = self.strategy.session_preflight_requirements()
+        if not isinstance(requirements, Mapping):
+            return []
+        raw = requirements.get("free_upgrade_locks")
+        return list(raw) if isinstance(raw, (list, tuple)) else []
+
+    def _record_deferred_free_upgrade_lock_evidence(self) -> None:
+        required = self._free_upgrade_lock_requirements()
+        if not required:
+            return
+        deferred = {
+            "status": "unavailable_deferred",
+            "boundary": HomeBattleControl.NEW_BATTLE.value,
+            "required": required,
+            "checked": False,
+            "valid": None,
+            "blocking_valid": True,
+            "reason": (
+                "attached battle has no authoritative no-battle NEW_BATTLE "
+                "lock evidence"
+            ),
+        }
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        setup_evidence = dict(mv.get("gc_no_battle_setup_evidence") or {})
+        setup_evidence["free_upgrade_locks"] = copy.deepcopy(deferred)
+        mv["gc_no_battle_setup_evidence"] = setup_evidence
+        session_evidence = dict(mv.get("gc_session_preflight_evidence") or {})
+        session_evidence["free_upgrade_locks"] = copy.deepcopy(deferred)
+        mv["gc_session_preflight_evidence"] = session_evidence
+
+    def _rearm_free_upgrade_lock_gate(self) -> None:
+        """Require fresh Home proof once per genuine NEW_BATTLE boundary."""
+
+        if not self._free_upgrade_lock_requirements():
+            return
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        mv["gc_no_battle_setup_completed"] = False
+        mv["gc_no_battle_setup_evidence"] = {}
+        session_evidence = dict(mv.get("gc_session_preflight_evidence") or {})
+        session_evidence.pop("free_upgrade_locks", None)
+        mv["gc_session_preflight_evidence"] = session_evidence
 
     def handle_overlays(self, detection: Detection) -> None:
         if not self.mission:
@@ -159,6 +215,7 @@ class MissionManager:
                 mission_vars.pop(str(key), None)
         self.ctx.data["rule_last_fire"] = {}
         self._startup_gates_deferred = False
+        self._new_battle_home_observed = False
         self.ctx.data["startup_gates_deferred"] = False
         self.strategy = strategy
         if self.strategy:
@@ -314,7 +371,16 @@ class MissionManager:
             or mv.get("gc_session_preflight_repair_in_progress")
         )
         mv["gc_no_battle_setup_completed"] = True
-        mv["gc_no_battle_setup_evidence"] = dict(evidence)
+        mv["gc_no_battle_setup_evidence"] = copy.deepcopy(dict(evidence))
+        lock_evidence = evidence.get("free_upgrade_locks")
+        if isinstance(lock_evidence, Mapping):
+            session_evidence = dict(
+                mv.get("gc_session_preflight_evidence") or {}
+            )
+            session_evidence["free_upgrade_locks"] = copy.deepcopy(
+                dict(lock_evidence)
+            )
+            mv["gc_session_preflight_evidence"] = session_evidence
         mv["gc_session_preflight_waivers"] = {
             str(key): dict(value) if isinstance(value, Mapping) else value
             for key, value in (waivers or {}).items()

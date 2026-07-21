@@ -4,26 +4,16 @@ import cv2
 import numpy as np
 import pytest
 
-from core.auto_pick_perks import AutoPickPerksEvidence
 from core.clickmap_access import get_click
 from core.free_upgrade_locks import (
     FARM_FREE_UPGRADE_LOCKS,
     FreeUpgradeLockEvidence,
     FreeUpgradeLockState,
-    FreeUpgradeLocksEvidence,
     inspect_free_upgrade_locks,
     measure_free_upgrade_lock,
     normalize_free_upgrade_lock_requirements,
 )
-from core.gc_preflight import (
-    GcPreflightEvidence,
-    GcSectionResult,
-    GcSessionPreflightEvidence,
-    UltimateWeaponEvidence,
-    UltimateWeaponResult,
-)
 from core.upgrade_box_detector import UpgradeBox, detect_visible_boxes
-from core.workshop_preset import PresetSlotSelection
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -351,72 +341,3 @@ def test_no_battle_enforcement_checks_only_authoritative_mismatch():
         if action == "buttons.free_upgrade_lock:checkbox"
     ] == ["buttons.free_upgrade_lock:checkbox"]
     assert ui.detail_label is None
-
-
-def _session_evidence(lock_states):
-    section = GcSectionResult("test", True, "TEST", (), (), ())
-    selection = PresetSlotSelection((0, 0, 1, 1), True, True, 1_500, 0)
-    configuration = GcPreflightEvidence(
-        cards=section,
-        cards_selection=selection,
-        workshop=section,
-        workshop_selection=selection,
-        bots=section,
-        bots_selection=selection,
-        guardians=section,
-    )
-    locks = FreeUpgradeLocksEvidence(
-        tuple(
-            _evidence(label, state)
-            for label, state in zip(FARM_FREE_UPGRADE_LOCKS, lock_states)
-        )
-    )
-    return GcSessionPreflightEvidence(
-        configuration=configuration,
-        free_upgrade_lock_requirements=FARM_FREE_UPGRADE_LOCKS,
-        free_upgrade_locks=locks,
-        module_mode="preserve",
-        modules=None,
-        auto_pick_perks_required=True,
-        auto_pick_perks=AutoPickPerksEvidence((0, 0, 1, 1), True, True, 1_500),
-        ultimate_weapons=UltimateWeaponEvidence(
-            (
-                UltimateWeaponResult(
-                    "Test",
-                    True,
-                    True,
-                    ("primary=on",),
-                    ("primary=on",),
-                    (),
-                ),
-            )
-        ),
-    )
-
-
-def test_authoritative_unchecked_lock_requests_existing_home_repair_path():
-    evidence = _session_evidence(
-        (
-            FreeUpgradeLockState.CHECKED,
-            FreeUpgradeLockState.UNCHECKED,
-            FreeUpgradeLockState.CHECKED,
-        )
-    )
-
-    assert not evidence.valid
-    assert not evidence.free_upgrade_locks_valid
-    assert evidence.requires_no_battle_repair
-
-
-def test_ambiguous_lock_blocks_without_authorizing_surrender_repair():
-    evidence = _session_evidence(
-        (
-            FreeUpgradeLockState.CHECKED,
-            FreeUpgradeLockState.UNKNOWN,
-            FreeUpgradeLockState.CHECKED,
-        )
-    )
-
-    assert not evidence.valid
-    assert not evidence.free_upgrade_locks_valid
-    assert not evidence.requires_no_battle_repair
