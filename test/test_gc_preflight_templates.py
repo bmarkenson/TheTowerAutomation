@@ -388,6 +388,37 @@ def test_complete_session_preflight_combines_all_positive_evidence():
     assert evidence.ultimate_weapons.valid
 
 
+def test_session_preflight_rehydrates_home_boundary_configuration_and_modules():
+    observed = {
+        label: dict(toggles)
+        for label, toggles in GC_ULTIMATE_REQUIREMENTS.items()
+    }
+    captured = validate_gc_session_preflight_screens(
+        cards_screen=_load(FARM_ACTIVE_FIXTURE),
+        workshop_screen=_load(WORKSHOP_FIXTURE),
+        bots_screen=_load(BOT_FIXTURE),
+        guardians_screen=_load(GUARDIAN_FIXTURE),
+        modules_screen=_load(MODULES_FIXTURE),
+        perks_screen=_load(AUTO_PICK_FIXTURE),
+        module_requirements=GC_MODULE_REQUIREMENTS,
+        ultimate_requirements=GC_ULTIMATE_REQUIREMENTS,
+        ultimate_observations=observed,
+    )
+
+    retained = validate_gc_session_preflight_screens(
+        perks_screen=_load(AUTO_PICK_FIXTURE),
+        module_requirements=GC_MODULE_REQUIREMENTS,
+        ultimate_requirements=GC_ULTIMATE_REQUIREMENTS,
+        ultimate_observations=observed,
+        configuration_boundary_evidence=captured.configuration.as_dict(),
+        module_boundary_evidence=captured.modules.as_dict(),
+    )
+
+    assert retained.valid
+    assert retained.configuration == captured.configuration
+    assert retained.modules == captured.modules
+
+
 def test_session_preflight_retains_verified_new_battle_lock_evidence():
     observed = {
         label: dict(toggles)

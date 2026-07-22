@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+from core.clickmap_access import get_click
 from core.target_priority import (
     TARGETS,
     _canonical_target,
@@ -29,6 +30,28 @@ def test_enforcer_moves_rows_up_and_verifies():
         )
     assert taps[0] == (910, 380)
     assert taps[-1] == (950, 100)
+
+
+def test_home_boundary_can_supply_an_already_open_priority_panel():
+    taps = []
+    with (
+        patch(
+            "core.target_priority.read_target_priority_order",
+            side_effect=(list(TARGETS), list(TARGETS)),
+        ),
+        patch("core.target_priority.log"),
+    ):
+        assert ensure_target_priority_order(
+            tap_fn=lambda point: taps.append(point) or True,
+            ensure_menu_fn=lambda: (_ for _ in ()).throw(
+                AssertionError("in-run menu must not open from Home")
+            ),
+            sleep_fn=lambda _seconds: None,
+            panel_open=True,
+        )
+
+    assert get_click("navigation.home_target_priority") == (1025, 620)
+    assert taps == [(950, 100)]
 
 
 def test_priority_comparison_is_case_insensitive_and_ordered():

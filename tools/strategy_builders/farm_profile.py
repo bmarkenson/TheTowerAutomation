@@ -79,13 +79,18 @@ def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
     requirements = invariants
     gate_fallbacks = _normalize_gate_fallbacks(
         profile.get("gate_fallbacks"),
-        supported_checks=set(requirements) | {"modules"},
+        supported_checks=set(requirements) | {"modules", "target_priority"},
     )
     requirements["loadout_policies"] = {
         "modules": module_policy["mode"],
+        "target_priority": target_policy["mode"],
     }
     if module_policy["mode"] != "preserve":
         requirements["modules"] = copy.deepcopy(module_policy["resolved"])
+    if target_policy["mode"] != "preserve":
+        requirements["target_priority"] = copy.deepcopy(
+            target_policy["resolved"]
+        )
 
     target_priority: dict[str, Any] = {"mode": target_policy["mode"]}
     if target_policy["mode"] != "preserve":

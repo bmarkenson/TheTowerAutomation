@@ -82,6 +82,41 @@ class ModuleLoadoutCorrectionError(RuntimeError):
     pass
 
 
+def gc_module_loadout_evidence_from_dict(
+    raw: Mapping[str, Any],
+) -> GcModuleLoadoutEvidence:
+    """Rehydrate retained no-battle module evidence for session reporting."""
+
+    if not isinstance(raw, Mapping):
+        raise ValueError("module evidence must be a mapping")
+    raw_slots = raw.get("slots")
+    if not isinstance(raw_slots, (list, tuple)):
+        raise ValueError("module evidence must contain slots")
+    slots = []
+    for raw_slot in raw_slots:
+        if not isinstance(raw_slot, Mapping):
+            raise ValueError("module slot evidence must be a mapping")
+        slots.append(
+            GcModuleSlotEvidence(
+                slot_key=str(raw_slot.get("slot_key") or ""),
+                family=str(raw_slot.get("family") or ""),
+                role=str(raw_slot.get("role") or ""),
+                expected=str(raw_slot.get("expected") or ""),
+                actual=(
+                    str(raw_slot["actual"])
+                    if raw_slot.get("actual") is not None
+                    else None
+                ),
+                match_status=str(raw_slot.get("match_status") or ""),
+                valid=bool(raw_slot.get("valid")),
+                confidence=float(raw_slot.get("confidence") or 0.0),
+                margin=float(raw_slot.get("margin") or 0.0),
+                green_fraction=float(raw_slot.get("green_fraction") or 0.0),
+            )
+        )
+    return GcModuleLoadoutEvidence(tuple(slots))
+
+
 def normalize_gc_module_requirements(
     raw: Any,
     *,
@@ -763,6 +798,7 @@ def _unequip_module_slot(
 
 
 __all__ = [
+    "gc_module_loadout_evidence_from_dict",
     "GcModuleLoadoutEvidence",
     "GcModuleSlotEvidence",
     "ModuleLoadoutCorrectionError",

@@ -236,6 +236,58 @@ def test_read_only_route_returns_to_running_and_never_uses_mutating_controls():
     assert ui.event_swipes == ["gesture_targets.goto_top:event_bots"]
 
 
+def test_farm_route_consumes_home_boundary_evidence_without_revisiting_sections():
+    ui = _FakeUi()
+    boxes = [
+        UpgradeBox(
+            "left",
+            (0, 0, 1, 1),
+            text=label,
+            toggles={name: "on" for name in toggles if name != "stun"},
+        )
+        for label, toggles in ULTIMATE_REQUIREMENTS.items()
+    ]
+    setup_evidence = {
+        "configuration": {"valid": True, "source": "NEW_BATTLE"},
+        "modules": {"checked": True, "valid": True},
+    }
+    validated = {}
+
+    def validate(**kwargs):
+        validated.update(kwargs)
+        return SimpleNamespace(valid=True)
+
+    result = run_read_only_gc_preflight(
+        PREFLIGHT_REQUIREMENTS,
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.safe_tap,
+        tap_visible_fn=ui.visible_tap,
+        go_home_fn=lambda: (_ for _ in ()).throw(
+            AssertionError("Home route must not repeat")
+        ),
+        swipe_fn=ui.swipe,
+        detect_boxes_fn=lambda _frame, **_kwargs: {"left": boxes, "right": []},
+        ensure_poison_swamp_stun_fn=lambda **_kwargs: _stun_off_result(ui),
+        no_battle_setup_evidence=setup_evidence,
+        sleep_fn=lambda _seconds: None,
+        validate_fn=validate,
+    )
+
+    assert result.status is GcPreflightNavigationStatus.COMPLETE
+    assert ui.state == "RUNNING"
+    assert validated["configuration_boundary_evidence"] == setup_evidence[
+        "configuration"
+    ]
+    assert validated["module_boundary_evidence"] == setup_evidence["modules"]
+    assert "navigation.Cards" not in ui.visible_taps
+    assert "navigation.menu_modules" not in ui.visible_taps
+    assert "navigation.menu_event" not in ui.visible_taps
+    assert "navigation.menu_guild" not in ui.visible_taps
+    assert "navigation.goto_workshop_home" not in ui.static_taps
+    assert "buttons.battle_control:home" not in ui.static_taps
+
+
 def test_active_farm_route_never_inspects_locks_and_carries_boundary_evidence():
     ui = _FakeUi()
     boxes = [

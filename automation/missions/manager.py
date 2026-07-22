@@ -400,6 +400,20 @@ class MissionManager:
                 dict(lock_evidence)
             )
             mv["gc_session_preflight_evidence"] = session_evidence
+        target_priority_evidence = evidence.get("target_priority")
+        if isinstance(target_priority_evidence, Mapping):
+            target_priority_mode = str(
+                target_priority_evidence.get("mode") or ""
+            ).strip().lower()
+            if target_priority_mode == "enforce" and bool(
+                target_priority_evidence.get("valid")
+            ):
+                mv["target_priority_checked"] = True
+            elif target_priority_mode == "observe":
+                mv["target_priority_observed"] = True
+                mv["target_priority_observation"] = copy.deepcopy(
+                    dict(target_priority_evidence)
+                )
         mv["gc_session_preflight_waivers"] = {
             str(key): dict(value) if isinstance(value, Mapping) else value
             for key, value in (waivers or {}).items()

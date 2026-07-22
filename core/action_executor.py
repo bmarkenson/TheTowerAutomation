@@ -299,6 +299,13 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                 preflight_kwargs: Dict[str, Any] = {}
                 if mv is not None:
                     setup_evidence = mv.get("gc_no_battle_setup_evidence")
+                    if (
+                        mv.get("gc_no_battle_setup_completed")
+                        and isinstance(setup_evidence, Mapping)
+                    ):
+                        preflight_kwargs["no_battle_setup_evidence"] = dict(
+                            setup_evidence
+                        )
                     lock_evidence = (
                         setup_evidence.get("free_upgrade_locks")
                         if isinstance(setup_evidence, Mapping)

@@ -48,6 +48,7 @@ session_preflight:
         missiles: 'on'
     loadout_policies:
       modules: enforce
+      target_priority: enforce
     modules:
       cannon_assist: Being Annihilator
       cannon_primary: Amplifying Strike
@@ -57,6 +58,17 @@ session_preflight:
       armor_primary: Orbital Augment
       core_primary: Multiverse Nexus
       core_assist: Dimension Core
+    target_priority:
+    - Fleets
+    - Boss
+    - Elites
+    - In Spotlight
+    - Tank
+    - Closest (Default)
+    - Ranged
+    - Protector
+    - Fast
+    - Basic
   fallbacks:
     bots_preset:
     - id: flame
@@ -377,6 +389,7 @@ rules:
           missiles: 'on'
       loadout_policies:
         modules: enforce
+        target_priority: enforce
       modules:
         cannon_assist: Being Annihilator
         cannon_primary: Amplifying Strike
@@ -386,6 +399,17 @@ rules:
         armor_primary: Orbital Augment
         core_primary: Multiverse Nexus
         core_assist: Dimension Core
+      target_priority:
+      - Fleets
+      - Boss
+      - Elites
+      - In Spotlight
+      - Tank
+      - Closest (Default)
+      - Ranged
+      - Protector
+      - Fast
+      - Basic
 run_configuration:
   schema_version: 2
   profile: farm

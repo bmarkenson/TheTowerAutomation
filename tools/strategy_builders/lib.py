@@ -494,7 +494,9 @@ def _normalize_gc_session_preflight(raw: Any) -> Dict[str, Any]:
     raw_policies = requirements.get("loadout_policies") or {}
     if not isinstance(raw_policies, dict):
         raise ValueError("gc_farm session_preflight.loadout_policies must be a mapping")
-    unknown_policies = sorted(set(raw_policies) - {"modules"})
+    unknown_policies = sorted(
+        set(raw_policies) - {"modules", "target_priority"}
+    )
     if unknown_policies:
         raise ValueError(
             "gc_farm session_preflight has unsupported loadout policies: "
@@ -506,7 +508,29 @@ def _normalize_gc_session_preflight(raw: Any) -> Dict[str, Any]:
             "gc_farm session_preflight modules policy must be enforce, "
             "observe, or preserve"
         )
-    requirements["loadout_policies"] = {"modules": module_mode}
+    target_priority_mode = str(
+        raw_policies.get("target_priority") or "preserve"
+    ).strip().lower()
+    if target_priority_mode not in {"enforce", "observe", "preserve"}:
+        raise ValueError(
+            "gc_farm session_preflight.loadout_policies.target_priority "
+            f"must be enforce, observe, or preserve (got {target_priority_mode!r})"
+        )
+    if target_priority_mode == "preserve":
+        if "target_priority" in requirements:
+            raise ValueError(
+                "gc_farm preserved target_priority must not supply an order"
+            )
+    else:
+        from core.target_priority_config import validate_target_priority_order
+
+        requirements["target_priority"] = validate_target_priority_order(
+            requirements.get("target_priority")
+        )
+    requirements["loadout_policies"] = {
+        "modules": module_mode,
+        "target_priority": target_priority_mode,
+    }
     if module_mode == "preserve":
         if "modules" in requirements:
             raise ValueError(

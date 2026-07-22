@@ -436,6 +436,7 @@ def run_read_only_gc_preflight(
     ensure_poison_swamp_stun_fn: Callable[
         ..., PoisonSwampStunResult
     ] = ensure_poison_swamp_stun_off,
+    no_battle_setup_evidence: Optional[Mapping[str, Any]] = None,
     free_upgrade_lock_boundary_evidence: Optional[Mapping[str, Any]] = None,
     detect_home_control_fn: HomeControlDetector = detect_home_battle_control,
     sleep_fn: Callable[[float], None] = time.sleep,
@@ -468,6 +469,24 @@ def run_read_only_gc_preflight(
             raise _NavigationFailure(
                 "profile did not supply module requirements"
             )
+        configuration_boundary_evidence = (
+            no_battle_setup_evidence.get("configuration")
+            if isinstance(no_battle_setup_evidence, Mapping)
+            else None
+        )
+        module_boundary_evidence = (
+            no_battle_setup_evidence.get("modules")
+            if isinstance(no_battle_setup_evidence, Mapping)
+            else None
+        )
+        use_no_battle_evidence = bool(
+            isinstance(configuration_boundary_evidence, Mapping)
+            and (
+                module_mode == "preserve"
+                or isinstance(module_boundary_evidence, Mapping)
+            )
+        )
+        free_upgrade_lock_requirements = requirements.get("free_upgrade_locks")
         _wait_for(
             state="RUNNING",
             capture_fn=capture_fn,
@@ -475,39 +494,41 @@ def run_read_only_gc_preflight(
             sleep_fn=sleep_fn,
         )
 
-        _ensure_running_side_menu_open(
-            capture_fn=capture_fn,
-            detector=detector,
-            tap_visible_fn=tap_visible_fn,
-            sleep_fn=sleep_fn,
-        )
+        cards = None
+        if not use_no_battle_evidence:
+            _ensure_running_side_menu_open(
+                capture_fn=capture_fn,
+                detector=detector,
+                tap_visible_fn=tap_visible_fn,
+                sleep_fn=sleep_fn,
+            )
 
-        _guarded_visible_tap(
-            "navigation.Cards",
-            allowed_states={"RUNNING"},
-            capture_fn=capture_fn,
-            detector=detector,
-            tap_visible_fn=tap_visible_fn,
-        )
-        cards = _wait_for(
-            state="CARDS",
-            capture_fn=capture_fn,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
-        _guarded_visible_tap(
-            "buttons.return_to_game",
-            allowed_states={"CARDS"},
-            capture_fn=capture_fn,
-            detector=detector,
-            tap_visible_fn=tap_visible_fn,
-        )
-        _wait_for(
-            state="RUNNING",
-            capture_fn=capture_fn,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
+            _guarded_visible_tap(
+                "navigation.Cards",
+                allowed_states={"RUNNING"},
+                capture_fn=capture_fn,
+                detector=detector,
+                tap_visible_fn=tap_visible_fn,
+            )
+            cards = _wait_for(
+                state="CARDS",
+                capture_fn=capture_fn,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
+            _guarded_visible_tap(
+                "buttons.return_to_game",
+                allowed_states={"CARDS"},
+                capture_fn=capture_fn,
+                detector=detector,
+                tap_visible_fn=tap_visible_fn,
+            )
+            _wait_for(
+                state="RUNNING",
+                capture_fn=capture_fn,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
 
         auto_pick_perks = requirements.get("auto_pick_perks")
         if auto_pick_perks not in {True, False}:
@@ -629,6 +650,51 @@ def run_read_only_gc_preflight(
             if position < 5:
                 swipe_fn("towards_bottom", "medium")
                 sleep_fn(0.5)
+
+        if use_no_battle_evidence:
+            validation_args = dict(
+                cards_screen=None,
+                workshop_screen=None,
+                bots_screen=None,
+                guardians_screen=None,
+                modules_screen=None,
+                perks_screen=perks,
+                module_requirements=module_requirements,
+                module_mode=module_mode,
+                ultimate_requirements=ultimate_requirements,
+                ultimate_observations=ultimate_observations,
+                configuration_boundary_evidence=(
+                    configuration_boundary_evidence
+                ),
+                module_boundary_evidence=module_boundary_evidence,
+                detector=detector,
+            )
+            waivers = requirements.get("_gate_waivers")
+            if isinstance(waivers, Mapping) and waivers:
+                validation_args["waivers"] = dict(waivers)
+            if free_upgrade_lock_requirements is not None:
+                validation_args.update(
+                    free_upgrade_lock_requirements=(
+                        free_upgrade_lock_requirements
+                    ),
+                    free_upgrade_lock_boundary_evidence=(
+                        free_upgrade_lock_boundary_evidence
+                    ),
+                )
+            evidence = validate_fn(**validation_args)
+            route_completed = True
+            status = (
+                GcPreflightNavigationStatus.COMPLETE
+                if evidence.valid
+                else GcPreflightNavigationStatus.MISMATCH
+            )
+            if not evidence.valid:
+                reason = "configuration mismatch"
+            elif getattr(evidence, "deferred_checks", ()):
+                reason = "active requirements verified; boundary checks deferred"
+            else:
+                reason = "all requirements verified"
+            return GcLivePreflightResult(status, reason, evidence)
 
         modules = None
         if module_mode != "preserve":
@@ -781,7 +847,6 @@ def run_read_only_gc_preflight(
             detector=detector,
             sleep_fn=sleep_fn,
         )
-        free_upgrade_lock_requirements = requirements.get("free_upgrade_locks")
         _guarded_static_tap(
             "navigation.goto_home",
             allowed_states={"WORKSHOP"},

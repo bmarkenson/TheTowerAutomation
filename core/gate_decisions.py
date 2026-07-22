@@ -14,6 +14,7 @@ STARTUP_GATE_CHECK_LABELS = {
     "bots_preset": "Bot preset",
     "guardian_chips": "Guardian Chips",
     "modules": "Modules",
+    "target_priority": "Target Priority",
     "auto_pick_perks": "Auto Pick Perks",
     "ultimate_weapons": "Ultimate Weapons",
 }
@@ -37,6 +38,13 @@ def startup_gate_check_catalog(
         )
         if module_mode != "enforce":
             included.discard("modules")
+        target_priority_mode = (
+            str(policies.get("target_priority") or "").strip().lower()
+            if isinstance(policies, Mapping)
+            else ""
+        )
+        if target_priority_mode != "enforce":
+            included.discard("target_priority")
         if not bool(configured.get("auto_pick_perks")):
             included.discard("auto_pick_perks")
         if not configured.get("free_upgrade_locks"):

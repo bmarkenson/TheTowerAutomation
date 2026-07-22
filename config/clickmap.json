@@ -1846,6 +1846,16 @@
         "navigation"
       ]
     },
+    "home_target_priority": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 1025,
+        "y": 620
+      }
+    },
     "home_guild": {
       "match_template": "navigation/home_guild.png",
       "match_region": {

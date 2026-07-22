@@ -50,10 +50,11 @@ Every compact Farm profile names all three and assigns one of these policies:
 | `preserve` | Do not inspect or change the setting. |
 
 Named module and Target Priority presets are resolved at build time into an
-explicit self-contained strategy plan. Damage Slider `observe` and `enforce`
-policies resolve an explicit percentage; Tier 18 enforces `1E-22%` during every
-new-run initialization after the time-sensitive EHLS/EALS setup. `YamlStrategy`
-exposes the plan's resolved
+explicit self-contained strategy plan. Modules and Target Priority are checked
+from verified Home `NEW_BATTLE` before Battle may start. Damage Slider
+`observe` and `enforce` policies resolve an explicit percentage; Tier 18
+enforces `1E-22%` during every new-run initialization after the time-sensitive
+EHLS/EALS setup. `YamlStrategy` exposes the plan's resolved
 `run_configuration` generically, and Game Over records copy that snapshot into
 the versioned battle JSON. Runtime code does not inherit configuration or
 branch on a Farm strategy name.
@@ -164,16 +165,17 @@ remain insufficient evidence to distinguish Tournament from Milestone.
   reacquires authoritative panel and percentage evidence before every explicit
   arrow tap, requires strict progress and a verified final value, and returns
   to `RUNNING/ATTACK_MENU`. Unknown or incomplete evidence remains blocked.
-- Farm session preflight still reaches the resumable Home Workshop to validate
-  the unrelated Workshop preset, but it never invokes the Free Upgrade lock
-  scanner. Shockwave Size, Bounce Shot Targets, and Bounce Shot Range are
-  inspected and enforced only by complete no-battle setup after verified Home
-  `NEW_BATTLE` evidence and before Battle may start. That boundary-owned proof
-  is retained in session evidence and completed-run reporting. Attaching to an
-  existing battle without such proof records `unavailable_deferred` without a
-  pass, failure, Home repair, or Surrender request; Home `RESUME_BATTLE`
-  preserves the attachment, and the lock gate rearms at the next genuine
-  `NEW_BATTLE` boundary.
+- Complete no-battle setup owns every profile check available from verified
+  Home `NEW_BATTLE`: Cards, Workshop and its Free Upgrade locks, Bots,
+  Guardians, Modules, and Target Priority. It retains screen-derived
+  configuration evidence for session preflight, which consumes that boundary
+  proof and checks only battle-only settings instead of leaving the newly
+  started run to repeat Home checks. Attaching to an existing battle without
+  boundary proof retains the guarded read-only compatibility route. Home-only
+  Free Upgrade locks remain deferred there: they record
+  `unavailable_deferred` without a pass, failure, Home repair, or Surrender
+  request; Home `RESUME_BATTLE` preserves the attachment, and the lock gate
+  rearms at the next genuine `NEW_BATTLE` boundary.
 - Confident mismatches on Home-only configuration may request one app-owned
   stop/repair/restart sequence; ambiguous or unknown module identity and other
   non-Home repair classes remain blocked. The matcher reports evidence but

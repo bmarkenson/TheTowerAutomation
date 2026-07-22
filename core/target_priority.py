@@ -122,18 +122,20 @@ def observe_target_priority_order(
     tap_fn: Callable[[tuple[int, int]], bool] = _tap,
     ensure_menu_fn: Callable[[], bool] = ensure_menu_open,
     sleep_fn: Callable[[float], None] = time.sleep,
+    panel_open: bool = False,
 ) -> TargetPriorityObservation:
     """Read and compare Target Priority without changing its order."""
 
     expected_list = validate_target_priority_order(expected)
-    panel_open = False
+    opened_here = panel_open
     try:
-        if not ensure_menu_fn():
-            raise RuntimeError("unable to open the game menu")
-        if not tap_fn(_SCOPE_TARGET):
-            raise RuntimeError("unable to open Target Priority")
-        panel_open = True
-        sleep_fn(0.6)
+        if not panel_open:
+            if not ensure_menu_fn():
+                raise RuntimeError("unable to open the game menu")
+            if not tap_fn(_SCOPE_TARGET):
+                raise RuntimeError("unable to open Target Priority")
+            opened_here = True
+            sleep_fn(0.6)
         actual = read_target_priority_order(capture_fn)
         matches = target_priority_matches(actual, expected_list)
         log(
@@ -157,7 +159,7 @@ def observe_target_priority_order(
             reason=str(exc),
         )
     finally:
-        if panel_open:
+        if opened_here:
             tap_fn(_CLOSE_TARGET)
             sleep_fn(0.2)
 
@@ -169,16 +171,20 @@ def ensure_target_priority_order(
     tap_fn: Callable[[tuple[int, int]], bool] = _tap,
     ensure_menu_fn: Callable[[], bool] = ensure_menu_open,
     sleep_fn: Callable[[float], None] = time.sleep,
+    panel_open: bool = False,
 ) -> bool:
-    """Open the panel, enforce expected using Up arrows, and verify it."""
+    """Open or consume the panel, enforce with Up arrows, and verify it."""
     expected_list = validate_target_priority_order(expected)
-    if not ensure_menu_fn():
-        log("[TARGET_PRIORITY] Unable to open the game menu", "WARN")
-        return False
-    if not tap_fn(_SCOPE_TARGET):
-        log("[TARGET_PRIORITY] Unable to open Target Priority", "WARN")
-        return False
-    sleep_fn(0.6)
+    opened_here = panel_open
+    if not panel_open:
+        if not ensure_menu_fn():
+            log("[TARGET_PRIORITY] Unable to open the game menu", "WARN")
+            return False
+        if not tap_fn(_SCOPE_TARGET):
+            log("[TARGET_PRIORITY] Unable to open Target Priority", "WARN")
+            return False
+        opened_here = True
+        sleep_fn(0.6)
     try:
         actual = read_target_priority_order(capture_fn)
         log(f"[TARGET_PRIORITY] Current order: {actual}", "INFO")
@@ -204,8 +210,9 @@ def ensure_target_priority_order(
         log(f"[TARGET_PRIORITY] Enforcement failed: {exc}", "ERROR")
         return False
     finally:
-        tap_fn(_CLOSE_TARGET)
-        sleep_fn(0.2)
+        if opened_here:
+            tap_fn(_CLOSE_TARGET)
+            sleep_fn(0.2)
 
 
 __all__ = [

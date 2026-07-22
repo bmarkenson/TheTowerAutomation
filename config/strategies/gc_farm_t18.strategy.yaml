@@ -52,6 +52,7 @@ session_preflight:
         missiles: 'on'
     loadout_policies:
       modules: enforce
+      target_priority: preserve
   fallbacks: {}
 vars:
   run_initialised: false
@@ -341,3 +342,4 @@ rules:
           missiles: 'on'
       loadout_policies:
         modules: enforce
+        target_priority: preserve

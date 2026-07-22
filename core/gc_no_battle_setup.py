@@ -14,12 +14,19 @@ from core.free_upgrade_locks import (
 )
 from core.home_battle import detect_home_battle_control
 from core.gc_module_loadout import (
+    evaluate_gc_module_loadout,
     ensure_gc_module_loadout,
     normalize_gc_module_requirements,
 )
+from core.gc_preflight import validate_gc_preflight_screens
 from core.input import safe_tap, swipe_now, tap_if_visible
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
+from core.target_priority import (
+    ensure_target_priority_order,
+    observe_target_priority_order,
+)
+from core.target_priority_config import validate_target_priority_order
 from core.upgrade_navigation import swipe_upgrade_menu
 from core.workshop_preset import (
     BOTS_FARM_PRESET_SLOT,
@@ -71,7 +78,11 @@ def run_gc_no_battle_setup(
     workshop_swipe_fn: Callable[[str, str], None] = swipe_upgrade_menu,
     measure_selection_fn: Callable[..., Any] = measure_preset_slot_selection,
     ensure_modules_fn: Callable[..., Any] = ensure_gc_module_loadout,
+    evaluate_modules_fn: Callable[..., Any] = evaluate_gc_module_loadout,
     ensure_free_upgrade_locks_fn: Callable[..., Any] = inspect_free_upgrade_locks,
+    ensure_target_priority_fn: Callable[..., Any] = ensure_target_priority_order,
+    observe_target_priority_fn: Callable[..., Any] = observe_target_priority_order,
+    validate_configuration_fn: Callable[..., Any] = validate_gc_preflight_screens,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> GcNoBattleSetupResult:
     """Correct supported persistent GC settings before a new battle starts."""
@@ -84,9 +95,13 @@ def run_gc_no_battle_setup(
         )
 
     module_mode = _module_policy(requirements)
+    target_priority_mode = _target_priority_policy(requirements)
     active_waivers = dict(waivers or {})
     evidence: dict[str, Any] = {
-        "loadout_policies": {"modules": module_mode},
+        "loadout_policies": {
+            "modules": module_mode,
+            "target_priority": target_priority_mode,
+        },
         "waivers": active_waivers,
     }
     current = screenshot if screenshot is not None else capture_fn()
@@ -364,9 +379,38 @@ def run_gc_no_battle_setup(
                 raise _SetupFailure(
                     "module loadout remained invalid after correction"
                 )
-            evidence["modules"] = module_evidence.as_dict()
-            _return_home(
+            module_payload = module_evidence.as_dict()
+            module_payload.update(mode=module_mode, checked=True)
+            evidence["modules"] = module_payload
+            current = _return_home(
                 capture_fn(),
+                capture_fn,
+                detector,
+                detect_home_control_fn,
+                safe_tap_fn,
+                tap_visible_fn,
+                sleep_fn,
+            )
+        elif module_mode == "observe":
+            modules = _open_static(
+                current,
+                "navigation.goto_modules_home",
+                "HOME_SCREEN",
+                "MODULES",
+                capture_fn,
+                detector,
+                safe_tap_fn,
+                sleep_fn,
+            )
+            module_evidence = evaluate_modules_fn(
+                modules,
+                requirements["modules"],
+            )
+            module_payload = module_evidence.as_dict()
+            module_payload.update(mode=module_mode, checked=True)
+            evidence["modules"] = module_payload
+            current = _return_home(
+                modules,
                 capture_fn,
                 detector,
                 detect_home_control_fn,
@@ -379,6 +423,92 @@ def run_gc_no_battle_setup(
                 "mode": module_mode,
                 "checked": False,
             }
+
+        current_check = "target_priority"
+        target_priority_requirement = requirements.get("target_priority")
+        if current_check in active_waivers:
+            evidence[current_check] = _waived_evidence(
+                current_check,
+                target_priority_requirement,
+                active_waivers[current_check],
+            )
+        elif target_priority_mode != "preserve":
+            target_priority_panel = _open_static(
+                current,
+                "navigation.home_target_priority",
+                "HOME_SCREEN",
+                "TARGET_PRIORITY",
+                capture_fn,
+                detector,
+                safe_tap_fn,
+                sleep_fn,
+            )
+
+            def target_priority_tap(target):
+                return safe_tap_fn(
+                    target,
+                    require_visible=False,
+                    dispatch="now",
+                    log_label="target_priority",
+                )
+
+            if target_priority_mode == "enforce":
+                target_priority_valid = ensure_target_priority_fn(
+                    target_priority_requirement,
+                    capture_fn=capture_fn,
+                    tap_fn=target_priority_tap,
+                    sleep_fn=sleep_fn,
+                    panel_open=True,
+                )
+                if not target_priority_valid:
+                    raise _SetupFailure(
+                        "Target Priority remained invalid after correction"
+                    )
+                evidence[current_check] = {
+                    "mode": target_priority_mode,
+                    "checked": True,
+                    "matches_expected": True,
+                    "valid": True,
+                }
+            else:
+                observation = observe_target_priority_fn(
+                    target_priority_requirement,
+                    capture_fn=capture_fn,
+                    tap_fn=target_priority_tap,
+                    sleep_fn=sleep_fn,
+                    panel_open=True,
+                )
+                target_payload = observation.as_dict()
+                target_payload.update(
+                    mode=target_priority_mode,
+                    checked=True,
+                )
+                evidence[current_check] = target_payload
+            current = _wait_for(
+                state="HOME_SCREEN",
+                capture_fn=capture_fn,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
+            _require_no_battle_home(
+                current,
+                detector,
+                detect_home_control_fn,
+            )
+        else:
+            evidence[current_check] = {
+                "mode": target_priority_mode,
+                "checked": False,
+            }
+
+        configuration = validate_configuration_fn(
+            cards_screen=cards,
+            workshop_screen=workshop,
+            bots_screen=bots,
+            guardians_screen=guardians,
+            detector=detector,
+        )
+        evidence["configuration"] = configuration.as_dict()
     except Exception as exc:
         _recover_home(
             capture_fn,
@@ -453,6 +583,10 @@ def _unsupported_requirement(requirements: Mapping[str, Any]) -> str | None:
             normalize_gc_module_requirements(requirements.get("modules"))
         except ValueError as exc:
             return str(exc)
+    try:
+        _target_priority_policy(requirements)
+    except ValueError as exc:
+        return str(exc)
     return None
 
 
@@ -460,12 +594,28 @@ def _module_policy(requirements: Mapping[str, Any]) -> str:
     policies = requirements.get("loadout_policies") or {}
     if not isinstance(policies, Mapping):
         raise ValueError("loadout_policies must be a mapping")
-    unknown = sorted(set(policies) - {"modules"})
+    unknown = sorted(set(policies) - {"modules", "target_priority"})
     if unknown:
         raise ValueError(f"unsupported loadout policies: {unknown}")
     mode = str(policies.get("modules") or "enforce").strip().lower()
     if mode not in {"enforce", "observe", "preserve"}:
         raise ValueError(f"unsupported modules policy {mode!r}")
+    return mode
+
+
+def _target_priority_policy(requirements: Mapping[str, Any]) -> str:
+    policies = requirements.get("loadout_policies") or {}
+    if not isinstance(policies, Mapping):
+        raise ValueError("loadout_policies must be a mapping")
+    mode = str(policies.get("target_priority") or "preserve").strip().lower()
+    if mode not in {"enforce", "observe", "preserve"}:
+        raise ValueError(f"unsupported target_priority policy {mode!r}")
+    configured = requirements.get("target_priority")
+    if mode == "preserve":
+        if configured is not None:
+            raise ValueError("preserved target_priority must not supply an order")
+    else:
+        validate_target_priority_order(configured)
     return mode
 
 

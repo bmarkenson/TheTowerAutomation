@@ -47,6 +47,7 @@ session_preflight:
         missiles: 'on'
     loadout_policies:
       modules: enforce
+      target_priority: preserve
     modules:
       cannon_assist: Being Annihilator
       cannon_primary: Amplifying Strike
@@ -322,6 +323,7 @@ rules:
           missiles: 'on'
       loadout_policies:
         modules: enforce
+        target_priority: preserve
       modules:
         cannon_assist: Being Annihilator
         cannon_primary: Amplifying Strike

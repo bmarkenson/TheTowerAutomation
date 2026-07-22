@@ -114,10 +114,14 @@ Surrender/repair/restart sequence; ambiguous lock evidence blocks without
 Surrendering. Poison Swamp Stun is the narrow in-battle repair exception:
 when its detail screen authoritatively shows Stun on, preflight switches it off
 and verifies the result without Surrendering or leaving the active run.
-Before a new battle starts, a separate verified no-battle Home route may
-correct Cards `Farm`, Workshop `Farm`, the three Free Upgrade locks, Bots
-`Farm`, and the supported Attack/Ally/Scout → Fetch/Summon/Scout Guardian
-transition. Unknown no-battle layouts fail closed.
+Before a new battle starts, the verified no-battle Home route completes every
+profile-owned check available from `NEW_BATTLE`: Cards `Farm`, Workshop `Farm`,
+the three Free Upgrade locks, Bots `Farm`, the supported
+Attack/Ally/Scout → Fetch/Summon/Scout Guardian transition, Modules, and
+Target Priority. It retains screen-derived configuration evidence for session
+preflight, which consumes that boundary proof instead of starting the battle
+and returning Home to repeat those checks. Unknown no-battle layouts fail
+closed.
 
 Modules, Damage Slider, and Target Priority are the only per-Tier or
 experimental loadout fields. Each compact profile declares `enforce`, `observe`,

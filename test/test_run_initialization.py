@@ -607,6 +607,24 @@ class DeferredStartupGateTests(unittest.TestCase):
             boundary_evidence,
         )
 
+    def test_no_battle_setup_completion_satisfies_target_priority_gate(self):
+        strategy = get_strategy("farm_t18")
+        manager = MissionManager(None, strategy)
+        manager.start()
+        mv = manager.ctx.data["mission_vars"]
+
+        manager.mark_no_battle_setup_complete(
+            {
+                "target_priority": {
+                    "mode": "enforce",
+                    "checked": True,
+                    "valid": True,
+                }
+            }
+        )
+
+        self.assertTrue(mv["target_priority_checked"])
+
 
 class FarmProfileTests(unittest.TestCase):
     def _source(self, name="farm_t18"):
@@ -637,6 +655,14 @@ class FarmProfileTests(unittest.TestCase):
             "off",
         )
         self.assertEqual(requirements["loadout_policies"]["modules"], "enforce")
+        self.assertEqual(
+            requirements["loadout_policies"]["target_priority"],
+            "enforce",
+        )
+        self.assertEqual(
+            requirements["target_priority"],
+            configuration["loadout"]["target_priority"]["resolved"],
+        )
         self.assertEqual(configuration["profile"], "farm")
         self.assertEqual(configuration["tier"], 18)
         self.assertEqual(configuration["schema_version"], 2)
@@ -836,7 +862,10 @@ class FarmProfileTests(unittest.TestCase):
         requirements = plan["session_preflight"]["requirements"]
 
         self.assertNotIn("modules", requirements)
-        self.assertEqual(requirements["loadout_policies"], {"modules": "preserve"})
+        self.assertEqual(
+            requirements["loadout_policies"],
+            {"modules": "preserve", "target_priority": "enforce"},
+        )
         self.assertEqual(
             plan["run_configuration"]["loadout"]["modules"],
             {"mode": "preserve"},
@@ -849,7 +878,10 @@ class FarmProfileTests(unittest.TestCase):
         plan = build_strategy_yaml(source)
         requirements = plan["session_preflight"]["requirements"]
 
-        self.assertEqual(requirements["loadout_policies"], {"modules": "observe"})
+        self.assertEqual(
+            requirements["loadout_policies"],
+            {"modules": "observe", "target_priority": "enforce"},
+        )
         self.assertEqual(
             requirements["modules"]["generator_primary"],
             "Black Hole Digestor",
@@ -1231,6 +1263,7 @@ class GcFarmProfileTests(unittest.TestCase):
         mv["gc_no_battle_setup_evidence"] = {
             "free_upgrade_locks": boundary_evidence
         }
+        mv["gc_no_battle_setup_completed"] = True
         action = next(
             rule
             for rule in strategy.rules
@@ -1255,6 +1288,9 @@ class GcFarmProfileTests(unittest.TestCase):
 
         run_preflight.assert_called_once_with(
             action["requirements"],
+            no_battle_setup_evidence={
+                "free_upgrade_locks": boundary_evidence
+            },
             free_upgrade_lock_boundary_evidence=boundary_evidence,
         )
         self.assertTrue(mv["gc_session_preflight_attempted"])

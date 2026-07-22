@@ -12,6 +12,7 @@ from core.free_upgrade_locks import (
 from core.gc_module_loadout import (
     GcModuleLoadoutEvidence,
     evaluate_gc_module_loadout,
+    gc_module_loadout_evidence_from_dict,
 )
 from core.state_detector import detect_state_and_overlays
 from core.workshop_preset import (
@@ -70,6 +71,51 @@ class GcPreflightEvidence:
         payload = asdict(self)
         payload["valid"] = self.valid
         return payload
+
+
+def gc_preflight_evidence_from_dict(raw: Mapping[str, Any]) -> GcPreflightEvidence:
+    """Rehydrate retained Home-boundary configuration evidence."""
+
+    if not isinstance(raw, Mapping):
+        raise ValueError("configuration evidence must be a mapping")
+
+    def section(name: str) -> GcSectionResult:
+        value = raw.get(name)
+        if not isinstance(value, Mapping):
+            raise ValueError(f"configuration evidence is missing {name}")
+        return GcSectionResult(
+            name=str(value.get("name") or name),
+            valid=bool(value.get("valid")),
+            detected_state=str(value.get("detected_state") or "UNKNOWN"),
+            required_secondary=tuple(value.get("required_secondary") or ()),
+            detected_secondary=tuple(value.get("detected_secondary") or ()),
+            missing_secondary=tuple(value.get("missing_secondary") or ()),
+        )
+
+    def selection(name: str) -> PresetSlotSelection:
+        value = raw.get(name)
+        if not isinstance(value, Mapping):
+            raise ValueError(f"configuration evidence is missing {name}")
+        region = tuple(value.get("region") or ())
+        if len(region) != 4:
+            raise ValueError(f"configuration evidence {name} has invalid region")
+        return PresetSlotSelection(
+            region=region,
+            valid_region=bool(value.get("valid_region")),
+            selected=bool(value.get("selected")),
+            green_pixels=int(value.get("green_pixels") or 0),
+            cyan_pixels=int(value.get("cyan_pixels") or 0),
+        )
+
+    return GcPreflightEvidence(
+        cards=section("cards"),
+        cards_selection=selection("cards_selection"),
+        workshop=section("workshop"),
+        workshop_selection=selection("workshop_selection"),
+        bots=section("bots"),
+        bots_selection=selection("bots_selection"),
+        guardians=section("guardians"),
+    )
 
 
 @dataclass(frozen=True)
@@ -517,10 +563,10 @@ def _free_upgrade_lock_boundary_evidence(
 
 def validate_gc_session_preflight_screens(
     *,
-    cards_screen,
-    workshop_screen,
-    bots_screen,
-    guardians_screen,
+    cards_screen=None,
+    workshop_screen=None,
+    bots_screen=None,
+    guardians_screen=None,
     modules_screen=None,
     perks_screen,
     module_requirements: Optional[Mapping[str, Any]] = None,
@@ -533,6 +579,8 @@ def validate_gc_session_preflight_screens(
     section_specs: Mapping[str, GcSectionSpec] = GC_SECTION_SPECS,
     auto_pick_perks_required: bool = True,
     waivers: Optional[Mapping[str, Any]] = None,
+    configuration_boundary_evidence: Optional[Mapping[str, Any]] = None,
+    module_boundary_evidence: Optional[Mapping[str, Any]] = None,
 ) -> GcSessionPreflightEvidence:
     """Validate every currently implemented read-only session requirement."""
 
@@ -548,13 +596,17 @@ def validate_gc_session_preflight_screens(
         waiver=active_waivers.get("free_upgrade_locks"),
     )
 
-    configuration = validate_gc_preflight_screens(
-        cards_screen=cards_screen,
-        workshop_screen=workshop_screen,
-        bots_screen=bots_screen,
-        guardians_screen=guardians_screen,
-        detector=detector,
-        section_specs=section_specs,
+    configuration = (
+        gc_preflight_evidence_from_dict(configuration_boundary_evidence)
+        if configuration_boundary_evidence is not None
+        else validate_gc_preflight_screens(
+            cards_screen=cards_screen,
+            workshop_screen=workshop_screen,
+            bots_screen=bots_screen,
+            guardians_screen=guardians_screen,
+            detector=detector,
+            section_specs=section_specs,
+        )
     )
     auto_pick = measure_auto_pick_perks(perks_screen)
     if auto_pick_perks_required and (
@@ -570,14 +622,25 @@ def validate_gc_session_preflight_screens(
         raise ValueError(f"unsupported module policy {module_mode!r}")
     modules = None
     if module_mode != "preserve":
-        if modules_screen is None or not isinstance(module_requirements, Mapping):
+        if not isinstance(module_requirements, Mapping):
             raise ValueError(
-                f"module policy {module_mode!r} requires screen and requirements"
+                f"module policy {module_mode!r} requires requirements"
             )
-        modules = evaluate_gc_module_loadout(
-            modules_screen,
-            module_requirements,
-        )
+        if "modules" in active_waivers:
+            modules = None
+        elif module_boundary_evidence is not None:
+            modules = gc_module_loadout_evidence_from_dict(
+                module_boundary_evidence
+            )
+        elif modules_screen is not None:
+            modules = evaluate_gc_module_loadout(
+                modules_screen,
+                module_requirements,
+            )
+        else:
+            raise ValueError(
+                f"module policy {module_mode!r} requires screen or boundary evidence"
+            )
     return GcSessionPreflightEvidence(
         configuration=configuration,
         free_upgrade_lock_requirements=normalized_free_upgrade_locks,
@@ -605,6 +668,7 @@ __all__ = [
     "evaluate_gc_section",
     "evaluate_ultimate_weapon_state",
     "merge_ultimate_weapon_observations",
+    "gc_preflight_evidence_from_dict",
     "validate_gc_preflight_screens",
     "validate_gc_session_preflight_screens",
 ]
