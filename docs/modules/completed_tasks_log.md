@@ -617,6 +617,24 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   the repository-root Linux WPF publisher also completed successfully. No live
   device interaction was used for this code-only change.
 
+### 2026-07-22 Guarded active-battle automation reload
+
+- Commit `3216fb9` added **Reload automation for current battle** to the native
+  and browser control surfaces. The fixed automation unit is replaced without
+  persisting ordinary `STOPPED`: the existing runtime first acknowledges Pause
+  and publishes a fresh `RUNNING` observation, then the replacement must prove
+  a distinct MainPID, matching held ADB lock, one-launch `next_run` policy,
+  Pause consumption, and its first status before prior control intent returns.
+- The configured cold-start policy is restored immediately after the attached
+  launch environment is copied. Launch or verification failure remains paused;
+  initial owner/precondition rejection changes nothing. Repeated same-state
+  directives now have unique identities, are acknowledged by the runtime, and
+  force a fresh next-frame status sample without authorizing actions.
+- Repository-wide validation passed 523 sandbox tests plus the separately
+  permitted localhost HTTP test, for 524 total. Browser JavaScript syntax and
+  the repository-root Linux WPF publisher also completed successfully. Live
+  systemd/device validation remains explicitly pending in the runtime backlog.
+
 ---
 
 ## 📘 Documentation

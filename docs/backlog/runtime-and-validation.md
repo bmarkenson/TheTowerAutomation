@@ -8,6 +8,12 @@ checked-item detail remains in the
 
 ## Current validation gates
 
+- [ ] Live-validate guarded **Reload automation for current battle** on a safe
+  active run. Confirm the original Pause acknowledgement and fresh `RUNNING`
+  probe, distinct systemd MainPID and refreshed ADB lock, one-launch `next_run`
+  policy, replacement Pause/status evidence, restoration of prior control
+  intent, suppression of duplicate startup/session gates, and normal gate
+  re-arming at the following authoritative run boundary.
 - [ ] Diagnose the unexpectedly early Tier 18 Farm ending recorded in
   [`../observed_issues.md`](../observed_issues.md#tier-18-farm-ended-at-wave-2644-without-completed-session-preflight).
   Reproduce a clean, fully validated Farm start at 720p before attributing the
