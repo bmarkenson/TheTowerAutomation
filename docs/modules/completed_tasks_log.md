@@ -632,8 +632,13 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   force a fresh next-frame status sample without authorizing actions.
 - Repository-wide validation passed 523 sandbox tests plus the separately
   permitted localhost HTTP test, for 524 total. Browser JavaScript syntax and
-  the repository-root Linux WPF publisher also completed successfully. Live
-  systemd/device validation remains explicitly pending in the runtime backlog.
+  the repository-root Linux WPF publisher also completed successfully.
+- Live validation on 2026-07-22 reloaded the active No Strategy Attack
+  Dissonance battle at wave 3314. The original PID acknowledged Pause and
+  exited cleanly; a distinct MainPID acquired the refreshed ADB lock, attached
+  once with `next_run`, acknowledged Pause, and restored `RUNNING` at wave 3315
+  while the configured policy returned to `immediate`. Gate re-arming under a
+  strategy that actually declares gates remains in the runtime backlog.
 
 ### 2026-07-22 No Strategy observed-run inventory
 

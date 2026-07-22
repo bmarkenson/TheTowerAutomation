@@ -14,12 +14,17 @@ checked-item detail remains in the
   Cards hold, operator-opened Perks configuration, complete First Perk/Ban/Auto
   Pick tab capture, update of the same battle record, and release of the next-
   battle path. Do not Surrender or manufacture the boundary.
-- [ ] Live-validate guarded **Reload automation for current battle** on a safe
-  active run. Confirm the original Pause acknowledgement and fresh `RUNNING`
-  probe, distinct systemd MainPID and refreshed ADB lock, one-launch `next_run`
-  policy, replacement Pause/status evidence, restoration of prior control
-  intent, suppression of duplicate startup/session gates, and normal gate
-  re-arming at the following authoritative run boundary.
+- [ ] Complete live validation of guarded **Reload automation for current
+  battle**.
+  - [x] On the active No Strategy Attack Dissonance battle at wave 3314, the
+    original PID acknowledged Pause and published a fresh `RUNNING` frame; PID
+    `3787794` exited cleanly; replacement PID `3846802` acquired the refreshed
+    localhost:5555 lock, launched once with `next_run`, acknowledged Pause,
+    attached at wave 3315 without gates, and restored the prior `RUNNING`
+    intent. The configured cold-start policy returned to `immediate`.
+  - [ ] Confirm normal gate re-arming at the following authoritative run
+    boundary. This remaining check requires the next strategy to declare gates;
+    No Strategy itself has none.
 - [ ] Diagnose the unexpectedly early Tier 18 Farm ending recorded in
   [`../observed_issues.md`](../observed_issues.md#tier-18-farm-ended-at-wave-2644-without-completed-session-preflight).
   Reproduce a clean, fully validated Farm start at 720p before attributing the
