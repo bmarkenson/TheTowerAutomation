@@ -232,7 +232,7 @@ def configure_damage_slider(
     max_steps: int = 64,
     settle_attempts: int = 6,
 ) -> DamageSliderResult:
-    """Observe or enforce one percentage using guarded single-step feedback."""
+    """Observe or enforce one percentage using guarded bounded feedback."""
 
     canonical_mode = str(mode or "").strip().lower()
     if canonical_mode not in {"observe", "enforce"}:
@@ -298,46 +298,58 @@ def configure_damage_slider(
             else:
                 seen = {current_value}
                 while not matches and steps < max(0, int(max_steps)):
-                    fresh = read_damage_adjuster(capture_fn())
-                    fresh_value = _valid_slider_value(fresh)
-                    if fresh_value is None:
-                        reason = "fresh_value_not_authoritative"
-                        break
-                    final = fresh.percentage
-                    if fresh_value == expected_value:
-                        matches = True
-                        reason = "matched"
-                        break
-
                     button = (
                         "buttons.damage_adjuster:decrease"
-                        if fresh_value > expected_value
+                        if current_value > expected_value
                         else "buttons.damage_adjuster:increase"
                     )
-                    if not tap_fn(
-                        button,
-                        require_visible=False,
-                        dispatch="now",
-                    ):
-                        reason = "arrow_tap_failed"
+                    remaining_steps = max(0, int(max_steps)) - steps
+                    batch_steps = min(
+                        _known_slider_step_count(current_value, expected_value),
+                        remaining_steps,
+                    )
+                    if batch_steps <= 0:
+                        reason = "step_limit_reached"
                         break
-                    steps += 1
+                    log(
+                        "[DAMAGE_ADJUSTER] Applying "
+                        f"{batch_steps} {button.rsplit(':', 1)[-1]} tap(s) "
+                        f"from {final} toward {canonical_expected}",
+                        "INFO",
+                    )
 
-                    updated = _wait_for_changed_value(
-                        fresh_value,
+                    dispatched = 0
+                    dispatch_failed = False
+                    for _ in range(batch_steps):
+                        if not tap_fn(
+                            button,
+                            require_visible=False,
+                            dispatch="now",
+                        ):
+                            dispatch_failed = True
+                            break
+                        steps += 1
+                        dispatched += 1
+                    if dispatched == 0:
+                        break
+
+                    updated = _wait_for_settled_value(
+                        current_value,
+                        expected_value,
                         capture_fn=capture_fn,
                         sleep_fn=sleep_fn,
                         attempts=settle_attempts,
                     )
                     updated_value = _valid_slider_value(updated)
-                    if updated_value is None or updated_value == fresh_value:
+                    if updated_value is None or updated_value == current_value:
                         reason = "value_did_not_change"
                         break
                     final = updated.percentage
                     changed = changed or updated_value != current_value
-                    if abs(updated_value - expected_value) >= abs(
-                        fresh_value - expected_value
-                    ):
+                    if _slider_distance(
+                        updated_value,
+                        expected_value,
+                    ) >= _slider_distance(current_value, expected_value):
                         reason = "value_moved_away_from_target"
                         break
                     if updated_value in seen and updated_value != expected_value:
@@ -347,6 +359,9 @@ def configure_damage_slider(
                     current_value = updated_value
                     matches = current_value == expected_value
                     reason = "matched" if matches else "adjusting"
+                    if dispatch_failed and not matches:
+                        reason = "arrow_tap_failed"
+                        break
 
                 if not matches and reason == "adjusting":
                     reason = "step_limit_reached"
@@ -385,21 +400,63 @@ def _valid_slider_value(reading: DamageAdjusterReading) -> Optional[Decimal]:
     return _percentage_value(reading.percentage)
 
 
-def _wait_for_changed_value(
+def _power_of_ten_exponent(value: Decimal) -> Optional[int]:
+    normalized = value.normalize()
+    sign, digits, exponent = normalized.as_tuple()
+    if sign == 0 and digits == (1,):
+        return int(exponent)
+    return None
+
+
+def _known_slider_step_count(current: Decimal, expected: Decimal) -> int:
+    """Return an exact power-of-ten gap, else a single guarded fallback step."""
+
+    current_exponent = _power_of_ten_exponent(current)
+    expected_exponent = _power_of_ten_exponent(expected)
+    if current_exponent is None or expected_exponent is None:
+        return 1
+    return max(1, abs(current_exponent - expected_exponent))
+
+
+def _slider_distance(current: Decimal, expected: Decimal) -> Decimal:
+    current_exponent = _power_of_ten_exponent(current)
+    expected_exponent = _power_of_ten_exponent(expected)
+    if current_exponent is not None and expected_exponent is not None:
+        return Decimal(abs(current_exponent - expected_exponent))
+    return abs(current - expected)
+
+
+def _wait_for_settled_value(
     previous: Decimal,
+    expected: Decimal,
     *,
     capture_fn: CaptureFn,
     sleep_fn: SleepFn,
     attempts: int,
 ) -> DamageAdjusterReading:
     latest = DamageAdjusterReading(False, None, None, "", -1.0, -1.0)
+    last_value: Optional[Decimal] = None
+    stable_reads = 0
     for _ in range(max(1, int(attempts))):
         sleep_fn(0.25)
         latest = read_damage_adjuster(capture_fn())
         value = _valid_slider_value(latest)
-        if value is not None and value != previous:
+        if value is None or value == previous:
+            last_value = None
+            stable_reads = 0
+            continue
+        if value == expected:
             return latest
-    return latest
+        if value == last_value:
+            stable_reads += 1
+        else:
+            last_value = value
+            stable_reads = 1
+        if stable_reads >= 2:
+            return latest
+    if _valid_slider_value(latest) == expected:
+        return latest
+    return DamageAdjusterReading(False, None, None, "", -1.0, -1.0)
 
 
 __all__ = [

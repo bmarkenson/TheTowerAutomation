@@ -164,9 +164,12 @@ remain insufficient evidence to distinguish Tournament from Milestone.
   `off`, and returns to `RUNNING/UW_MENU` without Surrender or a Home
   transition. New-run initialization owns Damage Slider enforcement: it
   requires `RUNNING/ATTACK_MENU`, opens the freshly matched Damage control,
-  reacquires authoritative panel and percentage evidence before every explicit
-  arrow tap, requires strict progress and a verified final value, and returns
-  to `RUNNING/ATTACK_MENU`. Unknown or incomplete evidence remains blocked.
+  and uses authoritative panel and percentage evidence to compute a bounded
+  same-direction batch only for an exact power-of-ten exponent gap. It then
+  reacquires settled OCR evidence, recomputes any remaining gap, requires
+  strict progress and a verified final value, and returns to
+  `RUNNING/ATTACK_MENU`. Unknown sequences fall back to single-step feedback;
+  unknown or incomplete evidence remains blocked.
 - Complete no-battle setup owns every profile check available from verified
   Home `NEW_BATTLE`: Cards, Workshop and its Free Upgrade locks, Bots,
   Guardians, Modules, and Target Priority. It retains screen-derived

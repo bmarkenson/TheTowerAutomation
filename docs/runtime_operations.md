@@ -322,9 +322,12 @@ the API, authority boundaries, and planned capabilities.
   detected Poison Swamp tile, authoritative detail and checked-control matches,
   verification of `off`, and a verified return to `RUNNING/UW_MENU`. Damage
   Slider enforcement requires `RUNNING/ATTACK_MENU`, authoritative panel/mode/
-  OCR evidence before every explicit arrow tap, strict progress, final-value
-  verification, and a verified return to `RUNNING/ATTACK_MENU`. Neither path
-  authorizes Surrender or Home traversal.
+  OCR evidence before adjustment. When both current and target values are exact
+  powers of ten, that evidence may authorize only the bounded same-direction
+  exponent-gap batch; runtime then reacquires settled OCR evidence, recomputes
+  any remaining gap, requires strict progress and a verified final value, and
+  returns to `RUNNING/ATTACK_MENU`. Unknown value sequences retain single-step
+  feedback. Neither path authorizes Surrender or Home traversal.
 - Safe live validation, verified taps, resumable Exit Battle → Go Home
   traversal, and process restarts are allowed only within the user's stated
   task scope.
