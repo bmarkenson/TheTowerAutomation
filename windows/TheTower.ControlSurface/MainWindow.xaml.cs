@@ -10,11 +10,6 @@ namespace TheTower.ControlSurface;
 
 public partial class MainWindow : Window
 {
-    private static readonly string[] RequiredControlSurfaceCapabilities =
-    [
-        "active_battle_strategy_adoption",
-        "explicit_strategy_disposition",
-    ];
     private readonly ControlSurfaceApi _api = new();
     private readonly SshTunnelManager _sshTunnel = new();
     private readonly ClientSettings _settings;
@@ -41,9 +36,7 @@ public partial class MainWindow : Window
     private string? _requestedStrategy;
     private string? _pendingStrategy;
     private string _strategyApplyMode = "next_boundary";
-    private bool _serverCompatibilityKnown;
-    private bool _serverSupportsRequiredCapabilities;
-    private int _serverRevision;
+    private ControlSurfaceCompatibilityResult? _serverCompatibility;
     private bool _controlSurfaceRestartInFlight;
     private StartupGateContext? _startupGateContext;
     private IReadOnlyDictionary<string, StartupGateWaiverStatus> _startupGateWaivers
@@ -150,8 +143,8 @@ public partial class MainWindow : Window
                 destination,
                 cancellation.Token);
             LinuxServiceCompatibilityText.Text =
-                "Linux service restarted; waiting for the required capability...";
-            var status = await WaitForRequiredCapabilityAsync(cancellation.Token);
+                "Linux service restarted; waiting for a compatible API...";
+            var status = await WaitForCompatibleServerAsync(cancellation.Token);
             RenderStatus(status);
             ConnectionText.Text = "Linux service connected";
             ConnectionText.Foreground = new SolidColorBrush(Color.FromRgb(73, 214, 157));
@@ -170,7 +163,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task<StatusResponse> WaitForRequiredCapabilityAsync(
+    private async Task<StatusResponse> WaitForCompatibleServerAsync(
         CancellationToken cancellationToken)
     {
         Exception? lastFailure = null;
@@ -180,12 +173,14 @@ public partial class MainWindow : Window
             try
             {
                 var status = await _api.GetStatusAsync(cancellationToken);
-                if (SupportsRequiredCapability(status))
+                var compatibility = ControlSurfaceCompatibility.Evaluate(status);
+                if (compatibility.IsCompatible)
                 {
                     return status;
                 }
                 lastFailure = new InvalidOperationException(
-                    "The restarted Linux service still lacks required client capabilities.");
+                    $"The restarted Linux service is still incompatible: "
+                    + DescribeCompatibilityProblems(compatibility));
             }
             catch (Exception exc) when (exc is not OperationCanceledException)
             {
@@ -194,7 +189,7 @@ public partial class MainWindow : Window
             await Task.Delay(TimeSpan.FromMilliseconds(750), cancellationToken);
         }
         throw new InvalidOperationException(
-            "The Linux control service did not return with the required capability.",
+            "The Linux control service did not return with an API compatible with this client.",
             lastFailure);
     }
 
@@ -766,9 +761,7 @@ public partial class MainWindow : Window
 
     private void RenderStatus(StatusResponse status)
     {
-        _serverCompatibilityKnown = true;
-        _serverSupportsRequiredCapabilities = SupportsRequiredCapability(status);
-        _serverRevision = status.ServerRevision;
+        _serverCompatibility = ControlSurfaceCompatibility.Evaluate(status);
         UpdateControlSurfaceCompatibility();
         DirectiveText.Text = status.Control.State;
         ModeText.Text = status.Control.Mode;
@@ -1204,7 +1197,7 @@ public partial class MainWindow : Window
             && !_strategyRequestInFlight;
         AdoptStrategyButton.IsEnabled = _strategyLifecycleAvailable
             && _strategyProcessActive
-            && _serverSupportsRequiredCapabilities
+            && _serverCompatibility?.IsCompatible == true
             && hasSelection
             && !string.Equals(
                 selected,
@@ -1214,27 +1207,23 @@ public partial class MainWindow : Window
             && !_strategyRequestInFlight;
     }
 
-    private static bool SupportsRequiredCapability(StatusResponse status) =>
-        status.Capabilities is not null
-        && RequiredControlSurfaceCapabilities.All(capability =>
-            status.Capabilities.Contains(capability, StringComparer.Ordinal));
-
     private void UpdateControlSurfaceCompatibility()
     {
-        if (!_serverCompatibilityKnown)
+        if (_serverCompatibility is null)
         {
             LinuxServiceCompatibilityText.Text =
-                "Waiting for Linux API capability status.";
+                "Waiting for Linux API compatibility status.";
             LinuxServiceCompatibilityText.Foreground =
                 (Brush)FindResource("MutedBrush");
             RestartControlSurfaceButton.Visibility = Visibility.Collapsed;
             RestartControlSurfaceButton.IsEnabled = false;
             return;
         }
-        if (_serverSupportsRequiredCapabilities)
+        if (_serverCompatibility.IsCompatible)
         {
             LinuxServiceCompatibilityText.Text =
-                $"Linux API revision {_serverRevision} supports this client.";
+                $"Linux API v{_serverCompatibility.ApiVersion}, server revision "
+                + $"{_serverCompatibility.ServerRevision}, supports this client.";
             LinuxServiceCompatibilityText.Foreground =
                 new SolidColorBrush(Color.FromRgb(73, 214, 157));
             RestartControlSurfaceButton.Visibility = Visibility.Collapsed;
@@ -1244,14 +1233,44 @@ public partial class MainWindow : Window
 
         var destinationValid = SshTunnelManager.IsValidDestination(
             SshDestinationBox.Text);
+        var incompatibility =
+            "Linux control service is older than or incompatible with this Windows client ("
+            + DescribeCompatibilityProblems(_serverCompatibility)
+            + "). Update or restart the Linux control service.";
         LinuxServiceCompatibilityText.Text = destinationValid
-            ? "Linux API update/restart required: active-battle strategy adoption is unavailable."
-            : "Linux API update/restart required. Enter an SSH destination to enable the fixed-service restart.";
+            ? incompatibility
+            : incompatibility
+                + " Enter an SSH destination to enable the fixed-service restart.";
         LinuxServiceCompatibilityText.Foreground =
             new SolidColorBrush(Color.FromRgb(241, 191, 91));
         RestartControlSurfaceButton.Visibility = Visibility.Visible;
         RestartControlSurfaceButton.IsEnabled =
             destinationValid && !_controlSurfaceRestartInFlight;
+    }
+
+    private static string DescribeCompatibilityProblems(
+        ControlSurfaceCompatibilityResult compatibility)
+    {
+        var problems = new List<string>();
+        if (!compatibility.ApiVersionSupported)
+        {
+            problems.Add(
+                $"API version {compatibility.ApiVersion}; requires "
+                + ControlSurfaceCompatibility.RequiredApiVersion);
+        }
+        if (!compatibility.ServerRevisionSupported)
+        {
+            problems.Add(
+                $"server revision {compatibility.ServerRevision}; requires "
+                + $"{ControlSurfaceCompatibility.MinimumServerRevision} or newer");
+        }
+        if (compatibility.MissingCapabilities.Count > 0)
+        {
+            problems.Add(
+                "missing capabilities: "
+                + string.Join(", ", compatibility.MissingCapabilities));
+        }
+        return string.Join("; ", problems);
     }
 
     private static string? NormalizeStrategy(string? strategy) =>

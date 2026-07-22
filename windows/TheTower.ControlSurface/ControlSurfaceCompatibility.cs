@@ -1,0 +1,43 @@
+namespace TheTower.ControlSurface;
+
+internal sealed record ControlSurfaceCompatibilityResult(
+    int ApiVersion,
+    int ServerRevision,
+    IReadOnlyList<string> MissingCapabilities)
+{
+    public bool ApiVersionSupported =>
+        ApiVersion == ControlSurfaceCompatibility.RequiredApiVersion;
+
+    public bool ServerRevisionSupported =>
+        ServerRevision >= ControlSurfaceCompatibility.MinimumServerRevision;
+
+    public bool IsCompatible =>
+        ApiVersionSupported
+        && ServerRevisionSupported
+        && MissingCapabilities.Count == 0;
+}
+
+internal static class ControlSurfaceCompatibility
+{
+    public const int RequiredApiVersion = 1;
+    public const int MinimumServerRevision = 2;
+
+    private static readonly string[] RequiredCapabilities =
+    [
+        "active_battle_strategy_adoption",
+        "explicit_strategy_disposition",
+    ];
+
+    public static ControlSurfaceCompatibilityResult Evaluate(StatusResponse status)
+    {
+        var capabilities = status.Capabilities ?? [];
+        var missingCapabilities = RequiredCapabilities
+            .Where(capability =>
+                !capabilities.Contains(capability, StringComparer.Ordinal))
+            .ToArray();
+        return new ControlSurfaceCompatibilityResult(
+            status.ApiVersion,
+            status.ServerRevision,
+            missingCapabilities);
+    }
+}
