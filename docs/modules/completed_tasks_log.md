@@ -577,6 +577,27 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   passed 493 sandbox tests plus the separately permitted localhost-socket test,
   for 494 total.
 
+### 2026-07-22 Home-boundary preflight and runtime responsiveness
+
+- Commit `dacb715` moved every persistent Farm check available from Home
+  `NEW_BATTLE` into complete no-battle setup: Cards, Workshop and Free Upgrade
+  locks, Bots, Guardians, Modules, and Target Priority. Serialized
+  screen-derived evidence now satisfies the corresponding session-preflight
+  requirements, so a newly started battle checks only Auto Pick Perks and
+  Ultimate Weapons instead of returning Home. Existing-battle attachments
+  retain the guarded compatibility route. The focused suite passed 130 tests.
+- Commit `152d3be` anchored Guild reward-badge measurement to the matched Guild
+  icon. A retained positive frame and same-layout negative prove badge
+  detection when an active Tournament Trophy displaces Guild; the reward
+  handler suite passed 32 tests.
+- Commit `e0b246f` changed Damage Slider enforcement to batch only exact
+  power-of-ten exponent gaps, reacquire settled OCR evidence afterward, and
+  recompute dropped steps. Unknown sequences retain single-step feedback and
+  partial dispatch failures stop after verification. Damage Slider and run
+  initialization validation passed 87 tests.
+- Repository-wide validation passed 502 sandbox tests plus the separately
+  permitted localhost-socket test, for 503 total.
+
 ---
 
 ## 📘 Documentation

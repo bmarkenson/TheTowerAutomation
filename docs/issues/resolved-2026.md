@@ -8,6 +8,90 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Farm preflight repeated Home-accessible checks after Battle start
+
+- **Observed:** Reported by the operator on 2026-07-22 while reviewing a new
+  Farm run boundary.
+- **Symptom:** The no-battle route checked Workshop locks and then started the
+  battle. New-run initialization checked Damage Slider and Target Priority;
+  session preflight subsequently used Exit Battle → Go Home to inspect Cards,
+  Workshop, Modules, Bots, and Guardians even though all of those settings were
+  available at the original `NEW_BATTLE` Home boundary.
+- **Evidence:** Fresh control, owner-PID, ADB-target, current-screen, and action
+  log inspection confirmed the exact ordering: Home lock checks, Battle start,
+  Damage Slider, Target Priority, Cards/Perks/UW/Modules/Event/Guild, then Exit
+  Battle → Go Home → Workshop before resuming the same run.
+- **Safety response:** Runtime inspection was read-only. The active
+  operator-owned battle was not paused, navigated, exited, or Surrendered.
+- **Cause:** Complete no-battle setup retained only lock evidence. Session
+  preflight therefore repeated its historical persistent-configuration route,
+  while Target Priority remained a separate in-battle initialization action.
+- **Resolution:** Complete no-battle setup now verifies Cards, Workshop and its
+  locks, Bots, Guardians, Modules, and Target Priority from verified Home
+  `NEW_BATTLE`. It retains serialized screen evidence, seeds the Target
+  Priority gate, and session preflight consumes that proof before checking only
+  battle-only Auto Pick Perks and Ultimate Weapons. Attachments without
+  boundary proof retain the guarded compatibility route.
+- **Regression:** `test/test_gc_no_battle_setup.py`,
+  `test/test_gc_preflight_navigation.py`,
+  `test/test_gc_preflight_templates.py`, `test/test_run_initialization.py`,
+  `test/test_target_priority.py`, and `test/test_strategy_builder_cli.py` cover
+  Home ownership, evidence round trips and consumption, gate seeding, static
+  Home Target Priority navigation, and generated-plan consistency. The focused
+  suite passed 130 tests.
+- **Fixed by:** `dacb715`.
+
+### Tournament menu displacement hid an available Guild chest badge
+
+- **Observed:** 2026-07-22 during fresh read-only inspection of an active
+  Tournament-era Farm battle.
+- **Symptom:** The open side menu visibly showed a purple Guild badge, but
+  `measure_menu_reward_badges()` returned `guild_chests=False`; reward-probe
+  logs consistently reported `guild=False`.
+- **Evidence:** The fresh retained frame matches Guild at `(1015,693)` with the
+  badge immediately above-left, while the detector still cropped the normal
+  Guild slot at `(852,542,50,55)`. Logged eligible probes otherwise followed
+  the intended 30-minute cooldown, so probe frequency was not the detection
+  failure.
+- **Safety response:** The current frame and logs were captured read-only. No
+  reward control, menu destination, or other device action was invoked.
+- **Cause:** Badge color measurement used an absolute crop for the normal menu
+  grid even though the existing navigation matcher already accounted for the
+  Tournament Trophy moving Guild down and right.
+- **Resolution:** Guild badge measurement now anchors its narrow color crop to
+  the freshly matched Guild icon. Daily and Event retain their existing fixed
+  regions, and the Guild action still requires its independent visible match.
+- **Regression:** `test/test_mission_reward_handler.py` uses
+  `running_menu_tournament_guild_badge_20260722.png` as positive displaced
+  evidence and `running_menu_tournament_trophy_20260718.png` as a same-layout
+  negative. Its 32 tests passed.
+- **Fixed by:** `152d3be`.
+
+### Damage Slider captured and OCRed after every predictable step
+
+- **Observed:** Reported by the operator on 2026-07-22 and confirmed in the
+  current run's action log.
+- **Symptom:** Enforcing `100%` → `1E-22%` issued the expected 24 decrease
+  taps but captured and OCRed a new screen after every tap, making a
+  deterministic run-boundary adjustment unnecessarily slow.
+- **Evidence:** The action log recorded all 24 one-power-of-ten transitions and
+  their per-step capture/verification cycle. Repository tracing confirmed the
+  enforcer reacquired authoritative percentage evidence before each arrow tap.
+- **Safety response:** Diagnosis used retained logs and fixtures only. The
+  active battle and its Damage control were not touched.
+- **Cause:** The feedback loop did not encode the slider's observed
+  power-of-ten step model, so it could not calculate a known remaining gap.
+- **Resolution:** An authoritative current/target pair that consists of exact
+  powers of ten now authorizes one bounded same-direction exponent-gap batch,
+  followed by settled OCR verification. Dropped steps are recomputed from the
+  stable intermediate value, partial dispatch failures stop after
+  verification, and unknown sequences retain single-step feedback.
+- **Regression:** `test/test_damage_adjuster.py` covers the live-observed
+  24-tap gap with one post-batch read, smaller exact batches, dropped-step
+  recovery, partial dispatch failure, unknown-sequence fallback, strict
+  progress, and final dismissal. Its 16 tests passed.
+- **Fixed by:** `e0b246f`.
+
 ### Workshop lock gate stayed on the retained Enhance mode
 
 - **Observed:** Reported by the operator on 2026-07-22 while checking the
