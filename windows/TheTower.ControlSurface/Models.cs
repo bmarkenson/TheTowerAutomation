@@ -72,6 +72,18 @@ public sealed class RequestStatus
 
     [JsonPropertyName("decision_id")]
     public string? DecisionId { get; set; }
+
+    [JsonPropertyName("previous_pid")]
+    public int? PreviousPid { get; set; }
+
+    [JsonPropertyName("replacement_pid")]
+    public int? ReplacementPid { get; set; }
+
+    [JsonPropertyName("restored_state")]
+    public string? RestoredState { get; set; }
+
+    [JsonPropertyName("startup_gate_policy")]
+    public string? StartupGatePolicy { get; set; }
 }
 
 public sealed class DirectiveAcknowledgement

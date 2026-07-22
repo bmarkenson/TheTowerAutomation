@@ -232,6 +232,21 @@ class SystemdAutomationManager:
     def set_startup_gate_policy(self, policy: object) -> dict[str, Any]:
         """Persist how the next process treats its first observed battle."""
 
+        return self._persist_startup_gate_policy(policy, require_inactive=True)
+
+    def persist_startup_gate_policy(self, policy: object) -> dict[str, Any]:
+        """Persist the policy for a later start without changing a live process."""
+
+        return self._persist_startup_gate_policy(policy, require_inactive=False)
+
+    def _persist_startup_gate_policy(
+        self,
+        policy: object,
+        *,
+        require_inactive: bool,
+    ) -> dict[str, Any]:
+        """Persist and verify one allowlisted startup-gate policy."""
+
         normalized = str(policy).strip().lower()
         if normalized not in STARTUP_GATE_POLICIES:
             raise AutomationProcessError(
@@ -246,7 +261,7 @@ class SystemdAutomationManager:
                     "Cannot configure startup gates while "
                     f"{self.service_name} is unavailable"
                 )
-            if before["active"]:
+            if require_inactive and before["active"]:
                 raise AutomationProcessError(
                     "Completely stop automation before changing startup gates"
                 )

@@ -57,6 +57,29 @@ def test_pause_remains_authoritative_until_explicit_resume(tmp_path):
     assert AUTOMATION.state.value == "RUNNING"
 
 
+def test_repeated_state_directive_is_acknowledged_and_requests_fresh_status(
+    tmp_path,
+):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    store.set_state("PAUSED", source="test")
+    supervisor = _supervisor(control_file)
+
+    with patch("core.automation_supervisor.log") as runtime_log:
+        assert supervisor.apply_control()
+        assert not supervisor.apply_control()
+        store.set_state("PAUSED", source="attached-restart")
+        assert supervisor.apply_control()
+
+    acknowledgements = [
+        call
+        for call in runtime_log.call_args_list
+        if call.args
+        and call.args[0] == "[CTRL] State set to PAUSED via control file"
+    ]
+    assert len(acknowledgements) == 2
+
+
 def test_timed_pause_expiry_persists_resume_before_changing_memory(tmp_path):
     control_file = tmp_path / "automation_ctl.json"
     supervisor = _supervisor(control_file)

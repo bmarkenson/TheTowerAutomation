@@ -82,6 +82,7 @@ class AutomationSupervisor:
 
         # Internal state
         self._last_applied_state: Optional[str] = None
+        self._last_state_directive_revision: object = None
         self._last_applied_mode: Optional[str] = None
         self._pause_resume_at: Optional[float] = None
         self._last_invalid_resume_at: object = None
@@ -123,17 +124,31 @@ class AutomationSupervisor:
             for check_id, waiver in self._startup_gate_waivers.items()
         }
 
-    def apply_control(self) -> None:
-        """Apply persistent directives and expire an optional timed pause."""
+    def apply_control(self) -> bool:
+        """Apply directives and report whether state intent changed on disk."""
 
         directives = self._load_control_directive()
+        state_directive_changed = False
         if directives:
+            state_revision = (
+                directives.get("state_request_id")
+                or directives.get("state_updated_at")
+                or directives.get("updated_at")
+            )
+            state_directive_changed = (
+                state_revision is not None
+                and state_revision != self._last_state_directive_revision
+            )
+            self._last_state_directive_revision = state_revision
             self._strategy_request = self._parse_strategy_request(directives)
             self._gate_decision = self._parse_gate_decision(directives)
             self._startup_gate_waivers = self._parse_startup_gate_waivers(
                 directives
             )
-            self._apply_state(directives.get("state"))
+            self._apply_state(
+                directives.get("state"),
+                acknowledge_unchanged=state_directive_changed,
+            )
             self._apply_mode(directives.get("mode"))
             self._sync_pause_deadline(directives)
             self._apply_adb_port(
@@ -142,6 +157,7 @@ class AutomationSupervisor:
             )
 
         self._auto_resume_if_needed()
+        return state_directive_changed
 
     @staticmethod
     def _parse_strategy_request(
@@ -573,11 +589,24 @@ class AutomationSupervisor:
             log(f"[CTRL] Failed reading control file: {exc}", "WARN")
             return {}
 
-    def _apply_state(self, state: object) -> None:
+    def _apply_state(
+        self,
+        state: object,
+        *,
+        acknowledge_unchanged: bool = False,
+    ) -> None:
         if not isinstance(state, str) or not state:
             return
         normalized = state.upper()
-        if normalized not in _ALLOWED_STATES or normalized == self._last_applied_state:
+        if normalized not in _ALLOWED_STATES:
+            return
+        if normalized == self._last_applied_state:
+            if acknowledge_unchanged:
+                log(
+                    f"[CTRL] State set to {normalized} via control file",
+                    "INFO",
+                    console=True,
+                )
             return
         try:
             AUTOMATION.state = normalized

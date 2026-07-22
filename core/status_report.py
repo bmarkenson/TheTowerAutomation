@@ -112,6 +112,11 @@ class StatusReporter:
 
         self._coin_rate_samples.clear()
 
+    def request_immediate_report(self) -> None:
+        """Make the next captured frame publish a fresh status observation."""
+
+        self._last_status_ts = 0.0
+
     def maybe_report(
         self,
         *,

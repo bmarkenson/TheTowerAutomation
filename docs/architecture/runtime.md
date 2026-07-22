@@ -241,10 +241,20 @@ Tier while remaining `unknown` rather than fabricating Farm or Milestone type.
 - Process replacement must verify the existing owner and safe UI boundary,
   then verify the replacement PID, refreshed lock, startup log, control
   consumption, and first state report.
+- The guarded active-battle reload makes that contract executable. A refreshed
+  same-state Pause directive causes the current runtime to acknowledge intent
+  and force its next captured frame into the status stream. Only a fresh
+  `RUNNING` result from the systemd MainPID's held ADB lock may cross the stop
+  boundary. The replacement launches once with `next_run`; the persistent
+  next-start policy is restored immediately after systemd copies its launch
+  environment. Normal control intent returns only after the replacement proves
+  its distinct PID, lock, attached startup, Pause consumption, and first
+  observation. Any failure after Pause preparation begins remains paused.
 - Remote lifecycle control is limited to the configured
   `thetower-automation.service` systemd user unit. A start crosses the process
   boundary under persisted `PAUSED` and may publish `RUNNING` only after the
-  unit is active. A stop persists `STOPPED` before systemd signals the unit.
+  unit is active. A stop persists `STOPPED` before systemd signals the unit;
+  guarded active-battle reload retains `PAUSED` across its stop/start boundary.
   A stopped request may persist one validated localhost ADB TCP port and one
   validated startup-gate policy for the next start; an acknowledged paused
   runtime may apply that same restricted port as a live target handoff. Remote

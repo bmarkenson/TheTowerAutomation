@@ -85,6 +85,11 @@ checked-item detail remains in the
   - [x] Allow a stopped managed start to attach to an existing battle without
     replaying startup/session gates, then re-arm those gates at the next
     authoritative run boundary without seeding completion state.
+  - [x] Add a guarded active-battle automation reload that pauses and obtains a
+    fresh runtime-owned `RUNNING` observation, replaces the fixed systemd unit
+    once with attachment semantics, verifies the new PID/lock/startup/control/
+    observation evidence, restores the configured cold-start policy, and
+    restores prior control intent only after readiness succeeds.
   - [x] Merge Battle and Tournament history; classify Farm, Tournament, and
     Milestone from strategy plus terminal evidence; and filter by type, Tier,
     wave range, strategy, and capture quality.

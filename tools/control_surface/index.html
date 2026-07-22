@@ -89,6 +89,8 @@
             <button type="button" data-process-action="start" data-run-state="PAUSED">Start paused</button>
             <button class="success" type="button" data-process-action="start" data-run-state="RUNNING">Start running</button>
           </div>
+          <button class="primary" type="button" data-process-action="restart_attached">Reload automation for current battle</button>
+          <p class="fine-print">Pauses and replaces the main Python process, verifies attached startup, then restores the prior control state.</p>
         </div>
 
         <div class="danger-zone">

@@ -573,7 +573,8 @@ class App:
             except Exception:
                 pass
 
-        self._supervisor.apply_control()
+        if self._supervisor.apply_control():
+            self._status_reporter.request_immediate_report()
         self._observe_strategy_request()
         if self._supervisor.is_paused:
             if stop_blind_gem_tapper():
@@ -588,7 +589,8 @@ class App:
                 # Control synchronization must not depend on a working ADB
                 # connection. This both acknowledges Pause during an outage
                 # and permits a paused live target handoff before capture.
-                self._supervisor.apply_control()
+                if self._supervisor.apply_control():
+                    self._status_reporter.request_immediate_report()
                 self._observe_strategy_request()
                 is_paused = self._supervisor.is_paused
                 if is_paused and stop_blind_gem_tapper():

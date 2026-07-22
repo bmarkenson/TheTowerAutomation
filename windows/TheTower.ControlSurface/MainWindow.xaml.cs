@@ -38,6 +38,7 @@ public partial class MainWindow : Window
     private string _strategyApplyMode = "next_boundary";
     private ControlSurfaceCompatibilityResult? _serverCompatibility;
     private bool _controlSurfaceRestartInFlight;
+    private bool _automationRestartInFlight;
     private StartupGateContext? _startupGateContext;
     private IReadOnlyDictionary<string, StartupGateWaiverStatus> _startupGateWaivers
         = new Dictionary<string, StartupGateWaiverStatus>();
@@ -536,6 +537,53 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void ReloadAutomation_Click(object sender, RoutedEventArgs e)
+    {
+        if (MessageBox.Show(
+                this,
+                "Reload the main Python automation process for the current battle?\n\n"
+                + "Automation will pause, start a replacement in attachment mode, "
+                + "verify its PID, lock, startup policy, control acknowledgement, "
+                + "and first observation, then restore the current Running or "
+                + "Paused state. Startup and session gates remain deferred until "
+                + "the next battle boundary.",
+                "Reload automation",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question) != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        _automationRestartInFlight = true;
+        ReloadAutomationButton.IsEnabled = false;
+        ControlSelectionText.Text =
+            "Pausing and replacing the main automation process...";
+        try
+        {
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+            var response = await _api.PostProcessAsync(
+                new { action = "restart_attached" },
+                cancellation.Token);
+            RenderStatus(response);
+            var request = response.Request;
+            ControlSelectionText.Text = request is null
+                ? "Automation reload completed."
+                : $"Automation reloaded: PID {request.PreviousPid} → "
+                    + $"{request.ReplacementPid}; restored {request.RestoredState}.";
+            await RefreshActivityAsync(force: true);
+        }
+        catch (Exception exc)
+        {
+            LastErrorText.Text = exc.Message;
+            ShowError(exc);
+            await RefreshStatusAsync(force: true);
+        }
+        finally
+        {
+            _automationRestartInFlight = false;
+        }
+    }
+
     private void StartupGatePolicy_Click(object sender, RoutedEventArgs e) =>
         _startupGatePolicyDirty = true;
 
@@ -794,6 +842,15 @@ public partial class MainWindow : Window
         StartRunningButton.IsEnabled = lifecycleAvailable && !processActive;
         AttachCurrentBattleBox.IsEnabled = lifecycleAvailable && !processActive;
         CompleteStopButton.IsEnabled = lifecycleAvailable && service?.Active == true;
+        ReloadAutomationButton.IsEnabled = lifecycleAvailable
+            && service?.Active == true
+            && _serverCompatibility?.IsCompatible == true
+            && (status.Observation is null
+                || status.Observation.Stale
+                || status.Observation.StateLabel.StartsWith(
+                    "RUNNING",
+                    StringComparison.OrdinalIgnoreCase))
+            && !_automationRestartInFlight;
         var pausedAndAcknowledged = processActive
             && string.Equals(
                 status.Control.State,

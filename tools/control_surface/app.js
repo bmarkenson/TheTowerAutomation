@@ -134,12 +134,22 @@ function renderStatus(payload) {
   document.querySelectorAll("[data-control-action]").forEach((button) => {
     button.disabled = Boolean(control.error);
   });
+  const processActive = Boolean(runtime.active || processService?.active);
   document.querySelectorAll("[data-process-action]").forEach((button) => {
-    button.disabled = Boolean(control.error) || !processService?.available;
+    const action = button.dataset.processAction;
+    const unavailable = Boolean(control.error) || !processService?.available;
+    button.disabled = unavailable
+      || (action === "start" && processActive)
+      || (action === "stop" && !processService?.active)
+      || (action === "restart_attached" && (
+        !processService?.active
+        || (observation?.stale === false
+          && !observation?.state_label?.startsWith("RUNNING"))
+      ));
   });
   renderRunConfiguration(
     control,
-    Boolean(runtime.active || processService?.active),
+    processActive,
   );
   renderGateDecision(control.gate_decision);
 }
@@ -564,12 +574,17 @@ document.addEventListener("click", (event) => {
   if (process) {
     const action = process.dataset.processAction;
     if (action === "stop" && !window.confirm("Persist STOPPED and stop the managed Linux automation service?")) return;
+    if (action === "restart_attached" && !window.confirm(
+      "Reload the main Python automation process for this battle? Automation will pause, verify the attached replacement, and restore the current control state.",
+    )) return;
     const payload = { action };
     if (process.dataset.runState) payload.run_state = process.dataset.runState;
     sendProcess(
       payload,
       action === "stop"
         ? "Automation service stopped"
+        : action === "restart_attached"
+          ? "Automation reloaded for the current battle"
         : `Automation service started ${payload.run_state.toLowerCase()}`,
     );
     return;

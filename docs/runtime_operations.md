@@ -223,6 +223,36 @@ Results, or verified Home `NEW_BATTLE`; the following battle then performs the
 real gates. Do not select this for a process that is expected to configure a
 newly started battle immediately.
 
+For a checked-in Python update during a running battle, prefer **Reload
+automation for current battle** over a separate Stop/Start sequence. The
+control surface performs one guarded replacement of
+`thetower-automation.service` and therefore replaces its `main.py` process:
+
+1. Persist an indefinite Pause and wait for the existing runtime to acknowledge
+   it.
+2. Require that same PID and ADB lock owner to publish a fresh post-request
+   `RUNNING` observation. Capture and detection continue while paused; no
+   handler or strategy action is allowed.
+3. Stop the fixed automation unit, launch its replacement once with
+   `startup_gates=next_run`, and immediately restore the configured policy for
+   future ordinary starts.
+4. Require a distinct systemd MainPID, matching held ADB lock, attached-policy
+   startup log, Pause consumption, and first status observation from the
+   replacement.
+5. Restore the prior `RUNNING`, indefinite `PAUSED`, or unexpired timed-Pause
+   intent. An expired timed Pause restores `RUNNING`.
+
+Any failure after Pause preparation begins leaves control `PAUSED` and reports
+the missing evidence; an initial owner/precondition rejection changes nothing.
+A fresh non-running observation rejects the
+replacement after Pause, before systemd is stopped. The operation does not
+fabricate completed gate variables: attachment suppression ends at the normal
+Game Over, Tournament Results, or verified Home `NEW_BATTLE` boundary. Process-
+local histories such as Coins/min samples restart with the new process and
+should be interpreted as since attachment. A raw `systemctl --user restart`
+also replaces `main.py`, but does not provide this Pause, attachment-policy,
+readiness, or state-restoration protocol.
+
 If attached Tournament preflight finds an authoritative mismatch, the control
 surface opens a non-blocking warning. **Pause for manual changes** persists
 Pause without ending the run; **Retry** captures fresh read-only evidence; and

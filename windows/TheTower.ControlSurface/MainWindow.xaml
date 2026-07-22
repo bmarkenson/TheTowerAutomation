@@ -154,6 +154,8 @@
               <TextBlock Text="Use this when automation is starting in an existing battle. Normal automation continues, but startup and session gates wait for the next run boundary unless the observer declares a read-only attachment check." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="24,0,6,8" />
               <Button x:Name="StartPausedButton" Content="Start paused" Tag="start:PAUSED" Click="Process_Click" IsEnabled="False" />
               <Button x:Name="StartRunningButton" Content="Start running" Tag="start:RUNNING" Click="Process_Click" Style="{StaticResource SuccessButton}" IsEnabled="False" />
+              <Button x:Name="ReloadAutomationButton" Content="Reload automation for current battle" Click="ReloadAutomation_Click" Style="{StaticResource PrimaryButton}" Margin="4,12,4,2" IsEnabled="False" />
+              <TextBlock Text="Safely pauses and replaces the main Python process, attaches the replacement to the current battle, verifies readiness, and restores the prior control state." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,0,6,4" />
               <Button x:Name="CompleteStopButton" Content="Completely stop automation" Tag="stop" Click="Process_Click" Style="{StaticResource DangerButton}" Margin="4,12,4,4" IsEnabled="False" />
               <TextBlock Text="Stop persists STOPPED before stopping the fixed Linux systemd service." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="6" />
             </StackPanel>

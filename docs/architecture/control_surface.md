@@ -50,13 +50,22 @@ agnostic.
   optional strategy-scoped one-run check configuration,
   bundled-strategy selection, stopped or
   acknowledged-paused ADB-port
-  configuration, and fixed managed-service start/stop. Active strategy
+  configuration, fixed managed-service start/stop, and one guarded active-
+  battle automation reload. Active strategy
   requests are declarative runtime configuration, not direct tap authority.
   There is no arbitrary tap, shell command, process kill, Surrender, file-path,
   or ADB endpoint.
 - Complete stop persists `STOPPED` before asking the fixed systemd user service
   to stop. Start always crosses the service boundary under `PAUSED`; a requested
   `RUNNING` directive is saved only after systemd reports the unit active.
+- Guarded active-battle reload never persists ordinary `STOPPED`. It refreshes
+  same-state Pause intent so the runtime acknowledges the request and forces a
+  new detection/status sample, requires fresh `RUNNING` evidence from the
+  matching MainPID/ADB-lock owner, and then replaces only the fixed automation
+  unit. The replacement must prove a distinct PID, refreshed lock ownership,
+  one-launch `next_run` policy, Pause consumption, and a first observation
+  before the prior control state is restored. Failure after preparation begins
+  remains paused; an initial precondition rejection does not mutate control.
 - A stopped start request may choose `immediate` startup gates or `next_run`.
   `next_run` attaches to the first already-active/resumable battle: normal
   strategy and handler work continues, but rules explicitly tagged as run
@@ -138,7 +147,7 @@ memory only. The API deliberately sends no CORS permission.
 | --- | --- | --- |
 | `GET` | `/api/v1/status` | Server revision/capabilities, control intent, acknowledgement, latest observation, and runtime evidence |
 | `POST` | `/api/v1/control` | Allowlisted control mutation |
-| `POST` | `/api/v1/process` | Start/stop the fixed systemd automation unit, select its startup-gate policy, save/queue/adopt a bundled strategy, or configure/safely hand off its ADB port |
+| `POST` | `/api/v1/process` | Start/stop or guarded-reload the fixed systemd automation unit, select its startup-gate policy, save/queue/adopt a bundled strategy, or configure/safely hand off its ADB port |
 | `GET` | `/api/v1/battles?limit=N` | Newest Battle and Tournament summaries |
 | `GET` | `/api/v1/battles/{battle_id}` | One full structured battle record |
 | `GET` | `/api/v1/activity?limit=N&levels=ERROR,WARN` | Recent structured action-log entries, optionally filtered by level |
@@ -177,6 +186,7 @@ Process request examples:
 {"action": "start", "run_state": "RUNNING"}
 {"action": "start", "run_state": "RUNNING", "startup_gate_policy": "next_run"}
 {"action": "stop"}
+{"action": "restart_attached"}
 {"action": "set_adb_port", "adb_port": 5565}
 {"action": "set_strategy", "strategy": "tournament"}
 {"action": "set_strategy", "strategy": "farm_t18", "apply_to_active_run": true}
@@ -206,6 +216,10 @@ Process request examples:
   strategy clears staged exceptions.
 - Complete automation-service start (paused or running) and stop through a
   fixed systemd user unit.
+- Guarded **Reload automation for current battle** in the native and browser
+  clients. It replaces the main Python process only after fresh owner and
+  `RUNNING` evidence, verifies the attached replacement, restores the prior
+  control state, and leaves failures paused.
 - Optional attachment to an existing battle on process start. The selected
   policy persists on Linux; attached-run startup/session gates wait for the
   next real run boundary while ordinary automation remains available, except

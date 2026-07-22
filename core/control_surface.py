@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import threading
+import time
 from typing import Any, Mapping, Optional, Sequence
 
 from core.app_setup import CONFIGURABLE_STRATEGIES, STARTUP_GATE_POLICIES
@@ -26,12 +27,15 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 3
+CONTROL_SURFACE_REVISION = 4
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
+    "attached_automation_restart",
     "explicit_strategy_disposition",
 )
+ATTACHED_RESTART_TIMEOUT_SECONDS = 20.0
+ATTACHED_RESTART_POLL_SECONDS = 0.25
 _BATTLE_ID_RE = re.compile(r"(?:Battle|Tournament)\d{8}T\d{6}[+-]\d{4}")
 _LOG_RE = re.compile(
     r"^\[(?P<level>[A-Z_]+) (?P<timestamp>[^\]]+)] (?P<message>.*)$"
@@ -115,6 +119,7 @@ class ControlSurfaceService:
                 "resume_at": None,
                 "remaining_seconds": None,
                 "updated_at": None,
+                "state_request_id": None,
                 "adb_port_updated_at": None,
                 "strategy": None,
                 "strategy_apply_mode": "next_boundary",
@@ -161,6 +166,15 @@ class ControlSurfaceService:
 
         if not isinstance(request, Mapping):
             raise ControlSurfaceRequestError("Request body must be a JSON object")
+        with self._process_action_lock:
+            return self._apply_control_locked(request)
+
+    def _apply_control_locked(
+        self,
+        request: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Apply a control mutation outside any process replacement window."""
+
         action = str(request.get("action") or "").strip().lower()
         try:
             if action == "pause":
@@ -402,6 +416,13 @@ class ControlSurfaceService:
                 self._append_audit(f"Failed to stop service cleanly: {exc}")
                 raise ControlSurfaceRequestError(str(exc), status=503) from exc
             audit = "Stopped automation service"
+        elif action == "restart_attached":
+            restart = self._restart_attached_automation(manager)
+            audit = (
+                "Reloaded automation for the active battle "
+                f"(PID {restart['previous_pid']} -> {restart['replacement_pid']}); "
+                f"restored {restart['restored_state']}"
+            )
         elif action in {"set_adb_port", "set_strategy"}:
             runtime_active = self._runtime_evidence()["active"]
             manager_status = manager.status()
@@ -488,7 +509,8 @@ class ControlSurfaceService:
                     audit = f"Configured next-start strategy {strategy}"
         else:
             raise ControlSurfaceRequestError(
-                "action must be start, stop, set_adb_port, or set_strategy"
+                "action must be start, stop, restart_attached, set_adb_port, "
+                "or set_strategy"
             )
 
         audit_warning = self._append_audit(audit)
@@ -496,6 +518,8 @@ class ControlSurfaceService:
         response["request"] = {"accepted": True, "action": action}
         if action == "start" and requested_gate_policy is not None:
             response["request"]["startup_gate_policy"] = requested_gate_policy
+        elif action == "restart_attached":
+            response["request"].update(restart)
         elif action == "set_adb_port":
             response["request"]["adb_port"] = adb_port
         elif action == "set_strategy":
@@ -509,6 +533,309 @@ class ControlSurfaceService:
         if audit_warning:
             response["request"]["warning"] = audit_warning
         return response
+
+    def _restart_attached_automation(
+        self,
+        manager: SystemdAutomationManager,
+    ) -> dict[str, Any]:
+        """Replace the managed runtime while attaching to its active battle."""
+
+        before = self.status()
+        process = before.get("process_service") or {}
+        previous_pid = process.get("main_pid")
+        if not process.get("available") or not process.get("active"):
+            raise ControlSurfaceRequestError(
+                "Attached restart requires an active managed automation service",
+                status=409,
+            )
+        if not isinstance(previous_pid, int) or previous_pid <= 0:
+            raise ControlSurfaceRequestError(
+                "Attached restart requires an authoritative systemd MainPID",
+                status=409,
+            )
+
+        runtime = before.get("runtime") or {}
+        matching_owner = next(
+            (
+                instance
+                for instance in runtime.get("instances", [])
+                if instance.get("active") and instance.get("pid") == previous_pid
+            ),
+            None,
+        )
+        if matching_owner is None:
+            raise ControlSurfaceRequestError(
+                "Attached restart requires the active ADB lock owner to match "
+                "the systemd MainPID",
+                status=409,
+            )
+
+        control = before.get("control") or {}
+        original_state = str(control.get("state") or "").upper()
+        if original_state not in {"RUNNING", "PAUSED"}:
+            raise ControlSurfaceRequestError(
+                "Attached restart requires control state RUNNING or PAUSED",
+                status=409,
+            )
+        original_resume_at = control.get("resume_at")
+        original_policy = str(process.get("startup_gate_policy") or "").lower()
+        if process.get("startup_gate_policy_error"):
+            raise ControlSurfaceRequestError(
+                str(process["startup_gate_policy_error"]),
+                status=409,
+            )
+        if original_policy not in STARTUP_GATE_POLICIES:
+            raise ControlSurfaceRequestError(
+                "Attached restart cannot determine the configured startup-gate policy",
+                status=409,
+            )
+
+        try:
+            pause_log_offset = _file_size(self.action_log)
+            self.control_store.set_state(
+                "PAUSED",
+                source="control-surface-attached-restart",
+            )
+            self._wait_for_attached_restart_pause(
+                previous_pid=previous_pid,
+                log_offset=pause_log_offset,
+            )
+
+            log_offset = _file_size(self.action_log)
+            manager.stop()
+            manager.set_startup_gate_policy("next_run")
+            try:
+                started = manager.start()
+            except AutomationProcessError as exc:
+                restore_error = self._restore_startup_gate_policy(
+                    manager,
+                    original_policy,
+                )
+                detail = (
+                    "; additionally failed restoring startup gates: "
+                    f"{restore_error}"
+                    if restore_error
+                    else ""
+                )
+                raise AutomationProcessError(f"{exc}{detail}") from exc
+
+            replacement_pid = started.get("main_pid")
+            restore_error = self._restore_startup_gate_policy(
+                manager,
+                original_policy,
+            )
+            if restore_error:
+                raise AutomationProcessError(
+                    "Replacement started paused, but the configured startup-gate "
+                    f"policy could not be restored: {restore_error}"
+                )
+            if (
+                not isinstance(replacement_pid, int)
+                or replacement_pid <= 0
+                or replacement_pid == previous_pid
+            ):
+                raise AutomationProcessError(
+                    "systemd did not report a distinct replacement MainPID"
+                )
+
+            self._wait_for_replacement_runtime(
+                replacement_pid=replacement_pid,
+                log_offset=log_offset,
+            )
+
+            restored_state = original_state
+            if original_state == "PAUSED" and original_resume_at is not None:
+                if float(original_resume_at) > time.time():
+                    self.control_store.set_state(
+                        "PAUSED",
+                        resume_at=float(original_resume_at),
+                        source="control-surface-attached-restart",
+                    )
+                else:
+                    restored_state = "RUNNING"
+                    self.control_store.set_state(
+                        "RUNNING",
+                        source="control-surface-attached-restart",
+                    )
+                    self._wait_for_state_acknowledgement("RUNNING")
+            elif original_state == "RUNNING":
+                self.control_store.set_state(
+                    "RUNNING",
+                    source="control-surface-attached-restart",
+                )
+                self._wait_for_state_acknowledgement("RUNNING")
+
+            return {
+                "disposition": "active_battle_reloaded",
+                "previous_pid": previous_pid,
+                "replacement_pid": replacement_pid,
+                "restored_state": restored_state,
+                "startup_gate_policy": "next_run",
+            }
+        except (AutomationProcessError, ControlDirectiveError, ValueError) as exc:
+            try:
+                self.control_store.set_state(
+                    "PAUSED",
+                    source="control-surface-attached-restart-failure",
+                )
+            except (ControlDirectiveError, ValueError):
+                pass
+            self._append_audit(f"Attached automation restart failed: {exc}")
+            raise ControlSurfaceRequestError(str(exc), status=503) from exc
+
+    @staticmethod
+    def _restore_startup_gate_policy(
+        manager: SystemdAutomationManager,
+        policy: str,
+    ) -> Optional[str]:
+        try:
+            if manager.status().get("active"):
+                manager.persist_startup_gate_policy(policy)
+            else:
+                manager.set_startup_gate_policy(policy)
+        except AutomationProcessError as exc:
+            return str(exc)
+        return None
+
+    def _wait_for_state_acknowledgement(self, expected: str) -> dict[str, Any]:
+        deadline = time.monotonic() + ATTACHED_RESTART_TIMEOUT_SECONDS
+        while True:
+            status = self.status()
+            acknowledgement = status.get("acknowledgements", {}).get("state") or {}
+            if (
+                acknowledgement.get("acknowledges_current") is True
+                and acknowledgement.get("value") == expected
+            ):
+                return status
+            if time.monotonic() >= deadline:
+                raise AutomationProcessError(
+                    f"Timed out waiting for runtime to acknowledge {expected}"
+                )
+            time.sleep(ATTACHED_RESTART_POLL_SECONDS)
+
+    def _wait_for_attached_restart_pause(
+        self,
+        *,
+        previous_pid: int,
+        log_offset: int,
+    ) -> dict[str, Any]:
+        """Require post-request Pause acknowledgement and fresh RUNNING proof."""
+
+        deadline = time.monotonic() + ATTACHED_RESTART_TIMEOUT_SECONDS
+        last_missing: list[str] = []
+        while True:
+            status = self.status()
+            process = status.get("process_service") or {}
+            runtime = status.get("runtime") or {}
+            observation = status.get("observation") or {}
+            appended = _lines_from_offset(self.action_log, log_offset)
+            parsed = [entry for line in appended if (entry := _parse_log_line(line))]
+            pause_indices = [
+                index
+                for index, entry in enumerate(parsed)
+                if _STATE_ACK_RE.fullmatch(entry["message"])
+                and entry["message"].endswith("PAUSED via control file")
+            ]
+            pause_consumed = bool(pause_indices)
+            fresh_status = bool(
+                pause_indices
+                and any(
+                    index > pause_indices[-1] and entry["level"] == "STATUS"
+                    for index, entry in enumerate(parsed)
+                )
+            )
+            matching_owner = any(
+                instance.get("active") and instance.get("pid") == previous_pid
+                for instance in runtime.get("instances", [])
+            )
+            last_missing = []
+            if not (
+                process.get("active") and process.get("main_pid") == previous_pid
+            ):
+                last_missing.append("original MainPID")
+            if not matching_owner:
+                last_missing.append("original ADB lock")
+            if not pause_consumed:
+                last_missing.append("PAUSED control acknowledgement")
+            if not fresh_status:
+                last_missing.append("post-request status observation")
+            elif observation.get("state") != "RUNNING":
+                raise AutomationProcessError(
+                    "Attached restart paused safely but the fresh runtime "
+                    f"observation was {observation.get('state') or 'UNKNOWN'}, "
+                    "not RUNNING"
+                )
+            if not last_missing:
+                return status
+            if time.monotonic() >= deadline:
+                raise AutomationProcessError(
+                    "Attached restart remained paused but readiness verification "
+                    "timed out waiting for: " + ", ".join(last_missing)
+                )
+            time.sleep(ATTACHED_RESTART_POLL_SECONDS)
+
+    def _wait_for_replacement_runtime(
+        self,
+        *,
+        replacement_pid: int,
+        log_offset: int,
+    ) -> dict[str, Any]:
+        deadline = time.monotonic() + ATTACHED_RESTART_TIMEOUT_SECONDS
+        last_missing: list[str] = []
+        while True:
+            status = self.status()
+            process = status.get("process_service") or {}
+            runtime = status.get("runtime") or {}
+            appended = _lines_from_offset(self.action_log, log_offset)
+            parsed = [entry for line in appended if (entry := _parse_log_line(line))]
+            matching_owner = any(
+                instance.get("active") and instance.get("pid") == replacement_pid
+                for instance in runtime.get("instances", [])
+            )
+            policy_indices = [
+                index
+                for index, entry in enumerate(parsed)
+                if "[RUN_INIT] Startup gate policy=next_run" in entry["message"]
+            ]
+            pause_indices = [
+                index
+                for index, entry in enumerate(parsed)
+                if _STATE_ACK_RE.fullmatch(entry["message"])
+                and entry["message"].endswith("PAUSED via control file")
+                and policy_indices
+                and index > policy_indices[-1]
+            ]
+            policy_loaded = bool(policy_indices)
+            pause_consumed = bool(pause_indices)
+            first_status = bool(
+                pause_indices
+                and any(
+                    index > pause_indices[-1] and entry["level"] == "STATUS"
+                    for index, entry in enumerate(parsed)
+                )
+            )
+            last_missing = []
+            if not (
+                process.get("active")
+                and process.get("main_pid") == replacement_pid
+            ):
+                last_missing.append("replacement MainPID")
+            if not matching_owner:
+                last_missing.append("replacement ADB lock")
+            if not policy_loaded:
+                last_missing.append("next_run startup log")
+            if not pause_consumed:
+                last_missing.append("PAUSED control acknowledgement")
+            if not first_status:
+                last_missing.append("first status observation")
+            if not last_missing:
+                return status
+            if time.monotonic() >= deadline:
+                raise AutomationProcessError(
+                    "Replacement remained paused but readiness verification timed "
+                    "out waiting for: " + ", ".join(last_missing)
+                )
+            time.sleep(ATTACHED_RESTART_POLL_SECONDS)
 
     def battles(self, *, limit: int = 25) -> dict[str, Any]:
         """Return newest completed-battle summaries without OCR source bulk."""
@@ -908,6 +1235,26 @@ def _tail_lines(path: Path, *, max_bytes: int) -> list[str]:
     if size > max_bytes and lines:
         lines = lines[1:]
     return lines
+
+
+def _file_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
+def _lines_from_offset(path: Path, offset: int) -> list[str]:
+    """Read complete log lines appended after a captured byte offset."""
+
+    try:
+        with path.open("rb") as handle:
+            size = handle.seek(0, os.SEEK_END)
+            handle.seek(offset if 0 <= offset <= size else 0)
+            data = handle.read()
+    except OSError:
+        return []
+    return data.decode("utf-8", errors="replace").splitlines()
 
 
 def _parse_log_line(line: str) -> Optional[dict[str, str]]:

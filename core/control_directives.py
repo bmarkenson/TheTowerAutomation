@@ -67,6 +67,7 @@ class ControlDirectiveStore:
             "updated_at": data.get("updated_at"),
             "updated_by": data.get("updated_by"),
             "state_updated_at": data.get("state_updated_at"),
+            "state_request_id": data.get("state_request_id"),
             "mode_updated_at": data.get("mode_updated_at"),
             "adb_port_updated_at": data.get("adb_port_updated_at"),
             "strategy": _valid_strategy(data.get("strategy")),
@@ -112,6 +113,7 @@ class ControlDirectiveStore:
                 data["resume_at"] = deadline
             data["updated_at"] = timestamp
             data["state_updated_at"] = timestamp
+            data["state_request_id"] = uuid4().hex
             if source:
                 data["updated_by"] = source
             return data
@@ -554,6 +556,7 @@ class ControlDirectiveStore:
             timestamp = _updated_at()
             current["updated_at"] = timestamp
             current["state_updated_at"] = timestamp
+            current["state_request_id"] = uuid4().hex
             current["updated_by"] = "timed-pause-expiry"
             self._write_unlocked(current)
             return current

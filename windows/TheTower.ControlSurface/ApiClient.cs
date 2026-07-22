@@ -9,7 +9,7 @@ namespace TheTower.ControlSurface;
 
 public sealed class ControlSurfaceApi : IDisposable
 {
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(15) };
+    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(120) };
     private readonly JsonSerializerOptions _json = new()
     {
         PropertyNameCaseInsensitive = true,

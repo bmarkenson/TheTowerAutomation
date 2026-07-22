@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import stat
+import time
 
 import pytest
 
@@ -25,6 +26,7 @@ class FakeManager:
         self.adb_port = 5555
         self.strategy = "farm"
         self.startup_gate_policy = "immediate"
+        self.pid = os.getpid()
         self.calls: list[str] = []
         self.on_start = None
         self.on_stop = None
@@ -37,7 +39,7 @@ class FakeManager:
             "active": self.active,
             "active_state": "active" if self.active else "inactive",
             "sub_state": "running" if self.active else "dead",
-            "main_pid": 1234 if self.active else None,
+            "main_pid": self.pid if self.active else None,
             "adb_port": self.adb_port,
             "adb_target": f"localhost:{self.adb_port}",
             "strategy": self.strategy,
@@ -98,12 +100,20 @@ class FakeManager:
         self.startup_gate_policy = policy
         return self.status()
 
+    def persist_startup_gate_policy(self, policy):
+        self.calls.append(f"persist_startup_gate_policy:{policy}")
+        if policy not in {"immediate", "next_run"}:
+            raise AutomationProcessError("invalid startup gate policy")
+        self.startup_gate_policy = policy
+        return self.status()
+
     def start(self):
         self.calls.append("start")
         if self.on_start:
             self.on_start()
         if self.fail_start:
             raise AutomationProcessError("simulated start failure")
+        self.pid += 1
         self.active = True
         return self.status()
 
@@ -120,6 +130,29 @@ def _service(tmp_path, manager=None):
         repository_root=tmp_path,
         process_manager=manager,
     )
+
+
+def _write_running_runtime_evidence(tmp_path, *, pid: int) -> Path:
+    timestamp = datetime.now().astimezone().replace(microsecond=0)
+    log_path = tmp_path / "logs" / "actions.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text(
+        f"[STATUS {timestamp.strftime('%Y-%m-%d %H:%M:%S')}] "
+        "State=RUNNING | Wave=123 | Coins/min=1.0T\n",
+        encoding="utf-8",
+    )
+    lock_path = tmp_path / "logs" / "automation-localhost_5555.lock"
+    lock_path.write_text(
+        json.dumps(
+            {
+                "pid": pid,
+                "target": "localhost:5555",
+                "started_at": timestamp.isoformat(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    return lock_path
 
 
 def test_runtime_strategy_defaults_from_managed_environment(monkeypatch):
@@ -345,6 +378,41 @@ def test_systemd_manager_persists_startup_gate_policy_and_other_settings(tmp_pat
     assert status["startup_gate_policy_source"] == "environment-file"
 
 
+def test_systemd_manager_can_restore_next_start_policy_while_active(tmp_path):
+    environment_file = tmp_path / "automation-adb.env"
+    environment_file.write_text(
+        "THETOWER_ADB_PORT=5565\n"
+        "THETOWER_STRATEGY=tournament\n"
+        "THETOWER_STARTUP_GATES=next_run\n",
+        encoding="utf-8",
+    )
+
+    def runner(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            "LoadState=loaded\nActiveState=active\nSubState=running\n"
+            "UnitFileState=enabled\nMainPID=1234\nExecMainStatus=0\n"
+            f"EnvironmentFiles={environment_file} (ignore_errors=yes)\n",
+            "",
+        )
+
+    manager = SystemdAutomationManager(
+        runner=runner,
+        adb_environment_file=environment_file,
+    )
+
+    status = manager.persist_startup_gate_policy("immediate")
+
+    assert status["active"] is True
+    assert status["startup_gate_policy"] == "immediate"
+    assert environment_file.read_text(encoding="utf-8") == (
+        "THETOWER_ADB_PORT=5565\n"
+        "THETOWER_STRATEGY=tournament\n"
+        "THETOWER_STARTUP_GATES=immediate\n"
+    )
+
+
 def test_systemd_manager_rejects_adb_change_while_active(tmp_path):
     environment_file = tmp_path / "automation-adb.env"
 
@@ -484,6 +552,211 @@ def test_start_paused_and_complete_stop_preserve_safe_ordering(tmp_path):
     assert manager.calls == ["start", "stop"]
     assert service.control_store.read()["state"] == "STOPPED"
     assert response["process_service"]["active"] is False
+
+
+def test_attached_restart_pauses_replaces_and_restores_running_intent(tmp_path):
+    manager = FakeManager(active=True)
+    service = _service(tmp_path, manager)
+    service.control_store.set_state("RUNNING", source="test")
+    lock_path = _write_running_runtime_evidence(tmp_path, pid=manager.pid)
+    acknowledgements: list[str] = []
+    pause_checks: list[tuple[int, int]] = []
+    replacement_checks: list[tuple[int, int]] = []
+    service._wait_for_attached_restart_pause = (
+        lambda *, previous_pid, log_offset: pause_checks.append(
+            (previous_pid, log_offset)
+        )
+        or {}
+    )
+    service._wait_for_state_acknowledgement = lambda expected: (
+        acknowledgements.append(expected) or {}
+    )
+    service._wait_for_replacement_runtime = (
+        lambda *, replacement_pid, log_offset: replacement_checks.append(
+            (replacement_pid, log_offset)
+        )
+        or {}
+    )
+    manager.on_stop = lambda: (
+        service.control_store.read()["state"] == "PAUSED"
+        or pytest.fail("attached restart stopped before persisting PAUSED")
+    )
+    manager.on_start = lambda: (
+        manager.startup_gate_policy == "next_run"
+        and service.control_store.read()["state"] == "PAUSED"
+        or pytest.fail("replacement did not cross its boundary paused/attached")
+    )
+
+    with lock_path.open("r", encoding="utf-8") as lock_handle:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        response = service.apply_process_action({"action": "restart_attached"})
+
+    assert manager.calls == [
+        "stop",
+        "set_startup_gate_policy:next_run",
+        "start",
+        "persist_startup_gate_policy:immediate",
+    ]
+    assert len(pause_checks) == 1
+    assert pause_checks[0][0] == manager.pid - 1
+    assert pause_checks[0][1] > 0
+    assert acknowledgements == ["RUNNING"]
+    assert len(replacement_checks) == 1
+    assert replacement_checks[0][0] == manager.pid
+    assert replacement_checks[0][1] > 0
+    assert manager.startup_gate_policy == "immediate"
+    assert service.control_store.read()["state"] == "RUNNING"
+    assert response["request"] == {
+        "accepted": True,
+        "action": "restart_attached",
+        "disposition": "active_battle_reloaded",
+        "previous_pid": manager.pid - 1,
+        "replacement_pid": manager.pid,
+        "restored_state": "RUNNING",
+        "startup_gate_policy": "next_run",
+    }
+
+
+def test_attached_restart_failure_restores_policy_and_leaves_pause(tmp_path):
+    manager = FakeManager(active=True, fail_start=True)
+    service = _service(tmp_path, manager)
+    service.control_store.set_state("RUNNING", source="test")
+    lock_path = _write_running_runtime_evidence(tmp_path, pid=manager.pid)
+    service._wait_for_attached_restart_pause = (
+        lambda *, previous_pid, log_offset: {}
+    )
+
+    with lock_path.open("r", encoding="utf-8") as lock_handle:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(ControlSurfaceRequestError) as exc_info:
+            service.apply_process_action({"action": "restart_attached"})
+
+    assert exc_info.value.status == 503
+    assert manager.calls == [
+        "stop",
+        "set_startup_gate_policy:next_run",
+        "start",
+        "set_startup_gate_policy:immediate",
+    ]
+    assert manager.startup_gate_policy == "immediate"
+    assert service.control_store.read()["state"] == "PAUSED"
+
+
+def test_attached_restart_restores_unexpired_timed_pause(tmp_path):
+    manager = FakeManager(active=True)
+    service = _service(tmp_path, manager)
+    resume_at = time.time() + 600
+    service.control_store.set_state(
+        "PAUSED",
+        resume_at=resume_at,
+        source="test",
+    )
+    lock_path = _write_running_runtime_evidence(tmp_path, pid=manager.pid)
+    service._wait_for_attached_restart_pause = (
+        lambda *, previous_pid, log_offset: {}
+    )
+    service._wait_for_replacement_runtime = (
+        lambda *, replacement_pid, log_offset: {}
+    )
+
+    with lock_path.open("r", encoding="utf-8") as lock_handle:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        response = service.apply_process_action({"action": "restart_attached"})
+
+    control = service.control_store.read()
+    assert control["state"] == "PAUSED"
+    assert control["resume_at"] == resume_at
+    assert response["request"]["restored_state"] == "PAUSED"
+
+
+def test_attached_restart_rejects_missing_matching_runtime_owner(tmp_path):
+    manager = FakeManager(active=True)
+    service = _service(tmp_path, manager)
+    service.control_store.set_state("RUNNING", source="test")
+    _write_running_runtime_evidence(tmp_path, pid=manager.pid)
+
+    with pytest.raises(ControlSurfaceRequestError) as exc_info:
+        service.apply_process_action({"action": "restart_attached"})
+
+    assert exc_info.value.status == 409
+    assert "ADB lock owner" in str(exc_info.value)
+    assert manager.calls == []
+
+
+def test_attached_restart_readiness_verifies_fresh_owner_control_and_status(
+    tmp_path,
+):
+    manager = FakeManager(active=True)
+    service = _service(tmp_path, manager)
+    service.control_store.set_state("PAUSED", source="attached-restart")
+    lock_path = _write_running_runtime_evidence(tmp_path, pid=manager.pid)
+    timestamp = datetime.now().astimezone().replace(microsecond=0)
+    timestamp_text = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+    service.action_log.write_text(
+        f"[INFO {timestamp_text}] [CTRL] State set to PAUSED via control file\n"
+        f"[STATUS {timestamp_text}] State=RUNNING/PAUSED | "
+        "Wave=123 | Coins/min=1.0T\n",
+        encoding="utf-8",
+    )
+
+    with lock_path.open("r", encoding="utf-8") as lock_handle:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        status = service._wait_for_attached_restart_pause(
+            previous_pid=manager.pid,
+            log_offset=0,
+        )
+
+    assert status["observation"]["state"] == "RUNNING"
+    assert status["runtime"]["instances"][0]["pid"] == manager.pid
+
+
+def test_replacement_readiness_verifies_attached_policy_and_first_status(tmp_path):
+    manager = FakeManager(active=True)
+    service = _service(tmp_path, manager)
+    service.control_store.set_state("PAUSED", source="attached-restart")
+    lock_path = _write_running_runtime_evidence(tmp_path, pid=manager.pid)
+    timestamp = datetime.now().astimezone().replace(microsecond=0)
+    timestamp_text = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+    service.action_log.write_text(
+        f"[INFO {timestamp_text}] [RUN_INIT] Startup gate policy=next_run\n"
+        f"[INFO {timestamp_text}] [CTRL] State set to PAUSED via control file\n"
+        f"[STATUS {timestamp_text}] State=RUNNING/PAUSED | "
+        "Wave=123 | Coins/min=1.0T\n",
+        encoding="utf-8",
+    )
+
+    with lock_path.open("r", encoding="utf-8") as lock_handle:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        status = service._wait_for_replacement_runtime(
+            replacement_pid=manager.pid,
+            log_offset=0,
+        )
+
+    assert status["process_service"]["main_pid"] == manager.pid
+    assert status["acknowledgements"]["state"]["value"] == "PAUSED"
+
+
+def test_attached_restart_pause_rejects_fresh_nonrunning_observation(tmp_path):
+    manager = FakeManager(active=True)
+    service = _service(tmp_path, manager)
+    service.control_store.set_state("PAUSED", source="attached-restart")
+    lock_path = _write_running_runtime_evidence(tmp_path, pid=manager.pid)
+    timestamp = datetime.now().astimezone().replace(microsecond=0)
+    timestamp_text = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+    service.action_log.write_text(
+        f"[INFO {timestamp_text}] [CTRL] State set to PAUSED via control file\n"
+        f"[STATUS {timestamp_text}] State=HOME_SCREEN/PAUSED | "
+        "Wave=— | Coins/min=—\n",
+        encoding="utf-8",
+    )
+
+    with lock_path.open("r", encoding="utf-8") as lock_handle:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(AutomationProcessError, match="HOME_SCREEN"):
+            service._wait_for_attached_restart_pause(
+                previous_pid=manager.pid,
+                log_offset=0,
+            )
 
 
 def test_start_failure_falls_back_to_stopped_intent(tmp_path):
