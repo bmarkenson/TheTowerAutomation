@@ -6,7 +6,7 @@ import json
 from typing import Any, Callable, Mapping, Sequence
 
 
-VALID_GATE_DECISION_ACTIONS = frozenset({"retry", "waive"})
+VALID_GATE_DECISION_ACTIONS = frozenset({"pause", "retry", "waive"})
 STARTUP_GATE_CHECK_LABELS = {
     "cards_deck": "Cards deck",
     "workshop_preset": "Workshop preset",
@@ -84,6 +84,8 @@ def startup_gate_context_for_strategy(strategy_name: str) -> dict[str, Any]:
 def build_gate_decision_options(
     check_id: str,
     configured_fallbacks: Sequence[Mapping[str, Any]] = (),
+    *,
+    advisory: bool = False,
 ) -> list[dict[str, str]]:
     """Return safe operator choices for one failed requirement."""
 
@@ -116,6 +118,37 @@ def build_gate_decision_options(
             option["value"] = value
         options.append(option)
         seen.add(option_id)
+
+    if advisory:
+        return [
+            {
+                "id": "pause_for_changes",
+                "label": "Pause for manual changes",
+                "description": (
+                    "Pause automation without ending the Tournament; resume "
+                    "after changing the setting to review the warning again."
+                ),
+                "action": "pause",
+                "kind": "standard",
+            },
+            {
+                "id": "retry",
+                "label": "Retry the read-only check",
+                "description": "Re-run the observer check with fresh evidence.",
+                "action": "retry",
+                "kind": "standard",
+            },
+            {
+                "id": "continue_observing",
+                "label": f"Continue despite {normalized_check}",
+                "description": (
+                    "Acknowledge only this mismatch; Tournament result capture "
+                    "continues."
+                ),
+                "action": "waive",
+                "kind": "standard",
+            },
+        ]
 
     defaults = (
         {

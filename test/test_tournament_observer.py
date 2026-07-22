@@ -6,6 +6,7 @@ import numpy as np
 import yaml
 
 from automation.missions.base import MissionContext
+from automation.missions.manager import MissionManager
 from automation.strategies import get_strategy
 from core.action_executor import execute_actions
 from core.app import App
@@ -13,6 +14,7 @@ from core.gc_preflight_navigation import (
     GcLivePreflightResult,
     GcPreflightNavigationStatus,
 )
+from core.gate_decisions import build_gate_decision_options
 from core.run_state import AUTOMATION, ExecMode
 from core.tournament_preflight import (
     validate_tournament_session_preflight_screens,
@@ -44,6 +46,9 @@ def test_tournament_strategy_is_a_passive_observer():
         "handlers": ["ad_gem", "game_over"],
         "auto_return": False,
         "game_over_mode": "wait",
+        "home_preflight": True,
+        "session_preflight_on_attach": True,
+        "preflight_mismatch": "notify",
     }
     assert strategy.run_configuration()["profile"] == "tournament"
     assert len(strategy.rules) == 1
@@ -51,6 +56,8 @@ def test_tournament_strategy_is_a_passive_observer():
     assert action["type"] == "session_preflight"
     assert action["validator"] == "tournament"
     assert action["allow_repair"] is False
+    assert action["mismatch_policy"] == "notify"
+    assert strategy.rules[0]["run_when_attached"] is True
     assert strategy._session_preflight_assertions == [
         "gc_session_preflight_attempted"
     ]
@@ -86,6 +93,104 @@ def test_tournament_mismatch_is_recorded_without_requesting_repair():
     assert not variables["gc_session_preflight_completed"]
     assert variables["gc_session_preflight_blocked"]
     assert not variables["gc_session_preflight_repair_required"]
+    assert variables["gc_session_preflight_advisory"]
+
+
+def test_tournament_attachment_runs_read_only_preflight_without_run_boundary():
+    strategy = get_strategy("tournament")
+    assert strategy is not None
+    manager = MissionManager(
+        None,
+        strategy,
+        defer_startup_gates_until_next_run=True,
+    )
+    manager.start()
+
+    manager.maybe_run_start({"state": "RUNNING"})
+    actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
+
+    assert manager.session_preflight_pending()
+    assert len(actions) == 1
+    assert actions[0]["type"] == "session_preflight"
+    assert actions[0]["validator"] == "tournament"
+
+
+def test_tournament_mismatch_publishes_nonblocking_operator_warning():
+    strategy = get_strategy("tournament")
+    assert strategy is not None
+    manager = MagicMock()
+    manager.strategy = strategy
+    manager.session_preflight_failure_checks.return_value = ["ultimate_weapons"]
+    manager.gate_fallbacks.return_value = []
+    manager.ctx = MissionContext(
+        data={
+            "mission_vars": {
+                "gc_session_preflight_last_reason": "configuration mismatch"
+            }
+        }
+    )
+    supervisor = MagicMock()
+    supervisor.gate_decision = None
+    options = build_gate_decision_options("ultimate_weapons", advisory=True)
+    supervisor.publish_gate_decision.return_value = {
+        "request_id": "tournament-warning-1",
+        "status": "pending",
+        "strategy": "tournament",
+        "phase": "session_preflight",
+        "check_id": "ultimate_weapons",
+        "blocking": False,
+        "options": options,
+    }
+    app = App.__new__(App)
+    app._mission_mgr = manager
+    app._supervisor = supervisor
+    app._gate_decision_prompt = lambda _decision: None
+    app._gate_prompted_request_id = None
+
+    app._handle_session_preflight_advisory()
+
+    call = supervisor.publish_gate_decision.call_args
+    assert call.kwargs["blocking"] is False
+    assert [option["id"] for option in call.kwargs["options"]] == [
+        "pause_for_changes",
+        "retry",
+        "continue_observing",
+    ]
+    assert "result capture remains active" in call.kwargs["reason"]
+    supervisor.persist_state.assert_not_called()
+
+
+def test_tournament_warning_pause_is_persisted_without_ending_run():
+    strategy = get_strategy("tournament")
+    assert strategy is not None
+    options = build_gate_decision_options("ultimate_weapons", advisory=True)
+    selected = next(option for option in options if option["action"] == "pause")
+    supervisor = MagicMock()
+    supervisor.gate_decision = {
+        "request_id": "tournament-warning-2",
+        "status": "resolved",
+        "strategy": "tournament",
+        "phase": "session_preflight",
+        "check_id": "ultimate_weapons",
+        "blocking": False,
+        "decision_id": selected["id"],
+        "selected_option": selected,
+        "options": options,
+    }
+    supervisor.persist_state.return_value = True
+    app = App.__new__(App)
+    app._mission_mgr = MagicMock(strategy=strategy)
+    app._supervisor = supervisor
+
+    app._handle_session_preflight_advisory()
+
+    supervisor.persist_state.assert_called_once_with("PAUSED")
+    supervisor.consume_gate_decision.assert_called_once_with(
+        "tournament-warning-2",
+        completion_reason="paused for manual ultimate_weapons changes",
+    )
+    app._mission_mgr.retry_session_preflight.assert_not_called()
+    app._mission_mgr.waive_session_preflight_check.assert_not_called()
 
 
 def test_tournament_policy_suppresses_unrelated_runtime_handlers():
@@ -132,6 +237,7 @@ def test_tournament_main_loop_keeps_status_and_recovery_read_only():
     manager.ctx = MissionContext(data={"mission_vars": {}})
     manager.run_initialization_pending.return_value = False
     manager.session_preflight_pending.return_value = False
+    manager.session_preflight_advisory_pending.return_value = False
 
     app = App.__new__(App)
     app._config = SimpleNamespace(wait_on_start=False)

@@ -14,6 +14,7 @@ def analyze_battle_type(
     run_configuration: Optional[Mapping[str, Any]],
     terminal_state: Optional[str] = None,
     record_id: Optional[str] = None,
+    observed_tier: object = None,
 ) -> dict[str, Any]:
     """Classify a completed run without treating shared settings as identity.
 
@@ -29,6 +30,7 @@ def analyze_battle_type(
     strategy = str(strategy_name or "").strip().lower()
     terminal = str(terminal_state or "").strip().upper()
     identifier = str(record_id or "")
+    tier = _normalize_observed_tier(observed_tier)
 
     signals: list[str] = []
     if terminal:
@@ -40,6 +42,8 @@ def analyze_battle_type(
         # Battle records are produced only by the guarded GAME_OVER handler.
         terminal = "GAME_OVER"
         signals.append("record_identity:game_over")
+    if tier is not None:
+        signals.append(f"terminal_observation:tier_{tier}")
 
     farm_identity = profile == "farm" or family == "farm" or "farm" in strategy
     tournament_identity = (
@@ -71,6 +75,13 @@ def analyze_battle_type(
         kind = "farm"
         confidence = "medium"
         reason = "The strategy/profile identifies a Farm run."
+    elif terminal == "GAME_OVER" and tier is not None:
+        kind = "unknown"
+        confidence = "low"
+        reason = (
+            f"The standard Game Over stats identify Tier {tier}, but Tier alone "
+            "cannot distinguish a Farm run from a manual or Milestone run."
+        )
     else:
         kind = "unknown"
         confidence = "low"
@@ -85,6 +96,7 @@ def analyze_battle_type(
         "confidence": confidence,
         "reason": reason,
         "signals": signals,
+        "observed_tier": tier,
     }
 
 
@@ -93,10 +105,18 @@ def classification_for_record(record: Mapping[str, Any]) -> dict[str, Any]:
 
     stored_type = str(record.get("battle_type") or "").strip().lower()
     stored_analysis = record.get("battle_type_analysis")
+    observed_tier = observed_tier_for_record(record)
     if stored_type in KNOWN_BATTLE_TYPES and isinstance(stored_analysis, Mapping):
         result = dict(stored_analysis)
         result["type"] = stored_type
         result.setdefault("label", stored_type.title())
+        result.setdefault("observed_tier", observed_tier)
+        if observed_tier is not None:
+            signals = list(result.get("signals") or ())
+            signal = f"terminal_observation:tier_{observed_tier}"
+            if signal not in signals:
+                signals.append(signal)
+            result["signals"] = signals
         return result
 
     record_id = record.get("battle_id") or record.get("tournament_id")
@@ -108,11 +128,71 @@ def classification_for_record(record: Mapping[str, Any]) -> dict[str, Any]:
         run_configuration=configuration if isinstance(configuration, Mapping) else {},
         terminal_state=terminal_state,
         record_id=str(record_id or ""),
+        observed_tier=observed_tier,
     )
+
+
+def observed_tier_for_record(record: Mapping[str, Any]) -> int | None:
+    """Return Tier observed in terminal evidence, never configured intent."""
+
+    runtime = record.get("runtime")
+    if isinstance(runtime, Mapping):
+        tier = _normalize_observed_tier(runtime.get("observed_tier"))
+        if tier is not None:
+            return tier
+
+    game_stats = record.get("game_stats")
+    if isinstance(game_stats, Mapping):
+        fields = game_stats.get("fields")
+        if isinstance(fields, Mapping):
+            field = fields.get("tier")
+            if isinstance(field, Mapping):
+                tier = _normalize_observed_tier(
+                    field.get("value", field.get("raw"))
+                )
+                if tier is not None:
+                    return tier
+
+    for source_key in ("more_stats", "detailed_stats"):
+        source = record.get(source_key)
+        if not isinstance(source, Mapping):
+            continue
+        for section in source.get("sections") or ():
+            if (
+                not isinstance(section, Mapping)
+                or section.get("key") != "battle_report"
+            ):
+                continue
+            for row in section.get("rows") or ():
+                if not isinstance(row, Mapping) or row.get("key") != "tier":
+                    continue
+                tier = _normalize_observed_tier(
+                    row.get("value", row.get("value_raw"))
+                )
+                if tier is not None:
+                    return tier
+    return None
+
+
+def _normalize_observed_tier(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    text = str(value).strip()
+    if not text:
+        return None
+    normalized = text.replace(",", "").removesuffix("+")
+    try:
+        parsed = int(normalized)
+    except ValueError:
+        return None
+    return parsed if parsed > 0 else None
 
 
 __all__ = [
     "KNOWN_BATTLE_TYPES",
     "analyze_battle_type",
     "classification_for_record",
+    "observed_tier_for_record",
 ]

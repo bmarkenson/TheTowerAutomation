@@ -15,7 +15,8 @@
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
-    <TextBlock Text="A startup requirement could not be satisfied"
+    <TextBlock x:Name="HeadingText"
+               Text="A startup requirement could not be satisfied"
                FontSize="20" FontWeight="SemiBold" Margin="0,0,0,12" />
     <Border Grid.Row="1" Background="#111827" BorderBrush="#263349"
             BorderThickness="1" CornerRadius="8" Padding="12">
@@ -46,7 +47,8 @@
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
-      <TextBlock Text="Closing leaves automation blocked at this gate."
+      <TextBlock x:Name="DispositionText"
+                 Text="Closing leaves automation blocked at this gate."
                  Foreground="#93A4BB" FontSize="11" VerticalAlignment="Center" />
       <Button Grid.Column="1" Content="Decide later" Click="Later_Click" />
       <Button Grid.Column="2" Content="Apply choice" Click="Apply_Click"

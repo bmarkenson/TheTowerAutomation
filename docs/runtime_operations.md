@@ -214,11 +214,22 @@ startup gates. Explicit manual `main.py --adb-port PORT --strategy NAME
 When replacing automation during a battle, select **Attach to current battle;
 run gates next battle** before starting. The new process observes and controls
 that existing run normally but suppresses only rules tagged as run
-initialization or session preflight. The suppression survives transient
-Unknown screens and Home `RESUME_BATTLE`. It ends only at Game Over, Tournament
+initialization or session preflight. The Tournament observer is the narrow
+exception: it runs its declared read-only preflight on attachment so a bad
+setting can be reported without acquiring repair authority. The suppression
+survives transient Unknown screens and Home `RESUME_BATTLE`. It ends only at
+Game Over, Tournament
 Results, or verified Home `NEW_BATTLE`; the following battle then performs the
 real gates. Do not select this for a process that is expected to configure a
 newly started battle immediately.
+
+If attached Tournament preflight finds an authoritative mismatch, the control
+surface opens a non-blocking warning. **Pause for manual changes** persists
+Pause without ending the run; **Retry** captures fresh read-only evidence; and
+**Continue observing** waives only the displayed mismatch for that run. Closing
+the warning leaves it pending while natural Tournament Results/Game Over
+capture remains active. If Pause is selected, terminal handling waits until the
+operator resumes, as it does for every paused handler action.
 
 The ADB port can also move without replacing a live automation process or
 rerunning its in-memory startup/session gates:
@@ -347,6 +358,9 @@ the API, authority boundaries, and planned capabilities.
 - Persistent control: `logs/automation_ctl.json`
 - Per-battle records: `logs/battles/Battle*.json` and `Battle*.md`
 - Tournament records: `logs/tournaments/Tournament*.json` and `Tournament*.md`
+- Terminal Stats Tier is retained as observed evidence independently of the
+  configured strategy. It can identify the Tier of an unconfigured Game Over,
+  but it cannot by itself distinguish Farm from a manual or Milestone run.
 - During-run Coins/min progression: embedded numeric samples in the applicable
   completed record (not a separate CSV or screenshot series)
 - Failure/OCR evidence: `screenshots/matches/`

@@ -207,7 +207,14 @@ function renderGateDecision(decision) {
   }
   if (decision.request_id === state.lastGatePrompted) return;
   state.lastGatePrompted = decision.request_id;
-  byId("gateTitle").textContent = `${humanize(decision.check_id)} needs direction`;
+  const advisory = decision.blocking === false;
+  byId("gateEyebrow").textContent = advisory ? "Preflight warning" : "Startup gate";
+  byId("gateTitle").textContent = advisory
+    ? `${humanize(decision.check_id)} warning`
+    : `${humanize(decision.check_id)} needs direction`;
+  byId("gateDisposition").textContent = advisory
+    ? "Closing leaves this warning pending; Tournament observation continues."
+    : "Closing this dialog leaves automation blocked at this check.";
   byId("gateReason").textContent = decision.reason || "The requirement failed.";
   byId("gateExpected").textContent = decision.expected
     ? `Required: ${decision.expected}`
@@ -623,7 +630,7 @@ byId("gateForm").addEventListener("submit", (event) => {
   dialog.close();
   sendControl(
     { action: "resolve_gate", request_id: requestId, decision_id: selected.value },
-    `Startup gate resolved with ${humanize(selected.value)}`,
+    `Preflight decision resolved with ${humanize(selected.value)}`,
   );
 });
 byId("configureRunForm").addEventListener("submit", (event) => {

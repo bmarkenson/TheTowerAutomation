@@ -160,6 +160,8 @@ def validate_tournament_session_preflight_screens(
     ultimate_observations: Mapping[str, Mapping[str, Any]],
     detector: Detector = detect_state_and_overlays,
     waivers: Mapping[str, Any] | None = None,
+    configuration_boundary_evidence: Mapping[str, Any] | None = None,
+    module_boundary_evidence: Mapping[str, Any] | None = None,
 ) -> GcSessionPreflightEvidence:
     """Validate Tournament presets, loadouts, and controls without Perks."""
 
@@ -180,6 +182,8 @@ def validate_tournament_session_preflight_screens(
         section_specs=TOURNAMENT_SECTION_SPECS,
         auto_pick_perks_required=False,
         waivers=waivers,
+        configuration_boundary_evidence=configuration_boundary_evidence,
+        module_boundary_evidence=module_boundary_evidence,
     )
 
 

@@ -209,6 +209,7 @@ class ControlDirectiveStore:
         reason: str,
         expected: object = None,
         options: Sequence[Mapping[str, Any]],
+        blocking: bool = True,
     ) -> dict[str, Any]:
         """Publish one idempotent operator decision request from the runtime."""
 
@@ -232,6 +233,7 @@ class ControlDirectiveStore:
                 and existing.get("phase") == normalized_phase
                 and existing.get("check_id") == normalized_check
                 and existing.get("reason") == normalized_reason
+                and bool(existing.get("blocking", True)) == bool(blocking)
             ):
                 return existing
             timestamp = _updated_at()
@@ -242,6 +244,7 @@ class ControlDirectiveStore:
                 "phase": normalized_phase,
                 "check_id": normalized_check,
                 "reason": normalized_reason,
+                "blocking": bool(blocking),
                 "options": normalized_options,
                 "created_at": timestamp,
                 "updated_at": timestamp,
@@ -702,6 +705,7 @@ def _valid_gate_decision(value: object) -> Optional[dict[str, Any]]:
         phase=phase,
         check_id=check_id,
         reason=_bounded_text(value.get("reason"), 1000),
+        blocking=value.get("blocking") is not False,
         options=options,
     )
     if status == "resolved":

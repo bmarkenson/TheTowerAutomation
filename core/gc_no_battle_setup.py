@@ -18,7 +18,7 @@ from core.gc_module_loadout import (
     ensure_gc_module_loadout,
     normalize_gc_module_requirements,
 )
-from core.gc_preflight import validate_gc_preflight_screens
+from core.gc_preflight import GC_SECTION_SPECS, validate_gc_preflight_screens
 from core.input import safe_tap, swipe_now, tap_if_visible
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
@@ -27,11 +27,15 @@ from core.target_priority import (
     observe_target_priority_order,
 )
 from core.target_priority_config import validate_target_priority_order
+from core.tournament_preflight import TOURNAMENT_SECTION_SPECS
 from core.upgrade_navigation import swipe_upgrade_menu
 from core.workshop_preset import (
+    BOTS_AMPLIFY_PRESET_SLOT,
     BOTS_FARM_PRESET_SLOT,
     CARDS_FARM_PRESET_SLOT,
+    CARDS_TOURNAMENT_PRESET_SLOT,
     FARM_PRESET_SLOT,
+    TOURNEY_PRESET_SLOT,
     measure_preset_slot_selection,
 )
 from utils.logger import log
@@ -40,6 +44,52 @@ from utils.ocr_utils import ocr_text_and_conf
 
 NOT_ENOUGH_MEDALS_REGION = (100, 650, 880, 550)
 NOT_ENOUGH_MEDALS_OK = (540, 1100)
+
+
+@dataclass(frozen=True)
+class _PresetSpec:
+    secondary: str
+    label: str
+    region: tuple[int, int, int, int]
+
+
+_PRESET_SPECS = {
+    ("cards_deck", "Farm"): _PresetSpec(
+        "CARDS_FARM_SLOT",
+        "indicators.cards:farm_slot",
+        CARDS_FARM_PRESET_SLOT,
+    ),
+    ("cards_deck", "Tournament"): _PresetSpec(
+        "CARDS_TOURNAMENT_SLOT",
+        "indicators.cards:tournament_slot",
+        CARDS_TOURNAMENT_PRESET_SLOT,
+    ),
+    ("workshop_preset", "Farm"): _PresetSpec(
+        "WORKSHOP_FARM_SLOT",
+        "indicators.workshop:farm_slot",
+        FARM_PRESET_SLOT,
+    ),
+    ("workshop_preset", "Tourney"): _PresetSpec(
+        "WORKSHOP_TOURNEY_SLOT",
+        "indicators.workshop:tourney_slot",
+        TOURNEY_PRESET_SLOT,
+    ),
+    ("bots_preset", "Farm"): _PresetSpec(
+        "BOTS_FARM_SLOT",
+        "indicators.bots:farm_slot",
+        BOTS_FARM_PRESET_SLOT,
+    ),
+    ("bots_preset", "Amplify"): _PresetSpec(
+        "BOTS_AMPLIFY_SLOT",
+        "indicators.bots:amplify_slot",
+        BOTS_AMPLIFY_PRESET_SLOT,
+    ),
+}
+
+_SUPPORTED_HOME_CONFIGURATIONS = {
+    ("Farm", "Farm", "Farm"): GC_SECTION_SPECS,
+    ("Tournament", "Tourney", "Amplify"): TOURNAMENT_SECTION_SPECS,
+}
 
 
 class GcNoBattleSetupStatus(str, Enum):
@@ -85,7 +135,7 @@ def run_gc_no_battle_setup(
     validate_configuration_fn: Callable[..., Any] = validate_gc_preflight_screens,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> GcNoBattleSetupResult:
-    """Correct supported persistent GC settings before a new battle starts."""
+    """Correct supported persistent profile settings before a battle starts."""
 
     unsupported = _unsupported_requirement(requirements)
     if unsupported:
@@ -105,6 +155,7 @@ def run_gc_no_battle_setup(
         "waivers": active_waivers,
     }
     current = screenshot if screenshot is not None else capture_fn()
+    section_specs = _configuration_section_specs(requirements)
     current_check = "home_boundary"
     try:
         _require_no_battle_home(current, detector, detect_home_control_fn)
@@ -127,19 +178,20 @@ def run_gc_no_battle_setup(
                 active_waivers[current_check],
             )
         else:
+            preset = _preset_spec(current_check, requirements)
             cards = _ensure_preset(
                 cards,
                 state="CARDS",
-                slot_secondary="CARDS_FARM_SLOT",
-                slot_label="indicators.cards:farm_slot",
-                slot_region=CARDS_FARM_PRESET_SLOT,
+                slot_secondary=preset.secondary,
+                slot_label=preset.label,
+                slot_region=preset.region,
                 capture_fn=capture_fn,
                 detector=detector,
                 tap_visible_fn=tap_visible_fn,
                 measure_selection_fn=measure_selection_fn,
                 sleep_fn=sleep_fn,
             )
-            evidence[current_check] = "Farm"
+            evidence[current_check] = requirements[current_check]
         current = _return_home(
             cards,
             capture_fn,
@@ -168,19 +220,20 @@ def run_gc_no_battle_setup(
                 active_waivers[current_check],
             )
         else:
+            preset = _preset_spec(current_check, requirements)
             workshop = _ensure_preset(
                 workshop,
                 state="WORKSHOP",
-                slot_secondary="WORKSHOP_FARM_SLOT",
-                slot_label="indicators.workshop:farm_slot",
-                slot_region=FARM_PRESET_SLOT,
+                slot_secondary=preset.secondary,
+                slot_label=preset.label,
+                slot_region=preset.region,
                 capture_fn=capture_fn,
                 detector=detector,
                 tap_visible_fn=tap_visible_fn,
                 measure_selection_fn=measure_selection_fn,
                 sleep_fn=sleep_fn,
             )
-            evidence[current_check] = "Farm"
+            evidence[current_check] = requirements[current_check]
         current_check = "free_upgrade_locks"
         free_upgrade_lock_requirements = requirements.get("free_upgrade_locks")
         if current_check in active_waivers:
@@ -278,19 +331,20 @@ def run_gc_no_battle_setup(
                 active_waivers[current_check],
             )
         else:
+            preset = _preset_spec(current_check, requirements)
             bots = _ensure_preset(
                 bots,
                 state="EVENT",
-                slot_secondary="BOTS_FARM_SLOT",
-                slot_label="indicators.bots:farm_slot",
-                slot_region=BOTS_FARM_PRESET_SLOT,
+                slot_secondary=preset.secondary,
+                slot_label=preset.label,
+                slot_region=preset.region,
                 capture_fn=capture_fn,
                 detector=detector,
                 tap_visible_fn=tap_visible_fn,
                 measure_selection_fn=measure_selection_fn,
                 sleep_fn=sleep_fn,
             )
-            evidence[current_check] = "Farm"
+            evidence[current_check] = requirements[current_check]
         current = _return_home(
             bots,
             capture_fn,
@@ -332,12 +386,14 @@ def run_gc_no_battle_setup(
         else:
             guardians = _ensure_guardian_loadout(
                 guardians,
+                requirements[current_check],
                 capture_fn,
                 detector,
+                safe_tap_fn,
                 tap_visible_fn,
                 sleep_fn,
             )
-            evidence[current_check] = ["Fetch", "Summon", "Scout"]
+            evidence[current_check] = list(requirements[current_check])
         current = _return_home(
             guardians,
             capture_fn,
@@ -507,6 +563,7 @@ def run_gc_no_battle_setup(
             bots_screen=bots,
             guardians_screen=guardians,
             detector=detector,
+            section_specs=section_specs,
         )
         evidence["configuration"] = configuration.as_dict()
     except Exception as exc:
@@ -527,7 +584,7 @@ def run_gc_no_battle_setup(
         )
 
     log(
-        "[GC_NO_BATTLE] Farm Home settings verified/corrected before Battle",
+        "[GC_NO_BATTLE] Profile Home settings verified/corrected before Battle",
         "INFO",
     )
     return GcNoBattleSetupResult(
@@ -552,16 +609,21 @@ def _waived_evidence(
 
 
 def _unsupported_requirement(requirements: Mapping[str, Any]) -> str | None:
-    fixed = {
-        "cards_deck": "Farm",
-        "workshop_preset": "Farm",
-        "bots_preset": "Farm",
-    }
-    for key, expected in fixed.items():
-        if str(requirements.get(key) or "").strip() != expected:
-            return f"unsupported {key}={requirements.get(key)!r}"
+    configuration = _configuration_key(requirements)
+    if configuration not in _SUPPORTED_HOME_CONFIGURATIONS:
+        return (
+            "unsupported Home preset combination "
+            f"cards_deck={configuration[0]!r}, "
+            f"workshop_preset={configuration[1]!r}, "
+            f"bots_preset={configuration[2]!r}"
+        )
     chips = {str(chip).strip() for chip in requirements.get("guardian_chips") or []}
-    if chips != {"Fetch", "Summon", "Scout"}:
+    supported_chips = (
+        {"Fetch", "Summon", "Scout"}
+        if configuration == ("Farm", "Farm", "Farm")
+        else {"Attack", "Ally", "Scout"}
+    )
+    if chips != supported_chips:
         return f"unsupported guardian_chips={sorted(chips)!r}"
     if "free_upgrade_locks" in requirements:
         try:
@@ -588,6 +650,27 @@ def _unsupported_requirement(requirements: Mapping[str, Any]) -> str | None:
     except ValueError as exc:
         return str(exc)
     return None
+
+
+def _configuration_key(requirements: Mapping[str, Any]) -> tuple[str, str, str]:
+    return tuple(
+        str(requirements.get(key) or "").strip()
+        for key in ("cards_deck", "workshop_preset", "bots_preset")
+    )
+
+
+def _configuration_section_specs(requirements: Mapping[str, Any]):
+    return _SUPPORTED_HOME_CONFIGURATIONS[_configuration_key(requirements)]
+
+
+def _preset_spec(check_id: str, requirements: Mapping[str, Any]) -> _PresetSpec:
+    key = (check_id, str(requirements.get(check_id) or "").strip())
+    try:
+        return _PRESET_SPECS[key]
+    except KeyError as exc:
+        raise _SetupFailure(
+            f"unsupported {check_id}={requirements.get(check_id)!r}"
+        ) from exc
 
 
 def _module_policy(requirements: Mapping[str, Any]) -> str:
@@ -769,38 +852,82 @@ def _ensure_event_bots_top(
 
 def _ensure_guardian_loadout(
     frame,
+    required,
     capture_fn,
     detector,
+    safe_tap_fn,
     tap_visible_fn,
     sleep_fn,
 ):
+    required_chips = {str(chip).strip() for chip in required or ()}
+    if required_chips == {"Fetch", "Summon", "Scout"}:
+        replacements = (
+            (
+                "GUARDIAN_FETCH_EQUIPPED",
+                "GUARDIAN_ATTACK_EQUIPPED",
+                "indicators.guardian:attack_equipped",
+                "buttons.guardian:fetch_inventory",
+                True,
+            ),
+            (
+                "GUARDIAN_SUMMON_EQUIPPED",
+                "GUARDIAN_ALLY_EQUIPPED",
+                "indicators.guardian:ally_equipped",
+                "buttons.guardian:summon_inventory",
+                True,
+            ),
+        )
+    elif required_chips == {"Attack", "Ally", "Scout"}:
+        replacements = (
+            (
+                "GUARDIAN_ATTACK_EQUIPPED",
+                "GUARDIAN_FETCH_EQUIPPED",
+                "indicators.guardian:fetch_equipped",
+                "buttons.guardian:attack_inventory",
+                False,
+            ),
+            (
+                "GUARDIAN_ALLY_EQUIPPED",
+                "GUARDIAN_SUMMON_EQUIPPED",
+                "indicators.guardian:summon_equipped",
+                "buttons.guardian:ally_inventory",
+                False,
+            ),
+        )
+    else:
+        raise _SetupFailure(
+            "unsupported Guardian loadout: " + ", ".join(sorted(required_chips))
+        )
+
     desired = {
-        "GUARDIAN_FETCH_EQUIPPED",
-        "GUARDIAN_SUMMON_EQUIPPED",
-        "GUARDIAN_SCOUT_EQUIPPED",
+        f"GUARDIAN_{chip.upper()}_EQUIPPED" for chip in required_chips
     }
     current = frame
-    detected = set(detector(current).get("secondary_states") or ())
-    if "GUARDIAN_FETCH_EQUIPPED" not in detected:
+    for (
+        expected_secondary,
+        replacement_source_secondary,
+        wrong_label,
+        inventory_label,
+        inventory_visible,
+    ) in replacements:
+        detected = set(detector(current).get("secondary_states") or ())
+        if expected_secondary in detected:
+            continue
+        if replacement_source_secondary not in detected:
+            raise _SetupFailure(
+                "unsupported Guardian mismatch: expected "
+                f"{expected_secondary}, found {sorted(detected)}"
+            )
         current = _replace_guardian_chip(
             current,
-            wrong_label="indicators.guardian:attack_equipped",
-            inventory_label="buttons.guardian:fetch_inventory",
-            expected_secondary="GUARDIAN_FETCH_EQUIPPED",
+            wrong_label=wrong_label,
+            wrong_secondary=replacement_source_secondary,
+            inventory_label=inventory_label,
+            inventory_visible=inventory_visible,
+            expected_secondary=expected_secondary,
             capture_fn=capture_fn,
             detector=detector,
-            tap_visible_fn=tap_visible_fn,
-            sleep_fn=sleep_fn,
-        )
-    detected = set(detector(current).get("secondary_states") or ())
-    if "GUARDIAN_SUMMON_EQUIPPED" not in detected:
-        current = _replace_guardian_chip(
-            current,
-            wrong_label="indicators.guardian:ally_equipped",
-            inventory_label="buttons.guardian:summon_inventory",
-            expected_secondary="GUARDIAN_SUMMON_EQUIPPED",
-            capture_fn=capture_fn,
-            detector=detector,
+            safe_tap_fn=safe_tap_fn,
             tap_visible_fn=tap_visible_fn,
             sleep_fn=sleep_fn,
         )
@@ -817,23 +944,33 @@ def _replace_guardian_chip(
     frame,
     *,
     wrong_label,
+    wrong_secondary,
     inventory_label,
+    inventory_visible,
     expected_secondary,
     capture_fn,
     detector,
+    safe_tap_fn,
     tap_visible_fn,
     sleep_fn,
 ):
     if not tap_visible_fn(wrong_label, screenshot=frame, retries=1):
         raise _SetupFailure(f"known Guardian replacement source missing: {wrong_label}")
-    emptied = _wait_for(
-        state="GUILD",
-        secondary="GUILD_GUARDIAN_SCREEN",
+    emptied = _wait_for_guardian_inventory(
+        removed_secondary=wrong_secondary,
         capture_fn=capture_fn,
         detector=detector,
         sleep_fn=sleep_fn,
     )
-    if not tap_visible_fn(inventory_label, screenshot=emptied, retries=1):
+    if inventory_visible:
+        selected = tap_visible_fn(inventory_label, screenshot=emptied, retries=1)
+    else:
+        selected = safe_tap_fn(
+            inventory_label,
+            require_visible=False,
+            dispatch="now",
+        )
+    if not selected:
         raise _SetupFailure(f"Guardian inventory target missing: {inventory_label}")
     return _wait_for(
         state="GUILD",
@@ -841,6 +978,31 @@ def _replace_guardian_chip(
         capture_fn=capture_fn,
         detector=detector,
         sleep_fn=sleep_fn,
+    )
+
+
+def _wait_for_guardian_inventory(
+    *,
+    removed_secondary,
+    capture_fn,
+    detector,
+    sleep_fn,
+    timeout: float = 8.0,
+):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        frame = capture_fn()
+        detection = detector(frame)
+        secondary = set(detection.get("secondary_states") or ())
+        if (
+            detection.get("state") == "GUILD"
+            and "GUILD_GUARDIAN_SCREEN" in secondary
+            and removed_secondary not in secondary
+        ):
+            return frame
+        sleep_fn(0.25)
+    raise _SetupFailure(
+        f"Guardian source remained equipped: {removed_secondary}"
     )
 
 

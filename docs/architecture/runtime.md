@@ -67,9 +67,17 @@ Guardians, Tournament/Milestone modules, all nine Ultimate Weapons, and
 Spotlight missiles. Tournament battles have no Perks, so Perks are not part of
 this contract.
 
-The read-only route inspects Cards, Ultimate Weapons, Modules, Bots, and
-Guardians from the active battle. Workshop is the only check that takes the
-resumable Exit Battle → Go Home path. The route never selects or equips a
+At verified Home `NEW_BATTLE`, the profile's no-battle route selects Tournament
+Cards, Tourney Workshop, Amplify Bots, Attack/Ally/Scout Guardians, and the
+Tournament module loadout. The evidence is retained for session preflight, and
+the runtime deliberately leaves Tournament entry to the operator instead of
+pressing the normal Battle control. Session preflight then checks only Ultimate
+Weapons from the active Tournament.
+
+Without Home boundary evidence, including attachment to an already-running
+Tournament, the guarded read-only compatibility route inspects Cards, Ultimate
+Weapons, Modules, Bots, and Guardians in battle. Workshop is the only check
+that takes resumable Exit Battle → Go Home. The route never selects or equips a
 setting and must verify that Resume returns to the same Tournament.
 
 After one conclusive validation attempt, the Tournament runtime policy grants
@@ -77,8 +85,11 @@ action authority only to ad-gem collection and terminal-result handling. An ad
 gem starts the same bounded floating-gem sweep used by normal battles; the
 Tournament policy does not run an independent or continuous floating-gem
 handler. A configuration mismatch is retained as session evidence but cannot
-request repair or block result capture. The profile does not buy upgrades,
-Surrender, auto-return Home, or start another battle.
+request repair or block result capture. Attached-run mismatches publish a
+non-blocking operator decision: pause for manual changes, retry with fresh
+evidence, or continue observation with a run-scoped waiver for the displayed
+check. The profile does not buy upgrades, Surrender, auto-return Home, enter a
+Tournament, or start a normal battle.
 
 In-battle side-menu destinations and Event/Guild tabs require visible template
 matches and tap the matched bounding box. Their static coordinates are not
@@ -100,7 +111,10 @@ Completed-run classification preserves that terminal distinction. A detected
 `TOURNAMENT_RESULTS` record is Tournament. A standard `GAME_OVER` record under
 the shared Tournament/Milestone profile is Milestone, while Farm
 strategy/profile identity marks Farm. Shared Tournament settings by themselves
-remain insufficient evidence to distinguish Tournament from Milestone.
+remain insufficient evidence to distinguish Tournament from Milestone. The Tier
+copied or OCRed from terminal stats is stored as observed evidence independently
+of strategy identity. Thus an unconfigured standard Game Over can report its
+Tier while remaining `unknown` rather than fabricating Farm or Milestone type.
 
 ## State and battle lifecycle
 
@@ -170,8 +184,8 @@ remain insufficient evidence to distinguish Tournament from Milestone.
   strict progress and a verified final value, and returns to
   `RUNNING/ATTACK_MENU`. Unknown sequences fall back to single-step feedback;
   unknown or incomplete evidence remains blocked.
-- Complete no-battle setup owns every profile check available from verified
-  Home `NEW_BATTLE`: Cards, Workshop and its Free Upgrade locks, Bots,
+- Complete no-battle setup owns every supported profile check available from
+  verified Home `NEW_BATTLE`: Cards, Workshop and its Free Upgrade locks, Bots,
   Guardians, Modules, and Target Priority. It retains screen-derived
   configuration evidence for session preflight, which consumes that boundary
   proof and checks only battle-only settings instead of leaving the newly
@@ -210,7 +224,9 @@ remain insufficient evidence to distinguish Tournament from Milestone.
 - Process startup has an explicit gate policy. `immediate` retains the normal
   behavior in which the first observed active battle is a new-run boundary.
   `next_run` adopts the first active/resumable battle and structurally
-  suppresses plan rules tagged `run_initialization` or `session_preflight`.
+  suppresses plan rules tagged `run_initialization` or `session_preflight`,
+  except an explicitly declared observer-only attachment check such as
+  Tournament preflight.
   It does not seed their completion variables. Game Over, Tournament Results,
   or Home `NEW_BATTLE` arms the gates, and the next `RUNNING` observation emits
   the normal run-start hooks. Home `RESUME_BATTLE` and transient Unknown states
@@ -218,9 +234,10 @@ remain insufficient evidence to distinguish Tournament from Milestone.
 - Explicit mid-run strategy adoption uses the same attachment boundary. Fresh
   `RUNNING` or Home `RESUME_BATTLE` evidence may replace normal strategy
   behavior and report identity without a restart, but run initialization,
-  session preflight, and Home-only checks stay deferred. A request encountered
-  at Home `NEW_BATTLE` follows normal boundary replacement instead and runs the
-  complete startup-gate sequence.
+  session preflight, and Home-only checks stay deferred, except for an
+  explicitly declared observer-only attachment check such as Tournament
+  preflight. A request encountered at Home `NEW_BATTLE` follows normal boundary
+  replacement instead and runs the complete startup-gate sequence.
 - Process replacement must verify the existing owner and safe UI boundary,
   then verify the replacement PID, refreshed lock, startup log, control
   consumption, and first state report.

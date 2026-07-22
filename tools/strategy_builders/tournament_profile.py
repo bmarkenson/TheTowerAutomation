@@ -12,6 +12,9 @@ TOURNAMENT_RUNTIME_POLICY = {
     "handlers": ["ad_gem", "game_over"],
     "auto_return": False,
     "game_over_mode": "wait",
+    "home_preflight": True,
+    "session_preflight_on_attach": True,
+    "preflight_mismatch": "notify",
 }
 
 
@@ -40,6 +43,7 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
         "gc_session_preflight_last_status": "",
         "gc_session_preflight_last_reason": "",
         "gc_session_preflight_evidence": {},
+        "gc_session_preflight_advisory": False,
     }
 
     return {
@@ -58,6 +62,7 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
             {
                 "name": "validate_tournament_session_preflight",
                 "gate_phase": "session_preflight",
+                "run_when_attached": True,
                 "when": {"state": "RUNNING"},
                 "assert": ["!gc_session_preflight_attempted"],
                 "cooldown_sec": 30.0,
@@ -66,6 +71,7 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
                         "type": "session_preflight",
                         "validator": "tournament",
                         "allow_repair": False,
+                        "mismatch_policy": "notify",
                         "requirements": copy.deepcopy(requirements),
                     }
                 ],

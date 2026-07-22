@@ -319,6 +319,52 @@ def test_gate_decision_has_guarded_lifecycle(tmp_path):
     assert consumed["completion_reason"] == "waiver applied"
 
 
+def test_advisory_gate_decision_persists_nonblocking_pause_choice(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    options = build_gate_decision_options(
+        "ultimate_weapons",
+        advisory=True,
+    )
+
+    requested = store.publish_gate_decision(
+        strategy="tournament",
+        phase="session_preflight",
+        check_id="ultimate_weapons",
+        reason="Tournament Ultimate Weapon mismatch",
+        expected={"Golden Tower": {"primary": "on"}},
+        options=options,
+        blocking=False,
+    )
+    resolved = store.resolve_gate_decision(
+        requested["request_id"],
+        "pause_for_changes",
+        source="test",
+    )
+
+    assert requested["blocking"] is False
+    assert [option["id"] for option in requested["options"]] == [
+        "pause_for_changes",
+        "retry",
+        "continue_observing",
+    ]
+    assert resolved is not None
+    assert resolved["blocking"] is False
+    assert resolved["selected_option"]["action"] == "pause"
+
+
+def test_runtime_can_persist_advisory_pause(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    supervisor = _supervisor(control_file)
+
+    assert supervisor.persist_state("PAUSED")
+
+    saved = json.loads(control_file.read_text(encoding="utf-8"))
+    assert saved["state"] == "PAUSED"
+    assert saved["updated_by"] == "runtime"
+    assert supervisor.is_paused
+
+
 def test_terminal_gate_prompt_displays_issue_and_returns_shared_option_id():
     lines = []
     decision = {

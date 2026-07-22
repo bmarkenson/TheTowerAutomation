@@ -89,6 +89,8 @@ def test_tournament_result_persists_summary_and_exact_detailed_report(tmp_path):
 
     assert record["quality"]["valid"]
     assert record["battle_type"] == "tournament"
+    assert record["runtime"]["observed_tier"] == 19
+    assert record["battle_type_analysis"]["observed_tier"] == 19
     assert record["quality"]["identity"] == {
         "summary_wave": 2558,
         "detailed_wave": 2558,
@@ -98,6 +100,7 @@ def test_tournament_result_persists_summary_and_exact_detailed_report(tmp_path):
     assert json_path.exists()
     markdown = markdown_path.read_text(encoding="utf-8")
     assert "Rank at completion: 4" in markdown
+    assert "Observed tier: 19" in markdown
     assert "## Battle Report" in markdown
     assert "| Wave | 2558 |" in markdown
     assert "## Coins/min progression" in markdown

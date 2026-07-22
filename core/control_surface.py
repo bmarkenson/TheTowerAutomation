@@ -14,7 +14,10 @@ from typing import Any, Mapping, Optional, Sequence
 
 from core.app_setup import CONFIGURABLE_STRATEGIES, STARTUP_GATE_POLICIES
 from core.automation_process import AutomationProcessError, SystemdAutomationManager
-from core.battle_classification import classification_for_record
+from core.battle_classification import (
+    classification_for_record,
+    observed_tier_for_record,
+)
 from core.control_directives import ControlDirectiveError, ControlDirectiveStore
 from core.gate_decisions import startup_gate_context_for_strategy
 
@@ -23,9 +26,10 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 2
+CONTROL_SURFACE_REVISION = 3
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
+    "advisory_preflight_decisions",
     "explicit_strategy_disposition",
 )
 _BATTLE_ID_RE = re.compile(r"(?:Battle|Tournament)\d{8}T\d{6}[+-]\d{4}")
@@ -859,7 +863,10 @@ def _battle_summary(record: Mapping[str, Any]) -> dict[str, Any]:
         "profile": run_configuration.get("profile")
         if isinstance(run_configuration, Mapping)
         else None,
-        "tier": integer("battle_report", "tier"),
+        "tier": (
+            integer("battle_report", "tier")
+            or observed_tier_for_record(record)
+        ),
         "wave": integer("battle_report", "wave") or summary_integer("wave"),
         "killed_by": raw("battle_report", "killed_by") or summary_raw("killed_by"),
         "league": summary_raw("league"),

@@ -257,11 +257,20 @@ class MissionManager:
         """Return whether the active battle is waiting on session validation."""
 
         if (
-            self._startup_gates_deferred
-            or not self._battle_lifecycle.active_battle_observed
+            not self._battle_lifecycle.active_battle_observed
             or not self.strategy
         ):
             return False
+        if self._startup_gates_deferred:
+            try:
+                policy = self.strategy.runtime_policy()
+            except Exception:
+                policy = {}
+            if not (
+                isinstance(policy, Mapping)
+                and policy.get("session_preflight_on_attach") is True
+            ):
+                return False
         if self.run_initialization_pending():
             return False
         if not self.strategy.requires_session_preflight():
@@ -288,6 +297,15 @@ class MissionManager:
             mv.get("gc_session_preflight_blocked")
             and not mv.get("gc_session_preflight_repair_required")
             and not mv.get("gc_session_preflight_repair_in_progress")
+        )
+
+    def session_preflight_advisory_pending(self) -> bool:
+        """Return whether a non-blocking observer mismatch needs direction."""
+
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        return bool(
+            mv.get("gc_session_preflight_advisory")
+            and mv.get("gc_session_preflight_blocked")
         )
 
     def session_preflight_failure_checks(self) -> list[str]:
@@ -320,6 +338,7 @@ class MissionManager:
         mv["gc_session_preflight_blocked"] = False
         mv["gc_session_preflight_repair_required"] = False
         mv["gc_session_preflight_repair_in_progress"] = False
+        mv["gc_session_preflight_advisory"] = False
         mv["gc_session_preflight_failed_checks"] = []
 
     def retry_session_preflight(self) -> None:
@@ -331,6 +350,7 @@ class MissionManager:
         mv["gc_session_preflight_blocked"] = False
         mv["gc_session_preflight_repair_required"] = False
         mv["gc_session_preflight_repair_in_progress"] = False
+        mv["gc_session_preflight_advisory"] = False
         mv["gc_session_preflight_failed_checks"] = []
 
     def begin_session_preflight_repair(self) -> bool:

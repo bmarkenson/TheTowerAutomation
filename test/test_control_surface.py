@@ -352,6 +352,30 @@ def test_completed_battles_include_tournament_records_and_terminal_classificatio
     assert service.battle(tournament_id)["tournament_id"] == tournament_id
 
 
+def test_battle_list_reports_terminal_tier_for_ambiguous_no_strategy_run(tmp_path):
+    battle_id = "Battle20260720T071923-0700"
+    record = {
+        "schema_version": 2,
+        "battle_id": battle_id,
+        "captured_at": "2026-07-20T07:19:23-07:00",
+        "strategy": None,
+        "runtime": {"terminal_state": "GAME_OVER"},
+        "game_stats": {
+            "fields": {"tier": {"raw": "20", "value": 20}},
+        },
+        "more_stats": {"sections": []},
+        "quality": {"valid": False, "warnings": []},
+    }
+    path = tmp_path / "logs" / "battles" / f"{battle_id}.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(record), encoding="utf-8")
+
+    item = _service(tmp_path).battles(limit=10)["items"][0]
+
+    assert item["battle_type"] == "unknown"
+    assert item["tier"] == 20
+
+
 def test_control_requests_are_allowlisted_and_audited(tmp_path):
     service = _service(tmp_path)
 

@@ -210,12 +210,12 @@
 
   <dialog id="gateDialog" class="gate-dialog">
     <form id="gateForm">
-      <span class="eyebrow">Startup gate</span>
+      <span id="gateEyebrow" class="eyebrow">Startup gate</span>
       <h2 id="gateTitle">Direction required</h2>
       <p id="gateReason"></p>
       <p id="gateExpected" class="muted"></p>
       <div id="gateOptions" class="gate-options"></div>
-      <p class="fine-print">Closing this dialog leaves automation blocked at this check.</p>
+      <p id="gateDisposition" class="fine-print">Closing this dialog leaves automation blocked at this check.</p>
       <div class="dialog-actions">
         <button type="button" data-close-dialog="gateDialog">Decide later</button>
         <button class="primary" type="submit">Apply choice</button>

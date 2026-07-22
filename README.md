@@ -64,9 +64,11 @@ explicit next-run startup policy:
 
 This attaches to the existing/resumable battle and suppresses only tagged
 new-run initialization and session-preflight rules. Normal automation remains
-active. Game Over, Tournament Results, or verified Home `NEW_BATTLE` evidence
-re-arms the gates for the following battle. The default `immediate` policy
-retains normal first-battle startup gating.
+active. The Tournament observer is the narrow exception: its explicitly
+read-only preflight runs on attachment so mismatches can be reported without
+repair authority. Game Over, Tournament Results, or verified Home `NEW_BATTLE`
+evidence re-arms the gates for the following battle. The default `immediate`
+policy retains normal first-battle startup gating.
 
 For a gate-free experiment, select the no-strategy mode explicitly:
 
@@ -137,11 +139,16 @@ the generated plan and copied into each battle's JSON record.
 
 ### Validating Tournament setup
 
-The Tournament validator is a read-only live test for an already active
-Tournament. It verifies Tournament Cards, Tourney Workshop, Amplify Bots,
-Attack/Ally/Scout Guardians, the Tournament module loadout, all nine Ultimate
-Weapons, and Spotlight missiles. Tournaments have no Perks, so the route does
-not open or validate the Perks screen.
+Select the `tournament` strategy while the game is at verified Home **New
+Battle** to run the pre-start Tournament setup. The Home route selects
+Tournament Cards, Tourney Workshop, Amplify Bots, Attack/Ally/Scout Guardians,
+and the Tournament module loadout. It retains that evidence, leaves Tournament
+entry manual, and never presses the normal Battle control. Once the Tournament
+starts, session preflight consumes the Home evidence and checks only all nine
+Ultimate Weapons plus Spotlight missiles. Tournaments have no Perks.
+
+The standalone Tournament validator remains a read-only live test for an
+already active Tournament. It checks the same contract without changing it.
 
 Pause persistent automation intent before running the test, then restore the
 previous control state after it returns to the same battle:
@@ -168,12 +175,18 @@ To keep observing that Tournament after the check, start the passive profile:
 ```
 
 The Tournament profile attempts the same read-only validation once, records a
-conclusive pass or mismatch as session evidence, and then limits runtime action
-authority to ad gems, floating gems, and the natural Game Over handler. It does
-not buy upgrades, repair configuration, Surrender, auto-return Home, or start a
-new battle. At Game Over it captures the normal structured battle JSON and
-Markdown records with the resolved Tournament configuration and preflight
-evidence, then waits for operator direction.
+conclusive pass or mismatch as session evidence, including when attaching to
+an already-running Tournament. An attached mismatch publishes a non-blocking
+warning with choices to pause for manual changes, retry the read-only check, or
+continue observing with only that mismatch waived. Leaving the warning pending
+does not block natural Tournament Results/Game Over capture. The profile then
+limits runtime action authority to ad gems and the natural terminal handler. It
+does not buy upgrades, repair configuration, Surrender, auto-return Home, enter
+a Tournament, or start a normal battle. Terminal records identify Tournament
+from the distinct Tournament Results screen and retain the Tier observed in
+terminal stats even when no reliable strategy identity was attached. A standard
+Game Over with no strategy remains type `unknown`; Tier alone is not used to
+invent Farm or Milestone identity.
 
 ## Battle statistics
 

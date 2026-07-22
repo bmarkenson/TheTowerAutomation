@@ -835,7 +835,7 @@ public partial class MainWindow : Window
                 $"{decision.CheckId}: {decision.Reason}",
             { Status: "resolved" } decision =>
                 $"{decision.CheckId}: {decision.DecisionId}; waiting for runtime.",
-            _ => "No startup gate is waiting for direction.",
+            _ => "No preflight decision is waiting for direction.",
         };
         if (pendingGate is not null
             && pendingGate.RequestId != _autoPromptedGateRequestId)

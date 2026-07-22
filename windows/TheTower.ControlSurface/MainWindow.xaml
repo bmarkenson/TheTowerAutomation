@@ -106,8 +106,8 @@
                 <Button Content="Pause 15 min" Tag="pause:15" Click="Control_Click" />
                 <Button Content="Pause 30 min" Tag="pause:30" Click="Control_Click" />
               </UniformGrid>
-              <Button x:Name="GateDecisionButton" Content="Review blocked startup" Click="GateDecision_Click" Style="{StaticResource DangerButton}" IsEnabled="False" Margin="4,8,4,2" />
-              <TextBlock x:Name="GateDecisionText" Text="No startup gate is waiting for direction." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,0,6,4" />
+              <Button x:Name="GateDecisionButton" Content="Review preflight decision" Click="GateDecision_Click" Style="{StaticResource DangerButton}" IsEnabled="False" Margin="4,8,4,2" />
+              <TextBlock x:Name="GateDecisionText" Text="No preflight decision is waiting for direction." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,0,6,4" />
               <TextBlock Text="GAME OVER MODE" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4,10,4,0" />
               <UniformGrid Columns="3">
                 <Button x:Name="RetryModeButton" Content="Retry" Tag="RETRY" Click="Mode_Click" />
@@ -126,7 +126,7 @@
                 <Button x:Name="AdoptStrategyButton" Content="Adopt for active battle" Click="AdoptStrategy_Click" Style="{StaticResource PrimaryButton}" IsEnabled="False" />
               </UniformGrid>
               <TextBlock x:Name="StrategySelectionText" Text="Waiting for strategy status." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,4,6,0" />
-              <TextBlock Text="Select a strategy, then choose its disposition. Queue preserves the current battle strategy; selecting Current and queueing cancels a different pending request. Adopt changes behavior and Battle End identity after fresh active-battle evidence; new-run gates still wait for the next genuine boundary." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,2,6,4" />
+              <TextBlock Text="Select a strategy, then choose its disposition. Queue preserves the current battle strategy; selecting Current and queueing cancels a different pending request. Adopt changes behavior and Battle End identity after fresh active-battle evidence; new-run gates wait for the next genuine boundary unless the observer declares a read-only attachment check." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,2,6,4" />
               <Button x:Name="ConfigureRunButton" Content="Configure run..." Click="ConfigureRun_Click" Style="{StaticResource PrimaryButton}" IsEnabled="False" Margin="4,4,4,2" />
               <TextBlock x:Name="ConfigureRunText" Text="Strategy defaults; no one-run skips staged." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,0,6,4" />
               <TextBlock x:Name="ControlSelectionText" Text="Waiting for control status." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,4" />
@@ -151,7 +151,7 @@
               </Grid>
               <TextBlock x:Name="AdbPortHelpText" Text="Pause automation before switching a live ADB port." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,0,6,8" />
               <CheckBox x:Name="AttachCurrentBattleBox" Content="Attach to current battle; run gates next battle" Click="StartupGatePolicy_Click" Margin="6,4,6,2" IsEnabled="False" />
-              <TextBlock Text="Use this when automation is starting in an existing battle. Normal automation continues, but startup and session gates wait for the next run boundary." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="24,0,6,8" />
+              <TextBlock Text="Use this when automation is starting in an existing battle. Normal automation continues, but startup and session gates wait for the next run boundary unless the observer declares a read-only attachment check." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="24,0,6,8" />
               <Button x:Name="StartPausedButton" Content="Start paused" Tag="start:PAUSED" Click="Process_Click" IsEnabled="False" />
               <Button x:Name="StartRunningButton" Content="Start running" Tag="start:RUNNING" Click="Process_Click" Style="{StaticResource SuccessButton}" IsEnabled="False" />
               <Button x:Name="CompleteStopButton" Content="Completely stop automation" Tag="stop" Click="Process_Click" Style="{StaticResource DangerButton}" Margin="4,12,4,4" IsEnabled="False" />

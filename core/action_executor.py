@@ -291,6 +291,7 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                 if mv is not None:
                     mv["gc_session_preflight_attempted"] = True
                     mv["gc_session_preflight_blocked"] = False
+                    mv["gc_session_preflight_advisory"] = False
                 effective_requirements = dict(requirements)
                 if mv is not None:
                     waivers = mv.get("gc_session_preflight_waivers")
@@ -347,6 +348,10 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                         "INFO",
                     )
                 elif result.status is GcPreflightNavigationStatus.MISMATCH:
+                    mismatch_policy = str(
+                        act.get("mismatch_policy") or "block"
+                    ).strip().lower()
+                    advisory = mismatch_policy == "notify"
                     repairable = bool(
                         act.get("allow_repair", True)
                         and result.evidence is not None
@@ -364,12 +369,21 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                         )
                         mv["gc_session_preflight_repair_required"] = repairable
                         mv["gc_session_preflight_repair_in_progress"] = False
+                        mv["gc_session_preflight_advisory"] = advisory
                         if repairable:
                             mv["gc_no_battle_setup_completed"] = False
                     if repairable:
                         log_mission(
                             "[SESSION_PREFLIGHT] No-battle configuration mismatch; "
                             "guarded stop/repair/restart requested: "
+                            + json.dumps(evidence_payload, sort_keys=True),
+                            "WARN",
+                        )
+                    elif advisory:
+                        log_mission(
+                            "[SESSION_PREFLIGHT] Read-only observer mismatch; "
+                            "terminal capture remains active while operator "
+                            "direction is requested: "
                             + json.dumps(evidence_payload, sort_keys=True),
                             "WARN",
                         )
@@ -386,6 +400,7 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                         mv["gc_session_preflight_attempted"] = False
                         mv["gc_session_preflight_repair_required"] = False
                         mv["gc_session_preflight_repair_in_progress"] = False
+                        mv["gc_session_preflight_advisory"] = False
                         mv["gc_session_preflight_failed_checks"] = []
                     interrupted_level = (
                         "INFO"

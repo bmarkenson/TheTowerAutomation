@@ -229,6 +229,8 @@ def test_battle_record_retains_resolved_run_configuration():
     assert record["schema_version"] == 2
     assert record["battle_type"] == "farm"
     assert record["battle_type_analysis"]["confidence"] == "high"
+    assert record["runtime"]["observed_tier"] == 19
+    assert record["battle_type_analysis"]["observed_tier"] == 19
     assert record["run_configuration"]["profile"] == "farm"
     assert record["run_configuration"]["tier"] == 19
     assert (
@@ -237,6 +239,7 @@ def test_battle_record_retains_resolved_run_configuration():
     )
     markdown = render_battle_markdown(record)
     assert "Run configuration: farm Tier 19" in markdown
+    assert "Observed tier: 19" in markdown
     assert "Modules: mode `observe`; preset `module_test_a`" in markdown
     assert "core_primary=Multiverse Nexus" in markdown
     assert "Target Priority: mode `observe`; preset `priority_test_a`" in markdown
@@ -247,6 +250,27 @@ def test_battle_record_retains_resolved_run_configuration():
     assert "Poison Swamp: primary=on, stun=off" in markdown
     assert "## Coins/min progression" in markdown
     assert "| 2026-07-15T11:00:00-07:00 | 1000 | 1.25T | 98.5% |" in markdown
+
+
+def test_no_strategy_record_retains_terminal_tier_without_guessing_type():
+    record = build_battle_record(
+        _frame(9),
+        [_frame(1), _frame(2), _frame(3), _frame(4), _frame(5)],
+        source_complete=True,
+        source_reason="edge_reached",
+        battle_id="Battle20260715T120000-0700",
+        captured_at=datetime(2026, 7, 15, 12, 0, tzinfo=timezone.utc),
+        strategy_name="none",
+        run_configuration={},
+        runtime_context={"terminal_state": "GAME_OVER"},
+        data_fn=_data_fn,
+        game_stats_text_fn=_game_text,
+    )
+
+    assert record["battle_type"] == "unknown"
+    assert record["runtime"]["observed_tier"] == 19
+    assert record["battle_type_analysis"]["observed_tier"] == 19
+    assert "Observed tier: 19" in render_battle_markdown(record)
 
 
 def test_tower_number_parser_preserves_case_sensitive_magnitudes():

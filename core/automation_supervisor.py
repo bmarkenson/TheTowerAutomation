@@ -210,6 +210,7 @@ class AutomationSupervisor:
         reason: str,
         expected: object,
         options,
+        blocking: bool = True,
     ) -> Optional[Dict[str, object]]:
         try:
             directive = self._control_store.publish_gate_decision(
@@ -219,6 +220,7 @@ class AutomationSupervisor:
                 reason=reason,
                 expected=expected,
                 options=options,
+                blocking=blocking,
             )
         except (ControlDirectiveError, ValueError) as exc:
             log(f"[GATE_DECISION] Failed publishing request: {exc}", "WARN")
@@ -289,6 +291,24 @@ class AutomationSupervisor:
             check_id: dict(waiver)
             for check_id, waiver in claimed.items()
         }
+
+    def persist_state(self, state: str) -> bool:
+        """Persist and immediately apply a runtime-owned state transition."""
+
+        normalized = str(state).strip().upper()
+        if normalized not in _ALLOWED_STATES:
+            raise ValueError(
+                f"Unsupported automation state {state!r}; "
+                f"expected one of {sorted(_ALLOWED_STATES)}"
+            )
+        try:
+            self._control_store.set_state(normalized, source="runtime")
+        except ControlDirectiveError as exc:
+            log(f"[CTRL] Failed writing control file: {exc}", "WARN")
+            return False
+        self._last_applied_state = None
+        self._apply_state(normalized)
+        return True
 
     def persist_mode(self, mode: str) -> bool:
         """Persist and apply a runtime-owned terminal mode transition."""

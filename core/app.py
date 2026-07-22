@@ -174,10 +174,12 @@ class App:
         check_id: str,
         reason: str,
         expected: object,
+        blocking: bool = True,
     ) -> Optional[Dict[str, Any]]:
         options = build_gate_decision_options(
             check_id,
             self._mission_mgr.gate_fallbacks(check_id),
+            advisory=not blocking,
         )
         directive = self._supervisor.publish_gate_decision(
             strategy=self._current_strategy_name(),
@@ -186,6 +188,7 @@ class App:
             reason=reason,
             expected=expected,
             options=options,
+            blocking=blocking,
         )
         if not isinstance(directive, Mapping):
             return None
@@ -273,6 +276,10 @@ class App:
             if phase == "session_preflight":
                 self._mission_mgr.retry_session_preflight()
             completion_reason = f"retrying {check_id} without a waiver"
+        elif action == "pause":
+            if not self._supervisor.persist_state("PAUSED"):
+                return False
+            completion_reason = f"paused for manual {check_id} changes"
         else:
             return False
         self._supervisor.consume_gate_decision(
@@ -285,6 +292,35 @@ class App:
             console=True,
         )
         return True
+
+    def _handle_session_preflight_advisory(self) -> None:
+        """Publish a non-blocking decision for an observer-only mismatch."""
+
+        checks = self._mission_mgr.session_preflight_failure_checks()
+        check_id = checks[0] if checks else "session_preflight"
+        directive = self._matching_gate_decision("session_preflight")
+        if directive is None:
+            requirements = self._mission_mgr.strategy.session_preflight_requirements()
+            reason = str(
+                self._mission_mgr.ctx.data.get("mission_vars", {}).get(
+                    "gc_session_preflight_last_reason",
+                    "read-only session preflight mismatch",
+                )
+            )
+            directive = self._publish_gate_decision(
+                phase="session_preflight",
+                check_id=check_id,
+                reason=(
+                    f"{reason}. Tournament result capture remains active; "
+                    "this warning does not block observation."
+                ),
+                expected=requirements.get(check_id),
+                blocking=False,
+            )
+            if directive and directive.get("status") == "pending":
+                directive = self._prompt_for_gate_decision(directive) or directive
+        if directive:
+            self._apply_gate_decision(directive, phase="session_preflight")
 
     def _handle_terminal_session_gate_decision(self) -> None:
         checks = self._mission_mgr.session_preflight_failure_checks()
@@ -612,6 +648,15 @@ class App:
                         session_preflight_pending
                         and self._mission_mgr.session_preflight_terminally_blocked()
                     )
+                advisory_pending = bool(
+                    not session_preflight_pending
+                    and not self._supervisor.is_paused
+                    and self._runtime_policy().get("preflight_mismatch") == "notify"
+                    and self._mission_mgr.session_preflight_advisory_pending()
+                )
+                if advisory_pending:
+                    self._handle_session_preflight_advisory()
+                    is_paused = self._supervisor.is_paused
                 if initialization_pending:
                     if not self._run_initialization_gate_logged:
                         log(
@@ -1056,12 +1101,16 @@ class App:
                 },
             )
             finalize_run_boundary()
-        elif new_state == "HOME_SCREEN" and self._handler_enabled("home"):
-            log("Detected HOME_SCREEN. Executing handler.", "INFO")
+        elif new_state == "HOME_SCREEN":
+            home_handler_enabled = self._handler_enabled("home")
+            home_preflight_enabled = bool(
+                self._runtime_policy().get("home_preflight") is True
+            )
+            log("Detected HOME_SCREEN. Evaluating Home policy.", "INFO")
             home_control = detect_home_battle_control(img).control
             requirements = self._mission_mgr.no_battle_setup_requirements()
             if (
-                self._auto_start_enabled
+                (self._auto_start_enabled or home_preflight_enabled)
                 and home_control is HomeBattleControl.NEW_BATTLE
                 and requirements
             ):
@@ -1134,8 +1183,9 @@ class App:
                 else:
                     self._mission_mgr.mark_no_battle_setup_complete(setup.evidence)
                 self._startup_gate_waivers = {}
-            handle_home_screen(restart_enabled=self._auto_start_enabled)
-            self._mission_mgr.on_home()
+            if home_handler_enabled:
+                handle_home_screen(restart_enabled=self._auto_start_enabled)
+                self._mission_mgr.on_home()
 
         if (
             "AD_GEMS_AVAILABLE" in overlays

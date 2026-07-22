@@ -257,6 +257,7 @@ class YamlStrategy(BaseStrategy):
             if (
                 ctx.data.get("startup_gates_deferred")
                 and gate_phase in {"run_initialization", "session_preflight"}
+                and not bool(rule.get("run_when_attached"))
             ):
                 continue
             when = dict(rule.get("when") or {})

@@ -55,3 +55,32 @@ def test_historical_record_identity_supplies_terminal_evidence():
 
     assert result["type"] == "milestone"
     assert "record_identity:game_over" in result["signals"]
+
+
+def test_no_strategy_game_over_reports_tier_without_inventing_run_identity():
+    result = analyze_battle_type(
+        strategy_name="none",
+        run_configuration={},
+        terminal_state="GAME_OVER",
+        observed_tier=18,
+    )
+
+    assert result["type"] == "unknown"
+    assert result["observed_tier"] == 18
+    assert "terminal_observation:tier_18" in result["signals"]
+    assert "cannot distinguish" in result["reason"]
+
+
+def test_historical_record_derives_observed_tier_from_terminal_stats():
+    result = classification_for_record(
+        {
+            "battle_id": "Battle20260719T101126-0700",
+            "game_stats": {
+                "fields": {"tier": {"raw": "20", "value": 20}}
+            },
+        }
+    )
+
+    assert result["type"] == "unknown"
+    assert result["observed_tier"] == 20
+    assert "terminal_observation:tier_20" in result["signals"]

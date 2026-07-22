@@ -14,7 +14,10 @@ from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 import cv2
 import numpy as np
 
-from core.battle_classification import analyze_battle_type
+from core.battle_classification import (
+    analyze_battle_type,
+    observed_tier_for_record,
+)
 from utils.ocr_utils import ocr_text_and_conf
 
 try:
@@ -582,11 +585,21 @@ def _assemble_battle_record(
         "coin_breakdown": coin_breakdown,
     }
     runtime = dict(runtime_context or {})
+    observed_tier = observed_tier_for_record(
+        {
+            "runtime": runtime,
+            "game_stats": game_stats,
+            "more_stats": more_stats,
+        }
+    )
+    if observed_tier is not None:
+        runtime["observed_tier"] = observed_tier
     classification = analyze_battle_type(
         strategy_name=strategy_name,
         run_configuration=run_configuration,
         terminal_state=runtime.get("terminal_state"),
         record_id=battle_id,
+        observed_tier=observed_tier,
     )
     record = {
         "schema_version": SCHEMA_VERSION,
@@ -909,6 +922,9 @@ def render_battle_markdown(record: Mapping[str, Any]) -> str:
         confidence = classification.get("confidence")
         suffix = f" ({confidence} confidence)" if confidence else ""
         lines.append(f"Battle type: {str(record['battle_type']).title()}{suffix}")
+    observed_tier = observed_tier_for_record(record)
+    if observed_tier is not None:
+        lines.append(f"Observed tier: {observed_tier}")
     run_configuration = record.get("run_configuration") or {}
     if run_configuration:
         lines.append(

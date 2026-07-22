@@ -11,7 +11,10 @@ from typing import Any, Callable, Mapping, Optional
 
 import numpy as np
 
-from core.battle_classification import analyze_battle_type
+from core.battle_classification import (
+    analyze_battle_type,
+    observed_tier_for_record,
+)
 from core.battle_stats import (
     parse_more_stats_clipboard,
     parse_tower_number,
@@ -158,11 +161,17 @@ def build_tournament_result(
         and not identity["mismatch"]
     )
     runtime = dict(runtime_context or {})
+    observed_tier = observed_tier_for_record(
+        {"runtime": runtime, "detailed_stats": detailed}
+    )
+    if observed_tier is not None:
+        runtime["observed_tier"] = observed_tier
     classification = analyze_battle_type(
         strategy_name=strategy_name,
         run_configuration=run_configuration,
         terminal_state=runtime.get("terminal_state") or "TOURNAMENT_RESULTS",
         record_id=tournament_id,
+        observed_tier=observed_tier,
     )
     return {
         "schema_version": SCHEMA_VERSION,
@@ -294,6 +303,9 @@ def render_tournament_markdown(record: Mapping[str, Any]) -> str:
         lines.append(f"Strategy: {record['strategy']}")
     if record.get("battle_type"):
         lines.append(f"Battle type: {str(record['battle_type']).title()}")
+    observed_tier = observed_tier_for_record(record)
+    if observed_tier is not None:
+        lines.append(f"Observed tier: {observed_tier}")
     fields = record.get("summary", {}).get("fields", {})
     lines.extend(["", "## Result", ""])
     for key, label in (

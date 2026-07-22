@@ -148,6 +148,9 @@ public sealed class GateDecisionStatus
     [JsonPropertyName("reason")]
     public string Reason { get; set; } = "";
 
+    [JsonPropertyName("blocking")]
+    public bool Blocking { get; set; } = true;
+
     [JsonPropertyName("expected")]
     public string? Expected { get; set; }
 

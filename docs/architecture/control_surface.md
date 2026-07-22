@@ -43,6 +43,8 @@ agnostic.
   Tournament; standard Game Over plus the shared Tournament/Milestone profile
   identifies a Milestone; Farm strategy/profile identity identifies Farm.
   Tournament settings alone never decide between Tournament and Milestone.
+  Terminal-observed Tier is shown independently, including for an ambiguous
+  standard Game Over whose type remains `unknown`.
 - The allowlisted write surface is pause, timed pause, resume, mode,
   resolution of a runtime-published startup-gate decision,
   optional strategy-scoped one-run check configuration,
@@ -58,9 +60,12 @@ agnostic.
 - A stopped start request may choose `immediate` startup gates or `next_run`.
   `next_run` attaches to the first already-active/resumable battle: normal
   strategy and handler work continues, but rules explicitly tagged as run
-  initialization or session preflight remain suppressed. A terminal result or
-  verified Home `NEW_BATTLE` boundary removes the suppression, so the next
-  battle runs its real gates without fabricated completion state.
+  initialization or session preflight remain suppressed unless the selected
+  observer profile explicitly declares a read-only attachment check. Tournament
+  uses that exception to report configuration without repair authority. A
+  terminal result or verified Home `NEW_BATTLE` boundary removes the
+  suppression, so the next battle runs its real gates without fabricated
+  completion state.
 - An active strategy request persists the next-start setting and a versioned
   control directive. By default it remains pending during a battle. The
   current strategy first finalizes the terminal report and its Game Over hook;
@@ -75,8 +80,9 @@ agnostic.
   normal strategy behavior and the strategy/profile identity used by Battle
   End reporting, but uses attachment semantics: run initialization, session
   preflight, and Home-only gates remain deferred until the next genuine
-  new-run boundary. If `NEW_BATTLE` is observed first, the request follows the
-  normal boundary-install path and all new-run gates remain active.
+  new-run boundary, except for an explicitly declared read-only observer check.
+  If `NEW_BATTLE` is observed first, the request follows the normal
+  boundary-install path and all new-run gates remain active.
 - The API never accepts a PID, executable, service name, or command from the
   Windows client. The Linux server is configured with one validated unit name.
 - A malformed control file is reported and preserved rather than overwritten.
@@ -189,6 +195,10 @@ Process request examples:
   fallback waives only the named requirement for the current run, so unrelated
   checks such as Auto Pick Perks remain authoritative. Closing the dialog
   leaves automation blocked and the request pending.
+- Non-blocking attached-Tournament warning dialogs use the same scoped decision
+  channel. They offer persistent Pause for manual changes, a fresh read-only
+  retry, or continuation with only the displayed mismatch waived. Closing the
+  dialog leaves the warning pending but does not block terminal observation.
 - An optional **Configure run...** dialog populated from the selected
   strategy's actual preflight requirements. Unchecked checks retain their
   defaults; checked checks create strategy-bound one-run waivers. The dialog
@@ -198,7 +208,9 @@ Process request examples:
   fixed systemd user unit.
 - Optional attachment to an existing battle on process start. The selected
   policy persists on Linux; attached-run startup/session gates wait for the
-  next real run boundary while ordinary automation remains available.
+  next real run boundary while ordinary automation remains available, except
+  for an explicitly declared read-only observer check such as Tournament
+  preflight.
 - Persistent ADB-port selection for the next managed start, plus live handoff
   while the runtime has acknowledged `PAUSED`. The API accepts only an integer
   TCP port; the runtime keeps Pause and its former target if new-target

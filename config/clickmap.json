@@ -2521,6 +2521,26 @@
         "button"
       ]
     },
+    "guardian:attack_inventory": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 195,
+        "y": 1230
+      }
+    },
+    "guardian:ally_inventory": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 540,
+        "y": 1230
+      }
+    },
     "close:perks": {
       "match_template": "buttons/close:perks.png",
       "match_region": {

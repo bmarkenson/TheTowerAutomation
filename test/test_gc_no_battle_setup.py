@@ -19,10 +19,17 @@ from core.home_battle import HomeBattleEvidence
 from core.matcher import get_match
 from core.target_priority import TARGETS
 from core.workshop_preset import (
+    BOTS_AMPLIFY_PRESET_SLOT,
     BOTS_FARM_PRESET_SLOT,
     CARDS_FARM_PRESET_SLOT,
+    CARDS_TOURNAMENT_PRESET_SLOT,
     FARM_PRESET_SLOT,
     PresetSlotSelection,
+    TOURNEY_PRESET_SLOT,
+)
+from core.tournament_preflight import (
+    TOURNAMENT_SECTION_SPECS,
+    load_tournament_requirements,
 )
 
 
@@ -49,6 +56,7 @@ REQUIREMENTS = {
         "target_priority": "enforce",
     },
 }
+TOURNAMENT_REQUIREMENTS = load_tournament_requirements()
 
 
 class _NoBattleRouter:
@@ -114,7 +122,7 @@ class _NoBattleRouter:
             return {"state": "GUILD", "secondary_states": []}
         if frame == "guardians":
             secondary = ["GUILD_GUARDIAN_SCREEN"]
-            for chip in ("fetch", "summon", "scout"):
+            for chip in ("attack", "ally", "fetch", "summon", "scout"):
                 if chip in self.guardians:
                     secondary.append(f"GUARDIAN_{chip.upper()}_EQUIPPED")
             return {"state": "GUILD", "secondary_states": secondary}
@@ -161,6 +169,7 @@ class _NoBattleRouter:
             return False
         self.state = destination
         return True
+
 
     def ensure_modules(self, requirements, **kwargs):
         assert self.state == "modules"
@@ -242,6 +251,84 @@ class _NoBattleRouter:
         return True
 
 
+class _TournamentRouter(_NoBattleRouter):
+    def __init__(self, *, selected: bool = False, correct_guardians: bool = False):
+        super().__init__(selected=True, correct_guardians=True)
+        self.selected = {
+            CARDS_TOURNAMENT_PRESET_SLOT: selected,
+            TOURNEY_PRESET_SLOT: selected,
+            BOTS_AMPLIFY_PRESET_SLOT: selected,
+        }
+        self.guardians = (
+            {"attack", "ally", "scout"}
+            if correct_guardians
+            else {"fetch", "summon", "scout"}
+        )
+        self.configuration_specs = None
+
+    def detect(self, frame):
+        if frame == "cards":
+            return {
+                "state": "CARDS",
+                "secondary_states": ["CARDS_TOURNAMENT_SLOT"],
+            }
+        if frame == "workshop":
+            return {
+                "state": "WORKSHOP",
+                "secondary_states": ["WORKSHOP_TOURNEY_SLOT"],
+            }
+        if frame == "bots":
+            return {
+                "state": "EVENT",
+                "secondary_states": ["EVENT_BOTS_SCREEN", "BOTS_AMPLIFY_SLOT"],
+            }
+        if frame == "guardians":
+            secondary = ["GUILD_GUARDIAN_SCREEN"]
+            for chip in ("attack", "ally", "scout", "fetch", "summon"):
+                if chip in self.guardians:
+                    secondary.append(f"GUARDIAN_{chip.upper()}_EQUIPPED")
+            return {"state": "GUILD", "secondary_states": secondary}
+        return super().detect(frame)
+
+    def static_tap(self, label, **kwargs):
+        if self.state == "guardians" and label == "buttons.guardian:attack_inventory":
+            self.static_actions.append(label)
+            self.guardians.add("attack")
+            return True
+        if self.state == "guardians" and label == "buttons.guardian:ally_inventory":
+            self.static_actions.append(label)
+            self.guardians.add("ally")
+            return True
+        return super().static_tap(label, **kwargs)
+
+    def visible_tap(self, label, **kwargs):
+        if self.state == "cards" and label == "indicators.cards:tournament_slot":
+            self.visible_actions.append(label)
+            self.selected[CARDS_TOURNAMENT_PRESET_SLOT] = True
+            return True
+        if self.state == "workshop" and label == "indicators.workshop:tourney_slot":
+            self.visible_actions.append(label)
+            self.selected[TOURNEY_PRESET_SLOT] = True
+            return True
+        if self.state == "bots" and label == "indicators.bots:amplify_slot":
+            self.visible_actions.append(label)
+            self.selected[BOTS_AMPLIFY_PRESET_SLOT] = True
+            return True
+        if self.state == "guardians" and label in {
+            "indicators.guardian:fetch_equipped",
+            "indicators.guardian:summon_equipped",
+        }:
+            self.visible_actions.append(label)
+            chip = "fetch" if "fetch" in label else "summon"
+            self.guardians.remove(chip)
+            return True
+        return super().visible_tap(label, **kwargs)
+
+    def validate_configuration(self, **kwargs):
+        self.configuration_specs = kwargs.get("section_specs")
+        return super().validate_configuration(**kwargs)
+
+
 def _run(router, requirements=REQUIREMENTS, *, waivers=None):
     return run_gc_no_battle_setup(
         requirements,
@@ -302,6 +389,32 @@ def test_no_battle_setup_leaves_already_correct_settings_untouched():
         "navigation.home_guild",
         "buttons.return_to_game",
     ]
+
+
+def test_no_battle_setup_corrects_tournament_home_configuration():
+    router = _TournamentRouter()
+
+    result = _run(router, TOURNAMENT_REQUIREMENTS)
+
+    assert result.complete
+    assert router.state == "home"
+    assert all(router.selected.values())
+    assert router.guardians == {"attack", "ally", "scout"}
+    assert router.module_checks == [TOURNAMENT_REQUIREMENTS["modules"]]
+    assert router.target_priority_checks == []
+    assert router.configuration_specs is TOURNAMENT_SECTION_SPECS
+    assert result.evidence["cards_deck"] == "Tournament"
+    assert result.evidence["workshop_preset"] == "Tourney"
+    assert result.evidence["bots_preset"] == "Amplify"
+    assert "buttons.guardian:attack_inventory" in router.static_actions
+    assert "buttons.guardian:ally_inventory" in router.static_actions
+
+
+def test_tournament_guardian_inventory_actions_have_explicit_geometry():
+    from core.clickmap_access import get_click
+
+    assert get_click("buttons.guardian:attack_inventory") == (195, 1230)
+    assert get_click("buttons.guardian:ally_inventory") == (540, 1230)
 
 
 def test_not_enough_medals_dialog_requires_exact_high_confidence_text():
@@ -609,6 +722,51 @@ def test_app_runs_no_battle_setup_before_starting_profile_battle():
     manager.mark_no_battle_setup_complete.assert_called_once_with(setup.evidence)
     handle_home.assert_called_once_with(restart_enabled=True)
     manager.on_home.assert_called_once_with()
+
+
+def test_app_runs_tournament_home_preflight_without_starting_battle():
+    frame = object()
+    manager = Mock()
+    manager.strategy = Mock()
+    manager.strategy.runtime_policy.return_value = {
+        "handlers": ["ad_gem", "game_over"],
+        "home_preflight": True,
+    }
+    manager.no_battle_setup_requirements.return_value = TOURNAMENT_REQUIREMENTS
+    app = App.__new__(App)
+    app._auto_start_enabled = False
+    app._mission_mgr = manager
+    app._fast_game_over = False
+    app._last_wave_value = None
+    app._last_wave_conf = -1.0
+    app._status_reporter = Mock()
+    app._supervisor = Mock()
+    app._handle_daily_gem_if_due = Mock(return_value=False)
+    app._handle_mission_rewards_if_due = Mock(return_value=False)
+    setup = GcNoBattleSetupResult(
+        GcNoBattleSetupStatus.COMPLETE,
+        "ok",
+        {"cards_deck": "Tournament"},
+    )
+
+    with (
+        patch(
+            "core.app.detect_home_battle_control",
+            return_value=HomeBattleEvidence(
+                HomeBattleControl.NEW_BATTLE,
+                "test",
+                100.0,
+            ),
+        ),
+        patch("core.app.run_gc_no_battle_setup", return_value=setup) as run_setup,
+        patch("core.app.handle_home_screen") as handle_home,
+    ):
+        app._handle_primary_states("HOME_SCREEN", set(), frame)
+
+    run_setup.assert_called_once_with(TOURNAMENT_REQUIREMENTS, screenshot=frame)
+    manager.mark_no_battle_setup_complete.assert_called_once_with(setup.evidence)
+    handle_home.assert_not_called()
+    manager.on_home.assert_not_called()
 
 
 def test_app_blocks_battle_start_when_no_battle_setup_fails():

@@ -131,13 +131,20 @@ are cleared if the selected strategy changes.
 
 When a startup requirement fails, the runtime publishes the failed check,
 expected value, and allowed responses. The app opens **Startup check needs a
-decision** automatically; **Review blocked startup** reopens the current
+decision** automatically; **Review preflight decision** reopens the current
 request. **Apply choice** resolves only that request, while **Decide later**
 leaves automation blocked without changing anything. **Retry check** captures
 fresh evidence. A configured fallback or **Bypass only this check for this
 run** waives only the displayed requirement for the current run; all unrelated
 preflight checks still execute. The same pending decision is visible to the
 browser and CLI because the Linux control file remains authoritative.
+
+An attached Tournament mismatch uses the same dialog as a non-blocking
+preflight warning. **Pause for manual changes** persists Pause without ending
+the Tournament, **Retry the read-only check** captures fresh evidence, and
+**Continue despite...** waives only the displayed mismatch for the current
+run. **Decide later** leaves the warning pending while Tournament result
+observation continues.
 
 Recent Activity refreshes independently once per second, follows the newest
 entry, and defaults to the concise **Operational** levels. Use **Diagnostics**
@@ -172,6 +179,11 @@ initialization and session-preflight rules remain suppressed until Game Over,
 Tournament Results, or a verified Home **New Battle** boundary. The next battle
 then performs those gates normally. Leave the option clear when the first
 observed battle needs its startup gates immediately.
+
+The Tournament observer is the deliberate exception to session-preflight
+suppression: it performs its read-only check on the attached run so the warning
+above can report mismatches without changing configuration or blocking natural
+terminal capture.
 
 The ADB port, bundled strategy, and startup-gate policy share the managed
 Linux environment file while remaining independent settings. Changing the ADB

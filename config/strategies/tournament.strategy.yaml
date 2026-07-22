@@ -8,6 +8,9 @@ runtime_policy:
   - game_over
   auto_return: false
   game_over_mode: wait
+  home_preflight: true
+  session_preflight_on_attach: true
+  preflight_mismatch: notify
 session_preflight:
   complete_when:
   - gc_session_preflight_attempted
@@ -60,10 +63,12 @@ vars:
   gc_session_preflight_last_status: ''
   gc_session_preflight_last_reason: ''
   gc_session_preflight_evidence: {}
+  gc_session_preflight_advisory: false
 per_run_reset: []
 rules:
 - name: validate_tournament_session_preflight
   gate_phase: session_preflight
+  run_when_attached: true
   when:
     state: RUNNING
   assert:
@@ -73,6 +78,7 @@ rules:
   - type: session_preflight
     validator: tournament
     allow_repair: false
+    mismatch_policy: notify
     requirements:
       cards_deck: Tournament
       workshop_preset: Tourney
@@ -165,3 +171,6 @@ run_configuration:
     - game_over
     auto_return: false
     game_over_mode: wait
+    home_preflight: true
+    session_preflight_on_attach: true
+    preflight_mismatch: notify
