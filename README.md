@@ -82,9 +82,11 @@ default remains `farm` when `--strategy` is omitted.
 
 Mission and Guild reward collection uses the in-run menu's attention dot only
 as a reason to inspect. After opening the menu, the handler independently
-measures the Daily Missions, Event, and Guild badge slots. Every reward tap then
-requires its parent screen plus exact available artwork: Daily `CLAIM`, an
-unclaimed weekly chest, Event `CLAIM`, or a glowing Guild contribution chest.
+measures the Daily Missions and Event badge slots and anchors the Guild badge
+region to the freshly matched Guild icon, including when an active Tournament
+moves that icon. Every reward tap then requires its parent screen plus exact
+available artwork: Daily `CLAIM`, an unclaimed weekly chest, Event `CLAIM`, or
+a glowing Guild contribution chest.
 Claimed and locked chests are negatives. Reward reveals are dismissed through
 their verified `SKIP` control, Event Missions are searched with bounded guarded
 scrolling, and the handler returns to the active battle and closes the menu.

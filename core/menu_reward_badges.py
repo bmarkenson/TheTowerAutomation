@@ -8,6 +8,8 @@ from typing import Mapping, Tuple
 import cv2
 import numpy as np
 
+from core.matcher import get_match
+
 
 Region = Tuple[int, int, int, int]
 
@@ -15,8 +17,8 @@ MENU_REWARD_ALERT_REGION: Region = (945, 5, 65, 55)
 MENU_REWARD_BADGE_REGIONS: Mapping[str, Region] = {
     "daily_missions": (852, 118, 50, 55),
     "event_missions": (852, 438, 50, 55),
-    "guild_chests": (852, 542, 50, 55),
 }
+GUILD_BADGE_OFFSET_REGION: Region = (-58, -46, 50, 55)
 HOME_REWARD_BADGE_REGIONS: Mapping[str, Region] = {
     "daily_missions": (895, 220, 70, 80),
     "event_missions": (140, 600, 80, 100),
@@ -51,11 +53,24 @@ def measure_menu_reward_badges(screenshot) -> MenuRewardBadges:
 
     values = {}
     for name, region in MENU_REWARD_BADGE_REGIONS.items():
-        hsv = _hsv_crop(screenshot, region)
-        values[name] = bool(
-            hsv is not None
-            and (_red_pixels(hsv) + _purple_pixels(hsv)) >= BADGE_PIXEL_THRESHOLD
+        values[name] = _menu_badge_visible(screenshot, region)
+    guild_point = None
+    if (
+        screenshot is not None
+        and hasattr(screenshot, "shape")
+        and len(screenshot.shape) >= 2
+    ):
+        guild_point, _confidence = get_match(
+            "navigation.menu_guild",
+            screenshot=screenshot,
         )
+    values["guild_chests"] = bool(
+        guild_point is not None
+        and _menu_badge_visible(
+            screenshot,
+            _offset_region(guild_point, GUILD_BADGE_OFFSET_REGION),
+        )
+    )
     return MenuRewardBadges(**values)
 
 
@@ -90,6 +105,20 @@ def _hsv_crop(screenshot, region: Region):
     if crop.size == 0:
         return None
     return cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+
+
+def _menu_badge_visible(screenshot, region: Region) -> bool:
+    hsv = _hsv_crop(screenshot, region)
+    return bool(
+        hsv is not None
+        and (_red_pixels(hsv) + _purple_pixels(hsv)) >= BADGE_PIXEL_THRESHOLD
+    )
+
+
+def _offset_region(point: tuple[int, int], offset: Region) -> Region:
+    x, y = point
+    dx, dy, width, height = offset
+    return x + dx, y + dy, width, height
 
 
 def _red_pixels(hsv) -> int:

@@ -60,6 +60,23 @@ def test_closed_menu_attention_dot_and_open_menu_section_badges_are_distinct():
     assert not post_claim_badges.any
 
 
+def test_guild_badge_tracks_guild_icon_when_tournament_displaces_it():
+    positive = _load("running_menu_tournament_guild_badge_20260722.png")
+    negative = _load("running_menu_tournament_trophy_20260718.png")
+
+    badges = measure_menu_reward_badges(positive)
+    assert not badges.daily_missions
+    assert not badges.event_missions
+    assert badges.guild_chests
+    assert badges.any
+
+    no_badges = measure_menu_reward_badges(negative)
+    assert not no_badges.daily_missions
+    assert not no_badges.event_missions
+    assert not no_badges.guild_chests
+    assert not no_badges.any
+
+
 def test_home_daily_and_event_badges_have_distinct_positive_and_negative_evidence():
     positive = _load("home_screen_new_day_store_badge_20260713.png")
     negative = _load("home_screen_no_reward_badges_20260714.png")

@@ -83,7 +83,9 @@ Surrender, auto-return Home, or start another battle.
 In-battle side-menu destinations and Event/Guild tabs require visible template
 matches and tap the matched bounding box. Their static coordinates are not
 action authority; this is required because the Tournament Trophy control moves
-the Guild button to a different grid cell.
+the Guild button to a different grid cell. Guild reward-badge measurement uses
+that same fresh Guild match as its crop anchor, so the displaced Tournament
+layout remains observable without broadening the color detector.
 
 Natural Tournament completion is the distinct `TOURNAMENT_RESULTS` terminal
 state. Its handler OCRs league, wave, rank, death source, and the displayed coin
