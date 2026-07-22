@@ -8,6 +8,12 @@ checked-item detail remains in the
 
 ## Current validation gates
 
+- [ ] Live-validate the No Strategy two-phase inventory at the next natural Game
+  Over. Confirm the in-battle Attack Dissonance observation, full terminal
+  record, forced verified Home `NEW_BATTLE`, read-only Free Upgrade lock pass,
+  Cards hold, operator-opened Perks configuration, complete First Perk/Ban/Auto
+  Pick tab capture, update of the same battle record, and release of the next-
+  battle path. Do not Surrender or manufacture the boundary.
 - [ ] Live-validate guarded **Reload automation for current battle** on a safe
   active run. Confirm the original Pause acknowledgement and fresh `RUNNING`
   probe, distinct systemd MainPID and refreshed ADB lock, one-launch `next_run`

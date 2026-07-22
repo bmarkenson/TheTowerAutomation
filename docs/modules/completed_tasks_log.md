@@ -635,6 +635,33 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   the repository-root Linux WPF publisher also completed successfully. Live
   systemd/device validation remains explicitly pending in the runtime backlog.
 
+### 2026-07-22 No Strategy observed-run inventory
+
+- Commit `28faa29` made No Strategy a two-phase observation profile without
+  adding configured intent or strategy action authority. It passively records
+  actual selected presets, Guardian chips, Modules, Target Priority, Damage
+  Slider, Auto Pick state, and Ultimate Weapon toggles when their screens are
+  visible. Missing fields remain explicit rather than inheriting Farm or
+  Tournament values.
+- A localized purple sword badge beside Tier records Attack Dissonance identity
+  and supports high-confidence `dissonance` classification at standard Game
+  Over. Schema-version-3 battle records keep this and every other actual value
+  under `observed_run_configuration`, separate from `run_configuration`, with
+  field source, phase, confidence, and timestamp.
+- Natural No Strategy Game Over now forces full structured capture and Home.
+  Verified `NEW_BATTLE` owns a read-only inspection of the three supported Free
+  Upgrade locks, then holds Cards until the operator opens Perks configuration.
+  First Perk, Ban Perks, and Auto Pick tabs are guarded, fully scrolled, OCRed
+  in selected-row order, and backed by retained page images; uncertain results
+  stay raw instead of becoming invented settings. The same battle JSON and
+  Markdown are updated before normal Home/start handling is released.
+- Repository-wide validation passed 543 sandbox tests plus the separately
+  permitted localhost HTTP test, for 544 total. The current ignored frame read
+  1,071 badge-purple pixels against a 500-pixel threshold; eight retained
+  `RUNNING` fixtures were negative. No device input or live terminal-boundary
+  validation was used, so the complete natural Game Over path remains in the
+  runtime backlog.
+
 ---
 
 ## 📘 Documentation
