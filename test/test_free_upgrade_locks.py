@@ -107,6 +107,7 @@ def test_farm_lock_contract_rejects_missing_duplicate_and_unknown_labels():
 
 
 def test_workshop_lock_action_coordinates_are_explicit():
+    assert get_click("navigation.workshop:upgrade") == (270, 343)
     assert get_click("navigation.workshop:attack") == (135, 1685)
     assert get_click("navigation.workshop:defense") == (405, 1685)
     assert get_click("buttons.free_upgrade_lock:checkbox") == (257, 998)
@@ -130,9 +131,10 @@ def test_workshop_scan_region_finds_shockwave_above_battle_viewport():
 
 
 class _WorkshopUi:
-    def __init__(self, states):
+    def __init__(self, states, *, mode="upgrade", menu="attack"):
         self.frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
-        self.menu = "attack"
+        self.mode = mode
+        self.menu = menu
         self.detail_label = None
         self.states = dict(states)
         self.actions = []
@@ -149,7 +151,9 @@ class _WorkshopUi:
         }
 
     def measure_menu(self, _frame):
-        return None if self.detail_label else self.menu
+        if self.detail_label or self.mode != "upgrade":
+            return None
+        return self.menu
 
     def detect_boxes(self, _frame, *, menu, column_regions=None):
         assert column_regions == {
@@ -163,7 +167,7 @@ class _WorkshopUi:
         }
         result = {"left": [], "right": []}
         for label, (expected_menu, column, rect) in specs.items():
-            if menu == self.menu == expected_menu:
+            if self.mode == "upgrade" and menu == self.menu == expected_menu:
                 result[column].append(UpgradeBox(column, rect, text=label))
         return result
 
@@ -174,6 +178,9 @@ class _WorkshopUi:
 
     def tap(self, target, **kwargs):
         self.actions.append((target, kwargs.get("log_label")))
+        if target == "navigation.workshop:upgrade":
+            self.mode = "upgrade"
+            return True
         if target == "navigation.workshop:attack":
             self.menu = "attack"
             return True
@@ -197,6 +204,33 @@ class _WorkshopUi:
             self.detail_label = None
             return True
         return False
+
+
+def test_inspection_returns_from_enhance_to_upgrade_before_selecting_category():
+    ui = _WorkshopUi(
+        {label: FreeUpgradeLockState.CHECKED for label in FARM_FREE_UPGRADE_LOCKS},
+        mode="enhance",
+    )
+
+    result = inspect_free_upgrade_locks(
+        FARM_FREE_UPGRADE_LOCKS,
+        screenshot=ui.frame,
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.tap,
+        swipe_fn=lambda *_args: None,
+        detect_boxes_fn=ui.detect_boxes,
+        measure_menu_fn=ui.measure_menu,
+        measure_lock_fn=ui.measure_lock,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.evidence.valid
+    assert ui.mode == "upgrade"
+    assert [action for action, _label in ui.actions[:2]] == [
+        "navigation.workshop:upgrade",
+        "navigation.workshop:defense",
+    ]
 
 
 def test_read_only_inspection_reports_unchecked_without_toggling():

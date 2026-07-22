@@ -39,6 +39,7 @@ _WORKSHOP_MENU_ACTIONS = {
     "attack": "navigation.workshop:attack",
     "defense": "navigation.workshop:defense",
 }
+_WORKSHOP_UPGRADE_ACTION = "navigation.workshop:upgrade"
 
 _WORKSHOP_MENU_TITLE_REGION = (20, 400, 680, 90)
 _WORKSHOP_UPGRADE_COLUMN_REGIONS = {
@@ -441,8 +442,24 @@ def _select_workshop_menu(
     sleep_fn,
 ):
     current = _require_workshop(current, detector, measure_menu_fn, menu=None)
-    if measure_menu_fn(current) == menu:
+    current_menu = measure_menu_fn(current)
+    if current_menu == menu:
         return current
+    if current_menu is None:
+        if not safe_tap_fn(
+            _WORKSHOP_UPGRADE_ACTION,
+            require_visible=False,
+            dispatch="now",
+        ):
+            raise FreeUpgradeLockInspectionError(
+                "Workshop Upgrade navigation tap failed"
+            )
+        sleep_fn(0.25)
+        current = _require_workshop(
+            capture_fn(), detector, measure_menu_fn, menu=None
+        )
+        if measure_menu_fn(current) == menu:
+            return current
     if not safe_tap_fn(
         _WORKSHOP_MENU_ACTIONS[menu],
         require_visible=False,

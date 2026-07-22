@@ -1474,6 +1474,16 @@
         "navigation"
       ]
     },
+    "workshop:upgrade": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 270,
+        "y": 343
+      }
+    },
     "workshop:attack": {
       "roles": [
         "navigation"
