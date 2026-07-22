@@ -116,6 +116,42 @@ copied or OCRed from terminal stats is stored as observed evidence independently
 of strategy identity. Thus an unconfigured standard Game Over can report its
 Tier while remaining `unknown` rather than fabricating Farm or Milestone type.
 
+## No Strategy observation profile
+
+`No Strategy` supplies no configured run intent and owns no upgrade actions,
+startup initialization, or session-preflight gate. It is nevertheless an
+observation profile: after an active `RUNNING` frame establishes the battle, it
+passively accumulates actual values from already-visible Cards, Workshop, Bots,
+Guardians, Modules, Target Priority, Damage Slider, Perks, and Ultimate Weapon
+screens. Missing screens remain explicitly `not_observed`; their values are
+never copied from a Farm or Tournament profile. This evidence is stored under
+`observed_run_configuration`, separately from the configured-intent
+`run_configuration` field.
+
+The fixed purple sword badge next to Tier is localized Attack Dissonance
+identity evidence. Standard Game Over plus that badge supports a high-confidence
+`dissonance` classification; Tier without the badge still remains `unknown`.
+The observer does not probe the disabled Attack menu or treat a failed action as
+identity evidence.
+
+Home-only facts use a second phase after natural completion. No Strategy forces
+full structured Game Over capture and the Home terminal action, even if the
+process was launched with fast Game Over capture. At verified Home
+`NEW_BATTLE`, the runtime reads the three currently supported Free Upgrade lock
+details with `enforce=False`, so checkbox state is observed but never changed.
+It then opens Cards and holds all normal Home/start handling until the operator
+opens the Perks configuration panel. The runtime may select the read-only First
+Perk, Ban Perks, and Auto Pick tabs, scroll each to its verified edge, OCR the
+dark selected rows independently of the brighter available rows, close the
+panel, and revalidate Home `NEW_BATTLE`. The same battle record is atomically
+updated after the lock phase and again after Perks capture. Each field retains
+its source, confidence, phase, and observation timestamp; uncertain parsing
+retains raw page images instead of manufacturing a structured value.
+
+Pause continues to block this post-run navigation. Game Over `WAIT` must first
+receive an actionable direction; No Strategy then overrides Retry to Home so a
+new battle cannot start before its Home-only evidence is attached.
+
 ## State and battle lifecycle
 
 - Visible navigation and battle lifecycle are separate. Home
@@ -138,9 +174,9 @@ Tier while remaining `unknown` rather than fabricating Farm or Milestone type.
 - Structured Battle/Tournament JSON is the canonical completed-run artifact;
   Markdown and the control-surface report are views over that same record.
 - The record retains copied Stats rows, compact Game Stats-only fields, perks,
-  resolved configuration, observed preflight/runtime evidence, and derived
-  metrics. Consumers must read these fields instead of relying on a terminal
-  screenshot.
+  resolved configured intent, separately sourced observed run configuration,
+  observed preflight/runtime evidence, and derived metrics. Consumers must read
+  these fields instead of relying on a terminal screenshot.
 - Periodic valid Coins/min readings are stored as bounded numeric samples with
   their timestamp, wave, and OCR confidence, then attached to the completed
   record. The runtime does not maintain a separate per-run Coins CSV or toggle

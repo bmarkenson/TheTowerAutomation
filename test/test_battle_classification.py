@@ -71,6 +71,34 @@ def test_no_strategy_game_over_reports_tier_without_inventing_run_identity():
     assert "cannot distinguish" in result["reason"]
 
 
+def test_observed_attack_dissonance_identity_classifies_no_strategy_run():
+    observed = {
+        "fields": {
+            "run_identity": {
+                "status": "observed",
+                "value": {
+                    "family": "Dissonance",
+                    "subtype": "Attack",
+                    "label": "Attack Dissonance",
+                },
+            }
+        }
+    }
+
+    result = analyze_battle_type(
+        strategy_name="none",
+        run_configuration={},
+        terminal_state="GAME_OVER",
+        observed_tier=18,
+        observed_run_configuration=observed,
+    )
+
+    assert result["type"] == "dissonance"
+    assert result["label"] == "Attack Dissonance"
+    assert result["confidence"] == "high"
+    assert "observed_identity:attack_dissonance" in result["signals"]
+
+
 def test_historical_record_derives_observed_tier_from_terminal_stats():
     result = classification_for_record(
         {

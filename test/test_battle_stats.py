@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 
 from core.battle_stats import (
+    attach_observed_run_configuration,
     attach_battle_perks,
     build_battle_record,
     build_battle_record_from_clipboard,
@@ -226,7 +227,7 @@ def _record(*, source_complete=True, source_reason="edge_reached"):
 def test_battle_record_retains_resolved_run_configuration():
     record = _record()
 
-    assert record["schema_version"] == 2
+    assert record["schema_version"] == 3
     assert record["battle_type"] == "farm"
     assert record["battle_type_analysis"]["confidence"] == "high"
     assert record["runtime"]["observed_tier"] == 19
@@ -271,6 +272,94 @@ def test_no_strategy_record_retains_terminal_tier_without_guessing_type():
     assert record["runtime"]["observed_tier"] == 19
     assert record["battle_type_analysis"]["observed_tier"] == 19
     assert "Observed tier: 19" in render_battle_markdown(record)
+
+
+def test_no_strategy_record_keeps_observed_configuration_distinct_from_intent():
+    observed = {
+        "schema_version": 1,
+        "collection_mode": "no_strategy_observation",
+        "coverage": {"observed": 2, "total": 14, "complete": False},
+        "fields": {
+            "run_identity": {
+                "status": "observed",
+                "value": {
+                    "family": "Dissonance",
+                    "subtype": "Attack",
+                    "label": "Attack Dissonance",
+                },
+                "source": "tier_attack_dissonance_badge",
+                "phase": "in_battle",
+                "confidence": "high",
+                "observed_at": "2026-07-22T16:00:00-07:00",
+            },
+            "free_upgrade_locks": {
+                "status": "observed",
+                "value": {
+                    "locks": [
+                        {"label": "Shockwave Size", "state": "checked"},
+                    ]
+                },
+                "source": "home_workshop_lock_details",
+                "phase": "post_run_home",
+                "confidence": "high",
+                "observed_at": "2026-07-22T20:00:00-07:00",
+            },
+        },
+    }
+    record = build_battle_record(
+        _frame(9),
+        [_frame(1), _frame(2), _frame(3), _frame(4), _frame(5)],
+        source_complete=True,
+        source_reason="edge_reached",
+        battle_id="Battle20260715T120000-0700",
+        captured_at=datetime(2026, 7, 15, 12, 0, tzinfo=timezone.utc),
+        strategy_name="none",
+        run_configuration={},
+        runtime_context={
+            "terminal_state": "GAME_OVER",
+            "observed_run_configuration": observed,
+        },
+        data_fn=_data_fn,
+        game_stats_text_fn=_game_text,
+    )
+
+    assert record["run_configuration"] == {}
+    assert record["observed_run_configuration"] == observed
+    assert "observed_run_configuration" not in record["runtime"]
+    assert record["battle_type"] == "dissonance"
+    markdown = render_battle_markdown(record)
+    assert "Battle type: Dissonance (high confidence)" in markdown
+    assert "Run identity: Attack Dissonance" in markdown
+    assert "Free Upgrade locks: Shockwave Size=checked" in markdown
+    assert "post run home; 2026-07-22T20:00:00-07:00" in markdown
+
+
+def test_post_run_observations_refresh_previously_unknown_classification():
+    record = {
+        "battle_id": "Battle20260722T200000-0700",
+        "strategy": "none",
+        "battle_type": "unknown",
+        "battle_type_analysis": {"type": "unknown", "confidence": "low"},
+        "run_configuration": {},
+        "runtime": {"terminal_state": "GAME_OVER", "observed_tier": 18},
+    }
+    observed = {
+        "fields": {
+            "run_identity": {
+                "status": "observed",
+                "value": {
+                    "family": "Dissonance",
+                    "subtype": "Attack",
+                    "label": "Attack Dissonance",
+                },
+            }
+        }
+    }
+
+    attach_observed_run_configuration(record, observed)
+
+    assert record["battle_type"] == "dissonance"
+    assert record["battle_type_analysis"]["label"] == "Attack Dissonance"
 
 
 def test_tower_number_parser_preserves_case_sensitive_magnitudes():

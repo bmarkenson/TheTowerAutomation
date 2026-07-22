@@ -68,7 +68,7 @@ def handle_game_over(
          - else: tap "Retry"; if it fails, abort handler.
 
     Returns:
-        None — mission/handler side-effects only.
+        The structured battle record when capture succeeds, otherwise ``None``.
 
     Side effects:
         [adb] Captures screenshots in memory.
@@ -87,6 +87,7 @@ def handle_game_over(
     captured_at = datetime.now().astimezone()
     session_id = _make_session_id(captured_at.timetuple())
     battle_id = make_battle_id(captured_at)
+    completed_record = None
     log(f"Handling GAME OVER — Session: {session_id}", "INFO", console=True)
 
     if capture_stats:
@@ -114,6 +115,7 @@ def handle_game_over(
         )
         if record is not None:
             attach_battle_perks(record, perks)
+            completed_record = record
             _persist_battle_stats_record(
                 record,
                 session_id=session_id,
@@ -158,7 +160,7 @@ def handle_game_over(
                 source_complete = False
                 source_reason = f"top_{top.reason}"
 
-            _save_battle_stats_record(
+            completed_record = _save_battle_stats_record(
                 battle_id=battle_id,
                 session_id=session_id,
                 game_stats_frame=img_game_stats,
@@ -201,6 +203,7 @@ def handle_game_over(
             return _abort_handler("Retry Game", session_id)
 
     time.sleep(2)
+    return completed_record
 
 
 def _wait_for_game_over_direction(
@@ -433,7 +436,7 @@ def _save_battle_stats_record(
     captured_at: Optional[datetime] = None,
     perks: Optional[Mapping[str, Any]] = None,
     perks_frames=(),
-) -> None:
+) -> Optional[dict[str, Any]]:
     """Persist OCR output and retain source images only for uncertain records."""
 
     context = dict(battle_context or {})
@@ -460,7 +463,7 @@ def _save_battle_stats_record(
             more_stats_frames=more_stats_frames,
             perks_frames=perks_frames,
         )
-        return
+        return record
     except Exception as exc:
         log(f"[BATTLE_STATS] Structured capture failed: {exc}", "ERROR", console=True)
 
@@ -469,6 +472,7 @@ def _save_battle_stats_record(
         save_image(frame, f"{session_id}_more_stats_{index}_OCR_EVIDENCE")
     for index, frame in enumerate(perks_frames, start=1):
         save_image(frame, f"{session_id}_perks_{index}_OCR_EVIDENCE")
+    return None
 
 
 def _persist_battle_stats_record(

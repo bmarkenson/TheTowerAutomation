@@ -30,6 +30,37 @@ MIN_FULL_ROW_HEIGHT = 150
 DEFAULT_CONFIDENCE_THRESHOLD = 80.0
 
 
+def ocr_perk_rows(
+    frame: Frame,
+    *,
+    text_fn: Optional[PerkTextFn] = None,
+) -> list[dict[str, Any]]:
+    """OCR visible perk tiles and retain their background brightness evidence."""
+
+    recognize = text_fn or _ocr_perk_text
+    rows = []
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    for top, bottom in _perk_row_regions(frame):
+        crop = frame[top : bottom + 1, PERK_TEXT_X1:PERK_TEXT_X2]
+        raw_text, confidence = recognize(crop)
+        raw_text = " ".join(str(raw_text or "").split())
+        if not raw_text:
+            continue
+        background = hsv[top : bottom + 1, PERKS_X1:PERKS_X2, 2]
+        rows.append(
+            {
+                "top": top,
+                "bottom": bottom,
+                "text_raw": raw_text,
+                "display_text": _normalize_perk_ocr(raw_text),
+                "key": _slug(_normalize_perk_ocr(raw_text)),
+                "confidence": round(float(confidence), 1),
+                "background_value_median": float(np.median(background)),
+            }
+        )
+    return rows
+
+
 def ocr_selected_perks(
     frames: Sequence[Frame],
     *,
@@ -265,5 +296,6 @@ def _slug(text: str) -> str:
 
 __all__ = [
     "DEFAULT_CONFIDENCE_THRESHOLD",
+    "ocr_perk_rows",
     "ocr_selected_perks",
 ]

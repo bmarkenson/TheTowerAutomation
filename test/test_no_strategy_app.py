@@ -1,0 +1,130 @@
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import numpy as np
+
+from automation.missions.base import MissionContext
+from core.app import App
+
+
+def _app_without_strategy():
+    app = App.__new__(App)
+    app._mission_mgr = MagicMock()
+    app._mission_mgr.strategy = None
+    app._mission_mgr.ctx = MissionContext(data={"mission_vars": {}})
+    app._mission_mgr.session_preflight_repair_in_progress.return_value = False
+    app._fast_game_over = True
+    app._last_wave_value = 2470
+    app._last_wave_conf = 99.0
+    app._supervisor = MagicMock()
+    app._status_reporter = MagicMock()
+    app._status_reporter.coin_rate_samples = []
+    app._pending_strategy_request = None
+    app._strategy_boundary_confirmed = False
+    app._handle_daily_gem_if_due = MagicMock(return_value=False)
+    app._handle_mission_rewards_if_due = MagicMock(return_value=False)
+    app._apply_pending_strategy = MagicMock()
+    app._no_strategy_observer = MagicMock()
+    app._no_strategy_observer.snapshot.return_value = {
+        "fields": {"run_identity": {"status": "observed"}}
+    }
+    app._no_strategy_observation_active = True
+    app._pending_no_strategy_record = None
+    app._no_strategy_post_run_stage = None
+    app._no_strategy_post_run_retry_at = 0.0
+    return app
+
+
+def test_no_strategy_game_over_forces_full_capture_and_home_inventory():
+    app = _app_without_strategy()
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    record = {"battle_id": "Battle1"}
+
+    with patch("core.app.handle_game_over", return_value=record) as game_over:
+        app._handle_primary_states("GAME_OVER", set(), frame)
+
+    kwargs = game_over.call_args.kwargs
+    assert kwargs["capture_stats"] is True
+    assert kwargs["return_home_after_battle"] is True
+    assert kwargs["battle_context"]["strategy"] is None
+    assert kwargs["battle_context"]["observed_run_configuration"] == {
+        "fields": {"run_identity": {"status": "observed"}}
+    }
+    assert app._pending_no_strategy_record is record
+    assert app._no_strategy_post_run_stage == "locks"
+
+
+def test_post_run_home_records_locks_then_holds_on_cards_for_perks():
+    app = _app_without_strategy()
+    app._pending_no_strategy_record = {"battle_id": "Battle1"}
+    app._no_strategy_post_run_stage = "locks"
+    app._persist_pending_no_strategy_record = MagicMock()
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    restored = np.ones((1920, 1080, 3), dtype=np.uint8)
+    lock_result = SimpleNamespace(
+        values={"locks": [{"label": "Shockwave Size", "state": "checked"}]},
+        home_screenshot=restored,
+    )
+
+    with (
+        patch(
+            "core.app.inspect_post_run_free_upgrade_locks",
+            return_value=lock_result,
+        ),
+        patch("core.app.open_cards_for_post_run_perk_capture") as open_cards,
+    ):
+        handled = app._handle_no_strategy_post_run("HOME_SCREEN", frame)
+
+    assert handled is True
+    app._no_strategy_observer.record_post_run_value.assert_called_once_with(
+        "free_upgrade_locks",
+        lock_result.values,
+        source="home_workshop_lock_details",
+    )
+    app._persist_pending_no_strategy_record.assert_called_once_with(finalized=False)
+    open_cards.assert_called_once_with(restored)
+    assert app._no_strategy_post_run_stage == "awaiting_perks"
+
+
+def test_post_run_perk_capture_finalizes_same_record_and_releases_boundary():
+    app = _app_without_strategy()
+    app._pending_no_strategy_record = {"battle_id": "Battle1"}
+    app._no_strategy_post_run_stage = "awaiting_perks"
+    app._persist_pending_no_strategy_record = MagicMock()
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    capture = SimpleNamespace(
+        fields={
+            "perk_first_choice": {"evidence_images": ["first.png"]},
+            "perk_bans": {"evidence_images": ["bans.png"]},
+            "perk_auto_pick_order": {"evidence_images": ["order.png"]},
+        }
+    )
+
+    with (
+        patch("core.app.is_visible", return_value=True),
+        patch(
+            "core.app.capture_post_run_perk_configuration",
+            return_value=capture,
+        ),
+    ):
+        handled = app._handle_no_strategy_post_run("PERKS", frame)
+
+    assert handled is True
+    assert app._no_strategy_observer.record_post_run_evidence.call_count == 3
+    app._persist_pending_no_strategy_record.assert_called_once_with(finalized=True)
+    app._no_strategy_observer.reset.assert_called_once_with()
+    assert app._pending_no_strategy_record is None
+    assert app._no_strategy_post_run_stage is None
+    assert app._no_strategy_observation_active is False
+
+
+def test_pending_post_run_inventory_blocks_normal_home_handler():
+    app = _app_without_strategy()
+    app._pending_no_strategy_record = {"battle_id": "Battle1"}
+    app._handle_no_strategy_post_run = MagicMock(return_value=True)
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+    with patch("core.app.handle_home_screen") as home:
+        app._handle_primary_states("HOME_SCREEN", set(), frame)
+
+    home.assert_not_called()

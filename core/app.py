@@ -21,6 +21,19 @@ from core.daily_gem_scheduler import DailyGemScheduler
 from core.event_mission_tracker import EventMissionTracker, format_warning
 from core.home_battle import detect_home_battle_control
 from core.battle_lifecycle import HomeBattleControl
+from core.battle_stats import (
+    attach_observed_run_configuration,
+    persist_battle_record,
+)
+from core.label_tapper import is_visible
+from core.no_strategy_observer import NoStrategyRunObserver
+from core.no_strategy_post_run import (
+    NoStrategyPostRunError,
+    PERK_CONFIGURATION_INDICATOR,
+    capture_post_run_perk_configuration,
+    inspect_post_run_free_upgrade_locks,
+    open_cards_for_post_run_perk_capture,
+)
 from core.gc_no_battle_setup import run_gc_no_battle_setup
 from core.gate_decisions import (
     build_gate_decision_options,
@@ -131,6 +144,11 @@ class App:
         self._last_wave_ts: float = 0.0
         self._blind_tapper_suspended = False
         self._tournament_results_captured = False
+        self._no_strategy_observer = NoStrategyRunObserver()
+        self._no_strategy_observation_active = False
+        self._pending_no_strategy_record: Optional[Dict[str, Any]] = None
+        self._no_strategy_post_run_stage: Optional[str] = None
+        self._no_strategy_post_run_retry_at = 0.0
         self._run_initialization_gate_logged = False
         self._session_preflight_gate_logged = False
         self._session_preflight_terminal_blocked_logged = False
@@ -611,6 +629,8 @@ class App:
                         "DEBUG",
                     )
 
+                self._observe_no_strategy_frame(img, detection)
+
                 self._process_strategy_boundary(detection)
 
                 # Update battle identity independently of screen navigation,
@@ -967,6 +987,124 @@ class App:
             console=True,
         )
 
+    def _observe_no_strategy_frame(
+        self,
+        img: Frame,
+        detection: Mapping[str, Any],
+    ) -> None:
+        """Passively accumulate actual values without acquiring tap authority."""
+
+        state = str(detection.get("state") or "UNKNOWN")
+        pending = getattr(self, "_pending_no_strategy_record", None) is not None
+        if not pending and self._current_strategy_name() != "none":
+            return
+        if state == "RUNNING":
+            self._no_strategy_observation_active = True
+        if not self._no_strategy_observation_active and not pending:
+            return
+        phase = "post_run_home" if pending else "in_battle"
+        try:
+            self._no_strategy_observer.observe(img, detection, phase=phase)
+        except Exception as exc:
+            log(f"[NO_STRATEGY] Passive observation failed: {exc}", "WARN")
+
+    def _persist_pending_no_strategy_record(self, *, finalized: bool) -> None:
+        record = self._pending_no_strategy_record
+        if record is None:
+            return
+        snapshot = self._no_strategy_observer.snapshot(finalized=finalized)
+        attach_observed_run_configuration(record, snapshot)
+        json_path, markdown_path = persist_battle_record(record)
+        log(
+            f"[NO_STRATEGY] Updated battle observation record: {json_path} "
+            f"(view: {markdown_path})",
+            "INFO",
+            console=True,
+        )
+
+    def _handle_no_strategy_post_run(
+        self,
+        new_state: str,
+        img: Frame,
+    ) -> bool:
+        """Hold the no-battle boundary until Home-only evidence is recorded."""
+
+        record = getattr(self, "_pending_no_strategy_record", None)
+        if record is None:
+            return False
+        if time.time() < getattr(self, "_no_strategy_post_run_retry_at", 0.0):
+            return True
+        stage = getattr(self, "_no_strategy_post_run_stage", None)
+        try:
+            if stage == "locks" and new_state == "HOME_SCREEN":
+                lock_result = inspect_post_run_free_upgrade_locks(img)
+                self._no_strategy_observer.record_post_run_value(
+                    "free_upgrade_locks",
+                    lock_result.values,
+                    source="home_workshop_lock_details",
+                )
+                self._persist_pending_no_strategy_record(finalized=False)
+                open_cards_for_post_run_perk_capture(lock_result.home_screenshot)
+                self._no_strategy_post_run_stage = "awaiting_perks"
+                self._no_strategy_post_run_retry_at = 0.0
+                return True
+
+            if (
+                stage == "awaiting_perks"
+                and new_state == "PERKS"
+                and is_visible(PERK_CONFIGURATION_INDICATOR, screenshot=img)
+            ):
+                capture = capture_post_run_perk_configuration(
+                    img,
+                    battle_id=str(record.get("battle_id") or "Battle"),
+                )
+                for field, value in capture.fields.items():
+                    quality = value.get("quality") if isinstance(value, Mapping) else None
+                    if isinstance(quality, Mapping) and quality.get("valid") is True:
+                        self._no_strategy_observer.record_post_run_value(
+                            field,
+                            value,
+                            source="home_perks_configuration_tabs",
+                        )
+                    else:
+                        self._no_strategy_observer.record_post_run_evidence(
+                            field,
+                            value,
+                            source="home_perks_configuration_tabs",
+                        )
+                self._persist_pending_no_strategy_record(finalized=True)
+                self._pending_no_strategy_record = None
+                self._no_strategy_post_run_stage = None
+                self._no_strategy_post_run_retry_at = 0.0
+                self._no_strategy_observation_active = False
+                self._no_strategy_observer.reset()
+                log(
+                    "[NO_STRATEGY] Post-run inventory complete; the next-battle "
+                    "path is released",
+                    "INFO",
+                    console=True,
+                )
+                return True
+        except NoStrategyPostRunError as exc:
+            self._no_strategy_post_run_retry_at = time.time() + 60.0
+            log(
+                f"[NO_STRATEGY] Post-run inventory is still holding the next "
+                f"battle: {exc}. It will retry after 60 seconds.",
+                "WARN",
+                console=True,
+            )
+            return True
+        except Exception as exc:
+            self._no_strategy_post_run_retry_at = time.time() + 60.0
+            log(
+                f"[NO_STRATEGY] Could not persist post-run inventory: {exc}. "
+                "The next battle remains held.",
+                "ERROR",
+                console=True,
+            )
+            return True
+        return True
+
     def _handle_primary_states(
         self,
         new_state: str,
@@ -974,6 +1112,8 @@ class App:
         img: Frame,
     ) -> None:
         """Dispatch handlers for top-level UI states and overlay-driven events."""
+        if self._handle_no_strategy_post_run(new_state, img):
+            return
         if new_state == "RUNNING":
             self._tournament_results_captured = False
         if (
@@ -1050,6 +1190,12 @@ class App:
         if new_state == "GAME_OVER" and self._handler_enabled("game_over"):
             log("Detected GAME_OVER. Executing handler.", "INFO", console=True)
             strategy = self._mission_mgr.strategy
+            no_strategy_run = strategy is None
+            observed_run_configuration = (
+                self._no_strategy_observer.snapshot()
+                if no_strategy_run
+                else {}
+            )
             if self._runtime_policy().get("game_over_mode") == "wait":
                 if not self._supervisor.persist_mode("WAIT"):
                     # Preserve the safe in-memory behavior even if the control
@@ -1080,11 +1226,11 @@ class App:
                 self._supervisor.apply_control()
                 self._observe_strategy_request()
 
-            handle_game_over(
-                capture_stats=(not self._fast_game_over),
+            completed_record = handle_game_over(
+                capture_stats=(not self._fast_game_over or no_strategy_run),
                 control_sync=sync_terminal_control,
                 before_terminal_action=finalize_run_boundary,
-                return_home_after_battle=repair_in_progress,
+                return_home_after_battle=(repair_in_progress or no_strategy_run),
                 battle_context={
                     "strategy": strategy.name if strategy else None,
                     "terminal_state": "GAME_OVER",
@@ -1094,6 +1240,7 @@ class App:
                     "last_wave": self._last_wave_value,
                     "last_wave_confidence": self._last_wave_conf,
                     "coin_rate_samples": self._status_reporter.coin_rate_samples,
+                    "observed_run_configuration": observed_run_configuration,
                     "session_preflight_evidence": dict(
                         self._mission_mgr.ctx.data.get("mission_vars", {}).get(
                             "gc_session_preflight_evidence",
@@ -1103,6 +1250,25 @@ class App:
                 },
             )
             finalize_run_boundary()
+            if no_strategy_run and completed_record is not None:
+                self._pending_no_strategy_record = completed_record
+                self._no_strategy_post_run_stage = "locks"
+                self._no_strategy_post_run_retry_at = 0.0
+                log(
+                    "[NO_STRATEGY] Battle record is awaiting read-only Home "
+                    "inventory before another battle may start",
+                    "INFO",
+                    console=True,
+                )
+            elif no_strategy_run:
+                log(
+                    "[NO_STRATEGY] Structured Game Over capture failed; post-run "
+                    "inventory was not attached",
+                    "ERROR",
+                    console=True,
+                )
+                self._no_strategy_observation_active = False
+                self._no_strategy_observer.reset()
         elif new_state == "HOME_SCREEN":
             home_handler_enabled = self._handler_enabled("home")
             home_preflight_enabled = bool(

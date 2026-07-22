@@ -296,6 +296,58 @@ restart cannot silently restore the old strategy. A strategy acknowledgement,
 not the accepted API response alone, is evidence that the live runtime applied
 the request.
 
+### No Strategy run inventory
+
+Use `none` when the purpose of a battle is to discover and preserve the actual
+configuration rather than assert a known profile. `No Strategy` still runs the
+normal general handlers, but it has no strategy upgrade actions or startup/
+session gates. Its observer never fills a missing value from Farm,
+Tournament, Tier, or another expected profile.
+
+During the battle:
+
+1. Start or attach the managed runtime with strategy `none`. If you want to
+   navigate the game manually without racing general handlers, Pause first;
+   passive frame observation continues while paused.
+2. Leave each setting screen visible through at least one normal capture cycle.
+   The observer can read selected Cards, Workshop, and Bots slots; equipped
+   Guardian chips and Modules; Target Priority; Damage Slider; Auto Pick state;
+   and Ultimate Weapon toggles from the applicable visible panels. It merges
+   repeated Ultimate Weapon scroll positions.
+3. The purple sword badge beside Tier records `Attack Dissonance` identity.
+   Tier by itself still does not identify a Farm, Milestone, or Dissonance run.
+4. Return to the battle and Resume when automation actions should continue.
+   Fields whose screens were never observed remain explicitly unobserved in the
+   final record.
+
+At natural Game Over, No Strategy always performs the full structured capture;
+`--fast-game-over` does not suppress this inventory record. If mode is `WAIT`,
+select an actionable Game Over direction and keep the runtime resumed. The
+No Strategy terminal policy uses Home regardless of Retry so the following
+post-run sequence occurs before any new battle:
+
+1. Require verified Home `NEW_BATTLE`.
+2. Open Workshop and inspect Shockwave Size, Bounce Shot Targets, and Bounce
+   Shot Range lock details with read-only `enforce=False`; no checkbox is
+   changed.
+3. Return Home, open Cards, and hold the normal Home/start handler. The Perks
+   configuration entry itself remains an operator action because it does not
+   yet have an independently verified runtime control. Open that panel manually.
+4. The runtime selects and captures First Perk, Ban Perks, and Auto Pick tabs,
+   scrolls each complete list, OCRs selected rows in display/priority order,
+   closes the panel, and revalidates Home `NEW_BATTLE`.
+5. The original `logs/battles/Battle*.json` and `.md` are updated atomically;
+   Perks page evidence is retained under
+   `logs/battle_observations/<battle-id>/perk_configuration/`. Only then is the
+   next-battle path released.
+
+Every observation records source, in-battle or post-run phase, confidence, and
+timestamp. A complete but uncertain Perks capture is kept as raw page evidence
+and reported as pending interpretation rather than accepted as a setting. A
+Pause blocks all post-run navigation, and a failed step leaves the next battle
+held with a logged reason and a bounded retry instead of skipping the evidence
+boundary.
+
 The API also verifies that the installed unit advertises this file through
 systemd. If it reports that the unit does not load the file, copy the current
 checked-in automation unit over the installed user unit and run
@@ -387,10 +439,13 @@ the API, authority boundaries, and planned capabilities.
 - Runtime actions and state: `logs/actions.log`
 - Persistent control: `logs/automation_ctl.json`
 - Per-battle records: `logs/battles/Battle*.json` and `Battle*.md`
+- No Strategy post-run Perks pages:
+  `logs/battle_observations/<battle-id>/perk_configuration/`
 - Tournament records: `logs/tournaments/Tournament*.json` and `Tournament*.md`
 - Terminal Stats Tier is retained as observed evidence independently of the
   configured strategy. It can identify the Tier of an unconfigured Game Over,
-  but it cannot by itself distinguish Farm from a manual or Milestone run.
+  but it cannot by itself distinguish Farm from a manual or Milestone run. The
+  localized purple sword badge can independently identify Attack Dissonance.
 - During-run Coins/min progression: embedded numeric samples in the applicable
   completed record (not a separate CSV or screenshot series)
 - Failure/OCR evidence: `screenshots/matches/`

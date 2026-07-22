@@ -29,7 +29,7 @@ except Exception:  # pragma: no cover - exercised through the unavailable path
 Frame = np.ndarray
 OcrDataFn = Callable[[Frame], Mapping[str, Sequence[Any]]]
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DEFAULT_RECORDS_DIR = Path("logs/battles")
 MORE_STATS_CROP = (140, 330, 800, 1370)
 GAME_STATS_CROP = (40, 400, 995, 1110)
@@ -585,6 +585,7 @@ def _assemble_battle_record(
         "coin_breakdown": coin_breakdown,
     }
     runtime = dict(runtime_context or {})
+    observed_run_configuration = runtime.pop("observed_run_configuration", None)
     observed_tier = observed_tier_for_record(
         {
             "runtime": runtime,
@@ -600,6 +601,11 @@ def _assemble_battle_record(
         terminal_state=runtime.get("terminal_state"),
         record_id=battle_id,
         observed_tier=observed_tier,
+        observed_run_configuration=(
+            observed_run_configuration
+            if isinstance(observed_run_configuration, Mapping)
+            else None
+        ),
     )
     record = {
         "schema_version": SCHEMA_VERSION,
@@ -613,6 +619,10 @@ def _assemble_battle_record(
         "game_stats": game_stats,
         "more_stats": more_stats,
     }
+    if isinstance(observed_run_configuration, Mapping):
+        record["observed_run_configuration"] = copy.deepcopy(
+            dict(observed_run_configuration)
+        )
     record["derived"] = derive_battle_stats(record)
     identity = compare_battle_identity(game_stats, more_stats)
     warnings = list(more_stats["quality"]["warnings"])
@@ -800,6 +810,30 @@ def attach_battle_perks(
     record["quality"]["valid"] = False
     record["quality"]["retain_source_images"] = True
     record["quality"]["warnings"].extend(warnings)
+    return record
+
+
+def attach_observed_run_configuration(
+    record: dict[str, Any],
+    observed_run_configuration: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Attach actual-value evidence and refresh evidence-based run identity."""
+
+    observed = copy.deepcopy(dict(observed_run_configuration))
+    record["observed_run_configuration"] = observed
+    runtime = record.get("runtime")
+    terminal_state = runtime.get("terminal_state") if isinstance(runtime, Mapping) else None
+    configured = record.get("run_configuration")
+    classification = analyze_battle_type(
+        strategy_name=record.get("strategy"),
+        run_configuration=(configured if isinstance(configured, Mapping) else {}),
+        terminal_state=terminal_state,
+        record_id=str(record.get("battle_id") or ""),
+        observed_tier=observed_tier_for_record(record),
+        observed_run_configuration=observed,
+    )
+    record["battle_type"] = classification["type"]
+    record["battle_type_analysis"] = classification
     return record
 
 
@@ -997,6 +1031,65 @@ def render_battle_markdown(record: Mapping[str, Any]) -> str:
                     "resolved: " + " > ".join(str(value) for value in resolved)
                 )
             lines.append(f"- {label}: " + "; ".join(details))
+
+    observed_configuration = record.get("observed_run_configuration") or {}
+    if isinstance(observed_configuration, Mapping) and observed_configuration:
+        lines.extend(["", "## Observed Run Configuration", ""])
+        coverage = observed_configuration.get("coverage") or {}
+        if isinstance(coverage, Mapping):
+            lines.append(
+                "Coverage: "
+                f"{coverage.get('observed', 0)} interpreted + "
+                f"{coverage.get('evidence_captured', 0)} raw-evidence / "
+                f"{coverage.get('total', 0)} fields"
+            )
+        fields = observed_configuration.get("fields") or {}
+        labels = {
+            "run_identity": "Run identity",
+            "cards_deck": "Cards deck",
+            "workshop_preset": "Workshop preset",
+            "free_upgrade_locks": "Free Upgrade locks",
+            "bots_preset": "Bots preset",
+            "guardian_chips": "Guardian chips",
+            "modules": "Modules",
+            "target_priority": "Target Priority",
+            "damage_slider": "Damage Slider",
+            "auto_pick_perks": "Auto Pick Perks",
+            "perk_first_choice": "First Perk",
+            "perk_bans": "Banned Perks",
+            "perk_auto_pick_order": "Auto Pick order",
+            "ultimate_weapons": "Ultimate Weapons",
+        }
+        not_observed = []
+        if isinstance(fields, Mapping):
+            for key, label in labels.items():
+                evidence = fields.get(key)
+                if not isinstance(evidence, Mapping):
+                    not_observed.append(label)
+                    continue
+                status = evidence.get("status")
+                if status == "evidence_captured":
+                    value = evidence.get("value")
+                    paths = value.get("evidence_images") if isinstance(value, Mapping) else None
+                    rendered_paths = ", ".join(str(path) for path in paths or ())
+                    lines.append(
+                        f"- {label}: raw evidence captured; structured interpretation "
+                        f"pending ({rendered_paths or 'no image path'})"
+                    )
+                    continue
+                if status != "observed":
+                    not_observed.append(label)
+                    continue
+                value = _render_observed_value(key, evidence.get("value"))
+                phase = str(evidence.get("phase") or "unknown phase").replace("_", " ")
+                observed_at = evidence.get("observed_at") or "unknown time"
+                confidence = evidence.get("confidence") or "unknown confidence"
+                lines.append(
+                    f"- {label}: {value} "
+                    f"({confidence}; {phase}; {observed_at})"
+                )
+        if not_observed:
+            lines.append("- Not observed: " + ", ".join(not_observed))
     lines.extend(["", "## Derived", ""])
     derived = record.get("derived", {})
     if derived:
@@ -1726,6 +1819,70 @@ def _display_source_method(source_method: str) -> str:
     return "scrolling screenshot OCR"
 
 
+def _render_observed_value(field: str, value: Any) -> str:
+    """Render compact actual-value evidence without implying configured intent."""
+
+    if field == "run_identity" and isinstance(value, Mapping):
+        return str(value.get("label") or "unknown")
+    if field in {"cards_deck", "workshop_preset", "bots_preset"} and isinstance(
+        value, Mapping
+    ):
+        label = value.get("label")
+        slot = value.get("slot")
+        return str(label or f"selected slot {slot or 'unknown'}")
+    if field == "free_upgrade_locks" and isinstance(value, Mapping):
+        locks = value.get("locks")
+        if isinstance(locks, Sequence) and not isinstance(locks, (str, bytes)):
+            return "; ".join(
+                f"{item.get('label', 'unknown')}={item.get('state', 'unknown')}"
+                if isinstance(item, Mapping)
+                else str(item)
+                for item in locks
+            )
+    if field == "modules" and isinstance(value, Sequence) and not isinstance(
+        value, (str, bytes)
+    ):
+        return "; ".join(
+            f"{item.get('slot_key', 'slot')}="
+            f"{item.get('name') or item.get('status', 'unknown')}"
+            if isinstance(item, Mapping)
+            else str(item)
+            for item in value
+        )
+    if field == "damage_slider" and isinstance(value, Mapping):
+        return f"{value.get('mode', 'unknown')} {value.get('percentage', 'unknown')}"
+    if field == "auto_pick_perks" and isinstance(value, Mapping):
+        enabled = value.get("enabled")
+        return "enabled" if enabled is True else "disabled" if enabled is False else "unknown"
+    if field in {
+        "perk_first_choice",
+        "perk_bans",
+        "perk_auto_pick_order",
+    } and isinstance(value, Mapping):
+        selected = value.get("selected")
+        if isinstance(selected, Sequence) and not isinstance(selected, (str, bytes)):
+            labels = [
+                str(item.get("display_text") or "unknown")
+                if isinstance(item, Mapping)
+                else str(item)
+                for item in selected
+            ]
+            return " > ".join(labels) if labels else "none"
+    if field == "ultimate_weapons" and isinstance(value, Mapping):
+        return "; ".join(
+            f"{weapon}: "
+            + ", ".join(f"{name}={state}" for name, state in toggles.items())
+            if isinstance(toggles, Mapping)
+            else f"{weapon}: {toggles}"
+            for weapon, toggles in value.items()
+        )
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return " > ".join(str(item) for item in value)
+    if isinstance(value, Mapping):
+        return ", ".join(f"{key}={item}" for key, item in value.items())
+    return str(value)
+
+
 def _display_row_quality(row: Mapping[str, Any]) -> str:
     if row.get("source") == "android_clipboard":
         return "exact clipboard text"
@@ -1782,6 +1939,7 @@ __all__ = [
     "DEFAULT_RECORDS_DIR",
     "SCHEMA_VERSION",
     "attach_battle_perks",
+    "attach_observed_run_configuration",
     "build_battle_record",
     "build_battle_record_from_clipboard",
     "compare_battle_identity",

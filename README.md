@@ -79,8 +79,17 @@ For a gate-free experiment, select the no-strategy mode explicitly:
 This keeps the regular capture, detection, lifecycle, Game Over, Home, ad-gem,
 Daily Gem, Daily/Event Mission reward, Guild chest, floating-gem, status, and
 recovery handlers running. It loads no Farm strategy, so there are no strategy
-upgrade actions, new-run initialization gate, or session-preflight gate. The
-default remains `farm` when `--strategy` is omitted.
+upgrade actions, new-run initialization gate, or session-preflight gate. While
+an active battle is visible, it passively records actual settings from any
+configuration panel the operator opens; it never substitutes a familiar Farm
+profile for missing evidence. At natural Game Over it captures the full battle
+record, returns to verified no-battle Home, reads the supported Free Upgrade
+locks without changing them, and holds the next-battle path on Cards until the
+operator opens Perks configuration. It then captures First Perk, Ban Perks, and
+Auto Pick order, updates the same battle JSON/Markdown, and releases Home. See
+[`docs/runtime_operations.md`](docs/runtime_operations.md#no-strategy-run-inventory)
+for the exact workflow. The default remains `farm` when `--strategy` is
+omitted.
 
 Mission and Guild reward collection uses the in-run menu's attention dot only
 as a reason to inspect. After opening the menu, the handler independently
@@ -185,8 +194,11 @@ does not buy upgrades, repair configuration, Surrender, auto-return Home, enter
 a Tournament, or start a normal battle. Terminal records identify Tournament
 from the distinct Tournament Results screen and retain the Tier observed in
 terminal stats even when no reliable strategy identity was attached. A standard
-Game Over with no strategy remains type `unknown`; Tier alone is not used to
-invent Farm or Milestone identity.
+Game Over with no strategy remains type `unknown` when Tier is the only identity
+evidence; Tier alone is not used to invent Farm or Milestone identity. A
+localized Attack Dissonance sword badge is independent observed identity
+evidence, so a no-strategy Game Over carrying that evidence is classified as
+`dissonance`.
 
 ## Battle statistics
 
@@ -196,8 +208,9 @@ OCR into one durable record. Each battle produces:
 
 - `logs/battles/Battle*.json` — the authoritative versioned source record,
   including named sections/rows, exact copied text, OCR evidence, ordered
-  perks, strategy/runtime context, resolved run configuration, derived values,
-  and timestamped/wave-indexed Coins/min progression samples;
+  perks, strategy/runtime context, resolved run configuration, separately
+  sourced observed run configuration, derived values, and
+  timestamped/wave-indexed Coins/min progression samples;
 - `logs/battles/Battle*.md` — a human-readable view of the same battle,
   including the resolved loadout policies, presets, and values.
 

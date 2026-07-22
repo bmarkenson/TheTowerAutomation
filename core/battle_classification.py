@@ -5,7 +5,13 @@ from __future__ import annotations
 from typing import Any, Mapping, Optional
 
 
-KNOWN_BATTLE_TYPES = {"farm", "tournament", "milestone", "unknown"}
+KNOWN_BATTLE_TYPES = {
+    "farm",
+    "tournament",
+    "milestone",
+    "dissonance",
+    "unknown",
+}
 
 
 def analyze_battle_type(
@@ -15,6 +21,7 @@ def analyze_battle_type(
     terminal_state: Optional[str] = None,
     record_id: Optional[str] = None,
     observed_tier: object = None,
+    observed_run_configuration: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
     """Classify a completed run without treating shared settings as identity.
 
@@ -31,6 +38,14 @@ def analyze_battle_type(
     terminal = str(terminal_state or "").strip().upper()
     identifier = str(record_id or "")
     tier = _normalize_observed_tier(observed_tier)
+    observed_identity = _observed_run_identity(observed_run_configuration)
+    observed_identity_label = str(observed_identity.get("label") or "").strip()
+    observed_identity_family = str(
+        observed_identity.get("family") or ""
+    ).strip().lower()
+    observed_identity_subtype = str(
+        observed_identity.get("subtype") or ""
+    ).strip().lower()
 
     signals: list[str] = []
     if terminal:
@@ -55,11 +70,24 @@ def analyze_battle_type(
         signals.append("strategy_identity:farm")
     if tournament_identity:
         signals.append("shared_loadout_identity:tournament_or_milestone")
+    attack_dissonance = (
+        observed_identity_family == "dissonance"
+        and observed_identity_subtype == "attack"
+    )
+    if attack_dissonance:
+        signals.append("observed_identity:attack_dissonance")
 
     if terminal == "TOURNAMENT_RESULTS":
         kind = "tournament"
         confidence = "high"
         reason = "The distinct Tournament Results terminal screen was detected."
+    elif terminal == "GAME_OVER" and attack_dissonance:
+        kind = "dissonance"
+        confidence = "high"
+        reason = (
+            "The run ended at Game Over after the fixed Tier badge identified "
+            "the Attack Dissonance modifier."
+        )
     elif terminal == "GAME_OVER" and farm_identity:
         kind = "farm"
         confidence = "high"
@@ -92,7 +120,11 @@ def analyze_battle_type(
 
     return {
         "type": kind,
-        "label": kind.title(),
+        "label": (
+            observed_identity_label or "Dissonance"
+            if kind == "dissonance"
+            else kind.title()
+        ),
         "confidence": confidence,
         "reason": reason,
         "signals": signals,
@@ -106,7 +138,20 @@ def classification_for_record(record: Mapping[str, Any]) -> dict[str, Any]:
     stored_type = str(record.get("battle_type") or "").strip().lower()
     stored_analysis = record.get("battle_type_analysis")
     observed_tier = observed_tier_for_record(record)
-    if stored_type in KNOWN_BATTLE_TYPES and isinstance(stored_analysis, Mapping):
+    observed_configuration = record.get("observed_run_configuration")
+    observed_identity = _observed_run_identity(
+        observed_configuration if isinstance(observed_configuration, Mapping) else None
+    )
+    needs_observed_reanalysis = bool(
+        stored_type == "unknown"
+        and str(observed_identity.get("family") or "").strip().lower()
+        == "dissonance"
+    )
+    if (
+        stored_type in KNOWN_BATTLE_TYPES
+        and isinstance(stored_analysis, Mapping)
+        and not needs_observed_reanalysis
+    ):
         result = dict(stored_analysis)
         result["type"] = stored_type
         result.setdefault("label", stored_type.title())
@@ -129,7 +174,27 @@ def classification_for_record(record: Mapping[str, Any]) -> dict[str, Any]:
         terminal_state=terminal_state,
         record_id=str(record_id or ""),
         observed_tier=observed_tier,
+        observed_run_configuration=(
+            observed_configuration
+            if isinstance(observed_configuration, Mapping)
+            else None
+        ),
     )
+
+
+def _observed_run_identity(
+    observed_run_configuration: Optional[Mapping[str, Any]],
+) -> Mapping[str, Any]:
+    if not isinstance(observed_run_configuration, Mapping):
+        return {}
+    fields = observed_run_configuration.get("fields")
+    if not isinstance(fields, Mapping):
+        return {}
+    identity = fields.get("run_identity")
+    if not isinstance(identity, Mapping) or identity.get("status") != "observed":
+        return {}
+    value = identity.get("value")
+    return value if isinstance(value, Mapping) else {}
 
 
 def observed_tier_for_record(record: Mapping[str, Any]) -> int | None:

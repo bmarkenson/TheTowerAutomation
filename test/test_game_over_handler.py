@@ -349,11 +349,12 @@ def test_clipboard_success_skips_more_stats_scrolling_and_keeps_perk_order():
             patch("handlers.game_over_handler._persist_battle_stats_record") as persist,
             patch("handlers.game_over_handler.time.sleep"),
         ):
-            handle_game_over(capture_stats=True)
+            result = handle_game_over(capture_stats=True)
     finally:
         AUTOMATION.mode = original_mode
 
     scroll.assert_not_called()
+    assert result is record
     assert record["perks"] == perks
     assert persist.call_args.kwargs["perks_frames"] == [frame]
     assert [call.args[0] for call in tap.call_args_list] == [
