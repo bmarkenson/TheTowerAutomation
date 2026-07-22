@@ -566,6 +566,17 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   localhost HTTP test, for 16 total; the repository-root Linux publisher also
   completed successfully.
 
+### 2026-07-22 Workshop retained-mode recovery
+
+- Commit `1505ec7` made the no-battle Free Upgrade lock gate recover when
+  Workshop opens on its retained Enhance mode. It selects the explicit Upgrade
+  control, reacquires Workshop evidence, and then navigates to the required
+  Attack or Defense upgrade category.
+- A focused simulator regression starts in Enhance and verifies the navigation
+  order. The no-battle integration suites passed 53 tests; the full suite
+  passed 493 sandbox tests plus the separately permitted localhost-socket test,
+  for 494 total.
+
 ---
 
 ## 📘 Documentation

@@ -8,6 +8,35 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Workshop lock gate stayed on the retained Enhance mode
+
+- **Observed:** Reported by the operator on 2026-07-22 while checking the
+  Shockwave Size and Bounce Shot locks before a battle.
+- **Symptom:** Workshop restores its last open Upgrade/Enhance mode. When that
+  mode was Enhance, the no-battle lock gate selected an Attack or Defense
+  category without first returning to Upgrade, so it could not reach the
+  required upgrade cards.
+- **Evidence:** Static tracing showed that an unrecognized Workshop heading
+  went directly to `navigation.workshop:attack` or
+  `navigation.workshop:defense`. The retained no-battle Workshop fixture
+  confirms that Upgrade/Enhance is a separate mode row above those category
+  controls, and the focused UI simulator reproduced the retained Enhance
+  state.
+- **Safety response:** Diagnosis and validation were repository-local. No
+  automation process or device was inspected or changed.
+- **Cause:** The lock scanner treated Attack/Defense as complete Workshop
+  navigation and assumed the Upgrade mode was already selected.
+- **Resolution:** The clickmap now owns an explicit Workshop Upgrade action.
+  When the required upgrade heading is absent, the scanner selects Upgrade,
+  reacquires an unobscured Workshop frame, and then selects the required
+  Attack or Defense category.
+- **Regression:** `test/test_free_upgrade_locks.py` starts the Workshop
+  simulator in Enhance mode and requires the Upgrade action to precede the
+  Defense category action. The no-battle integration suites passed 53 tests;
+  the full suite passed 493 sandbox tests plus the separately permitted
+  localhost-socket test, for 494 total.
+- **Fixed by:** `1505ec7`.
+
 ### Farm session preflight repeated the Home-only Free Upgrade lock gate
 
 - **Observed:** Reported by the operator on 2026-07-21 after Shockwave Size
