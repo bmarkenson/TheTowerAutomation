@@ -598,6 +598,25 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Repository-wide validation passed 502 sandbox tests plus the separately
   permitted localhost-socket test, for 503 total.
 
+### 2026-07-22 Tournament boundary preflight and attachment advisories
+
+- Commit `ea7e548` added a corrective Tournament setup at verified Home
+  `NEW_BATTLE`. It selects Tournament Cards, Tourney Workshop, Amplify Bots,
+  Attack/Ally/Scout Guardians, and Tournament Modules, retains their boundary
+  evidence for the Ultimate Weapon-only in-battle check, and deliberately
+  leaves Tournament entry manual.
+- Tournament attachment now runs its declared read-only preflight instead of
+  suppressing it with other startup gates. Authoritative mismatches publish a
+  non-blocking browser/native decision with pause, retry, and scoped-continuation
+  choices while natural terminal capture remains active.
+- Completed Tournament identity follows the distinct Tournament Results screen,
+  and terminal-observed Tier is retained independently of strategy identity. A
+  no-strategy standard Game Over reports its Tier while remaining `unknown`.
+- Repository-wide validation passed 514 sandbox tests plus the separately
+  permitted localhost HTTP test, for 515 total. Browser JavaScript syntax and
+  the repository-root Linux WPF publisher also completed successfully. No live
+  device interaction was used for this code-only change.
+
 ---
 
 ## 📘 Documentation
