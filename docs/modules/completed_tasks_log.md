@@ -558,6 +558,13 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   capability after reconnection. Focused validation passed 55 sandbox tests
   plus the separately permitted localhost HTTP test, for 56 total; the
   repository-root Linux publisher also completed successfully.
+- Commit `ef8df58` generalized that compatibility decision. The Windows client
+  now evaluates its expected API version, minimum Linux server revision, and
+  required capability set; revision mismatch alone exposes the same generic,
+  confirmed recovery path, and reconnection must satisfy the complete contract.
+  Focused validation passed 15 sandbox tests plus the separately permitted
+  localhost HTTP test, for 16 total; the repository-root Linux publisher also
+  completed successfully.
 
 ---
 

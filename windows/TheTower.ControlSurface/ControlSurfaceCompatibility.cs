@@ -20,6 +20,8 @@ internal sealed record ControlSurfaceCompatibilityResult(
 internal static class ControlSurfaceCompatibility
 {
     public const int RequiredApiVersion = 1;
+    // Advance this when the client depends on the matching newer Linux
+    // CONTROL_SURFACE_REVISION; older clients may retain a lower minimum.
     public const int MinimumServerRevision = 2;
 
     private static readonly string[] RequiredCapabilities =

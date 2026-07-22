@@ -107,11 +107,17 @@ for a matching recurrence or historical investigation.
   Windows compatibility banner that disables unsupported adoption. With
   confirmation, the client can run only the fixed
   `systemctl --user restart thetower-control-surface.service` command through
-  its validated SSH destination, then requires the capability to appear after
-  reconnection. Focused validation passed 55 sandbox tests plus the separately
-  permitted localhost HTTP test, and the self-contained Linux publish
-  succeeded. Keep this issue open until the warning, fixed restart, and
-  reconnect verification are exercised from Windows.
+  its validated SSH destination. Follow-up commit `ef8df58` makes the decision
+  feature-independent: the Windows client now requires its expected API
+  version, a minimum server revision, and its required capability set, and the
+  restart path verifies that complete contract after reconnection. Future
+  client dependencies must advance the server revision and compiled client
+  minimum together. The restart reloads installed code but does not deploy an
+  update. Focused validation for the original repair passed 55 sandbox tests
+  plus the separately permitted localhost HTTP test; the follow-up passed 15
+  sandbox tests plus that one localhost test. Both self-contained Linux
+  publishes succeeded. Keep this issue open until the generic warning, fixed
+  restart, and reconnect verification are exercised from Windows.
 
 ### Native top bar retained a running directive after automation stopped
 

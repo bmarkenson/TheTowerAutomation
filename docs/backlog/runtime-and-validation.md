@@ -196,10 +196,11 @@ evidence.
      strategy dropdown plus explicit queue/adopt actions. Preserve unsent
      selection across refreshes and disable no-op adoption of the displayed
      Current strategy (`88b603c`).
-   - [x] Advertise Linux-server revision/capabilities, disable unsupported
-     client actions when the server is stale, and offer a confirmed fixed-unit
-     SSH restart that verifies capabilities after reconnection without touching
-     main automation (`2c06a66`).
+   - [x] Advertise Linux API/revision/capability metadata, evaluate a generic
+     compiled client compatibility contract, disable dependent actions when
+     the server is stale, and offer a confirmed fixed-unit SSH restart that
+     verifies the whole contract after reconnection without touching main
+     automation (`2c06a66`, `ef8df58`).
    - [ ] On Windows, verify immediate accepted-request feedback, current/pending
      display, dropdown selection retention, pending replacement/cancellation
      during a battle, stale-server warning and explicit reload, active-battle

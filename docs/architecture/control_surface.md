@@ -80,13 +80,22 @@ agnostic.
 - The API never accepts a PID, executable, service name, or command from the
   Windows client. The Linux server is configured with one validated unit name.
 - A malformed control file is reported and preserved rather than overwritten.
-- Status advertises a monotonic server revision and explicit capabilities.
-  Connecting the Windows client remains read-only: missing required
-  capabilities disable unsupported actions and show a deployment warning.
+- Status advertises an API version, a monotonic server revision, and explicit
+  capabilities. The Windows client evaluates all three: it requires the
+  expected API version, a compiled minimum server revision, and its required
+  capabilities. A feature that makes the current Windows client depend on new
+  Linux behavior must advance the Linux server revision and the client's
+  minimum revision in the same change; independently gated features should
+  also advertise and require a named capability.
+- Connecting the Windows client remains read-only. An incompatible API,
+  insufficient server revision, or missing required capability disables the
+  dependent action and shows one generic client/server compatibility warning.
   With confirmation, the client may use its validated SSH destination to run
   only the fixed `systemctl --user restart thetower-control-surface.service`
-  command, then must reconnect and verify the required capabilities. This path
-  cannot select another unit or command and never restarts main automation.
+  command, then must reconnect and verify the complete compatibility contract.
+  Restart reloads the installed Linux code but does not deploy an update. This
+  path cannot select another unit or command and never restarts main
+  automation.
 
 Control writers use a companion advisory lock and atomic replacement. Timed
 pause expiry revalidates its exact deadline while holding that writer lock, so

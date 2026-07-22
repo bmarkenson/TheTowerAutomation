@@ -181,15 +181,22 @@ An in-app SSH process is reported as connected only after the forwarded Linux
 status endpoint responds successfully. If OpenSSH remains alive but that probe
 fails, the app labels the API unavailable and keeps **Stop tunnel** enabled.
 
-The status endpoint advertises its server revision and supported capabilities.
-Opening or connecting the Windows app never restarts Linux automatically. If
-the server is reachable but lacks a capability required by this client, the
-app disables the unsupported action and displays **Restart Linux control
-service**. After confirmation, that button runs only the fixed
+The status endpoint advertises its API version, monotonic server revision, and
+supported capabilities. The Windows build carries an expected API version, a
+minimum server revision, and required capabilities. Any mismatch produces a
+generic client/server compatibility warning and disables dependent actions;
+the decision is not tied to the strategy feature that first exposed the stale
+service problem. A future Windows feature that depends on new Linux behavior
+must advance the server revision and the client's minimum revision together.
+
+Opening or connecting the Windows app never restarts Linux automatically. For
+an incompatible service, the app displays **Restart Linux control service**.
+After confirmation, that button runs only the fixed
 `systemctl --user restart thetower-control-surface.service` command against the
-validated SSH destination, waits for the API to return, and requires the new
-capabilities before reporting success. It cannot choose another command or
-service and does not restart main automation or alter the active battle.
+validated SSH destination, waits for the API to return, and verifies the full
+compatibility contract before reporting success. It reloads the installed code
+but does not install an update, choose another command or service, restart main
+automation, or alter the active battle.
 
 The Linux API and fixed systemd user units must be installed first; see
 [`../../deploy/systemd/README.md`](../../deploy/systemd/README.md).
