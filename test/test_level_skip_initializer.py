@@ -111,20 +111,20 @@ def test_fallback_initializer_taps_ehls_before_eals():
     )
 
 
-def test_fallback_dispatches_one_verified_tap_before_capture():
+def test_fallback_reuses_verified_tap_authority_during_capture():
     capture_started = Event()
-    tap_seen = Event()
+    concurrent_tap_seen = Event()
 
     def capture():
         capture_started.set()
-        assert tap_seen.is_set()
+        assert concurrent_tap_seen.wait(timeout=1.0)
         return _frame(2)
 
     def tap(_point, *, label, verification):
-        assert not capture_started.is_set()
         assert label == "test"
         assert verification is sentinel
-        tap_seen.set()
+        if capture_started.is_set():
+            concurrent_tap_seen.set()
         return True
 
     sentinel = object()
@@ -137,9 +137,9 @@ def test_fallback_dispatches_one_verified_tap_before_capture():
     )
 
     assert dispatch_ok
-    assert taps_sent == 1
+    assert taps_sent == 2
     assert frame is not None and int(frame[0, 0, 0]) == 2
-    assert tap_seen.is_set()
+    assert concurrent_tap_seen.is_set()
 
 
 def test_initializer_finishes_without_taps_when_both_skips_start_gold_boxed():
@@ -344,7 +344,7 @@ def test_live_stream_keeps_purchasing_without_blocking_screenshot_captures():
     assert stream.started and stream.stopped
 
 
-def test_live_stream_never_reuses_one_frame_for_multiple_taps():
+def test_live_stream_reuses_initial_verified_frame_until_new_frame_arrives():
     initial = _frame(1)
     after_ehls = _frame(2)
     complete = _frame(3)
@@ -412,7 +412,11 @@ def test_live_stream_never_reuses_one_frame_for_multiple_taps():
     assert result.success
     assert taps == [
         (f"level_skip:{EHLS}", 1),
+        (f"level_skip:{EHLS}", 2),
+        (f"level_skip:{EHLS}", 3),
         (f"level_skip:{EALS}", 4),
+        (f"level_skip:{EALS}", 5),
+        (f"level_skip:{EALS}", 6),
     ]
     assert stream.stopped
 

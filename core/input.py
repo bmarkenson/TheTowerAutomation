@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import time
 from typing import Any, Callable, Dict, Literal, Optional, Tuple, Sequence, Union
 
@@ -26,12 +26,22 @@ class TapVerification:
     authority by themselves.  Their caller must provide the frame used to
     identify the target, a bounded target region containing the tap point, and
     a predicate which rechecks the target-specific evidence on that frame.
+    ``reuse_authority`` is reserved for bounded, explicitly urgent sequences
+    whose contract accepts that one verified frame remains authoritative for
+    multiple taps.
     """
 
     screenshot: Any
     target_region: Region
     description: str
     verifier: Callable[[Any], bool]
+    reuse_authority: bool = False
+    _cached_result: Optional[bool] = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     def authorizes(self, point: Tuple[int, int]) -> bool:
         if not is_complete_screenshot(self.screenshot):
@@ -42,7 +52,12 @@ class TapVerification:
             return False
         if not (x <= tap_x < x + width and y <= tap_y < y + height):
             return False
-        return bool(self.verifier(self.screenshot))
+        if self.reuse_authority and self._cached_result is not None:
+            return self._cached_result
+        result = bool(self.verifier(self.screenshot))
+        if self.reuse_authority:
+            object.__setattr__(self, "_cached_result", result)
+        return result
 
 
 def _compute_offset(entry: Dict[str, Any]) -> Optional[Tuple[int, int]]:

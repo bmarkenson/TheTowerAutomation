@@ -93,6 +93,27 @@ def test_low_level_runtime_tap_authority_is_narrowly_allowlisted():
     assert violations == []
 
 
+def test_reusable_frame_authority_is_limited_to_urgent_purchase_blocks():
+    allowed = {
+        "core/damage_adjuster.py",
+        "core/level_skip_initializer.py",
+    }
+    violations = []
+    for path in _runtime_files():
+        relative = path.relative_to(ROOT).as_posix()
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
+            for keyword in call.keywords:
+                if (
+                    keyword.arg == "reuse_authority"
+                    and isinstance(keyword.value, ast.Constant)
+                    and keyword.value.value is True
+                    and relative not in allowed
+                ):
+                    violations.append(f"{relative}:{call.lineno}:reuse_authority")
+    assert violations == []
+
+
 def test_home_target_priority_control_does_not_exist():
     assert _resolve_clickmap("navigation.home_target_priority") is None
 

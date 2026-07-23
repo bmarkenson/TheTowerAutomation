@@ -90,7 +90,9 @@ def test_damage_percentage_normalization_uses_screen_notation():
     assert normalize_damage_percentage("1E-22%") == "1E-22%"
 
 
-def _reading(percentage, *, confidence=95.0):
+def _reading(percentage, *, confidence=95.0, screenshot=None):
+    if screenshot is None:
+        screenshot = _load(PANEL_FIXTURE)
     return DamageAdjusterReading(
         visible=True,
         mode=DAMAGE_SELECTOR_MODE,
@@ -98,6 +100,7 @@ def _reading(percentage, *, confidence=95.0):
         ocr_text=f"Percent Of Enemy Health {percentage}",
         ocr_confidence=confidence,
         panel_confidence=1.0,
+        screenshot=screenshot,
     )
 
 
@@ -129,13 +132,14 @@ def test_damage_slider_enforcement_batches_known_power_of_ten_steps():
     assert result.final == "1E-22%"
     assert result.changed
     assert result.steps == 2
-    assert [name for name, _kwargs in taps] == [
-        "buttons.damage_adjuster:decrease",
-        "buttons.damage_adjuster:decrease",
-    ]
+    assert [point for point, _kwargs in taps] == [(195, 1755)] * 2
+    verifications = [kwargs["verification"] for _point, kwargs in taps]
+    assert verifications[0] is verifications[1]
+    assert verifications[0].reuse_authority
     assert all(
-        kwargs == {"dispatch": "now"}
-        for _name, kwargs in taps
+        kwargs["dispatch"] == "now"
+        and kwargs["log_label"] == "buttons.damage_adjuster:decrease"
+        for _point, kwargs in taps
     )
     assert read.call_count == 1
 
@@ -160,7 +164,7 @@ def test_damage_slider_batches_full_live_observed_exponent_gap():
 
     assert result.success
     assert result.steps == 24
-    assert taps == ["buttons.damage_adjuster:decrease"] * 24
+    assert taps == [(195, 1755)] * 24
     assert read.call_count == 1
 
 
@@ -188,7 +192,7 @@ def test_damage_slider_recomputes_batch_after_dropped_steps_settle():
 
     assert result.success
     assert result.steps == 3
-    assert taps == ["buttons.damage_adjuster:decrease"] * 3
+    assert taps == [(195, 1755)] * 3
 
 
 def test_damage_slider_unknown_sequence_keeps_single_step_feedback():
@@ -211,7 +215,7 @@ def test_damage_slider_unknown_sequence_keeps_single_step_feedback():
 
     assert result.success
     assert result.steps == 1
-    assert taps == ["buttons.damage_adjuster:decrease"]
+    assert taps == [(195, 1755)]
     assert read.call_count == 1
 
 

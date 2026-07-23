@@ -76,6 +76,31 @@ def test_coordinate_tap_fails_closed_when_verifier_rejects_target():
     dispatch.assert_not_called()
 
 
+def test_reusable_tap_authority_evaluates_initial_frame_once():
+    screenshot = np.full((1920, 1080, 3), 32, dtype=np.uint8)
+    verifier_calls = 0
+
+    def verifier(_frame):
+        nonlocal verifier_calls
+        verifier_calls += 1
+        return True
+
+    verification = TapVerification(
+        screenshot=screenshot,
+        target_region=(0, 0, 30, 40),
+        description="urgent_batch",
+        verifier=verifier,
+        reuse_authority=True,
+    )
+
+    with patch("core.input._dispatch_tap") as dispatch:
+        assert safe_tap((10, 20), verification=verification)
+        assert safe_tap((10, 20), verification=verification)
+
+    assert dispatch.call_count == 2
+    assert verifier_calls == 1
+
+
 def test_navigation_targets_preserve_expected_tap_geometry():
     assert get_click("navigation.goto_attack") == (136, 1864)
     assert get_click("navigation.goto_defense") == (406, 1868)

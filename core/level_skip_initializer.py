@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import threading
 import time
 from typing import Callable, Dict, Optional, Tuple
 
@@ -144,11 +145,30 @@ def _tap_and_capture(
     tap_fn: Callable[..., bool],
     verification: TapVerification,
 ) -> Tuple[Optional[Frame], int, bool]:
-    """Dispatch one verified tap, then acquire the next decision frame."""
+    """Keep dispatching under one verified lease during a blocking capture."""
 
     if not tap_fn(point, label=label, verification=verification):
         return None, 0, False
-    return capture_fn(), 1, True
+    taps_sent = 1
+
+    captured: Dict[str, Optional[Frame]] = {"frame": None}
+
+    def capture() -> None:
+        captured["frame"] = capture_fn()
+
+    capture_thread = threading.Thread(target=capture, daemon=True)
+    capture_thread.start()
+    dispatch_ok = True
+    while capture_thread.is_alive():
+        capture_thread.join(timeout=0.04)
+        if not capture_thread.is_alive():
+            break
+        if not tap_fn(point, label=label, verification=verification):
+            dispatch_ok = False
+            break
+        taps_sent += 1
+    capture_thread.join()
+    return captured["frame"], taps_sent, dispatch_ok
 
 
 def _target_tap_verification(
@@ -168,6 +188,7 @@ def _target_tap_verification(
                 fresh_box.rect,
             )[0]
         ),
+        reuse_authority=True,
     )
 
 
@@ -289,8 +310,6 @@ def initialize_level_skips(
     last_stream_sequence = -1
     last_stream_state_check = monotonic_fn()
     stream_ready_logged = False
-    decision_generation = 0
-    tapped_generation = -1
 
     for target in (EHLS, EALS):
         while monotonic_fn() < deadline:
@@ -321,19 +340,6 @@ def initialize_level_skips(
                         if sequence != last_stream_sequence:
                             frame = latest
                             last_stream_sequence = sequence
-                            decision_generation += 1
-
-            # A decision frame authorizes at most one tap.  Wait for the live
-            # stream to advance, or reacquire a screenshot after a stream
-            # failure, before inspecting another purchase action.
-            if tapped_generation == decision_generation:
-                if frame_stream is not None:
-                    sleep_fn(0.01)
-                    continue
-                frame = capture_fn()
-                if frame is None:
-                    return finish("capture_after_tap_failed")
-                decision_generation += 1
 
             if (
                 frame_stream is None
@@ -383,10 +389,8 @@ def initialize_level_skips(
                             ):
                                 return finish("eals_handoff_tap_dispatch_failed")
                             taps_sent += 1
-                            tapped_generation = decision_generation
                             sleep_fn(0.04)
                         else:
-                            tapped_generation = decision_generation
                             frame, burst_taps, dispatch_ok = _tap_and_capture(
                                 point=_purchase_point(eals_box),
                                 label=f"level_skip:{EALS}",
@@ -403,7 +407,6 @@ def initialize_level_skips(
                                 return finish("eals_handoff_tap_dispatch_failed")
                             if frame is None:
                                 return finish("capture_after_eals_handoff_failed")
-                            decision_generation += 1
                 break
 
             point = _purchase_point(current_box)
@@ -423,10 +426,8 @@ def initialize_level_skips(
                 ):
                     return finish("tap_dispatch_failed")
                 taps_sent += 1
-                tapped_generation = decision_generation
                 sleep_fn(0.04)
             else:
-                tapped_generation = decision_generation
                 frame, burst_taps, dispatch_ok = _tap_and_capture(
                     point=point,
                     label=f"level_skip:{target}",
@@ -439,7 +440,6 @@ def initialize_level_skips(
                     return finish("tap_dispatch_failed")
                 if frame is None:
                     return finish("capture_after_tap_failed")
-                decision_generation += 1
         else:
             return finish(f"{target}_timeout")
 

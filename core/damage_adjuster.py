@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from decimal import Decimal, InvalidOperation
 import re
 import time
@@ -10,6 +10,7 @@ from typing import Any, Callable, Final, Optional
 
 import numpy as np
 
+from core.clickmap_access import resolve_dot_path
 from core.input import TapVerification, safe_tap, tap_if_visible
 from core.matcher import get_match
 from core.ss_capture import capture_adb_screenshot, is_complete_screenshot
@@ -35,6 +36,7 @@ class DamageAdjusterReading:
     ocr_text: str
     ocr_confidence: float
     panel_confidence: float
+    screenshot: Optional[Frame] = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -118,7 +120,15 @@ def read_damage_adjuster(screenshot: Optional[Frame]) -> DamageAdjusterReading:
     x, y, w, h = DAMAGE_SELECTOR_REGION
     crop = screenshot[y : y + h, x : x + w]
     if crop.size == 0:
-        return DamageAdjusterReading(True, None, None, "", -1.0, panel_confidence)
+        return DamageAdjusterReading(
+            True,
+            None,
+            None,
+            "",
+            -1.0,
+            panel_confidence,
+            screenshot=screenshot,
+        )
 
     ocr_text, ocr_confidence = ocr_text_and_conf(crop, psm=6)
     normalized_words = " ".join(re.findall(r"[A-Z]+", ocr_text.upper()))
@@ -134,6 +144,7 @@ def read_damage_adjuster(screenshot: Optional[Frame]) -> DamageAdjusterReading:
         ocr_text,
         ocr_confidence,
         panel_confidence,
+        screenshot=screenshot,
     )
 
 
@@ -323,12 +334,23 @@ def configure_damage_slider(
                         "INFO",
                     )
 
+                    arrow_authority = _damage_arrow_batch_authority(
+                        reading,
+                        button,
+                        current_value,
+                    )
+                    if arrow_authority is None:
+                        reason = "arrow_not_verified"
+                        break
+                    arrow_point, verification = arrow_authority
                     dispatched = 0
                     dispatch_failed = False
                     for _ in range(batch_steps):
                         if not tap_fn(
-                            button,
+                            arrow_point,
                             dispatch="now",
+                            log_label=button,
+                            verification=verification,
                         ):
                             dispatch_failed = True
                             break
@@ -360,6 +382,7 @@ def configure_damage_slider(
                         reason = "value_cycle_detected"
                         break
                     seen.add(updated_value)
+                    reading = updated
                     current_value = updated_value
                     matches = current_value == expected_value
                     reason = "matched" if matches else "adjusting"
@@ -402,6 +425,46 @@ def _valid_slider_value(reading: DamageAdjusterReading) -> Optional[Decimal]:
     ):
         return None
     return _percentage_value(reading.percentage)
+
+
+def _damage_arrow_batch_authority(
+    reading: DamageAdjusterReading,
+    button: str,
+    current_value: Decimal,
+) -> Optional[tuple[tuple[int, int], TapVerification]]:
+    """Authorize one urgent arrow batch from its initial verified panel frame."""
+
+    screenshot = reading.screenshot
+    if screenshot is None or _valid_slider_value(reading) != current_value:
+        return None
+    entry = resolve_dot_path(button)
+    region = entry.get("match_region") if isinstance(entry, dict) else None
+    if not isinstance(region, dict):
+        return None
+    point, _confidence = get_match(button, screenshot=screenshot)
+    if point is None:
+        return None
+    target_region = (
+        int(region["x"]),
+        int(region["y"]),
+        int(region["w"]),
+        int(region["h"]),
+    )
+    return (
+        (int(point[0]), int(point[1])),
+        TapVerification(
+            screenshot=screenshot,
+            target_region=target_region,
+            description=f"damage_slider_urgent_batch:{button}:{reading.percentage}",
+            verifier=lambda candidate: (
+                candidate is screenshot
+                and reading.visible
+                and reading.mode == DAMAGE_SELECTOR_MODE
+                and _valid_slider_value(reading) == current_value
+            ),
+            reuse_authority=True,
+        ),
+    )
 
 
 def _power_of_ten_exponent(value: Decimal) -> Optional[int]:
