@@ -1,4 +1,4 @@
-"""Inspect and enforce Farm Free Upgrade locks from the Home Workshop."""
+"""Inspect and enforce Farm Free Upgrade locks at their declared boundary."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from core.input import TapVerification, safe_tap
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
 from core.upgrade_box_detector import UpgradeBox, detect_visible_boxes
-from core.upgrade_navigation import swipe_upgrade_menu
+from core.upgrade_navigation import find_upgrade, swipe_upgrade_menu
 from utils.logger import log
 from utils.ocr_utils import ocr_text_and_conf
 
@@ -444,6 +444,181 @@ def inspect_free_upgrade_locks(
     )
 
 
+def inspect_in_battle_free_upgrade_locks(
+    requirements: Any,
+    *,
+    screenshot: Optional[Frame] = None,
+    enforce: bool = False,
+    capture_fn: Capture = capture_adb_screenshot,
+    detector: Detector = detect_state_and_overlays,
+    safe_tap_fn: Callable[..., bool] = safe_tap,
+    find_upgrade_fn: Callable[..., Any] = find_upgrade,
+    detect_boxes_fn: Callable[
+        ..., Mapping[str, list[UpgradeBox]]
+    ] = detect_visible_boxes,
+    measure_lock_fn: Callable[
+        [Optional[Frame], str], FreeUpgradeLockEvidence
+    ] = measure_free_upgrade_lock,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> FreeUpgradeLockInspectionResult:
+    """Inspect supported locks from the active battle's upgrade panes."""
+
+    labels = normalize_free_upgrade_lock_requirements(requirements)
+    current = screenshot if screenshot is not None else capture_fn()
+    _require_running_upgrade_menu(current, detector, menu=None)
+    evidence: list[FreeUpgradeLockEvidence] = []
+    changed: list[str] = []
+    detail_open = False
+    try:
+        for label in labels:
+            menu, column = _LOCK_SPECS[label]
+            result = find_upgrade_fn(
+                menu,
+                label,
+                capture_fn=capture_fn,
+                sleep_fn=sleep_fn,
+                ensure_menu=True,
+                attempt_purchase=False,
+            )
+            if result is None:
+                raise FreeUpgradeLockInspectionError(
+                    f"could not locate {label} in active {menu} upgrades"
+                )
+            current = _require_running_upgrade_menu(
+                result.screenshot,
+                detector,
+                menu=menu,
+            )
+            confirmed = _matching_box(
+                detect_boxes_fn(current, menu=menu).get(column, ()),
+                label,
+            )
+            if confirmed is None:
+                raise FreeUpgradeLockInspectionError(
+                    f"could not reconfirm {label} before opening details"
+                )
+            x, y, width, height = confirmed.rect
+            if not safe_tap_fn(
+                (x + width // 4, y + height // 2),
+                dispatch="now",
+                log_label=f"in_battle_upgrade_detail:{_slug(label)}",
+                verification=TapVerification(
+                    screenshot=current,
+                    target_region=confirmed.rect,
+                    description=f"in_battle_upgrade:{label}",
+                    verifier=lambda frame, expected=confirmed.rect: (
+                        detector(frame).get("state") == "RUNNING"
+                        and (
+                            candidate := _matching_box(
+                                detect_boxes_fn(frame, menu=menu).get(column),
+                                label,
+                            )
+                        )
+                        is not None
+                        and abs(candidate.rect[0] - expected[0]) <= 20
+                        and abs(candidate.rect[1] - expected[1]) <= 20
+                    ),
+                ),
+            ):
+                raise FreeUpgradeLockInspectionError(
+                    f"detail tap failed for {label}"
+                )
+            detail_open = True
+            current, lock = _wait_for_lock_detail(
+                label,
+                capture_fn=capture_fn,
+                detector=detector,
+                measure_lock_fn=measure_lock_fn,
+                sleep_fn=sleep_fn,
+                boundary="RUNNING",
+            )
+            log(
+                f"[FREE_UPGRADE_LOCKS] {label}={lock.state.value} "
+                f"title_conf={lock.title_confidence:.1f} "
+                f"outline_pixels={lock.checkbox_outline_pixels} "
+                f"checkmark_pixels={lock.checkmark_pixels}",
+                "INFO",
+            )
+            if enforce and lock.authoritative_mismatch:
+                fresh = capture_fn()
+                fresh_lock = measure_lock_fn(fresh, label)
+                if not _is_expected_boundary_detail(
+                    fresh,
+                    detector,
+                    fresh_lock,
+                    boundary="RUNNING",
+                ):
+                    raise FreeUpgradeLockInspectionError(
+                        f"lost authoritative unchecked evidence for {label}"
+                    )
+                if not safe_tap_fn(
+                    "buttons.free_upgrade_lock:checkbox",
+                    dispatch="now",
+                    verification=TapVerification(
+                        screenshot=fresh,
+                        target_region=_CHECKBOX_REGION,
+                        description=f"in_battle_free_upgrade_lock:{label}:unchecked",
+                        verifier=lambda frame: (
+                            (
+                                candidate := measure_lock_fn(frame, label)
+                            ).state
+                            is FreeUpgradeLockState.UNCHECKED
+                            and _is_expected_boundary_detail(
+                                frame,
+                                detector,
+                                candidate,
+                                boundary="RUNNING",
+                            )
+                        ),
+                    ),
+                ):
+                    raise FreeUpgradeLockInspectionError(
+                        f"lock checkbox tap failed for {label}"
+                    )
+                current, lock = _wait_for_lock_detail(
+                    label,
+                    capture_fn=capture_fn,
+                    detector=detector,
+                    measure_lock_fn=measure_lock_fn,
+                    required_state=FreeUpgradeLockState.CHECKED,
+                    sleep_fn=sleep_fn,
+                    boundary="RUNNING",
+                )
+                changed.append(label)
+                log(
+                    f"[FREE_UPGRADE_LOCKS] {label} checked and verified in battle",
+                    "INFO",
+                )
+            evidence.append(lock)
+            current = _dismiss_in_battle_lock_detail(
+                label,
+                menu,
+                current,
+                capture_fn=capture_fn,
+                detector=detector,
+                safe_tap_fn=safe_tap_fn,
+                measure_lock_fn=measure_lock_fn,
+                sleep_fn=sleep_fn,
+            )
+            detail_open = False
+    except Exception:
+        if detail_open:
+            _best_effort_dismiss_boundary(
+                capture_fn=capture_fn,
+                detector=detector,
+                safe_tap_fn=safe_tap_fn,
+                sleep_fn=sleep_fn,
+                boundary="RUNNING",
+            )
+        raise
+
+    return FreeUpgradeLockInspectionResult(
+        FreeUpgradeLocksEvidence(tuple(evidence)),
+        current,
+        tuple(changed),
+    )
+
+
 def _crop(frame: Optional[Frame], region: tuple[int, int, int, int]):
     if frame is None or not isinstance(frame, np.ndarray) or frame.ndim < 2:
         return None
@@ -648,11 +823,27 @@ def _reconfirm_workshop_upgrade(
 
 
 def _is_expected_detail(frame, detector, lock):
+    return _is_expected_boundary_detail(
+        frame,
+        detector,
+        lock,
+        boundary="WORKSHOP",
+    )
+
+
+def _is_expected_boundary_detail(
+    frame,
+    detector,
+    lock,
+    *,
+    boundary,
+):
     if frame is None or lock.state is FreeUpgradeLockState.UNKNOWN:
         return False
     detection = detector(frame)
+    expected_state = "WORKSHOP" if boundary == "WORKSHOP" else "UPGRADE_DETAIL"
     return (
-        detection.get("state") == "WORKSHOP"
+        detection.get("state") == expected_state
         and "UPGRADE_DETAIL" in set(detection.get("overlays") or ())
     )
 
@@ -666,6 +857,7 @@ def _wait_for_lock_detail(
     sleep_fn,
     required_state=None,
     attempts=16,
+    boundary="WORKSHOP",
 ):
     last = None
     last_state = None
@@ -673,7 +865,12 @@ def _wait_for_lock_detail(
     for _ in range(attempts):
         frame = capture_fn()
         last = measure_lock_fn(frame, label)
-        if _is_expected_detail(frame, detector, last) and (
+        if _is_expected_boundary_detail(
+            frame,
+            detector,
+            last,
+            boundary=boundary,
+        ) and (
             required_state is None or last.state is required_state
         ):
             if last.state is last_state:
@@ -738,11 +935,29 @@ def _dismiss_lock_detail(
 
 
 def _best_effort_dismiss(*, capture_fn, detector, safe_tap_fn, sleep_fn):
+    return _best_effort_dismiss_boundary(
+        capture_fn=capture_fn,
+        detector=detector,
+        safe_tap_fn=safe_tap_fn,
+        sleep_fn=sleep_fn,
+        boundary="WORKSHOP",
+    )
+
+
+def _best_effort_dismiss_boundary(
+    *,
+    capture_fn,
+    detector,
+    safe_tap_fn,
+    sleep_fn,
+    boundary,
+):
     try:
         frame = capture_fn()
         detection = detector(frame) if frame is not None else {}
+        expected_state = "WORKSHOP" if boundary == "WORKSHOP" else "UPGRADE_DETAIL"
         if (
-            detection.get("state") == "WORKSHOP"
+            detection.get("state") == expected_state
             and "UPGRADE_DETAIL" in set(detection.get("overlays") or ())
         ):
             tapped = safe_tap_fn(
@@ -753,7 +968,7 @@ def _best_effort_dismiss(*, capture_fn, detector, safe_tap_fn, sleep_fn):
                     target_region=(0, 0, frame.shape[1], frame.shape[0]),
                     description="free_upgrade_detail:visible",
                     verifier=lambda candidate: (
-                        detector(candidate).get("state") == "WORKSHOP"
+                        detector(candidate).get("state") == expected_state
                         and "UPGRADE_DETAIL"
                         in set(
                             detector(candidate).get("overlays") or ()
@@ -776,6 +991,102 @@ def _best_effort_dismiss(*, capture_fn, detector, safe_tap_fn, sleep_fn):
         pass
 
 
+def _normalize_running_menu(value: Any) -> str:
+    return str(value or "").strip().lower().removesuffix("_menu")
+
+
+def _require_running_upgrade_menu(
+    frame,
+    detector,
+    *,
+    menu: Optional[str],
+):
+    if frame is None:
+        raise FreeUpgradeLockInspectionError("active battle capture failed")
+    detection = detector(frame)
+    if detection.get("state") != "RUNNING":
+        raise FreeUpgradeLockInspectionError(
+            f"expected RUNNING, got {detection.get('state')!r}"
+        )
+    actual_menu = _normalize_running_menu(detection.get("menu"))
+    if menu is not None and actual_menu != menu:
+        raise FreeUpgradeLockInspectionError(
+            f"expected active {menu} upgrades, got {actual_menu!r}"
+        )
+    return frame
+
+
+def _wait_for_running_upgrade_menu(
+    menu,
+    *,
+    capture_fn,
+    detector,
+    sleep_fn,
+    attempts=16,
+):
+    last_state = None
+    last_menu = None
+    for _ in range(attempts):
+        frame = capture_fn()
+        detection = detector(frame) if frame is not None else {}
+        last_state = detection.get("state")
+        last_menu = _normalize_running_menu(detection.get("menu"))
+        if last_state == "RUNNING" and last_menu == menu:
+            return frame
+        sleep_fn(0.25)
+    raise FreeUpgradeLockInspectionError(
+        f"timed out returning to active {menu} upgrades; "
+        f"last state={last_state!r} menu={last_menu!r}"
+    )
+
+
+def _dismiss_in_battle_lock_detail(
+    label,
+    menu,
+    current,
+    *,
+    capture_fn,
+    detector,
+    safe_tap_fn,
+    measure_lock_fn,
+    sleep_fn,
+):
+    lock = measure_lock_fn(current, label)
+    if not _is_expected_boundary_detail(
+        current,
+        detector,
+        lock,
+        boundary="RUNNING",
+    ):
+        raise FreeUpgradeLockInspectionError(
+            f"refusing to dismiss unverified in-battle {label} detail"
+        )
+    if not safe_tap_fn(
+        "gesture_targets.upgrade_detail_dismiss",
+        dispatch="now",
+        verification=TapVerification(
+            screenshot=current,
+            target_region=(0, 0, current.shape[1], current.shape[0]),
+            description=f"in_battle_free_upgrade_detail:{label}",
+            verifier=lambda frame: _is_expected_boundary_detail(
+                frame,
+                detector,
+                measure_lock_fn(frame, label),
+                boundary="RUNNING",
+            ),
+        ),
+    ):
+        raise FreeUpgradeLockInspectionError(
+            f"detail dismissal tap failed for {label}"
+        )
+    return _wait_for_running_upgrade_menu(
+        menu,
+        capture_fn=capture_fn,
+        detector=detector,
+        sleep_fn=sleep_fn,
+    )
+
+
 __all__ = [
     "FARM_FREE_UPGRADE_LOCKS",
     "FreeUpgradeLockEvidence",
@@ -783,6 +1094,7 @@ __all__ = [
     "FreeUpgradeLockInspectionResult",
     "FreeUpgradeLockState",
     "FreeUpgradeLocksEvidence",
+    "inspect_in_battle_free_upgrade_locks",
     "inspect_free_upgrade_locks",
     "measure_free_upgrade_lock",
     "measure_unavailable_free_upgrade_lock",

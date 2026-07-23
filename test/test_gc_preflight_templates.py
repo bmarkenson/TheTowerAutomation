@@ -420,14 +420,14 @@ def test_session_preflight_rehydrates_home_boundary_configuration_and_modules():
     assert retained.modules == captured.modules
 
 
-def test_session_preflight_retains_verified_new_battle_lock_evidence():
+def test_session_preflight_requires_verified_running_lock_evidence():
     observed = {
         label: dict(toggles)
         for label, toggles in GC_ULTIMATE_REQUIREMENTS.items()
     }
     boundary_evidence = {
         "status": "verified",
-        "boundary": "NEW_BATTLE",
+        "boundary": "RUNNING",
         "required": list(FARM_FREE_UPGRADE_LOCKS),
         "checked": True,
         "valid": True,
@@ -461,7 +461,7 @@ def test_session_preflight_retains_verified_new_battle_lock_evidence():
     }
 
 
-def test_missing_boundary_lock_evidence_is_deferred_without_session_failure():
+def test_missing_running_lock_evidence_blocks_session_without_home_repair():
     observed = {
         label: dict(toggles)
         for label, toggles in GC_ULTIMATE_REQUIREMENTS.items()
@@ -481,15 +481,15 @@ def test_missing_boundary_lock_evidence_is_deferred_without_session_failure():
     )
 
     payload = evidence.as_dict()["free_upgrade_locks"]
-    assert evidence.valid
-    assert evidence.free_upgrade_locks_valid is None
-    assert "free_upgrade_locks" not in evidence.failed_checks
-    assert evidence.deferred_checks == ("free_upgrade_locks",)
+    assert not evidence.valid
+    assert evidence.free_upgrade_locks_valid is False
+    assert "free_upgrade_locks" in evidence.failed_checks
+    assert evidence.deferred_checks == ()
     assert not evidence.requires_no_battle_repair
-    assert payload["status"] == "unavailable_deferred"
+    assert payload["status"] == "unavailable"
     assert payload["checked"] is False
-    assert payload["valid"] is None
-    assert payload["blocking_valid"] is True
+    assert payload["valid"] is False
+    assert payload["blocking_valid"] is False
 
 
 def test_bots_waiver_does_not_waive_auto_pick_perks():

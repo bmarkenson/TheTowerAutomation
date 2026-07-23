@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
@@ -10,6 +11,7 @@ from core.free_upgrade_locks import (
     FreeUpgradeLockEvidence,
     FreeUpgradeLockState,
     inspect_free_upgrade_locks,
+    inspect_in_battle_free_upgrade_locks,
     measure_free_upgrade_lock,
     measure_unavailable_free_upgrade_lock,
     normalize_free_upgrade_lock_requirements,
@@ -226,6 +228,103 @@ class _WorkshopUi:
             self.detail_label = None
             return True
         return False
+
+
+class _InBattleUi:
+    def __init__(self, states):
+        self.frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+        self.menu = "defense"
+        self.detail_label = None
+        self.states = dict(states)
+        self.actions = []
+
+    def capture(self):
+        return self.frame
+
+    def detect(self, _frame):
+        if self.detail_label:
+            return {
+                "state": "UPGRADE_DETAIL",
+                "menu": None,
+                "overlays": ["UPGRADE_DETAIL"],
+            }
+        return {
+            "state": "RUNNING",
+            "menu": f"{self.menu.upper()}_MENU",
+            "overlays": [],
+        }
+
+    def find_upgrade(self, menu, label, **_kwargs):
+        self.menu = menu
+        return SimpleNamespace(screenshot=self.frame, label=label)
+
+    def detect_boxes(self, _frame, *, menu):
+        specs = {
+            "Shockwave Size": ("defense", "left", (26, 1320, 511, 240)),
+            "Bounce Shot Targets": ("attack", "right", (546, 1320, 509, 240)),
+            "Bounce Shot Range": ("attack", "left", (26, 1320, 511, 240)),
+        }
+        result = {"left": [], "right": []}
+        for label, (expected_menu, column, rect) in specs.items():
+            if menu == self.menu == expected_menu:
+                result[column].append(UpgradeBox(column, rect, text=label))
+        return result
+
+    def measure_lock(self, _frame, expected_label):
+        if self.detail_label != expected_label:
+            return _evidence(expected_label, FreeUpgradeLockState.UNKNOWN)
+        return _evidence(expected_label, self.states[expected_label])
+
+    def tap(self, target, **_kwargs):
+        self.actions.append(target)
+        if isinstance(target, tuple):
+            x, _y = target
+            if self.menu == "defense":
+                self.detail_label = "Shockwave Size"
+            elif x > 500:
+                self.detail_label = "Bounce Shot Targets"
+            else:
+                self.detail_label = "Bounce Shot Range"
+            return True
+        if target == "buttons.free_upgrade_lock:checkbox":
+            self.states[self.detail_label] = FreeUpgradeLockState.CHECKED
+            return True
+        if target == "gesture_targets.upgrade_detail_dismiss":
+            self.detail_label = None
+            return True
+        return False
+
+
+def test_in_battle_enforcement_uses_running_upgrade_panes_only():
+    ui = _InBattleUi(
+        {
+            "Shockwave Size": FreeUpgradeLockState.UNCHECKED,
+            "Bounce Shot Targets": FreeUpgradeLockState.CHECKED,
+            "Bounce Shot Range": FreeUpgradeLockState.CHECKED,
+        }
+    )
+
+    result = inspect_in_battle_free_upgrade_locks(
+        FARM_FREE_UPGRADE_LOCKS,
+        screenshot=ui.frame,
+        enforce=True,
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.tap,
+        find_upgrade_fn=ui.find_upgrade,
+        detect_boxes_fn=ui.detect_boxes,
+        measure_lock_fn=ui.measure_lock,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.evidence.valid
+    assert result.changed_labels == ("Shockwave Size",)
+    assert ui.detect(ui.frame)["state"] == "RUNNING"
+    assert ui.actions.count("buttons.free_upgrade_lock:checkbox") == 1
+    assert not any(
+        action in {"navigation.goto_workshop_home", "navigation.goto_home"}
+        for action in ui.actions
+    )
 
 
 def test_inspection_returns_from_enhance_to_upgrade_before_selecting_category():

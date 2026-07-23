@@ -52,7 +52,7 @@ FARM_STRATEGY_PATHS = {
 def _free_upgrade_lock_boundary_evidence():
     return {
         "status": "verified",
-        "boundary": "NEW_BATTLE",
+        "boundary": "RUNNING",
         "required": list(FARM_FREE_UPGRADE_LOCKS),
         "checked": True,
         "valid": True,
@@ -207,7 +207,7 @@ class RunBoundaryTests(unittest.TestCase):
         self.assertFalse(manager.session_preflight_pending())
         self.assertEqual(
             mv["gc_session_preflight_evidence"]["free_upgrade_locks"]["status"],
-            "unavailable_deferred",
+            "in_battle_pending",
         )
 
         manager.maybe_run_start(
@@ -567,9 +567,9 @@ class DeferredStartupGateTests(unittest.TestCase):
         mv = manager.ctx.data["mission_vars"]
         deferred = mv["gc_session_preflight_evidence"]["free_upgrade_locks"]
 
-        self.assertEqual(deferred["status"], "unavailable_deferred")
+        self.assertEqual(deferred["status"], "in_battle_pending")
         self.assertIsNone(deferred["valid"])
-        self.assertTrue(deferred["blocking_valid"])
+        self.assertFalse(deferred["blocking_valid"])
         self.assertFalse(manager.session_preflight_repair_required())
 
         manager.maybe_run_start(

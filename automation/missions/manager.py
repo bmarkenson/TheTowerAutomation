@@ -119,15 +119,15 @@ class MissionManager:
         if not required:
             return
         deferred = {
-            "status": "unavailable_deferred",
-            "boundary": HomeBattleControl.NEW_BATTLE.value,
+            "status": "in_battle_pending",
+            "boundary": "RUNNING",
             "required": required,
             "checked": False,
             "valid": None,
-            "blocking_valid": True,
+            "blocking_valid": False,
             "reason": (
-                "attached battle has no authoritative no-battle NEW_BATTLE "
-                "lock evidence"
+                "startup gates are deferred for the attached battle; locks "
+                "will be inspected in the next armed session preflight"
             ),
         }
         mv = self.ctx.data.setdefault("mission_vars", {})
@@ -139,7 +139,7 @@ class MissionManager:
         mv["gc_session_preflight_evidence"] = session_evidence
 
     def _rearm_free_upgrade_lock_gate(self) -> None:
-        """Require fresh Home proof once per genuine NEW_BATTLE boundary."""
+        """Require fresh in-battle lock proof after each genuine run boundary."""
 
         if not self._free_upgrade_lock_requirements():
             return
