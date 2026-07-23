@@ -107,6 +107,25 @@ def test_post_run_value_preserves_home_phase_and_observation_time():
     assert snapshot["finalized_at"] == "2026-07-22T16:00:00+00:00"
 
 
+def test_unfinished_snapshot_can_be_restored_after_process_reload():
+    original = NoStrategyRunObserver(clock=_clock)
+    original.record_post_run_value(
+        "free_upgrade_locks",
+        {"locks": [{"label": "Shockwave Size", "state": "checked"}]},
+        source="home_workshop_lock_details",
+    )
+    snapshot = original.snapshot(finalized=False)
+    replacement = NoStrategyRunObserver(
+        clock=lambda: datetime(2026, 7, 22, 17, 0, tzinfo=timezone.utc)
+    )
+
+    replacement.restore_snapshot(snapshot)
+    restored = replacement.snapshot(finalized=False)
+
+    assert restored["started_at"] == snapshot["started_at"]
+    assert restored["fields"] == snapshot["fields"]
+
+
 def test_ultimate_weapon_observations_merge_across_visible_scroll_positions():
     observer = NoStrategyRunObserver(clock=_clock)
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)

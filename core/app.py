@@ -36,6 +36,7 @@ from core.no_strategy_post_run import (
     NoStrategyPostRunPaused,
     capture_post_run_perk_configuration,
     inspect_post_run_free_upgrade_locks,
+    load_pending_no_strategy_record,
     open_perks_configuration_for_post_run_capture,
     open_perks_configuration_from_cards,
     restore_post_run_home,
@@ -157,6 +158,7 @@ class App:
         self._pending_no_strategy_record: Optional[Dict[str, Any]] = None
         self._no_strategy_post_run_stage: Optional[str] = None
         self._no_strategy_post_run_retry_at = 0.0
+        self._no_strategy_post_run_recovery_checked = False
         self._run_initialization_gate_logged = False
         self._session_preflight_gate_logged = False
         self._session_preflight_terminal_blocked_logged = False
@@ -1258,6 +1260,56 @@ class App:
             return True
         return True
 
+    def _recover_no_strategy_post_run(
+        self,
+        new_state: str,
+        img: Frame,
+    ) -> None:
+        """Recover an unfinished Home inventory after process replacement."""
+
+        if (
+            getattr(self, "_no_strategy_post_run_recovery_checked", False)
+            or getattr(self, "_pending_no_strategy_record", None) is not None
+            or self._mission_mgr.strategy is not None
+            or new_state != "HOME_SCREEN"
+        ):
+            return
+        home_control = detect_home_battle_control(img)
+        if home_control.control is not HomeBattleControl.NEW_BATTLE:
+            return
+        self._no_strategy_post_run_recovery_checked = True
+        record = load_pending_no_strategy_record()
+        if record is None:
+            return
+        observed = record.get("observed_run_configuration")
+        try:
+            self._no_strategy_observer.restore_snapshot(observed)
+        except (TypeError, ValueError) as exc:
+            log(
+                f"[NO_STRATEGY] Could not restore unfinished post-run "
+                f"inventory: {exc}",
+                "ERROR",
+                console=True,
+            )
+            return
+        fields = observed.get("fields") if isinstance(observed, Mapping) else {}
+        lock_field = fields.get("free_upgrade_locks", {}) if isinstance(fields, Mapping) else {}
+        lock_status = lock_field.get("status") if isinstance(lock_field, Mapping) else None
+        self._pending_no_strategy_record = record
+        self._no_strategy_post_run_stage = (
+            "perks"
+            if lock_status in {"observed", "evidence_captured", "unavailable"}
+            else "locks"
+        )
+        self._no_strategy_post_run_retry_at = 0.0
+        self._no_strategy_observation_active = True
+        log(
+            "[NO_STRATEGY] Recovered unfinished post-run inventory for "
+            f"{record.get('battle_id')}",
+            "INFO",
+            console=True,
+        )
+
     def _release_no_strategy_post_run(self) -> None:
         """Release a completed observation boundary and reset its collector."""
 
@@ -1276,6 +1328,7 @@ class App:
         img: Frame,
     ) -> None:
         """Dispatch handlers for top-level UI states and overlay-driven events."""
+        self._recover_no_strategy_post_run(new_state, img)
         if self._handle_no_strategy_post_run(new_state, img):
             return
         if new_state == "RUNNING":

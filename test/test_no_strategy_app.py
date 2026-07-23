@@ -42,6 +42,7 @@ def _app_without_strategy():
     app._pending_no_strategy_record = None
     app._no_strategy_post_run_stage = None
     app._no_strategy_post_run_retry_at = 0.0
+    app._no_strategy_post_run_recovery_checked = True
     return app
 
 
@@ -226,3 +227,33 @@ def test_pending_post_run_inventory_blocks_normal_home_handler():
         app._handle_primary_states("HOME_SCREEN", set(), frame)
 
     home.assert_not_called()
+
+
+def test_no_battle_home_recovers_unfinished_inventory_after_process_reload():
+    app = _app_without_strategy()
+    app._no_strategy_post_run_recovery_checked = False
+    app._no_strategy_observer = MagicMock()
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    snapshot = {
+        "collection_mode": "no_strategy_observation",
+        "finalized": False,
+        "fields": {"free_upgrade_locks": {"status": "not_observed"}},
+    }
+    record = {
+        "battle_id": "BattleRecovered",
+        "observed_run_configuration": snapshot,
+    }
+
+    with (
+        patch("core.app.load_pending_no_strategy_record", return_value=record),
+        patch(
+            "core.app.detect_home_battle_control",
+            return_value=SimpleNamespace(control=HomeBattleControl.NEW_BATTLE),
+        ),
+    ):
+        app._recover_no_strategy_post_run("HOME_SCREEN", frame)
+
+    app._no_strategy_observer.restore_snapshot.assert_called_once_with(snapshot)
+    assert app._pending_no_strategy_record is record
+    assert app._no_strategy_post_run_stage == "locks"
+    assert app._no_strategy_post_run_recovery_checked is True

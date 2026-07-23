@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta
+import json
 from pathlib import Path
 import re
 import time
@@ -41,6 +43,7 @@ PERK_TABS = (
     ("perk_bans", "Ban Perks", (436, 210, 210, 90)),
     ("perk_auto_pick_order", "Auto Pick", (650, 210, 210, 90)),
 )
+POST_RUN_RECOVERY_WINDOW = timedelta(hours=6)
 
 
 @dataclass(frozen=True)
@@ -68,6 +71,82 @@ class NoStrategyPostRunError(RuntimeError):
 
 class NoStrategyPostRunPaused(NoStrategyPostRunError):
     pass
+
+
+def load_pending_no_strategy_record(
+    *,
+    records_dir: Path | str = Path("logs/battles"),
+    now: Optional[datetime] = None,
+    recovery_window: timedelta = POST_RUN_RECOVERY_WINDOW,
+) -> Optional[dict[str, Any]]:
+    """Load the newest recent unfinished No Strategy terminal record."""
+
+    current_time = now or datetime.now().astimezone()
+    candidates = sorted(
+        Path(records_dir).glob("Battle*.json"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    recoverable: list[tuple[datetime, dict[str, Any]]] = []
+    for path in candidates:
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+            observed = record.get("observed_run_configuration")
+            captured_at = datetime.fromisoformat(str(record.get("captured_at") or ""))
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if record.get("strategy") is not None or not isinstance(observed, Mapping):
+            continue
+        if (
+            observed.get("collection_mode") != "no_strategy_observation"
+            or observed.get("finalized") is True
+        ):
+            continue
+        if captured_at.tzinfo is None:
+            continue
+        age = current_time - captured_at.astimezone(current_time.tzinfo)
+        if timedelta(0) <= age <= recovery_window:
+            recoverable.append((captured_at, record))
+    if not recoverable:
+        return None
+    recoverable.sort(key=lambda item: item[0], reverse=True)
+    newest_fingerprint = _terminal_record_fingerprint(recoverable[0][1])
+    related = [
+        item
+        for item in recoverable
+        if not newest_fingerprint
+        or _terminal_record_fingerprint(item[1]) == newest_fingerprint
+    ]
+    _captured_at, best = max(
+        related,
+        key=lambda item: (_observation_coverage(item[1]), item[0]),
+    )
+    return best
+
+
+def _terminal_record_fingerprint(record: Mapping[str, Any]) -> tuple[Any, ...]:
+    fields = record.get("game_stats", {}).get("fields", {})
+    if not isinstance(fields, Mapping):
+        return ()
+    values = []
+    for name in ("tier", "wave", "total_coins_earned"):
+        field = fields.get(name)
+        if not isinstance(field, Mapping):
+            values.append(None)
+            continue
+        values.append(field.get("value", field.get("decimal", field.get("raw"))))
+    return tuple(values) if any(value is not None for value in values) else ()
+
+
+def _observation_coverage(record: Mapping[str, Any]) -> int:
+    observed = record.get("observed_run_configuration")
+    coverage = observed.get("coverage", {}) if isinstance(observed, Mapping) else {}
+    if not isinstance(coverage, Mapping):
+        return 0
+    return sum(
+        int(coverage.get(name) or 0)
+        for name in ("observed", "evidence_captured", "unavailable")
+    )
 
 
 def detect_home_perks_configuration_control(
@@ -542,6 +621,7 @@ __all__ = [
     "capture_post_run_perk_configuration",
     "detect_home_perks_configuration_control",
     "inspect_post_run_free_upgrade_locks",
+    "load_pending_no_strategy_record",
     "open_perks_configuration_for_post_run_capture",
     "open_perks_configuration_from_cards",
     "restore_post_run_home",

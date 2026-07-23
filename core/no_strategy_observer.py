@@ -7,6 +7,7 @@ loadout can never be mistaken for a profile the operator selected.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict
 from datetime import datetime
 from typing import Any, Callable, Mapping, Optional
@@ -118,6 +119,38 @@ class NoStrategyRunObserver:
             }
             for name in OBSERVED_FIELDS
         }
+
+    def restore_snapshot(self, snapshot: Mapping[str, Any]) -> None:
+        """Restore a persisted unfinished observation after a process reload."""
+
+        if snapshot.get("collection_mode") != "no_strategy_observation":
+            raise ValueError("not a No Strategy observation snapshot")
+        if snapshot.get("finalized") is True:
+            raise ValueError("cannot restore a finalized observation snapshot")
+        fields = snapshot.get("fields")
+        if not isinstance(fields, Mapping):
+            raise ValueError("No Strategy observation fields are missing")
+        restored: dict[str, dict[str, Any]] = {}
+        for name in OBSERVED_FIELDS:
+            field = fields.get(name)
+            if not isinstance(field, Mapping):
+                raise ValueError(f"No Strategy observation field {name!r} is missing")
+            status = str(field.get("status") or "")
+            if status not in {
+                "not_observed",
+                "observed",
+                "evidence_captured",
+                "unavailable",
+            }:
+                raise ValueError(
+                    f"No Strategy observation field {name!r} has invalid status"
+                )
+            restored[name] = deepcopy(dict(field))
+        started_at = str(snapshot.get("started_at") or "").strip()
+        if not started_at:
+            raise ValueError("No Strategy observation start time is missing")
+        self._started_at = started_at
+        self._fields = restored
 
     def observe(
         self,

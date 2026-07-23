@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+import json
 from types import SimpleNamespace
 
 import cv2
@@ -12,6 +14,7 @@ from core.no_strategy_post_run import (
     capture_post_run_perk_configuration,
     detect_home_perks_configuration_control,
     inspect_post_run_free_upgrade_locks,
+    load_pending_no_strategy_record,
     open_perks_configuration_for_post_run_capture,
 )
 
@@ -79,6 +82,92 @@ def test_post_run_lock_inspection_rejects_resume_battle_boundary():
                 control=HomeBattleControl.RESUME_BATTLE
             ),
         )
+
+
+def test_recent_unfinished_no_strategy_record_survives_process_reload(tmp_path):
+    now = datetime(2026, 7, 23, 2, 30, tzinfo=timezone.utc)
+    older = {
+        "battle_id": "BattleOld",
+        "captured_at": (now - timedelta(hours=7)).isoformat(),
+        "strategy": None,
+        "observed_run_configuration": {
+            "collection_mode": "no_strategy_observation",
+            "finalized": False,
+        },
+    }
+    recent = {
+        "battle_id": "BattleRecent",
+        "captured_at": (now - timedelta(minutes=40)).isoformat(),
+        "strategy": None,
+        "observed_run_configuration": {
+            "collection_mode": "no_strategy_observation",
+            "finalized": False,
+        },
+    }
+    (tmp_path / "BattleOld.json").write_text(json.dumps(older), encoding="utf-8")
+    (tmp_path / "BattleRecent.json").write_text(
+        json.dumps(recent), encoding="utf-8"
+    )
+
+    loaded = load_pending_no_strategy_record(records_dir=tmp_path, now=now)
+
+    assert loaded == recent
+
+
+def test_finalized_no_strategy_record_is_not_recovered(tmp_path):
+    now = datetime(2026, 7, 23, 2, 30, tzinfo=timezone.utc)
+    record = {
+        "battle_id": "BattleDone",
+        "captured_at": (now - timedelta(minutes=10)).isoformat(),
+        "strategy": None,
+        "observed_run_configuration": {
+            "collection_mode": "no_strategy_observation",
+            "finalized": True,
+        },
+    }
+    (tmp_path / "BattleDone.json").write_text(json.dumps(record), encoding="utf-8")
+
+    assert load_pending_no_strategy_record(records_dir=tmp_path, now=now) is None
+
+
+def test_duplicate_terminal_captures_recover_the_record_with_best_observations(
+    tmp_path,
+):
+    now = datetime(2026, 7, 23, 2, 30, tzinfo=timezone.utc)
+
+    def record(name, minutes_ago, observed):
+        return {
+            "battle_id": name,
+            "captured_at": (now - timedelta(minutes=minutes_ago)).isoformat(),
+            "strategy": None,
+            "game_stats": {
+                "fields": {
+                    "tier": {"value": 18},
+                    "wave": {"value": 5390},
+                    "total_coins_earned": {"decimal": "1270000000000000.00"},
+                }
+            },
+            "observed_run_configuration": {
+                "collection_mode": "no_strategy_observation",
+                "finalized": False,
+                "coverage": {
+                    "observed": observed,
+                    "evidence_captured": 0,
+                    "unavailable": 1 if observed else 0,
+                },
+            },
+        }
+
+    canonical = record("BattleCanonical", 30, 7)
+    duplicate = record("BattleDuplicate", 5, 0)
+    for item in (canonical, duplicate):
+        (tmp_path / f"{item['battle_id']}.json").write_text(
+            json.dumps(item), encoding="utf-8"
+        )
+
+    loaded = load_pending_no_strategy_record(records_dir=tmp_path, now=now)
+
+    assert loaded == canonical
 
 
 def test_home_perks_control_detector_rejects_closed_cards_and_accepts_fixture():
