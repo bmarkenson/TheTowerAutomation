@@ -4,6 +4,7 @@ from unittest.mock import patch
 import cv2
 import numpy as np
 
+from core.input import TapVerification
 from core.matcher import get_match
 from core.battle_lifecycle import HomeBattleControl
 from core.home_battle import HomeBattleEvidence, detect_home_battle_control
@@ -40,11 +41,14 @@ def test_verified_home_battle_ocr_fallback_taps_configured_control():
     ):
         assert _tap_verified_home_battle_control()
 
-    tap.assert_called_once_with(
-        "buttons.battle_control:home",
-        require_visible=False,
-        dispatch="now",
-    )
+    tap.assert_called_once()
+    target, = tap.call_args.args
+    kwargs = tap.call_args.kwargs
+    assert target == "buttons.battle_control:home"
+    assert kwargs["dispatch"] == "now"
+    verification = kwargs["verification"]
+    assert isinstance(verification, TapVerification)
+    assert verification.description == "home_battle_control:NEW_BATTLE"
 
 
 def test_home_battle_fallback_refuses_unknown_screen():

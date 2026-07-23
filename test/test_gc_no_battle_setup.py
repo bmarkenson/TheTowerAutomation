@@ -85,7 +85,6 @@ class _NoBattleRouter:
         self.visible_actions = []
         self.module_checks = []
         self.module_observations = []
-        self.target_priority_checks = []
         self.bots_offscreen = bots_offscreen
         self.deny_bots_preset = deny_bots_preset
         self.swipes = []
@@ -130,8 +129,6 @@ class _NoBattleRouter:
             return {"state": "GUILD", "secondary_states": secondary}
         if frame == "modules":
             return {"state": "MODULES", "secondary_states": []}
-        if frame == "target_priority":
-            return {"state": "TARGET_PRIORITY", "secondary_states": []}
         raise AssertionError(frame)
 
     def home_control(self, _frame):
@@ -164,11 +161,7 @@ class _NoBattleRouter:
             ("event", "navigation.event:bots_tab"): "bots",
             ("guild", "navigation.guild:guardian_tab"): "guardians",
             ("home", "navigation.goto_modules_home"): "modules",
-            ("home", "navigation.home_target_priority"): "target_priority",
         }
-        if label == (950, 100) and self.state == "target_priority":
-            self.state = "home"
-            return True
         if label == "navigation.goto_home" and self.state != "home":
             self.state = "home"
             return True
@@ -195,13 +188,6 @@ class _NoBattleRouter:
             valid=True,
             as_dict=lambda: {"valid": True, "slots": []},
         )
-
-    def ensure_target_priority(self, expected, **kwargs):
-        assert self.state == "target_priority"
-        assert kwargs["panel_open"] is True
-        self.target_priority_checks.append(list(expected))
-        assert kwargs["tap_fn"]((950, 100))
-        return True
 
     def validate_configuration(self, **_kwargs):
         return SimpleNamespace(
@@ -351,7 +337,6 @@ def _run(router, requirements=REQUIREMENTS, *, waivers=None):
         measure_selection_fn=router.measure,
         ensure_modules_fn=router.ensure_modules,
         evaluate_modules_fn=router.evaluate_modules,
-        ensure_target_priority_fn=router.ensure_target_priority,
         validate_configuration_fn=router.validate_configuration,
         sleep_fn=lambda _seconds: None,
     )
@@ -367,7 +352,13 @@ def test_no_battle_setup_corrects_supported_farm_presets_and_guardians():
     assert all(router.selected.values())
     assert router.guardians == {"fetch", "summon", "scout"}
     assert router.module_checks == [REQUIREMENTS["modules"]]
-    assert router.target_priority_checks == [REQUIREMENTS["target_priority"]]
+    assert result.evidence["target_priority"] == {
+        "mode": "enforce",
+        "checked": False,
+        "valid": None,
+        "boundary": "RUNNING",
+        "reason": "battle_only_control",
+    }
     assert router.visible_actions == [
         "indicators.cards:farm_slot",
         "indicators.workshop:farm_slot",
@@ -456,7 +447,7 @@ def test_no_battle_setup_leaves_already_correct_settings_untouched():
 
     assert result.complete
     assert router.module_checks == [REQUIREMENTS["modules"]]
-    assert router.target_priority_checks == [REQUIREMENTS["target_priority"]]
+    assert result.evidence["target_priority"]["reason"] == "battle_only_control"
     assert router.visible_actions == [
         "navigation.home_event",
         "buttons.return_to_game",
@@ -475,7 +466,10 @@ def test_no_battle_setup_corrects_tournament_home_configuration():
     assert all(router.selected.values())
     assert router.guardians == {"attack", "ally", "scout"}
     assert router.module_checks == [TOURNAMENT_REQUIREMENTS["modules"]]
-    assert router.target_priority_checks == []
+    assert result.evidence["target_priority"] == {
+        "mode": "preserve",
+        "checked": False,
+    }
     assert router.configuration_specs is TOURNAMENT_SECTION_SPECS
     assert result.evidence["cards_deck"] == "Tournament"
     assert result.evidence["workshop_preset"] == "Tourney"
@@ -592,7 +586,6 @@ def test_no_battle_setup_enforces_free_upgrade_locks_after_farm_preset():
         ensure_modules_fn=router.ensure_modules,
         evaluate_modules_fn=router.evaluate_modules,
         ensure_free_upgrade_locks_fn=ensure_locks,
-        ensure_target_priority_fn=router.ensure_target_priority,
         validate_configuration_fn=router.validate_configuration,
         sleep_fn=lambda _seconds: None,
     )
@@ -646,7 +639,6 @@ def test_no_battle_lock_mismatch_blocks_new_battle_boundary():
             screenshot="workshop",
             changed_labels=(),
         ),
-        ensure_target_priority_fn=router.ensure_target_priority,
         validate_configuration_fn=router.validate_configuration,
         sleep_fn=lambda _seconds: None,
     )

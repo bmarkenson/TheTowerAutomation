@@ -104,12 +104,13 @@ def test_guarded_correction_toggles_on_to_off_and_reverifies():
 
     assert result.changed
     assert result.evidence.state is PoisonSwampStunState.OFF
-    safe_tap.assert_called_once_with(
-        (179, 1428),
-        require_visible=False,
-        dispatch="now",
-        log_label="uw_detail:Poison Swamp",
-    )
+    safe_tap.assert_called_once()
+    point, = safe_tap.call_args.args
+    kwargs = safe_tap.call_args.kwargs
+    assert point == (179, 1428)
+    assert kwargs["dispatch"] == "now"
+    assert kwargs["log_label"] == "uw_detail:Poison Swamp"
+    assert kwargs["verification"].description == "ultimate_weapon:Poison Swamp"
     tap_visible.assert_called_once_with(
         "buttons.poison_swamp_stun_on",
         screenshot=detail_on,

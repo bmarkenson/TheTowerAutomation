@@ -1482,7 +1482,15 @@
         "type": "tap",
         "x": 270,
         "y": 343
-      }
+      },
+      "match_template": "navigation/workshop:upgrade.png",
+      "match_region": {
+        "x": 80,
+        "y": 295,
+        "w": 390,
+        "h": 95
+      },
+      "match_threshold": 0.9
     },
     "workshop:attack": {
       "roles": [
@@ -1492,7 +1500,15 @@
         "type": "tap",
         "x": 135,
         "y": 1685
-      }
+      },
+      "match_template": "navigation/workshop:attack.png",
+      "match_region": {
+        "x": 55,
+        "y": 1620,
+        "w": 160,
+        "h": 130
+      },
+      "match_threshold": 0.9
     },
     "workshop:defense": {
       "roles": [
@@ -1502,7 +1518,15 @@
         "type": "tap",
         "x": 405,
         "y": 1685
-      }
+      },
+      "match_template": "navigation/workshop:defense.png",
+      "match_region": {
+        "x": 325,
+        "y": 1620,
+        "w": 160,
+        "h": 130
+      },
+      "match_threshold": 0.9
     },
     "goto_utility": {
       "match_template": "navigation/goto_utility.png",
@@ -1548,7 +1572,15 @@
         "type": "tap",
         "x": 540,
         "y": 60
-      }
+      },
+      "match_template": "navigation/open_perks.png",
+      "match_region": {
+        "x": 340,
+        "y": 15,
+        "w": 430,
+        "h": 95
+      },
+      "match_threshold": 0.9
     },
     "goto_store": {
       "match_template": "navigation/goto_store.png",
@@ -1571,7 +1603,15 @@
         "type": "tap",
         "x": 1000,
         "y": 1830
-      }
+      },
+      "match_template": "navigation/goto_store_home.png",
+      "match_region": {
+        "x": 935,
+        "y": 1765,
+        "w": 130,
+        "h": 130
+      },
+      "match_threshold": 0.9
     },
     "goto_home_store": {
       "roles": [
@@ -1581,7 +1621,15 @@
         "type": "tap",
         "x": 80,
         "y": 1830
-      }
+      },
+      "match_template": "navigation/goto_home.png",
+      "match_region": {
+        "x": 15,
+        "y": 1765,
+        "w": 130,
+        "h": 130
+      },
+      "match_threshold": 0.9
     },
     "goto_home": {
       "roles": [
@@ -1591,7 +1639,15 @@
         "type": "tap",
         "x": 80,
         "y": 1830
-      }
+      },
+      "match_template": "navigation/goto_home.png",
+      "match_region": {
+        "x": 15,
+        "y": 1765,
+        "w": 130,
+        "h": 130
+      },
+      "match_threshold": 0.9
     },
     "goto_workshop_home": {
       "roles": [
@@ -1601,7 +1657,15 @@
         "type": "tap",
         "x": 270,
         "y": 1830
-      }
+      },
+      "match_template": "navigation/goto_workshop_home.png",
+      "match_region": {
+        "x": 205,
+        "y": 1765,
+        "w": 130,
+        "h": 130
+      },
+      "match_threshold": 0.9
     },
     "goto_cards_home": {
       "roles": [
@@ -1611,7 +1675,15 @@
         "type": "tap",
         "x": 450,
         "y": 1830
-      }
+      },
+      "match_template": "navigation/goto_cards_home.png",
+      "match_region": {
+        "x": 385,
+        "y": 1765,
+        "w": 130,
+        "h": 130
+      },
+      "match_threshold": 0.9
     },
     "home_menu_toggle": {
       "roles": [
@@ -1641,7 +1713,15 @@
         "type": "tap",
         "x": 630,
         "y": 1830
-      }
+      },
+      "match_template": "navigation/goto_modules_home.png",
+      "match_region": {
+        "x": 565,
+        "y": 1765,
+        "w": 130,
+        "h": 130
+      },
+      "match_threshold": 0.9
     },
     "toggle_menu": {
       "match_template": "navigation/toggle_menu.png",
@@ -1843,7 +1923,15 @@
         "type": "tap",
         "x": 910,
         "y": 380
-      }
+      },
+      "match_template": "navigation/target_priority.png",
+      "match_region": {
+        "x": 850,
+        "y": 320,
+        "w": 120,
+        "h": 120
+      },
+      "match_threshold": 0.9
     },
     "menu_close_button": {
       "match_template": "navigation/menu_close_button.png",
@@ -1875,16 +1963,6 @@
       "roles": [
         "navigation"
       ]
-    },
-    "home_target_priority": {
-      "roles": [
-        "navigation"
-      ],
-      "tap": {
-        "type": "tap",
-        "x": 1025,
-        "y": 620
-      }
     },
     "home_guild": {
       "match_template": "navigation/home_guild.png",
@@ -1945,7 +2023,15 @@
         "type": "tap",
         "x": 950,
         "y": 100
-      }
+      },
+      "match_template": "buttons/close:target_priority.png",
+      "match_region": {
+        "x": 890,
+        "y": 50,
+        "w": 120,
+        "h": 120
+      },
+      "match_threshold": 0.9
     },
     "module:equipped_outer_left_top": {
       "roles": [
@@ -2125,7 +2211,15 @@
         "type": "tap",
         "x": 960,
         "y": 795
-      }
+      },
+      "match_template": "buttons/exit_battle.png",
+      "match_region": {
+        "x": 845,
+        "y": 740,
+        "w": 225,
+        "h": 115
+      },
+      "match_threshold": 0.9
     },
     "surrender:exit_battle": {
       "roles": [
@@ -2135,7 +2229,15 @@
         "type": "tap",
         "x": 350,
         "y": 1070
-      }
+      },
+      "match_template": "buttons/surrender:exit_battle.png",
+      "match_region": {
+        "x": 180,
+        "y": 980,
+        "w": 350,
+        "h": 180
+      },
+      "match_threshold": 0.9
     },
     "go_home:exit_battle": {
       "roles": [
@@ -2145,7 +2247,15 @@
         "type": "tap",
         "x": 730,
         "y": 1070
-      }
+      },
+      "match_template": "buttons/go_home:exit_battle.png",
+      "match_region": {
+        "x": 550,
+        "y": 980,
+        "w": 355,
+        "h": 180
+      },
+      "match_threshold": 0.9
     },
     "free_upgrade_lock:checkbox": {
       "roles": [
@@ -2173,7 +2283,15 @@
         "type": "tap",
         "x": 195,
         "y": 1755
-      }
+      },
+      "match_template": "buttons/damage_adjuster:decrease.png",
+      "match_region": {
+        "x": 90,
+        "y": 1680,
+        "w": 210,
+        "h": 150
+      },
+      "match_threshold": 0.9
     },
     "damage_adjuster:increase": {
       "roles": [
@@ -2183,7 +2301,15 @@
         "type": "tap",
         "x": 885,
         "y": 1755
-      }
+      },
+      "match_template": "buttons/damage_adjuster:increase.png",
+      "match_region": {
+        "x": 780,
+        "y": 1680,
+        "w": 210,
+        "h": 150
+      },
+      "match_threshold": 0.9
     },
     "yes:end_round": {
       "match_template": "buttons/yes:end_round.png",
@@ -2589,7 +2715,15 @@
         "type": "tap",
         "x": 870,
         "y": 1540
-      }
+      },
+      "match_template": "buttons/guardian:scout_inventory.png",
+      "match_region": {
+        "x": 730,
+        "y": 1410,
+        "w": 280,
+        "h": 230
+      },
+      "match_threshold": 0.9
     },
     "perks:auto_pick": {
       "roles": [

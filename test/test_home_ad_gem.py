@@ -72,11 +72,9 @@ def test_home_ad_gem_claim_revalidates_and_never_starts_blind_tapper():
     start.assert_not_called()
     tap.assert_called_once_with(
         "buttons.claim_ad_gem:home",
-        require_visible=True,
         retries=1,
         retry_delay=0.4,
         dispatch="now",
-        allow_fallback=False,
     )
 
 

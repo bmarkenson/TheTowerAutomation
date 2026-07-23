@@ -2,6 +2,7 @@ from threading import Event
 from unittest.mock import patch
 
 import numpy as np
+import pytest
 
 from automation.missions.base import MissionContext
 from core.action_executor import execute_actions
@@ -78,7 +79,7 @@ def test_fallback_initializer_taps_ehls_before_eals():
         result = initialize_level_skips(
             screenshot=initial,
             capture_fn=lambda: next(captures),
-            tap_fn=lambda point, *, label: (
+            tap_fn=lambda point, *, label, verification: (
                 taps.append((label, point)),
                 events.append(label),
                 True,
@@ -110,31 +111,35 @@ def test_fallback_initializer_taps_ehls_before_eals():
     )
 
 
-def test_fallback_taps_continue_while_capture_is_in_flight():
+def test_fallback_dispatches_one_verified_tap_before_capture():
     capture_started = Event()
-    concurrent_tap_seen = Event()
+    tap_seen = Event()
 
     def capture():
         capture_started.set()
-        assert concurrent_tap_seen.wait(timeout=1.0)
+        assert tap_seen.is_set()
         return _frame(2)
 
-    def tap(_point, *, label):
-        if capture_started.is_set():
-            concurrent_tap_seen.set()
+    def tap(_point, *, label, verification):
+        assert not capture_started.is_set()
+        assert label == "test"
+        assert verification is sentinel
+        tap_seen.set()
         return True
 
+    sentinel = object()
     frame, taps_sent, dispatch_ok = _tap_and_capture(
         point=(10, 20),
         label="test",
         capture_fn=capture,
         tap_fn=tap,
+        verification=sentinel,
     )
 
     assert dispatch_ok
-    assert taps_sent == 2
+    assert taps_sent == 1
     assert frame is not None and int(frame[0, 0, 0]) == 2
-    assert concurrent_tap_seen.is_set()
+    assert tap_seen.is_set()
 
 
 def test_initializer_finishes_without_taps_when_both_skips_start_gold_boxed():
@@ -162,7 +167,9 @@ def test_initializer_finishes_without_taps_when_both_skips_start_gold_boxed():
         result = initialize_level_skips(
             screenshot=_frame(1),
             capture_fn=lambda: (_ for _ in ()).throw(AssertionError("unexpected capture")),
-            tap_fn=lambda point, *, label: taps.append((label, point)) or True,
+            tap_fn=lambda point, *, label, verification: (
+                taps.append((label, point)) or True
+            ),
             sleep_fn=lambda _seconds: None,
             frame_stream_factory=None,
         )
@@ -203,7 +210,9 @@ def test_initializer_skips_ehls_taps_when_only_ehls_starts_gold_boxed():
         result = initialize_level_skips(
             screenshot=initial,
             capture_fn=lambda: complete,
-            tap_fn=lambda point, *, label: taps.append((label, point)) or True,
+            tap_fn=lambda point, *, label, verification: (
+                taps.append((label, point)) or True
+            ),
             sleep_fn=lambda _seconds: None,
             frame_stream_factory=None,
         )
@@ -244,7 +253,9 @@ def test_initializer_does_not_tap_eals_when_it_starts_gold_boxed():
         result = initialize_level_skips(
             screenshot=initial,
             capture_fn=lambda: complete,
-            tap_fn=lambda point, *, label: taps.append((label, point)) or True,
+            tap_fn=lambda point, *, label, verification: (
+                taps.append((label, point)) or True
+            ),
             sleep_fn=lambda _seconds: None,
             frame_stream_factory=None,
         )
@@ -317,7 +328,9 @@ def test_live_stream_keeps_purchasing_without_blocking_screenshot_captures():
             capture_fn=lambda: (_ for _ in ()).throw(
                 AssertionError("live stream path must not request a screenshot")
             ),
-            tap_fn=lambda point, *, label: taps.append((label, point)) or True,
+            tap_fn=lambda point, *, label, verification: (
+                taps.append((label, point)) or True
+            ),
             sleep_fn=lambda _seconds: None,
             frame_stream_factory=lambda: stream,
         )
@@ -331,6 +344,79 @@ def test_live_stream_keeps_purchasing_without_blocking_screenshot_captures():
     assert stream.started and stream.stopped
 
 
+def test_live_stream_never_reuses_one_frame_for_multiple_taps():
+    initial = _frame(1)
+    after_ehls = _frame(2)
+    complete = _frame(3)
+    taps = []
+
+    class RepeatingStream:
+        is_live = True
+        failed = False
+        age_s = 0.0
+
+        def __init__(self):
+            self.calls = 0
+            self.stopped = False
+
+        def start(self):
+            pass
+
+        def stop(self):
+            self.stopped = True
+
+        def latest_frame(self):
+            self.calls += 1
+            if self.calls < 4:
+                return 1, initial
+            if self.calls < 7:
+                return 2, after_ehls
+            return 3, complete
+
+    stream = RepeatingStream()
+
+    def gold_box(frame, rect):
+        value = int(frame[0, 0, 0])
+        is_ehls = rect[0] < 500
+        return value >= (2 if is_ehls else 3), {}
+
+    with (
+        patch(
+            "core.level_skip_initializer.detect_state_and_overlays",
+            return_value={"state": "RUNNING", "menu": "UTILITY_MENU"},
+        ),
+        patch("core.level_skip_initializer.detect_current_buy_quantity", return_value="max"),
+        patch(
+            "core.level_skip_initializer._target_boxes",
+            return_value={EHLS: _box(EHLS, "affordable"), EALS: _box(EALS, "affordable")},
+        ),
+        patch(
+            "core.level_skip_initializer.evaluate_upgrade_box_gold_box",
+            side_effect=gold_box,
+        ),
+        patch(
+            "core.level_skip_initializer.detect_wave_number_from_image",
+            return_value=(20, 99.0),
+        ),
+    ):
+        result = initialize_level_skips(
+            screenshot=initial,
+            capture_fn=lambda: pytest.fail("live stream path must not capture"),
+            tap_fn=lambda point, *, label, verification: (
+                taps.append((label, stream.calls)) or True
+            ),
+            sleep_fn=lambda _seconds: None,
+            frame_stream_factory=lambda: stream,
+        )
+
+    assert result.success
+    assert taps == [
+        (f"level_skip:{EHLS}", 1),
+        (f"level_skip:{EALS}", 4),
+    ]
+    assert stream.stopped
+
+
 def test_fast_initializer_refuses_non_running_screen_without_taps():
     taps = []
     with patch(
@@ -339,7 +425,9 @@ def test_fast_initializer_refuses_non_running_screen_without_taps():
     ):
         result = initialize_level_skips(
             screenshot=_frame(1),
-            tap_fn=lambda point, *, label: taps.append((label, point)) or True,
+            tap_fn=lambda point, *, label, verification: (
+                taps.append((label, point)) or True
+            ),
         )
 
     assert not result.success

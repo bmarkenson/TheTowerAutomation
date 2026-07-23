@@ -184,11 +184,7 @@ def is_blind_gem_tapper_active() -> bool:
     return _blind_tapper_active.is_set()
 
 
-def _collect_visible_ad_gem(
-    label: str,
-    *,
-    allow_fallback_after_retry: bool,
-) -> bool:
+def _collect_visible_ad_gem(label: str) -> bool:
     """Tap one currently visible ad-gem control and verify its dismissal."""
 
     max_attempts = 3
@@ -204,11 +200,9 @@ def _collect_visible_ad_gem(
 
         tapped = safe_tap(
             label,
-            require_visible=True,
             retries=1,
             retry_delay=0.4,
             dispatch="now",
-            allow_fallback=(allow_fallback_after_retry and attempt > 1),
         )
         if not tapped:
             log(f"[AD_GEM] Failed to tap {label} (match missing)", "WARN")
@@ -233,10 +227,7 @@ def handle_home_ad_gem() -> bool:
     # Home cannot host the in-battle floating gem.  Ensure a prior bounded
     # tapper is winding down and never start a new one from this path.
     stop_blind_gem_tapper()
-    return _collect_visible_ad_gem(
-        "buttons.claim_ad_gem:home",
-        allow_fallback_after_retry=False,
-    )
+    return _collect_visible_ad_gem("buttons.claim_ad_gem:home")
 
 
 def handle_ad_gem() -> bool:
@@ -264,9 +255,6 @@ def handle_ad_gem() -> bool:
     log("Handling AD_GEMS_AVAILABLE overlay", "ACTION")
     start_blind_gem_tapper(duration=20, interval=1, blocking=False)
 
-    collected = _collect_visible_ad_gem(
-        "overlays.ad_gem",
-        allow_fallback_after_retry=True,
-    )
+    collected = _collect_visible_ad_gem("overlays.ad_gem")
     time.sleep(1)
     return collected

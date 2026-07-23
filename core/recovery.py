@@ -54,7 +54,7 @@ def handle_unknown_state(
     try:
         if tap_if_visible("buttons.close_generic", retries=1, screenshot=screen):
             tapped = True
-        elif safe_tap("buttons.close_generic", require_visible=False, dispatch="now"):
+        elif safe_tap("buttons.close_generic", dispatch="now"):
             tapped = True
         if tapped:
             log("[RECOVERY] Unknown state detected; tapped close_generic", "WARN")

@@ -1,6 +1,8 @@
 from unittest.mock import patch
 
-from core.clickmap_access import get_click
+import numpy as np
+
+from core.clickmap_access import resolve_dot_path
 from core.target_priority import (
     TARGETS,
     _canonical_target,
@@ -24,7 +26,8 @@ def test_enforcer_moves_rows_up_and_verifies():
         patch("core.target_priority.log"),
     ):
         assert ensure_target_priority_order(
-            tap_fn=lambda point: taps.append(point) or True,
+            capture_fn=lambda: np.full((1920, 1080, 3), 32, dtype=np.uint8),
+            tap_fn=lambda point, **_kwargs: taps.append(point) or True,
             ensure_menu_fn=lambda: True,
             sleep_fn=lambda _seconds: None,
         )
@@ -32,7 +35,7 @@ def test_enforcer_moves_rows_up_and_verifies():
     assert taps[-1] == (950, 100)
 
 
-def test_home_boundary_can_supply_an_already_open_priority_panel():
+def test_running_boundary_can_supply_an_already_open_priority_panel():
     taps = []
     with (
         patch(
@@ -42,15 +45,15 @@ def test_home_boundary_can_supply_an_already_open_priority_panel():
         patch("core.target_priority.log"),
     ):
         assert ensure_target_priority_order(
-            tap_fn=lambda point: taps.append(point) or True,
+            tap_fn=lambda point, **_kwargs: taps.append(point) or True,
             ensure_menu_fn=lambda: (_ for _ in ()).throw(
-                AssertionError("in-run menu must not open from Home")
+                AssertionError("menu is already open")
             ),
             sleep_fn=lambda _seconds: None,
             panel_open=True,
         )
 
-    assert get_click("navigation.home_target_priority") == (1025, 620)
+    assert resolve_dot_path("navigation.home_target_priority") is None
     assert taps == [(950, 100)]
 
 
@@ -67,7 +70,7 @@ def test_observer_reads_and_closes_without_reordering():
         patch("core.target_priority.log"),
     ):
         observation = observe_target_priority_order(
-            tap_fn=lambda point: taps.append(point) or True,
+            tap_fn=lambda point, **_kwargs: taps.append(point) or True,
             ensure_menu_fn=lambda: True,
             sleep_fn=lambda _seconds: None,
         )

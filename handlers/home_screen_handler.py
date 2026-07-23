@@ -2,9 +2,9 @@
 
 import time
 from utils.logger import log
-from core.input import safe_tap, tap_if_visible
+from core.input import TapVerification, safe_tap, tap_if_visible
 from core.battle_lifecycle import HomeBattleControl
-from core.home_battle import detect_home_battle_control
+from core.home_battle import HOME_BATTLE_CONTROL_REGION, detect_home_battle_control
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
 
@@ -37,8 +37,16 @@ def _tap_verified_home_battle_control() -> bool:
     )
     return safe_tap(
         "buttons.battle_control:home",
-        require_visible=False,
         dispatch="now",
+        verification=TapVerification(
+            screenshot=screenshot,
+            target_region=HOME_BATTLE_CONTROL_REGION,
+            description=f"home_battle_control:{evidence.control.value}",
+            verifier=lambda frame: (
+                detect_state_and_overlays(frame)["state"] == "HOME_SCREEN"
+                and detect_home_battle_control(frame).control is evidence.control
+            ),
+        ),
     )
 
 

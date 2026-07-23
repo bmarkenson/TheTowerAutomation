@@ -10,9 +10,10 @@ from typing import Literal, cast
 import cv2  # type: ignore
 import numpy as np  # type: ignore
 
-from core.input import safe_tap
+from core.input import TapVerification, safe_tap
 from core.clickmap_access import resolve_dot_path
 from core.ss_capture import capture_adb_screenshot
+from core.state_detector import detect_state_and_overlays
 from utils.logger import log
 from utils.ocr_utils import preprocess_binary, ocr_text_and_conf
 from pathlib import Path
@@ -131,9 +132,26 @@ def _expanded_centers(rect: Tuple[int, int, int, int], quantity: BuyQuantity) ->
     return tuple(centers)
 
 
-def _tap_point(point: Tuple[int, int]) -> None:
+def _tap_point(
+    point: Tuple[int, int],
+    *,
+    screenshot: np.ndarray,
+    target_region: Tuple[int, int, int, int],
+    description: str,
+    verifier: Callable[[np.ndarray], bool],
+) -> bool:
     x, y = point
-    safe_tap((int(x), int(y)), require_visible=False, dispatch="now", log_label="buy_quantity")
+    return safe_tap(
+        (int(x), int(y)),
+        dispatch="now",
+        log_label="buy_quantity",
+        verification=TapVerification(
+            screenshot=screenshot,
+            target_region=target_region,
+            description=description,
+            verifier=verifier,
+        ),
+    )
 
 
 def get_buy_quantity_regions(image: np.ndarray) -> Dict[str, object]:
@@ -175,7 +193,12 @@ def get_buy_quantity_regions(image: np.ndarray) -> Dict[str, object]:
 def is_buy_quantity_expanded(image: np.ndarray) -> bool:
     """Return True when the selector options row is visible."""
 
-    return False
+    try:
+        return "BUY_QUANTITY_MENU_EXPANDED" in set(
+            detect_state_and_overlays(image).get("overlays") or ()
+        )
+    except Exception:
+        return False
 
 
 def collapse_buy_quantity(
@@ -207,7 +230,14 @@ def collapse_buy_quantity(
         if not is_buy_quantity_expanded(current):
             return current
 
-        _tap_point(collapsed_point)
+        if not _tap_point(
+            collapsed_point,
+            screenshot=current,
+            target_region=area_rect,
+            description="buy_quantity:expanded_selector",
+            verifier=is_buy_quantity_expanded,
+        ):
+            return current
         sleep_fn(0.35)
 
         current = capture_fn()
@@ -368,12 +398,45 @@ def ensure_buy_quantity(
             "MATCH",
         )
 
-        _tap_point(collapsed_point)
+        if current_quantity is None:
+            current = capture_fn()
+            if current is None:
+                raise RuntimeError(
+                    "Buy quantity control was not identified before tapping"
+                )
+            last_capture = current
+            continue
+        collapsed_rect = get_buy_quantity_regions(current)["collapsed_rect"]
+        if not _tap_point(
+            collapsed_point,
+            screenshot=current,
+            target_region=collapsed_rect,
+            description=f"buy_quantity:collapsed:{current_quantity}",
+            verifier=lambda frame, expected=current_quantity: (
+                _read_collapsed_quantity(frame) == expected
+            ),
+        ):
+            raise RuntimeError("Buy quantity selector was not reverified")
         sleep_fn(0.35)
+
+        expanded = capture_fn()
+        if expanded is None or not is_buy_quantity_expanded(expanded):
+            raise RuntimeError("Buy quantity options did not become visible")
+        current = expanded
+        last_capture = current
 
         centers = _expanded_centers(area_rect, target)
         for idx, target_point in enumerate(centers):
-            _tap_point(target_point)
+            if not _tap_point(
+                target_point,
+                screenshot=current,
+                target_region=area_rect,
+                description=f"buy_quantity:expanded:{target}",
+                verifier=is_buy_quantity_expanded,
+            ):
+                raise RuntimeError(
+                    f"Buy quantity option {target!r} was not reverified"
+                )
             sleep_fn(0.4)
 
             for verify in range(3):
@@ -412,8 +475,32 @@ def ensure_buy_quantity(
                 continue
 
             if idx < len(centers) - 1:
-                _tap_point(collapsed_point)
+                observed_quantity = _read_collapsed_quantity(current)
+                if observed_quantity is None:
+                    raise RuntimeError(
+                        "Buy quantity control was not identified before retrying"
+                    )
+                collapsed_rect = get_buy_quantity_regions(current)["collapsed_rect"]
+                if not _tap_point(
+                    collapsed_point,
+                    screenshot=current,
+                    target_region=collapsed_rect,
+                    description=f"buy_quantity:collapsed:{observed_quantity}",
+                    verifier=lambda frame, expected=observed_quantity: (
+                        _read_collapsed_quantity(frame) == expected
+                    ),
+                ):
+                    raise RuntimeError(
+                        "Buy quantity selector was not reverified before retrying"
+                    )
                 sleep_fn(0.35)
+                expanded = capture_fn()
+                if expanded is None or not is_buy_quantity_expanded(expanded):
+                    raise RuntimeError(
+                        "Buy quantity options did not reopen for retry"
+                    )
+                current = expanded
+                last_capture = current
         else:
             _save_debug(last_capture, f"failure_{target}_attempt{attempt+1}.png")
 

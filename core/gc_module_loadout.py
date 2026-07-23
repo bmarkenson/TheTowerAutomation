@@ -10,7 +10,7 @@ from typing import Any, Callable, Mapping, Optional
 import cv2
 import numpy as np
 
-from core.input import safe_tap, swipe_now
+from core.input import TapVerification, safe_tap, swipe_now
 from core.module_icon_index import (
     EquippedModuleMatch,
     ModuleIconCatalog,
@@ -416,6 +416,18 @@ def _filter_panel_visible(frame) -> bool:
     return all(token in normalized for token in ("NONE", "COMMON", "ANCESTRAL"))
 
 
+def _filter_option_visible(frame, option: str) -> bool:
+    regions = {
+        "NONE": (430, 420, 910, 550),
+        "ANCESTRAL": (430, 1350, 1010, 1535),
+        "ALL RARITIES": (430, 1510, 910, 1630),
+    }
+    x1, y1, x2, y2 = regions[option]
+    text, _ = ocr_text_and_conf(frame[y1:y2, x1:x2], psm=7)
+    normalized = _normalized(text)
+    return all(token in normalized for token in option.split())
+
+
 def _filter_label(frame) -> str:
     text, _ = ocr_text_and_conf(frame[1630:1750, 450:880], psm=7)
     return _normalized(text)
@@ -432,11 +444,20 @@ def _set_module_rarity_filter(
     frame = _capture_modules(capture_fn, detector)
     if not safe_tap_fn(
         "buttons.module:rarity_filter",
-        require_visible=False,
         dispatch="now",
+        verification=TapVerification(
+            screenshot=frame,
+            target_region=(450, 1630, 430, 120),
+            description="module_rarity_filter:closed",
+            verifier=lambda candidate: (
+                detector(candidate).get("state") == "MODULES"
+                and not _filter_panel_visible(candidate)
+                and bool(_filter_label(candidate))
+            ),
+        ),
     ):
         raise ModuleLoadoutCorrectionError("failed to open module rarity filter")
-    _wait_for(
+    frame = _wait_for(
         _filter_panel_visible,
         capture_fn=capture_fn,
         detector=detector,
@@ -447,8 +468,16 @@ def _set_module_rarity_filter(
     if mode == "ancestral":
         if not safe_tap_fn(
             "buttons.module:rarity_none",
-            require_visible=False,
             dispatch="now",
+            verification=TapVerification(
+                screenshot=frame,
+                target_region=(430, 420, 480, 120),
+                description="module_rarity_filter:none",
+                verifier=lambda candidate: (
+                    _filter_panel_visible(candidate)
+                    and _filter_option_visible(candidate, "NONE")
+                ),
+            ),
         ):
             raise ModuleLoadoutCorrectionError("failed to clear module rarities")
         frame = _wait_for(
@@ -460,16 +489,32 @@ def _set_module_rarity_filter(
         )
         if not safe_tap_fn(
             "buttons.module:rarity_ancestral",
-            require_visible=False,
             dispatch="now",
+            verification=TapVerification(
+                screenshot=frame,
+                target_region=(760, 1400, 250, 150),
+                description="module_rarity_filter:ancestral",
+                verifier=lambda candidate: (
+                    _filter_panel_visible(candidate)
+                    and _filter_option_visible(candidate, "ANCESTRAL")
+                ),
+            ),
         ):
             raise ModuleLoadoutCorrectionError("failed to select Ancestral rarity")
         wanted = "ANCESTRAL"
     elif mode == "all":
         if not safe_tap_fn(
             "buttons.module:rarity_all",
-            require_visible=False,
             dispatch="now",
+            verification=TapVerification(
+                screenshot=frame,
+                target_region=(450, 1510, 270, 130),
+                description="module_rarity_filter:all",
+                verifier=lambda candidate: (
+                    _filter_panel_visible(candidate)
+                    and _filter_option_visible(candidate, "ALL RARITIES")
+                ),
+            ),
         ):
             raise ModuleLoadoutCorrectionError("failed to select all module rarities")
         wanted = "ALL RARITIES"
@@ -481,8 +526,16 @@ def _set_module_rarity_filter(
         raise ModuleLoadoutCorrectionError("module rarity filter closed unexpectedly")
     if not safe_tap_fn(
         "buttons.module:rarity_filter",
-        require_visible=False,
         dispatch="now",
+        verification=TapVerification(
+            screenshot=frame,
+            target_region=(450, 1630, 430, 120),
+            description=f"module_rarity_filter:close:{wanted}",
+            verifier=lambda candidate: (
+                _filter_panel_visible(candidate)
+                and bool(_filter_label(candidate))
+            ),
+        ),
     ):
         raise ModuleLoadoutCorrectionError("failed to close module rarity filter")
     return _wait_for(
@@ -596,10 +649,31 @@ def _find_inventory_detail(
                 continue
             if not safe_tap_fn(
                 center,
-                require_visible=False,
                 dispatch="now",
                 log_label=(
                     f"gc_module_inventory_candidate:{target}:score={score:.3f}"
+                ),
+                verification=TapVerification(
+                    screenshot=fresh,
+                    target_region=(
+                        center[0] - INVENTORY_FRAME_CROP_SIZE // 2,
+                        center[1] - INVENTORY_FRAME_CROP_SIZE // 2,
+                        INVENTORY_FRAME_CROP_SIZE,
+                        INVENTORY_FRAME_CROP_SIZE,
+                    ),
+                    description=f"ancestral_module_candidate:{target}",
+                    verifier=lambda candidate, point=center: (
+                        detector(candidate).get("state") == "MODULES"
+                        and ancestral_green_fraction(
+                            _crop_centered(
+                                candidate,
+                                point,
+                                INVENTORY_FRAME_CROP_SIZE,
+                            ),
+                            catalog=catalog,
+                        )
+                        >= catalog.minimum_green_fraction
+                    ),
                 ),
             ):
                 raise ModuleLoadoutCorrectionError(
@@ -624,8 +698,13 @@ def _find_inventory_detail(
                 seen_names.add(normalized_name)
             if not safe_tap_fn(
                 "buttons.close:module_detail",
-                require_visible=False,
                 dispatch="now",
+                verification=TapVerification(
+                    screenshot=detail,
+                    target_region=(860, 160, 140, 130),
+                    description=f"module_detail:{observed.name}",
+                    verifier=_detail_ready,
+                ),
             ):
                 raise ModuleLoadoutCorrectionError("failed to close module detail")
             current = _wait_for(
@@ -700,8 +779,17 @@ def _equip_inventory_module(
         )
     if not safe_tap_fn(
         "buttons.module:detail_equip_toggle",
-        require_visible=False,
         dispatch="now",
+        verification=TapVerification(
+            screenshot=detail,
+            target_region=(120, 1610, 310, 130),
+            description=f"module_detail:equip:{slot.expected}",
+            verifier=lambda frame: _detail_for(
+                frame,
+                slot.expected,
+                action="EQUIP",
+            ),
+        ),
     ):
         raise ModuleLoadoutCorrectionError(f"Equip tap failed for {slot.expected}")
     _wait_for(
@@ -715,7 +803,21 @@ def _equip_inventory_module(
     frame = _capture_modules(capture_fn, detector)
     if not _role_prompt_visible(frame):
         raise ModuleLoadoutCorrectionError("module role prompt guard was lost")
-    if not safe_tap_fn(role_key, require_visible=False, dispatch="now"):
+    role_region = (
+        (300, 1010, 210, 170)
+        if slot.role == "primary"
+        else (570, 1010, 220, 170)
+    )
+    if not safe_tap_fn(
+        role_key,
+        dispatch="now",
+        verification=TapVerification(
+            screenshot=frame,
+            target_region=role_region,
+            description=f"module_role:{slot.role}",
+            verifier=_role_prompt_visible,
+        ),
+    ):
         raise ModuleLoadoutCorrectionError(
             f"failed to select {slot.role} for {slot.expected}"
         )
@@ -726,8 +828,13 @@ def _equip_inventory_module(
         if _transfer_prompt_visible(frame):
             if not safe_tap_fn(
                 "buttons.module:decline_level_transfer",
-                require_visible=False,
                 dispatch="now",
+                verification=TapVerification(
+                    screenshot=frame,
+                    target_region=(220, 1040, 270, 170),
+                    description="module_level_transfer:decline",
+                    verifier=_transfer_prompt_visible,
+                ),
             ):
                 raise ModuleLoadoutCorrectionError(
                     "failed to decline module level transfer"
@@ -760,9 +867,27 @@ def _unequip_module_slot(
     frame = _capture_modules(capture_fn, detector)
     if not safe_tap_fn(
         catalog_slot.center,
-        require_visible=False,
         dispatch="now",
         log_label=f"gc_module_cycle_unequip:{slot.slot_key}",
+        verification=TapVerification(
+            screenshot=frame,
+            target_region=(
+                catalog_slot.center[0] - INVENTORY_FRAME_CROP_SIZE // 2,
+                catalog_slot.center[1] - INVENTORY_FRAME_CROP_SIZE // 2,
+                INVENTORY_FRAME_CROP_SIZE,
+                INVENTORY_FRAME_CROP_SIZE,
+            ),
+            description=f"equipped_module:{slot.slot_key}:{slot.actual}",
+            verifier=lambda candidate: any(
+                match.slot_key == slot.slot_key
+                and match.status == "matched"
+                and match.name == slot.actual
+                for match in identify_equipped_ancestral_modules(
+                    candidate,
+                    catalog=catalog,
+                )
+            ),
+        ),
     ):
         raise ModuleLoadoutCorrectionError(
             f"failed to open equipped slot {slot.slot_key}"
@@ -784,8 +909,17 @@ def _unequip_module_slot(
         )
     if not safe_tap_fn(
         "buttons.module:detail_equip_toggle",
-        require_visible=False,
         dispatch="now",
+        verification=TapVerification(
+            screenshot=detail,
+            target_region=(120, 1610, 310, 130),
+            description=f"module_detail:unequip:{slot.actual}",
+            verifier=lambda frame: _detail_for(
+                frame,
+                slot.actual or "",
+                action="UNEQUIP",
+            ),
+        ),
     ):
         raise ModuleLoadoutCorrectionError(
             f"Unequip tap failed for {slot.slot_key}"

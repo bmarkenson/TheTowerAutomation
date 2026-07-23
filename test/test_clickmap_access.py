@@ -1,7 +1,9 @@
 from unittest.mock import patch
 
+import numpy as np
+
 from core.clickmap_access import get_click, get_explicit_tap, resolve_dot_path
-from core.input import safe_tap
+from core.input import TapVerification, safe_tap
 
 
 def test_legacy_get_click_preserves_direct_match_region_center():
@@ -22,9 +24,9 @@ def test_broad_region_ref_never_becomes_a_click_center():
     assert get_click("upgrades.utility.left.EHLS") is None
 
 
-def test_runtime_blind_tap_rejects_derived_region_center():
+def test_runtime_static_tap_requires_target_verification():
     with patch("core.input._dispatch_tap") as dispatch:
-        assert not safe_tap("buttons.battle:home", require_visible=False)
+        assert not safe_tap("buttons.battle_control:home")
 
     dispatch.assert_not_called()
 
@@ -35,24 +37,46 @@ def test_safe_tap_separates_operator_summary_from_coordinate_detail(
 ):
     action_log = tmp_path / "actions.log"
     monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(action_log))
+    screenshot = np.full((1920, 1080, 3), 32, dtype=np.uint8)
 
     with patch("core.input._dispatch_tap") as dispatch:
         assert safe_tap(
             (10, 20),
-            require_visible=False,
             dispatch="queue",
             log_label="test_target",
+            verification=TapVerification(
+                screenshot=screenshot,
+                target_region=(0, 0, 30, 40),
+                description="unit_test_target",
+                verifier=lambda _frame: True,
+            ),
         )
 
     dispatch.assert_called_once_with(10, 20, label="test_target", dispatch="queue")
     lines = action_log.read_text(encoding="utf-8").splitlines()
     assert lines[0].endswith("] Tap queued: Test target")
     assert lines[1].endswith(
-        "] TAP_SAFE now=False label=test_target at (10,20) vis=False"
+        "] TAP_SAFE now=False label=test_target at (10,20) "
+        "verified=unit_test_target"
     )
 
 
-def test_blind_navigation_targets_have_explicit_tap_geometry():
+def test_coordinate_tap_fails_closed_when_verifier_rejects_target():
+    screenshot = np.full((1920, 1080, 3), 32, dtype=np.uint8)
+    verification = TapVerification(
+        screenshot=screenshot,
+        target_region=(0, 0, 30, 40),
+        description="rejected_target",
+        verifier=lambda _frame: False,
+    )
+
+    with patch("core.input._dispatch_tap") as dispatch:
+        assert not safe_tap((10, 20), verification=verification)
+
+    dispatch.assert_not_called()
+
+
+def test_navigation_targets_preserve_expected_tap_geometry():
     assert get_click("navigation.goto_attack") == (136, 1864)
     assert get_click("navigation.goto_defense") == (406, 1868)
     assert get_click("navigation.goto_utility") == (670, 1867)

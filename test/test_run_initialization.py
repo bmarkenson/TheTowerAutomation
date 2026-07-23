@@ -607,7 +607,7 @@ class DeferredStartupGateTests(unittest.TestCase):
             boundary_evidence,
         )
 
-    def test_no_battle_setup_completion_satisfies_target_priority_gate(self):
+    def test_no_battle_setup_defers_target_priority_gate_to_running(self):
         strategy = get_strategy("farm_t18")
         manager = MissionManager(None, strategy)
         manager.start()
@@ -617,13 +617,15 @@ class DeferredStartupGateTests(unittest.TestCase):
             {
                 "target_priority": {
                     "mode": "enforce",
-                    "checked": True,
-                    "valid": True,
+                    "checked": False,
+                    "valid": None,
+                    "boundary": "RUNNING",
+                    "reason": "battle_only_control",
                 }
             }
         )
 
-        self.assertTrue(mv["target_priority_checked"])
+        self.assertFalse(mv["target_priority_checked"])
 
 
 class FarmProfileTests(unittest.TestCase):

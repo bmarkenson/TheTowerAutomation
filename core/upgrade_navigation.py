@@ -13,7 +13,7 @@ from core.adb_utils import input_swipe
 from core.clickmap_access import resolve_dot_path
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
-from core.input import safe_tap
+from core.input import TapVerification, safe_tap
 from core.upgrade_box_detector import (
     UpgradeBox,
     detect_visible_boxes,
@@ -218,7 +218,23 @@ def _maybe_collapse_buy_quantity(
     try:
         regions = get_buy_quantity_regions(image)
         cx, cy = regions["collapsed_center"]
-        safe_tap((int(cx), int(cy)), require_visible=False, dispatch="now", log_label="buy_quantity_collapse")
+        area_rect = tuple(int(value) for value in regions["area_rect"])
+        safe_tap(
+            (int(cx), int(cy)),
+            dispatch="now",
+            log_label="buy_quantity_collapse",
+            verification=TapVerification(
+                screenshot=image,
+                target_region=area_rect,
+                description="buy_quantity:expanded_selector",
+                verifier=lambda frame: (
+                    "BUY_QUANTITY_MENU_EXPANDED"
+                    in set(
+                        detect_state_and_overlays(frame).get("overlays") or ()
+                    )
+                ),
+            ),
+        )
         sleep_fn(0.35)
     except Exception as exc:
         log(
@@ -293,7 +309,7 @@ def _ensure_menu(menu: str, *, capture_fn: Callable[[], Optional[np.ndarray]], m
 
         nav_entry = _MENU_NAV[menu_key]["nav"]
         log(f"[UPGRADE_NAV] Attempting to switch to {menu_key} (attempt {attempt + 1})", "MATCH")
-        safe_tap(nav_entry, require_visible=False, dispatch='now')
+        safe_tap(nav_entry, dispatch="now", screenshot=screenshot)
         time.sleep(0.5)
 
     # final capture after attempts
@@ -424,9 +440,22 @@ def _tap_purchase_area(
 
     safe_tap(
         (tap_x, tap_y),
-        require_visible=False,
         dispatch="now",
         log_label=f"upgrade_purchase:{confirmed_box.text or target_text}",
+        verification=TapVerification(
+            screenshot=image,
+            target_region=confirmed_box.rect,
+            description=f"upgrade_purchase:{target_text}",
+            verifier=lambda frame: any(
+                (candidate.text or "").lower() == target_text
+                and abs(candidate.rect[0] - confirmed_box.rect[0]) <= 20
+                and abs(candidate.rect[1] - confirmed_box.rect[1]) <= 20
+                for candidate in detect_visible_boxes(
+                    frame,
+                    menu=menu,
+                ).get(column, [])
+            ),
+        ),
     )
 
 
@@ -987,7 +1016,19 @@ def ensure_ultimate_state(
                         "ACTION",
                     )
                     changed_descriptions.append(f"{toggle_name}={desired_state}")
-                    _tap_ultimate_toggle(box.rect, toggle_name)
+                    if not _tap_ultimate_toggle(
+                        box.rect,
+                        toggle_name,
+                        label=label,
+                        expected_on=current_on,
+                        capture_fn=capture_fn,
+                    ):
+                        log(
+                            f"[ULTIMATE] Refusing stale or unverified "
+                            f"'{toggle_name}' tap for '{label}'",
+                            "WARN",
+                        )
+                        return
                     sleep_fn(0.2)
 
                 post = capture_fn()
@@ -1166,7 +1207,50 @@ def _ultimate_desired_met(
     return True
 
 
-def _tap_ultimate_toggle(rect: Tuple[int, int, int, int], toggle_name: str) -> None:
+def _tap_ultimate_toggle(
+    rect: Tuple[int, int, int, int],
+    toggle_name: str,
+    *,
+    label: str,
+    expected_on: bool,
+    capture_fn: Callable[[], Optional[np.ndarray]],
+) -> bool:
+    frame = capture_fn()
+    if frame is None:
+        return False
+    detection = detect_state_and_overlays(frame)
+    if (
+        detection.get("state") != "RUNNING"
+        or _normalize_menu(detection.get("menu")) != "ultimate weapons"
+    ):
+        return False
+
+    def matching_box(candidate_frame: np.ndarray) -> Optional[UpgradeBox]:
+        for candidates in detect_visible_boxes(
+            candidate_frame,
+            menu="ultimate weapons",
+        ).values():
+            for candidate in candidates:
+                if (
+                    (candidate.text or "").strip().lower() == label.lower()
+                    and abs(candidate.rect[0] - rect[0]) <= 20
+                    and abs(candidate.rect[1] - rect[1]) <= 20
+                ):
+                    return candidate
+        return None
+
+    fresh_box = matching_box(frame)
+    if fresh_box is None:
+        return False
+    fresh_toggles = fresh_box.toggles or {}
+    fresh_metrics = fresh_box.toggle_metrics or {}
+    if (
+        _ultimate_toggle_is_on(toggle_name, fresh_toggles, fresh_metrics)
+        is not expected_on
+    ):
+        return False
+
+    rect = fresh_box.rect
     x, y, w, h = rect
     if toggle_name == "primary":
         x_bounds, y_bounds = ULTIMATE_PRIMARY_TOGGLE_REGION
@@ -1181,11 +1265,24 @@ def _tap_ultimate_toggle(rect: Tuple[int, int, int, int], toggle_name: str) -> N
     tap_y = y + int(round(h * center_y))
 
     log(f"[UPGRADE_NAV] Toggling '{toggle_name}' at ({tap_x},{tap_y})", "DEBUG")
-    safe_tap(
+    return safe_tap(
         (tap_x, tap_y),
-        require_visible=False,
         dispatch="now",
         log_label=f"ultimate_toggle:{toggle_name}",
+        verification=TapVerification(
+            screenshot=frame,
+            target_region=rect,
+            description=f"ultimate_toggle:{label}:{toggle_name}",
+            verifier=lambda candidate_frame: (
+                (candidate := matching_box(candidate_frame)) is not None
+                and _ultimate_toggle_is_on(
+                    toggle_name,
+                    candidate.toggles or {},
+                    candidate.toggle_metrics or {},
+                )
+                is expected_on
+            ),
+        ),
     )
 
 

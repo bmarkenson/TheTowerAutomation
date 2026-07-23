@@ -14,6 +14,7 @@ from core.gc_module_loadout import (
     _find_inventory_detail,
     _scroll_inventory_to_top,
     _detail_ready,
+    _set_module_rarity_filter,
     ensure_gc_module_loadout,
     evaluate_gc_module_loadout,
     normalize_gc_module_requirements,
@@ -262,6 +263,55 @@ def test_inventory_candidate_waits_for_fresh_detail_before_ocr():
         ("sleep", MODULE_DETAIL_SETTLE_SECONDS),
         "wait",
     ]
+
+
+def test_rarity_filter_actions_use_each_fresh_panel_frame():
+    initial = np.full((1920, 1080, 3), 10, dtype=np.uint8)
+    panel = np.full((1920, 1080, 3), 20, dtype=np.uint8)
+    cleared = np.full((1920, 1080, 3), 30, dtype=np.uint8)
+    selected = np.full((1920, 1080, 3), 40, dtype=np.uint8)
+    closed = np.full((1920, 1080, 3), 50, dtype=np.uint8)
+    taps = []
+
+    def tap(target, **kwargs):
+        taps.append((target, kwargs["verification"].screenshot))
+        return True
+
+    with (
+        patch(
+            "core.gc_module_loadout._capture_modules",
+            side_effect=(initial, selected),
+        ),
+        patch(
+            "core.gc_module_loadout._wait_for",
+            side_effect=(panel, cleared, closed),
+        ),
+        patch("core.gc_module_loadout._filter_panel_visible", return_value=True),
+        patch("core.gc_module_loadout._filter_option_visible", return_value=True),
+        patch("core.gc_module_loadout._filter_label", return_value="ANCESTRAL"),
+    ):
+        result = _set_module_rarity_filter(
+            "ancestral",
+            capture_fn=lambda: pytest.fail("capture is wrapped"),
+            detector=lambda _frame: {"state": "MODULES"},
+            safe_tap_fn=tap,
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert result is closed
+    assert [target for target, _frame in taps] == [
+        "buttons.module:rarity_filter",
+        "buttons.module:rarity_none",
+        "buttons.module:rarity_ancestral",
+        "buttons.module:rarity_filter",
+    ]
+    assert all(
+        actual is expected
+        for (_target, actual), expected in zip(
+            taps,
+            (initial, panel, cleared, selected),
+        )
+    )
 
 
 def test_module_actions_reject_incomplete_frames_and_partial_detail_renders():

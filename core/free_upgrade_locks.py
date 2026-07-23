@@ -11,7 +11,7 @@ from typing import Any, Callable, Mapping, Optional, Sequence
 import cv2
 import numpy as np
 
-from core.input import safe_tap
+from core.input import TapVerification, safe_tap
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
 from core.upgrade_box_detector import UpgradeBox, detect_visible_boxes
@@ -333,9 +333,25 @@ def inspect_free_upgrade_locks(
             x, y, width, height = confirmed.rect
             if not safe_tap_fn(
                 (x + width // 4, y + height // 2),
-                require_visible=False,
                 dispatch="now",
                 log_label=f"workshop_detail:{_slug(label)}",
+                verification=TapVerification(
+                    screenshot=current,
+                    target_region=confirmed.rect,
+                    description=f"workshop_upgrade:{label}",
+                    verifier=lambda frame, expected=confirmed.rect: (
+                        detector(frame).get("state") == "WORKSHOP"
+                        and (
+                            candidate := _matching_box(
+                                detect_boxes_fn(frame, menu=menu).get(column),
+                                label,
+                            )
+                        )
+                        is not None
+                        and abs(candidate.rect[0] - expected[0]) <= 20
+                        and abs(candidate.rect[1] - expected[1]) <= 20
+                    ),
+                ),
             ):
                 raise FreeUpgradeLockInspectionError(
                     f"detail tap failed for {label}"
@@ -364,8 +380,23 @@ def inspect_free_upgrade_locks(
                     )
                 if not safe_tap_fn(
                     "buttons.free_upgrade_lock:checkbox",
-                    require_visible=False,
                     dispatch="now",
+                    verification=TapVerification(
+                        screenshot=fresh,
+                        target_region=_CHECKBOX_REGION,
+                        description=f"free_upgrade_lock:{label}:unchecked",
+                        verifier=lambda frame: (
+                            (
+                                candidate := measure_lock_fn(frame, label)
+                            ).state
+                            is FreeUpgradeLockState.UNCHECKED
+                            and _is_expected_detail(
+                                frame,
+                                detector,
+                                candidate,
+                            )
+                        ),
+                    ),
                 ):
                     raise FreeUpgradeLockInspectionError(
                         f"lock checkbox tap failed for {label}"
@@ -492,8 +523,8 @@ def _select_workshop_menu(
     if current_menu is None:
         if not safe_tap_fn(
             _WORKSHOP_UPGRADE_ACTION,
-            require_visible=False,
             dispatch="now",
+            screenshot=current,
         ):
             raise FreeUpgradeLockInspectionError(
                 "Workshop Upgrade navigation tap failed"
@@ -506,8 +537,8 @@ def _select_workshop_menu(
             return current
     if not safe_tap_fn(
         _WORKSHOP_MENU_ACTIONS[menu],
-        require_visible=False,
         dispatch="now",
+        screenshot=current,
     ):
         raise FreeUpgradeLockInspectionError(
             f"Workshop {menu} navigation tap failed"
@@ -682,8 +713,17 @@ def _dismiss_lock_detail(
         )
     if not safe_tap_fn(
         "gesture_targets.upgrade_detail_dismiss",
-        require_visible=False,
         dispatch="now",
+        verification=TapVerification(
+            screenshot=current,
+            target_region=(0, 0, current.shape[1], current.shape[0]),
+            description=f"free_upgrade_detail:{label}",
+            verifier=lambda frame: _is_expected_detail(
+                frame,
+                detector,
+                measure_lock_fn(frame, label),
+            ),
+        ),
     ):
         raise FreeUpgradeLockInspectionError(
             f"detail dismissal tap failed for {label}"
@@ -707,8 +747,19 @@ def _best_effort_dismiss(*, capture_fn, detector, safe_tap_fn, sleep_fn):
         ):
             tapped = safe_tap_fn(
                 "gesture_targets.upgrade_detail_dismiss",
-                require_visible=False,
                 dispatch="now",
+                verification=TapVerification(
+                    screenshot=frame,
+                    target_region=(0, 0, frame.shape[1], frame.shape[0]),
+                    description="free_upgrade_detail:visible",
+                    verifier=lambda candidate: (
+                        detector(candidate).get("state") == "WORKSHOP"
+                        and "UPGRADE_DETAIL"
+                        in set(
+                            detector(candidate).get("overlays") or ()
+                        )
+                    ),
+                ),
             )
             if tapped:
                 for _ in range(8):

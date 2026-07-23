@@ -1,18 +1,48 @@
-"""Device input helpers: visible/ blind taps and basic swipes."""
+"""Device input helpers: verified taps and basic swipes."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import time
-from typing import Any, Dict, Literal, Optional, Tuple, Sequence, Union
+from typing import Any, Callable, Dict, Literal, Optional, Tuple, Sequence, Union
 
 from utils.logger import log, log_action
 from core.adb_utils import input_swipe, input_tap
 from core.tap_dispatcher import tap as enqueue_tap
 from core.clickmap_access import get_click, get_explicit_tap, get_swipe, resolve_dot_path
 from core.label_tapper import get_label_match
+from core.ss_capture import is_complete_screenshot
 
 DispatchMode = Literal["now", "queue"]
 Coord = Union[Sequence[int], Sequence[float]]
+Region = Tuple[int, int, int, int]
+
+
+@dataclass(frozen=True)
+class TapVerification:
+    """Fresh target-specific evidence authorizing one non-template tap.
+
+    Static coordinates and dynamically calculated points are not action
+    authority by themselves.  Their caller must provide the frame used to
+    identify the target, a bounded target region containing the tap point, and
+    a predicate which rechecks the target-specific evidence on that frame.
+    """
+
+    screenshot: Any
+    target_region: Region
+    description: str
+    verifier: Callable[[Any], bool]
+
+    def authorizes(self, point: Tuple[int, int]) -> bool:
+        if not is_complete_screenshot(self.screenshot):
+            return False
+        x, y, width, height = (int(value) for value in self.target_region)
+        tap_x, tap_y = point
+        if width <= 0 or height <= 0:
+            return False
+        if not (x <= tap_x < x + width and y <= tap_y < y + height):
+            return False
+        return bool(self.verifier(self.screenshot))
 
 
 def _compute_offset(entry: Dict[str, Any]) -> Optional[Tuple[int, int]]:
@@ -60,92 +90,108 @@ def _tap_summary(label: str, dispatch: DispatchMode) -> str:
 def safe_tap(
     name: Union[str, Coord],
     *,
-    require_visible: bool = True,
     retries: int = 0,
     retry_delay: float = 0.5,
     dispatch: DispatchMode = "now",
-    allow_fallback: bool = False,
     screenshot=None,
     log_label: Optional[str] = None,
+    verification: Optional[TapVerification] = None,
 ) -> bool:
-    if isinstance(name, (tuple, list)):
-        tap_x = int(name[0])
-        tap_y = int(name[1])
-        label = log_label or f"tap@{tap_x},{tap_y}"
-        summary_label = log_label or "screen target"
-        if require_visible:
-            log(
-                f"[WARN] TAP_SAFE coordinate path called with require_visible=True; forcing False",
-                "WARN",
-            )
-        log_action(
-            _tap_summary(summary_label, dispatch),
-            detail=(
-                f"TAP_SAFE now={dispatch=='now'} label={label} "
-                f"at ({tap_x},{tap_y}) vis=False"
-            ),
-        )
-        _dispatch_tap(tap_x, tap_y, label=label, dispatch=dispatch)
-        return True
+    """Tap only a freshly matched or explicitly reverified target.
 
-    attempts = max(0, int(retries)) + 1
-    entry = resolve_dot_path(name)
-    label = log_label or name
-    last_err: Optional[Exception] = None
+    Template-backed names are always matched immediately before dispatch.
+    Coordinate and static named targets require :class:`TapVerification`;
+    otherwise the tap fails closed.
+    """
 
     if dispatch not in ("now", "queue"):
         dispatch = "now"
+    entry = resolve_dot_path(name) if isinstance(name, str) else None
+    has_template = isinstance(entry, dict) and bool(entry.get("match_template"))
+    label = log_label or (name if isinstance(name, str) else None)
 
-    if require_visible:
+    if has_template:
+        attempts = max(0, int(retries)) + 1
+        last_err: Optional[Exception] = None
         for attempt in range(attempts):
             try:
-                bbox = get_label_match(name, screenshot=screenshot if attempt == 0 else None)
-                x, y, w, h = bbox
-                offset = _compute_offset(entry or {})
-                tap_x = x + (offset[0] if offset else w // 2)
-                tap_y = y + (offset[1] if offset else h // 2)
+                bbox = get_label_match(
+                    name,
+                    screenshot=screenshot if attempt == 0 else None,
+                )
+                x, y, width, height = bbox
+                offset = _compute_offset(entry)
+                tap_x = x + (offset[0] if offset else width // 2)
+                tap_y = y + (offset[1] if offset else height // 2)
                 log_action(
-                    _tap_summary(label, dispatch),
+                    _tap_summary(str(label), dispatch),
                     detail=(
                         f"TAP_SAFE now={dispatch=='now'} label={label} "
-                        f"at ({tap_x},{tap_y}) vis=True "
+                        f"at ({tap_x},{tap_y}) verified=template "
                         f"attempt={attempt+1}/{attempts}"
                     ),
                 )
-                _dispatch_tap(tap_x, tap_y, label=label, dispatch=dispatch)
+                _dispatch_tap(tap_x, tap_y, label=str(label), dispatch=dispatch)
                 return True
             except Exception as exc:
                 last_err = exc
                 if attempt < attempts - 1:
                     time.sleep(max(0.0, float(retry_delay)))
-        if allow_fallback:
-            coords = get_explicit_tap(name)
-            if coords:
-                log_action(
-                    _tap_summary(label, dispatch),
-                    detail=(
-                        f"TAP_SAFE now={dispatch=='now'} label={label} "
-                        f"at {coords} vis=False fallback=True"
-                    ),
-                )
-                _dispatch_tap(coords[0], coords[1], label=label, dispatch=dispatch)
-                return True
         if last_err is not None:
             log(f"[SKIP] TAP_SAFE failed for {label}: {last_err}", "WARN")
         return False
 
-    coords = get_explicit_tap(name)
-    if not coords:
-        log(f"[SKIP] TAP_SAFE blind path has no coords for {label}", "WARN")
+    if isinstance(name, (tuple, list)):
+        try:
+            tap_x = int(name[0])
+            tap_y = int(name[1])
+        except (IndexError, TypeError, ValueError):
+            log(f"[SKIP] TAP_SAFE invalid coordinate target: {name!r}", "WARN")
+            return False
+        label = log_label or f"tap@{tap_x},{tap_y}"
+        summary_label = log_label or "screen target"
+    else:
+        coords = get_explicit_tap(name)
+        if not coords:
+            log(
+                f"[SKIP] TAP_SAFE static path has no explicit coords for {label}",
+                "WARN",
+            )
+            return False
+        tap_x, tap_y = coords
+        summary_label = str(label)
+
+    if verification is None:
+        log(
+            f"[SKIP] TAP_SAFE refused unverified target {label} "
+            f"at ({tap_x},{tap_y})",
+            "WARN",
+        )
         return False
+    try:
+        authorized = verification.authorizes((tap_x, tap_y))
+    except Exception as exc:
+        log(
+            f"[SKIP] TAP_SAFE verification failed for {label}: {exc}",
+            "WARN",
+        )
+        return False
+    if not authorized:
+        log(
+            f"[SKIP] TAP_SAFE target check rejected {label}: "
+            f"{verification.description}",
+            "WARN",
+        )
+        return False
+
     log_action(
-        _tap_summary(label, dispatch),
+        _tap_summary(str(summary_label), dispatch),
         detail=(
             f"TAP_SAFE now={dispatch=='now'} label={label} "
-            f"at {coords} vis=False"
+            f"at ({tap_x},{tap_y}) verified={verification.description}"
         ),
     )
-    _dispatch_tap(coords[0], coords[1], label=label, dispatch=dispatch)
+    _dispatch_tap(tap_x, tap_y, label=str(label), dispatch=dispatch)
     return True
 
 
@@ -159,28 +205,27 @@ def tap_if_visible(
 ) -> bool:
     return safe_tap(
         name,
-        require_visible=True,
         retries=retries,
         retry_delay=retry_delay,
         dispatch=dispatch,
-        allow_fallback=False,
         screenshot=screenshot,
     )
 
 
-def tap_blind(name: str, *, dispatch: DispatchMode = "queue") -> bool:
-    return safe_tap(name, require_visible=False, dispatch=dispatch)
+def tap_unchecked_for_tooling(name: str, *, reason: str) -> bool:
+    """Issue an explicit static tap from an operator-invoked development tool."""
 
-
-def tap_now(name: str) -> bool:
+    if not str(reason or "").strip():
+        log(f"[INPUT] unchecked tooling tap lacks a reason for '{name}'", "ERROR")
+        return False
     coords = get_click(name)
     if not coords:
-        log(f"[INPUT] tap_now: missing coords for '{name}'", "ERROR")
+        log(f"[INPUT] tooling tap: missing coords for '{name}'", "ERROR")
         return False
     _dispatch_tap(coords[0], coords[1], label=name, dispatch="now")
     log_action(
-        f"Tap requested: {_operator_label(name)}",
-        detail=f"TAP_NOW: {name} at {coords}",
+        f"Unchecked tooling tap requested: {_operator_label(name)}",
+        detail=f"TAP_TOOLING: {name} at {coords} reason={reason}",
     )
     return True
 
@@ -206,9 +251,9 @@ def swipe_now(name: str) -> bool:
 
 
 __all__ = [
+    "TapVerification",
     "safe_tap",
     "tap_if_visible",
-    "tap_blind",
-    "tap_now",
+    "tap_unchecked_for_tooling",
     "swipe_now",
 ]

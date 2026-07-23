@@ -429,7 +429,9 @@ class MissionManager:
                 target_priority_evidence.get("valid")
             ):
                 mv["target_priority_checked"] = True
-            elif target_priority_mode == "observe":
+            elif target_priority_mode == "observe" and bool(
+                target_priority_evidence.get("observed")
+            ):
                 mv["target_priority_observed"] = True
                 mv["target_priority_observation"] = copy.deepcopy(
                     dict(target_priority_evidence)

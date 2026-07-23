@@ -16,8 +16,12 @@ from core.gc_preflight import (
     validate_gc_session_preflight_screens,
 )
 from core.battle_lifecycle import HomeBattleControl
-from core.home_battle import HomeBattleEvidence, detect_home_battle_control
-from core.input import safe_tap, swipe_now, tap_if_visible
+from core.home_battle import (
+    HOME_BATTLE_CONTROL_REGION,
+    HomeBattleEvidence,
+    detect_home_battle_control,
+)
+from core.input import TapVerification, safe_tap, swipe_now, tap_if_visible
 from core.poison_swamp_stun import (
     PoisonSwampStunResult,
     ensure_poison_swamp_stun_off,
@@ -163,7 +167,7 @@ def _guarded_static_tap(
         raise _NavigationFailure(
             f"refusing {key}: state={state}, expected={sorted(allowed_states)}"
         )
-    if not safe_tap_fn(key, require_visible=False, dispatch="now"):
+    if not safe_tap_fn(key, dispatch="now"):
         raise _NavigationFailure(f"tap failed: {key}")
 
 
@@ -211,13 +215,21 @@ def _ensure_auto_pick_perks_enabled(
         log("[GC_PREFLIGHT] Auto Pick Perks verified enabled", "INFO")
         return current
 
-    _guarded_static_tap(
+    if not safe_tap_fn(
         "buttons.perks:auto_pick",
-        allowed_states={"PERKS"},
-        capture_fn=capture_fn,
-        detector=detector,
-        safe_tap_fn=safe_tap_fn,
-    )
+        dispatch="now",
+        verification=TapVerification(
+            screenshot=current,
+            target_region=evidence.region,
+            description="auto_pick_perks:disabled_checkbox",
+            verifier=lambda frame: (
+                detector(frame).get("state") == "PERKS"
+                and (candidate := measure_fn(frame)).valid_region
+                and not candidate.enabled
+            ),
+        ),
+    ):
+        raise _NavigationFailure("Auto Pick Perks checkbox tap failed")
     for _attempt in range(24):
         frame, detection = _capture_detection(capture_fn, detector)
         if detection.get("state") != "PERKS":
@@ -379,8 +391,17 @@ def _guarded_resume_battle(
     _verify_active_home(frame, detect_home_control_fn)
     if not safe_tap_fn(
         "buttons.battle_control:home",
-        require_visible=False,
         dispatch="now",
+        verification=TapVerification(
+            screenshot=frame,
+            target_region=HOME_BATTLE_CONTROL_REGION,
+            description="home_battle_control:resume",
+            verifier=lambda screenshot: (
+                detector(screenshot).get("state") == "HOME_SCREEN"
+                and detect_home_control_fn(screenshot).control
+                is HomeBattleControl.RESUME_BATTLE
+            ),
+        ),
     ):
         raise _NavigationFailure("Resume Battle tap failed")
 
@@ -446,9 +467,7 @@ def _return_to_running(
                 )
                 return
         if state in {"WORKSHOP", "MODULES", "EVENT", "GUILD"}:
-            if not safe_tap_fn(
-                "navigation.goto_home", require_visible=False, dispatch="now"
-            ):
+            if not safe_tap_fn("navigation.goto_home", dispatch="now"):
                 return
             frame = _wait_for(
                 state="HOME_SCREEN",

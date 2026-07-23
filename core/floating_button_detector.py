@@ -52,18 +52,12 @@ def tap_floating_button(name: str, buttons: Iterable[Dict[str, Any]]) -> bool:
     """
     for button in buttons:
         if button.get("name") == name:
-            tap_point = button.get("tap_point") or {}
-            try:
-                x, y = int(tap_point["x"]), int(tap_point["y"])
-            except Exception:
-                continue
-            safe_tap(
-                (x, y),
-                require_visible=False,
+            return safe_tap(
+                name,
+                retries=0,
                 dispatch="now",
                 log_label=f"floating_button:{name}",
             )
-            return True
     return False
 
 

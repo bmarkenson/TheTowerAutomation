@@ -33,7 +33,6 @@ def test_home_screen_uses_bottom_store_navigation():
 
     safe_tap.assert_called_once_with(
         "navigation.goto_store_home",
-        require_visible=False,
         dispatch="now",
     )
     tap_if_visible.assert_not_called()
@@ -269,7 +268,6 @@ def test_home_origin_returns_through_bottom_navigation_and_verifies_home():
 
     safe_tap.assert_called_once_with(
         "navigation.goto_home_store",
-        require_visible=False,
         dispatch="now",
     )
     tap_if_visible.assert_not_called()

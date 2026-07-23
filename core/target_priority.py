@@ -12,7 +12,7 @@ import cv2
 import numpy as np
 
 from core.ss_capture import capture_adb_screenshot
-from core.input import safe_tap
+from core.input import TapVerification, safe_tap
 from core.run_controls import ensure_menu_open
 from core.target_priority_config import (
     TARGET_PRIORITY_TARGETS,
@@ -106,12 +106,20 @@ def target_priority_matches(actual: Sequence[str], expected: Sequence[str]) -> b
     ]
 
 
-def _tap(point: tuple[int, int]) -> bool:
+def _tap(
+    point: tuple[int, int],
+    *,
+    verification: Optional[TapVerification] = None,
+) -> bool:
+    if point == _SCOPE_TARGET:
+        return safe_tap("navigation.target_priority", dispatch="now")
+    if point == _CLOSE_TARGET:
+        return safe_tap("buttons.close:target_priority", dispatch="now")
     return safe_tap(
         point,
-        require_visible=False,
         dispatch="now",
         log_label="target_priority",
+        verification=verification,
     )
 
 
@@ -119,7 +127,7 @@ def observe_target_priority_order(
     expected: Sequence[str] = TARGETS,
     *,
     capture_fn: Callable[[], Optional[np.ndarray]] = capture_adb_screenshot,
-    tap_fn: Callable[[tuple[int, int]], bool] = _tap,
+    tap_fn: Callable[..., bool] = _tap,
     ensure_menu_fn: Callable[[], bool] = ensure_menu_open,
     sleep_fn: Callable[[float], None] = time.sleep,
     panel_open: bool = False,
@@ -168,7 +176,7 @@ def ensure_target_priority_order(
     expected: Sequence[str] = TARGETS,
     *,
     capture_fn: Callable[[], Optional[np.ndarray]] = capture_adb_screenshot,
-    tap_fn: Callable[[tuple[int, int]], bool] = _tap,
+    tap_fn: Callable[..., bool] = _tap,
     ensure_menu_fn: Callable[[], bool] = ensure_menu_open,
     sleep_fn: Callable[[float], None] = time.sleep,
     panel_open: bool = False,
@@ -193,7 +201,29 @@ def ensure_target_priority_order(
             current_index = working.index(target)
             while current_index > desired_index:
                 arrow_y = _ROW_FIRST_CENTER_Y + current_index * _ROW_STEP_Y
-                if not tap_fn((_UP_ARROW_X, arrow_y)):
+                fresh = capture_fn()
+                if fresh is None:
+                    raise RuntimeError(
+                        f"Unable to reverify {target!r} before moving it"
+                    )
+                expected_index = current_index
+                verification = TapVerification(
+                    screenshot=fresh,
+                    target_region=(
+                        _UP_ARROW_X - 70,
+                        arrow_y - 70,
+                        140,
+                        140,
+                    ),
+                    description=f"target_priority_row:{target}",
+                    verifier=lambda frame, expected=target, index=expected_index: (
+                        detect_target_priority_order(frame)[index] == expected
+                    ),
+                )
+                if not tap_fn(
+                    (_UP_ARROW_X, arrow_y),
+                    verification=verification,
+                ):
                     raise RuntimeError(f"Failed moving {target!r} upward")
                 working[current_index - 1], working[current_index] = (
                     working[current_index], working[current_index - 1]

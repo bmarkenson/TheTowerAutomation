@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 import cv2
 
+from core.input import TapVerification
 from handlers.dismiss_uw_detail import handle_upgrade_detail_popup
 
 
@@ -27,13 +28,14 @@ def test_generic_upgrade_detail_uses_generalized_dismiss_target():
         )
 
     assert result is cleared
-    safe_tap.assert_called_once_with(
-        "gesture_targets.upgrade_detail_dismiss",
-        require_visible=False,
-        retries=1,
-        retry_delay=0.2,
-        dispatch="now",
-    )
+    safe_tap.assert_called_once()
+    target, = safe_tap.call_args.args
+    kwargs = safe_tap.call_args.kwargs
+    assert target == "gesture_targets.upgrade_detail_dismiss"
+    assert kwargs["retries"] == 1
+    assert kwargs["retry_delay"] == 0.2
+    assert kwargs["dispatch"] == "now"
+    assert isinstance(kwargs["verification"], TapVerification)
 
 
 def test_non_detail_screen_is_not_tapped():
@@ -48,4 +50,3 @@ def test_non_detail_screen_is_not_tapped():
 
     assert result is screenshot
     safe_tap.assert_not_called()
-

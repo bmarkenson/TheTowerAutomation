@@ -7,7 +7,7 @@ from pathlib import Path
 import cv2
 
 from core.clickmap_access import resolve_dot_path
-from core.input import tap_if_visible, tap_now, swipe_now
+from core.input import tap_if_visible, tap_unchecked_for_tooling, swipe_now
 from core.ss_capture import capture_and_save_screenshot
 from utils.logger import log
 
@@ -29,7 +29,7 @@ def run_gesture(dot_path, screenshot=None):
 
     Resolution order:
       1) If entry has "match_template": use visual tap via tap_if_visible(dot_path).
-      2) Else if entry has "tap": perform static tap via tap_now(dot_path).
+      2) Else if entry has "tap": perform an explicit tooling-only static tap.
       3) Else if entry has "swipe": perform swipe via swipe_now(dot_path).
       4) Otherwise: log an error.
 
@@ -67,7 +67,10 @@ def run_gesture(dot_path, screenshot=None):
     # 2. Try static tap
     if "tap" in entry:
         log(f"[INFO] Executing static tap gesture: {dot_path}", "DEBUG")
-        tap_now(dot_path)
+        tap_unchecked_for_tooling(
+            dot_path,
+            reason="explicit test_gesture invocation",
+        )
         return True
 
     # 3. Try swipe

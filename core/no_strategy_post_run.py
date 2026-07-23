@@ -19,7 +19,7 @@ from core.free_upgrade_locks import (
     inspect_free_upgrade_locks,
 )
 from core.home_battle import detect_home_battle_control
-from core.input import safe_tap, swipe_now, tap_if_visible
+from core.input import TapVerification, safe_tap, swipe_now, tap_if_visible
 from core.label_tapper import is_visible
 from core.perk_configuration import parse_perk_configuration_selection
 from core.scrolling import capture_scroll_to_edge, scroll_to_edge
@@ -218,9 +218,9 @@ def inspect_post_run_free_upgrade_locks(
 
     if not guarded_tap(
         "navigation.goto_workshop_home",
-        require_visible=False,
         dispatch="now",
         log_label="no_strategy_post_run:workshop",
+        screenshot=home_screenshot,
     ):
         raise NoStrategyPostRunError("Workshop navigation tap failed")
     workshop = _wait_for(
@@ -247,9 +247,9 @@ def inspect_post_run_free_upgrade_locks(
     workshop_observation = result.screenshot
     if not guarded_tap(
         "navigation.goto_home",
-        require_visible=False,
         dispatch="now",
         log_label="no_strategy_post_run:return_home",
+        screenshot=result.screenshot,
     ):
         raise NoStrategyPostRunError("Home navigation tap failed after lock inspection")
     home = _wait_for_new_battle_home(
@@ -282,9 +282,9 @@ def open_perks_configuration_for_post_run_capture(
     _require_action(action_guard_fn)
     if not safe_tap_fn(
         "navigation.goto_cards_home",
-        require_visible=False,
         dispatch="now",
         log_label="no_strategy_post_run:cards",
+        screenshot=home_screenshot,
     ):
         raise NoStrategyPostRunError("Cards navigation tap failed")
     cards = _wait_for(
@@ -325,9 +325,9 @@ def open_perks_configuration_from_cards(
     _require_action(action_guard_fn)
     if not safe_tap_fn(
         "navigation.goto_home",
-        require_visible=False,
         dispatch="now",
         log_label="no_strategy_post_run:return_home_from_cards",
+        screenshot=cards_screenshot,
     ):
         raise NoStrategyPostRunError("Home navigation tap failed from Cards")
     home = _wait_for_new_battle_home(
@@ -343,9 +343,17 @@ def open_perks_configuration_from_cards(
     _require_action(action_guard_fn)
     if not safe_tap_fn(
         "navigation.home_perks_configuration",
-        require_visible=False,
         dispatch="now",
         log_label="no_strategy_post_run:perks_configuration",
+        verification=TapVerification(
+            screenshot=home,
+            target_region=HOME_PERKS_CONTROL_REGION,
+            description="home_perks_configuration:visible",
+            verifier=lambda frame: (
+                detector(frame).get("state") == "HOME_SCREEN"
+                and detect_home_perks_configuration_control(frame)["visible"]
+            ),
+        ),
     ):
         raise NoStrategyPostRunError("Perks configuration tap failed")
     perks = _wait_for(
@@ -461,9 +469,9 @@ def capture_post_run_perk_configuration(
         _require_action(action_guard_fn)
         if not safe_tap_fn(
             "navigation.goto_home",
-            require_visible=False,
             dispatch="now",
             log_label="no_strategy_post_run:perks_return_home",
+            screenshot=destination,
         ):
             raise NoStrategyPostRunError(
                 "Home navigation tap failed after Perks capture"
@@ -513,9 +521,21 @@ def _select_perk_tab(
     _require_action(action_guard_fn)
     if not safe_tap_fn(
         (x + width // 2, y + height // 2),
-        require_visible=False,
         dispatch="now",
         log_label=f"no_strategy_post_run:perk_tab:{_safe_slug(label)}",
+        verification=TapVerification(
+            screenshot=current,
+            target_region=region,
+            description=f"perk_configuration_tab:{_safe_slug(label)}",
+            verifier=lambda frame: (
+                detector(frame).get("state") == "PERKS"
+                and visible_fn(
+                    PERK_CONFIGURATION_INDICATOR,
+                    screenshot=frame,
+                )
+                and not measure_preset_slot_selection(frame, region).selected
+            ),
+        ),
     ):
         raise NoStrategyPostRunError(f"{label} tab tap failed")
     for _ in range(8):
@@ -651,9 +671,9 @@ def restore_post_run_home(
     _require_action(action_guard_fn)
     if not safe_tap_fn(
         "navigation.goto_home",
-        require_visible=False,
         dispatch="now",
         log_label="no_strategy_post_run:restore_home",
+        screenshot=current,
     ):
         raise NoStrategyPostRunError("post-run Home restoration tap failed")
     home = _wait_for_new_battle_home(

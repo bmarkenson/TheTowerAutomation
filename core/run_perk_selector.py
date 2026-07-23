@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 
 from core.auto_pick_perks import measure_auto_pick_perks
-from core.input import safe_tap, tap_if_visible
+from core.input import TapVerification, safe_tap, tap_if_visible
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
 from utils.logger import log
@@ -242,9 +242,9 @@ class RunScopedPerkSelector:
             return False
         if not safe_tap_fn(
             "navigation.open_perks",
-            require_visible=False,
             dispatch="now",
             log_label="run_perk_selector:open",
+            screenshot=screenshot,
         ):
             self._next_check_at = now + 30.0
             return False
@@ -304,9 +304,29 @@ class RunScopedPerkSelector:
                     break
                 if not safe_tap_fn(
                     (CHOICE_TAP_X, (confirmed.top + confirmed.bottom) // 2),
-                    require_visible=False,
                     dispatch="now",
                     log_label=f"run_perk_selector:{confirmed.family}",
+                    verification=TapVerification(
+                        screenshot=fresh,
+                        target_region=(
+                            CHOICE_TEXT_X1,
+                            confirmed.top,
+                            CHOICE_TEXT_X2 - CHOICE_TEXT_X1,
+                            confirmed.bottom - confirmed.top,
+                        ),
+                        description=f"perk_choice:{confirmed.family}",
+                        verifier=lambda frame, expected=confirmed: (
+                            (
+                                candidate := _find_confirmed_choice(
+                                    inspect_fn(frame),
+                                    expected,
+                                    allowed,
+                                )
+                            )
+                            is not None
+                            and candidate.top == expected.top
+                        ),
+                    ),
                 ):
                     break
                 selected_any = True

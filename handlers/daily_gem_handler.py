@@ -78,7 +78,6 @@ def _open_store_for_current_screen() -> str | None:
         log("[DAILY_GEM] Opening Store from the home-screen bottom navigation", "DEBUG")
         opened = safe_tap(
             "navigation.goto_store_home",
-            require_visible=False,
             dispatch="now",
         )
         return state if opened else None
@@ -191,7 +190,6 @@ def _return_from_store(session_id: str, source_state: str) -> bool:
     elif source_state == "HOME_SCREEN":
         returned = safe_tap(
             "navigation.goto_home_store",
-            require_visible=False,
             dispatch="now",
         )
         step = "Return Home"

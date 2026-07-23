@@ -6,7 +6,7 @@ import json
 import subprocess
 import keyboard
 from core.clickmap_access import get_clickmap, save_clickmap
-from core.input import tap_now
+from core.input import tap_unchecked_for_tooling
 from core.adb_utils import adb_shell
 
 
@@ -87,7 +87,10 @@ def run_tap(name):
             continue
         k = key.name
         if k == "r":
-            tap_now(name)
+            tap_unchecked_for_tooling(
+                name,
+                reason="interactive gesture tuning",
+            )
         elif k == "b":
             return
         elif k == "q":

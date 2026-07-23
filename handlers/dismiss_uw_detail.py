@@ -7,7 +7,7 @@ from typing import Callable, Optional
 
 import numpy as np
 
-from core.input import safe_tap
+from core.input import TapVerification, safe_tap
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
 from core.clickmap_access import resolve_dot_path
@@ -65,6 +65,12 @@ def handle_upgrade_detail_popup(
 
     for attempt in range(1, max_attempts + 1):
         tap_x, tap_y = candidate_taps[(attempt - 1) % len(candidate_taps)]
+        verification = TapVerification(
+            screenshot=image,
+            target_region=(0, 0, image.shape[1], image.shape[0]),
+            description="upgrade_detail:verified_backdrop",
+            verifier=_overlay_present,
+        )
         log(
             f"[UPGRADE_DETAIL] Dismissing detail popup (attempt {attempt}) "
             f"with tap at ({tap_x},{tap_y})",
@@ -74,24 +80,24 @@ def handle_upgrade_detail_popup(
         if attempt == 1:
             tapped = safe_tap(
                 "gesture_targets.upgrade_detail_dismiss",
-                require_visible=False,
                 retries=1,
                 retry_delay=0.2,
                 dispatch="now",
+                verification=verification,
             )
             if not tapped:
                 tapped = safe_tap(
                     (tap_x, tap_y),
-                    require_visible=False,
                     dispatch="now",
                     log_label="upgrade_detail_fallback",
+                    verification=verification,
                 )
         else:
             tapped = safe_tap(
                 (tap_x, tap_y),
-                require_visible=False,
                 dispatch="now",
                 log_label="upgrade_detail_fallback",
+                verification=verification,
             )
 
         if not tapped:

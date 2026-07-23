@@ -19,13 +19,9 @@ from core.gc_module_loadout import (
     normalize_gc_module_requirements,
 )
 from core.gc_preflight import GC_SECTION_SPECS, validate_gc_preflight_screens
-from core.input import safe_tap, swipe_now, tap_if_visible
+from core.input import TapVerification, safe_tap, swipe_now, tap_if_visible
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
-from core.target_priority import (
-    ensure_target_priority_order,
-    observe_target_priority_order,
-)
 from core.target_priority_config import validate_target_priority_order
 from core.tournament_preflight import TOURNAMENT_SECTION_SPECS
 from core.upgrade_navigation import swipe_upgrade_menu
@@ -131,8 +127,6 @@ def run_gc_no_battle_setup(
     ensure_modules_fn: Callable[..., Any] = ensure_gc_module_loadout,
     evaluate_modules_fn: Callable[..., Any] = evaluate_gc_module_loadout,
     ensure_free_upgrade_locks_fn: Callable[..., Any] = inspect_free_upgrade_locks,
-    ensure_target_priority_fn: Callable[..., Any] = ensure_target_priority_order,
-    observe_target_priority_fn: Callable[..., Any] = observe_target_priority_order,
     validate_configuration_fn: Callable[..., Any] = validate_gc_preflight_screens,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> GcNoBattleSetupResult:
@@ -490,68 +484,16 @@ def run_gc_no_battle_setup(
                 active_waivers[current_check],
             )
         elif target_priority_mode != "preserve":
-            target_priority_panel = _open_static(
-                current,
-                "navigation.home_target_priority",
-                "HOME_SCREEN",
-                "TARGET_PRIORITY",
-                capture_fn,
-                detector,
-                safe_tap_fn,
-                sleep_fn,
-            )
-
-            def target_priority_tap(target):
-                return safe_tap_fn(
-                    target,
-                    require_visible=False,
-                    dispatch="now",
-                    log_label="target_priority",
-                )
-
-            if target_priority_mode == "enforce":
-                target_priority_valid = ensure_target_priority_fn(
-                    target_priority_requirement,
-                    capture_fn=capture_fn,
-                    tap_fn=target_priority_tap,
-                    sleep_fn=sleep_fn,
-                    panel_open=True,
-                )
-                if not target_priority_valid:
-                    raise _SetupFailure(
-                        "Target Priority remained invalid after correction"
-                    )
-                evidence[current_check] = {
-                    "mode": target_priority_mode,
-                    "checked": True,
-                    "matches_expected": True,
-                    "valid": True,
-                }
-            else:
-                observation = observe_target_priority_fn(
-                    target_priority_requirement,
-                    capture_fn=capture_fn,
-                    tap_fn=target_priority_tap,
-                    sleep_fn=sleep_fn,
-                    panel_open=True,
-                )
-                target_payload = observation.as_dict()
-                target_payload.update(
-                    mode=target_priority_mode,
-                    checked=True,
-                )
-                evidence[current_check] = target_payload
-            current = _wait_for(
-                state="HOME_SCREEN",
-                capture_fn=capture_fn,
-                detector=detector,
-                sleep_fn=sleep_fn,
-            )
-            _require_no_battle_home(
-                current,
-                detector,
-                detect_home_control_fn,
-            )
+            # Target Priority is exposed only from the in-battle side menu.
+            # Keep its resolved policy/order in the generated runtime plan,
+            # where the existing RUNNING-only action verifies it.
+            evidence[current_check] = {
+                "mode": target_priority_mode,
+                "checked": False,
+                "valid": None,
+                "boundary": "RUNNING",
+                "reason": "battle_only_control",
+            }
         else:
             evidence[current_check] = {
                 "mode": target_priority_mode,
@@ -753,7 +695,7 @@ def _open_static(
             f"static navigation guard failed for {label}: "
             f"expected {source_state}, got {state!r}"
         )
-    if not safe_tap_fn(label, require_visible=False, dispatch="now"):
+    if not safe_tap_fn(label, dispatch="now"):
         raise _SetupFailure(f"static navigation failed for {label} from {state}")
     return _wait_for(
         state=destination,
@@ -945,7 +887,6 @@ def _ensure_guardian_loadout(
         )
         if not safe_tap_fn(
             "buttons.guardian:scout_inventory",
-            require_visible=False,
             dispatch="now",
         ):
             raise _SetupFailure("Guardian Scout inventory selection failed")
@@ -1003,7 +944,6 @@ def _replace_guardian_chip(
     else:
         selected = safe_tap_fn(
             inventory_label,
-            require_visible=False,
             dispatch="now",
         )
     if not selected:
@@ -1065,7 +1005,6 @@ def _return_home(
     if not returned:
         returned = safe_tap_fn(
             "navigation.goto_home",
-            require_visible=False,
             dispatch="now",
         )
     if not returned:
@@ -1093,9 +1032,14 @@ def _recover_home(
         if _is_not_enough_medals_dialog(frame):
             if not safe_tap_fn(
                 NOT_ENOUGH_MEDALS_OK,
-                require_visible=False,
                 dispatch="now",
                 log_label="not_enough_medals_ok",
+                verification=TapVerification(
+                    screenshot=frame,
+                    target_region=NOT_ENOUGH_MEDALS_REGION,
+                    description="not_enough_medals:ok",
+                    verifier=_is_not_enough_medals_dialog,
+                ),
             ):
                 return
             sleep_fn(0.8)

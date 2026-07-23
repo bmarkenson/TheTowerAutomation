@@ -99,7 +99,7 @@ def _open_exit_battle_dialog(timeout_s: float) -> bool:
     if detection["state"] != "RUNNING" or "MENU_OPEN" not in detection["overlays"]:
         log("[RUN_CONTROL] Run/menu guard failed before Exit Battle tap", "WARN")
         return False
-    if not safe_tap("buttons.exit_battle", require_visible=False, dispatch="now"):
+    if not safe_tap("buttons.exit_battle", dispatch="now"):
         return False
     dialog = _wait_for_screen(
         _exit_battle_dialog_visible,
@@ -121,7 +121,7 @@ def _choose_exit_battle_action(
     if not _exit_battle_dialog_visible(screenshot):
         log(f"[RUN_CONTROL] Refusing '{button_key}': Exit Battle dialog missing", "WARN")
         return False
-    if not safe_tap(button_key, require_visible=False, dispatch="now"):
+    if not safe_tap(button_key, dispatch="now"):
         return False
 
     def reached_expected_state(frame: Frame) -> bool:

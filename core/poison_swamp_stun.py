@@ -9,7 +9,7 @@ from typing import Any, Callable, Mapping, Optional
 
 import numpy as np
 
-from core.input import safe_tap, tap_if_visible
+from core.input import TapVerification, safe_tap, tap_if_visible
 from core.matcher import get_match_result
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
@@ -104,9 +104,30 @@ def ensure_poison_swamp_stun_off(
     title_point = (int(x + 0.30 * width), int(y + 0.25 * height))
     if not safe_tap_fn(
         title_point,
-        require_visible=False,
         dispatch="now",
         log_label="uw_detail:Poison Swamp",
+        verification=TapVerification(
+            screenshot=current,
+            target_region=boxes[0].rect,
+            description="ultimate_weapon:Poison Swamp",
+            verifier=lambda frame: (
+                detector(frame).get("state") == "RUNNING"
+                and detector(frame).get("menu") == "UW_MENU"
+                and sum(
+                    1
+                    for column in detect_boxes_fn(
+                        frame,
+                        menu="ultimate weapons",
+                    ).values()
+                    for candidate in (column or ())
+                    if str(
+                        getattr(candidate, "text", "") or ""
+                    ).strip().lower()
+                    == "poison swamp"
+                )
+                == 1
+            ),
+        ),
     ):
         raise PoisonSwampStunError("Poison Swamp detail tap failed")
 

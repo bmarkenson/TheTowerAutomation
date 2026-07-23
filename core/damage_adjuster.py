@@ -10,7 +10,7 @@ from typing import Any, Callable, Final, Optional
 
 import numpy as np
 
-from core.input import safe_tap, tap_if_visible
+from core.input import TapVerification, safe_tap, tap_if_visible
 from core.matcher import get_match
 from core.ss_capture import capture_adb_screenshot, is_complete_screenshot
 from core.state_detector import detect_state_and_overlays
@@ -203,8 +203,13 @@ def dismiss_damage_adjuster(
 
     if not tap_fn(
         "gesture_targets.dismiss_damage_adjuster",
-        require_visible=False,
         dispatch="now",
+        verification=TapVerification(
+            screenshot=screenshot,
+            target_region=(0, 0, 1080, 1920),
+            description="damage_adjuster:visible_backdrop",
+            verifier=lambda frame: read_damage_adjuster(frame).visible,
+        ),
     ):
         return False
 
@@ -323,7 +328,6 @@ def configure_damage_slider(
                     for _ in range(batch_steps):
                         if not tap_fn(
                             button,
-                            require_visible=False,
                             dispatch="now",
                         ):
                             dispatch_failed = True

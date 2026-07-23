@@ -134,7 +134,7 @@ def test_damage_slider_enforcement_batches_known_power_of_ten_steps():
         "buttons.damage_adjuster:decrease",
     ]
     assert all(
-        kwargs == {"require_visible": False, "dispatch": "now"}
+        kwargs == {"dispatch": "now"}
         for _name, kwargs in taps
     )
     assert read.call_count == 1
@@ -332,10 +332,9 @@ def test_dismiss_is_guarded_and_restores_attack_menu():
         tap_fn=tap,
         sleep_fn=lambda _seconds: None,
     )
-    assert taps == [
-        (
-            "gesture_targets.dismiss_damage_adjuster",
-            {"require_visible": False, "dispatch": "now"},
-        )
-    ]
+    assert len(taps) == 1
+    target, kwargs = taps[0]
+    assert target == "gesture_targets.dismiss_damage_adjuster"
+    assert kwargs["dispatch"] == "now"
+    assert kwargs["verification"].description == "damage_adjuster:visible_backdrop"
     assert get_click("gesture_targets.dismiss_damage_adjuster") == (50, 50)
