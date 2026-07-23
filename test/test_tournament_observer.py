@@ -43,7 +43,7 @@ def test_tournament_strategy_is_a_passive_observer():
     assert strategy is not None
     assert strategy.name == "tournament"
     assert strategy.runtime_policy() == {
-        "handlers": ["ad_gem", "game_over"],
+        "handlers": ["ad_gem", "game_over", "game_speed"],
         "auto_return": False,
         "game_over_mode": "wait",
         "home_preflight": True,
@@ -199,6 +199,7 @@ def test_tournament_policy_suppresses_unrelated_runtime_handlers():
 
     assert app._handler_enabled("ad_gem")
     assert app._handler_enabled("game_over")
+    assert app._handler_enabled("game_speed")
     assert not app._handler_enabled("floating_gem")
     assert not app._handler_enabled("daily_gem")
     assert not app._handler_enabled("mission_rewards")

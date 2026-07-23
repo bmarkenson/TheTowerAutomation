@@ -9,7 +9,7 @@ from core.tournament_preflight import load_tournament_requirements
 
 
 TOURNAMENT_RUNTIME_POLICY = {
-    "handlers": ["ad_gem", "game_over"],
+    "handlers": ["ad_gem", "game_over", "game_speed"],
     "auto_return": False,
     "game_over_mode": "wait",
     "home_preflight": True,

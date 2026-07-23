@@ -43,6 +43,7 @@ from core.no_strategy_post_run import (
 )
 from core.run_perk_selector import RunScopedPerkSelector
 from core.gc_no_battle_setup import run_gc_no_battle_setup
+from core.game_speed import GameSpeedGuard
 from core.gate_decisions import (
     build_gate_decision_options,
     startup_gate_check_catalog,
@@ -164,6 +165,7 @@ class App:
             Path(config.control_file).parent / "run_perk_selector.json"
         )
         self._run_perk_selector = RunScopedPerkSelector(perk_selector_state)
+        self._game_speed_guard = GameSpeedGuard()
         self._run_initialization_gate_logged = False
         self._session_preflight_gate_logged = False
         self._session_preflight_terminal_blocked_logged = False
@@ -673,6 +675,26 @@ class App:
                             not initialization_pending
                             and self._mission_mgr.session_preflight_pending()
                         )
+                game_speed_guard = getattr(self, "_game_speed_guard", None)
+                if game_speed_guard is not None:
+                    game_speed_allowed = bool(
+                        not is_paused
+                        and self._handler_enabled("game_speed")
+                        and self._game_speed_priority_ready(
+                            initialization_pending=initialization_pending
+                        )
+                    )
+                    if game_speed_guard.handle(
+                        img,
+                        detection,
+                        action_guard_fn=lambda: (
+                            game_speed_allowed and self._runtime_action_guard()
+                        ),
+                    ):
+                        # The guard may have captured several newer frames while
+                        # walking the speed control. Re-enter through capture
+                        # before any other consumer sees the stale frame.
+                        continue
                 session_preflight_terminally_blocked = bool(
                     session_preflight_pending
                     and self._mission_mgr.session_preflight_terminally_blocked()
@@ -1046,12 +1068,32 @@ class App:
         except Exception as exc:
             log(f"[NO_STRATEGY] Passive observation failed: {exc}", "WARN")
 
-    def _no_strategy_action_guard(self) -> bool:
-        """Synchronize control before one inventory action."""
+    def _runtime_action_guard(self) -> bool:
+        """Synchronize persistent control before one bounded runtime action."""
 
         if self._supervisor.apply_control():
             self._status_reporter.request_immediate_report()
         return not self._supervisor.is_paused
+
+    def _game_speed_priority_ready(
+        self,
+        *,
+        initialization_pending: bool,
+    ) -> bool:
+        """Keep Farm's urgent EHLS/EALS purchases ahead of game speed."""
+
+        if not initialization_pending:
+            return True
+        mv = self._mission_mgr.ctx.data.get("mission_vars", {})
+        level_skip_keys = {"ehls_completed", "eals_completed"}
+        if not level_skip_keys.intersection(mv):
+            return True
+        return all(bool(mv.get(key)) for key in level_skip_keys)
+
+    def _no_strategy_action_guard(self) -> bool:
+        """Synchronize control before one inventory action."""
+
+        return self._runtime_action_guard()
 
     def _handle_no_strategy_in_battle_inventory(
         self,

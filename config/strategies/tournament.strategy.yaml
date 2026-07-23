@@ -6,6 +6,7 @@ runtime_policy:
   handlers:
   - ad_gem
   - game_over
+  - game_speed
   auto_return: false
   game_over_mode: wait
   home_preflight: true
@@ -169,6 +170,7 @@ run_configuration:
     handlers:
     - ad_gem
     - game_over
+    - game_speed
     auto_return: false
     game_over_mode: wait
     home_preflight: true
