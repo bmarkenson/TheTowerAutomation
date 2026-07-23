@@ -788,6 +788,131 @@ and actionable work lives in
   cold-start policy was restored to `immediate`.
 - **Fixed by:** `d26f633`.
 
+### Strict in-run Perk selection rejected an alternate valid Perks panel
+
+- **Observed:** 2026-07-22 during the first live strict-whitelist selection on
+  a Tier 19 Attack Dissonance battle after an attached-process reload.
+- **Symptom:** State detection authoritatively classified the open screen as
+  `PERKS`, but the selector's additional `indicators.perks_panel` check rejected
+  it. The selector failed closed, selected nothing, closed Perks, and returned
+  to the resumable battle.
+- **Evidence:** `logs/actions.log` records the guarded open at 20:05:44, the
+  refusal at 20:05:46, and the verified close. The preceding No Strategy
+  inventory had left a layout that was valid through the alternative
+  `indicators.perks_configuration` state key.
+- **Cause:** The generic `PERKS` primary state deliberately accepts both the
+  normal panel and configuration layout, while the selector redundantly
+  required only one of those two templates. A second issue made the longer
+  read-only No Strategy inventory run before the pending, time-sensitive Perk
+  route after every process replacement.
+- **Resolution:** The selector accepts the authoritative `PERKS` primary and
+  independently requires the localized choice header, readable disabled Auto
+  Pick control, confident fixed-row OCR, and a fresh same-row semantic-family
+  reconfirmation before tapping. Pending strict selection now precedes the
+  restart-reset in-battle inventory.
+- **Regression:** `test/test_run_perk_selector.py` covers strict whitelist
+  derivation, all four fixed rows, fresh choice confirmation, no-match refusal,
+  and Auto Pick-enabled refusal. The related No Strategy and application tests
+  remain covered by `test/test_no_strategy_app.py`,
+  `test/test_no_strategy_inventory.py`, and `test/test_app_control_sync.py`.
+- **Live validation:** At 20:11:16–20:15:53, replacement PID `4056693`
+  selected two accumulated batches totaling 16 choices. Every recorded family
+  belonged to the prior Tier 18 run's 22-family whitelist; Auto Pick remained
+  off. The terminal Perks inventory later captured 14 ordered families after
+  leveled-family deduplication. Both selector routes closed Perks and released
+  the battle before lower-priority work.
+- **Fixed by:** `fc18b07` and `6fd56fc`; initial strict selector `71852d9`.
+
+### Game Over terminal modal collided with its underlying Event screen
+
+- **Observed:** 2026-07-22 when the Tier 19 battle ended while Event Mission
+  inventory was open.
+- **Symptom:** The frame matched both `GAME_OVER` and `EVENT`; the detector
+  raised `Multiple primary states matched`, and PID `4056693` exited without a
+  battle record. On recovery, the first Perks close also failed to restore Game
+  Stats before the handler looked for More Stats.
+- **Evidence:** `logs/actions.log` records the collision at 20:16:44 and the
+  first guarded More Stats refusal at 20:20:24. The retained live frame showed
+  Game Stats for Tier 19 wave 1329 layered over Event Missions.
+- **Safety response:** The runtime failed closed. No Retry, Home, or new-battle
+  action occurred until the terminal frame and stopped owner were freshly
+  verified. The first failed capture persisted no incomplete battle record.
+- **Resolution:** `GAME_OVER` and `TOURNAMENT_RESULTS` are terminal primaries
+  that take precedence over an underlying ordinary screen while multiple
+  ordinary or terminal peers remain errors. Game Over Perks capture now waits
+  for visible Game Stats and retries the exact Perks close once if the panel is
+  still present.
+- **Regression:** `test/test_ui_state_coverage.py` covers terminal-over-Event
+  precedence and retained ordinary-primary conflict rejection;
+  `test/test_game_over_handler.py` covers close retry and restored Game Stats.
+- **Live validation:** PID `4065253` classified the same live frame as
+  `GAME_OVER`, saved `Battle20260722T202039-0700`, followed the verified Home
+  control, and completed the Home lock and Perks configuration inventory at
+  20:26:38.
+- **Fixed by:** `a0dfd22` and `bda0d66`.
+
+### Mid-run reload lost No Strategy Attack Dissonance identity
+
+- **Observed:** 2026-07-22 after multiple guarded process replacements during
+  the active Tier 19 run.
+- **Symptom:** The terminal record initially classified the run as Unknown even
+  though the live sword badge had been observed before replacement and the
+  immediate post-run selected Workshop preset read `Attack Disso` at 92.0 OCR
+  confidence.
+- **Cause:** No Strategy's passive badge observation was in process memory. A
+  replacement could attach safely to the battle but did not retain that
+  already-observed identity through the later terminal record.
+- **Resolution:** The observer records an immediately captured post-run Attack
+  Dissonance Workshop preset as run identity, and historical/current
+  classification has the same evidence-based fallback for records finalized by
+  an older process.
+- **Regression:** `test/test_no_strategy_observer.py` covers post-run identity
+  restoration; `test/test_battle_classification.py` covers high-confidence
+  classification and the distinct evidence signal.
+- **Live validation:** `Battle20260722T202039-0700` now reports high-confidence
+  Attack Dissonance from Tier 19 Game Over plus the post-run selected preset.
+- **Fixed by:** `b22e41d` and `6986c63`.
+
+### Recovery reopened an unfinished duplicate after its canonical record finalized
+
+- **Observed:** 2026-07-22 after restarting the WAIT-held Home runtime on the
+  latest code.
+- **Symptom:** Recovery selected old unfinished duplicate
+  `Battle20260722T190745-0700` even though equivalent canonical terminal record
+  `Battle20260722T185119-0700` had already finalized its post-run evidence.
+- **Cause:** Candidate selection filtered finalized records before comparing
+  terminal fingerprints, so it could not see that an unfinished duplicate's
+  terminal boundary was already complete elsewhere.
+- **Resolution:** Recovery first indexes recent finalized terminal
+  fingerprints and suppresses matching unfinished duplicates before selecting
+  the best remaining pending record.
+- **Regression:**
+  `test/test_no_strategy_post_run.py::test_finalized_terminal_capture_suppresses_unfinished_duplicate`.
+- **Fixed by:** `0603591`.
+
+### Post-run Perks close outran the settling Home battle control
+
+- **Observed:** 2026-07-22 while the WAIT-held runtime retried an old duplicate
+  post-run inventory.
+- **Symptom:** Closing the Home Perks configuration produced a valid
+  `HOME_SCREEN` frame before the Home battle control was readable. The pass
+  immediately rejected `UNKNOWN`, retried the complete inventory 60 seconds
+  later, and failed the same way a second time.
+- **Evidence:** `logs/actions.log` records Perks closes at 20:35:05 and
+  20:38:07, followed by `requires NEW_BATTLE, observed UNKNOWN`; subsequent
+  fresh frames on both attempts authoritatively read `NEW_BATTLE` Home.
+- **Safety response:** The runtime remained in WAIT and did not start a battle.
+  The incomplete pass did not finalize or overwrite the duplicate record.
+- **Cause:** Navigation waited for the primary Home state but performed only
+  one immediate read of the independently authoritative battle control.
+- **Resolution:** Every post-run transition back to Home now waits for the
+  combined `HOME_SCREEN` plus `NEW_BATTLE` boundary. It remains read-only while
+  the control settles and fails closed on a bounded timeout.
+- **Regression:**
+  `test/test_no_strategy_post_run.py::test_perk_configuration_capture_records_all_tabs_as_raw_evidence`
+  exercises the observed `UNKNOWN` then `NEW_BATTLE` transition.
+- **Fixed by:** `f6f12ba`.
+
 ## Operational lessons
 
 ### A detached child may not survive the agent execution wrapper

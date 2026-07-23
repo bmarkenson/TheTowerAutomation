@@ -8,18 +8,22 @@ checked-item detail remains in the
 
 ## Current validation gates
 
-- [ ] Finish live validation of the No Strategy two-phase inventory at the next
+- [x] Finish live validation of the No Strategy two-phase inventory at the next
   natural Game Over. Do not Surrender or manufacture the boundary.
   - [x] On the active Tier 18 Attack Dissonance battle, confirm automatic
     Cards/Perks/UW/Modules/Bots/Guardians/Target Priority traversal, Attack
     Dissonance Damage Slider unavailability, and guarded return to the battle.
     The repaired pass completed at 17:26:49 and returned to `RUNNING` at wave
     4120 under PID `3899024`.
-  - [ ] At natural Game Over, confirm Attack Dissonance identity, the full
+  - [x] At natural Game Over, confirm Attack Dissonance identity, the full
     terminal record, forced verified Home `NEW_BATTLE`, read-only Workshop/Free
     Upgrade lock pass, independently guarded automatic Perks opening, complete
     First Perk/Ban/Auto Pick capture, update of the same battle record, and
-    release of the next-battle path.
+    release of the next-battle path. The natural Tier 18 boundary saved
+    `Battle20260722T185119-0700` at 18:52:25. Reload recovery retained that
+    record through the Home-only work; the completed lock and Perks evidence
+    was finalized back into the same record at 19:37:34, and WAIT continued to
+    hold verified `NEW_BATTLE` Home.
 - [ ] Complete live validation of guarded **Reload automation for current
   battle**.
   - [x] On the active No Strategy Attack Dissonance battle at wave 3314, the
@@ -66,6 +70,10 @@ checked-item detail remains in the
   a separate inventory pass, or another dispatch from redundant post-claim
   scanning; log the continuation reason and stop promptly once fresh evidence
   proves that no additional claim is available.
+- [ ] Diagnose the dropped Game Stats coin decimal retained for
+  `Battle20260722T202039-0700`. The visible base value was `1.82T`, but OCR
+  produced `182T`; the resulting split disagreed with the copied `2.72T` total,
+  correctly invalidated record quality, and retained source screenshots.
 
 ## Farm session preflight
 

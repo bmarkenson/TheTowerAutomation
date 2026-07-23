@@ -11,6 +11,25 @@ for a matching recurrence or historical investigation.
 
 ## Open
 
+### Game Stats OCR dropped a coin-value decimal
+
+- **Observed:** 2026-07-22 while recovering the completed Tier 19 Attack
+  Dissonance record after a terminal-state collision.
+- **Symptom:** The visible base coins value was `1.82T`, but repaired Game Stats
+  OCR recorded `182T`. That could not reconcile with `907.75B` ad coins and the
+  copied `2.72T` total.
+- **Evidence:** `Battle20260722T202039-0700` is retained with invalid quality
+  and warning `Repaired Game Stats coin split disagrees with copied total`.
+  The source Game Stats and three Perks screenshots were retained under
+  `screenshots/matches/Game20260722_202039_*_OCR_EVIDENCE.png`.
+- **Safety response:** The parser did not silently accept or repair the
+  disagreement; it retained evidence and excluded the record from valid
+  analytics.
+- **Status:** Open. Reproduce the decimal-loss path against the retained Game
+  Stats frame and add a regression before changing number repair. The active
+  task is in
+  [`backlog/runtime-and-validation.md`](backlog/runtime-and-validation.md#current-validation-gates).
+
 ### Farm Bot preset switch required more Event medals than were available
 
 - **Observed:** 2026-07-20 during the same authorized fresh Tier 18 Farm
