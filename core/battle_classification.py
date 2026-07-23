@@ -46,6 +46,11 @@ def analyze_battle_type(
     observed_identity_subtype = str(
         observed_identity.get("subtype") or ""
     ).strip().lower()
+    observed_identity_signals = observed_identity.get("signals")
+    post_run_preset_identity = bool(
+        isinstance(observed_identity_signals, Mapping)
+        and "post_run_workshop_preset" in observed_identity_signals
+    )
 
     signals: list[str] = []
     if terminal:
@@ -75,7 +80,11 @@ def analyze_battle_type(
         and observed_identity_subtype == "attack"
     )
     if attack_dissonance:
-        signals.append("observed_identity:attack_dissonance")
+        signals.append(
+            "post_run_workshop_preset:attack_dissonance"
+            if post_run_preset_identity
+            else "observed_identity:attack_dissonance"
+        )
 
     if terminal == "TOURNAMENT_RESULTS":
         kind = "tournament"
@@ -84,10 +93,16 @@ def analyze_battle_type(
     elif terminal == "GAME_OVER" and attack_dissonance:
         kind = "dissonance"
         confidence = "high"
-        reason = (
-            "The run ended at Game Over after the fixed Tier badge identified "
-            "the Attack Dissonance modifier."
-        )
+        if post_run_preset_identity:
+            reason = (
+                "The run ended at Game Over and the immediately captured Home "
+                "Workshop preset identified Attack Dissonance."
+            )
+        else:
+            reason = (
+                "The run ended at Game Over after the fixed Tier badge "
+                "identified the Attack Dissonance modifier."
+            )
     elif terminal == "GAME_OVER" and farm_identity:
         kind = "farm"
         confidence = "high"
@@ -191,10 +206,23 @@ def _observed_run_identity(
     if not isinstance(fields, Mapping):
         return {}
     identity = fields.get("run_identity")
-    if not isinstance(identity, Mapping) or identity.get("status") != "observed":
+    if isinstance(identity, Mapping) and identity.get("status") == "observed":
+        value = identity.get("value")
+        if isinstance(value, Mapping):
+            return value
+    preset = fields.get("workshop_preset")
+    if not isinstance(preset, Mapping) or preset.get("status") != "observed":
         return {}
-    value = identity.get("value")
-    return value if isinstance(value, Mapping) else {}
+    value = preset.get("value")
+    label = str(value.get("label") or "") if isinstance(value, Mapping) else ""
+    if not label.casefold().startswith("attack disso"):
+        return {}
+    return {
+        "family": "Dissonance",
+        "subtype": "Attack",
+        "label": "Attack Dissonance",
+        "signals": {"post_run_workshop_preset": value},
+    }
 
 
 def observed_tier_for_record(record: Mapping[str, Any]) -> int | None:

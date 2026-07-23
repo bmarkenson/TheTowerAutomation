@@ -99,6 +99,37 @@ def test_observed_attack_dissonance_identity_classifies_no_strategy_run():
     assert "observed_identity:attack_dissonance" in result["signals"]
 
 
+def test_post_run_attack_preset_recovers_identity_after_mid_run_reload():
+    observed = {
+        "fields": {
+            "run_identity": {"status": "not_observed", "value": None},
+            "workshop_preset": {
+                "status": "observed",
+                "phase": "post_run_home",
+                "value": {
+                    "slot": 4,
+                    "label": "Attack Disso",
+                    "label_ocr_confidence": 92.0,
+                },
+            },
+        }
+    }
+
+    result = analyze_battle_type(
+        strategy_name="none",
+        run_configuration={},
+        terminal_state="GAME_OVER",
+        observed_tier=19,
+        observed_run_configuration=observed,
+    )
+
+    assert result["type"] == "dissonance"
+    assert result["label"] == "Attack Dissonance"
+    assert result["confidence"] == "high"
+    assert "post_run_workshop_preset:attack_dissonance" in result["signals"]
+    assert "immediately captured Home Workshop preset" in result["reason"]
+
+
 def test_historical_record_derives_observed_tier_from_terminal_stats():
     result = classification_for_record(
         {
