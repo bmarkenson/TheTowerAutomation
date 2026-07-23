@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import cv2
 import numpy as np
+import pytest
 
 from core.app import App
 from core.game_speed import (
@@ -11,6 +12,7 @@ from core.game_speed import (
     GameSpeedGuard,
     GameSpeedReading,
     GameSpeedResult,
+    NORMAL_MAX_GAME_SPEED,
     maximize_game_speed,
     measure_game_speed,
 )
@@ -59,7 +61,32 @@ def test_measurement_rejects_the_control_outside_an_active_battle():
     assert reading.reason == "not_running"
 
 
-def test_maximize_walks_up_until_a_verified_plus_tap_has_no_effect():
+@pytest.mark.parametrize("speed", (5.0, 6.3))
+def test_maximize_accepts_normal_and_perk_maximum_without_tapping(speed):
+    frame = _complete_frame()
+
+    with patch(
+        "core.game_speed.measure_game_speed",
+        return_value=_reading(speed),
+    ):
+        result = maximize_game_speed(
+            screenshot=frame,
+            tap_fn=lambda *_args, **_kwargs: pytest.fail(
+                "an already-satisfied speed must not be probed"
+            ),
+        )
+
+    assert result == GameSpeedResult(
+        True,
+        speed,
+        speed,
+        0,
+        0,
+        "target_satisfied",
+    )
+
+
+def test_maximize_stops_as_soon_as_normal_maximum_is_reached():
     frame = _complete_frame()
     speed = {"value": 1.0}
     taps = []
@@ -68,8 +95,7 @@ def test_maximize_walks_up_until_a_verified_plus_tap_has_no_effect():
         assert point == GAME_SPEED_PLUS_POINT
         assert verification.authorizes(point)
         taps.append(point)
-        if speed["value"] < 2.0:
-            speed["value"] += 0.5
+        speed["value"] += 2.0
         return True
 
     with (
@@ -92,12 +118,42 @@ def test_maximize_walks_up_until_a_verified_plus_tap_has_no_effect():
     assert result == GameSpeedResult(
         True,
         1.0,
-        2.0,
-        3,
+        NORMAL_MAX_GAME_SPEED,
         2,
-        "maximum_verified",
+        2,
+        "target_reached",
     )
-    assert taps == [GAME_SPEED_PLUS_POINT] * 3
+    assert taps == [GAME_SPEED_PLUS_POINT] * 2
+
+
+def test_maximize_fails_if_a_submaximum_plus_tap_has_no_effect():
+    frame = _complete_frame()
+
+    with (
+        patch(
+            "core.game_speed.measure_game_speed",
+            return_value=_reading(3.0),
+        ),
+        patch(
+            "core.game_speed.read_game_speed_control",
+            return_value=_reading(3.0),
+        ),
+    ):
+        result = maximize_game_speed(
+            screenshot=frame,
+            capture_fn=lambda: frame,
+            tap_fn=lambda *_args, **_kwargs: True,
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert result == GameSpeedResult(
+        False,
+        3.0,
+        3.0,
+        1,
+        0,
+        "speed_did_not_increase",
+    )
 
 
 def test_maximize_rechecks_runtime_authority_before_every_tap():
@@ -128,9 +184,9 @@ def test_guard_checks_only_running_battles_and_resets_at_home():
 
     def maximize(**_kwargs):
         calls.append(now["value"])
-        return GameSpeedResult(True, 5.0, 5.0, 1, 0, "maximum_verified")
+        return GameSpeedResult(True, 5.0, 5.0, 0, 0, "target_satisfied")
 
-    assert guard.handle(
+    assert not guard.handle(
         frame,
         {"state": "RUNNING"},
         action_guard_fn=lambda: True,
@@ -148,13 +204,37 @@ def test_guard_checks_only_running_battles_and_resets_at_home():
         action_guard_fn=lambda: True,
         maximize_fn=maximize,
     )
-    assert guard.handle(
+    assert not guard.handle(
         frame,
         {"state": "RUNNING"},
         action_guard_fn=lambda: True,
         maximize_fn=maximize,
     )
     assert calls == [100.0, 100.0]
+
+
+def test_guard_does_not_repeat_stable_noop_log_entries():
+    now = {"value": 100.0}
+    guard = GameSpeedGuard(clock=lambda: now["value"], check_interval_s=30.0)
+    frame = _complete_frame()
+    result = GameSpeedResult(True, 6.3, 6.3, 0, 0, "target_satisfied")
+
+    with patch("core.game_speed.log") as log:
+        assert not guard.handle(
+            frame,
+            {"state": "RUNNING"},
+            action_guard_fn=lambda: True,
+            maximize_fn=lambda **_kwargs: result,
+        )
+        now["value"] = 131.0
+        assert not guard.handle(
+            frame,
+            {"state": "RUNNING"},
+            action_guard_fn=lambda: True,
+            maximize_fn=lambda **_kwargs: result,
+        )
+
+    log.assert_called_once()
 
 
 def test_farm_level_skips_remain_ahead_of_game_speed():

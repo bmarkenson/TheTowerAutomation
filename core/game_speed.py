@@ -32,6 +32,7 @@ GAME_SPEED_PLUS_POINT = (910, 935)
 GAME_SPEED_CHECK_INTERVAL_S = 30.0
 GAME_SPEED_RETRY_INTERVAL_S = 5.0
 MAX_GAME_SPEED_TAPS = 24
+NORMAL_MAX_GAME_SPEED = 5.0
 
 _SPEED_PATTERN = re.compile(r"X(\d{1,2}\.\d)")
 
@@ -60,7 +61,7 @@ class GameSpeedReading:
 
 @dataclass(frozen=True)
 class GameSpeedResult:
-    """Outcome from walking the battle speed control to its current ceiling."""
+    """Outcome from restoring the battle speed to the normal maximum."""
 
     success: bool
     initial: Optional[float]
@@ -240,7 +241,7 @@ def maximize_game_speed(
     action_guard_fn: Callable[[], bool] = lambda: True,
     max_taps: int = MAX_GAME_SPEED_TAPS,
 ) -> GameSpeedResult:
-    """Increase battle speed until one verified plus tap produces no change."""
+    """Increase battle speed only until it reaches the normal x5.0 maximum."""
 
     frame = screenshot if screenshot is not None else capture_fn()
     initial_reading = measure_game_speed(frame, detector=detector)
@@ -258,6 +259,11 @@ def maximize_game_speed(
     current = initial
     taps_sent = 0
     increases = 0
+    if current >= NORMAL_MAX_GAME_SPEED:
+        return GameSpeedResult(
+            True, initial, current, taps_sent, increases, "target_satisfied"
+        )
+
     for _ in range(max(1, int(max_taps))):
         if not action_guard_fn():
             return GameSpeedResult(
@@ -300,17 +306,26 @@ def maximize_game_speed(
             )
         if reading.value == current:
             return GameSpeedResult(
-                True, initial, current, taps_sent, increases, "maximum_verified"
+                False,
+                initial,
+                current,
+                taps_sent,
+                increases,
+                "speed_did_not_increase",
             )
         current = reading.value
         increases += 1
+        if current >= NORMAL_MAX_GAME_SPEED:
+            return GameSpeedResult(
+                True, initial, current, taps_sent, increases, "target_reached"
+            )
     return GameSpeedResult(
-        False, initial, current, taps_sent, increases, "maximum_not_reached"
+        False, initial, current, taps_sent, increases, "target_not_reached"
     )
 
 
 class GameSpeedGuard:
-    """Periodically restore the maximum visible speed during active battles."""
+    """Periodically restore at least x5.0 during active battles."""
 
     def __init__(
         self,
@@ -351,6 +366,7 @@ class GameSpeedGuard:
         if now < self._next_check_at or not action_guard_fn():
             return False
 
+        previous_result = self.last_result
         result = maximize_fn(
             screenshot=screenshot,
             action_guard_fn=action_guard_fn,
@@ -359,13 +375,22 @@ class GameSpeedGuard:
         self._next_check_at = now + (
             self._check_interval_s if result.success else self._retry_interval_s
         )
-        log(
-            "[GAME_SPEED] "
-            f"initial={result.initial} final={result.final} "
-            f"taps={result.taps_sent} increases={result.increases} "
-            f"success={result.success} reason={result.reason}",
-            "INFO" if result.success else "WARN",
+        should_log = (
+            not result.success
+            or result.taps_sent > 0
+            or previous_result is None
+            or previous_result.success != result.success
+            or previous_result.final != result.final
+            or previous_result.reason != result.reason
         )
+        if should_log:
+            log(
+                "[GAME_SPEED] "
+                f"initial={result.initial} final={result.final} "
+                f"taps={result.taps_sent} increases={result.increases} "
+                f"success={result.success} reason={result.reason}",
+                "INFO" if result.success else "WARN",
+            )
         return result.taps_sent > 0
 
 
@@ -373,6 +398,7 @@ __all__ = [
     "GAME_SPEED_PLUS_POINT",
     "GAME_SPEED_PLUS_REGION",
     "GAME_SPEED_REGION",
+    "NORMAL_MAX_GAME_SPEED",
     "GameSpeedGuard",
     "GameSpeedReading",
     "GameSpeedResult",
