@@ -15,7 +15,6 @@ import numpy as np
 
 from core.auto_pick_perks import measure_auto_pick_perks
 from core.input import safe_tap, tap_if_visible
-from core.label_tapper import is_visible
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
 from utils.logger import log
@@ -38,7 +37,6 @@ CHOICE_TEXT_X1 = 270
 CHOICE_TEXT_X2 = 950
 CHOICE_TAP_X = 540
 MIN_CHOICE_CONFIDENCE = 65.0
-PERKS_INDICATOR = "indicators.perks_panel"
 TERMINAL_STATES = {"GAME_OVER", "TOURNAMENT_RESULTS"}
 
 
@@ -138,7 +136,6 @@ def inspect_perk_choice_panel(
     screenshot: Frame,
     *,
     detector: Detector = detect_state_and_overlays,
-    visible_fn: Callable[..., bool] = is_visible,
     text_fn: Callable[[Frame], tuple[str, float]] = lambda crop: ocr_text_and_conf(
         crop, psm=6
     ),
@@ -148,9 +145,7 @@ def inspect_perk_choice_panel(
 ) -> PerkChoicePanel:
     """Read the four fixed choice rows without touching Auto Pick."""
 
-    if detector(screenshot).get("state") != "PERKS" or not visible_fn(
-        PERKS_INDICATOR, screenshot=screenshot
-    ):
+    if detector(screenshot).get("state") != "PERKS":
         raise ValueError("Perks panel is not authoritatively visible")
     auto_pick = measure_auto_pick_perks(screenshot)
     header = _crop(screenshot, CHOOSE_PERK_REGION)

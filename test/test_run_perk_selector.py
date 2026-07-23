@@ -72,7 +72,6 @@ def test_choice_reader_uses_fixed_prompt_rows_and_confidence():
     panel = inspect_perk_choice_panel(
         _frame(),
         detector=lambda _frame: {"state": "PERKS"},
-        visible_fn=lambda *_args, **_kwargs: True,
         text_fn=lambda _crop: next(texts),
         header_text_fn=lambda _crop: ("Choose a New Perk", 95.0),
     )
