@@ -797,14 +797,6 @@ class App:
 
                 if (
                     not actions_blocked
-                    and self._handle_no_strategy_in_battle_inventory(detection)
-                ):
-                    # The inventory owns a multi-screen route. Always recapture
-                    # before any handler consumes the pre-route frame.
-                    continue
-
-                if (
-                    not actions_blocked
                     and self._current_strategy_name() == "none"
                     and self._run_perk_selector.handle(
                         img,
@@ -814,6 +806,14 @@ class App:
                 ):
                     # Perk selection owns its modal route. Recapture before any
                     # handler consumes the pre-route frame.
+                    continue
+
+                if (
+                    not actions_blocked
+                    and self._handle_no_strategy_in_battle_inventory(detection)
+                ):
+                    # The inventory owns a multi-screen route. Always recapture
+                    # before any handler consumes the pre-route frame.
                     continue
 
                 wave_val: Optional[int] = None
