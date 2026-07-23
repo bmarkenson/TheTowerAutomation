@@ -336,10 +336,23 @@ def _capture_game_over_perks():
             source_reason=f"ocr_failed:{exc}",
         )
 
-    closed = tap_if_visible("buttons.close:perks", retries=1)
-    if closed:
-        time.sleep(1.0)
-    return perks, frames, closed
+    restored = False
+    for attempt in range(2):
+        if not tap_if_visible("buttons.close:perks", retries=1):
+            break
+        game_stats_screen = _wait_for_game_stats(timeout=3.0)
+        if game_stats_screen is not None:
+            restored = True
+            break
+        current = capture_adb_screenshot()
+        if current is None or not is_visible(PERKS_INDICATOR, screenshot=current):
+            break
+        log(
+            "[BATTLE_PERKS] Perks remained open after close; retrying the "
+            f"verified close ({attempt + 2}/2)",
+            "WARN",
+        )
+    return perks, frames, restored
 
 
 def _wait_for_visible(label: str, *, timeout: float, poll: float = 0.25):
@@ -349,6 +362,18 @@ def _wait_for_visible(label: str, *, timeout: float, poll: float = 0.25):
     while time.monotonic() < deadline:
         screenshot = capture_adb_screenshot()
         if screenshot is not None and is_visible(label, screenshot=screenshot):
+            return screenshot
+        time.sleep(max(0.05, poll))
+    return None
+
+
+def _wait_for_game_stats(*, timeout: float, poll: float = 0.25):
+    """Return only after the Perks close restores the Game Stats modal."""
+
+    deadline = time.monotonic() + max(0.0, timeout)
+    while time.monotonic() < deadline:
+        screenshot = capture_adb_screenshot()
+        if screenshot is not None and _game_stats_visible(screenshot):
             return screenshot
         time.sleep(max(0.05, poll))
     return None

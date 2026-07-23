@@ -106,6 +106,42 @@ def test_missing_perks_panel_continues_only_if_game_stats_is_still_visible():
     scroll.assert_not_called()
 
 
+def test_perks_capture_retries_close_until_game_stats_is_restored():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    perks = {"quality": {"perk_count": 1}}
+    taps = []
+
+    with (
+        patch("handlers.game_over_handler.capture_adb_screenshot", return_value=frame),
+        patch("handlers.game_over_handler._game_stats_visible", return_value=True),
+        patch("handlers.game_over_handler._wait_for_visible", return_value=frame),
+        patch(
+            "handlers.game_over_handler.scroll_to_edge",
+            return_value=ScrollResult(False, frame, 0, "edge_reached"),
+        ),
+        patch("handlers.game_over_handler.ocr_selected_perks", return_value=perks),
+        patch(
+            "handlers.game_over_handler.tap_if_visible",
+            side_effect=lambda label, **_kwargs: taps.append(label) or True,
+        ),
+        patch("handlers.game_over_handler.is_visible", return_value=True),
+        patch(
+            "handlers.game_over_handler._wait_for_game_stats",
+            side_effect=(None, frame),
+        ),
+    ):
+        result, frames, restored = _capture_game_over_perks()
+
+    assert result is perks
+    assert frames == [frame]
+    assert restored is True
+    assert taps == [
+        "buttons.perks:game_over",
+        "buttons.close:perks",
+        "buttons.close:perks",
+    ]
+
+
 def test_home_mode_taps_game_stats_home_instead_of_retry():
     original_mode = AUTOMATION.mode
     AUTOMATION.mode = ExecMode.HOME
