@@ -822,8 +822,11 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   bounded restoration from below `x5.0`, no-progress failure, Pause authority,
   battle-only scope, EHLS/EALS priority, and stable-log suppression.
   Repository-wide validation passed 641 sandbox-compatible tests plus the
-  separately permitted localhost HTTP test, for 642 total. The active service
-  was not reloaded during code validation.
+  separately permitted localhost HTTP test, for 642 total.
+- A guarded active-battle reload attached the replacement without replaying
+  startup/session gates and restored the prior control intent. The replacement
+  reported `taps=0` and `target_satisfied` at `x6.3`; the following complete
+  guard interval produced no speed input or repeated no-op log.
 
 ### 2026-07-23 module level-transfer preservation
 

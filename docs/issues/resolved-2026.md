@@ -1343,8 +1343,11 @@ and actionable work lives in
   and stable no-op log suppression.
 - **Validation:** The focused game-speed suite passed 11 tests.
   Repository-wide validation passed 641 sandbox-compatible tests plus the
-  separately permitted localhost HTTP test, for 642 total. The active service
-  was not reloaded during code validation.
+  separately permitted localhost HTTP test, for 642 total. A guarded
+  active-battle reload then attached the replacement without replaying gates
+  and restored the prior control intent. Its first `x6.3` check reported
+  `taps=0` and `target_satisfied`; the following complete guard interval
+  produced no speed input or repeated no-op log.
 - **Fixed by:** `1f6385a`.
 
 ## Operational lessons
