@@ -18,7 +18,7 @@ from core.menu_reward_badges import (
     measure_home_reward_badges,
     measure_menu_reward_badges,
 )
-from core.scrolling import scroll_to_edge, scroll_until_visible
+from core.scrolling import ScrollResult, scroll_to_edge, scroll_until_visible
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
 from utils.logger import log
@@ -33,8 +33,12 @@ GUILD_CHEST_CLAIM = "buttons.claim_guild_chest"
 REWARD_REVEAL_SKIP = "buttons.skip_reward_reveal"
 
 EVENT_CONTENT_REGION = (0, 840, 1080, 900)
+WEEKLY_MISSION_CHEST_REGION = (0, 290, 1080, 210)
 DAILY_MISSION_CAPACITY_REGION = (0, 485, 500, 100)
 DAILY_MISSION_CAPACITY_MIN_CONFIDENCE = 80.0
+WEEKLY_MISSION_SEARCH_COMPLETE = frozenset(
+    {"edge_before_target", "max_swipes_exceeded"}
+)
 SUNDAY_FULL_CAPACITY_CLAIMS = 2
 MAX_DAILY_REWARDS = 12
 MAX_EVENT_REWARDS = 24
@@ -241,14 +245,30 @@ def _claim_daily_rewards(
     for _ in range(MAX_DAILY_REWARDS):
         if not _is_state(current, "DAILY_MISSIONS"):
             return False, claimed
-        if is_visible(WEEKLY_MISSION_CHEST, screenshot=current):
-            if not tap_if_visible(WEEKLY_MISSION_CHEST, screenshot=current):
+
+        weekly_chest = _find_weekly_mission_chest(current)
+        if weekly_chest.success:
+            current = weekly_chest.screenshot
+            if current is None or not tap_if_visible(
+                WEEKLY_MISSION_CHEST,
+                screenshot=current,
+            ):
                 return False, claimed
             current = _dismiss_reward_reveal("DAILY_MISSIONS")
             if current is None:
                 return False, claimed
             claimed += 1
             continue
+        if weekly_chest.reason not in WEEKLY_MISSION_SEARCH_COMPLETE:
+            log(
+                "[MISSION_REWARDS] Weekly chest search failed: "
+                f"{weekly_chest.reason}",
+                "WARN",
+            )
+            return False, claimed
+        if weekly_chest.screenshot is not None:
+            current = weekly_chest.screenshot
+
         if (
             ordinary_claim_limit is not None
             and ordinary_claimed >= ordinary_claim_limit
@@ -273,6 +293,45 @@ def _claim_daily_rewards(
 
     log("[MISSION_REWARDS] Daily reward claim bound reached", "WARN")
     return False, claimed
+
+
+def _find_weekly_mission_chest(screenshot) -> ScrollResult:
+    """Find an available weekly chest across the bounded horizontal track."""
+
+    if is_visible(WEEKLY_MISSION_CHEST, screenshot=screenshot):
+        return ScrollResult(True, screenshot, 0, "target_visible")
+
+    first = scroll_to_edge(
+        "gesture_targets.goto_first:weekly_mission_chests",
+        source_label="indicators.daily_missions",
+        screenshot=screenshot,
+        progress_region=WEEKLY_MISSION_CHEST_REGION,
+        max_swipes=4,
+        settle_s=0.8,
+        stable_threshold=2.0,
+    )
+    current = first.screenshot if first.screenshot is not None else screenshot
+    if first.reason not in {"edge_reached", "max_swipes_exceeded"}:
+        return first
+    if is_visible(WEEKLY_MISSION_CHEST, screenshot=current):
+        return ScrollResult(True, current, first.swipes, "target_visible")
+
+    found = scroll_until_visible(
+        "gesture_targets.goto_next:weekly_mission_chests",
+        source_label="indicators.daily_missions",
+        target_label=WEEKLY_MISSION_CHEST,
+        screenshot=current,
+        progress_region=WEEKLY_MISSION_CHEST_REGION,
+        max_swipes=8,
+        settle_s=0.8,
+        stable_threshold=2.0,
+    )
+    return ScrollResult(
+        found.success,
+        found.screenshot,
+        first.swipes + found.swipes,
+        found.reason,
+    )
 
 
 def _read_daily_mission_capacity(screenshot) -> DailyMissionCapacity:

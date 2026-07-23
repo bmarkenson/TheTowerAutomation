@@ -244,6 +244,32 @@
         "duration_ms": 250
       }
     },
+    "goto_first:weekly_mission_chests": {
+      "roles": [
+        "gesture"
+      ],
+      "swipe": {
+        "type": "swipe",
+        "x1": 250,
+        "y1": 390,
+        "x2": 950,
+        "y2": 390,
+        "duration_ms": 300
+      }
+    },
+    "goto_next:weekly_mission_chests": {
+      "roles": [
+        "gesture"
+      ],
+      "swipe": {
+        "type": "swipe",
+        "x1": 900,
+        "y1": 390,
+        "x2": 650,
+        "y2": 390,
+        "duration_ms": 250
+      }
+    },
     "goto_next:module_inventory": {
       "roles": [
         "gesture"

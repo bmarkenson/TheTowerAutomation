@@ -37,6 +37,14 @@ def _load(name: str):
     return image
 
 
+def _weekly_found(frame, *, swipes: int = 0) -> ScrollResult:
+    return ScrollResult(True, frame, swipes, "target_visible")
+
+
+def _weekly_absent(frame, *, swipes: int = 0) -> ScrollResult:
+    return ScrollResult(False, frame, swipes, "edge_before_target")
+
+
 def test_closed_menu_attention_dot_and_open_menu_section_badges_are_distinct():
     closed_red = _load("running_menu_reward_alert_20260715.png")
     closed_purple = _load("running_menu_unrelated_alert_20260715.png")
@@ -183,6 +191,67 @@ def test_event_mission_search_uses_short_overlapping_scroll_steps():
         "y2": 1350,
         "duration_ms": 250,
     }
+
+
+def test_weekly_chest_search_uses_bounded_horizontal_swipes():
+    assert get_swipe("gesture_targets.goto_first:weekly_mission_chests") == {
+        "x1": 250,
+        "y1": 390,
+        "x2": 950,
+        "y2": 390,
+        "duration_ms": 300,
+    }
+    assert get_swipe("gesture_targets.goto_next:weekly_mission_chests") == {
+        "x1": 900,
+        "y1": 390,
+        "x2": 650,
+        "y2": 390,
+        "duration_ms": 250,
+    }
+
+
+def test_weekly_chest_search_normalizes_then_finds_offscreen_target():
+    initial = np.zeros((2, 2, 3), dtype=np.uint8)
+    first = np.ones((2, 2, 3), dtype=np.uint8)
+    found = np.full((2, 2, 3), 2, dtype=np.uint8)
+    normalized = ScrollResult(True, first, 2, "edge_reached")
+    searched = ScrollResult(True, found, 3, "target_visible")
+
+    with (
+        patch.object(rewards, "is_visible", side_effect=[False, False]),
+        patch.object(
+            rewards,
+            "scroll_to_edge",
+            return_value=normalized,
+        ) as to_edge,
+        patch.object(
+            rewards,
+            "scroll_until_visible",
+            return_value=searched,
+        ) as until_visible,
+    ):
+        result = rewards._find_weekly_mission_chest(initial)
+
+    assert result == ScrollResult(True, found, 5, "target_visible")
+    to_edge.assert_called_once_with(
+        "gesture_targets.goto_first:weekly_mission_chests",
+        source_label="indicators.daily_missions",
+        screenshot=initial,
+        progress_region=rewards.WEEKLY_MISSION_CHEST_REGION,
+        max_swipes=4,
+        settle_s=0.8,
+        stable_threshold=2.0,
+    )
+    until_visible.assert_called_once_with(
+        "gesture_targets.goto_next:weekly_mission_chests",
+        source_label="indicators.daily_missions",
+        target_label=rewards.WEEKLY_MISSION_CHEST,
+        screenshot=first,
+        progress_region=rewards.WEEKLY_MISSION_CHEST_REGION,
+        max_swipes=8,
+        settle_s=0.8,
+        stable_threshold=2.0,
+    )
 
 
 def test_event_missions_tab_navigation_is_visible_from_retained_bots_tab():
@@ -364,6 +433,15 @@ def test_daily_claim_loop_revalidates_before_mission_and_chest_actions():
     with (
         patch.object(rewards, "_is_state", return_value=True),
         patch.object(rewards, "is_visible", side_effect=visible),
+        patch.object(
+            rewards,
+            "_find_weekly_mission_chest",
+            side_effect=[
+                _weekly_absent(initial),
+                _weekly_found(after_mission),
+                _weekly_absent(after_chest),
+            ],
+        ),
         patch.object(rewards, "tap_if_visible", return_value=True) as tap,
         patch.object(rewards, "_wait_for_state", return_value=after_mission),
         patch.object(rewards, "_dismiss_reward_reveal", return_value=after_chest),
@@ -391,6 +469,14 @@ def test_sunday_hold_still_claims_glowing_weekly_chest():
     with (
         patch.object(rewards, "_is_state", return_value=True),
         patch.object(rewards, "is_visible", side_effect=visible),
+        patch.object(
+            rewards,
+            "_find_weekly_mission_chest",
+            side_effect=[
+                _weekly_found(initial),
+                _weekly_absent(after_chest),
+            ],
+        ),
         patch.object(rewards, "tap_if_visible", return_value=True) as tap,
         patch.object(rewards, "_dismiss_reward_reveal", return_value=after_chest),
     ):
@@ -416,6 +502,11 @@ def test_sunday_hold_does_not_tap_ordinary_daily_claim():
             rewards,
             "_read_daily_mission_capacity",
             return_value=rewards.DailyMissionCapacity(6, 8, 95.0, "6/8 Missions"),
+        ),
+        patch.object(
+            rewards,
+            "_find_weekly_mission_chest",
+            return_value=_weekly_absent(screenshot),
         ),
         patch.object(rewards, "is_visible", side_effect=visible),
         patch.object(rewards, "tap_if_visible") as tap,
@@ -444,6 +535,15 @@ def test_sunday_full_capacity_claims_exactly_two_ordinary_rewards():
             rewards,
             "_read_daily_mission_capacity",
             return_value=rewards.DailyMissionCapacity(8, 8, 95.0, "8/8 Missions"),
+        ),
+        patch.object(
+            rewards,
+            "_find_weekly_mission_chest",
+            side_effect=[
+                _weekly_absent(initial),
+                _weekly_absent(after_first),
+                _weekly_absent(after_second),
+            ],
         ),
         patch.object(rewards, "is_visible", side_effect=visible),
         patch.object(rewards, "tap_if_visible", return_value=True) as tap,
@@ -486,6 +586,16 @@ def test_sunday_weekly_chest_does_not_consume_full_capacity_claim_budget():
             "_read_daily_mission_capacity",
             return_value=rewards.DailyMissionCapacity(8, 8, 95.0, "8/8 Missions"),
         ),
+        patch.object(
+            rewards,
+            "_find_weekly_mission_chest",
+            side_effect=[
+                _weekly_found(initial),
+                _weekly_absent(after_chest),
+                _weekly_absent(after_first),
+                _weekly_absent(after_second),
+            ],
+        ),
         patch.object(rewards, "is_visible", side_effect=visible),
         patch.object(rewards, "tap_if_visible", return_value=True) as tap,
         patch.object(
@@ -511,6 +621,32 @@ def test_sunday_weekly_chest_does_not_consume_full_capacity_claim_budget():
         rewards.DAILY_MISSION_CLAIM,
         rewards.DAILY_MISSION_CLAIM,
     ]
+
+
+def test_daily_claim_uses_fresh_frame_found_by_offscreen_weekly_search():
+    initial = np.zeros((2, 2, 3), dtype=np.uint8)
+    found = np.ones((2, 2, 3), dtype=np.uint8)
+    after_chest = np.full((2, 2, 3), 2, dtype=np.uint8)
+
+    with (
+        patch.object(rewards, "_is_state", return_value=True),
+        patch.object(
+            rewards,
+            "_find_weekly_mission_chest",
+            side_effect=[
+                _weekly_found(found, swipes=3),
+                _weekly_absent(after_chest, swipes=5),
+            ],
+        ),
+        patch.object(rewards, "is_visible", return_value=False),
+        patch.object(rewards, "tap_if_visible", return_value=True) as tap,
+        patch.object(rewards, "_dismiss_reward_reveal", return_value=after_chest),
+    ):
+        success, claimed = rewards._claim_daily_rewards(initial)
+
+    assert success
+    assert claimed == 1
+    tap.assert_called_once_with(rewards.WEEKLY_MISSION_CHEST, screenshot=found)
 
 
 def test_app_dispatches_alert_probe_and_records_success():
