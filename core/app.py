@@ -41,6 +41,7 @@ from core.no_strategy_post_run import (
     open_perks_configuration_from_cards,
     restore_post_run_home,
 )
+from core.run_perk_selector import RunScopedPerkSelector
 from core.gc_no_battle_setup import run_gc_no_battle_setup
 from core.gate_decisions import (
     build_gate_decision_options,
@@ -159,6 +160,10 @@ class App:
         self._no_strategy_post_run_stage: Optional[str] = None
         self._no_strategy_post_run_retry_at = 0.0
         self._no_strategy_post_run_recovery_checked = False
+        perk_selector_state = (
+            Path(config.control_file).parent / "run_perk_selector.json"
+        )
+        self._run_perk_selector = RunScopedPerkSelector(perk_selector_state)
         self._run_initialization_gate_logged = False
         self._session_preflight_gate_logged = False
         self._session_preflight_terminal_blocked_logged = False
@@ -798,6 +803,19 @@ class App:
                     # before any handler consumes the pre-route frame.
                     continue
 
+                if (
+                    not actions_blocked
+                    and self._current_strategy_name() == "none"
+                    and self._run_perk_selector.handle(
+                        img,
+                        detection,
+                        action_guard_fn=self._no_strategy_action_guard,
+                    )
+                ):
+                    # Perk selection owns its modal route. Recapture before any
+                    # handler consumes the pre-route frame.
+                    continue
+
                 wave_val: Optional[int] = None
                 wave_conf: float = -1.0
                 if detection.get("state") == "RUNNING":
@@ -1267,10 +1285,12 @@ class App:
     ) -> None:
         """Recover an unfinished Home inventory after process replacement."""
 
+        mission_mgr = getattr(self, "_mission_mgr", None)
         if (
             getattr(self, "_no_strategy_post_run_recovery_checked", False)
             or getattr(self, "_pending_no_strategy_record", None) is not None
-            or self._mission_mgr.strategy is not None
+            or mission_mgr is None
+            or mission_mgr.strategy is not None
             or new_state != "HOME_SCREEN"
         ):
             return
@@ -1328,6 +1348,9 @@ class App:
         img: Frame,
     ) -> None:
         """Dispatch handlers for top-level UI states and overlay-driven events."""
+        selector = getattr(self, "_run_perk_selector", None)
+        if selector is not None:
+            selector.observe_state(new_state)
         self._recover_no_strategy_post_run(new_state, img)
         if self._handle_no_strategy_post_run(new_state, img):
             return
