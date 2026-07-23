@@ -1111,6 +1111,39 @@ and actionable work lives in
   actions at 22:10:57.
 - **Fixed by:** `32cfdbc`.
 
+### Home Shockwave lock tap verifier used the battle viewport
+
+- **Observed:** 2026-07-23 at verified Home `NEW_BATTLE` while retrying the
+  Farm Tier 18 startup setup.
+- **Symptom:** Setup selected Workshop Defense but raised a blocking
+  `free_upgrade_locks` gate with
+  `detail tap failed for Shockwave Size`.
+- **Evidence:** The action log records successful verified navigation through
+  Cards, Home, Workshop, and Defense, followed by
+  `TAP_SAFE target check rejected workshop_detail:shockwave_size`. On a fresh
+  read-only frame of the same Home Workshop layout, the full Workshop scan
+  found Shockwave Size at `(26,1061,511,246)` with 95% OCR confidence. The
+  verifier's default scan found only the lower Land Mine row.
+- **Safety response:** The verifier refused the uncertain tap, setup returned
+  Home, and the startup gate kept Battle blocked. Diagnosis captured current
+  state read-only; it did not choose a gate option, change the lock, or start a
+  battle.
+- **Cause:** The verified-tap retrofit rechecked the dynamic tile with
+  `detect_visible_boxes()` but omitted the full-height Home Workshop column
+  regions used by both initial location and immediate reconfirmation. The
+  detector therefore fell back to its lower in-battle viewport and could not
+  see Shockwave Size on the unchanged authoritative frame.
+- **Resolution:** The tap verifier now reuses the same full Home Workshop
+  column regions as location and reconfirmation.
+- **Regression:**
+  `test/test_free_upgrade_locks.py::test_detail_tap_verifier_reuses_full_home_workshop_scan_regions`
+  executes the actual `TapVerification` predicate and requires the full
+  Workshop scan contract.
+- **Validation:** The focused lock and no-battle suites passed 38 tests. The
+  full suite passed 617 sandbox tests plus the separately permitted
+  loopback-socket test, for 618 total.
+- **Fixed by:** `c04dd86`.
+
 ## Operational lessons
 
 ### A detached child may not survive the agent execution wrapper
