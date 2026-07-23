@@ -11,6 +11,33 @@ for a matching recurrence or historical investigation.
 
 ## Open
 
+### Home Poison Swamp Stun verification transiently timed out after its source tap
+
+- **Observed:** 2026-07-23 during the authorized Tier 18 Farm Home setup.
+- **Symptom:** The first Home verifier attempt authoritatively localized and
+  tapped the Poison Swamp Workshop icon at `(155,1273)`, but all post-tap
+  observations remained `unknown`; the `ultimate_weapons` gate blocked. A
+  normal Retry repeated the complete setup, tapped the dynamically relocated
+  icon at `(155,1181)`, and verified Stun `off` without changing it.
+- **Evidence:** `logs/actions.log` records the first tap at 10:15:07, the
+  `timed out verifying Poison Swamp Stun (unknown)` failure at 10:15:31, and
+  the successful retry from 10:16:53 through 10:16:58. The verifier currently
+  collapses detail-overlay, Stun-off, and Stun-on template results into
+  `unknown` at timeout and retains neither their individual confidences nor the
+  final failing frame.
+- **Safety response:** The failed check blocked Battle start. Retry used the
+  normal requirement path and created no waiver. The retry and complete
+  in-battle session preflight both verified Stun `off`.
+- **Status:** The Home source icon and detail checkbox are available; the
+  successful unchanged retry disproves a missing-control explanation. Exact
+  first-attempt cause is unresolved. Unsettled Workshop scroll geometry is a
+  credible inference from the different dynamic tap positions, but current
+  evidence cannot distinguish a missed detail-open tap from a detail/checkbox
+  template miss. On recurrence, retain the final frame and per-poll
+  `detail_visible`, detail confidence, off confidence, and on confidence before
+  changing retry or stabilization policy. The active investigation is in
+  [`backlog/runtime-and-validation.md`](backlog/runtime-and-validation.md#current-validation-gates).
+
 ### Startup gate dialog was reported without visible Retry or Bypass choices
 
 - **Observed:** Operator report on 2026-07-23 while the blocking

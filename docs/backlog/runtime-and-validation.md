@@ -8,6 +8,13 @@ checked-item detail remains in the
 
 ## Current validation gates
 
+- [ ] Diagnose the transient Home Poison Swamp Stun verification timeout
+  recorded in
+  [`../observed_issues.md`](../observed_issues.md#home-poison-swamp-stun-verification-transiently-timed-out-after-its-source-tap).
+  Retain the failing frame and individual detail/off/on match confidences on
+  recurrence, then distinguish a missed detail-open tap from unsettled
+  Workshop scroll geometry or a detail-template miss before changing retry or
+  stabilization behavior.
 - [x] Finish live validation of the No Strategy two-phase inventory at the next
   natural Game Over. Do not Surrender or manufacture the boundary.
   - [x] On the active Tier 18 Attack Dissonance battle, confirm automatic
