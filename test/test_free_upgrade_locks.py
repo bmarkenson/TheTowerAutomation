@@ -412,6 +412,35 @@ def test_reconfirmation_uses_fresh_position_after_workshop_scroll_settles():
     assert ui.actions[1][0] == (153, 1360)
 
 
+def test_detail_tap_verifier_reuses_full_home_workshop_scan_regions():
+    ui = _WorkshopUi(
+        {label: FreeUpgradeLockState.CHECKED for label in FARM_FREE_UPGRADE_LOCKS}
+    )
+    ui.frame[:] = 20
+
+    def verified_tap(target, **kwargs):
+        verification = kwargs.get("verification")
+        if isinstance(target, tuple):
+            assert verification is not None
+            assert verification.authorizes(target)
+        return ui.tap(target, **kwargs)
+
+    result = inspect_free_upgrade_locks(
+        FARM_FREE_UPGRADE_LOCKS,
+        screenshot=ui.frame,
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=verified_tap,
+        swipe_fn=lambda *_args: None,
+        detect_boxes_fn=ui.detect_boxes,
+        measure_menu_fn=ui.measure_menu,
+        measure_lock_fn=ui.measure_lock,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.evidence.valid
+
+
 def test_no_battle_enforcement_checks_only_authoritative_mismatch():
     ui = _WorkshopUi(
         {

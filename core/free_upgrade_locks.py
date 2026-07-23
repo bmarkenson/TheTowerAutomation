@@ -343,7 +343,13 @@ def inspect_free_upgrade_locks(
                         detector(frame).get("state") == "WORKSHOP"
                         and (
                             candidate := _matching_box(
-                                detect_boxes_fn(frame, menu=menu).get(column),
+                                detect_boxes_fn(
+                                    frame,
+                                    menu=menu,
+                                    column_regions=(
+                                        _WORKSHOP_UPGRADE_COLUMN_REGIONS
+                                    ),
+                                ).get(column),
                                 label,
                             )
                         )
