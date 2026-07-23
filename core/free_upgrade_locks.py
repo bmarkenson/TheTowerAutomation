@@ -50,7 +50,9 @@ _DETAIL_TITLE_REGION = (260, 300, 570, 110)
 _LOCK_LABEL_REGION = (300, 950, 350, 100)
 _CHECKBOX_REGION = (205, 945, 105, 105)
 _CHECKMARK_REGION = (230, 970, 55, 55)
+_RANGE_UPGRADES_UNLOCK_REGION = (20, 800, 1040, 500)
 _MIN_TITLE_CONFIDENCE = 70.0
+_MIN_UNAVAILABLE_CONFIDENCE = 45.0
 _MIN_CHECKBOX_OUTLINE_PIXELS = 1_000
 _MIN_CHECKMARK_PIXELS = 200
 
@@ -58,6 +60,7 @@ _MIN_CHECKMARK_PIXELS = 200
 class FreeUpgradeLockState(str, Enum):
     CHECKED = "checked"
     UNCHECKED = "unchecked"
+    UNAVAILABLE = "unavailable"
     UNKNOWN = "unknown"
 
 
@@ -228,6 +231,35 @@ def measure_free_upgrade_lock(
     )
 
 
+def measure_unavailable_free_upgrade_lock(
+    screenshot: Optional[Frame],
+    expected_label: str,
+) -> Optional[FreeUpgradeLockEvidence]:
+    """Recognize a lock whose containing Workshop upgrade tree is locked."""
+
+    if expected_label not in {"Bounce Shot Targets", "Bounce Shot Range"}:
+        return None
+    crop = _crop(screenshot, _RANGE_UPGRADES_UNLOCK_REGION)
+    if crop is None:
+        return None
+    text, confidence = ocr_text_and_conf(crop, psm=6)
+    if (
+        confidence < _MIN_UNAVAILABLE_CONFIDENCE
+        or "UNLOCK RANGE UPGRADES" not in _normalize_text(text)
+    ):
+        return None
+    return FreeUpgradeLockEvidence(
+        expected_label,
+        FreeUpgradeLockState.UNAVAILABLE,
+        text,
+        confidence,
+        "Range Upgrades locked",
+        confidence,
+        0,
+        0,
+    )
+
+
 def inspect_free_upgrade_locks(
     requirements: Any,
     *,
@@ -242,6 +274,9 @@ def inspect_free_upgrade_locks(
     measure_lock_fn: Callable[
         [Optional[Frame], str], FreeUpgradeLockEvidence
     ] = measure_free_upgrade_lock,
+    measure_unavailable_fn: Callable[
+        [Optional[Frame], str], Optional[FreeUpgradeLockEvidence]
+    ] = measure_unavailable_free_upgrade_lock,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> FreeUpgradeLockInspectionResult:
     """Inspect supported Workshop locks, optionally checking verified mismatches."""
@@ -264,6 +299,15 @@ def inspect_free_upgrade_locks(
                 measure_menu_fn=measure_menu_fn,
                 sleep_fn=sleep_fn,
             )
+            unavailable = measure_unavailable_fn(current, label)
+            if unavailable is not None:
+                evidence.append(unavailable)
+                log(
+                    f"[FREE_UPGRADE_LOCKS] {label}=unavailable "
+                    "because Range Upgrades are locked",
+                    "INFO",
+                )
+                continue
             _box, current = _locate_workshop_upgrade(
                 label,
                 menu,
@@ -690,6 +734,7 @@ __all__ = [
     "FreeUpgradeLocksEvidence",
     "inspect_free_upgrade_locks",
     "measure_free_upgrade_lock",
+    "measure_unavailable_free_upgrade_lock",
     "measure_workshop_upgrade_menu",
     "normalize_free_upgrade_lock_requirements",
 ]

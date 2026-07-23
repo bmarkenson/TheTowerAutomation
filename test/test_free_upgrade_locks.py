@@ -11,6 +11,7 @@ from core.free_upgrade_locks import (
     FreeUpgradeLockState,
     inspect_free_upgrade_locks,
     measure_free_upgrade_lock,
+    measure_unavailable_free_upgrade_lock,
     normalize_free_upgrade_lock_requirements,
 )
 from core.upgrade_box_detector import UpgradeBox, detect_visible_boxes
@@ -68,6 +69,27 @@ def test_lock_fixture_cannot_authorize_a_different_upgrade_title():
     assert evidence.state is FreeUpgradeLockState.UNKNOWN
     assert not evidence.valid
     assert not evidence.authoritative_mismatch
+
+
+def test_locked_range_tree_makes_bounce_lock_explicitly_unavailable(monkeypatch):
+    monkeypatch.setattr(
+        "core.free_upgrade_locks.ocr_text_and_conf",
+        lambda _crop, psm: ("Unlock Range Upgrades 50 coins", 83.0),
+    )
+
+    evidence = measure_unavailable_free_upgrade_lock(
+        np.zeros((1920, 1080, 3), dtype=np.uint8),
+        "Bounce Shot Targets",
+    )
+
+    assert evidence is not None
+    assert evidence.state is FreeUpgradeLockState.UNAVAILABLE
+    assert not evidence.valid
+    assert not evidence.authoritative_mismatch
+    assert measure_unavailable_free_upgrade_lock(
+        np.zeros((1920, 1080, 3), dtype=np.uint8),
+        "Shockwave Size",
+    ) is None
 
 
 @pytest.mark.parametrize(
@@ -263,6 +285,52 @@ def test_read_only_inspection_reports_unchecked_without_toggling():
         for action, _label in ui.actions
     )
     assert ui.detail_label is None
+
+
+def test_inspection_records_locked_range_tree_without_scanning_for_bounce_locks():
+    ui = _WorkshopUi(
+        {label: FreeUpgradeLockState.CHECKED for label in FARM_FREE_UPGRADE_LOCKS}
+    )
+    swipes = []
+
+    def measure_unavailable(_frame, label):
+        if not label.startswith("Bounce Shot"):
+            return None
+        return FreeUpgradeLockEvidence(
+            label=label,
+            state=FreeUpgradeLockState.UNAVAILABLE,
+            title_text="Unlock Range Upgrades 50 coins",
+            title_confidence=83.0,
+            lock_text="Range Upgrades locked",
+            lock_confidence=83.0,
+            checkbox_outline_pixels=0,
+            checkmark_pixels=0,
+        )
+
+    result = inspect_free_upgrade_locks(
+        FARM_FREE_UPGRADE_LOCKS,
+        screenshot=ui.frame,
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.tap,
+        swipe_fn=lambda *args: swipes.append(args),
+        detect_boxes_fn=ui.detect_boxes,
+        measure_menu_fn=ui.measure_menu,
+        measure_lock_fn=ui.measure_lock,
+        measure_unavailable_fn=measure_unavailable,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert [lock.state for lock in result.evidence.locks] == [
+        FreeUpgradeLockState.CHECKED,
+        FreeUpgradeLockState.UNAVAILABLE,
+        FreeUpgradeLockState.UNAVAILABLE,
+    ]
+    assert not result.evidence.valid
+    assert not result.evidence.has_authoritative_mismatch
+    assert swipes == []
+    detail_taps = [action for action, _label in ui.actions if isinstance(action, tuple)]
+    assert len(detail_taps) == 1
 
 
 def test_transient_unchecked_frame_does_not_authorize_repair():
