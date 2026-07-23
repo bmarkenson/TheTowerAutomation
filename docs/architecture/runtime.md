@@ -51,15 +51,18 @@ Every compact Farm profile names all three and assigns one of these policies:
 
 Named module and Target Priority presets are resolved at build time into an
 explicit self-contained strategy plan. Modules are checked from verified Home
-`NEW_BATTLE` before Battle may start. Target Priority is not a Home control: its
-Home-boundary evidence remains explicitly deferred, and its policy is checked
-from the verified in-battle side menu after the new run reaches `RUNNING`.
-Damage Slider `observe` and `enforce` policies resolve an explicit percentage;
-Tier 18 enforces `1E-22%` during every new-run initialization after the
-time-sensitive EHLS/EALS setup. `YamlStrategy` exposes the plan's resolved
-`run_configuration` generically, and Game Over records copy that snapshot into
-the versioned battle JSON. Runtime code does not inherit configuration or
-branch on a Farm strategy name.
+`NEW_BATTLE` before Battle may start. A guarded module replacement accepts
+every presented level-transfer dialog for both Primary and Assist roles so the
+slot's existing level follows the incoming module; an unverified transfer
+prompt fails closed. Target Priority is not a Home control: its Home-boundary
+evidence remains explicitly deferred, and its policy is checked from the
+verified in-battle side menu after the new run reaches `RUNNING`. Damage Slider
+`observe` and `enforce` policies resolve an explicit percentage; Tier 18
+enforces `1E-22%` during every new-run initialization after the time-sensitive
+EHLS/EALS setup. `YamlStrategy` exposes the plan's resolved `run_configuration`
+generically, and Game Over records copy that snapshot into the versioned battle
+JSON. Runtime code does not inherit configuration or branch on a Farm strategy
+name.
 
 Game speed is a global battle-only invariant. A periodic guard requires
 authoritative `RUNNING` evidence, reads the localized speed value and visible

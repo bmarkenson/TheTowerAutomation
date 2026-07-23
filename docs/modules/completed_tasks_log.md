@@ -239,8 +239,10 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Added an app-owned stop → Game Over → Home setup → restart → fresh-preflight
   lifecycle. Module correction acts only at verified `NEW_BATTLE` Home, ranks
   the complete Ancestral inventory from normalized icon data, confirms the
-  exact detail name plus Equip/Unequip action, declines level transfer, and
-  revalidates the complete overview after every transition.
+  exact detail name plus Equip/Unequip action, and revalidates the complete
+  overview after every transition. At this point the implementation
+  deliberately declined level transfer; the 2026-07-23 correction below
+  supersedes that behavior.
 - Added completeness guards for module captures, complete-modal guards for
   detail OCR, and bounded rewind-to-top behavior for retained Module inventory
   and Event Bots scroll positions. Regression coverage exercises correct,
@@ -791,6 +793,24 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   or starting a battle. Repository-wide validation passed 630
   sandbox-compatible tests; the one localhost HTTP test passed separately with
   socket permission, for 631 total.
+
+### 2026-07-23 module level-transfer preservation
+
+- Commit `2a2d00b` replaced the shared module repair's hard-coded decline action
+  with a verified acceptance of every presented level-transfer dialog. The same
+  path owns both Primary and Assist replacements, and correction now stops if
+  the acceptance cannot be authorized or the dialog does not dismiss.
+- The correction preserves the role-based level allocation during module
+  changes. At the reported progression boundary, the operator's expected state
+  was level 201 for every Primary and the highest available levels for Assist
+  modules (then approximately 193–194); those progression-dependent values are
+  operational evidence rather than hard-coded policy.
+- Regression coverage exercises the complete Equip → role selection → transfer
+  acceptance sequence independently for Primary and Assist, the failed-accept
+  path, and removal of the old decline clickmap action. Repository-wide
+  validation passed 634 sandbox-compatible tests plus the separately permitted
+  localhost HTTP test, for 635 total. No live module replacement was performed
+  during validation.
 
 ---
 

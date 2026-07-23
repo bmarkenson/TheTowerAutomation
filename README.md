@@ -148,6 +148,11 @@ explicit percentage; Tier 18 enforces `1E-22%` during every new-run
 initialization after EHLS/EALS. The fully resolved configuration is embedded in
 the generated plan and copied into each battle's JSON record.
 
+When an enforced module repair replaces an occupied Primary or Assist module,
+automation always accepts the presented level transfer and requires the dialog
+to dismiss before continuing. This preserves the slot's existing level instead
+of leaving the incoming module at its previous level.
+
 While a battle is active, the game-speed guard periodically walks the visible
 `+` control to the current maximum and rechecks it so an accidental slowdown is
 restored. Farm gives the urgent EHLS/EALS purchases first action priority;

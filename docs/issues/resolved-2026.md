@@ -1230,6 +1230,43 @@ and actionable work lives in
   the separately permitted localhost HTTP test, for 631 total.
 - **Fixed by:** `b19dfce`.
 
+### Module repair explicitly declined level transfer
+
+- **Observed:** 2026-07-23 after the operator found a sudden, repeatable Tier 18
+  progression collapse.
+- **Symptom:** Runs that normally reached approximately wave 9,000 began dying
+  near wave 1,800 even though the configured module identities were correct.
+  Inspection found that automated replacements had not preserved the levels of
+  either Primary or Assist modules. At this progression boundary, every Primary
+  should be level 201 and Assist modules should be maximized below that level
+  (then approximately 193–194).
+- **Evidence:** Seven consecutive Tier 18 records ended between waves 1,832 and
+  1,849, while reviewed healthy Tier 18 records ended between waves 9,137 and
+  9,779. `logs/actions.log` records the old decline action after Assist
+  replacements of Being Annihilator, Anti-Cube Portal, and Dimension Core and
+  Primary replacements of Black Hole Digestor and Multiverse Nexus.
+- **Safety response:** The operator stopped automation and returned the game to
+  no-battle Home. Diagnosis and repository validation made no further device
+  actions or module replacements.
+- **Cause:** The single `_equip_inventory_module` path used by both roles
+  hard-coded `buttons.module:decline_level_transfer`, tapping the dialog's left
+  option after every replacement. Identity-only preflight evidence still
+  reported a valid loadout because it did not measure module levels.
+- **Resolution:** Every presented transfer dialog now authorizes the right-side
+  accept action from fresh prompt evidence and waits for the Modules overview
+  before continuing. This applies to Primary and Assist replacements, removes
+  the old decline clickmap action, and fails closed when acceptance cannot be
+  verified.
+- **Regression:** `test/test_gc_module_loadout.py` covers the complete Primary
+  and Assist replacement paths, failed transfer acceptance, and removal of the
+  decline action.
+- **Validation:** The focused module/clickmap/tap-safety suite passed 46 tests.
+  Repository-wide validation passed 634 sandbox-compatible tests plus the
+  separately permitted localhost HTTP test, for 635 total. Live replacement
+  was intentionally not repeated because it would disturb the operator's
+  repaired loadout.
+- **Fixed by:** `2a2d00b`.
+
 ## Operational lessons
 
 ### A detached child may not survive the agent execution wrapper
