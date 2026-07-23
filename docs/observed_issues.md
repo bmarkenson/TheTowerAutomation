@@ -11,6 +11,32 @@ for a matching recurrence or historical investigation.
 
 ## Open
 
+### Offscreen weekly mission chest was skipped
+
+- **Observed:** 2026-07-23 at a natural no-battle Home reward opportunity after
+  the operator reported that the available weekly chest was outside the visible
+  Daily Missions viewport.
+- **Symptom:** The runtime detected the Home Daily Missions badge, opened Daily
+  Missions, claimed zero rewards, returned Home, and continued into Home setup
+  without finding the weekly chest.
+- **Evidence:** `logs/actions.log` records the badge-triggered probe from
+  09:40:51 through 09:40:58, including `daily=True`, verified Daily Missions
+  navigation, and `Claim summary: daily=0 event=0 guild=0`. Static inspection
+  confirms that `_claim_daily_rewards()` checks
+  `buttons.claim_weekly_mission_chest` only in the current screenshot; unlike
+  the Event Mission path, it does not normalize the list position or perform a
+  bounded scroll search.
+- **Safety response:** The operator had already stopped the managed process.
+  Diagnosis briefly restarted it under an acknowledged indefinite Pause to
+  verify the fresh PID, target lock, and `CARDS` state; no emulator input was
+  sent, and the original `STOPPED` service/control state was restored.
+- **Status:** Cause confirmed. Add guarded Daily Missions list traversal that
+  can find an available weekly chest outside the initial viewport, retain fresh
+  state/action authority throughout, and regression-test both visible and
+  offscreen cases before using this preserved live opportunity for validation.
+  The active task is in
+  [`backlog/handlers.md`](backlog/handlers.md#mission-rewards).
+
 ### Startup gate dialog was reported without visible Retry or Bypass choices
 
 - **Observed:** Operator report on 2026-07-23 while the blocking
