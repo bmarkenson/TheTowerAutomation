@@ -11,6 +11,27 @@ for a matching recurrence or historical investigation.
 
 ## Open
 
+### Required Auto Pick Perks mismatch blocked the active Farm preflight
+
+- **Observed:** 2026-07-22 in the requested Tier 19 Farm T19 Experimental
+  battle after its Home-only setup completed.
+- **Symptom:** Session preflight read Auto Pick Perks as disabled, closed the
+  Perks screen without changing it, then terminally blocked all normal strategy
+  and handler actions as a mismatch that was not repairable at Home.
+- **Evidence:** The preflight evidence reported a valid Auto Pick region with
+  zero enabled-green pixels. The same pass verified all retained Home
+  configuration, all eight corrected Modules, and all Ultimate Weapons after
+  turning Poison Swamp Stun off. Static tracing confirmed that the navigation
+  opened and measured Auto Pick but had no guarded correction path.
+- **Safety response:** The exclusive preflight gate remained active; no waiver,
+  Home repair Surrender, or further strategy action was sent.
+- **Status:** Cause confirmed. The working-tree repair adds an explicit
+  Perks-screen Auto Pick control, toggles it only after disabled evidence on a
+  verified Perks screen, and requires fresh enabled evidence before closing the
+  panel. Navigation and geometry regressions cover the correction. Live
+  completion remains in
+  [`backlog/runtime-and-validation.md`](backlog/runtime-and-validation.md#current-validation-gates).
+
 ### Module inventory accepted stale detail evidence after a candidate tap
 
 - **Observed:** 2026-07-22 while the repaired Modules overview corrected the

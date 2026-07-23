@@ -7,6 +7,7 @@ from core.battle_lifecycle import HomeBattleControl
 from core.free_upgrade_locks import FARM_FREE_UPGRADE_LOCKS
 from core.gc_preflight_navigation import (
     GcPreflightNavigationStatus,
+    _ensure_auto_pick_perks_enabled,
     _guarded_visible_tap,
     _select_running_menu,
     run_read_only_gc_preflight,
@@ -69,7 +70,9 @@ class _FakeUi:
             "navigation.goto_workshop_home": ("WORKSHOP", None, set()),
             "buttons.battle_control:home": ("RUNNING", "UW_MENU", set()),
         }
-        if key == "navigation.goto_home":
+        if key == "buttons.perks:auto_pick":
+            self.frame[220:310, 255:355] = (0, 255, 0)
+        elif key == "navigation.goto_home":
             self.state, self.menu, self.secondary = "HOME_SCREEN", None, set()
         elif key in transitions:
             self.state, self.menu, self.secondary = transitions[key]
@@ -169,7 +172,29 @@ def test_game_over_observation_aborts_without_sending_input():
     assert go_home_calls == []
 
 
-def test_read_only_route_returns_to_running_and_never_uses_mutating_controls():
+def test_enabled_auto_pick_perks_does_not_send_a_toggle():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    taps = []
+
+    result = _ensure_auto_pick_perks_enabled(
+        frame,
+        capture_fn=lambda: (_ for _ in ()).throw(
+            AssertionError("enabled evidence must not recapture")
+        ),
+        detector=lambda _frame: {"state": "PERKS"},
+        safe_tap_fn=lambda *args, **kwargs: taps.append((args, kwargs)),
+        sleep_fn=lambda _seconds: None,
+        measure_fn=lambda _frame: SimpleNamespace(
+            valid_region=True,
+            enabled=True,
+        ),
+    )
+
+    assert result is frame
+    assert taps == []
+
+
+def test_guarded_route_corrects_declared_in_run_controls_and_returns_to_running():
     ui = _FakeUi()
     ui.bots_offscreen = True
     boxes = [
@@ -225,6 +250,7 @@ def test_read_only_route_returns_to_running_and_never_uses_mutating_controls():
     assert "navigation.home_event" not in ui.visible_taps
     assert "navigation.home_guild" not in ui.visible_taps
     assert ui.static_taps.count("navigation.goto_home") == 1
+    assert ui.static_taps.count("buttons.perks:auto_pick") == 1
     assert ui.visible_taps.count("buttons.return_to_game") == 4
     all_keys = set(ui.static_taps + ui.visible_taps)
     assert not any("surrender" in key for key in all_keys)

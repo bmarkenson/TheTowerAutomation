@@ -230,6 +230,7 @@ def test_wrong_tabs_do_not_satisfy_bots_or_guardian_preflight_sections():
 
 def test_gc_preflight_navigation_coordinates_are_mapped():
     assert get_click("navigation.open_perks") == (540, 60)
+    assert get_click("buttons.perks:auto_pick") == (305, 265)
     assert get_click("navigation.goto_home") == (80, 1830)
     assert get_click("navigation.goto_workshop_home") == (270, 1830)
     assert get_click("navigation.event:bots_tab") == (900, 307)

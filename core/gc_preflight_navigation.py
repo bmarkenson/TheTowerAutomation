@@ -9,6 +9,7 @@ from typing import Any, Callable, Mapping, Optional
 
 import numpy as np
 
+from core.auto_pick_perks import measure_auto_pick_perks
 from core.gc_preflight import (
     GcSessionPreflightEvidence,
     merge_ultimate_weapon_observations,
@@ -190,6 +191,50 @@ def _guarded_visible_tap(
         if attempt < attempts - 1:
             sleep_fn(max(0.0, float(retry_delay_s)))
     raise _NavigationFailure(f"visible tap failed: {key}")
+
+
+def _ensure_auto_pick_perks_enabled(
+    current: Frame,
+    *,
+    capture_fn: Capture,
+    detector: Detector,
+    safe_tap_fn: Callable[..., bool],
+    sleep_fn: Callable[[float], None],
+    measure_fn: Callable[[Frame], Any],
+) -> Frame:
+    """Enable Auto Pick only from a verified Perks screen and remeasure it."""
+
+    evidence = measure_fn(current)
+    if not evidence.valid_region:
+        raise _NavigationFailure("Auto Pick Perks region was unavailable")
+    if evidence.enabled:
+        log("[GC_PREFLIGHT] Auto Pick Perks verified enabled", "INFO")
+        return current
+
+    _guarded_static_tap(
+        "buttons.perks:auto_pick",
+        allowed_states={"PERKS"},
+        capture_fn=capture_fn,
+        detector=detector,
+        safe_tap_fn=safe_tap_fn,
+    )
+    for _attempt in range(24):
+        frame, detection = _capture_detection(capture_fn, detector)
+        if detection.get("state") != "PERKS":
+            raise _NavigationFailure(
+                "Auto Pick Perks correction lost the Perks screen"
+            )
+        evidence = measure_fn(frame)
+        if evidence.valid_region and evidence.enabled:
+            log(
+                "[GC_PREFLIGHT] Auto Pick Perks verified enabled after correction",
+                "INFO",
+            )
+            return frame
+        sleep_fn(0.35)
+    raise _NavigationFailure(
+        "Auto Pick Perks did not become enabled after the guarded toggle"
+    )
 
 
 def _select_running_menu(
@@ -445,6 +490,7 @@ def run_read_only_gc_preflight(
     ensure_poison_swamp_stun_fn: Callable[
         ..., PoisonSwampStunResult
     ] = ensure_poison_swamp_stun_off,
+    measure_auto_pick_fn: Callable[[Frame], Any] = measure_auto_pick_perks,
     no_battle_setup_evidence: Optional[Mapping[str, Any]] = None,
     free_upgrade_lock_boundary_evidence: Optional[Mapping[str, Any]] = None,
     detect_home_control_fn: HomeControlDetector = detect_home_battle_control,
@@ -558,6 +604,14 @@ def run_read_only_gc_preflight(
                 capture_fn=capture_fn,
                 detector=detector,
                 sleep_fn=sleep_fn,
+            )
+            perks = _ensure_auto_pick_perks_enabled(
+                perks,
+                capture_fn=capture_fn,
+                detector=detector,
+                safe_tap_fn=safe_tap_fn,
+                sleep_fn=sleep_fn,
+                measure_fn=measure_auto_pick_fn,
             )
             _guarded_visible_tap(
                 "buttons.close:perks",

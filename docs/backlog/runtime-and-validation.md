@@ -23,6 +23,8 @@ checked-item detail remains in the
     before Home setup continues.
   - [ ] Confirm that inventory candidate detail OCR waits for the tapped card
     to settle and accepts the Ancestral Dimension Core before equipping it.
+  - [ ] Confirm session preflight enables Auto Pick Perks from fresh disabled
+    evidence, revalidates it, and releases normal Tier 19 strategy actions.
 - [x] Finish live validation of the No Strategy two-phase inventory at the next
   natural Game Over. Do not Surrender or manufacture the boundary.
   - [x] On the active Tier 18 Attack Dissonance battle, confirm automatic

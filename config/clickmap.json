@@ -2591,6 +2591,16 @@
         "y": 1540
       }
     },
+    "perks:auto_pick": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 305,
+        "y": 265
+      }
+    },
     "close:perks": {
       "match_template": "buttons/close:perks.png",
       "match_region": {
