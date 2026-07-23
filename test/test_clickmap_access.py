@@ -106,6 +106,7 @@ def test_navigation_targets_preserve_expected_tap_geometry():
     assert get_click("navigation.goto_defense") == (406, 1868)
     assert get_click("navigation.goto_utility") == (670, 1867)
     assert get_click("navigation.goto_uw") == (941, 1871)
+    assert get_click("navigation.workshop:uw") == (941, 1686)
     assert get_click("navigation.goto_home_store") == (80, 1830)
     assert get_click("navigation.goto_modules_home") == (630, 1830)
 

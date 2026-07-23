@@ -11,6 +11,7 @@ from core.battle_lifecycle import HomeBattleControl
 from core.free_upgrade_locks import (
     inspect_free_upgrade_locks,
     normalize_free_upgrade_lock_requirements,
+    select_workshop_upgrade_menu,
 )
 from core.home_battle import detect_home_battle_control
 from core.gc_module_loadout import (
@@ -20,6 +21,10 @@ from core.gc_module_loadout import (
 )
 from core.gc_preflight import GC_SECTION_SPECS, validate_gc_preflight_screens
 from core.input import TapVerification, safe_tap, swipe_now, tap_if_visible
+from core.poison_swamp_stun import (
+    PoisonSwampStunResult,
+    ensure_poison_swamp_stun_off,
+)
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
 from core.target_priority_config import validate_target_priority_order
@@ -127,6 +132,10 @@ def run_gc_no_battle_setup(
     ensure_modules_fn: Callable[..., Any] = ensure_gc_module_loadout,
     evaluate_modules_fn: Callable[..., Any] = evaluate_gc_module_loadout,
     ensure_free_upgrade_locks_fn: Callable[..., Any] = inspect_free_upgrade_locks,
+    select_workshop_menu_fn: Callable[..., Any] = select_workshop_upgrade_menu,
+    ensure_poison_swamp_stun_fn: Callable[
+        ..., PoisonSwampStunResult
+    ] = ensure_poison_swamp_stun_off,
     validate_configuration_fn: Callable[..., Any] = validate_gc_preflight_screens,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> GcNoBattleSetupResult:
@@ -281,6 +290,61 @@ def run_gc_no_battle_setup(
                     "Free Upgrade locks remained invalid after correction"
                 )
             workshop = lock_result.screenshot
+
+        current_check = "ultimate_weapons"
+        home_stun_required = _home_poison_swamp_stun_required(requirements)
+        if home_stun_required and current_check in active_waivers:
+            evidence[current_check] = _waived_evidence(
+                current_check,
+                requirements.get(current_check),
+                active_waivers[current_check],
+            )
+        elif home_stun_required:
+            workshop = select_workshop_menu_fn(
+                workshop,
+                "ultimate weapons",
+                capture_fn=capture_fn,
+                detector=detector,
+                safe_tap_fn=safe_tap_fn,
+                sleep_fn=sleep_fn,
+            )
+            stun_result = ensure_poison_swamp_stun_fn(
+                screenshot=workshop,
+                capture_fn=capture_fn,
+                detector=detector,
+                safe_tap_fn=safe_tap_fn,
+                tap_visible_fn=tap_visible_fn,
+                swipe_fn=workshop_swipe_fn,
+                sleep_fn=sleep_fn,
+            )
+            workshop = stun_result.screenshot
+            stun_state = stun_result.evidence.state.value
+            evidence[current_check] = {
+                "boundary": HomeBattleControl.NEW_BATTLE.value,
+                "checked": ["Poison Swamp.stun"],
+                "observations": {
+                    "Poison Swamp": {"stun": stun_state},
+                },
+                "valid": stun_state == "off",
+                "changed": stun_result.changed,
+            }
+            if stun_state != "off":
+                raise _SetupFailure(
+                    "Poison Swamp Stun remained enabled after Home correction"
+                )
+            log(
+                "[GC_NO_BATTLE] Poison Swamp Stun verified off at Home"
+                + (" after correction" if stun_result.changed else ""),
+                "INFO",
+            )
+        elif isinstance(requirements.get(current_check), Mapping):
+            evidence[current_check] = {
+                "boundary": HomeBattleControl.NEW_BATTLE.value,
+                "checked": [],
+                "observations": {},
+                "valid": True,
+                "reason": "no_supported_home_controls_required",
+            }
         current = _return_home(
             workshop,
             capture_fn,
@@ -592,6 +656,10 @@ def _unsupported_requirement(requirements: Mapping[str, Any]) -> str | None:
         _target_priority_policy(requirements)
     except ValueError as exc:
         return str(exc)
+    try:
+        _home_poison_swamp_stun_required(requirements)
+    except ValueError as exc:
+        return str(exc)
     return None
 
 
@@ -643,6 +711,28 @@ def _target_priority_policy(requirements: Mapping[str, Any]) -> str:
     else:
         validate_target_priority_order(configured)
     return mode
+
+
+def _home_poison_swamp_stun_required(
+    requirements: Mapping[str, Any],
+) -> bool:
+    ultimate_weapons = requirements.get("ultimate_weapons")
+    if ultimate_weapons is None:
+        return False
+    if not isinstance(ultimate_weapons, Mapping):
+        raise ValueError("ultimate_weapons must be a mapping")
+    for label, toggles in ultimate_weapons.items():
+        if str(label or "").strip().lower() != "poison swamp":
+            continue
+        if not isinstance(toggles, Mapping):
+            raise ValueError("Poison Swamp requirements must be a mapping")
+        if "stun" not in toggles:
+            return False
+        state = str(toggles.get("stun") or "").strip().lower()
+        if state != "off":
+            raise ValueError("Home Poison Swamp Stun supports only off")
+        return True
+    return False
 
 
 def _require_no_battle_home(frame, detector, detect_home_control_fn) -> None:

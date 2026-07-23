@@ -276,6 +276,13 @@ def test_farm_route_consumes_home_boundary_evidence_without_revisiting_sections(
     setup_evidence = {
         "configuration": {"valid": True, "source": "NEW_BATTLE"},
         "modules": {"checked": True, "valid": True},
+        "ultimate_weapons": {
+            "boundary": "NEW_BATTLE",
+            "checked": ["Poison Swamp.stun"],
+            "observations": {"Poison Swamp": {"stun": "off"}},
+            "valid": True,
+            "changed": False,
+        },
     }
     validated = {}
 
@@ -294,7 +301,11 @@ def test_farm_route_consumes_home_boundary_evidence_without_revisiting_sections(
         ),
         swipe_fn=ui.swipe,
         detect_boxes_fn=lambda _frame, **_kwargs: {"left": boxes, "right": []},
-        ensure_poison_swamp_stun_fn=lambda **_kwargs: _stun_off_result(ui),
+        ensure_poison_swamp_stun_fn=lambda **_kwargs: (
+            (_ for _ in ()).throw(
+                AssertionError("fresh Home Stun proof must be reused")
+            )
+        ),
         no_battle_setup_evidence=setup_evidence,
         sleep_fn=lambda _seconds: None,
         validate_fn=validate,
@@ -306,6 +317,10 @@ def test_farm_route_consumes_home_boundary_evidence_without_revisiting_sections(
         "configuration"
     ]
     assert validated["module_boundary_evidence"] == setup_evidence["modules"]
+    assert validated["ultimate_observations"]["Poison Swamp"] == {
+        "primary": "on",
+        "stun": "off",
+    }
     assert "navigation.Cards" not in ui.visible_taps
     assert "navigation.menu_modules" not in ui.visible_taps
     assert "navigation.menu_event" not in ui.visible_taps

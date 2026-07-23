@@ -493,6 +493,67 @@ def _return_to_running(
         log(f"[GC_PREFLIGHT] Cleanup stopped: {exc}", "WARN")
 
 
+def _home_ultimate_weapon_observations(
+    no_battle_setup_evidence: Optional[Mapping[str, Any]],
+) -> dict[str, dict[str, str]]:
+    """Accept only fresh Home proof for the supported Poison Stun control."""
+
+    if not isinstance(no_battle_setup_evidence, Mapping):
+        return {}
+    candidate = no_battle_setup_evidence.get("ultimate_weapons")
+    if not isinstance(candidate, Mapping):
+        return {}
+    checked_values = candidate.get("checked")
+    if not isinstance(checked_values, (list, tuple)):
+        return {}
+    checked = {
+        str(value or "").strip().lower()
+        for value in checked_values
+    }
+    observations = candidate.get("observations")
+    if (
+        str(candidate.get("boundary") or "").strip().upper() != "NEW_BATTLE"
+        or candidate.get("valid") is not True
+        or "poison swamp.stun" not in checked
+        or not isinstance(observations, Mapping)
+    ):
+        return {}
+    for label, toggles in observations.items():
+        if (
+            str(label or "").strip().lower() == "poison swamp"
+            and isinstance(toggles, Mapping)
+            and str(toggles.get("stun") or "").strip().lower() == "off"
+        ):
+            return {"Poison Swamp": {"stun": "off"}}
+    return {}
+
+
+def _ultimate_observations_complete(
+    requirements: Mapping[str, Any],
+    observations: Mapping[str, Mapping[str, Any]],
+) -> bool:
+    observed = {
+        str(label or "").strip().lower(): {
+            str(toggle or "").strip().lower()
+            for toggle in toggles
+        }
+        for label, toggles in observations.items()
+        if isinstance(toggles, Mapping)
+    }
+    for label, toggles in requirements.items():
+        if not isinstance(toggles, Mapping):
+            return False
+        required_toggles = {
+            str(toggle or "").strip().lower() for toggle in toggles
+        }
+        if not required_toggles <= observed.get(
+            str(label or "").strip().lower(),
+            set(),
+        ):
+            return False
+    return True
+
+
 def run_read_only_gc_preflight(
     requirements: Mapping[str, Any],
     *,
@@ -552,6 +613,9 @@ def run_read_only_gc_preflight(
             no_battle_setup_evidence.get("modules")
             if isinstance(no_battle_setup_evidence, Mapping)
             else None
+        )
+        ultimate_boundary_observations = _home_ultimate_weapon_observations(
+            no_battle_setup_evidence
         )
         use_no_battle_evidence = bool(
             isinstance(configuration_boundary_evidence, Mapping)
@@ -664,7 +728,10 @@ def run_read_only_gc_preflight(
             swipe_fn("towards_top", "extended")
             sleep_fn(0.5)
 
-        ultimate_observations: dict[str, dict[str, str]] = {}
+        ultimate_observations: dict[str, dict[str, str]] = {
+            label: dict(toggles)
+            for label, toggles in ultimate_boundary_observations.items()
+        }
         poison_swamp_label: Optional[str] = None
         poison_swamp_stun_required = False
         for label, toggles in ultimate_requirements.items():
@@ -676,8 +743,14 @@ def run_read_only_gc_preflight(
             ).strip().lower() == "off":
                 poison_swamp_stun_required = True
             break
-        poison_swamp_stun_observed = not poison_swamp_stun_required
-        required_labels = {str(label).strip().lower() for label in ultimate_requirements}
+        poison_swamp_stun_observed = (
+            not poison_swamp_stun_required
+            or any(
+                str(label).strip().lower() == "poison swamp"
+                and str(toggles.get("stun") or "").strip().lower() == "off"
+                for label, toggles in ultimate_observations.items()
+            )
+        )
         for position in range(6):
             frame = _wait_for(
                 state="RUNNING",
@@ -726,8 +799,13 @@ def run_read_only_gc_preflight(
                     + (" after correction" if result.changed else ""),
                     "INFO",
                 )
-            observed_labels = {label.lower() for label in ultimate_observations}
-            if required_labels <= observed_labels and poison_swamp_stun_observed:
+            if (
+                _ultimate_observations_complete(
+                    ultimate_requirements,
+                    ultimate_observations,
+                )
+                and poison_swamp_stun_observed
+            ):
                 break
             if position < 5:
                 swipe_fn("towards_bottom", "medium")

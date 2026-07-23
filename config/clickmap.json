@@ -1528,6 +1528,24 @@
       },
       "match_threshold": 0.9
     },
+    "workshop:uw": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 941,
+        "y": 1686
+      },
+      "match_template": "navigation/goto_uw.png",
+      "match_region": {
+        "x": 880,
+        "y": 1600,
+        "w": 190,
+        "h": 140
+      },
+      "match_threshold": 0.75
+    },
     "goto_utility": {
       "match_template": "navigation/goto_utility.png",
       "match_region": {
@@ -1573,11 +1591,11 @@
         "x": 540,
         "y": 60
       },
-      "match_template": "navigation/open_perks.png",
+      "match_template": "navigation/open_perks_frame.png",
       "match_region": {
-        "x": 340,
+        "x": 700,
         "y": 15,
-        "w": 430,
+        "w": 70,
         "h": 95
       },
       "match_threshold": 0.9

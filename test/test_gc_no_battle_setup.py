@@ -18,6 +18,7 @@ from core.gc_no_battle_setup import (
 from core.gate_decisions import build_gate_decision_options
 from core.home_battle import HomeBattleEvidence
 from core.matcher import get_match
+from core.poison_swamp_stun import PoisonSwampStunState
 from core.target_priority import TARGETS
 from core.workshop_preset import (
     BOTS_AMPLIFY_PRESET_SLOT,
@@ -99,6 +100,11 @@ class _NoBattleRouter:
         if frame == "cards":
             return {"state": "CARDS", "secondary_states": ["CARDS_FARM_SLOT"]}
         if frame == "workshop":
+            return {
+                "state": "WORKSHOP",
+                "secondary_states": ["WORKSHOP_FARM_SLOT"],
+            }
+        if frame == "workshop_uw":
             return {
                 "state": "WORKSHOP",
                 "secondary_states": ["WORKSHOP_FARM_SLOT"],
@@ -193,6 +199,21 @@ class _NoBattleRouter:
         return SimpleNamespace(
             valid=True,
             as_dict=lambda: {"valid": True},
+        )
+
+    def select_workshop_menu(self, current, menu, **_kwargs):
+        assert current == "workshop"
+        assert menu == "ultimate weapons"
+        self.state = "workshop_uw"
+        return self.state
+
+    def ensure_stun(self, **kwargs):
+        assert self.state == "workshop_uw"
+        assert kwargs["screenshot"] == "workshop_uw"
+        return SimpleNamespace(
+            screenshot="workshop_uw",
+            evidence=SimpleNamespace(state=PoisonSwampStunState.OFF),
+            changed=False,
         )
 
     def swipe(self, label):
@@ -337,6 +358,8 @@ def _run(router, requirements=REQUIREMENTS, *, waivers=None):
         measure_selection_fn=router.measure,
         ensure_modules_fn=router.ensure_modules,
         evaluate_modules_fn=router.evaluate_modules,
+        select_workshop_menu_fn=router.select_workshop_menu,
+        ensure_poison_swamp_stun_fn=router.ensure_stun,
         validate_configuration_fn=router.validate_configuration,
         sleep_fn=lambda _seconds: None,
     )
@@ -454,6 +477,28 @@ def test_no_battle_setup_leaves_already_correct_settings_untouched():
         "navigation.home_guild",
         "buttons.return_to_game",
     ]
+
+
+def test_no_battle_setup_verifies_poison_swamp_stun_before_battle():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+    requirements = {
+        **REQUIREMENTS,
+        "ultimate_weapons": {
+            "Poison Swamp": {"primary": "on", "stun": "off"},
+        },
+    }
+
+    result = _run(router, requirements)
+
+    assert result.complete
+    assert router.state == "home"
+    assert result.evidence["ultimate_weapons"] == {
+        "boundary": "NEW_BATTLE",
+        "checked": ["Poison Swamp.stun"],
+        "observations": {"Poison Swamp": {"stun": "off"}},
+        "valid": True,
+        "changed": False,
+    }
 
 
 def test_no_battle_setup_corrects_tournament_home_configuration():

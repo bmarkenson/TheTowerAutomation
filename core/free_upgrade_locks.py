@@ -38,6 +38,7 @@ _LOCK_SPECS = {
 _WORKSHOP_MENU_ACTIONS = {
     "attack": "navigation.workshop:attack",
     "defense": "navigation.workshop:defense",
+    "ultimate weapons": "navigation.workshop:uw",
 }
 _WORKSHOP_UPGRADE_ACTION = "navigation.workshop:upgrade"
 
@@ -163,7 +164,37 @@ def measure_workshop_upgrade_menu(screenshot: Optional[Frame]) -> Optional[str]:
         return "attack"
     if normalized == "DEFENSE UPGRADES":
         return "defense"
+    if normalized == "ULTIMATE UPGRADES":
+        return "ultimate weapons"
     return None
+
+
+def select_workshop_upgrade_menu(
+    current: Frame,
+    menu: str,
+    *,
+    capture_fn: Capture = capture_adb_screenshot,
+    detector: Detector = detect_state_and_overlays,
+    safe_tap_fn: Callable[..., bool] = safe_tap,
+    measure_menu_fn: Callable[
+        [Optional[Frame]], Optional[str]
+    ] = measure_workshop_upgrade_menu,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> Frame:
+    """Select one verified Workshop Upgrade category and await its heading."""
+
+    normalized = str(menu or "").strip().lower()
+    if normalized not in _WORKSHOP_MENU_ACTIONS:
+        raise ValueError(f"unsupported Workshop Upgrade menu {menu!r}")
+    return _select_workshop_menu(
+        current,
+        normalized,
+        capture_fn=capture_fn,
+        detector=detector,
+        safe_tap_fn=safe_tap_fn,
+        measure_menu_fn=measure_menu_fn,
+        sleep_fn=sleep_fn,
+    )
 
 
 def measure_free_upgrade_lock(
@@ -794,4 +825,5 @@ __all__ = [
     "measure_unavailable_free_upgrade_lock",
     "measure_workshop_upgrade_menu",
     "normalize_free_upgrade_lock_requirements",
+    "select_workshop_upgrade_menu",
 ]

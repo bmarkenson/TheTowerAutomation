@@ -9,7 +9,9 @@ from core.poison_swamp_stun import (
     PoisonSwampStunError,
     PoisonSwampStunEvidence,
     PoisonSwampStunState,
+    WorkshopPoisonSwampSource,
     ensure_poison_swamp_stun_off,
+    locate_workshop_poison_swamp_source,
     measure_poison_swamp_stun,
 )
 from core.state_detector import detect_state_and_overlays
@@ -17,7 +19,8 @@ from core.upgrade_box_detector import UpgradeBox
 
 
 ROOT = Path(__file__).resolve().parents[1]
-FIXTURES = ROOT / "test" / "fixtures" / "gc_poison_swamp_stun_20260717"
+ROOT_FIXTURES = ROOT / "test" / "fixtures"
+FIXTURES = ROOT_FIXTURES / "gc_poison_swamp_stun_20260717"
 
 
 def _load(name: str):
@@ -66,6 +69,42 @@ def test_live_detail_templates_separate_stun_off_and_on():
         assert "UPGRADE_DETAIL" in detection["overlays"]
 
 
+def test_workshop_source_locator_requires_heading_and_exact_title_pair():
+    frame = _frame(32)
+    source = locate_workshop_poison_swamp_source(
+        frame,
+        text_fn=lambda _crop: ("Ultimate Upgrades", 96.0),
+        word_data_fn=lambda _crop: {
+            "text": ["Poison", "Swamp"],
+            "conf": ["96", "96"],
+            "left": [405, 540],
+            "top": [134, 134],
+            "width": [122, 136],
+            "height": [29, 36],
+        },
+    )
+
+    assert source.visible
+    assert source.title_region == (405, 624, 271, 36)
+    assert source.icon_region == (60, 664, 190, 190)
+    assert source.icon_point == (155, 759)
+
+
+def test_live_workshop_source_localizes_non_purchase_poison_icon():
+    frame = cv2.imread(
+        str(ROOT_FIXTURES / "poison_swamp_workshop_home_20260723.png")
+    )
+    assert frame is not None
+
+    source = locate_workshop_poison_swamp_source(frame)
+
+    assert source.visible
+    assert source.header_confidence >= 90.0
+    assert source.title_confidence >= 90.0
+    assert source.icon_region == (60, 664, 190, 190)
+    assert source.icon_point == (155, 759)
+
+
 def test_guarded_correction_toggles_on_to_off_and_reverifies():
     uw = _frame(10)
     detail_on = _frame(20)
@@ -111,6 +150,71 @@ def test_guarded_correction_toggles_on_to_off_and_reverifies():
     assert kwargs["dispatch"] == "now"
     assert kwargs["log_label"] == "uw_detail:Poison Swamp"
     assert kwargs["verification"].description == "ultimate_weapon:Poison Swamp"
+    tap_visible.assert_called_once_with(
+        "buttons.poison_swamp_stun_on",
+        screenshot=detail_on,
+    )
+
+
+def test_workshop_correction_uses_isolated_icon_and_restores_ultimate_menu():
+    workshop = _frame(10)
+    detail_on = _frame(20)
+    detail_off = _frame(30)
+    cleared = _frame(40)
+    captures = iter((workshop, detail_on, detail_off))
+    source = WorkshopPoisonSwampSource(
+        visible=True,
+        header_text="Ultimate Upgrades",
+        header_confidence=96.0,
+        title_text="Poison Swamp",
+        title_confidence=96.0,
+        title_region=(405, 624, 271, 36),
+        icon_region=(60, 664, 190, 190),
+        icon_point=(155, 759),
+    )
+    safe_tap = Mock(return_value=True)
+    tap_visible = Mock(return_value=True)
+
+    def detector(frame):
+        value = int(frame[0, 0, 0])
+        if value in {10, 40}:
+            return {"state": "WORKSHOP", "menu": None, "overlays": []}
+        return {
+            "state": "UPGRADE_DETAIL",
+            "menu": None,
+            "overlays": ["UPGRADE_DETAIL"],
+        }
+
+    result = ensure_poison_swamp_stun_off(
+        capture_fn=lambda: next(captures),
+        detector=detector,
+        detect_boxes_fn=Mock(
+            side_effect=AssertionError("battle tile detector must not run")
+        ),
+        locate_workshop_fn=lambda _frame: source,
+        safe_tap_fn=safe_tap,
+        tap_visible_fn=tap_visible,
+        dismiss_fn=lambda **_kwargs: cleared,
+        measure_fn=lambda frame: _evidence(
+            PoisonSwampStunState.ON
+            if int(frame[0, 0, 0]) == 20
+            else PoisonSwampStunState.OFF
+        ),
+        measure_workshop_menu_fn=lambda frame: (
+            "ultimate weapons"
+            if int(frame[0, 0, 0]) in {10, 40}
+            else None
+        ),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.changed
+    assert result.screenshot is cleared
+    point, = safe_tap.call_args.args
+    assert point == (155, 759)
+    verification = safe_tap.call_args.kwargs["verification"]
+    assert verification.target_region == (60, 664, 190, 190)
+    assert verification.description == "workshop:ultimate_weapon:Poison Swamp"
     tap_visible.assert_called_once_with(
         "buttons.poison_swamp_stun_on",
         screenshot=detail_on,

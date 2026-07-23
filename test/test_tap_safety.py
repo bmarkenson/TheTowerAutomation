@@ -128,12 +128,17 @@ def test_home_target_priority_control_does_not_exist():
         ("navigation.goto_home", "workshop_farm_active_20260714.png"),
         ("navigation.target_priority", "running_menu_no_reward_badges_20260715.png"),
         ("navigation.open_perks", "ui_state_20260714/active_wave_stats.png"),
+        ("navigation.open_perks", "open_perks_dynamic_progress_20260723.png"),
         ("navigation.workshop:upgrade", "workshop_farm_active_20260714.png"),
         (
             "navigation.workshop:attack",
             "free_upgrade_locks/bounce_shot_range_unchecked_20260720.png",
         ),
         ("navigation.workshop:defense", "workshop_farm_active_20260714.png"),
+        (
+            "navigation.workshop:uw",
+            "free_upgrade_locks/shockwave_size_visible_workshop_20260720.png",
+        ),
         ("buttons.exit_battle", "running_menu_no_reward_badges_20260715.png"),
         (
             "buttons.surrender:exit_battle",
