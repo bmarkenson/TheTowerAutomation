@@ -110,16 +110,18 @@ colored Pause and Resume actions. Cyan is the saved state or Game Over mode;
 amber means a live runtime has not acknowledged that directive yet. Mode buttons
 apply immediately, which prevents a periodic status refresh from replacing an
 unsaved combo-box selection. The strategy dropdown likewise preserves an
-unsent choice across refreshes and does not apply it merely because it is
-selected. Choose **Queue for next boundary** to leave the current battle's
-strategy in place, or **Adopt for active battle** to request adoption after
-fresh running or resumable-Home evidence. Adoption changes normal strategy
-behavior and Battle End identity without a restart, while new-run
-initialization, session preflight, and Home-only gates wait for the next
-genuine boundary. Selecting the displayed Current strategy and queueing it
-cancels a different pending request. Actions that would be no-ops are disabled;
-the panel reports request acceptance immediately and shows selected, current,
-and pending values separately.
+unsent choice across refreshes. For an active process, selection alone does not
+change the current or queued strategy: choose **Queue for next boundary** to
+leave the current battle's strategy in place, or **Adopt for active battle** to
+request adoption after fresh running or resumable-Home evidence. For a stopped
+process, **Start paused** and **Start running** atomically save and launch the
+strategy that is visibly selected, so an older next-start value cannot win the
+process boundary. Adoption changes normal strategy behavior and Battle End
+identity without a restart, while new-run initialization, session preflight,
+and Home-only gates wait for the next genuine boundary. Selecting the displayed
+Current strategy and queueing it cancels a different pending request. Actions
+that would be no-ops are disabled; the panel reports request acceptance
+immediately and shows selected, current, and pending values separately.
 
 **Configure run...** is an optional pre-start dialog populated from the
 selected strategy's declared checks. Check a requirement to skip it once, or
@@ -178,7 +180,9 @@ When starting automation in a battle that was already running, select
 initialization and session-preflight rules remain suppressed until Game Over,
 Tournament Results, or a verified Home **New Battle** boundary. The next battle
 then performs those gates normally. Leave the option clear when the first
-observed battle needs its startup gates immediately.
+observed battle needs its startup gates immediately. Both Start actions persist
+the strategy currently visible in the Strategy dropdown before launching the
+Linux process.
 
 The Tournament observer is the deliberate exception to session-preflight
 suppression: it performs its read-only check on the attached run so the warning

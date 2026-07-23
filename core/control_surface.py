@@ -27,12 +27,13 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 4
+CONTROL_SURFACE_REVISION = 5
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
     "attached_automation_restart",
     "explicit_strategy_disposition",
+    "selected_strategy_process_start",
 )
 ATTACHED_RESTART_TIMEOUT_SECONDS = 20.0
 ATTACHED_RESTART_POLL_SECONDS = 0.25
@@ -351,7 +352,26 @@ class ControlSurfaceService:
                 raise ControlSurfaceRequestError(
                     "run_state must be PAUSED or RUNNING"
                 )
+            requested_strategy = None
+            if "strategy" in request:
+                strategy = request.get("strategy")
+                if not isinstance(strategy, str) or not strategy.strip():
+                    raise ControlSurfaceRequestError(
+                        "strategy must be a non-empty string"
+                    )
+                requested_strategy = strategy.strip().lower()
+                if requested_strategy not in CONFIGURABLE_STRATEGIES:
+                    raise ControlSurfaceRequestError(
+                        "Strategy must be one of: "
+                        + ", ".join(CONFIGURABLE_STRATEGIES)
+                    )
             before = manager.status()
+            if before.get("active") and requested_strategy is not None:
+                raise ControlSurfaceRequestError(
+                    "Completely stop automation before starting with a selected "
+                    "strategy",
+                    status=409,
+                )
             requested_gate_policy = request.get("startup_gate_policy")
             if requested_gate_policy is not None:
                 if not isinstance(requested_gate_policy, str):
@@ -374,6 +394,13 @@ class ControlSurfaceService:
                 if not before.get("active"):
                     if requested_gate_policy is not None:
                         manager.set_startup_gate_policy(requested_gate_policy)
+                    if requested_strategy is not None:
+                        manager.set_strategy(requested_strategy)
+                        self.control_store.set_strategy(
+                            requested_strategy,
+                            apply_mode="next_boundary",
+                            source="control-surface-process-start",
+                        )
                     # A new process always crosses its startup boundary paused.
                     # RUNNING is persisted only after systemd proves it active.
                     self.control_store.set_state(
@@ -404,6 +431,8 @@ class ControlSurfaceService:
                 f"Started automation service with state {requested_state} "
                 f"and startup gates {gate_description}"
             )
+            if requested_strategy is not None:
+                audit += f" using selected strategy {requested_strategy}"
         elif action == "stop":
             try:
                 # Persist intent before systemd signals the process so any live
@@ -518,6 +547,8 @@ class ControlSurfaceService:
         response["request"] = {"accepted": True, "action": action}
         if action == "start" and requested_gate_policy is not None:
             response["request"]["startup_gate_policy"] = requested_gate_policy
+        if action == "start" and requested_strategy is not None:
+            response["request"]["strategy"] = requested_strategy
         elif action == "restart_attached":
             response["request"].update(restart)
         elif action == "set_adb_port":

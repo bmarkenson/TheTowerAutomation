@@ -8,6 +8,11 @@ checked-item detail remains in the
 
 ## Current validation gates
 
+- [ ] Live-validate atomic selected-strategy process start from verified
+  no-battle Home. Confirm that the client-visible Farm T19 Experimental
+  selection becomes both managed and control strategy before the new PID
+  starts, that immediate Home-only initialization completes before Battle is
+  tapped, and that session preflight runs in the resulting Tier 19 battle.
 - [x] Finish live validation of the No Strategy two-phase inventory at the next
   natural Game Over. Do not Surrender or manufacture the boundary.
   - [x] On the active Tier 18 Attack Dissonance battle, confirm automatic

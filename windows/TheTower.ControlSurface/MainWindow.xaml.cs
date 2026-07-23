@@ -508,6 +508,9 @@ public partial class MainWindow : Window
             if (tag.StartsWith("start:", StringComparison.Ordinal))
             {
                 var runState = tag.Split(':')[1];
+                var strategy = SelectedStrategy()
+                    ?? throw new InvalidOperationException(
+                        "Select a strategy before starting automation.");
                 var startupGatePolicy = AttachCurrentBattleBox.IsChecked == true
                     ? "next_run"
                     : "immediate";
@@ -517,9 +520,13 @@ public partial class MainWindow : Window
                         action = "start",
                         run_state = runState,
                         startup_gate_policy = startupGatePolicy,
+                        strategy,
                     },
                     CancellationToken.None);
                 _startupGatePolicyDirty = false;
+                _strategySelectionDirty = false;
+                _strategyRequestMessage =
+                    $"Started with selected {StrategyDisplayName(strategy)} strategy.";
             }
             else
             {
@@ -838,8 +845,12 @@ public partial class MainWindow : Window
         ProcessPidText.Text = processPid?.ToString(CultureInfo.InvariantCulture) ?? "-";
         var lifecycleAvailable = service?.Available == true;
         var processActive = service?.Active == true || status.Runtime.Active;
-        StartPausedButton.IsEnabled = lifecycleAvailable && !processActive;
-        StartRunningButton.IsEnabled = lifecycleAvailable && !processActive;
+        StartPausedButton.IsEnabled = lifecycleAvailable
+            && !processActive
+            && _serverCompatibility.IsCompatible;
+        StartRunningButton.IsEnabled = lifecycleAvailable
+            && !processActive
+            && _serverCompatibility.IsCompatible;
         AttachCurrentBattleBox.IsEnabled = lifecycleAvailable && !processActive;
         CompleteStopButton.IsEnabled = lifecycleAvailable && service?.Active == true;
         ReloadAutomationButton.IsEnabled = lifecycleAvailable

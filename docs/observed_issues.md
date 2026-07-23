@@ -11,6 +11,31 @@ for a matching recurrence or historical investigation.
 
 ## Open
 
+### Selected strategy was not applied when starting automation
+
+- **Observed:** 2026-07-22 while the operator started automation from
+  no-battle Home with a Farm strategy visibly selected in the native Windows
+  client.
+- **Symptom:** Automation entered a battle without performing the selected
+  strategy's Home-only prerequisites and changes.
+- **Evidence:** Fresh control, owner-PID, ADB, screenshot, and action-log
+  inspection showed that the managed start launched `strategy=none` with
+  immediate startup gates, then tapped Battle from verified Home and began the
+  No Strategy inventory. The persistent control and managed environment still
+  contained the older `none` value. Static tracing confirmed that the client
+  kept a changed dropdown selection only as local UI state; its Start request
+  sent run state and gate policy but not the selected strategy.
+- **Safety response:** The live owner acknowledged indefinite Pause during its
+  read-only inventory. No cleanup input was sent, and the operator explicitly
+  authorized ending and replacing this battle for bounded testing.
+- **Status:** Cause confirmed. The working-tree repair makes process start
+  atomically persist the visible selected strategy before service launch,
+  advertises the new server dependency, and adds a regression proving that the
+  selected Farm T19 strategy and Pause boundary are authoritative before the
+  process starts. Focused Python validation and the self-contained Windows
+  publish pass. Live Home-gate validation remains in
+  [`backlog/runtime-and-validation.md`](backlog/runtime-and-validation.md#current-validation-gates).
+
 ### Game Stats OCR dropped a coin-value decimal
 
 - **Observed:** 2026-07-22 while recovering the completed Tier 19 Attack

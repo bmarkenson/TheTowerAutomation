@@ -204,8 +204,10 @@ unit active.
 
 The Windows controls can select the localhost ADB port, bundled strategy, and
 startup-gate policy used by the next managed start. While automation is
-stopped, select the new values and then start paused or running. The API
-persists the validated settings in
+stopped, select the new values and then start paused or running. Each Start
+request atomically persists the strategy currently visible in the client before
+launching the service, so a stale saved strategy cannot bypass that selection's
+Home-only gates. The API persists the validated settings in
 `~/.config/thetower/automation-adb.env`; the systemd unit reads that file at
 start. An absent file defaults to port `5555`, strategy `farm`, and immediate
 startup gates. Explicit manual `main.py --adb-port PORT --strategy NAME

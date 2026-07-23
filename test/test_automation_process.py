@@ -521,6 +521,41 @@ def test_start_can_attach_current_battle_and_persists_policy_before_start(tmp_pa
     }
 
 
+def test_start_persists_selected_strategy_before_process_reaches_home(tmp_path):
+    manager = FakeManager()
+    service = _service(tmp_path, manager)
+
+    def assert_selected_strategy_is_authoritative():
+        assert manager.strategy == "farm_t19_experiment"
+        control = service.control_store.read()
+        assert control["strategy"] == "farm_t19_experiment"
+        assert control["strategy_apply_mode"] == "next_boundary"
+        assert control["state"] == "PAUSED"
+
+    manager.on_start = assert_selected_strategy_is_authoritative
+    response = service.apply_process_action(
+        {
+            "action": "start",
+            "run_state": "RUNNING",
+            "startup_gate_policy": "immediate",
+            "strategy": "farm_t19_experiment",
+        }
+    )
+
+    assert manager.calls == [
+        "set_startup_gate_policy:immediate",
+        "set_strategy:farm_t19_experiment",
+        "start",
+    ]
+    assert response["process_service"]["strategy"] == "farm_t19_experiment"
+    assert response["request"] == {
+        "accepted": True,
+        "action": "start",
+        "startup_gate_policy": "immediate",
+        "strategy": "farm_t19_experiment",
+    }
+
+
 @pytest.mark.parametrize("policy", ["", "later", 1, True])
 def test_start_rejects_invalid_startup_gate_policy(tmp_path, policy):
     manager = FakeManager()
@@ -534,6 +569,41 @@ def test_start_rejects_invalid_startup_gate_policy(tmp_path, policy):
             }
         )
 
+    assert manager.calls == []
+
+
+@pytest.mark.parametrize("strategy", [None, "", "unknown", 123])
+def test_start_rejects_invalid_selected_strategy(tmp_path, strategy):
+    manager = FakeManager()
+
+    with pytest.raises(ControlSurfaceRequestError):
+        _service(tmp_path, manager).apply_process_action(
+            {
+                "action": "start",
+                "run_state": "RUNNING",
+                "strategy": strategy,
+            }
+        )
+
+    assert manager.calls == []
+
+
+def test_start_rejects_selected_strategy_when_process_is_already_active(tmp_path):
+    manager = FakeManager(active=True)
+
+    with pytest.raises(
+        ControlSurfaceRequestError,
+        match="Completely stop automation",
+    ) as exc_info:
+        _service(tmp_path, manager).apply_process_action(
+            {
+                "action": "start",
+                "run_state": "RUNNING",
+                "strategy": "farm_t19_experiment",
+            }
+        )
+
+    assert exc_info.value.status == 409
     assert manager.calls == []
 
 
