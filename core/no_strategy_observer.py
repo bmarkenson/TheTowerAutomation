@@ -186,9 +186,23 @@ class NoStrategyRunObserver:
         if state == "CARDS":
             self._observe_selected_slot("cards_deck", frame, _CARD_SLOTS, phase)
         elif state == "WORKSHOP":
-            self._observe_selected_slot(
+            preset = self._observe_selected_slot(
                 "workshop_preset", frame, _WORKSHOP_SLOTS, phase
             )
+            preset_label = str((preset or {}).get("label") or "").casefold()
+            if phase == "post_run_home" and preset_label.startswith("attack disso"):
+                self._set(
+                    "run_identity",
+                    {
+                        "family": "Dissonance",
+                        "subtype": "Attack",
+                        "label": "Attack Dissonance",
+                        "signals": {"post_run_workshop_preset": preset},
+                    },
+                    source="post_run_workshop_preset_selected_border",
+                    phase=phase,
+                    confidence="high",
+                )
         elif state == "EVENT" and "EVENT_BOTS_SCREEN" in secondary:
             self._observe_selected_slot("bots_preset", frame, _BOT_SLOTS, phase)
         elif state == "GUILD" and "GUILD_GUARDIAN_SCREEN" in secondary:
@@ -353,14 +367,14 @@ class NoStrategyRunObserver:
         frame: Frame,
         regions: tuple[tuple[int, int, int, int], ...],
         phase: str,
-    ) -> None:
+    ) -> Optional[dict[str, Any]]:
         selected = []
         for index, region in enumerate(regions, start=1):
             evidence = measure_preset_slot_selection(frame, region)
             if evidence.selected:
                 selected.append((index, region, evidence))
         if len(selected) != 1:
-            return
+            return None
         index, (x, y, width, height), evidence = selected[0]
         # The luminous selected border confuses Tesseract on otherwise clear
         # short preset names. Keep selection measurement on the full region,
@@ -372,19 +386,21 @@ class NoStrategyRunObserver:
         ]
         label, ocr_confidence = ocr_text_and_conf(label_crop, psm=7)
         normalized = " ".join(str(label or "").split())
+        value = {
+            "slot": index,
+            "label": normalized if ocr_confidence >= 60.0 else None,
+            "label_ocr_confidence": ocr_confidence,
+            "green_pixels": evidence.green_pixels,
+            "cyan_pixels": evidence.cyan_pixels,
+        }
         self._set(
             field,
-            {
-                "slot": index,
-                "label": normalized if ocr_confidence >= 60.0 else None,
-                "label_ocr_confidence": ocr_confidence,
-                "green_pixels": evidence.green_pixels,
-                "cyan_pixels": evidence.cyan_pixels,
-            },
+            value,
             source=f"{field}_selected_border",
             phase=phase,
             confidence="high" if normalized and ocr_confidence >= 80.0 else "medium",
         )
+        return value
 
     def _observe_modules(self, frame: Frame, phase: str) -> None:
         try:

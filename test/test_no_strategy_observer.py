@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import cv2
@@ -173,6 +174,32 @@ def test_selected_preset_labels_are_read_from_fixture_interiors():
     for field, _path, _detection in samples:
         assert fields[field]["value"]["label"] == "Farm"
         assert fields[field]["value"]["label_ocr_confidence"] >= 90.0
+
+
+def test_post_run_attack_dissonance_preset_restores_run_identity():
+    observer = NoStrategyRunObserver(clock=_clock)
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    selected = SimpleNamespace(selected=True, green_pixels=2489, cyan_pixels=290)
+    unselected = SimpleNamespace(selected=False, green_pixels=0, cyan_pixels=0)
+
+    with (
+        patch(
+            "core.no_strategy_observer.measure_preset_slot_selection",
+            side_effect=[selected, unselected, unselected, unselected, unselected],
+        ),
+        patch(
+            "core.no_strategy_observer.ocr_text_and_conf",
+            return_value=("Attack Disso", 92.0),
+        ),
+    ):
+        observer.observe(frame, {"state": "WORKSHOP"}, phase="post_run_home")
+
+    fields = observer.snapshot()["fields"]
+    identity = fields["run_identity"]
+    assert identity["status"] == "observed"
+    assert identity["value"]["label"] == "Attack Dissonance"
+    assert identity["source"] == "post_run_workshop_preset_selected_border"
+    assert identity["phase"] == "post_run_home"
 
 
 def test_unknown_post_run_field_is_rejected():
