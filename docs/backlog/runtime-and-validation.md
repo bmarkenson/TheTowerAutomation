@@ -8,6 +8,12 @@ checked-item detail remains in the
 
 ## Current validation gates
 
+- [ ] Stop game-speed maximum probing from tapping an already-correct `x5.0`
+  or `x6.3` control, as recorded in
+  [`../observed_issues.md`](../observed_issues.md#game-speed-maximum-probing-could-lower-an-already-correct-speed).
+  Treat an authoritative reading at or above `x5.0` as satisfied and tap only
+  while the value is below `x5.0`; cover restoration from a lower speed without
+  requiring a no-effect ceiling probe.
 - [ ] Diagnose the transient Home Poison Swamp Stun verification timeout
   recorded in
   [`../observed_issues.md`](../observed_issues.md#home-poison-swamp-stun-verification-transiently-timed-out-after-its-source-tap).
