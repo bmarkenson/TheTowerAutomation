@@ -153,10 +153,12 @@ automation always accepts the presented level transfer and requires the dialog
 to dismiss before continuing. This preserves the slot's existing level instead
 of leaving the incoming module at its previous level.
 
-While a battle is active, the game-speed guard periodically walks the visible
-`+` control to the current maximum and rechecks it so an accidental slowdown is
-restored. Farm gives the urgent EHLS/EALS purchases first action priority;
-other profiles may maximize speed immediately after `RUNNING` is verified.
+While a battle is active, the game-speed guard periodically reads the visible
+control so an accidental slowdown is restored. `x5.0` and the perk-raised
+`x6.3` are accepted without input; only a value below `x5.0` receives verified
+`+` taps, which stop as soon as `x5.0` or higher is observed. Farm gives the
+urgent EHLS/EALS purchases first action priority; other profiles may restore
+speed immediately after `RUNNING` is verified.
 
 ### Validating Tournament setup
 

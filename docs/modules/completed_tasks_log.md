@@ -809,6 +809,22 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   sandbox-compatible tests; the one localhost HTTP test passed separately with
   socket permission, for 631 total.
 
+### 2026-07-23 game-speed maximum-probe correction
+
+- Commit `1f6385a` replaced the original no-effect ceiling probe with the
+  operator-confirmed normal maximum. Authoritative `x5.0` and perk-raised
+  `x6.3` readings dispatch no input; a lower value receives bounded verified
+  `+` taps only until the reading reaches at least `x5.0`.
+- Stable satisfied readings remain checked every 30 seconds but no longer
+  repeat the same no-op log entry. Failures, changed readings, and actual
+  corrective taps remain visible.
+- `test/test_game_speed.py` covers zero-input handling at `x5.0` and `x6.3`,
+  bounded restoration from below `x5.0`, no-progress failure, Pause authority,
+  battle-only scope, EHLS/EALS priority, and stable-log suppression.
+  Repository-wide validation passed 641 sandbox-compatible tests plus the
+  separately permitted localhost HTTP test, for 642 total. The active service
+  was not reloaded during code validation.
+
 ### 2026-07-23 module level-transfer preservation
 
 - Commit `2a2d00b` replaced the shared module repair's hard-coded decline action

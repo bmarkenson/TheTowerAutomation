@@ -66,12 +66,13 @@ name.
 
 Game speed is a global battle-only invariant. A periodic guard requires
 authoritative `RUNNING` evidence, reads the localized speed value and visible
-plus glyph, and sends verified `+` taps until one produces no increase. This
-discovers the current perk-dependent ceiling instead of hard-coding `x5.0` or
-`x6.3`. Farm defers the guard while either urgent EHLS/EALS purchase remains
-incomplete; attachment and non-Farm profiles may correct speed as soon as
-their runtime policy grants the handler action authority. Pause is rechecked
-before every speed tap.
+plus glyph, and accepts every valid reading at or above the normal `x5.0`
+maximum without input. A lower reading receives verified `+` taps only until it
+reaches at least `x5.0`; the Game Speed perk raises the visible value to `x6.3`
+without requiring a ceiling probe. Farm defers the guard while either urgent
+EHLS/EALS purchase remains incomplete; attachment and non-Farm profiles may
+correct speed as soon as their runtime policy grants the handler action
+authority. Pause is rechecked before every speed tap.
 
 ## Tournament observer profile
 

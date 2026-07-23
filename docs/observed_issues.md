@@ -11,31 +11,6 @@ for a matching recurrence or historical investigation.
 
 ## Open
 
-### Game-speed maximum probing could lower an already-correct speed
-
-- **Observed:** 2026-07-23 after the operator reported a problem with the new
-  battle-only game-speed guard.
-- **Symptom:** The guard sends a `+` tap approximately every 30 seconds even
-  when the visible speed is already the normal `x5.0` maximum or the
-  Game-Speed-perk `x6.3` maximum. Some `x5.0` probes lowered the observed speed
-  to `x3.0` instead of leaving it unchanged.
-- **Evidence:** `logs/actions.log` records `initial=5.0 final=3.0` with
-  `reason=speed_decreased_after_plus` at 07:27:02, 08:40:31, and 10:30:25.
-  From 13:04 through the current 14:35 observation, it records a verified but
-  ineffective tap at `x6.3` roughly every 30 seconds. Source inspection
-  confirms that `maximize_game_speed` defines the ceiling as the first tap
-  producing no change, and `GameSpeedGuard` repeats that probe after every
-  30-second success interval.
-- **Safety response:** Diagnosis used fresh control, owner-process, ADB, and
-  log inspection only. The live PID remained under the operator's existing
-  `RUNNING` intent; no Pause, tap, restart, Surrender, or code reload was
-  performed.
-- **Status:** Cause confirmed. The operator established that `x5.0` is already
-  sufficient before the perk and does not need later probing; the perk raises
-  the visible speed to `x6.3` itself. The guard should accept any authoritative
-  reading at or above `x5.0` without input and send bounded `+` taps only below
-  `x5.0`.
-
 ### Home Poison Swamp Stun verification transiently timed out after its source tap
 
 - **Observed:** 2026-07-23 during the authorized Tier 18 Farm Home setup.

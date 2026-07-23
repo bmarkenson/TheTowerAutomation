@@ -1203,7 +1203,9 @@ and actionable work lives in
   verified tap produces no change. It checks periodically to restore later
   slowdowns and discovers the current perk-dependent ceiling dynamically.
   Farm defers all speed taps until both EHLS and EALS are complete, preserving
-  their urgent purchase priority; Pause is rechecked before every tap.
+  their urgent purchase priority; Pause is rechecked before every tap. The
+  no-effect ceiling probe was later superseded by `1f6385a` after the separate
+  recurrence below established that probing `x5.0` could lower it.
 - **Regression:** `test/test_game_speed.py` covers OCR, battle-only authority,
   ceiling discovery, periodic restoration, Pause, Home rejection, Tournament
   policy, and EHLS/EALS priority.
@@ -1307,6 +1309,43 @@ and actionable work lives in
   was intentionally not repeated because it would disturb the operator's
   repaired loadout.
 - **Fixed by:** `2a2d00b`.
+
+### Game-speed maximum probing could lower an already-correct speed
+
+- **Observed:** 2026-07-23 after the operator reported a problem with the new
+  battle-only game-speed guard.
+- **Symptom:** The guard sent a `+` tap approximately every 30 seconds even
+  when the visible speed was already the normal `x5.0` maximum or the
+  Game-Speed-perk `x6.3` maximum. Some `x5.0` probes lowered the observed speed
+  to `x3.0` instead of leaving it unchanged.
+- **Evidence:** `logs/actions.log` records `initial=5.0 final=3.0` with
+  `reason=speed_decreased_after_plus` at 07:27:02, 08:40:31, and 10:30:25.
+  From 13:04 through the 14:35 observation, it records a verified but
+  ineffective tap at `x6.3` roughly every 30 seconds. Source inspection
+  confirmed that `maximize_game_speed` defined the ceiling as the first tap
+  producing no change, and `GameSpeedGuard` repeated that probe after every
+  30-second success interval.
+- **Safety response:** Diagnosis used fresh control, owner-process, ADB, and
+  log inspection only. The live PID remained under the operator's existing
+  `RUNNING` intent; no Pause, tap, restart, Surrender, or code reload was
+  performed.
+- **Cause:** The original implementation tried to discover a dynamic ceiling
+  by tapping until the value stopped increasing. The operator established that
+  `x5.0` is already sufficient before the perk and does not need later probing;
+  the perk raises the visible value to `x6.3` itself.
+- **Resolution:** Any authoritative reading at or above `x5.0` is now satisfied
+  without input. Lower readings receive bounded verified `+` taps only until
+  they reach at least `x5.0`; a below-target tap that produces no increase is a
+  failure rather than proof of a ceiling. Repeated stable no-op log entries are
+  suppressed while periodic read-only checking continues.
+- **Regression:** `test/test_game_speed.py` covers zero-input `x5.0` and `x6.3`
+  readings, restoration from below `x5.0`, below-target no-progress failure,
+  and stable no-op log suppression.
+- **Validation:** The focused game-speed suite passed 11 tests.
+  Repository-wide validation passed 641 sandbox-compatible tests plus the
+  separately permitted localhost HTTP test, for 642 total. The active service
+  was not reloaded during code validation.
+- **Fixed by:** `1f6385a`.
 
 ## Operational lessons
 
