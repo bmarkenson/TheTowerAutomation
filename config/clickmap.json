@@ -1613,6 +1613,26 @@
         "y": 1830
       }
     },
+    "home_menu_toggle": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 980,
+        "y": 55
+      }
+    },
+    "home_perks_configuration": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 1025,
+        "y": 520
+      }
+    },
     "goto_modules_home": {
       "roles": [
         "navigation"
@@ -1815,6 +1835,16 @@
         "navigation"
       ]
     },
+    "target_priority": {
+      "roles": [
+        "navigation"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 910,
+        "y": 380
+      }
+    },
     "menu_close_button": {
       "match_template": "navigation/menu_close_button.png",
       "match_region": {
@@ -1905,6 +1935,16 @@
         "type": "tap",
         "x": 540,
         "y": 1550
+      }
+    },
+    "close:target_priority": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 950,
+        "y": 100
       }
     },
     "module:equipped_outer_left_top": {

@@ -59,9 +59,28 @@ def test_no_strategy_observer_records_dissonance_as_observed_not_configured():
     assert snapshot["coverage"] == {
         "observed": 1,
         "evidence_captured": 0,
+        "unavailable": 0,
         "total": len(OBSERVED_FIELDS),
         "complete": False,
     }
+
+
+def test_authoritatively_unavailable_field_counts_as_resolved_coverage():
+    observer = NoStrategyRunObserver(clock=_clock)
+
+    observer.record_unavailable(
+        "damage_slider",
+        reason="Attack menu disabled by Attack Dissonance",
+        source="attack_dissonance_menu_constraint",
+        phase="in_battle",
+    )
+
+    snapshot = observer.snapshot()
+    damage = snapshot["fields"]["damage_slider"]
+    assert damage["status"] == "unavailable"
+    assert damage["value"] is None
+    assert damage["reason"] == "Attack menu disabled by Attack Dissonance"
+    assert snapshot["coverage"]["unavailable"] == 1
 
 
 def test_post_run_value_preserves_home_phase_and_observation_time():
@@ -104,6 +123,37 @@ def test_ultimate_weapon_observations_merge_across_visible_scroll_positions():
 
     field = observer.snapshot()["fields"]["ultimate_weapons"]
     assert field["value"] == {"Poison Swamp": {"primary": "on", "stun": "off"}}
+
+
+def test_selected_preset_labels_are_read_from_fixture_interiors():
+    observer = NoStrategyRunObserver(clock=_clock)
+    samples = (
+        (
+            "cards_deck",
+            "test/fixtures/cards_farm_active_20260717.png",
+            {"state": "CARDS"},
+        ),
+        (
+            "workshop_preset",
+            "test/fixtures/workshop_farm_active_20260714.png",
+            {"state": "WORKSHOP"},
+        ),
+        (
+            "bots_preset",
+            "test/fixtures/event_bots_farm_active_20260713.png",
+            {"state": "EVENT", "secondary_states": ["EVENT_BOTS_SCREEN"]},
+        ),
+    )
+
+    for _field, path, detection in samples:
+        frame = cv2.imread(path)
+        assert frame is not None
+        observer.observe(frame, detection)
+
+    fields = observer.snapshot()["fields"]
+    for field, _path, _detection in samples:
+        assert fields[field]["value"]["label"] == "Farm"
+        assert fields[field]["value"]["label_ocr_confidence"] >= 90.0
 
 
 def test_unknown_post_run_field_is_rejected():

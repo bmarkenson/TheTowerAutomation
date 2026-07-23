@@ -667,6 +667,27 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   validation was used, so the complete natural Game Over path remains in the
   runtime backlog.
 
+### 2026-07-22 automatic No Strategy configuration traversal
+
+- Replaced operator-presented configuration screens with an automation-owned,
+  read-only in-battle pass. It verifies source and destination states while
+  visiting Cards, in-battle Perks, every bounded Ultimate Weapon viewport,
+  Modules, Event Bots, Guild Guardians, and Target Priority, then restores the
+  battle. Damage Slider is read when Attack is accessible and is explicitly
+  unavailable on Attack Dissonance rather than probing its disabled menu.
+- Post-run capture now records the Workshop preset with the read-only Free
+  Upgrade lock pass, opens Cards, expands the Home menu, independently verifies
+  the retained Perks item region, and opens/captures Perks configuration without
+  operator input. The verified `NEW_BATTLE` boundary remains held until all
+  three tabs are captured and the same record is updated.
+- Both phases synchronize Pause before every input. A mid-pass Pause sends no
+  cleanup action; Resume restores a known read-only screen or verified Home and
+  retries the current stage. Focused traversal, pause, terminal-state, visual-
+  guard, app-stage, observer, record-rendering, and clickmap tests cover the new
+  authority boundaries. Repository-wide validation passed 552 sandbox tests;
+  the single localhost HTTP test passed separately with socket permission, for
+  553 total.
+
 ---
 
 ## 📘 Documentation

@@ -307,18 +307,22 @@ Tournament, Tier, or another expected profile.
 During the battle:
 
 1. Start or attach the managed runtime with strategy `none`. If you want to
-   navigate the game manually without racing general handlers, Pause first;
-   passive frame observation continues while paused.
-2. Leave each setting screen visible through at least one normal capture cycle.
-   The observer can read selected Cards, Workshop, and Bots slots; equipped
-   Guardian chips and Modules; Target Priority; Damage Slider; Auto Pick state;
-   and Ultimate Weapon toggles from the applicable visible panels. It merges
-   repeated Ultimate Weapon scroll positions.
+   navigate the game manually, Pause first; passive frame observation continues
+   while paused.
+2. Once `RUNNING` is visible, the runtime takes exclusive ownership of one
+   guarded, read-only inventory pass. It opens and restores Cards, Perks,
+   Ultimate Weapons, Modules, Event/Bots, Guild/Guardians, Target Priority, and
+   the Damage Slider when Attack is accessible. Ultimate Weapon evidence is
+   merged across the complete bounded scroll. Normal handlers do not race this
+   traversal.
 3. The purple sword badge beside Tier records `Attack Dissonance` identity.
    Tier by itself still does not identify a Farm, Milestone, or Dissonance run.
-4. Return to the battle and Resume when automation actions should continue.
-   Fields whose screens were never observed remain explicitly unobserved in the
-   final record.
+   On Attack Dissonance, the collector does not probe the disabled Attack menu;
+   Damage Slider is recorded as unavailable with that reason.
+4. Every tap requires the expected source state and every transition requires
+   the expected destination. Pause is synchronized before each input. If Pause
+   arrives mid-pass, no cleanup input is sent; after Resume, the collector first
+   restores the known read-only screen and safely restarts the pass.
 
 At natural Game Over, No Strategy always performs the full structured capture;
 `--fast-game-over` does not suppress this inventory record. If mode is `WAIT`,
@@ -329,10 +333,10 @@ post-run sequence occurs before any new battle:
 1. Require verified Home `NEW_BATTLE`.
 2. Open Workshop and inspect Shockwave Size, Bounce Shot Targets, and Bounce
    Shot Range lock details with read-only `enforce=False`; no checkbox is
-   changed.
-3. Return Home, open Cards, and hold the normal Home/start handler. The Perks
-   configuration entry itself remains an operator action because it does not
-   yet have an independently verified runtime control. Open that panel manually.
+   changed. The Workshop preset is recorded from the same pass.
+3. Return Home and open Cards. The runtime expands the Home menu, independently
+   verifies the Perks menu item, and opens Perks configuration itself. Normal
+   Home/start handling remains held throughout.
 4. The runtime selects and captures First Perk, Ban Perks, and Auto Pick tabs,
    scrolls each complete list, OCRs selected rows in display/priority order,
    closes the panel, and revalidates Home `NEW_BATTLE`.
@@ -344,9 +348,10 @@ post-run sequence occurs before any new battle:
 Every observation records source, in-battle or post-run phase, confidence, and
 timestamp. A complete but uncertain Perks capture is kept as raw page evidence
 and reported as pending interpretation rather than accepted as a setting. A
-Pause blocks all post-run navigation, and a failed step leaves the next battle
-held with a logged reason and a bounded retry instead of skipping the evidence
-boundary.
+Pause blocks all post-run input. A resumed pass continues from Perks when safe
+or restores verified Home and repeats the current read-only stage. A failed
+step leaves the next battle held with a logged reason and a bounded retry
+instead of skipping the evidence boundary.
 
 The API also verifies that the installed unit advertises this file through
 systemd. If it reports that the unit does not load the file, copy the current

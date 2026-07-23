@@ -6,10 +6,13 @@ import pytest
 
 from core.battle_lifecycle import HomeBattleControl
 from core.no_strategy_post_run import (
+    NoStrategyPostRunPaused,
     NoStrategyPostRunError,
     PERK_TABS,
     capture_post_run_perk_configuration,
+    detect_home_perks_configuration_control,
     inspect_post_run_free_upgrade_locks,
+    open_perks_configuration_for_post_run_capture,
 )
 
 
@@ -44,6 +47,7 @@ def test_post_run_lock_inspection_is_read_only_and_restores_new_battle_home():
                 }
             ),
             changed_labels=(),
+            screenshot=workshop,
         )
 
     result = inspect_post_run_free_upgrade_locks(
@@ -63,6 +67,7 @@ def test_post_run_lock_inspection_is_read_only_and_restores_new_battle_home():
     assert result.values["boundary"] == "NEW_BATTLE"
     assert result.values["changed_labels"] == []
     assert result.home_screenshot is restored
+    assert result.workshop_screenshot is workshop
 
 
 def test_post_run_lock_inspection_rejects_resume_battle_boundary():
@@ -74,6 +79,87 @@ def test_post_run_lock_inspection_rejects_resume_battle_boundary():
                 control=HomeBattleControl.RESUME_BATTLE
             ),
         )
+
+
+def test_home_perks_control_detector_rejects_closed_cards_and_accepts_fixture():
+    closed = cv2.imread("test/fixtures/cards_farm_active_20260717.png")
+    expanded = cv2.imread(
+        "test/fixtures/ui_state_20260714/"
+        "no_battle_perks_configuration_20260719.png"
+    )
+
+    assert detect_home_perks_configuration_control(closed)["visible"] is False
+    assert detect_home_perks_configuration_control(expanded)["visible"] is True
+
+
+def test_post_run_opens_home_perks_control_without_operator_input():
+    home = _frame()
+    cards = cv2.imread("test/fixtures/cards_farm_active_20260717.png")
+    expanded = cv2.imread(
+        "test/fixtures/ui_state_20260714/"
+        "no_battle_perks_configuration_20260719.png"
+    )
+    perks = expanded.copy()
+    phase = {"value": "HOME"}
+    taps = []
+
+    def detector(frame):
+        if frame is home:
+            return {"state": "HOME_SCREEN"}
+        if phase["value"] in {"CARDS", "EXPANDED"}:
+            return {"state": "CARDS"}
+        return {"state": "PERKS"}
+
+    def capture():
+        return {
+            "CARDS": cards,
+            "EXPANDED": expanded,
+            "PERKS": perks,
+        }[phase["value"]]
+
+    def tap(target, **_kwargs):
+        taps.append(target)
+        if target == "navigation.goto_cards_home":
+            phase["value"] = "CARDS"
+        elif target == "navigation.home_menu_toggle":
+            phase["value"] = "EXPANDED"
+        elif target == "navigation.home_perks_configuration":
+            phase["value"] = "PERKS"
+        return True
+
+    result = open_perks_configuration_for_post_run_capture(
+        home,
+        capture_fn=capture,
+        detector=detector,
+        home_control_fn=lambda _frame: SimpleNamespace(
+            control=HomeBattleControl.NEW_BATTLE
+        ),
+        safe_tap_fn=tap,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.cards_screenshot is cards
+    assert result.perks_screenshot is perks
+    assert taps == [
+        "navigation.goto_cards_home",
+        "navigation.home_menu_toggle",
+        "navigation.home_perks_configuration",
+    ]
+
+
+def test_post_run_action_guard_blocks_input_when_pause_arrives():
+    taps = []
+    with pytest.raises(NoStrategyPostRunPaused):
+        open_perks_configuration_for_post_run_capture(
+            _frame(),
+            detector=lambda _frame: {"state": "HOME_SCREEN"},
+            home_control_fn=lambda _frame: SimpleNamespace(
+                control=HomeBattleControl.NEW_BATTLE
+            ),
+            safe_tap_fn=lambda target, **_kwargs: taps.append(target) or True,
+            action_guard_fn=lambda: False,
+        )
+    assert taps == []
 
 
 def test_perk_configuration_capture_records_all_tabs_as_raw_evidence(tmp_path):

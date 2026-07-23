@@ -17,12 +17,13 @@ from core.free_upgrade_locks import (
     inspect_free_upgrade_locks,
 )
 from core.home_battle import detect_home_battle_control
-from core.input import safe_tap, tap_if_visible
+from core.input import safe_tap, swipe_now, tap_if_visible
 from core.label_tapper import is_visible
 from core.perk_configuration import parse_perk_configuration_selection
 from core.scrolling import capture_scroll_to_edge, scroll_to_edge
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
+from core.upgrade_navigation import swipe_upgrade_menu
 from core.workshop_preset import measure_preset_slot_selection
 from utils.logger import log
 
@@ -33,6 +34,8 @@ Detector = Callable[[Frame], Mapping[str, Any]]
 
 PERK_CONFIGURATION_INDICATOR = "indicators.perks_configuration"
 PERK_CONTENT_REGION = (100, 420, 880, 1330)
+HOME_PERKS_CONTROL_REGION = (985, 475, 90, 100)
+_MIN_HOME_PERKS_GRAY_PIXELS = 800
 PERK_TABS = (
     ("perk_first_choice", "First Perk", (218, 210, 210, 90)),
     ("perk_bans", "Ban Perks", (436, 210, 210, 90)),
@@ -44,6 +47,13 @@ PERK_TABS = (
 class PostRunLockResult:
     values: Mapping[str, Any]
     home_screenshot: Frame
+    workshop_screenshot: Frame
+
+
+@dataclass(frozen=True)
+class PostRunPerksOpenResult:
+    cards_screenshot: Frame
+    perks_screenshot: Frame
 
 
 @dataclass(frozen=True)
@@ -56,6 +66,44 @@ class NoStrategyPostRunError(RuntimeError):
     pass
 
 
+class NoStrategyPostRunPaused(NoStrategyPostRunError):
+    pass
+
+
+def detect_home_perks_configuration_control(
+    screenshot: Optional[Frame],
+) -> dict[str, Any]:
+    """Recognize the expanded Home-menu Perks item beside Cards."""
+
+    x, y, width, height = HOME_PERKS_CONTROL_REGION
+    if (
+        screenshot is None
+        or not isinstance(screenshot, np.ndarray)
+        or screenshot.ndim != 3
+        or y + height > screenshot.shape[0]
+        or x + width > screenshot.shape[1]
+    ):
+        return {
+            "visible": False,
+            "gray_pixels": 0,
+            "region": list(HOME_PERKS_CONTROL_REGION),
+        }
+    crop = screenshot[y : y + height, x : x + width]
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    gray_pixels = int(
+        (
+            (hsv[:, :, 1] < 60)
+            & (hsv[:, :, 2] >= 20)
+        ).sum()
+    )
+    return {
+        "visible": gray_pixels >= _MIN_HOME_PERKS_GRAY_PIXELS,
+        "gray_pixels": gray_pixels,
+        "minimum_gray_pixels": _MIN_HOME_PERKS_GRAY_PIXELS,
+        "region": list(HOME_PERKS_CONTROL_REGION),
+    }
+
+
 def inspect_post_run_free_upgrade_locks(
     home_screenshot: Frame,
     *,
@@ -64,12 +112,23 @@ def inspect_post_run_free_upgrade_locks(
     home_control_fn: Callable[[Frame], Any] = detect_home_battle_control,
     safe_tap_fn: Callable[..., bool] = safe_tap,
     inspect_fn: Callable[..., Any] = inspect_free_upgrade_locks,
+    workshop_swipe_fn: Callable[[str, str], Any] = swipe_upgrade_menu,
+    action_guard_fn: Optional[Callable[[], bool]] = None,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> PostRunLockResult:
     """Inspect supported lock details and restore verified no-battle Home."""
 
     _require_new_battle_home(home_screenshot, detector, home_control_fn)
-    if not safe_tap_fn(
+
+    def guarded_tap(*args, **kwargs) -> bool:
+        _require_action(action_guard_fn)
+        return bool(safe_tap_fn(*args, **kwargs))
+
+    def guarded_swipe(direction: str, span: str) -> Any:
+        _require_action(action_guard_fn)
+        return workshop_swipe_fn(direction, span)
+
+    if not guarded_tap(
         "navigation.goto_workshop_home",
         require_visible=False,
         dispatch="now",
@@ -85,7 +144,8 @@ def inspect_post_run_free_upgrade_locks(
         enforce=False,
         capture_fn=capture_fn,
         detector=detector,
-        safe_tap_fn=safe_tap_fn,
+        safe_tap_fn=guarded_tap,
+        swipe_fn=guarded_swipe,
         sleep_fn=sleep_fn,
     )
     if getattr(result, "changed_labels", ()):
@@ -96,7 +156,8 @@ def inspect_post_run_free_upgrade_locks(
         checked=True,
         changed_labels=[],
     )
-    if not safe_tap_fn(
+    workshop_observation = result.screenshot
+    if not guarded_tap(
         "navigation.goto_home",
         require_visible=False,
         dispatch="now",
@@ -112,21 +173,23 @@ def inspect_post_run_free_upgrade_locks(
         "INFO",
         console=True,
     )
-    return PostRunLockResult(values, home)
+    return PostRunLockResult(values, home, workshop_observation)
 
 
-def open_cards_for_post_run_perk_capture(
+def open_perks_configuration_for_post_run_capture(
     home_screenshot: Frame,
     *,
     capture_fn: Capture = capture_adb_screenshot,
     detector: Detector = detect_state_and_overlays,
     home_control_fn: Callable[[Frame], Any] = detect_home_battle_control,
     safe_tap_fn: Callable[..., bool] = safe_tap,
+    action_guard_fn: Optional[Callable[[], bool]] = None,
     sleep_fn: Callable[[float], None] = time.sleep,
-) -> Frame:
-    """Open Cards and stop before the unverified Perks-configuration control."""
+) -> PostRunPerksOpenResult:
+    """Open Cards, verify its expanded menu, and open Perks configuration."""
 
     _require_new_battle_home(home_screenshot, detector, home_control_fn)
+    _require_action(action_guard_fn)
     if not safe_tap_fn(
         "navigation.goto_cards_home",
         require_visible=False,
@@ -137,13 +200,77 @@ def open_cards_for_post_run_perk_capture(
     cards = _wait_for(
         "CARDS", capture_fn=capture_fn, detector=detector, sleep_fn=sleep_fn
     )
+    perks = open_perks_configuration_from_cards(
+        cards,
+        capture_fn=capture_fn,
+        detector=detector,
+        safe_tap_fn=safe_tap_fn,
+        action_guard_fn=action_guard_fn,
+        sleep_fn=sleep_fn,
+    )
     log(
-        "[NO_STRATEGY] Post-run record is holding the next battle. Open the "
-        "Perks configuration panel; its three tabs will be captured read-only.",
+        "[NO_STRATEGY] Opened Home Perks configuration for automatic "
+        "read-only capture",
         "INFO",
         console=True,
     )
-    return cards
+    return PostRunPerksOpenResult(cards, perks)
+
+
+def open_perks_configuration_from_cards(
+    cards_screenshot: Frame,
+    *,
+    capture_fn: Capture = capture_adb_screenshot,
+    detector: Detector = detect_state_and_overlays,
+    safe_tap_fn: Callable[..., bool] = safe_tap,
+    action_guard_fn: Optional[Callable[[], bool]] = None,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> Frame:
+    """Open the verified Home-menu Perks item from a Cards screen."""
+
+    if detector(cards_screenshot).get("state") != "CARDS":
+        raise NoStrategyPostRunError("Perks configuration requires Cards")
+    current = cards_screenshot
+    evidence = detect_home_perks_configuration_control(current)
+    if not evidence["visible"]:
+        _require_action(action_guard_fn)
+        if not safe_tap_fn(
+            "navigation.home_menu_toggle",
+            require_visible=False,
+            dispatch="now",
+            log_label="no_strategy_post_run:home_menu",
+        ):
+            raise NoStrategyPostRunError("Home menu toggle tap failed on Cards")
+        for _ in range(12):
+            sleep_fn(0.25)
+            current = capture_fn()
+            if current is None:
+                continue
+            if detector(current).get("state") != "CARDS":
+                raise NoStrategyPostRunError("Cards was lost while opening Home menu")
+            evidence = detect_home_perks_configuration_control(current)
+            if evidence["visible"]:
+                break
+        else:
+            raise NoStrategyPostRunError(
+                "Home Perks menu item was not independently verified"
+            )
+    _require_action(action_guard_fn)
+    if not safe_tap_fn(
+        "navigation.home_perks_configuration",
+        require_visible=False,
+        dispatch="now",
+        log_label="no_strategy_post_run:perks_configuration",
+    ):
+        raise NoStrategyPostRunError("Perks configuration tap failed")
+    perks = _wait_for(
+        "PERKS", capture_fn=capture_fn, detector=detector, sleep_fn=sleep_fn
+    )
+    if not is_visible(PERK_CONFIGURATION_INDICATOR, screenshot=perks):
+        raise NoStrategyPostRunError(
+            "Perks destination was not the Home configuration panel"
+        )
+    return perks
 
 
 def capture_post_run_perk_configuration(
@@ -159,6 +286,8 @@ def capture_post_run_perk_configuration(
     visible_fn: Callable[..., bool] = is_visible,
     scroll_top_fn: Callable[..., Any] = scroll_to_edge,
     capture_scroll_fn: Callable[..., Any] = capture_scroll_to_edge,
+    swipe_fn: Callable[[str], bool] = swipe_now,
+    action_guard_fn: Optional[Callable[[], bool]] = None,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> PerkConfigurationCapture:
     """Capture all Perks configuration tabs, preserving raw evidence pages."""
@@ -171,6 +300,11 @@ def capture_post_run_perk_configuration(
     directory = Path(evidence_root) / _safe_slug(battle_id) / "perk_configuration"
     fields: dict[str, Mapping[str, Any]] = {}
     current = screenshot
+
+    def guarded_swipe(label: str) -> bool:
+        _require_action(action_guard_fn)
+        return bool(swipe_fn(label))
+
     for field, label, region in PERK_TABS:
         current = _select_perk_tab(
             current,
@@ -180,6 +314,7 @@ def capture_post_run_perk_configuration(
             detector=detector,
             safe_tap_fn=safe_tap_fn,
             visible_fn=visible_fn,
+            action_guard_fn=action_guard_fn,
             sleep_fn=sleep_fn,
         )
         top = scroll_top_fn(
@@ -191,6 +326,7 @@ def capture_post_run_perk_configuration(
             settle_s=0.8,
             capture_fn=capture_fn,
             visible_fn=visible_fn,
+            swipe_fn=guarded_swipe,
             sleep_fn=sleep_fn,
         )
         if top.screenshot is None:
@@ -204,6 +340,7 @@ def capture_post_run_perk_configuration(
             settle_s=0.8,
             capture_fn=capture_fn,
             visible_fn=visible_fn,
+            swipe_fn=guarded_swipe,
             sleep_fn=sleep_fn,
         )
         pages = list(capture.screenshots)
@@ -224,6 +361,7 @@ def capture_post_run_perk_configuration(
         fields[field]["tab"] = label
         current = pages[-1]
 
+    _require_action(action_guard_fn)
     if not tap_visible_fn(
         "buttons.close:perks", screenshot=current, retries=1
     ):
@@ -231,6 +369,7 @@ def capture_post_run_perk_configuration(
     cards = _wait_for(
         "CARDS", capture_fn=capture_fn, detector=detector, sleep_fn=sleep_fn
     )
+    _require_action(action_guard_fn)
     if not safe_tap_fn(
         "navigation.goto_home",
         require_visible=False,
@@ -261,6 +400,7 @@ def _select_perk_tab(
     detector: Detector,
     safe_tap_fn: Callable[..., bool],
     visible_fn: Callable[..., bool],
+    action_guard_fn: Optional[Callable[[], bool]],
     sleep_fn: Callable[[float], None],
 ) -> Frame:
     selection = measure_preset_slot_selection(current, region)
@@ -271,6 +411,7 @@ def _select_perk_tab(
     ):
         raise NoStrategyPostRunError(f"lost Perks configuration before {label}")
     x, y, width, height = region
+    _require_action(action_guard_fn)
     if not safe_tap_fn(
         (x + width // 2, y + height // 2),
         require_visible=False,
@@ -318,6 +459,58 @@ def _require_new_battle_home(frame, detector, home_control_fn) -> None:
         )
 
 
+def restore_post_run_home(
+    screenshot: Frame,
+    *,
+    capture_fn: Capture = capture_adb_screenshot,
+    detector: Detector = detect_state_and_overlays,
+    home_control_fn: Callable[[Frame], Any] = detect_home_battle_control,
+    safe_tap_fn: Callable[..., bool] = safe_tap,
+    tap_visible_fn: Callable[..., bool] = tap_if_visible,
+    action_guard_fn: Optional[Callable[[], bool]] = None,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> Frame:
+    """Restore a paused/retried post-run pass to verified no-battle Home."""
+
+    current = screenshot
+    state = str(detector(current).get("state") or "UNKNOWN")
+    if state == "HOME_SCREEN":
+        _require_new_battle_home(current, detector, home_control_fn)
+        return current
+    if state == "PERKS" and is_visible(
+        PERK_CONFIGURATION_INDICATOR, screenshot=current
+    ):
+        _require_action(action_guard_fn)
+        if not tap_visible_fn("buttons.close:perks", screenshot=current, retries=1):
+            raise NoStrategyPostRunError("could not close Perks configuration")
+        current = _wait_for(
+            "CARDS", capture_fn=capture_fn, detector=detector, sleep_fn=sleep_fn
+        )
+        state = "CARDS"
+    if state not in {"CARDS", "WORKSHOP"}:
+        raise NoStrategyPostRunError(
+            f"cannot restore post-run Home from state={state}"
+        )
+    _require_action(action_guard_fn)
+    if not safe_tap_fn(
+        "navigation.goto_home",
+        require_visible=False,
+        dispatch="now",
+        log_label="no_strategy_post_run:restore_home",
+    ):
+        raise NoStrategyPostRunError("post-run Home restoration tap failed")
+    home = _wait_for(
+        "HOME_SCREEN", capture_fn=capture_fn, detector=detector, sleep_fn=sleep_fn
+    )
+    _require_new_battle_home(home, detector, home_control_fn)
+    return home
+
+
+def _require_action(action_guard_fn: Optional[Callable[[], bool]]) -> None:
+    if action_guard_fn is not None and not action_guard_fn():
+        raise NoStrategyPostRunPaused("automation paused during post-run inventory")
+
+
 def _save_evidence_pages(
     directory: Path,
     field: str,
@@ -339,11 +532,17 @@ def _safe_slug(value: str) -> str:
 
 __all__ = [
     "NoStrategyPostRunError",
+    "NoStrategyPostRunPaused",
+    "HOME_PERKS_CONTROL_REGION",
     "PERK_CONFIGURATION_INDICATOR",
     "PERK_TABS",
     "PerkConfigurationCapture",
     "PostRunLockResult",
+    "PostRunPerksOpenResult",
     "capture_post_run_perk_configuration",
+    "detect_home_perks_configuration_control",
     "inspect_post_run_free_upgrade_locks",
-    "open_cards_for_post_run_perk_capture",
+    "open_perks_configuration_for_post_run_capture",
+    "open_perks_configuration_from_cards",
+    "restore_post_run_home",
 ]

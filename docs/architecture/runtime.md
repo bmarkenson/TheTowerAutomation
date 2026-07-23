@@ -121,9 +121,12 @@ Tier while remaining `unknown` rather than fabricating Farm or Milestone type.
 `No Strategy` supplies no configured run intent and owns no upgrade actions,
 startup initialization, or session-preflight gate. It is nevertheless an
 observation profile: after an active `RUNNING` frame establishes the battle, it
-passively accumulates actual values from already-visible Cards, Workshop, Bots,
-Guardians, Modules, Target Priority, Damage Slider, Perks, and Ultimate Weapon
-screens. Missing screens remain explicitly `not_observed`; their values are
+owns one exclusive, guarded read-only traversal of Cards, Bots, Guardians,
+Modules, Target Priority, Damage Slider when accessible, Perks, and Ultimate
+Weapons. Every action is source-state guarded, every destination is verified,
+and Pause is synchronized before each input. Workshop remains a Home-boundary
+observation. Missing screens remain explicitly `not_observed`; authoritatively
+inaccessible controls are recorded as `unavailable` with a reason. Values are
 never copied from a Farm or Tournament profile. This evidence is stored under
 `observed_run_configuration`, separately from the configured-intent
 `run_configuration` field.
@@ -131,26 +134,30 @@ never copied from a Farm or Tournament profile. This evidence is stored under
 The fixed purple sword badge next to Tier is localized Attack Dissonance
 identity evidence. Standard Game Over plus that badge supports a high-confidence
 `dissonance` classification; Tier without the badge still remains `unknown`.
-The observer does not probe the disabled Attack menu or treat a failed action as
-identity evidence.
+The collector does not probe the disabled Attack menu or treat a failed action
+as identity evidence; on Attack Dissonance it records Damage Slider as
+unavailable because that control cannot be inspected during the run.
 
 Home-only facts use a second phase after natural completion. No Strategy forces
 full structured Game Over capture and the Home terminal action, even if the
 process was launched with fast Game Over capture. At verified Home
 `NEW_BATTLE`, the runtime reads the three currently supported Free Upgrade lock
 details with `enforce=False`, so checkbox state is observed but never changed.
-It then opens Cards and holds all normal Home/start handling until the operator
-opens the Perks configuration panel. The runtime may select the read-only First
-Perk, Ban Perks, and Auto Pick tabs, scroll each to its verified edge, OCR the
-dark selected rows independently of the brighter available rows, close the
-panel, and revalidate Home `NEW_BATTLE`. The same battle record is atomically
-updated after the lock phase and again after Perks capture. Each field retains
-its source, confidence, phase, and observation timestamp; uncertain parsing
-retains raw page images instead of manufacturing a structured value.
+It records the Workshop preset, returns Home, opens Cards, expands the Home
+menu, independently verifies its Perks item, and opens the configuration panel
+itself. The runtime selects the read-only First Perk, Ban Perks, and Auto Pick
+tabs, scrolls each to its verified edge, OCRs the dark selected rows
+independently of the brighter available rows, closes the panel, and revalidates
+Home `NEW_BATTLE`. The same battle record is atomically updated after the lock
+phase and again after Perks capture. Each field retains its source, confidence,
+phase, and observation timestamp; uncertain parsing retains raw page images
+instead of manufacturing a structured value.
 
-Pause continues to block this post-run navigation. Game Over `WAIT` must first
-receive an actionable direction; No Strategy then overrides Retry to Home so a
-new battle cannot start before its Home-only evidence is attached.
+Pause continues to block every inventory input. An interrupted pass resumes
+from a known read-only screen or restores verified Home before retrying its
+stage. Game Over `WAIT` must first receive an actionable direction; No Strategy
+then overrides Retry to Home so a new battle cannot start before its Home-only
+evidence is attached.
 
 ## State and battle lifecycle
 

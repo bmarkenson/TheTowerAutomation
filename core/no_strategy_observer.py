@@ -262,6 +262,29 @@ class NoStrategyRunObserver:
             "observed_at": observed_at or self._timestamp(),
         }
 
+    def record_unavailable(
+        self,
+        field: str,
+        *,
+        reason: str,
+        source: str,
+        phase: str,
+        observed_at: Optional[str] = None,
+    ) -> None:
+        """Resolve a field whose control is authoritatively inaccessible."""
+
+        if field not in self._fields:
+            raise ValueError(f"unknown No Strategy observation field {field!r}")
+        self._fields[field] = {
+            "status": "unavailable",
+            "value": None,
+            "reason": str(reason),
+            "source": source,
+            "phase": phase,
+            "confidence": "high",
+            "observed_at": observed_at or self._timestamp(),
+        }
+
     def snapshot(self, *, finalized: bool = False) -> dict[str, Any]:
         observed = sum(
             field["status"] == "observed" for field in self._fields.values()
@@ -270,8 +293,11 @@ class NoStrategyRunObserver:
             field["status"] == "evidence_captured"
             for field in self._fields.values()
         )
+        unavailable = sum(
+            field["status"] == "unavailable" for field in self._fields.values()
+        )
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "collection_mode": "no_strategy_observation",
             "started_at": self._started_at,
             "finalized_at": self._timestamp() if finalized else None,
@@ -279,8 +305,11 @@ class NoStrategyRunObserver:
             "coverage": {
                 "observed": observed,
                 "evidence_captured": evidence_captured,
+                "unavailable": unavailable,
                 "total": len(self._fields),
-                "complete": observed + evidence_captured == len(self._fields),
+                "complete": (
+                    observed + evidence_captured + unavailable == len(self._fields)
+                ),
             },
             "fields": {name: dict(value) for name, value in self._fields.items()},
         }
@@ -300,7 +329,14 @@ class NoStrategyRunObserver:
         if len(selected) != 1:
             return
         index, (x, y, width, height), evidence = selected[0]
-        label_crop = frame[y : y + height, x : x + width]
+        # The luminous selected border confuses Tesseract on otherwise clear
+        # short preset names. Keep selection measurement on the full region,
+        # but OCR only the stable interior label.
+        inset = 15
+        label_crop = frame[
+            y + inset : y + height - inset,
+            x + inset : x + width - inset,
+        ]
         label, ocr_confidence = ocr_text_and_conf(label_crop, psm=7)
         normalized = " ".join(str(label or "").split())
         self._set(

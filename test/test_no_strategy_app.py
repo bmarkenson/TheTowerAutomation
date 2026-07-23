@@ -5,6 +5,11 @@ import numpy as np
 
 from automation.missions.base import MissionContext
 from core.app import App
+from core.no_strategy_inventory import (
+    NoStrategyInventoryResult,
+    NoStrategyInventoryStatus,
+)
+from core.no_strategy_post_run import NoStrategyPostRunPaused
 
 
 def _app_without_strategy():
@@ -17,6 +22,7 @@ def _app_without_strategy():
     app._last_wave_value = 2470
     app._last_wave_conf = 99.0
     app._supervisor = MagicMock()
+    app._supervisor.is_paused = False
     app._status_reporter = MagicMock()
     app._status_reporter.coin_rate_samples = []
     app._pending_strategy_request = None
@@ -29,6 +35,8 @@ def _app_without_strategy():
         "fields": {"run_identity": {"status": "observed"}}
     }
     app._no_strategy_observation_active = True
+    app._no_strategy_inventory_complete = False
+    app._no_strategy_inventory_retry_at = 0.0
     app._pending_no_strategy_record = None
     app._no_strategy_post_run_stage = None
     app._no_strategy_post_run_retry_at = 0.0
@@ -54,7 +62,7 @@ def test_no_strategy_game_over_forces_full_capture_and_home_inventory():
     assert app._no_strategy_post_run_stage == "locks"
 
 
-def test_post_run_home_records_locks_then_holds_on_cards_for_perks():
+def test_post_run_home_records_locks_then_automatically_opens_perks():
     app = _app_without_strategy()
     app._pending_no_strategy_record = {"battle_id": "Battle1"}
     app._no_strategy_post_run_stage = "locks"
@@ -64,6 +72,7 @@ def test_post_run_home_records_locks_then_holds_on_cards_for_perks():
     lock_result = SimpleNamespace(
         values={"locks": [{"label": "Shockwave Size", "state": "checked"}]},
         home_screenshot=restored,
+        workshop_screenshot=np.full((1920, 1080, 3), 2, dtype=np.uint8),
     )
 
     with (
@@ -71,7 +80,10 @@ def test_post_run_home_records_locks_then_holds_on_cards_for_perks():
             "core.app.inspect_post_run_free_upgrade_locks",
             return_value=lock_result,
         ),
-        patch("core.app.open_cards_for_post_run_perk_capture") as open_cards,
+        patch(
+            "core.app.open_perks_configuration_for_post_run_capture",
+            side_effect=NoStrategyPostRunPaused("paused"),
+        ) as open_perks,
     ):
         handled = app._handle_no_strategy_post_run("HOME_SCREEN", frame)
 
@@ -82,14 +94,15 @@ def test_post_run_home_records_locks_then_holds_on_cards_for_perks():
         source="home_workshop_lock_details",
     )
     app._persist_pending_no_strategy_record.assert_called_once_with(finalized=False)
-    open_cards.assert_called_once_with(restored)
-    assert app._no_strategy_post_run_stage == "awaiting_perks"
+    open_perks.assert_called_once()
+    assert open_perks.call_args.args == (restored,)
+    assert app._no_strategy_post_run_stage == "perks"
 
 
 def test_post_run_perk_capture_finalizes_same_record_and_releases_boundary():
     app = _app_without_strategy()
     app._pending_no_strategy_record = {"battle_id": "Battle1"}
-    app._no_strategy_post_run_stage = "awaiting_perks"
+    app._no_strategy_post_run_stage = "perks"
     app._persist_pending_no_strategy_record = MagicMock()
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
     capture = SimpleNamespace(
@@ -101,7 +114,6 @@ def test_post_run_perk_capture_finalizes_same_record_and_releases_boundary():
     )
 
     with (
-        patch("core.app.is_visible", return_value=True),
         patch(
             "core.app.capture_post_run_perk_configuration",
             return_value=capture,
@@ -116,6 +128,26 @@ def test_post_run_perk_capture_finalizes_same_record_and_releases_boundary():
     assert app._pending_no_strategy_record is None
     assert app._no_strategy_post_run_stage is None
     assert app._no_strategy_observation_active is False
+
+
+def test_automatic_in_battle_inventory_is_exclusive_and_runs_once():
+    app = _app_without_strategy()
+    result = NoStrategyInventoryResult(
+        NoStrategyInventoryStatus.COMPLETE,
+        "complete",
+    )
+
+    with patch(
+        "core.app.run_no_strategy_in_battle_inventory",
+        return_value=result,
+    ) as inventory:
+        handled = app._handle_no_strategy_in_battle_inventory({"state": "RUNNING"})
+        repeated = app._handle_no_strategy_in_battle_inventory({"state": "RUNNING"})
+
+    assert handled is True
+    assert repeated is False
+    inventory.assert_called_once()
+    assert app._no_strategy_inventory_complete is True
 
 
 def test_pending_post_run_inventory_blocks_normal_home_handler():

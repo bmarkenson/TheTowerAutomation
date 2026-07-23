@@ -1040,7 +1040,8 @@ def render_battle_markdown(record: Mapping[str, Any]) -> str:
             lines.append(
                 "Coverage: "
                 f"{coverage.get('observed', 0)} interpreted + "
-                f"{coverage.get('evidence_captured', 0)} raw-evidence / "
+                f"{coverage.get('evidence_captured', 0)} raw-evidence + "
+                f"{coverage.get('unavailable', 0)} unavailable / "
                 f"{coverage.get('total', 0)} fields"
             )
         fields = observed_configuration.get("fields") or {}
@@ -1076,6 +1077,13 @@ def render_battle_markdown(record: Mapping[str, Any]) -> str:
                         f"- {label}: raw evidence captured; structured interpretation "
                         f"pending ({rendered_paths or 'no image path'})"
                     )
+                    continue
+                if status == "unavailable":
+                    reason = evidence.get("reason") or "control unavailable"
+                    phase = str(evidence.get("phase") or "unknown phase").replace(
+                        "_", " "
+                    )
+                    lines.append(f"- {label}: unavailable ({reason}; {phase})")
                     continue
                 if status != "observed":
                     not_observed.append(label)

@@ -80,13 +80,14 @@ This keeps the regular capture, detection, lifecycle, Game Over, Home, ad-gem,
 Daily Gem, Daily/Event Mission reward, Guild chest, floating-gem, status, and
 recovery handlers running. It loads no Farm strategy, so there are no strategy
 upgrade actions, new-run initialization gate, or session-preflight gate. While
-an active battle is visible, it passively records actual settings from any
-configuration panel the operator opens; it never substitutes a familiar Farm
-profile for missing evidence. At natural Game Over it captures the full battle
-record, returns to verified no-battle Home, reads the supported Free Upgrade
-locks without changing them, and holds the next-battle path on Cards until the
-operator opens Perks configuration. It then captures First Perk, Ban Perks, and
-Auto Pick order, updates the same battle JSON/Markdown, and releases Home. See
+an active battle is visible, it runs one guarded read-only traversal of the
+accessible configuration panels and records their actual values; it never
+substitutes a familiar Farm profile for missing evidence. At natural Game Over
+it captures the full battle record, returns to verified no-battle Home, reads
+the Workshop preset and supported Free Upgrade locks without changing them,
+opens the guarded Home Perks configuration control itself, captures First Perk,
+Ban Perks, and Auto Pick order, updates the same battle JSON/Markdown, and
+releases Home. See
 [`docs/runtime_operations.md`](docs/runtime_operations.md#no-strategy-run-inventory)
 for the exact workflow. The default remains `farm` when `--strategy` is
 omitted.

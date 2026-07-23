@@ -9,11 +9,13 @@ checked-item detail remains in the
 ## Current validation gates
 
 - [ ] Live-validate the No Strategy two-phase inventory at the next natural Game
-  Over. Confirm the in-battle Attack Dissonance observation, full terminal
-  record, forced verified Home `NEW_BATTLE`, read-only Free Upgrade lock pass,
-  Cards hold, operator-opened Perks configuration, complete First Perk/Ban/Auto
-  Pick tab capture, update of the same battle record, and release of the next-
-  battle path. Do not Surrender or manufacture the boundary.
+  Over. Confirm the automatic in-battle Cards/Perks/UW/Modules/Bots/Guardians/
+  Target Priority traversal, Attack Dissonance identity and Damage Slider
+  unavailability, full terminal record, forced verified Home `NEW_BATTLE`,
+  read-only Workshop/Free Upgrade lock pass, independently guarded automatic
+  Perks opening, complete First Perk/Ban/Auto Pick capture, update of the same
+  battle record, and release of the next-battle path. Do not Surrender or
+  manufacture the boundary.
 - [ ] Complete live validation of guarded **Reload automation for current
   battle**.
   - [x] On the active No Strategy Attack Dissonance battle at wave 3314, the
