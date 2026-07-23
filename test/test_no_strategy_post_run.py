@@ -170,6 +170,37 @@ def test_duplicate_terminal_captures_recover_the_record_with_best_observations(
     assert loaded == canonical
 
 
+def test_finalized_terminal_capture_suppresses_unfinished_duplicate(tmp_path):
+    now = datetime(2026, 7, 23, 2, 30, tzinfo=timezone.utc)
+
+    def record(name, minutes_ago, finalized):
+        return {
+            "battle_id": name,
+            "captured_at": (now - timedelta(minutes=minutes_ago)).isoformat(),
+            "strategy": None,
+            "game_stats": {
+                "fields": {
+                    "tier": {"value": 18},
+                    "wave": {"value": 5390},
+                    "total_coins_earned": {"decimal": "1270000000000000.00"},
+                }
+            },
+            "observed_run_configuration": {
+                "collection_mode": "no_strategy_observation",
+                "finalized": finalized,
+            },
+        }
+
+    complete = record("BattleComplete", 30, True)
+    duplicate = record("BattleDuplicate", 5, False)
+    for item in (complete, duplicate):
+        (tmp_path / f"{item['battle_id']}.json").write_text(
+            json.dumps(item), encoding="utf-8"
+        )
+
+    assert load_pending_no_strategy_record(records_dir=tmp_path, now=now) is None
+
+
 def test_home_perks_control_detector_rejects_closed_cards_and_accepts_fixture():
     closed = cv2.imread("test/fixtures/cards_farm_active_20260717.png")
     expanded = cv2.imread(

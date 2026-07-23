@@ -88,6 +88,7 @@ def load_pending_no_strategy_record(
         reverse=True,
     )
     recoverable: list[tuple[datetime, dict[str, Any]]] = []
+    finalized_fingerprints: set[tuple[Any, ...]] = set()
     for path in candidates:
         try:
             record = json.loads(path.read_text(encoding="utf-8"))
@@ -97,16 +98,24 @@ def load_pending_no_strategy_record(
             continue
         if record.get("strategy") is not None or not isinstance(observed, Mapping):
             continue
-        if (
-            observed.get("collection_mode") != "no_strategy_observation"
-            or observed.get("finalized") is True
-        ):
+        if observed.get("collection_mode") != "no_strategy_observation":
             continue
         if captured_at.tzinfo is None:
             continue
         age = current_time - captured_at.astimezone(current_time.tzinfo)
         if timedelta(0) <= age <= recovery_window:
-            recoverable.append((captured_at, record))
+            if observed.get("finalized") is True:
+                fingerprint = _terminal_record_fingerprint(record)
+                if fingerprint:
+                    finalized_fingerprints.add(fingerprint)
+            else:
+                recoverable.append((captured_at, record))
+    recoverable = [
+        item
+        for item in recoverable
+        if not _terminal_record_fingerprint(item[1])
+        or _terminal_record_fingerprint(item[1]) not in finalized_fingerprints
+    ]
     if not recoverable:
         return None
     recoverable.sort(key=lambda item: item[0], reverse=True)
