@@ -230,7 +230,9 @@ def ensure_gc_module_loadout(
     break a cycle where every desired module is currently equipped in another
     wrong slot. Every inventory choice is confirmed by its detail name before
     the Equip action, and the complete overview is re-evaluated after each
-    transition.
+    transition. Every level-transfer prompt is accepted so the role's existing
+    module level follows the replacement; an unverified prompt blocks the
+    correction.
     """
 
     selected_catalog = catalog or load_module_icon_catalog()
@@ -827,24 +829,24 @@ def _equip_inventory_module(
         frame = _capture_modules(capture_fn, detector)
         if _transfer_prompt_visible(frame):
             if not safe_tap_fn(
-                "buttons.module:decline_level_transfer",
+                "buttons.module:accept_level_transfer",
                 dispatch="now",
                 verification=TapVerification(
                     screenshot=frame,
-                    target_region=(220, 1040, 270, 170),
-                    description="module_level_transfer:decline",
+                    target_region=(590, 1040, 270, 170),
+                    description="module_level_transfer:accept",
                     verifier=_transfer_prompt_visible,
                 ),
             ):
                 raise ModuleLoadoutCorrectionError(
-                    "failed to decline module level transfer"
+                    "failed to accept module level transfer"
                 )
             return _wait_for(
                 _overview_visible,
                 capture_fn=capture_fn,
                 detector=detector,
                 sleep_fn=sleep_fn,
-                reason="Modules overview after declined level transfer",
+                reason="Modules overview after accepted level transfer",
             )
         if _overview_visible(frame):
             return frame

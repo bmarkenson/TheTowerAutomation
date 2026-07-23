@@ -11,6 +11,7 @@ from core.gc_module_loadout import (
     MODULE_DETAIL_SETTLE_SECONDS,
     ModuleDetailEvidence,
     ModuleLoadoutCorrectionError,
+    _equip_inventory_module,
     _find_inventory_detail,
     _scroll_inventory_to_top,
     _detail_ready,
@@ -19,7 +20,7 @@ from core.gc_module_loadout import (
     evaluate_gc_module_loadout,
     normalize_gc_module_requirements,
 )
-from core.clickmap_access import get_swipe
+from core.clickmap_access import get_click, get_swipe, resolve_dot_path
 from core.module_icon_index import load_module_icon_catalog
 
 
@@ -181,6 +182,141 @@ def test_module_correction_refuses_unknown_overview_evidence():
             unequip_fn=lambda _slot: pytest.fail("must not unequip"),
         )
     assert not GcModuleLoadoutEvidence(tuple(uncertain)).has_authoritative_mismatch
+
+
+@pytest.mark.parametrize("role", ("primary", "assist"))
+def test_module_replacement_always_accepts_level_transfer(role):
+    detail = np.full((1920, 1080, 3), 10, dtype=np.uint8)
+    role_prompt = np.full((1920, 1080, 3), 20, dtype=np.uint8)
+    transfer_prompt = np.full((1920, 1080, 3), 30, dtype=np.uint8)
+    overview = np.full((1920, 1080, 3), 40, dtype=np.uint8)
+    captures = iter((role_prompt, transfer_prompt))
+    taps = []
+    slot = GcModuleSlotEvidence(
+        slot_key=f"cannon_{role}",
+        family="cannon",
+        role=role,
+        expected="Being Annihilator",
+        actual="Project Funding",
+        match_status="matched",
+        valid=False,
+        confidence=1.0,
+        margin=1.0,
+        green_fraction=1.0,
+    )
+
+    def safe_tap(target, **kwargs):
+        verification = kwargs["verification"]
+        point = get_click(target)
+        assert point is not None
+        assert verification.authorizes(point)
+        taps.append((target, verification.description))
+        return True
+
+    def wait_for(_predicate, *, reason, **_kwargs):
+        if reason == "Primary/Assist module role prompt":
+            return role_prompt
+        assert reason == "Modules overview after accepted level transfer"
+        return overview
+
+    with (
+        patch("core.gc_module_loadout._find_inventory_detail", return_value=detail),
+        patch("core.gc_module_loadout._detail_for", return_value=True),
+        patch(
+            "core.gc_module_loadout._role_prompt_visible",
+            side_effect=lambda frame: int(frame[0, 0, 0]) == 20,
+        ),
+        patch(
+            "core.gc_module_loadout._transfer_prompt_visible",
+            side_effect=lambda frame: int(frame[0, 0, 0]) == 30,
+        ),
+        patch(
+            "core.gc_module_loadout._overview_visible",
+            side_effect=lambda frame: int(frame[0, 0, 0]) == 40,
+        ),
+        patch("core.gc_module_loadout._capture_modules", side_effect=captures),
+        patch("core.gc_module_loadout._wait_for", side_effect=wait_for),
+    ):
+        result = _equip_inventory_module(
+            slot,
+            capture_fn=lambda: pytest.fail("capture is wrapped"),
+            detector=lambda _frame: {"state": "MODULES"},
+            safe_tap_fn=safe_tap,
+            swipe_fn=lambda _label: True,
+            sleep_fn=lambda _seconds: None,
+            catalog=load_module_icon_catalog(),
+        )
+
+    assert result is overview
+    assert taps == [
+        (
+            "buttons.module:detail_equip_toggle",
+            "module_detail:equip:Being Annihilator",
+        ),
+        (f"buttons.module:select_{role}", f"module_role:{role}"),
+        (
+            "buttons.module:accept_level_transfer",
+            "module_level_transfer:accept",
+        ),
+    ]
+
+
+def test_module_replacement_fails_when_level_transfer_cannot_be_accepted():
+    detail = np.full((1920, 1080, 3), 10, dtype=np.uint8)
+    role_prompt = np.full((1920, 1080, 3), 20, dtype=np.uint8)
+    transfer_prompt = np.full((1920, 1080, 3), 30, dtype=np.uint8)
+    captures = iter((role_prompt, transfer_prompt))
+    slot = GcModuleSlotEvidence(
+        slot_key="cannon_primary",
+        family="cannon",
+        role="primary",
+        expected="Being Annihilator",
+        actual="Project Funding",
+        match_status="matched",
+        valid=False,
+        confidence=1.0,
+        margin=1.0,
+        green_fraction=1.0,
+    )
+
+    def safe_tap(target, **_kwargs):
+        return target != "buttons.module:accept_level_transfer"
+
+    with (
+        patch("core.gc_module_loadout._find_inventory_detail", return_value=detail),
+        patch("core.gc_module_loadout._detail_for", return_value=True),
+        patch(
+            "core.gc_module_loadout._role_prompt_visible",
+            side_effect=lambda frame: int(frame[0, 0, 0]) == 20,
+        ),
+        patch(
+            "core.gc_module_loadout._transfer_prompt_visible",
+            side_effect=lambda frame: int(frame[0, 0, 0]) == 30,
+        ),
+        patch("core.gc_module_loadout._capture_modules", side_effect=captures),
+        patch(
+            "core.gc_module_loadout._wait_for",
+            return_value=role_prompt,
+        ),
+    ):
+        with pytest.raises(
+            ModuleLoadoutCorrectionError,
+            match="failed to accept module level transfer",
+        ):
+            _equip_inventory_module(
+                slot,
+                capture_fn=lambda: pytest.fail("capture is wrapped"),
+                detector=lambda _frame: {"state": "MODULES"},
+                safe_tap_fn=safe_tap,
+                swipe_fn=lambda _label: True,
+                sleep_fn=lambda _seconds: None,
+                catalog=load_module_icon_catalog(),
+            )
+
+
+def test_module_level_transfer_clickmap_has_only_the_accept_action():
+    assert get_click("buttons.module:accept_level_transfer") == (730, 1125)
+    assert resolve_dot_path("buttons.module:decline_level_transfer") is None
 
 
 def test_inventory_search_rewinds_to_top_before_ranking_candidates():

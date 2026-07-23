@@ -2101,13 +2101,13 @@
         "y": 1095
       }
     },
-    "module:decline_level_transfer": {
+    "module:accept_level_transfer": {
       "roles": [
         "button"
       ],
       "tap": {
         "type": "tap",
-        "x": 350,
+        "x": 730,
         "y": 1125
       }
     },
