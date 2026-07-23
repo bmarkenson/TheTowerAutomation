@@ -306,7 +306,7 @@ def test_perk_configuration_capture_records_all_tabs_as_raw_evidence(tmp_path):
         return True
 
     def close(_target, **_kwargs):
-        phase["state"] = "CARDS"
+        phase["state"] = "HOME"
         return True
 
     def top(*_args, screenshot, **_kwargs):

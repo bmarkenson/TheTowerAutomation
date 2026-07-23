@@ -438,23 +438,32 @@ def capture_post_run_perk_configuration(
         "buttons.close:perks", screenshot=current, retries=1
     ):
         raise NoStrategyPostRunError("Perks configuration close button was not visible")
-    cards = _wait_for(
-        "CARDS", capture_fn=capture_fn, detector=detector, sleep_fn=sleep_fn
+    destination = _wait_for_any(
+        {"CARDS", "HOME_SCREEN"},
+        capture_fn=capture_fn,
+        detector=detector,
+        sleep_fn=sleep_fn,
     )
-    _require_action(action_guard_fn)
-    if not safe_tap_fn(
-        "navigation.goto_home",
-        require_visible=False,
-        dispatch="now",
-        log_label="no_strategy_post_run:perks_return_home",
-    ):
-        raise NoStrategyPostRunError("Home navigation tap failed after Perks capture")
-    home = _wait_for(
-        "HOME_SCREEN", capture_fn=capture_fn, detector=detector, sleep_fn=sleep_fn
-    )
+    if detector(destination).get("state") == "CARDS":
+        _require_action(action_guard_fn)
+        if not safe_tap_fn(
+            "navigation.goto_home",
+            require_visible=False,
+            dispatch="now",
+            log_label="no_strategy_post_run:perks_return_home",
+        ):
+            raise NoStrategyPostRunError(
+                "Home navigation tap failed after Perks capture"
+            )
+        home = _wait_for(
+            "HOME_SCREEN",
+            capture_fn=capture_fn,
+            detector=detector,
+            sleep_fn=sleep_fn,
+        )
+    else:
+        home = destination
     _require_new_battle_home(home, detector, home_control_fn)
-    if cards is None:  # pragma: no cover - _wait_for either returns or raises
-        raise NoStrategyPostRunError("Cards screen was not restored")
     log(
         "[NO_STRATEGY] Captured post-run First Perk, Ban Perks, and Auto Pick evidence",
         "INFO",
@@ -521,6 +530,24 @@ def _wait_for(
     raise NoStrategyPostRunError(f"timed out waiting for {state}")
 
 
+def _wait_for_any(
+    states: set[str],
+    *,
+    capture_fn: Capture,
+    detector: Detector,
+    sleep_fn: Callable[[float], None],
+    attempts: int = 12,
+) -> Frame:
+    for _ in range(attempts):
+        frame = capture_fn()
+        if frame is not None and detector(frame).get("state") in states:
+            return frame
+        sleep_fn(0.25)
+    raise NoStrategyPostRunError(
+        "timed out waiting for " + " or ".join(sorted(states))
+    )
+
+
 def _require_new_battle_home(frame, detector, home_control_fn) -> None:
     if detector(frame).get("state") != "HOME_SCREEN":
         raise NoStrategyPostRunError("post-run inspection requires Home")
@@ -555,10 +582,16 @@ def restore_post_run_home(
         _require_action(action_guard_fn)
         if not tap_visible_fn("buttons.close:perks", screenshot=current, retries=1):
             raise NoStrategyPostRunError("could not close Perks configuration")
-        current = _wait_for(
-            "CARDS", capture_fn=capture_fn, detector=detector, sleep_fn=sleep_fn
+        current = _wait_for_any(
+            {"CARDS", "HOME_SCREEN"},
+            capture_fn=capture_fn,
+            detector=detector,
+            sleep_fn=sleep_fn,
         )
-        state = "CARDS"
+        state = str(detector(current).get("state") or "UNKNOWN")
+        if state == "HOME_SCREEN":
+            _require_new_battle_home(current, detector, home_control_fn)
+            return current
     if state not in {"CARDS", "WORKSHOP"}:
         raise NoStrategyPostRunError(
             f"cannot restore post-run Home from state={state}"
