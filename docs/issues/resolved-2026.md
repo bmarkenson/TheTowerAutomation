@@ -739,6 +739,55 @@ and actionable work lives in
   battle.
 - **Fixed by:** `6ed3b6f`.
 
+### No Strategy inventory collapsed an already-selected upgrade menu
+
+- **Observed:** 2026-07-22 during the first live automatic No Strategy
+  inventory pass on the active Tier 18 Attack Dissonance battle.
+- **Symptom:** After Cards and Perks, the route tapped the already-selected
+  Ultimate Weapons tab. The game collapsed the upgrade panel into Cinematic
+  Mode; destination verification failed closed and scheduled a retry.
+- **Evidence:** `logs/actions.log` records the UW tap at 17:15:09 and the
+  guarded timeout at 17:15:22 with `menu=None`,
+  `secondary=['CINEMATIC_MODE']`, and `MENU_OPEN`. The live frame showed the
+  selected UW tab and collapsed upgrade panel.
+- **Safety response:** The failed route changed no configuration and used no
+  Home, Exit Battle, or Surrender control.
+- **Cause:** The shared selector always tapped a visible destination tab before
+  checking whether that menu was already selected.
+- **Resolution:** Menu selection now accepts fresh `RUNNING` plus the requested
+  menu as success without sending a tap.
+- **Regression:**
+  `test/test_gc_preflight_navigation.py::test_running_menu_selection_does_not_collapse_already_selected_menu`.
+- **Fixed by:** `4565ab4`.
+
+### Cinematic battle evidence competed with the open Perks modal
+
+- **Observed:** 2026-07-22 during the retry of the same live No Strategy
+  inventory.
+- **Symptom:** The exact Perks-panel match coexisted with the Cinematic wall
+  icon left visible behind the modal. State detection raised
+  `Multiple primary states matched: RUNNING and PERKS`; the pass failed closed,
+  and the following heartbeat exited the fixed systemd unit.
+- **Evidence:** `logs/actions.log` records the Perks open at 17:18:05, guarded
+  failure at 17:18:10, and process exit at 17:18:12. The fresh failure frame
+  matched `indicators.perks_panel` at `1.0` and
+  `indicators.cinematic_wall_icon` at `0.983`.
+- **Safety response:** The service was not automatically restarted. The device
+  remained on Perks in the resumable battle, and the stale lock was unheld.
+- **Cause:** `RUNNING` was modeled as an ordinary primary even though its
+  controls can remain visible as background evidence behind a specific modal.
+- **Resolution:** State detection now distinguishes background-primary evidence
+  from ordinary and fallback primaries. Specific modal states win, while a bare
+  cinematic battle still resolves to `RUNNING`.
+- **Regression:** `test/test_ui_state_coverage.py` covers both precedence and
+  background-only fallback; the retained live frame classified as `PERKS` with
+  Cinematic Mode secondary before recovery.
+- **Live validation:** Replacement PID `3899024` attached once with
+  `next_run`, restored the stranded Perks screen, completed the full automatic
+  inventory at 17:26:49, and returned to `RUNNING` at wave 4120. The future
+  cold-start policy was restored to `immediate`.
+- **Fixed by:** `d26f633`.
+
 ## Operational lessons
 
 ### A detached child may not survive the agent execution wrapper

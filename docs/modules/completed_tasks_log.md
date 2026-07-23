@@ -669,8 +669,9 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 
 ### 2026-07-22 automatic No Strategy configuration traversal
 
-- Replaced operator-presented configuration screens with an automation-owned,
-  read-only in-battle pass. It verifies source and destination states while
+- Commit `9285979` replaced operator-presented configuration screens with an
+  automation-owned, read-only in-battle pass. It verifies source and
+  destination states while
   visiting Cards, in-battle Perks, every bounded Ultimate Weapon viewport,
   Modules, Event Bots, Guild Guardians, and Target Priority, then restores the
   battle. Damage Slider is read when Attack is accessible and is explicitly
@@ -684,9 +685,21 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   cleanup action; Resume restores a known read-only screen or verified Home and
   retries the current stage. Focused traversal, pause, terminal-state, visual-
   guard, app-stage, observer, record-rendering, and clickmap tests cover the new
-  authority boundaries. Repository-wide validation passed 552 sandbox tests;
+  authority boundaries.
+- The first live pass exposed two fail-closed navigation/state defects.
+  Commit `4565ab4` avoids tapping an already-selected battle menu, and commit
+  `d26f633` makes underlying `RUNNING` evidence yield to a specific modal such
+  as Perks. Repository-wide validation passed 555 sandbox-compatible tests;
   the single localhost HTTP test passed separately with socket permission, for
-  553 total.
+  556 total.
+- Live validation on the active Tier 18 Attack Dissonance run attached PID
+  `3899024` with startup gates deferred, recovered from the retained Perks
+  screen, and completed Cards, Perks, bounded Ultimate Weapon scrolling,
+  Modules, Event Bots, Guild Guardians, and Target Priority at 17:26:49. It
+  returned to `RUNNING` at wave 4120 with the target lock held and every current
+  control acknowledged. No configuration control, Home, Exit Battle, or
+  Surrender action was used. The future cold-start policy was restored to
+  `immediate`; natural Game Over/post-run validation remains pending.
 
 ---
 
