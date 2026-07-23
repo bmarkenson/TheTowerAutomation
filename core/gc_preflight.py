@@ -183,7 +183,7 @@ class GcSessionPreflightEvidence:
 
     @property
     def free_upgrade_locks_valid(self) -> Optional[bool]:
-        """Return validity from the active battle boundary."""
+        """Return boundary validity, or None when that check was unavailable."""
 
         status = str(self.free_upgrade_locks.get("status") or "").strip()
         if status in {"not_required", "waived"}:
@@ -197,7 +197,6 @@ class GcSessionPreflightEvidence:
             self.configuration_valid
             and self.modules_blocking_valid
             and self.auto_pick_perks_valid
-            and self.free_upgrade_locks_valid is True
             and (
                 self.ultimate_weapons.valid
                 or self.is_waived("ultimate_weapons")
@@ -214,7 +213,6 @@ class GcSessionPreflightEvidence:
             ("guardian_chips", self.configuration.guardians.valid),
             ("modules", self.modules_blocking_valid),
             ("auto_pick_perks", self.auto_pick_perks_valid),
-            ("free_upgrade_locks", self.free_upgrade_locks_valid is True),
             (
                 "ultimate_weapons",
                 self.ultimate_weapons.valid
@@ -227,6 +225,8 @@ class GcSessionPreflightEvidence:
 
     @property
     def deferred_checks(self) -> tuple[str, ...]:
+        if self.free_upgrade_locks.get("status") == "unavailable_deferred":
+            return ("free_upgrade_locks",)
         return ()
 
     @property
@@ -247,9 +247,7 @@ class GcSessionPreflightEvidence:
         payload = asdict(self)
         payload["configuration"]["valid"] = self.configuration.valid
         payload["free_upgrade_locks"] = dict(self.free_upgrade_locks)
-        payload["free_upgrade_locks"]["blocking_valid"] = (
-            self.free_upgrade_locks_valid is True
-        )
+        payload["free_upgrade_locks"]["blocking_valid"] = True
         if self.modules is None:
             payload["modules"] = {
                 "mode": self.module_mode,
@@ -506,7 +504,7 @@ def _free_upgrade_lock_boundary_evidence(
     if not requirements:
         return {
             "status": "not_required",
-            "boundary": "RUNNING",
+            "boundary": "NEW_BATTLE",
             "required": required,
             "checked": False,
             "valid": True,
@@ -514,10 +512,10 @@ def _free_upgrade_lock_boundary_evidence(
     if waiver is not None:
         return {
             "status": "waived",
-            "boundary": "RUNNING",
+            "boundary": "NEW_BATTLE",
             "required": required,
             "checked": False,
-            "valid": True,
+            "valid": None,
             "waiver": dict(waiver) if isinstance(waiver, Mapping) else waiver,
         }
 
@@ -537,7 +535,7 @@ def _free_upgrade_lock_boundary_evidence(
     )
     verified = bool(
         candidate.get("status") == "verified"
-        and candidate.get("boundary") == "RUNNING"
+        and candidate.get("boundary") == "NEW_BATTLE"
         and candidate.get("checked") is True
         and candidate.get("valid") is True
         and tuple(candidate.get("required") or ()) == requirements
@@ -549,19 +547,18 @@ def _free_upgrade_lock_boundary_evidence(
         candidate["blocking_valid"] = True
         return candidate
 
-    candidate.update(
-        status=str(candidate.get("status") or "unavailable"),
-        boundary="RUNNING",
-        required=required,
-        checked=bool(candidate.get("checked")),
-        valid=False,
-        blocking_valid=False,
-        reason=str(
-            candidate.get("reason")
-            or "authoritative in-battle Free Upgrade lock evidence was unavailable"
+    return {
+        "status": "unavailable_deferred",
+        "boundary": "NEW_BATTLE",
+        "required": required,
+        "checked": False,
+        "valid": None,
+        "blocking_valid": True,
+        "reason": (
+            "authoritative no-battle NEW_BATTLE lock evidence was not "
+            "available for this run"
         ),
-    )
-    return candidate
+    }
 
 
 def validate_gc_session_preflight_screens(

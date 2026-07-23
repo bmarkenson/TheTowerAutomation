@@ -553,12 +553,25 @@ def test_scoped_bots_waiver_preserves_current_preset_and_runs_later_checks():
     }
 
 
-def test_no_battle_setup_defers_free_upgrade_locks_to_running_preflight():
+def test_no_battle_setup_enforces_free_upgrade_locks_after_farm_preset():
     router = _NoBattleRouter(selected=True, correct_guardians=True)
     requirements = {
         **REQUIREMENTS,
         "free_upgrade_locks": list(FARM_FREE_UPGRADE_LOCKS),
     }
+    calls = []
+    lock_evidence = SimpleNamespace(
+        valid=True,
+        has_authoritative_mismatch=False,
+        as_dict=lambda: {"valid": True, "locks": []},
+    )
+
+    def ensure_locks(lock_requirements, **kwargs):
+        calls.append((lock_requirements, kwargs))
+        return SimpleNamespace(
+            evidence=lock_evidence,
+            screenshot="workshop",
+        )
 
     result = run_gc_no_battle_setup(
         requirements,
@@ -572,29 +585,42 @@ def test_no_battle_setup_defers_free_upgrade_locks_to_running_preflight():
         measure_selection_fn=router.measure,
         ensure_modules_fn=router.ensure_modules,
         evaluate_modules_fn=router.evaluate_modules,
+        ensure_free_upgrade_locks_fn=ensure_locks,
         validate_configuration_fn=router.validate_configuration,
         sleep_fn=lambda _seconds: None,
     )
 
     assert result.complete
+    assert len(calls) == 1
+    assert calls[0][0] == list(FARM_FREE_UPGRADE_LOCKS)
+    assert calls[0][1]["screenshot"] == "workshop"
+    assert calls[0][1]["enforce"] is True
     assert result.evidence["free_upgrade_locks"] == {
-        "status": "in_battle_pending",
-        "boundary": "RUNNING",
+        "valid": True,
+        "locks": [],
+        "boundary": "NEW_BATTLE",
+        "checked": True,
         "required": list(FARM_FREE_UPGRADE_LOCKS),
-        "checked": False,
-        "valid": None,
-        "blocking_valid": False,
-        "reason": "battle_only_control",
+        "status": "verified",
+        "changed_labels": [],
     }
 
 
-def test_no_battle_lock_waiver_is_recorded_for_running_preflight():
+def test_no_battle_lock_mismatch_blocks_new_battle_boundary():
     router = _NoBattleRouter(selected=True, correct_guardians=True)
     requirements = {
         **REQUIREMENTS,
         "free_upgrade_locks": list(FARM_FREE_UPGRADE_LOCKS),
     }
-    waiver = {"decision_id": "skip-locks", "value": "Bypass"}
+    lock_evidence = SimpleNamespace(
+        valid=False,
+        has_authoritative_mismatch=True,
+        as_dict=lambda: {
+            "valid": False,
+            "has_authoritative_mismatch": True,
+            "locks": [],
+        },
+    )
 
     result = run_gc_no_battle_setup(
         requirements,
@@ -608,21 +634,20 @@ def test_no_battle_lock_waiver_is_recorded_for_running_preflight():
         measure_selection_fn=router.measure,
         ensure_modules_fn=router.ensure_modules,
         evaluate_modules_fn=router.evaluate_modules,
-        waivers={"free_upgrade_locks": waiver},
+        ensure_free_upgrade_locks_fn=lambda *_args, **_kwargs: SimpleNamespace(
+            evidence=lock_evidence,
+            screenshot="workshop",
+            changed_labels=(),
+        ),
         validate_configuration_fn=router.validate_configuration,
         sleep_fn=lambda _seconds: None,
     )
 
-    assert result.complete
-    assert result.evidence["free_upgrade_locks"] == {
-        "status": "waived",
-        "check_id": "free_upgrade_locks",
-        "required": list(FARM_FREE_UPGRADE_LOCKS),
-        "waiver": waiver,
-        "boundary": "RUNNING",
-        "checked": False,
-        "valid": None,
-    }
+    assert result.status is GcNoBattleSetupStatus.FAILED
+    assert result.failed_check == "free_upgrade_locks"
+    assert result.evidence["free_upgrade_locks"]["status"] == "mismatch"
+    assert result.evidence["free_upgrade_locks"]["boundary"] == "NEW_BATTLE"
+    assert result.evidence["free_upgrade_locks"]["valid"] is False
 
 
 def test_no_battle_setup_restores_retained_bots_scroll_before_preset_check():

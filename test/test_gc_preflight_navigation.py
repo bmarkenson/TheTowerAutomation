@@ -4,10 +4,7 @@ from unittest.mock import patch
 import numpy as np
 
 from core.battle_lifecycle import HomeBattleControl
-from core.free_upgrade_locks import (
-    FARM_FREE_UPGRADE_LOCKS,
-    FreeUpgradeLockInspectionError,
-)
+from core.free_upgrade_locks import FARM_FREE_UPGRADE_LOCKS
 from core.gc_preflight_navigation import (
     GcPreflightNavigationStatus,
     _ensure_auto_pick_perks_enabled,
@@ -140,7 +137,7 @@ def _lock_boundary_evidence():
     ]
     return {
         "status": "verified",
-        "boundary": "RUNNING",
+        "boundary": "NEW_BATTLE",
         "required": list(FARM_FREE_UPGRADE_LOCKS),
         "checked": True,
         "valid": True,
@@ -317,7 +314,7 @@ def test_farm_route_consumes_home_boundary_evidence_without_revisiting_sections(
     assert "buttons.battle_control:home" not in ui.static_taps
 
 
-def test_active_farm_route_inspects_locks_in_battle_and_replaces_home_evidence():
+def test_active_farm_route_never_inspects_locks_and_carries_boundary_evidence():
     ui = _FakeUi()
     boxes = [
         UpgradeBox(
@@ -328,126 +325,43 @@ def test_active_farm_route_inspects_locks_in_battle_and_replaces_home_evidence()
         )
         for label, toggles in ULTIMATE_REQUIREMENTS.items()
     ]
-    boundary_evidence = {
-        **_lock_boundary_evidence(),
-        "boundary": "NEW_BATTLE",
-    }
+    boundary_evidence = _lock_boundary_evidence()
     validated = {}
-    inspected = []
 
     def validate(**kwargs):
         validated.update(kwargs)
         return SimpleNamespace(valid=True)
 
-    running_evidence = _lock_boundary_evidence()
-
-    def inspect(lock_requirements, **kwargs):
-        inspected.append((lock_requirements, kwargs))
-        return SimpleNamespace(
-            evidence=SimpleNamespace(
-                valid=True,
-                as_dict=lambda: dict(running_evidence),
-            ),
-            screenshot=ui.frame,
-            changed_labels=("Shockwave Size",),
+    with patch("core.free_upgrade_locks.inspect_free_upgrade_locks") as inspect:
+        result = run_read_only_gc_preflight(
+            {
+                **PREFLIGHT_REQUIREMENTS,
+                "free_upgrade_locks": list(FARM_FREE_UPGRADE_LOCKS),
+            },
+            capture_fn=ui.capture,
+            detector=ui.detect,
+            safe_tap_fn=ui.safe_tap,
+            tap_visible_fn=ui.visible_tap,
+            go_home_fn=ui.go_home,
+            swipe_fn=ui.swipe,
+            event_swipe_fn=ui.event_swipe,
+            detect_boxes_fn=lambda _frame, **_kwargs: {
+                "left": boxes,
+                "right": [],
+            },
+            ensure_poison_swamp_stun_fn=lambda **_kwargs: _stun_off_result(ui),
+            free_upgrade_lock_boundary_evidence=boundary_evidence,
+            detect_home_control_fn=lambda _frame: _home_evidence(),
+            sleep_fn=lambda _seconds: None,
+            validate_fn=validate,
         )
 
-    result = run_read_only_gc_preflight(
-        {
-            **PREFLIGHT_REQUIREMENTS,
-            "free_upgrade_locks": list(FARM_FREE_UPGRADE_LOCKS),
-        },
-        capture_fn=ui.capture,
-        detector=ui.detect,
-        safe_tap_fn=ui.safe_tap,
-        tap_visible_fn=ui.visible_tap,
-        go_home_fn=ui.go_home,
-        swipe_fn=ui.swipe,
-        event_swipe_fn=ui.event_swipe,
-        detect_boxes_fn=lambda _frame, **_kwargs: {
-            "left": boxes,
-            "right": [],
-        },
-        ensure_poison_swamp_stun_fn=lambda **_kwargs: _stun_off_result(ui),
-        inspect_free_upgrade_locks_fn=inspect,
-        free_upgrade_lock_boundary_evidence=boundary_evidence,
-        detect_home_control_fn=lambda _frame: _home_evidence(),
-        sleep_fn=lambda _seconds: None,
-        validate_fn=validate,
-    )
-
     assert result.status is GcPreflightNavigationStatus.COMPLETE
-    assert len(inspected) == 1
-    assert inspected[0][0] == FARM_FREE_UPGRADE_LOCKS
-    assert inspected[0][1]["enforce"] is True
+    inspect.assert_not_called()
     assert validated["free_upgrade_lock_requirements"] == list(
         FARM_FREE_UPGRADE_LOCKS
     )
-    assert validated["free_upgrade_lock_boundary_evidence"] == {
-        **running_evidence,
-        "status": "verified",
-        "boundary": "RUNNING",
-        "required": list(FARM_FREE_UPGRADE_LOCKS),
-        "checked": True,
-        "changed_labels": ["Shockwave Size"],
-    }
-
-
-def test_in_battle_lock_failure_is_reported_as_session_evidence():
-    ui = _FakeUi()
-    boxes = [
-        UpgradeBox(
-            "left",
-            (0, 0, 1, 1),
-            text=label,
-            toggles={name: "on" for name in toggles if name != "stun"},
-        )
-        for label, toggles in ULTIMATE_REQUIREMENTS.items()
-    ]
-    validated = {}
-
-    def validate(**kwargs):
-        validated.update(kwargs)
-        return SimpleNamespace(valid=False)
-
-    def fail_lock_inspection(*_args, **_kwargs):
-        raise FreeUpgradeLockInspectionError(
-            "detail tap failed for Shockwave Size"
-        )
-
-    result = run_read_only_gc_preflight(
-        {
-            **PREFLIGHT_REQUIREMENTS,
-            "free_upgrade_locks": list(FARM_FREE_UPGRADE_LOCKS),
-        },
-        capture_fn=ui.capture,
-        detector=ui.detect,
-        safe_tap_fn=ui.safe_tap,
-        tap_visible_fn=ui.visible_tap,
-        go_home_fn=ui.go_home,
-        swipe_fn=ui.swipe,
-        event_swipe_fn=ui.event_swipe,
-        detect_boxes_fn=lambda _frame, **_kwargs: {
-            "left": boxes,
-            "right": [],
-        },
-        ensure_poison_swamp_stun_fn=lambda **_kwargs: _stun_off_result(ui),
-        inspect_free_upgrade_locks_fn=fail_lock_inspection,
-        detect_home_control_fn=lambda _frame: _home_evidence(),
-        sleep_fn=lambda _seconds: None,
-        validate_fn=validate,
-    )
-
-    assert result.status is GcPreflightNavigationStatus.MISMATCH
-    assert validated["free_upgrade_lock_boundary_evidence"] == {
-        "status": "unavailable",
-        "boundary": "RUNNING",
-        "required": list(FARM_FREE_UPGRADE_LOCKS),
-        "checked": True,
-        "valid": False,
-        "blocking_valid": False,
-        "reason": "detail tap failed for Shockwave Size",
-    }
+    assert validated["free_upgrade_lock_boundary_evidence"] == boundary_evidence
 
 
 def test_stun_evidence_survives_later_primary_only_observation():

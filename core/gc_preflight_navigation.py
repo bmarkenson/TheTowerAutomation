@@ -16,11 +16,6 @@ from core.gc_preflight import (
     validate_gc_session_preflight_screens,
 )
 from core.battle_lifecycle import HomeBattleControl
-from core.free_upgrade_locks import (
-    FreeUpgradeLockInspectionError,
-    inspect_in_battle_free_upgrade_locks,
-    normalize_free_upgrade_lock_requirements,
-)
 from core.home_battle import (
     HOME_BATTLE_CONTROL_REGION,
     HomeBattleEvidence,
@@ -514,9 +509,6 @@ def run_read_only_gc_preflight(
     ensure_poison_swamp_stun_fn: Callable[
         ..., PoisonSwampStunResult
     ] = ensure_poison_swamp_stun_off,
-    inspect_free_upgrade_locks_fn: Callable[
-        ..., Any
-    ] = inspect_in_battle_free_upgrade_locks,
     measure_auto_pick_fn: Callable[[Frame], Any] = measure_auto_pick_perks,
     no_battle_setup_evidence: Optional[Mapping[str, Any]] = None,
     free_upgrade_lock_boundary_evidence: Optional[Mapping[str, Any]] = None,
@@ -569,64 +561,12 @@ def run_read_only_gc_preflight(
             )
         )
         free_upgrade_lock_requirements = requirements.get("free_upgrade_locks")
-        running = _wait_for(
+        _wait_for(
             state="RUNNING",
             capture_fn=capture_fn,
             detector=detector,
             sleep_fn=sleep_fn,
         )
-        active_waivers = requirements.get("_gate_waivers")
-        lock_waived = bool(
-            isinstance(active_waivers, Mapping)
-            and "free_upgrade_locks" in active_waivers
-        )
-        in_battle_lock_evidence = free_upgrade_lock_boundary_evidence
-        if free_upgrade_lock_requirements is not None and not lock_waived:
-            normalized_locks = normalize_free_upgrade_lock_requirements(
-                free_upgrade_lock_requirements
-            )
-            try:
-                lock_result = inspect_free_upgrade_locks_fn(
-                    normalized_locks,
-                    screenshot=running,
-                    enforce=True,
-                    capture_fn=capture_fn,
-                    detector=detector,
-                    safe_tap_fn=safe_tap_fn,
-                    detect_boxes_fn=detect_boxes_fn,
-                    sleep_fn=sleep_fn,
-                )
-                lock_payload = lock_result.evidence.as_dict()
-                lock_payload.update(
-                    status="verified" if lock_result.evidence.valid else "mismatch",
-                    boundary="RUNNING",
-                    required=list(normalized_locks),
-                    checked=True,
-                    changed_labels=list(
-                        getattr(lock_result, "changed_labels", ()) or ()
-                    ),
-                )
-                in_battle_lock_evidence = lock_payload
-            except FreeUpgradeLockInspectionError as exc:
-                log(
-                    f"[GC_PREFLIGHT] In-battle Free Upgrade lock check failed: {exc}",
-                    "WARN",
-                )
-                _wait_for(
-                    state="RUNNING",
-                    capture_fn=capture_fn,
-                    detector=detector,
-                    sleep_fn=sleep_fn,
-                )
-                in_battle_lock_evidence = {
-                    "status": "unavailable",
-                    "boundary": "RUNNING",
-                    "required": list(normalized_locks),
-                    "checked": True,
-                    "valid": False,
-                    "blocking_valid": False,
-                    "reason": str(exc),
-                }
 
         cards = None
         if not use_no_battle_evidence:
@@ -820,7 +760,7 @@ def run_read_only_gc_preflight(
                         free_upgrade_lock_requirements
                     ),
                     free_upgrade_lock_boundary_evidence=(
-                        in_battle_lock_evidence
+                        free_upgrade_lock_boundary_evidence
                     ),
                 )
             evidence = validate_fn(**validation_args)
@@ -963,7 +903,8 @@ def run_read_only_gc_preflight(
 
         # The Workshop preset remains an active session requirement, so it is
         # inspected through the verified resumable Home route. Free Upgrade
-        # locks were already inspected from their in-battle upgrade panes.
+        # locks are deliberately excluded: only NEW_BATTLE no-battle setup can
+        # inspect or enforce them authoritatively.
         if not go_home_fn():
             _capture_detection(capture_fn, detector)
             raise _NavigationFailure("guarded Go Home failed")
@@ -1036,7 +977,7 @@ def run_read_only_gc_preflight(
             validation_args.update(
                 free_upgrade_lock_requirements=free_upgrade_lock_requirements,
                 free_upgrade_lock_boundary_evidence=(
-                    in_battle_lock_evidence
+                    free_upgrade_lock_boundary_evidence
                 ),
             )
         evidence = validate_fn(**validation_args)

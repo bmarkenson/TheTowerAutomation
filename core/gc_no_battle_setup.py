@@ -8,7 +8,10 @@ import time
 from typing import Any, Callable, Mapping
 
 from core.battle_lifecycle import HomeBattleControl
-from core.free_upgrade_locks import normalize_free_upgrade_lock_requirements
+from core.free_upgrade_locks import (
+    inspect_free_upgrade_locks,
+    normalize_free_upgrade_lock_requirements,
+)
 from core.home_battle import detect_home_battle_control
 from core.gc_module_loadout import (
     evaluate_gc_module_loadout,
@@ -21,6 +24,7 @@ from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
 from core.target_priority_config import validate_target_priority_order
 from core.tournament_preflight import TOURNAMENT_SECTION_SPECS
+from core.upgrade_navigation import swipe_upgrade_menu
 from core.workshop_preset import (
     BOTS_AMPLIFY_PRESET_SLOT,
     BOTS_FARM_PRESET_SLOT,
@@ -118,9 +122,11 @@ def run_gc_no_battle_setup(
     safe_tap_fn: Callable[..., bool] = safe_tap,
     tap_visible_fn: Callable[..., bool] = tap_if_visible,
     swipe_fn: Callable[[str], bool] = swipe_now,
+    workshop_swipe_fn: Callable[[str, str], None] = swipe_upgrade_menu,
     measure_selection_fn: Callable[..., Any] = measure_preset_slot_selection,
     ensure_modules_fn: Callable[..., Any] = ensure_gc_module_loadout,
     evaluate_modules_fn: Callable[..., Any] = evaluate_gc_module_loadout,
+    ensure_free_upgrade_locks_fn: Callable[..., Any] = inspect_free_upgrade_locks,
     validate_configuration_fn: Callable[..., Any] = validate_gc_preflight_screens,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> GcNoBattleSetupResult:
@@ -232,25 +238,49 @@ def run_gc_no_battle_setup(
                 active_waivers[current_check],
             )
             waived_locks.update(
-                boundary="RUNNING",
+                boundary=HomeBattleControl.NEW_BATTLE.value,
                 checked=False,
                 valid=None,
             )
             evidence[current_check] = waived_locks
         elif free_upgrade_lock_requirements is not None:
+            lock_result = ensure_free_upgrade_locks_fn(
+                free_upgrade_lock_requirements,
+                screenshot=workshop,
+                enforce=True,
+                capture_fn=capture_fn,
+                detector=detector,
+                safe_tap_fn=safe_tap_fn,
+                swipe_fn=workshop_swipe_fn,
+                sleep_fn=sleep_fn,
+            )
             normalized_lock_requirements = normalize_free_upgrade_lock_requirements(
                 free_upgrade_lock_requirements,
                 require_farm_set=True,
             )
-            evidence[current_check] = {
-                "status": "in_battle_pending",
-                "boundary": "RUNNING",
-                "required": list(normalized_lock_requirements),
-                "checked": False,
-                "valid": None,
-                "blocking_valid": False,
-                "reason": "battle_only_control",
-            }
+            lock_evidence = lock_result.evidence
+            lock_payload = lock_evidence.as_dict()
+            lock_payload.update(
+                boundary=HomeBattleControl.NEW_BATTLE.value,
+                checked=True,
+                required=list(normalized_lock_requirements),
+                status=(
+                    "verified"
+                    if lock_evidence.valid
+                    else "mismatch"
+                    if lock_evidence.has_authoritative_mismatch
+                    else "unavailable"
+                ),
+                changed_labels=list(
+                    getattr(lock_result, "changed_labels", ()) or ()
+                ),
+            )
+            evidence["free_upgrade_locks"] = lock_payload
+            if not lock_result.evidence.valid:
+                raise _SetupFailure(
+                    "Free Upgrade locks remained invalid after correction"
+                )
+            workshop = lock_result.screenshot
         current = _return_home(
             workshop,
             capture_fn,
