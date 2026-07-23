@@ -20,7 +20,7 @@ policy.
 | Matching/clickmap | Describe and locate visible UI evidence. |
 | Semantic state | Interpret evidence as primary state, overlays, and lifecycle events. |
 | Orchestration/policy | Decide which component may act and in what order. |
-| Action authority | Recheck guards and issue a visible or explicit static action. |
+| Action authority | Recheck guards and issue a template-matched or target-verified action. |
 | Feature handlers | Implement one bounded behavior through the shared layers. |
 
 Keep `YamlStrategy` and its evaluator generic. Strategy-specific behavior should
@@ -50,11 +50,13 @@ Every compact Farm profile names all three and assigns one of these policies:
 | `preserve` | Do not inspect or change the setting. |
 
 Named module and Target Priority presets are resolved at build time into an
-explicit self-contained strategy plan. Modules and Target Priority are checked
-from verified Home `NEW_BATTLE` before Battle may start. Damage Slider
-`observe` and `enforce` policies resolve an explicit percentage; Tier 18
-enforces `1E-22%` during every new-run initialization after the time-sensitive
-EHLS/EALS setup. `YamlStrategy` exposes the plan's resolved
+explicit self-contained strategy plan. Modules are checked from verified Home
+`NEW_BATTLE` before Battle may start. Target Priority is not a Home control: its
+Home-boundary evidence remains explicitly deferred, and its policy is checked
+from the verified in-battle side menu after the new run reaches `RUNNING`.
+Damage Slider `observe` and `enforce` policies resolve an explicit percentage;
+Tier 18 enforces `1E-22%` during every new-run initialization after the
+time-sensitive EHLS/EALS setup. `YamlStrategy` exposes the plan's resolved
 `run_configuration` generically, and Game Over records copy that snapshot into
 the versioned battle JSON. Runtime code does not inherit configuration or
 branch on a Farm strategy name.
@@ -206,11 +208,18 @@ evidence is attached.
   boundary, which scales and clamps them to the last verified native geometry
   for that ADB target. Capture therefore establishes geometry before action.
 - A broad search region is evidence geometry, not permission to tap its center.
-- Visibility-aware actions use the actual matched bounding box.
+- Template-backed actions always rematch immediately before dispatch and use
+  the actual matched bounding box.
 - Moving elements may continue to use match-region centers after a fresh match.
-- Static blind actions require explicit action geometry. Legacy direct-region
-  center lookup may remain for compatibility and tooling but must not acquire
-  runtime action authority implicitly.
+- Static coordinates and dynamically calculated points are never action
+  authority by themselves. A non-template runtime tap requires a complete
+  current frame, a bounded target region containing the point, and a
+  target-specific predicate that reidentifies what will be tapped. Legacy
+  direct-region center lookup remains compatibility/tooling geometry only.
+- The bounded in-battle floating-gem sweep is the explicit runtime exception:
+  the moving gem cannot be reacquired reliably, and its dedicated tapper acts
+  only while automation remains `RUNNING`. Operator-invoked gesture tuning may
+  use its separately named unchecked tooling path with a recorded reason.
 - Every live action requires fresh source-state evidence immediately before the
   input. Transition frames and stale screenshots cannot authorize actions.
 - Farm configuration is inspection-first and profile-driven. A setting may be
@@ -229,15 +238,17 @@ evidence is attached.
   unknown or incomplete evidence remains blocked.
 - Complete no-battle setup owns every supported profile check available from
   verified Home `NEW_BATTLE`: Cards, Workshop and its Free Upgrade locks, Bots,
-  Guardians, Modules, and Target Priority. It retains screen-derived
-  configuration evidence for session preflight, which consumes that boundary
-  proof and checks only battle-only settings instead of leaving the newly
-  started run to repeat Home checks. Attaching to an existing battle without
+  Guardians, and Modules. It retains screen-derived configuration evidence for
+  session preflight, which consumes that boundary proof and checks only
+  battle-only settings instead of leaving the newly started run to repeat Home
+  checks. Target Priority records `battle_only_control` at Home and remains
+  unsatisfied until the generated `RUNNING` action observes or enforces it;
+  there is no Home Target Priority tap. Attaching to an existing battle without
   boundary proof retains the guarded read-only compatibility route. Home-only
-  Free Upgrade locks remain deferred there: they record
-  `unavailable_deferred` without a pass, failure, Home repair, or Surrender
-  request; Home `RESUME_BATTLE` preserves the attachment, and the lock gate
-  rearms at the next genuine `NEW_BATTLE` boundary.
+  Free Upgrade locks remain deferred there: they record `unavailable_deferred`
+  without a pass, failure, Home repair, or Surrender request; Home
+  `RESUME_BATTLE` preserves the attachment, and the lock gate rearms at the
+  next genuine `NEW_BATTLE` boundary.
 - Confident mismatches on Home-only configuration may request one app-owned
   stop/repair/restart sequence; ambiguous or unknown module identity and other
   non-Home repair classes remain blocked. The matcher reports evidence but

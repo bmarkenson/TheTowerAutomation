@@ -730,6 +730,29 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   Perks, completed session preflight at 22:10:48, and remained under normal
   `RUNNING` automation.
 
+### 2026-07-23 verified tap authority and Target Priority boundary
+
+- Commit `d410b61` removed the nonexistent Home Target Priority route. Complete
+  Home setup now retains explicit `battle_only_control` evidence, which cannot
+  satisfy the gate; the generated `RUNNING` action remains the sole owner of
+  Target Priority observation or enforcement.
+- `safe_tap` now fails closed for every coordinate or matchless named runtime
+  target unless the caller supplies complete current-frame evidence, a bounded
+  target region, and a target-specific verifier. Template-backed names always
+  rematch before dispatch and cannot fall back to configured coordinates.
+- Added retained-evidence templates for Home navigation, in-battle Target
+  Priority, Perks, Workshop modes, Exit Battle, Damage Slider arrows, and the
+  missing Scout inventory control. Dynamic upgrade, module, Perks, Ultimate
+  Weapon, buy-quantity, and dialog actions now reidentify their exact target or
+  authoritative containing control before tapping.
+- The high-speed level-skip initializer no longer sends taps while capture is
+  in flight, and one stream frame can authorize at most one purchase. The
+  bounded moving-gem sweep remains the only allowlisted blind runtime tapper;
+  unchecked gesture taps are isolated to explicit operator tooling.
+- Clickmap and state-definition validation passed. Repository-wide validation
+  passed 614 sandbox-compatible tests plus the separately permitted localhost
+  HTTP test, for 615 total. No live process or device interaction was used.
+
 ---
 
 ## 📘 Documentation

@@ -8,6 +8,46 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Home startup attempted Target Priority and runtime taps could bypass visibility
+
+- **Observed:** Reported by the operator on 2026-07-23 during startup.
+- **Symptom:** Automation attempted to check Target Priority from Home even
+  though that control exists only in the in-battle side menu. The failing path
+  also exposed a broader safety defect: runtime callers could pass
+  `require_visible=False`, and `safe_tap` would dispatch a configured point
+  without identifying the target at that point.
+- **Evidence:** Static inspection found the newly added
+  `navigation.home_target_priority` point at `(1025,620)` and the Home setup
+  call that treated it as a destination. The same audit found unchecked
+  coordinate and static-name calls across navigation, configuration, upgrade,
+  module, Perks, and dialog paths. Retained Home evidence rejects the real
+  in-battle Target Priority template.
+- **Safety response:** Diagnosis and repair were repository-local. No process
+  or device interaction was used, and no claim was made about volatile runtime
+  state.
+- **Cause:** The Home-boundary consolidation incorrectly assumed Target
+  Priority was Home-accessible. Independently, the shared tap helper treated a
+  caller's visibility-bypass flag and configured geometry as sufficient action
+  authority.
+- **Resolution:** Home setup now records Target Priority as
+  `battle_only_control`; that evidence cannot satisfy either the enforce or
+  observe gate, so the generated `RUNNING` action remains responsible for the
+  check. Runtime `safe_tap` has no visibility/fallback bypass: template names
+  rematch before dispatch, while coordinates and matchless names require a
+  complete frame, a bounded target region, and target-specific verification.
+  Static controls used by runtime received retained-evidence templates or
+  explicit visual guards. The bounded floating-gem sweep remains the
+  allowlisted runtime exception, and unchecked gesture taps are isolated to an
+  explicitly named operator-tooling API.
+- **Regression:** `test/test_tap_safety.py` audits runtime tap authority,
+  validates the new templates against retained frames, and proves the Target
+  Priority template rejects Home. `test/test_gc_no_battle_setup.py`,
+  `test/test_run_initialization.py`, and `test/test_target_priority.py` cover
+  the deferred boundary and in-battle ownership. Domain tests cover guarded
+  coordinate actions, and the level-skip regression proves one frame
+  authorizes at most one purchase tap.
+- **Fixed by:** `d410b61`.
+
 ### Farm preflight repeated Home-accessible checks after Battle start
 
 - **Observed:** Reported by the operator on 2026-07-22 while reviewing a new
