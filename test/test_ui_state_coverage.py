@@ -146,6 +146,71 @@ def test_game_over_can_fall_back_to_its_more_stats_button():
     assert detection["state"] == "GAME_OVER"
 
 
+def test_game_over_terminal_modal_wins_over_underlying_event_screen():
+    definitions = {
+        "states": [
+            {
+                "name": "GAME_OVER",
+                "type": "terminal_primary",
+                "match_keys": ["indicators.game_over"],
+            },
+            {
+                "name": "EVENT",
+                "type": "primary",
+                "match_keys": ["indicators.event"],
+            },
+        ],
+        "overlays": [],
+    }
+    frame = cv2.imread(
+        str(
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "game_over_stats_20260715.png"
+        )
+    )
+    assert frame is not None
+
+    with patch(
+        "core.state_detector.get_match",
+        return_value=((100, 100), 0.99),
+    ):
+        detection = detect_state_and_overlays(frame, state_defs=definitions)
+
+    assert detection["state"] == "GAME_OVER"
+
+
+def test_multiple_ordinary_primary_states_still_fail_closed():
+    definitions = {
+        "states": [
+            {"name": "EVENT", "type": "primary", "match_keys": ["event"]},
+            {"name": "GUILD", "type": "primary", "match_keys": ["guild"]},
+        ],
+        "overlays": [],
+    }
+    frame = cv2.imread(
+        str(
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "game_over_stats_20260715.png"
+        )
+    )
+    assert frame is not None
+
+    with (
+        patch(
+            "core.state_detector._resolve_dot_path_cached",
+            return_value={"match_template": "unused.png"},
+        ),
+        patch(
+            "core.state_detector.get_match",
+            return_value=((100, 100), 0.99),
+        ),
+        pytest.raises(RuntimeError, match="Multiple primary states matched"),
+    ):
+        detect_state_and_overlays(frame, state_defs=definitions)
+
+
 def test_background_running_evidence_yields_to_perks_modal():
     definitions = {
         "states": [

@@ -23,6 +23,7 @@ defaults:
   state_yaml: config/state_definitions.yaml (safe_load)
   invariants:
     - Exactly one ordinary primary state per frame; multiple → RuntimeError
+    - A terminal primary modal takes precedence over an underlying ordinary primary
     - Background-primary evidence yields to modal and fallback-primary states
     - Menus are mutually exclusive; choose first match in YAML order
     - Overlays: 0..N may co-exist
@@ -165,14 +166,20 @@ def detect_state_and_overlays(
                 matched_states.append(state_name)
                 break
 
-    # Classify into primary, secondary, menu, and fallback-primary candidates.
+    # Classify into terminal, primary, secondary, menu, and fallback-primary
+    # candidates. Terminal result modals can appear over the screen that was
+    # open when a battle ended, so they authoritatively take precedence over
+    # ordinary screen evidence. Multiple candidates within either primary
+    # class remain an error.
     # Fallback primaries describe modal screens whose evidence may coexist with
     # a more specific primary (for example, an upgrade detail shown over the
     # dedicated Damage Adjuster). Background primaries describe the underlying
     # screen whose controls can remain visible behind a modal (for example, a
-    # cinematic battle behind Perks). The priority is ordinary primary,
-    # fallback primary, then background primary.
+    # cinematic battle behind Perks). The priority is terminal primary,
+    # ordinary primary, fallback primary, then background primary.
     menu_candidates_in_order = []  # preserve YAML order for priority
+    terminal_primary_candidates = []
+    primary_candidates = []
     fallback_primary_candidates = []
     background_primary_candidates = []
     for name in matched_states:
@@ -182,10 +189,10 @@ def detect_state_and_overlays(
             continue
         state_type = state_entry.get("type", "unknown")
 
-        if state_type == "primary":
-            if result["state"] != "UNKNOWN":
-                raise RuntimeError(f"[ERROR] Multiple primary states matched: {result['state']} and {name}")
-            result["state"] = name
+        if state_type == "terminal_primary":
+            terminal_primary_candidates.append(name)
+        elif state_type == "primary":
+            primary_candidates.append(name)
         elif state_type == "fallback_primary":
             fallback_primary_candidates.append(name)
         elif state_type == "background_primary":
@@ -194,6 +201,21 @@ def detect_state_and_overlays(
             menu_candidates_in_order.append(name)
         else:
             result["secondary_states"].append(name)
+
+    if len(terminal_primary_candidates) > 1:
+        raise RuntimeError(
+            "[ERROR] Multiple terminal primary states matched: "
+            + " and ".join(terminal_primary_candidates)
+        )
+    if len(primary_candidates) > 1 and not terminal_primary_candidates:
+        raise RuntimeError(
+            "[ERROR] Multiple primary states matched: "
+            + " and ".join(primary_candidates)
+        )
+    if terminal_primary_candidates:
+        result["state"] = terminal_primary_candidates[0]
+    elif primary_candidates:
+        result["state"] = primary_candidates[0]
 
     if result["state"] == "UNKNOWN" and fallback_primary_candidates:
         result["state"] = fallback_primary_candidates[0]

@@ -47,13 +47,13 @@ states:
   - indicators.workshop:tourney_slot
 
 - name: GAME_OVER
-  type: primary
+  type: terminal_primary
   match_keys:
   - indicators.game_over
   - buttons.more_stats:game_over
 
 - name: TOURNAMENT_RESULTS
-  type: primary
+  type: terminal_primary
   match_keys:
   - indicators.tournament_stats
 
