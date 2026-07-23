@@ -8,23 +8,6 @@ checked-item detail remains in the
 
 ## Current validation gates
 
-- [ ] Live-validate atomic selected-strategy process start from verified
-  no-battle Home. Confirm that the client-visible Farm T19 Experimental
-  selection becomes both managed and control strategy before the new PID
-  starts, that immediate Home-only initialization completes before Battle is
-  tapped, and that session preflight runs in the resulting Tier 19 battle.
-  - [ ] Confirm that each Guardian replacement waits for the emptied slot to
-    settle, reacquires fresh inventory evidence, and equips Fetch/Summon before
-    Home setup continues.
-  - [ ] Confirm that an otherwise-correct Farm pair plus an empty third slot
-    selects Scout and verifies all three Guardian chips before continuing.
-  - [ ] Confirm that bounded icon alignment resolves the animated Modules
-    overview, corrects all eight Farm slots, and revalidates the exact loadout
-    before Home setup continues.
-  - [ ] Confirm that inventory candidate detail OCR waits for the tapped card
-    to settle and accepts the Ancestral Dimension Core before equipping it.
-  - [ ] Confirm session preflight enables Auto Pick Perks from fresh disabled
-    evidence, revalidates it, and releases normal Tier 19 strategy actions.
 - [x] Finish live validation of the No Strategy two-phase inventory at the next
   natural Game Over. Do not Surrender or manufacture the boundary.
   - [x] On the active Tier 18 Attack Dissonance battle, confirm automatic

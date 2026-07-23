@@ -913,6 +913,156 @@ and actionable work lives in
   exercises the observed `UNKNOWN` then `NEW_BATTLE` transition.
 - **Fixed by:** `f6f12ba`.
 
+### Selected strategy was not applied when starting automation
+
+- **Observed:** 2026-07-22 while the operator started automation from
+  no-battle Home with a Farm strategy visibly selected in the native Windows
+  client.
+- **Symptom:** Automation entered a battle without performing the selected
+  strategy's Home-only prerequisites and changes.
+- **Evidence:** Fresh control, owner-PID, ADB, screenshot, and action-log
+  inspection showed that the managed start launched `strategy=none` with
+  immediate startup gates, then tapped Battle from verified Home and began the
+  No Strategy inventory. The persistent control and managed environment still
+  contained the older `none` value.
+- **Safety response:** The live owner acknowledged indefinite Pause during its
+  read-only inventory. No cleanup input was sent, and the operator explicitly
+  authorized ending and replacing this battle for bounded testing.
+- **Cause:** The native client retained the changed dropdown only as local UI
+  state; its Start request sent run state and gate policy but not the selected
+  strategy.
+- **Resolution:** Process start now validates and atomically persists the
+  visible strategy to both managed environment and control state before service
+  launch. The API advertises the new capability and the native client disables
+  dependent starts against an older server.
+- **Regression:**
+  `test/test_automation_process.py::test_start_persists_selected_strategy_before_process_reaches_home`
+  covers the ordering and authoritative Pause boundary.
+- **Live validation:** The final managed start reported
+  `farm_t19_experiment` in its request, process environment, control state, and
+  first strategy log before PID `4158098` reached Home. Home setup logged
+  complete at 22:01:00 before the Battle tap at 22:01:03.
+- **Fixed by:** `9ebfabc`.
+
+### Guardian replacement tap raced the emptied-slot transition
+
+- **Observed:** 2026-07-22 during live validation of a Farm T19 Experimental
+  start from no-battle Home.
+- **Symptom:** Home setup removed the equipped Attack chip and requested the
+  visible Fetch inventory chip, but Fetch did not become equipped. The startup
+  gate returned Home and blocked the battle at `guardian_chips`.
+- **Evidence:** The action log records Attack removal at 21:07:04, the Fetch
+  request at 21:07:06, and the authoritative timeout. A fresh paused Guardian
+  frame showed the first slot empty, Ally still equipped, and Fetch visibly
+  available in inventory. Repeating the guarded visible-target tap after the
+  transition was stable equipped Fetch immediately.
+- **Safety response:** The gate did not bypass the mismatch or start Battle.
+  Automation acknowledged Pause before manual inspection.
+- **Cause:** The selector acted on the earliest empty-slot transition frame
+  without reacquiring settled inventory evidence.
+- **Resolution:** Guardian replacement waits for a bounded settle and
+  reacquires fresh Guardian evidence before selecting the inventory chip.
+- **Regression:** `test/test_gc_no_battle_setup.py` reproduces a selector that
+  rejects the transition-frame tap.
+- **Live validation:** The repaired runtime selected Fetch and Summon only
+  after the emptied slots settled; the final Home pass verified both before
+  continuing to Modules.
+- **Fixed by:** `9f030a8`.
+
+### Farm Home setup could not fill a missing Scout Guardian slot
+
+- **Observed:** 2026-07-22 after the Guardian transition repair selected Fetch
+  and Summon during the requested Farm T19 Experimental start.
+- **Symptom:** The Guardian gate still blocked Battle because Scout was absent
+  from the third unlocked slot.
+- **Evidence:** Fresh paused Guardian evidence showed Fetch and Ally equipped,
+  the third slot empty, and Scout available in inventory. After Ally was
+  replaced with Summon, only `GUARDIAN_SCOUT_EQUIPPED` remained missing.
+- **Safety response:** The gate remained at no-battle Home and did not bypass
+  the missing requirement or tap Battle.
+- **Cause:** The repair supported swapping the Farm/Tournament chip pairs but
+  assumed Scout was already equipped.
+- **Resolution:** The exact lone-Scout mismatch uses a guarded explicit Scout
+  inventory target, then requires authoritative equipped evidence.
+- **Regression:** `test/test_gc_no_battle_setup.py` covers the empty third-slot
+  configuration; `test/test_clickmap_access.py` covers its geometry.
+- **Live validation:** The repaired runtime selected Scout at 21:23:18 and
+  advanced to Modules. The final Home pass verified Fetch, Summon, and Scout
+  before Battle.
+- **Fixed by:** `c942b8a`.
+
+### Animated Modules overview displaced equipped icons from fixed crops
+
+- **Observed:** 2026-07-22 during the requested Farm T19 Experimental start
+  from no-battle Home.
+- **Symptom:** The Modules gate blocked Battle because `cannon_assist` was
+  `unknown` and `generator_primary` was `ambiguous`.
+- **Evidence:** Two Home passes produced the same failure. Fresh paused details
+  identified Amplifying Strike and Galaxy Compressor. On the retained
+  overview, their correct correlations rose from `0.118` and `0.314` to above
+  `0.9` when translated only a few pixels with the animated icons.
+- **Safety response:** The gate remained at no-battle Home and did not waive
+  Modules or tap Battle.
+- **Cause:** Identity correlation used one fixed crop center even though the
+  equipped icon art animates within its overview frame.
+- **Resolution:** Each configured slot searches a bounded six-pixel
+  neighborhood while retaining Ancestral-frame, minimum-confidence, and
+  competing-candidate margin requirements.
+- **Regression:** `test/test_module_icon_index.py` covers a six-pixel shifted
+  overview plus unchanged unknown and ambiguity rejection.
+- **Live validation:** The repaired live overview confidently identified all
+  eight initial modules, corrected the seven authoritative mismatches, and
+  later revalidated all eight requested modules with large margins.
+- **Fixed by:** `f6a6def`.
+
+### Module inventory accepted stale detail evidence after a candidate tap
+
+- **Observed:** 2026-07-22 while the repaired Modules overview corrected the
+  requested Farm T19 Experimental loadout.
+- **Symptom:** Seven slots were corrected, but the gate reported that
+  Ancestral Dimension Core was not found after reviewing all 16 named
+  candidates.
+- **Evidence:** The failed pass ranked the real Dimension Core first at
+  `(941, 1295)` with score `0.513`, then immediately closed its detail. Fresh
+  paused evidence showed the Ancestral card there; its settled detail read
+  `Dimension Core` and `Equip`. The repeated settled lookup selected it first.
+- **Safety response:** Every rejected candidate was closed without Equip, the
+  gate returned no-battle Home, and Battle remained blocked.
+- **Cause:** Candidate validation could accept the earliest complete-looking
+  detail capture before the newly tapped card settled.
+- **Resolution:** Inventory selection waits a bounded settle before
+  authoritative detail OCR.
+- **Regression:**
+  `test/test_gc_module_loadout.py::test_inventory_candidate_waits_for_fresh_detail_before_ocr`.
+- **Live validation:** The repaired runtime selected Dimension Core first at
+  22:00:18, equipped it as Assist, restored the All Rarities filter, and
+  revalidated the complete eight-slot loadout.
+- **Fixed by:** `c8b90da`.
+
+### Required Auto Pick Perks mismatch blocked the active Farm preflight
+
+- **Observed:** 2026-07-22 in the requested Tier 19 Farm T19 Experimental
+  battle after Home-only setup completed.
+- **Symptom:** Session preflight read Auto Pick as disabled, closed Perks
+  unchanged, and terminally blocked normal strategy and handler actions.
+- **Evidence:** Preflight reported a valid Auto Pick region with zero enabled
+  green pixels. The same pass verified every retained Home setting, all eight
+  Modules, and all Ultimate Weapons after correcting Poison Swamp Stun.
+- **Safety response:** The exclusive gate remained active; no waiver, Home
+  repair Surrender, or further strategy action was sent.
+- **Cause:** Navigation measured the required in-run control but had no guarded
+  correction path.
+- **Resolution:** Preflight toggles Auto Pick only after disabled evidence on a
+  verified Perks screen and requires fresh enabled evidence before closing.
+- **Regression:** `test/test_gc_preflight_navigation.py` covers correction,
+  no-op behavior when already enabled, and fail-closed navigation;
+  `test/test_gc_preflight_templates.py` covers the control geometry.
+- **Live validation:** The guarded helper changed the live checkbox from zero
+  to 1,850 green pixels while paused. Retried preflight measured 1,804 pixels,
+  completed with no failed checks at 22:10:48, and released normal strategy
+  actions at 22:10:57.
+- **Fixed by:** `32cfdbc`.
+
 ## Operational lessons
 
 ### A detached child may not survive the agent execution wrapper

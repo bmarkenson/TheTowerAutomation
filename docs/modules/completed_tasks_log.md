@@ -701,6 +701,35 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   Surrender action was used. The future cold-start policy was restored to
   `immediate`; natural Game Over/post-run validation remains pending.
 
+### 2026-07-22 selected-strategy Home setup and Tier 19 start
+
+- Commit `9ebfabc` made the selected native-client strategy part of the
+  managed process-start transaction. The control and managed environment now
+  contain that strategy before systemd launch, with revision/capability
+  compatibility preventing an older server from accepting the dependent
+  action.
+- Live Home setup exposed and resolved four fail-closed transition/evidence
+  gaps: `9f030a8` waits for Guardian inventory after an emptied slot,
+  `c942b8a` fills an exact missing Scout slot, `f6a6def` tracks animated
+  equipped-module icons within a bounded neighborhood, and `c8b90da` waits for
+  a tapped module detail before OCR. All eight Farm modules were corrected and
+  authoritatively revalidated before Battle.
+- Commit `32cfdbc` added the missing in-run Auto Pick Perks correction. It acts
+  only on verified disabled evidence in the Perks panel and requires fresh
+  enabled evidence. Live evidence rose from zero to 1,850 green pixels; the
+  complete retried preflight passed with no failed checks and released normal
+  Farm strategy actions.
+- Repository-wide validation passed 590 sandbox-compatible tests plus the
+  separately permitted localhost HTTP test, for 591 total. The earlier
+  selected-strategy change also published the self-contained Windows client
+  successfully on Linux.
+- Final live validation atomically started `farm_t19_experiment`, completed
+  Cards, Workshop, Free Upgrade locks, Bots, Fetch/Summon/Scout, and the exact
+  Modules loadout before the 22:01:03 Battle tap. The resulting Tier 19 run
+  completed EHLS/EALS initialization, corrected Poison Swamp Stun and Auto Pick
+  Perks, completed session preflight at 22:10:48, and remained under normal
+  `RUNNING` automation.
+
 ---
 
 ## 📘 Documentation
