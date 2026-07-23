@@ -37,6 +37,21 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-23 offscreen weekly mission chest
+
+- Added a bounded horizontal weekly-chest traversal to Daily Missions. It
+  normalizes the retained track position, searches with overlapping guarded
+  swipes, and claims only from the fresh frame that exposes the available
+  chest.
+- Regression coverage verifies the swipe geometry, offscreen search, fresh
+  claim authority, initially visible rewards, and Sunday hold/capacity policy.
+  The focused suites passed 40 tests; the full suite passed 637 sandbox tests
+  plus its separately permitted localhost-socket test.
+- Live validation claimed the preserved offscreen chest, dismissed its reward
+  reveal, converged at the far edge with `daily=1`, and then completed a Tier 18
+  Farm startup and session preflight without waivers or failed checks.
+- Implemented in commit `4554f7c`.
+
 ### 2026-07-13 headless template workflow
 
 - Added a dry-run-first template tool that separates the exact asset crop from

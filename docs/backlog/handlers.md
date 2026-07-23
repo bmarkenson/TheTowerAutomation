@@ -6,12 +6,6 @@ completion evidence remains in the
 
 ## Mission rewards
 
-- [ ] Make the Daily Missions weekly-chest claim converge across the complete
-  bounded list rather than only the initial viewport. Preserve fresh
-  `DAILY_MISSIONS` authority before every scroll and tap, add visible/offscreen
-  regression fixtures, and live-validate against the preserved opportunity
-  recorded in
-  [`../observed_issues.md`](../observed_issues.md#offscreen-weekly-mission-chest-was-skipped).
 - [ ] Deploy and live-verify open-menu Mission reward scheduling at a safe
   process boundary. Commit `2b4315d` uses section badges when the
   in-battle menu is verified open and retains the attention-dot trigger when it

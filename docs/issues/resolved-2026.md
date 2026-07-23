@@ -8,6 +8,47 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Offscreen weekly mission chest was skipped
+
+- **Observed:** 2026-07-23 at a natural no-battle Home reward opportunity after
+  the operator reported that the available weekly chest was outside the visible
+  Daily Missions viewport.
+- **Symptom:** The runtime detected the Home Daily Missions badge, opened Daily
+  Missions, claimed zero rewards, returned Home, and continued into Home setup
+  without finding the weekly chest.
+- **Evidence:** `logs/actions.log` records the badge-triggered probe from
+  09:40:51 through 09:40:58, including `daily=True`, verified Daily Missions
+  navigation, and `Claim summary: daily=0 event=0 guild=0`. Static inspection
+  confirmed that `_claim_daily_rewards()` checked
+  `buttons.claim_weekly_mission_chest` only in the current screenshot; unlike
+  the Event Mission path, it did not normalize the horizontal track or perform
+  a bounded scroll search.
+- **Safety response:** The operator had already stopped the managed process.
+  Diagnosis briefly restarted it under an acknowledged indefinite Pause to
+  verify the fresh PID, target lock, and `CARDS` state; no emulator input was
+  sent, and the original `STOPPED` service/control state was restored.
+- **Cause:** Daily Missions retains the weekly-chest track's horizontal
+  position. The claim loop assumed every available milestone chest was in the
+  initial viewport, so an offscreen chest looked identical to no available
+  weekly reward.
+- **Resolution:** The handler now checks the entry frame, normalizes the
+  weekly track to its first edge, and searches right with bounded overlapping
+  swipes. Every swipe verifies the Daily Missions identity before and after,
+  and the claim tap uses the fresh frame that exposed the chest. A complete
+  edge search without a match remains an ordinary no-reward result.
+- **Regression:** `test/test_mission_reward_handler.py` covers the horizontal
+  gesture contract, first-edge normalization, offscreen discovery, and
+  fresh-frame claim authority while retaining visible-chest and Sunday claim
+  policy coverage. The focused handler/scrolling suites passed 40 tests. The
+  complete suite passed 637 sandbox tests plus the separately permitted
+  localhost-socket test, for 638 total.
+- **Fixed by:** `4554f7c`.
+- **Live validation:** At 10:13 the repaired runtime verified Daily Missions,
+  normalized the track, exposed the chest with one rightward search step,
+  matched and claimed it, dismissed the reward reveal, proved no second chest
+  at the far edge, and reported `daily=1`. It then completed Tier 18 Farm Home
+  setup and in-battle session preflight with no waivers or failed checks.
+
 ### Home startup attempted Target Priority and runtime taps could bypass visibility
 
 - **Observed:** Reported by the operator on 2026-07-23 during startup.
