@@ -18,6 +18,9 @@ checked-item detail remains in the
     Home setup continues.
   - [ ] Confirm that an otherwise-correct Farm pair plus an empty third slot
     selects Scout and verifies all three Guardian chips before continuing.
+  - [ ] Confirm that bounded icon alignment resolves the animated Modules
+    overview, corrects all eight Farm slots, and revalidates the exact loadout
+    before Home setup continues.
 - [x] Finish live validation of the No Strategy two-phase inventory at the next
   natural Game Over. Do not Surrender or manufacture the boundary.
   - [x] On the active Tier 18 Attack Dissonance battle, confirm automatic

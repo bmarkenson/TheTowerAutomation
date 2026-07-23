@@ -3,7 +3,8 @@
   "rarity": "Ancestral",
   "normalization": {
     "size": 160,
-    "mask_radius_fraction": 0.34
+    "mask_radius_fraction": 0.34,
+    "alignment_radius": 6
   },
   "ancestral_green": {
     "hsv_lower": [35, 80, 100],

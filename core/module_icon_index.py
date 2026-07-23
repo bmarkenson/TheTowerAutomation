@@ -47,6 +47,7 @@ class ModuleIconCatalog:
     rarity: str
     normalization_size: int
     mask_radius_fraction: float
+    alignment_radius: int
     minimum_confidence: float
     minimum_margin: float
     green_hsv_lower: tuple[int, int, int]
@@ -106,6 +107,16 @@ def _positive_even_int(value: object, *, label: str) -> int:
     return parsed
 
 
+def _nonnegative_int(value: object, *, label: str, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be an integer") from exc
+    if parsed < 0 or parsed > maximum:
+        raise ValueError(f"{label} must be between 0 and {maximum}")
+    return parsed
+
+
 def _hsv_triplet(value: object, *, label: str) -> tuple[int, int, int]:
     if not isinstance(value, list) or len(value) != 3:
         raise ValueError(f"{label} must contain three integers")
@@ -159,6 +170,11 @@ def _load_module_icon_catalog(path: str) -> ModuleIconCatalog:
         label="normalization.mask_radius_fraction",
         minimum=0.05,
         maximum=0.5,
+    )
+    alignment_radius = _nonnegative_int(
+        normalization.get("alignment_radius"),
+        label="normalization.alignment_radius",
+        maximum=16,
     )
     minimum_confidence = _number(
         authority.get("minimum_confidence"),
@@ -262,6 +278,7 @@ def _load_module_icon_catalog(path: str) -> ModuleIconCatalog:
         rarity=rarity,
         normalization_size=normalization_size,
         mask_radius_fraction=mask_radius_fraction,
+        alignment_radius=alignment_radius,
         minimum_confidence=minimum_confidence,
         minimum_margin=minimum_margin,
         green_hsv_lower=green_hsv_lower,
@@ -429,12 +446,7 @@ def identify_equipped_ancestral_modules(
             slot.center,
             selected_catalog.role_frame_crop_sizes[slot.role],
         )
-        icon_crop = _crop_centered(
-            screen,
-            slot.center,
-            selected_catalog.role_crop_sizes[slot.role],
-        )
-        if frame_crop is None or icon_crop is None:
+        if frame_crop is None:
             results.append(
                 _rejected_match(slot, status="unknown", green_fraction=0.0)
             )
@@ -451,12 +463,33 @@ def identify_equipped_ancestral_modules(
             )
             continue
 
-        observed = _unit_feature(
-            icon_crop,
-            size=selected_catalog.normalization_size,
-            radius_fraction=selected_catalog.mask_radius_fraction,
-        )
-        if observed is None:
+        observed_features: list[NDArray[np.float32]] = []
+        for y_offset in range(
+            -selected_catalog.alignment_radius,
+            selected_catalog.alignment_radius + 1,
+        ):
+            for x_offset in range(
+                -selected_catalog.alignment_radius,
+                selected_catalog.alignment_radius + 1,
+            ):
+                icon_crop = _crop_centered(
+                    screen,
+                    (
+                        slot.center[0] + x_offset,
+                        slot.center[1] + y_offset,
+                    ),
+                    selected_catalog.role_crop_sizes[slot.role],
+                )
+                if icon_crop is None:
+                    continue
+                observed = _unit_feature(
+                    icon_crop,
+                    size=selected_catalog.normalization_size,
+                    radius_fraction=selected_catalog.mask_radius_fraction,
+                )
+                if observed is not None:
+                    observed_features.append(observed)
+        if not observed_features:
             results.append(
                 _rejected_match(
                     slot, status="unknown", green_fraction=green_fraction
@@ -469,20 +502,20 @@ def identify_equipped_ancestral_modules(
             for module in selected_catalog.modules
             if module.family == slot.family
         ]
-        scores = [
-            (
-                float(
-                    observed
-                    @ _template_feature(
-                        str(module.template_path),
-                        selected_catalog.normalization_size,
-                        selected_catalog.mask_radius_fraction,
-                    )
-                ),
-                module,
+        observed_matrix = np.stack(observed_features)
+        scores = []
+        for module in candidates:
+            template = _template_feature(
+                str(module.template_path),
+                selected_catalog.normalization_size,
+                selected_catalog.mask_radius_fraction,
             )
-            for module in candidates
-        ]
+            scores.append(
+                (
+                    float(np.max(observed_matrix @ template)),
+                    module,
+                )
+            )
         scores.sort(key=lambda item: item[0], reverse=True)
         best_score, best = scores[0]
         runner_score, runner = scores[1]

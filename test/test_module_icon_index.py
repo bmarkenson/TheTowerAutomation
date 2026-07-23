@@ -76,6 +76,22 @@ def test_restored_gc_overview_identifies_all_equipped_modules_read_only():
         assert result.green_fraction >= 0.12
 
 
+def test_equipped_module_identity_tolerates_six_pixel_overview_animation():
+    screen = _load("gc_modules_overview.png")
+    shifted = np.zeros_like(screen)
+    shifted[6:] = screen[:-6]
+
+    matches = _by_slot(shifted)
+
+    assert set(matches) == set(GC_EXPECTED)
+    for slot_key, (_role, name) in GC_EXPECTED.items():
+        result = matches[slot_key]
+        assert result.status == "matched"
+        assert result.name == name
+        assert result.confidence >= 0.23
+        assert result.margin >= 0.08
+
+
 def test_same_project_funding_icon_matches_at_primary_and_assist_scales():
     primary = _by_slot(_load("project_funding_primary_overview.png"))[
         "generator_primary"

@@ -11,6 +11,27 @@ for a matching recurrence or historical investigation.
 
 ## Open
 
+### Animated Modules overview displaced equipped icons from fixed crops
+
+- **Observed:** 2026-07-22 during the requested Farm T19 Experimental start
+  from no-battle Home.
+- **Symptom:** The Modules gate blocked Battle because the equipped
+  `cannon_assist` icon was `unknown` and `generator_primary` was `ambiguous`.
+- **Evidence:** Two independent Home-setup passes produced the same failure.
+  Fresh paused detail views authoritatively identified the slots as Amplifying
+  Strike and Galaxy Compressor. On the retained overview, their correct icon
+  correlations rise from `0.118` and `0.314` to above `0.9` when the crop is
+  translated only a few pixels to follow the animated icon position.
+- **Safety response:** The gate remained at no-battle Home and did not waive
+  Modules or tap Battle. Detail inspection ran only after automation
+  acknowledged an agent-owned Pause and returned to the Modules overview.
+- **Status:** Cause confirmed. The working-tree repair searches a bounded
+  six-pixel neighborhood around each configured equipped slot while retaining
+  the existing Ancestral-frame, confidence, and competing-candidate margin
+  requirements. A shifted-overview regression and the existing ambiguity
+  regressions pass. Live correction remains in
+  [`backlog/runtime-and-validation.md`](backlog/runtime-and-validation.md#current-validation-gates).
+
 ### Farm Home setup could not fill a missing Scout Guardian slot
 
 - **Observed:** 2026-07-22 after the Guardian transition-race repair selected
