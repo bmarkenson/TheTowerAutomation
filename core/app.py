@@ -1121,6 +1121,16 @@ class App:
         if time.time() < getattr(self, "_no_strategy_post_run_retry_at", 0.0):
             return True
         stage = getattr(self, "_no_strategy_post_run_stage", None)
+        if stage == "complete_wait":
+            if AUTOMATION.mode is ExecMode.WAIT:
+                return True
+            self._release_no_strategy_post_run()
+            log(
+                "[NO_STRATEGY] WAIT released; the next-battle path is available",
+                "INFO",
+                console=True,
+            )
+            return True
         try:
             if stage == "locks":
                 if new_state != "HOME_SCREEN":
@@ -1201,13 +1211,17 @@ class App:
                             source="home_perks_configuration_tabs",
                         )
                 self._persist_pending_no_strategy_record(finalized=True)
-                self._pending_no_strategy_record = None
-                self._no_strategy_post_run_stage = None
-                self._no_strategy_post_run_retry_at = 0.0
-                self._no_strategy_observation_active = False
-                self._no_strategy_inventory_complete = False
-                self._no_strategy_inventory_retry_at = 0.0
-                self._no_strategy_observer.reset()
+                if AUTOMATION.mode is ExecMode.WAIT:
+                    self._no_strategy_post_run_stage = "complete_wait"
+                    self._no_strategy_post_run_retry_at = 0.0
+                    log(
+                        "[NO_STRATEGY] Post-run inventory complete; WAIT is "
+                        "holding the verified Home boundary",
+                        "INFO",
+                        console=True,
+                    )
+                    return True
+                self._release_no_strategy_post_run()
                 log(
                     "[NO_STRATEGY] Post-run inventory complete; the next-battle "
                     "path is released",
@@ -1243,6 +1257,17 @@ class App:
             )
             return True
         return True
+
+    def _release_no_strategy_post_run(self) -> None:
+        """Release a completed observation boundary and reset its collector."""
+
+        self._pending_no_strategy_record = None
+        self._no_strategy_post_run_stage = None
+        self._no_strategy_post_run_retry_at = 0.0
+        self._no_strategy_observation_active = False
+        self._no_strategy_inventory_complete = False
+        self._no_strategy_inventory_retry_at = 0.0
+        self._no_strategy_observer.reset()
 
     def _handle_primary_states(
         self,
@@ -1493,7 +1518,16 @@ class App:
                     self._mission_mgr.mark_no_battle_setup_complete(setup.evidence)
                 self._startup_gate_waivers = {}
             if home_handler_enabled:
-                handle_home_screen(restart_enabled=self._auto_start_enabled)
+                restart_enabled = (
+                    self._auto_start_enabled
+                    and AUTOMATION.mode is not ExecMode.WAIT
+                )
+                if self._auto_start_enabled and not restart_enabled:
+                    log(
+                        "[HOME] WAIT mode — holding Home without starting a battle",
+                        "INFO",
+                    )
+                handle_home_screen(restart_enabled=restart_enabled)
                 self._mission_mgr.on_home()
 
         if (

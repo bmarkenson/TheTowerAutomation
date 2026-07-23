@@ -5,11 +5,13 @@ import numpy as np
 
 from automation.missions.base import MissionContext
 from core.app import App
+from core.battle_lifecycle import HomeBattleControl
 from core.no_strategy_inventory import (
     NoStrategyInventoryResult,
     NoStrategyInventoryStatus,
 )
 from core.no_strategy_post_run import NoStrategyPostRunPaused
+from core.run_state import AUTOMATION, ExecMode
 
 
 def _app_without_strategy():
@@ -128,6 +130,70 @@ def test_post_run_perk_capture_finalizes_same_record_and_releases_boundary():
     assert app._pending_no_strategy_record is None
     assert app._no_strategy_post_run_stage is None
     assert app._no_strategy_observation_active is False
+
+
+def test_completed_post_run_inventory_holds_home_until_wait_mode_changes():
+    app = _app_without_strategy()
+    record = {"battle_id": "Battle1"}
+    app._pending_no_strategy_record = record
+    app._no_strategy_post_run_stage = "perks"
+    app._persist_pending_no_strategy_record = MagicMock()
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    capture = SimpleNamespace(fields={})
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.WAIT
+
+    try:
+        with patch(
+            "core.app.capture_post_run_perk_configuration",
+            return_value=capture,
+        ):
+            handled = app._handle_no_strategy_post_run("PERKS", frame)
+
+        assert handled is True
+        app._persist_pending_no_strategy_record.assert_called_once_with(
+            finalized=True
+        )
+        assert app._pending_no_strategy_record is record
+        assert app._no_strategy_post_run_stage == "complete_wait"
+        app._no_strategy_observer.reset.assert_not_called()
+
+        assert app._handle_no_strategy_post_run("HOME_SCREEN", frame) is True
+        assert app._pending_no_strategy_record is record
+
+        AUTOMATION.mode = ExecMode.RETRY
+        assert app._handle_no_strategy_post_run("HOME_SCREEN", frame) is True
+    finally:
+        AUTOMATION.mode = original_mode
+
+    assert app._pending_no_strategy_record is None
+    assert app._no_strategy_post_run_stage is None
+    app._no_strategy_observer.reset.assert_called_once_with()
+
+
+def test_wait_mode_never_auto_starts_from_home():
+    app = _app_without_strategy()
+    app._auto_start_enabled = True
+    app._handler_enabled = MagicMock(side_effect=lambda name: name == "home")
+    app._runtime_policy = MagicMock(return_value={})
+    app._mission_mgr.no_battle_setup_requirements.return_value = {}
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.WAIT
+
+    try:
+        with (
+            patch(
+                "core.app.detect_home_battle_control",
+                return_value=SimpleNamespace(control=HomeBattleControl.NEW_BATTLE),
+            ),
+            patch("core.app.handle_home_screen") as home,
+        ):
+            app._handle_primary_states("HOME_SCREEN", set(), frame)
+    finally:
+        AUTOMATION.mode = original_mode
+
+    home.assert_called_once_with(restart_enabled=False)
 
 
 def test_automatic_in_battle_inventory_is_exclusive_and_runs_once():

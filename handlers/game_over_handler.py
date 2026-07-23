@@ -62,10 +62,12 @@ def handle_game_over(
       5) If clipboard acquisition or freshness validation fails, fall back to
          guarded overlapping screenshots and OCR.
       6) Close "More Stats"; if it fails, abort handler.
-      7) Based on AUTOMATION.mode, unless a guarded preflight repair requires Home:
+      7) Based on AUTOMATION.mode, unless a guarded post-run workflow requires Home:
          - WAIT: loop until mode changes.
          - HOME: tap the Game Stats Home button and return to the home screen.
          - else: tap "Retry"; if it fails, abort handler.
+         A required Home workflow bypasses WAIT but still honors PAUSED and
+         STOPPED control.
 
     Returns:
         The structured battle record when capture succeeds, otherwise ``None``.
@@ -186,7 +188,10 @@ def handle_game_over(
     mode = AUTOMATION.mode
     if mode == ExecMode.WAIT:
         log("Pausing on Game Over — waiting for user signal.", "INFO", console=True)
-    mode = _wait_for_game_over_direction(control_sync)
+    mode = _wait_for_game_over_direction(
+        control_sync,
+        wait_mode_blocks=not return_home_after_battle,
+    )
     if mode is None:
         log("Automation stopped while waiting on Game Over.", "INFO", console=True)
         return
@@ -208,8 +213,10 @@ def handle_game_over(
 
 def _wait_for_game_over_direction(
     control_sync: Optional[Callable[[], None]],
+    *,
+    wait_mode_blocks: bool = True,
 ) -> Optional[ExecMode]:
-    """Wait interruptibly for a runnable RETRY/HOME terminal direction."""
+    """Wait interruptibly for terminal input authority and a direction."""
 
     while True:
         if control_sync is not None:
@@ -217,7 +224,9 @@ def _wait_for_game_over_direction(
         state = AUTOMATION.state
         if state is RunState.STOPPED:
             return None
-        if state is RunState.PAUSED or AUTOMATION.mode is ExecMode.WAIT:
+        if state is RunState.PAUSED or (
+            wait_mode_blocks and AUTOMATION.mode is ExecMode.WAIT
+        ):
             time.sleep(1)
             continue
         return AUTOMATION.mode

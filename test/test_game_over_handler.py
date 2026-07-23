@@ -142,6 +142,55 @@ def test_guarded_preflight_repair_forces_home_after_control_allows_actions():
     tap.assert_called_once_with("buttons.home:game_over", retries=1)
 
 
+def test_required_post_run_home_inventory_bypasses_wait_mode():
+    original_state = AUTOMATION.state
+    original_mode = AUTOMATION.mode
+    AUTOMATION.state = RunState.RUNNING
+    AUTOMATION.mode = ExecMode.WAIT
+    try:
+        with (
+            patch("handlers.game_over_handler.tap_if_visible", return_value=True) as tap,
+            patch("handlers.game_over_handler.time.sleep"),
+        ):
+            handle_game_over(
+                capture_stats=False,
+                return_home_after_battle=True,
+            )
+    finally:
+        AUTOMATION.state = original_state
+        AUTOMATION.mode = original_mode
+
+    tap.assert_called_once_with("buttons.home:game_over", retries=1)
+
+
+def test_required_post_run_home_inventory_still_waits_while_paused():
+    original_state = AUTOMATION.state
+    original_mode = AUTOMATION.mode
+    AUTOMATION.state = RunState.PAUSED
+    AUTOMATION.mode = ExecMode.WAIT
+    sync_calls = 0
+
+    def sync_control():
+        nonlocal sync_calls
+        sync_calls += 1
+        if sync_calls == 2:
+            AUTOMATION.state = RunState.RUNNING
+
+    try:
+        with patch("handlers.game_over_handler.time.sleep") as sleep:
+            direction = _wait_for_game_over_direction(
+                sync_control,
+                wait_mode_blocks=False,
+            )
+    finally:
+        AUTOMATION.state = original_state
+        AUTOMATION.mode = original_mode
+
+    assert direction is ExecMode.WAIT
+    assert sync_calls == 2
+    sleep.assert_called_once_with(1)
+
+
 def test_game_over_finalizes_boundary_before_terminal_navigation():
     original_state = AUTOMATION.state
     original_mode = AUTOMATION.mode
