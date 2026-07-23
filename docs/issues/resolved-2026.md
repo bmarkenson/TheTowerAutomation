@@ -44,9 +44,17 @@ and actionable work lives in
   Priority template rejects Home. `test/test_gc_no_battle_setup.py`,
   `test/test_run_initialization.py`, and `test/test_target_priority.py` cover
   the deferred boundary and in-battle ownership. Domain tests cover guarded
-  coordinate actions, and the level-skip regression proves one frame
-  authorizes at most one purchase tap.
+  coordinate actions. Follow-up regressions limit reusable frame authority to
+  the two urgent purchase modules and exercise repeated level-skip and Damage
+  Slider taps from one initial frame.
 - **Fixed by:** `d410b61`.
+- **Follow-up:** The operator identified EHLS/EALS and Damage Slider purchases
+  as urgency-sensitive exceptions where a target verified on the initial frame
+  must be assumed stable for the bounded sequence. Commit `5b9f0a2` restores
+  level-skip taps during blocking capture and permits the Damage Slider to
+  match its arrow once per computed batch. The reusable-authority API caches
+  that initial verdict and is statically allowlisted to only those two modules;
+  all other runtime targets retain per-action verification.
 
 ### Farm preflight repeated Home-accessible checks after Battle start
 

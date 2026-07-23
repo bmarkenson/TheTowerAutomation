@@ -216,12 +216,21 @@ evidence is attached.
   current frame, a bounded target region containing the point, and a
   target-specific predicate that reidentifies what will be tapped. Legacy
   direct-region center lookup remains compatibility/tooling geometry only.
-- The bounded in-battle floating-gem sweep is the explicit runtime exception:
-  the moving gem cannot be reacquired reliably, and its dedicated tapper acts
-  only while automation remains `RUNNING`. Operator-invoked gesture tuning may
-  use its separately named unchecked tooling path with a recorded reason.
-- Every live action requires fresh source-state evidence immediately before the
-  input. Transition frames and stale screenshots cannot authorize actions.
+- Reusable initial-frame authority is limited to two bounded, time-critical
+  purchase blocks. EHLS/EALS may keep tapping one verified upgrade box while a
+  raw capture is in flight or until the live stream advances. Damage Slider may
+  match one direction arrow and reuse that point for the exact computed batch.
+  Both paths reacquire authoritative result evidence after the batch; the
+  reusable-authority API is statically allowlisted to those two modules.
+- The bounded in-battle floating-gem sweep remains the explicit blind runtime
+  exception: the moving gem cannot be reacquired reliably, and its dedicated
+  tapper acts only while automation remains `RUNNING`. Operator-invoked gesture
+  tuning may use its separately named unchecked tooling path with a recorded
+  reason.
+- Every ordinary live action requires fresh source-state evidence immediately
+  before the input. A bounded urgent block requires fresh evidence before
+  issuing its reusable authority. Transition frames and unrelated stale
+  screenshots cannot authorize actions.
 - Farm configuration is inspection-first and profile-driven. A setting may be
   corrected during the active run only when the profile explicitly owns that
   setting and its runtime contract declares the transition safe. Session
@@ -231,11 +240,13 @@ evidence is attached.
   transition. New-run initialization owns Damage Slider enforcement: it
   requires `RUNNING/ATTACK_MENU`, opens the freshly matched Damage control,
   and uses authoritative panel and percentage evidence to compute a bounded
-  same-direction batch only for an exact power-of-ten exponent gap. It then
-  reacquires settled OCR evidence, recomputes any remaining gap, requires
-  strict progress and a verified final value, and returns to
-  `RUNNING/ATTACK_MENU`. Unknown sequences fall back to single-step feedback;
-  unknown or incomplete evidence remains blocked.
+  same-direction batch only for an exact power-of-ten exponent gap. The
+  direction arrow is matched once on that same evidence frame and remains
+  authoritative for the computed batch. The runtime then reacquires settled
+  OCR evidence, recomputes any remaining gap, requires strict progress and a
+  verified final value, and returns to `RUNNING/ATTACK_MENU`. Unknown sequences
+  fall back to single-step feedback; unknown or incomplete evidence remains
+  blocked.
 - Complete no-battle setup owns every supported profile check available from
   verified Home `NEW_BATTLE`: Cards, Workshop and its Free Upgrade locks, Bots,
   Guardians, and Modules. It retains screen-derived configuration evidence for

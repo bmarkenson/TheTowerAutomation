@@ -745,13 +745,32 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   missing Scout inventory control. Dynamic upgrade, module, Perks, Ultimate
   Weapon, buy-quantity, and dialog actions now reidentify their exact target or
   authoritative containing control before tapping.
-- The high-speed level-skip initializer no longer sends taps while capture is
-  in flight, and one stream frame can authorize at most one purchase. The
+- Commit `d410b61` initially stopped level-skip taps during capture and limited
+  one stream frame to one purchase. The urgency-specific entry below records
+  the operator-directed replacement of that short-lived constraint. The
   bounded moving-gem sweep remains the only allowlisted blind runtime tapper;
   unchecked gesture taps are isolated to explicit operator tooling.
 - Clickmap and state-definition validation passed. Repository-wide validation
   passed 614 sandbox-compatible tests plus the separately permitted localhost
   HTTP test, for 615 total. No live process or device interaction was used.
+
+### 2026-07-23 urgent initial-frame purchase authority
+
+- Commit `5b9f0a2` added an explicit reusable mode to `TapVerification`. It
+  evaluates one complete, target-specific initial frame and caches that verdict
+  for a caller-owned bounded sequence; static audit coverage limits the mode to
+  `core/level_skip_initializer.py` and `core/damage_adjuster.py`.
+- EHLS/EALS again continues purchase taps while a raw screenshot is in flight
+  and reuses an unchanged live-stream frame until a newer result frame arrives.
+  The first frame must still verify `RUNNING/UTILITY_MENU`, the exact target
+  box, and a non-Max state.
+- Damage Slider now carries the authoritative panel frame with its OCR reading,
+  matches the required direction arrow once, and reuses that matched point for
+  the exact bounded batch. Settled OCR and strict-progress checks still run
+  after each batch.
+- Clickmap and state-definition validation passed. Repository-wide validation
+  passed 616 sandbox-compatible tests plus the separately permitted localhost
+  HTTP test, for 617 total. No live process or device interaction was used.
 
 ---
 
