@@ -11,6 +11,27 @@ for a matching recurrence or historical investigation.
 
 ## Open
 
+### Guardian replacement tap raced the emptied-slot transition
+
+- **Observed:** 2026-07-22 during live validation of a Farm T19 Experimental
+  start from no-battle Home.
+- **Symptom:** Home setup removed the equipped Attack chip and requested the
+  visible Fetch inventory chip, but Fetch did not become equipped. The startup
+  gate returned Home and blocked the battle at `guardian_chips`.
+- **Evidence:** The action log records Attack removal at 21:07:04, the Fetch
+  request at 21:07:06, and the authoritative timeout. A fresh paused Guardian
+  frame showed the first slot empty, Ally still equipped, and Fetch visibly
+  available in inventory. Repeating the same guarded visible-target tap after
+  the transition was stable equipped Fetch immediately.
+- **Safety response:** The gate did not bypass the mismatch or start Battle.
+  Automation acknowledged Pause before manual inspection, and the requested
+  final run remained at no-battle Home.
+- **Status:** Cause confirmed as action on the earliest empty-slot frame. The
+  working-tree repair adds a bounded settle and fresh evidence reacquisition
+  before the inventory selection. Regression coverage reproduces a selector
+  that rejects the transition-frame tap. Live validation remains in
+  [`backlog/runtime-and-validation.md`](backlog/runtime-and-validation.md#current-validation-gates).
+
 ### Selected strategy was not applied when starting automation
 
 - **Observed:** 2026-07-22 while the operator started automation from

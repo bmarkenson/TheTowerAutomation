@@ -12,6 +12,7 @@ from core.gc_no_battle_setup import (
     GcNoBattleSetupResult,
     GcNoBattleSetupStatus,
     _is_not_enough_medals_dialog,
+    _replace_guardian_chip,
     run_gc_no_battle_setup,
 )
 from core.gate_decisions import build_gate_decision_options
@@ -372,6 +373,62 @@ def test_no_battle_setup_corrects_supported_farm_presets_and_guardians():
         "indicators.guardian:ally_equipped",
         "buttons.guardian:summon_inventory",
         "buttons.return_to_game",
+    ]
+
+
+def test_guardian_replacement_reacquires_after_empty_slot_settles():
+    state = {"phase": "equipped"}
+    sleeps = []
+    actions = []
+
+    def capture():
+        return state["phase"]
+
+    def detect(frame):
+        secondary = ["GUILD_GUARDIAN_SCREEN"]
+        if frame == "equipped":
+            secondary.append("GUARDIAN_ATTACK_EQUIPPED")
+        elif frame == "selected":
+            secondary.append("GUARDIAN_FETCH_EQUIPPED")
+        return {"state": "GUILD", "secondary_states": secondary}
+
+    def visible_tap(label, *, screenshot, retries):
+        actions.append((label, screenshot, retries))
+        if label == "indicators.guardian:attack_equipped":
+            state["phase"] = "transition"
+            return True
+        if (
+            label == "buttons.guardian:fetch_inventory"
+            and screenshot == "settled"
+        ):
+            state["phase"] = "selected"
+            return True
+        return False
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        if state["phase"] == "transition" and seconds >= 1.0:
+            state["phase"] = "settled"
+
+    selected = _replace_guardian_chip(
+        "equipped",
+        wrong_label="indicators.guardian:attack_equipped",
+        wrong_secondary="GUARDIAN_ATTACK_EQUIPPED",
+        inventory_label="buttons.guardian:fetch_inventory",
+        inventory_visible=True,
+        expected_secondary="GUARDIAN_FETCH_EQUIPPED",
+        capture_fn=capture,
+        detector=detect,
+        safe_tap_fn=lambda *_args, **_kwargs: False,
+        tap_visible_fn=visible_tap,
+        sleep_fn=sleep,
+    )
+
+    assert selected == "selected"
+    assert 1.0 in sleeps
+    assert actions == [
+        ("indicators.guardian:attack_equipped", "equipped", 1),
+        ("buttons.guardian:fetch_inventory", "settled", 1),
     ]
 
 

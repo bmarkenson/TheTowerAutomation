@@ -13,6 +13,9 @@ checked-item detail remains in the
   selection becomes both managed and control strategy before the new PID
   starts, that immediate Home-only initialization completes before Battle is
   tapped, and that session preflight runs in the resulting Tier 19 battle.
+  - [ ] Confirm that each Guardian replacement waits for the emptied slot to
+    settle, reacquires fresh inventory evidence, and equips Fetch/Summon before
+    Home setup continues.
 - [x] Finish live validation of the No Strategy two-phase inventory at the next
   natural Game Over. Do not Surrender or manufacture the boundary.
   - [x] On the active Tier 18 Attack Dissonance battle, confirm automatic

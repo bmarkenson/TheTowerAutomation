@@ -44,6 +44,7 @@ from utils.ocr_utils import ocr_text_and_conf
 
 NOT_ENOUGH_MEDALS_REGION = (100, 650, 880, 550)
 NOT_ENOUGH_MEDALS_OK = (540, 1100)
+GUARDIAN_INVENTORY_SETTLE_SECONDS = 1.0
 
 
 @dataclass(frozen=True)
@@ -956,6 +957,17 @@ def _replace_guardian_chip(
 ):
     if not tap_visible_fn(wrong_label, screenshot=frame, retries=1):
         raise _SetupFailure(f"known Guardian replacement source missing: {wrong_label}")
+    emptied = _wait_for_guardian_inventory(
+        removed_secondary=wrong_secondary,
+        capture_fn=capture_fn,
+        detector=detector,
+        sleep_fn=sleep_fn,
+    )
+    # The equipped slot can disappear one compositor frame before the chip
+    # inventory accepts a replacement tap. Wait for that transition to settle
+    # and reacquire current evidence instead of acting on the earliest empty
+    # frame.
+    sleep_fn(GUARDIAN_INVENTORY_SETTLE_SECONDS)
     emptied = _wait_for_guardian_inventory(
         removed_secondary=wrong_secondary,
         capture_fn=capture_fn,
