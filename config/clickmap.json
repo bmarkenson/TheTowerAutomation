@@ -2230,10 +2230,10 @@
     "home:game_over": {
       "match_template": "buttons/home:game_over.png",
       "match_region": {
-        "x": 564,
-        "y": 1349,
-        "w": 429,
-        "h": 127
+        "x": 540,
+        "y": 1200,
+        "w": 500,
+        "h": 450
       },
       "match_threshold": 0.9,
       "roles": [

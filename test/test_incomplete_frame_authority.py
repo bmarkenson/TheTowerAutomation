@@ -65,3 +65,21 @@ def test_mostly_black_frame_can_match_actionable_evidence_but_not_authority():
     with patch("core.input._dispatch_tap") as dispatch:
         assert not tap_if_visible("buttons.home:game_over", screenshot=partial)
     dispatch.assert_not_called()
+
+
+def test_game_over_home_control_covers_attack_dissonance_layout():
+    template = cv2.imread(
+        str(ROOT / "assets" / "match_templates" / "buttons" / "home:game_over.png")
+    )
+    assert template is not None
+    height, width = template.shape[:2]
+    frame = np.full((1920, 1080, 3), 32, dtype=np.uint8)
+    x, y = 564, 1443
+    frame[y : y + height, x : x + width] = template
+
+    assert get_label_match("buttons.home:game_over", screenshot=frame) == (
+        x,
+        y,
+        width,
+        height,
+    )
