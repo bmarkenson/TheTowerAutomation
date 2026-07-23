@@ -1,6 +1,6 @@
 states:
 - name: RUNNING
-  type: primary
+  type: background_primary
   match_keys:
   - indicators.tournament
   - indicators.menu_attack

@@ -146,6 +146,61 @@ def test_game_over_can_fall_back_to_its_more_stats_button():
     assert detection["state"] == "GAME_OVER"
 
 
+def test_background_running_evidence_yields_to_perks_modal():
+    definitions = {
+        "states": [
+            {
+                "name": "RUNNING",
+                "type": "background_primary",
+                "match_keys": ["indicators.cinematic_wall_icon"],
+            },
+            {
+                "name": "PERKS",
+                "type": "primary",
+                "match_keys": ["indicators.perks_panel"],
+            },
+        ],
+        "overlays": [],
+    }
+    frame = cv2.imread(
+        str(FIXTURES / "active_perks_selected_auto_pick_on.png")
+    )
+    assert frame is not None
+
+    with patch(
+        "core.state_detector.get_match",
+        return_value=((44, 1620), 1.0),
+    ):
+        detection = detect_state_and_overlays(frame, state_defs=definitions)
+
+    assert detection["state"] == "PERKS"
+
+
+def test_background_running_evidence_is_used_without_a_specific_state():
+    definitions = {
+        "states": [
+            {
+                "name": "RUNNING",
+                "type": "background_primary",
+                "match_keys": ["indicators.cinematic_wall_icon"],
+            }
+        ],
+        "overlays": [],
+    }
+    frame = cv2.imread(
+        str(FIXTURES / "active_perks_selected_auto_pick_on.png")
+    )
+    assert frame is not None
+
+    with patch(
+        "core.state_detector.get_match",
+        return_value=((44, 1620), 1.0),
+    ):
+        detection = detect_state_and_overlays(frame, state_defs=definitions)
+
+    assert detection["state"] == "RUNNING"
+
+
 def test_tournament_heat_has_a_dedicated_visible_close_control():
     screenshot = cv2.imread(str(FIXTURES / "active_tournament_heat_20260718.png"))
 

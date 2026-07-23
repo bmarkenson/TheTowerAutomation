@@ -22,7 +22,8 @@ defaults:
   clickmap: config/clickmap.json (resolved via core.clickmap_access)
   state_yaml: config/state_definitions.yaml (safe_load)
   invariants:
-    - Exactly one primary state per frame; multiple → RuntimeError
+    - Exactly one ordinary primary state per frame; multiple → RuntimeError
+    - Background-primary evidence yields to modal and fallback-primary states
     - Menus are mutually exclusive; choose first match in YAML order
     - Overlays: 0..N may co-exist
 """
@@ -167,10 +168,13 @@ def detect_state_and_overlays(
     # Classify into primary, secondary, menu, and fallback-primary candidates.
     # Fallback primaries describe modal screens whose evidence may coexist with
     # a more specific primary (for example, an upgrade detail shown over the
-    # dedicated Damage Adjuster). They are authoritative only when no ordinary
-    # primary matched.
+    # dedicated Damage Adjuster). Background primaries describe the underlying
+    # screen whose controls can remain visible behind a modal (for example, a
+    # cinematic battle behind Perks). The priority is ordinary primary,
+    # fallback primary, then background primary.
     menu_candidates_in_order = []  # preserve YAML order for priority
     fallback_primary_candidates = []
+    background_primary_candidates = []
     for name in matched_states:
         # find the state entry (by name) in YAML
         state_entry = state_lookup.get(name)
@@ -184,6 +188,8 @@ def detect_state_and_overlays(
             result["state"] = name
         elif state_type == "fallback_primary":
             fallback_primary_candidates.append(name)
+        elif state_type == "background_primary":
+            background_primary_candidates.append(name)
         elif state_type == "menu":
             menu_candidates_in_order.append(name)
         else:
@@ -195,6 +201,16 @@ def detect_state_and_overlays(
             log(
                 f"[WARN] Multiple fallback primaries matched "
                 f"{fallback_primary_candidates} -> chose "
+                f"'{result['state']}' (YAML order priority)",
+                "WARN",
+            )
+
+    if result["state"] == "UNKNOWN" and background_primary_candidates:
+        result["state"] = background_primary_candidates[0]
+        if len(background_primary_candidates) > 1:
+            log(
+                f"[WARN] Multiple background primaries matched "
+                f"{background_primary_candidates} -> chose "
                 f"'{result['state']}' (YAML order priority)",
                 "WARN",
             )
