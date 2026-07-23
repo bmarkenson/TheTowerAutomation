@@ -11,6 +11,29 @@ for a matching recurrence or historical investigation.
 
 ## Open
 
+### Module inventory accepted stale detail evidence after a candidate tap
+
+- **Observed:** 2026-07-22 while the repaired Modules overview corrected the
+  requested Farm T19 Experimental loadout.
+- **Symptom:** Seven slots were corrected, but the gate reported that
+  Ancestral Dimension Core was not found after reviewing all 16 named
+  inventory candidates.
+- **Evidence:** The failed pass ranked the real Dimension Core card first at
+  `(941, 1295)` with score `0.513`, then immediately closed its detail and
+  continued through the remaining candidates. Fresh paused evidence showed the
+  Ancestral card at that coordinate; its settled detail read `Dimension Core`
+  and `Equip`. Repeating the same guarded lookup from the settled inventory
+  selected it first and returned the exact authoritative detail.
+- **Safety response:** Every rejected candidate was closed without an Equip
+  action, the gate returned no-battle Home, and automation acknowledged an
+  agent-owned Pause before diagnosis. Battle was not tapped and the Modules
+  requirement was not waived.
+- **Status:** Cause confirmed as accepting the earliest complete-looking
+  detail frame after the candidate tap. The working-tree repair adds a bounded
+  settle before detail OCR and a regression that requires the settle to precede
+  authoritative detail evaluation. Live correction remains in
+  [`backlog/runtime-and-validation.md`](backlog/runtime-and-validation.md#current-validation-gates).
+
 ### Animated Modules overview displaced equipped icons from fixed crops
 
 - **Observed:** 2026-07-22 during the requested Farm T19 Experimental start

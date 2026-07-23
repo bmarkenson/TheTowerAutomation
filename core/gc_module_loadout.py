@@ -28,6 +28,7 @@ INVENTORY_COLUMNS = (145, 345, 543, 741, 941)
 INVENTORY_ROWS = (1090, 1295, 1500)
 INVENTORY_ICON_CROP_SIZE = 134
 INVENTORY_FRAME_CROP_SIZE = 190
+MODULE_DETAIL_SETTLE_SECONDS = 1.0
 _MAX_CORRECTION_STEPS = 16
 _MAX_INVENTORY_SCROLLS = 8
 
@@ -604,6 +605,7 @@ def _find_inventory_detail(
                 raise ModuleLoadoutCorrectionError(
                     f"failed to open inventory candidate for {target}"
                 )
+            sleep_fn(MODULE_DETAIL_SETTLE_SECONDS)
             detail = _wait_for(
                 _detail_ready,
                 capture_fn=capture_fn,

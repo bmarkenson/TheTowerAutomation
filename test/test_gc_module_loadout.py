@@ -8,8 +8,10 @@ import pytest
 from core.gc_module_loadout import (
     GcModuleLoadoutEvidence,
     GcModuleSlotEvidence,
+    MODULE_DETAIL_SETTLE_SECONDS,
     ModuleDetailEvidence,
     ModuleLoadoutCorrectionError,
+    _find_inventory_detail,
     _scroll_inventory_to_top,
     _detail_ready,
     ensure_gc_module_loadout,
@@ -207,6 +209,59 @@ def test_inventory_search_rewinds_to_top_before_ranking_candidates():
         "y2": 1500,
         "duration_ms": 260,
     }
+
+
+def test_inventory_candidate_waits_for_fresh_detail_before_ocr():
+    frame = np.full((1920, 1080, 3), 32, dtype=np.uint8)
+    events = []
+
+    with (
+        patch(
+            "core.gc_module_loadout._set_module_rarity_filter",
+            return_value=frame,
+        ),
+        patch(
+            "core.gc_module_loadout._scroll_inventory_to_top",
+            return_value=frame,
+        ),
+        patch(
+            "core.gc_module_loadout._inventory_candidates",
+            return_value=[(0.9, (145, 1090))],
+        ),
+        patch(
+            "core.gc_module_loadout.ancestral_green_fraction",
+            return_value=1.0,
+        ),
+        patch(
+            "core.gc_module_loadout._wait_for",
+            side_effect=lambda *_args, **_kwargs: events.append("wait") or frame,
+        ),
+        patch(
+            "core.gc_module_loadout._read_detail",
+            return_value=ModuleDetailEvidence(
+                name="Dimension Core",
+                rarity="ANCESTRAL",
+                equipped="",
+                action="EQUIP",
+            ),
+        ),
+    ):
+        result = _find_inventory_detail(
+            "Dimension Core",
+            capture_fn=lambda: frame,
+            detector=lambda _frame: {"state": "MODULES"},
+            safe_tap_fn=lambda *_args, **_kwargs: events.append("tap") or True,
+            swipe_fn=lambda _label: True,
+            sleep_fn=lambda seconds: events.append(("sleep", seconds)),
+            catalog=load_module_icon_catalog(),
+        )
+
+    assert result is frame
+    assert events == [
+        "tap",
+        ("sleep", MODULE_DETAIL_SETTLE_SECONDS),
+        "wait",
+    ]
 
 
 def test_module_actions_reject_incomplete_frames_and_partial_detail_renders():

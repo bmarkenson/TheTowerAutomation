@@ -21,6 +21,8 @@ checked-item detail remains in the
   - [ ] Confirm that bounded icon alignment resolves the animated Modules
     overview, corrects all eight Farm slots, and revalidates the exact loadout
     before Home setup continues.
+  - [ ] Confirm that inventory candidate detail OCR waits for the tapped card
+    to settle and accepts the Ancestral Dimension Core before equipping it.
 - [x] Finish live validation of the No Strategy two-phase inventory at the next
   natural Game Over. Do not Surrender or manufacture the boundary.
   - [x] On the active Tier 18 Attack Dissonance battle, confirm automatic
