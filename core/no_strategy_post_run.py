@@ -252,10 +252,12 @@ def inspect_post_run_free_upgrade_locks(
         log_label="no_strategy_post_run:return_home",
     ):
         raise NoStrategyPostRunError("Home navigation tap failed after lock inspection")
-    home = _wait_for(
-        "HOME_SCREEN", capture_fn=capture_fn, detector=detector, sleep_fn=sleep_fn
+    home = _wait_for_new_battle_home(
+        capture_fn=capture_fn,
+        detector=detector,
+        home_control_fn=home_control_fn,
+        sleep_fn=sleep_fn,
     )
-    _require_new_battle_home(home, detector, home_control_fn)
     log(
         "[NO_STRATEGY] Recorded post-run Free Upgrade locks without changing them",
         "INFO",
@@ -328,10 +330,12 @@ def open_perks_configuration_from_cards(
         log_label="no_strategy_post_run:return_home_from_cards",
     ):
         raise NoStrategyPostRunError("Home navigation tap failed from Cards")
-    home = _wait_for(
-        "HOME_SCREEN", capture_fn=capture_fn, detector=detector, sleep_fn=sleep_fn
+    home = _wait_for_new_battle_home(
+        capture_fn=capture_fn,
+        detector=detector,
+        home_control_fn=home_control_fn,
+        sleep_fn=sleep_fn,
     )
-    _require_new_battle_home(home, detector, home_control_fn)
     if not detect_home_perks_configuration_control(home)["visible"]:
         raise NoStrategyPostRunError(
             "Home Perks menu item was not independently verified"
@@ -464,15 +468,20 @@ def capture_post_run_perk_configuration(
             raise NoStrategyPostRunError(
                 "Home navigation tap failed after Perks capture"
             )
-        home = _wait_for(
-            "HOME_SCREEN",
+        home = _wait_for_new_battle_home(
             capture_fn=capture_fn,
             detector=detector,
+            home_control_fn=home_control_fn,
             sleep_fn=sleep_fn,
         )
     else:
-        home = destination
-    _require_new_battle_home(home, detector, home_control_fn)
+        home = _wait_for_new_battle_home(
+            initial=destination,
+            capture_fn=capture_fn,
+            detector=detector,
+            home_control_fn=home_control_fn,
+            sleep_fn=sleep_fn,
+        )
     log(
         "[NO_STRATEGY] Captured post-run First Perk, Ban Perks, and Auto Pick evidence",
         "INFO",
@@ -567,6 +576,35 @@ def _require_new_battle_home(frame, detector, home_control_fn) -> None:
         )
 
 
+def _wait_for_new_battle_home(
+    *,
+    capture_fn: Capture,
+    detector: Detector,
+    home_control_fn: Callable[[Frame], Any],
+    sleep_fn: Callable[[float], None],
+    initial: Optional[Frame] = None,
+    attempts: int = 24,
+) -> Frame:
+    """Wait for both Home and its no-battle control to finish settling."""
+
+    last_state = "UNKNOWN"
+    last_control = HomeBattleControl.UNKNOWN
+    for attempt in range(attempts):
+        frame = initial if attempt == 0 and initial is not None else capture_fn()
+        if frame is not None:
+            last_state = str(detector(frame).get("state") or "UNKNOWN")
+            if last_state == "HOME_SCREEN":
+                last_control = home_control_fn(frame).control
+                if last_control is HomeBattleControl.NEW_BATTLE:
+                    return frame
+        if attempt + 1 < attempts:
+            sleep_fn(0.25)
+    raise NoStrategyPostRunError(
+        "post-run inspection timed out waiting for NEW_BATTLE Home; "
+        f"last state={last_state}, control={last_control.value}"
+    )
+
+
 def restore_post_run_home(
     screenshot: Frame,
     *,
@@ -599,8 +637,13 @@ def restore_post_run_home(
         )
         state = str(detector(current).get("state") or "UNKNOWN")
         if state == "HOME_SCREEN":
-            _require_new_battle_home(current, detector, home_control_fn)
-            return current
+            return _wait_for_new_battle_home(
+                initial=current,
+                capture_fn=capture_fn,
+                detector=detector,
+                home_control_fn=home_control_fn,
+                sleep_fn=sleep_fn,
+            )
     if state not in {"CARDS", "WORKSHOP"}:
         raise NoStrategyPostRunError(
             f"cannot restore post-run Home from state={state}"
@@ -613,10 +656,12 @@ def restore_post_run_home(
         log_label="no_strategy_post_run:restore_home",
     ):
         raise NoStrategyPostRunError("post-run Home restoration tap failed")
-    home = _wait_for(
-        "HOME_SCREEN", capture_fn=capture_fn, detector=detector, sleep_fn=sleep_fn
+    home = _wait_for_new_battle_home(
+        capture_fn=capture_fn,
+        detector=detector,
+        home_control_fn=home_control_fn,
+        sleep_fn=sleep_fn,
     )
-    _require_new_battle_home(home, detector, home_control_fn)
     return home
 
 

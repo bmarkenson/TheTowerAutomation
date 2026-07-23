@@ -286,6 +286,7 @@ def test_post_run_action_guard_blocks_input_when_pause_arrives():
 
 def test_perk_configuration_capture_records_all_tabs_as_raw_evidence(tmp_path):
     phase = {"state": "PERKS", "active": 0}
+    home_control_reads = []
     perk_frame = _frame()
     cards = _frame()
     home = _frame()
@@ -340,6 +341,15 @@ def test_perk_configuration_capture_records_all_tabs_as_raw_evidence(tmp_path):
         phase["state"] = "HOME"
         return True
 
+    def home_control(_frame):
+        home_control_reads.append(len(home_control_reads) + 1)
+        control = (
+            HomeBattleControl.UNKNOWN
+            if len(home_control_reads) == 1
+            else HomeBattleControl.NEW_BATTLE
+        )
+        return SimpleNamespace(control=control)
+
     def top(*_args, screenshot, **_kwargs):
         return SimpleNamespace(success=True, screenshot=screenshot, reason="edge_reached")
 
@@ -356,9 +366,7 @@ def test_perk_configuration_capture_records_all_tabs_as_raw_evidence(tmp_path):
         evidence_root=tmp_path,
         capture_fn=capture,
         detector=detector,
-        home_control_fn=lambda _frame: SimpleNamespace(
-            control=HomeBattleControl.NEW_BATTLE
-        ),
+        home_control_fn=home_control,
         safe_tap_fn=tap,
         tap_visible_fn=close,
         visible_fn=lambda *_args, **_kwargs: phase["state"] == "PERKS",
@@ -373,6 +381,7 @@ def test_perk_configuration_capture_records_all_tabs_as_raw_evidence(tmp_path):
         "perk_auto_pick_order",
     }
     assert result.home_screenshot is home
+    assert home_control_reads == [1, 2]
     for field in result.fields.values():
         assert field["quality"]["source_complete"] is True
         assert len(field["evidence_images"]) == 1
