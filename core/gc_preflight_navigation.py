@@ -203,6 +203,15 @@ def _select_running_menu(
 ) -> Frame:
     """Select an in-run menu, allowing one tap to be consumed by Cinematic Mode."""
 
+    frame, detection = _capture_detection(capture_fn, detector)
+    state = str(detection.get("state") or "UNKNOWN")
+    if state != "RUNNING":
+        raise _NavigationFailure(
+            f"refusing {key}: state={state}, expected=['RUNNING']"
+        )
+    if detection.get("menu") == menu:
+        return frame
+
     last_failure: Optional[Exception] = None
     for _ in range(2):
         _guarded_visible_tap(

@@ -217,7 +217,7 @@ def test_read_only_route_returns_to_running_and_never_uses_mutating_controls():
     assert "navigation.menu_guild" in ui.visible_taps
     assert "navigation.event:bots_tab" in ui.visible_taps
     assert "navigation.guild:guardian_tab" in ui.visible_taps
-    assert "navigation.goto_uw" in ui.visible_taps
+    assert "navigation.goto_uw" not in ui.visible_taps
     assert "navigation.menu_modules" not in ui.static_taps
     assert "navigation.menu_event" not in ui.static_taps
     assert "navigation.menu_guild" not in ui.static_taps
@@ -598,6 +598,24 @@ def test_running_menu_selection_retries_when_cinematic_mode_consumes_first_tap()
 
     assert frame is ui.frame
     assert attempts == 2
+    assert ui.menu == "UW_MENU"
+
+
+def test_running_menu_selection_does_not_collapse_already_selected_menu():
+    ui = _FakeUi()
+    ui.menu = "UW_MENU"
+
+    frame = _select_running_menu(
+        "navigation.goto_uw",
+        "UW_MENU",
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        tap_visible_fn=ui.visible_tap,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert frame is ui.frame
+    assert ui.visible_taps == []
     assert ui.menu == "UW_MENU"
 
 
