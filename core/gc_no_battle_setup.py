@@ -934,6 +934,30 @@ def _ensure_guardian_loadout(
         )
     detected = set(detector(current).get("secondary_states") or ())
     missing = desired - detected
+    if missing == {"GUARDIAN_SCOUT_EQUIPPED"}:
+        sleep_fn(GUARDIAN_INVENTORY_SETTLE_SECONDS)
+        current = _wait_for(
+            state="GUILD",
+            secondary="GUILD_GUARDIAN_SCREEN",
+            capture_fn=capture_fn,
+            detector=detector,
+            sleep_fn=sleep_fn,
+        )
+        if not safe_tap_fn(
+            "buttons.guardian:scout_inventory",
+            require_visible=False,
+            dispatch="now",
+        ):
+            raise _SetupFailure("Guardian Scout inventory selection failed")
+        current = _wait_for(
+            state="GUILD",
+            secondary="GUARDIAN_SCOUT_EQUIPPED",
+            capture_fn=capture_fn,
+            detector=detector,
+            sleep_fn=sleep_fn,
+        )
+        detected = set(detector(current).get("secondary_states") or ())
+        missing = desired - detected
     if missing:
         raise _SetupFailure(
             "unsupported Guardian mismatch: " + ", ".join(sorted(missing))

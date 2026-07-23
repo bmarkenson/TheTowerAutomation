@@ -16,6 +16,8 @@ checked-item detail remains in the
   - [ ] Confirm that each Guardian replacement waits for the emptied slot to
     settle, reacquires fresh inventory evidence, and equips Fetch/Summon before
     Home setup continues.
+  - [ ] Confirm that an otherwise-correct Farm pair plus an empty third slot
+    selects Scout and verifies all three Guardian chips before continuing.
 - [x] Finish live validation of the No Strategy two-phase inventory at the next
   natural Game Over. Do not Surrender or manufacture the boundary.
   - [x] On the active Tier 18 Attack Dissonance battle, confirm automatic

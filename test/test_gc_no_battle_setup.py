@@ -66,6 +66,7 @@ class _NoBattleRouter:
         *,
         selected: bool = False,
         correct_guardians: bool = False,
+        missing_scout: bool = False,
         bots_offscreen: bool = False,
         deny_bots_preset: bool = False,
     ):
@@ -78,7 +79,7 @@ class _NoBattleRouter:
         self.guardians = (
             {"fetch", "summon", "scout"}
             if correct_guardians
-            else {"attack", "ally", "scout"}
+            else {"attack", "ally"} | (set() if missing_scout else {"scout"})
         )
         self.static_actions = []
         self.visible_actions = []
@@ -148,6 +149,12 @@ class _NoBattleRouter:
 
     def static_tap(self, label, **_kwargs):
         self.static_actions.append(label)
+        if (
+            label == "buttons.guardian:scout_inventory"
+            and self.state == "guardians"
+        ):
+            self.guardians.add("scout")
+            return True
         if label == (540, 1100) and self.state == "medals_dialog":
             self.state = "bots"
             return True
@@ -432,6 +439,16 @@ def test_guardian_replacement_reacquires_after_empty_slot_settles():
     ]
 
 
+def test_no_battle_setup_fills_a_missing_scout_guardian_slot():
+    router = _NoBattleRouter(selected=True, missing_scout=True)
+
+    result = _run(router)
+
+    assert result.complete
+    assert router.guardians == {"fetch", "summon", "scout"}
+    assert "buttons.guardian:scout_inventory" in router.static_actions
+
+
 def test_no_battle_setup_leaves_already_correct_settings_untouched():
     router = _NoBattleRouter(selected=True, correct_guardians=True)
 
@@ -472,6 +489,7 @@ def test_tournament_guardian_inventory_actions_have_explicit_geometry():
 
     assert get_click("buttons.guardian:attack_inventory") == (195, 1230)
     assert get_click("buttons.guardian:ally_inventory") == (540, 1230)
+    assert get_click("buttons.guardian:scout_inventory") == (870, 1540)
 
 
 def test_not_enough_medals_dialog_requires_exact_high_confidence_text():

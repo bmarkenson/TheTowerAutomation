@@ -11,6 +11,26 @@ for a matching recurrence or historical investigation.
 
 ## Open
 
+### Farm Home setup could not fill a missing Scout Guardian slot
+
+- **Observed:** 2026-07-22 after the Guardian transition-race repair selected
+  Fetch and Summon during the requested Farm T19 Experimental start.
+- **Symptom:** The Guardian gate still blocked Battle because Scout was absent
+  from the third unlocked slot.
+- **Evidence:** Fresh paused Guardian evidence showed Fetch and Ally equipped,
+  the third slot empty, and Scout available in inventory. After the repaired
+  runtime replaced Ally with Summon, it reported only
+  `GUARDIAN_SCOUT_EQUIPPED` missing. Static tracing confirmed that the Home
+  repair supported swapping the Farm/Tournament chip pairs but assumed Scout
+  was already equipped.
+- **Safety response:** The gate remained at no-battle Home and did not bypass
+  the missing requirement or tap Battle.
+- **Status:** Cause confirmed. The working-tree repair adds a guarded explicit
+  Scout inventory target only for the exact lone-Scout mismatch, then requires
+  authoritative equipped evidence before continuing. Regression coverage
+  exercises the empty third-slot configuration. Live validation remains in
+  [`backlog/runtime-and-validation.md`](backlog/runtime-and-validation.md#current-validation-gates).
+
 ### Guardian replacement tap raced the emptied-slot transition
 
 - **Observed:** 2026-07-22 during live validation of a Farm T19 Experimental
