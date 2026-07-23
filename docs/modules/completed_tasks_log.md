@@ -772,6 +772,26 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   passed 616 sandbox-compatible tests plus the separately permitted localhost
   HTTP test, for 617 total. No live process or device interaction was used.
 
+### 2026-07-23 battle speed and Home-owned Poison Stun
+
+- Commit `6d5f331` added a global battle-only game-speed guard. It verifies the
+  localized value and plus control, discovers the current maximum by observed
+  progress, and periodically restores a slowdown. Farm explicitly withholds
+  its action authority until both EHLS and EALS are complete.
+- Commit `b19dfce` moved Poison Swamp Stun to verified no-battle Home Workshop
+  setup. The live source locator uses the Ultimate Upgrades heading and exact
+  Poison Swamp title to derive an isolated icon target, while session preflight
+  consumes the fresh Stun proof and still requires the in-battle primary
+  toggle. Attachments retain the guarded battle fallback.
+- The same checkpoint repaired Perks startup navigation by replacing dynamic
+  progress digits with a stable, bounded bar-edge verifier. The exact
+  `80 / 191` failure frame is retained as a regression.
+- Bounded live inspection ran only while automation was stopped, measured Stun
+  `off`, and restored verified Home `NEW_BATTLE` without changing the control
+  or starting a battle. Repository-wide validation passed 630
+  sandbox-compatible tests; the one localhost HTTP test passed separately with
+  socket permission, for 631 total.
+
 ---
 
 ## 📘 Documentation

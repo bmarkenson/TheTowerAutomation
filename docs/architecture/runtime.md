@@ -61,6 +61,15 @@ time-sensitive EHLS/EALS setup. `YamlStrategy` exposes the plan's resolved
 the versioned battle JSON. Runtime code does not inherit configuration or
 branch on a Farm strategy name.
 
+Game speed is a global battle-only invariant. A periodic guard requires
+authoritative `RUNNING` evidence, reads the localized speed value and visible
+plus glyph, and sends verified `+` taps until one produces no increase. This
+discovers the current perk-dependent ceiling instead of hard-coding `x5.0` or
+`x6.3`. Farm defers the guard while either urgent EHLS/EALS purchase remains
+incomplete; attachment and non-Farm profiles may correct speed as soon as
+their runtime policy grants the handler action authority. Pause is rechecked
+before every speed tap.
+
 ## Tournament observer profile
 
 `Tournament` is a passive, single-battle observer profile. Its generated plan
@@ -234,12 +243,15 @@ evidence is attached.
 - Farm configuration is inspection-first and profile-driven. A setting may be
   corrected during the active run only when the profile explicitly owns that
   setting and its runtime contract declares the transition safe. Session
-  preflight owns verified Poison Swamp Stun `on` → `off`: it opens the detected
-  Poison Swamp detail, taps the freshly matched checked control, verifies
-  `off`, and returns to `RUNNING/UW_MENU` without Surrender or a Home
-  transition. New-run initialization owns Damage Slider enforcement: it
-  requires `RUNNING/ATTACK_MENU`, opens the freshly matched Damage control,
-  and uses authoritative panel and percentage evidence to compute a bounded
+  preflight consumes fresh Home proof that Poison Swamp Stun is `off`. Complete
+  Home setup selects Workshop Ultimate Upgrades, OCR-localizes the Poison Swamp
+  card, opens only its isolated non-purchase icon, corrects a verified `on`
+  checkbox, and returns to Workshop. An attached run without boundary proof
+  retains the guarded in-battle compatibility route, which returns to
+  `RUNNING/UW_MENU` without Surrender or a Home transition. New-run
+  initialization owns Damage Slider enforcement: it requires
+  `RUNNING/ATTACK_MENU`, opens the freshly matched Damage control, and uses
+  authoritative panel and percentage evidence to compute a bounded
   same-direction batch only for an exact power-of-ten exponent gap. The
   direction arrow is matched once on that same evidence frame and remains
   authoritative for the computed batch. The runtime then reacquires settled
@@ -248,18 +260,19 @@ evidence is attached.
   fall back to single-step feedback; unknown or incomplete evidence remains
   blocked.
 - Complete no-battle setup owns every supported profile check available from
-  verified Home `NEW_BATTLE`: Cards, Workshop and its Free Upgrade locks, Bots,
-  Guardians, and Modules. It retains screen-derived configuration evidence for
-  session preflight, which consumes that boundary proof and checks only
-  battle-only settings instead of leaving the newly started run to repeat Home
-  checks. Target Priority records `battle_only_control` at Home and remains
-  unsatisfied until the generated `RUNNING` action observes or enforces it;
-  there is no Home Target Priority tap. Attaching to an existing battle without
-  boundary proof retains the guarded read-only compatibility route. Home-only
-  Free Upgrade locks remain deferred there: they record `unavailable_deferred`
-  without a pass, failure, Home repair, or Surrender request; Home
-  `RESUME_BATTLE` preserves the attachment, and the lock gate rearms at the
-  next genuine `NEW_BATTLE` boundary.
+  verified Home `NEW_BATTLE`: Cards, Workshop and its Free Upgrade locks,
+  Poison Swamp Stun, Bots, Guardians, and Modules. It retains screen-derived
+  configuration evidence for session preflight, which consumes that boundary
+  proof and checks only battle-only settings instead of leaving the newly
+  started run to repeat Home checks. Target Priority records
+  `battle_only_control` at Home and remains unsatisfied until the generated
+  `RUNNING` action observes or enforces it; there is no Home Target Priority
+  tap. Attaching to an existing battle without boundary proof retains the
+  guarded read-only compatibility route. Home-only Free Upgrade locks remain
+  deferred there: they record `unavailable_deferred` without a pass, failure,
+  Home repair, or Surrender request; Poison Swamp Stun falls back to its guarded
+  in-battle detail check; Home `RESUME_BATTLE` preserves the attachment, and
+  the Home-owned gates rearm at the next genuine `NEW_BATTLE` boundary.
 - Confident mismatches on Home-only configuration may request one app-owned
   stop/repair/restart sequence; ambiguous or unknown module identity and other
   non-Home repair classes remain blocked. The matcher reports evidence but

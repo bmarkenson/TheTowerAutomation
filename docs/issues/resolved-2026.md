@@ -1144,6 +1144,92 @@ and actionable work lives in
   loopback-socket test, for 618 total.
 - **Fixed by:** `c04dd86`.
 
+### Battle speed could remain at x1.0
+
+- **Observed:** Operator report on 2026-07-23 during the Tier 18 startup run.
+- **Symptom:** Game speed was visibly `x1.0` even though active battles should
+  always run at the maximum available speed.
+- **Evidence:** The retained frame
+  `test/fixtures/open_perks_dynamic_progress_20260723.png` shows the active
+  battle at `x1.0`. Runtime inspection found no component that measured or
+  restored the battle speed control.
+- **Safety response:** Automation was stopped and the operator later ended the
+  battle. Diagnosis did not tap the speed control or start another battle.
+- **Cause:** Maximum speed was an operator expectation but had no runtime
+  owner.
+- **Resolution:** A global battle-only guard OCRs the localized speed value,
+  verifies the visible plus glyph, and walks the control upward until a
+  verified tap produces no change. It checks periodically to restore later
+  slowdowns and discovers the current perk-dependent ceiling dynamically.
+  Farm defers all speed taps until both EHLS and EALS are complete, preserving
+  their urgent purchase priority; Pause is rechecked before every tap.
+- **Regression:** `test/test_game_speed.py` covers OCR, battle-only authority,
+  ceiling discovery, periodic restoration, Pause, Home rejection, Tournament
+  policy, and EHLS/EALS priority.
+- **Validation:** Repository-wide validation passed 630 sandbox-compatible
+  tests; the one localhost HTTP test passed separately with socket permission,
+  for 631 total.
+- **Fixed by:** `6d5f331`.
+
+### Poison Swamp Stun waited until battle despite a Home control
+
+- **Observed:** Operator report and bounded live inspection on 2026-07-23 at
+  verified no-battle Home.
+- **Symptom:** Farm treated Poison Swamp Stun as an in-battle-only correction,
+  adding avoidable work after Battle even though the same detail control is
+  available from Home.
+- **Evidence:** Verified Home navigation through Workshop and its green
+  Ultimate Upgrades category exposed the full-width Poison Swamp card. Tapping
+  its isolated icon opened the existing detail overlay, whose retained
+  templates authoritatively measured Stun `off`. The exact source frame is
+  retained as
+  `test/fixtures/poison_swamp_workshop_home_20260723.png`.
+- **Safety response:** Automation was stopped. Inspection used guarded,
+  verified navigation only, did not change Stun, and returned the device to
+  verified Home `NEW_BATTLE`.
+- **Cause:** The original exception was implemented against only the
+  two-column in-battle Ultimate Weapon menu; Home setup had no owner for the
+  Workshop Ultimate Upgrades category or its different card geometry.
+- **Resolution:** Complete no-battle setup now selects the verified Workshop
+  Ultimate Upgrades category, OCR-localizes exactly one Poison Swamp title,
+  opens only the isolated icon region, verifies/corrects Stun, and retains
+  `NEW_BATTLE` evidence. Session preflight merges that proof with the still
+  required in-battle primary-toggle observation and does not reopen Stun.
+  Attached runs without fresh Home proof keep the guarded battle fallback.
+- **Regression:** `test/test_poison_swamp_stun.py` covers the retained Home
+  source, exact geometry, guarded correction, and battle compatibility;
+  `test/test_gc_no_battle_setup.py` covers Home ownership; and
+  `test/test_gc_preflight_navigation.py` covers boundary-evidence consumption
+  without losing the primary toggle.
+- **Validation:** The focused Home/preflight suite passed 90 tests. The final
+  repository-wide validation passed 630 sandbox-compatible tests plus the
+  separately permitted localhost HTTP test, for 631 total.
+- **Fixed by:** `b19dfce`.
+
+### Perks opener matched changing progress text
+
+- **Observed:** 2026-07-23 during the Tier 18 session preflight.
+- **Symptom:** The exclusive validation gate retried four times but could not
+  open Perks, reporting template confidence between `0.60` and `0.62`.
+- **Evidence:** `logs/actions.log` records failures from 02:52:37 through
+  02:54:11. The retained failing frame shows `80 / 191`, while the tap
+  template included an earlier numeric progress value. The full template scored
+  below threshold on that exact frame even though the Perks bar was plainly
+  visible.
+- **Safety response:** Every uncertain tap failed closed. The operator stopped
+  automation; diagnosis used only the retained screenshot.
+- **Cause:** The verifier treated dynamic progress digits and fill width as
+  part of the stable identity of the Perks bar.
+- **Resolution:** The clickmap verifier now matches a tightly bounded stable
+  right-edge frame segment while preserving the explicit center tap.
+- **Regression:** `test/test_tap_safety.py` requires
+  `navigation.open_perks` to match both the older retained frame and
+  `test/fixtures/open_perks_dynamic_progress_20260723.png`.
+- **Validation:** The exact failing frame passes the repaired verifier. The
+  final repository-wide validation passed 630 sandbox-compatible tests plus
+  the separately permitted localhost HTTP test, for 631 total.
+- **Fixed by:** `b19dfce`.
+
 ## Operational lessons
 
 ### A detached child may not survive the agent execution wrapper

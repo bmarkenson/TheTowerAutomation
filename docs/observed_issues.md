@@ -11,6 +11,28 @@ for a matching recurrence or historical investigation.
 
 ## Open
 
+### Startup gate dialog was reported without visible Retry or Bypass choices
+
+- **Observed:** Operator report on 2026-07-23 while the blocking
+  `free_upgrade_locks` decision was pending.
+- **Symptom:** The browser dialog said that the Startup Gate needed direction,
+  but the operator initially could not see a Retry or Bypass choice and
+  wondered whether an older GUI was running.
+- **Evidence:** The persisted directive created at 02:20:55 contained both
+  `retry` and `bypass_once` options. At 02:48:28 the action log records that
+  the current control surface resolved the same request with `retry`, and the
+  runtime consumed it at 02:48:33. Static assets are served with `no-cache` and
+  API status with `no-store`, so available evidence does not establish an
+  older browser bundle.
+- **Safety response:** No option was chosen during diagnosis. The later Retry
+  used the normal requirement path and did not create a waiver.
+- **Status:** Unconfirmed transient display problem. The backend choices and
+  end-to-end resolution path are covered by
+  `test/test_automation_control.py` and `test/test_control_surface.py`. If it
+  recurs, retain a browser screenshot and viewport dimensions before
+  refreshing so the rendering failure can be distinguished from stale content
+  or an off-screen dialog.
+
 ### Game Stats OCR dropped a coin-value decimal
 
 - **Observed:** 2026-07-22 while recovering the completed Tier 19 Attack

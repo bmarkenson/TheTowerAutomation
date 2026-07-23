@@ -122,20 +122,21 @@ with:
 Every Farm profile inherits the same `Farm` Cards, Workshop, and Bots presets;
 Shockwave Size, Bounce Shot Targets, and Bounce Shot Range Free Upgrade locks;
 Fetch/Summon/Scout Guardian chips; Auto Pick Perks; and Ultimate Weapon
-requirements. During session preflight, an authoritatively unchecked Free
-Upgrade lock is a Home-only mismatch that requests the guarded
-Surrender/repair/restart sequence; ambiguous lock evidence blocks without
-Surrendering. Poison Swamp Stun is the narrow in-battle repair exception:
-when its detail screen authoritatively shows Stun on, preflight switches it off
-and verifies the result without Surrendering or leaving the active run.
+requirements. At a genuine `NEW_BATTLE` Home boundary, an authoritatively
+unchecked Free Upgrade lock blocks Battle until the Home route corrects and
+reverifies it; ambiguous lock evidence blocks without Surrendering. Poison
+Swamp Stun is also verified and, when necessary, switched off from Workshop
+Ultimate Upgrades before Battle. The in-battle detail route remains a
+compatibility fallback only when a run lacks fresh Home-boundary proof.
 Before a new battle starts, the verified no-battle Home route completes every
 profile-owned check available from `NEW_BATTLE`: Cards `Farm`, Workshop `Farm`,
-the three Free Upgrade locks, Bots `Farm`, the supported
-Attack/Ally/Scout → Fetch/Summon/Scout Guardian transition, Modules, and
-Target Priority. It retains screen-derived configuration evidence for session
-preflight, which consumes that boundary proof instead of starting the battle
-and returning Home to repeat those checks. Unknown no-battle layouts fail
-closed.
+the three Free Upgrade locks, Poison Swamp Stun, Bots `Farm`, the supported
+Attack/Ally/Scout → Fetch/Summon/Scout Guardian transition, and Modules. It
+retains screen-derived configuration evidence for session preflight, which
+consumes that boundary proof instead of starting the battle and returning Home
+to repeat those checks. Target Priority, Auto Pick Perks, Ultimate Weapon
+primary toggles, and game speed remain battle-only. Unknown no-battle layouts
+fail closed.
 
 Modules, Damage Slider, and Target Priority are the only per-Tier or
 experimental loadout fields. Each compact profile declares `enforce`, `observe`,
@@ -146,6 +147,11 @@ Priority resolve named presets at build time. Damage Slider profiles use an
 explicit percentage; Tier 18 enforces `1E-22%` during every new-run
 initialization after EHLS/EALS. The fully resolved configuration is embedded in
 the generated plan and copied into each battle's JSON record.
+
+While a battle is active, the game-speed guard periodically walks the visible
+`+` control to the current maximum and rechecks it so an accidental slowdown is
+restored. Farm gives the urgent EHLS/EALS purchases first action priority;
+other profiles may maximize speed immediately after `RUNNING` is verified.
 
 ### Validating Tournament setup
 
