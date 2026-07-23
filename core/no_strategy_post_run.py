@@ -283,6 +283,7 @@ def open_perks_configuration_for_post_run_capture(
         cards,
         capture_fn=capture_fn,
         detector=detector,
+        home_control_fn=home_control_fn,
         safe_tap_fn=safe_tap_fn,
         action_guard_fn=action_guard_fn,
         sleep_fn=sleep_fn,
@@ -301,39 +302,31 @@ def open_perks_configuration_from_cards(
     *,
     capture_fn: Capture = capture_adb_screenshot,
     detector: Detector = detect_state_and_overlays,
+    home_control_fn: Callable[[Frame], Any] = detect_home_battle_control,
     safe_tap_fn: Callable[..., bool] = safe_tap,
     action_guard_fn: Optional[Callable[[], bool]] = None,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> Frame:
-    """Open the verified Home-menu Perks item from a Cards screen."""
+    """Return from Cards and open the verified no-battle Home Perks item."""
 
     if detector(cards_screenshot).get("state") != "CARDS":
         raise NoStrategyPostRunError("Perks configuration requires Cards")
-    current = cards_screenshot
-    evidence = detect_home_perks_configuration_control(current)
-    if not evidence["visible"]:
-        _require_action(action_guard_fn)
-        if not safe_tap_fn(
-            "navigation.home_menu_toggle",
-            require_visible=False,
-            dispatch="now",
-            log_label="no_strategy_post_run:home_menu",
-        ):
-            raise NoStrategyPostRunError("Home menu toggle tap failed on Cards")
-        for _ in range(12):
-            sleep_fn(0.25)
-            current = capture_fn()
-            if current is None:
-                continue
-            if detector(current).get("state") != "CARDS":
-                raise NoStrategyPostRunError("Cards was lost while opening Home menu")
-            evidence = detect_home_perks_configuration_control(current)
-            if evidence["visible"]:
-                break
-        else:
-            raise NoStrategyPostRunError(
-                "Home Perks menu item was not independently verified"
-            )
+    _require_action(action_guard_fn)
+    if not safe_tap_fn(
+        "navigation.goto_home",
+        require_visible=False,
+        dispatch="now",
+        log_label="no_strategy_post_run:return_home_from_cards",
+    ):
+        raise NoStrategyPostRunError("Home navigation tap failed from Cards")
+    home = _wait_for(
+        "HOME_SCREEN", capture_fn=capture_fn, detector=detector, sleep_fn=sleep_fn
+    )
+    _require_new_battle_home(home, detector, home_control_fn)
+    if not detect_home_perks_configuration_control(home)["visible"]:
+        raise NoStrategyPostRunError(
+            "Home Perks menu item was not independently verified"
+        )
     _require_action(action_guard_fn)
     if not safe_tap_fn(
         "navigation.home_perks_configuration",

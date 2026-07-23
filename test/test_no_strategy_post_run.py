@@ -184,25 +184,27 @@ def test_home_perks_control_detector_rejects_closed_cards_and_accepts_fixture():
 def test_post_run_opens_home_perks_control_without_operator_input():
     home = _frame()
     cards = cv2.imread("test/fixtures/cards_farm_active_20260717.png")
-    expanded = cv2.imread(
+    restored = cv2.imread(
         "test/fixtures/ui_state_20260714/"
         "no_battle_perks_configuration_20260719.png"
     )
-    perks = expanded.copy()
+    perks = restored.copy()
     phase = {"value": "HOME"}
     taps = []
 
     def detector(frame):
         if frame is home:
             return {"state": "HOME_SCREEN"}
-        if phase["value"] in {"CARDS", "EXPANDED"}:
+        if phase["value"] == "CARDS":
             return {"state": "CARDS"}
+        if phase["value"] == "RESTORED":
+            return {"state": "HOME_SCREEN"}
         return {"state": "PERKS"}
 
     def capture():
         return {
             "CARDS": cards,
-            "EXPANDED": expanded,
+            "RESTORED": restored,
             "PERKS": perks,
         }[phase["value"]]
 
@@ -210,8 +212,8 @@ def test_post_run_opens_home_perks_control_without_operator_input():
         taps.append(target)
         if target == "navigation.goto_cards_home":
             phase["value"] = "CARDS"
-        elif target == "navigation.home_menu_toggle":
-            phase["value"] = "EXPANDED"
+        elif target == "navigation.goto_home":
+            phase["value"] = "RESTORED"
         elif target == "navigation.home_perks_configuration":
             phase["value"] = "PERKS"
         return True
@@ -231,7 +233,7 @@ def test_post_run_opens_home_perks_control_without_operator_input():
     assert result.perks_screenshot is perks
     assert taps == [
         "navigation.goto_cards_home",
-        "navigation.home_menu_toggle",
+        "navigation.goto_home",
         "navigation.home_perks_configuration",
     ]
 
