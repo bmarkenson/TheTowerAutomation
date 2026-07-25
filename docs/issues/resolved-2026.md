@@ -8,6 +8,41 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Tournament Guardian Ally selection was rejected as unverified
+
+- **Observed:** 2026-07-25 during an operator-requested Tournament pre-flight
+  from no-battle Home.
+- **Symptom:** Home setup removed the equipped Summon chip, then blocked the
+  battle at `guardian_chips` with
+  `Guardian inventory target missing: buttons.guardian:ally_inventory`.
+- **Evidence:** `logs/actions.log` records verified Guardian navigation,
+  verified removal of Summon, and
+  `TAP_SAFE refused unverified target buttons.guardian:ally_inventory at
+  (540,1230)`. Static inspection found that Fetch, Summon, and Scout inventory
+  controls had templates, while the Tournament-only Attack and Ally
+  replacements retained coordinate-only clickmap entries. The Tournament unit
+  router mocked those coordinate taps as successful and therefore did not
+  exercise the runtime safety boundary.
+- **Safety response:** Read-only control, lock-owner, ADB, screenshot, and log
+  inspection confirmed that the gate recovered to no-battle Home and did not
+  start a battle. The live process was not paused, reloaded, retried, or given
+  device input during the repair.
+- **Cause:** Commit `d410b61` correctly made runtime coordinate-only taps fail
+  closed without target-specific authority, but the Tournament Guardian
+  Attack/Ally path was not migrated to visible template-backed selection.
+- **Resolution:** Attack and Ally inventory cards now have bounded
+  retained-fixture-backed templates, and Tournament setup selects both through
+  the same guarded visible-target path as Fetch and Summon.
+- **Regression:** `test/test_tap_safety.py` matches both unequipped Tournament
+  targets against the retained Farm Guardian loadout, while
+  `test/test_gc_no_battle_setup.py` requires Tournament correction to use
+  visible Attack and Ally actions. The focused Guardian, tap-safety, and
+  clickmap suites pass all 58 tests.
+- **Fixed by:** `2bfb653`.
+- **Live validation:** Pending. The operator-owned runtime remains on the
+  pre-fix process with the original requirement-scoped gate pending; no reload,
+  retry, or Tournament start was inferred from repository repair authority.
+
 ### Offscreen weekly mission chest was skipped
 
 - **Observed:** 2026-07-23 at a natural no-battle Home reward opportunity after

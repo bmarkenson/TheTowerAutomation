@@ -37,6 +37,16 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-25 Tournament Guardian tap authority
+
+- Added retained-fixture-backed Attack and Ally inventory targets so
+  Tournament Home setup can replace Farm Guardian chips without falling back
+  to forbidden coordinate-only taps.
+- Regression coverage requires visible-target selection and validates both
+  unequipped inventory cards against the retained Farm loadout. The focused
+  Guardian, tap-safety, and clickmap suites pass all 58 tests.
+- Implemented in commit `2bfb653`; live reload and gate retry remain pending.
+
 ### 2026-07-23 offscreen weekly mission chest
 
 - Added a bounded horizontal weekly-chest traversal to Daily Missions. It
