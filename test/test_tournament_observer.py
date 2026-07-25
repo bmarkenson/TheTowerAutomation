@@ -77,7 +77,7 @@ def test_tournament_strategy_declares_exclusive_validation_then_observes():
         "ehls_completed",
         "eals_completed",
     ]
-    assert len(strategy.rules) == 3
+    assert len(strategy.rules) == 4
     level_skip_rule = next(
         rule
         for rule in strategy.rules
@@ -101,6 +101,24 @@ def test_tournament_strategy_declares_exclusive_validation_then_observes():
         "mode": "enforce",
         "value": "1E2%",
     }
+    orb_rule = next(
+        rule
+        for rule in strategy.rules
+        if rule["name"] == "enforce_tournament_orb_distance"
+    )
+    orb_action = orb_rule["do"][0]
+    assert orb_rule["run_when_attached"] is True
+    assert orb_rule["assert"] == [
+        "damage_slider_checked",
+        "!orb_distance_checked",
+    ]
+    assert orb_action == {
+        "type": "orb_distance_configure",
+        "mode": "enforce",
+        "range_basis": "98.38m",
+        "extra": "87.16m",
+        "workshop": "80.37m",
+    }
     session_rule = next(
         rule
         for rule in strategy.rules
@@ -116,7 +134,8 @@ def test_tournament_strategy_declares_exclusive_validation_then_observes():
     assert session_rule["run_when_attached"] is True
     assert strategy._session_preflight_assertions == [
         "damage_slider_checked",
-        "gc_session_preflight_attempted"
+        "orb_distance_checked",
+        "gc_session_preflight_attempted",
     ]
     assert "auto_pick_perks" not in strategy.run_configuration()["settings"]
     assert (
@@ -128,6 +147,15 @@ def test_tournament_strategy_declares_exclusive_validation_then_observes():
     assert strategy.run_configuration()["loadout"]["damage_slider"] == {
         "mode": "enforce",
         "value": "1E2%",
+    }
+    assert strategy.run_configuration()["loadout"]["orb_distance"] == {
+        "mode": "enforce",
+        "preset": "tournament_range_98_38",
+        "resolved": {
+            "range_basis": "98.38m",
+            "extra": "87.16m",
+            "workshop": "80.37m",
+        },
     }
 
 
@@ -168,7 +196,7 @@ def test_tournament_mismatch_is_recorded_without_requesting_repair():
     assert variables["gc_session_preflight_advisory"]
 
 
-def test_tournament_attachment_enforces_damage_before_read_only_preflight():
+def test_tournament_attachment_enforces_battle_loadout_before_preflight():
     strategy = get_strategy("tournament")
     assert strategy is not None
     manager = MissionManager(
@@ -188,6 +216,18 @@ def test_tournament_attachment_enforces_damage_before_read_only_preflight():
     assert actions[0]["value"] == "1E2%"
 
     manager.ctx.data["mission_vars"]["damage_slider_checked"] = True
+    actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
+
+    assert len(actions) == 1
+    assert actions[0] == {
+        "type": "orb_distance_configure",
+        "mode": "enforce",
+        "range_basis": "98.38m",
+        "extra": "87.16m",
+        "workshop": "80.37m",
+    }
+
+    manager.ctx.data["mission_vars"]["orb_distance_checked"] = True
     actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
 
     assert len(actions) == 1

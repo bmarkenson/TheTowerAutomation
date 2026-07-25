@@ -222,14 +222,15 @@ After every declared Home check passes, the runtime atomically claims the
 request and then taps only a freshly verified ordinary **New Battle** control.
 It does not tap **Resume Battle**, enter the Tournament screen, or start a
 Tournament during validation. In that disposable ordinary battle it leaves
-Auto Perks unchanged, enforces Damage Slider `100%`, and verifies the
-configured Ultimate Weapons and Spotlight Missiles. Staged one-run waivers are
-not claimed for this validation; a Home preflight failure consumes the request
-and reports its failed check without starting a battle. A conclusive in-battle
-pass or failure starts guarded cleanup: only the same runtime/ADB owner may
-Surrender that battle and return from Game Over to verified Home **New
-Battle**. The status panel then reports either readiness and a
-Tournament-launch prompt or the validation failure reason.
+Auto Perks unchanged, enforces Damage Slider `100%`, requires Attack Range
+`98.38m`, enforces Orb Distance Extra `87.16m` / Workshop `80.37m`, and
+verifies the configured Ultimate Weapons and Spotlight Missiles. Staged
+one-run waivers are not claimed for this validation; a Home preflight failure
+consumes the request and reports its failed check without starting a battle. A
+conclusive in-battle pass or failure starts guarded cleanup: only the same
+runtime/ADB owner may Surrender that battle and return from Game Over to
+verified Home **New Battle**. The status panel then reports either readiness
+and a Tournament-launch prompt or the validation failure reason.
 
 Each later explicit Tournament selection or managed Start creates a new
 request. Restarting an unattended runtime does not: a claimed, running, or
@@ -272,12 +273,12 @@ run gates next battle** before starting. The new process observes and controls
 that existing run normally but suppresses only rules tagged as run
 initialization or session preflight. The Tournament observer is the narrow
 exception: it runs its declared preflight on attachment, enforces only Damage
-Slider `100%` and Poison Swamp Stun `on`, and reports other bad settings without
-acquiring Home-repair authority. The suppression survives transient Unknown
-screens and Home `RESUME_BATTLE`. It ends only at Game Over, Tournament
-Results, or verified Home `NEW_BATTLE`; the following battle then performs the
-real gates. Do not select this for a process that is expected to configure a
-newly started battle immediately.
+Slider `100%`, the Range `98.38m` Orb Distance preset, and Poison Swamp Stun
+`on`, and reports other bad settings without acquiring Home-repair authority.
+The suppression survives transient Unknown screens and Home `RESUME_BATTLE`.
+It ends only at Game Over, Tournament Results, or verified Home `NEW_BATTLE`;
+the following battle then performs the real gates. Do not select this for a
+process that is expected to configure a newly started battle immediately.
 
 For a checked-in Python update during a running battle, prefer **Reload
 automation for current battle** over a separate Stop/Start sequence. The
@@ -489,6 +490,13 @@ the API, authority boundaries, and planned capabilities.
   any remaining gap, requires strict progress and a verified final value, and
   returns to `RUNNING/ATTACK_MENU`. Unknown value sequences retain single-step
   feedback. Neither path authorizes Surrender or Home traversal.
+- Orb Distance enforcement requires a verified Attack Range equal to the
+  resolved preset's Range basis before opening the in-run Distance Adjuster.
+  Both displayed values require authoritative OCR. Every arrow is freshly
+  matched for one tap, followed by settled OCR that must move the selected row
+  strictly closer to its target. Unknown, unchanged, cycling, non-progressing,
+  or wrong-Range evidence fails closed, and success requires a verified return
+  to the running side menu.
 - Safe live validation, verified taps, resumable Exit Battle → Go Home
   traversal, and process restarts are allowed only within the user's stated
   task scope.

@@ -32,6 +32,7 @@ run_initialization:
 session_preflight:
   complete_when:
   - damage_slider_checked
+  - orb_distance_checked
   - gc_session_preflight_attempted
   requirements:
     cards_deck: Tournament
@@ -76,6 +77,13 @@ session_preflight:
     damage_slider:
       mode: enforce
       value: 1E2%
+    orb_distance:
+      mode: enforce
+      preset: tournament_range_98_38
+      resolved:
+        range_basis: 98.38m
+        extra: 87.16m
+        workshop: 80.37m
 vars:
   exclusive_validation_battle: false
   ehls_completed: false
@@ -91,6 +99,8 @@ vars:
   level_skip_last_reason: ''
   damage_slider_checked: false
   damage_slider_observation: {}
+  orb_distance_checked: false
+  orb_distance_observation: {}
   gc_session_preflight_completed: false
   gc_session_preflight_attempted: false
   gc_session_preflight_blocked: false
@@ -136,6 +146,21 @@ rules:
   - type: damage_slider_configure
     mode: enforce
     value: 1E2%
+- name: enforce_tournament_orb_distance
+  gate_phase: session_preflight
+  run_when_attached: true
+  when:
+    state: RUNNING
+  assert:
+  - damage_slider_checked
+  - '!orb_distance_checked'
+  cooldown_sec: 30.0
+  do:
+  - type: orb_distance_configure
+    mode: enforce
+    range_basis: 98.38m
+    extra: 87.16m
+    workshop: 80.37m
 - name: validate_tournament_session_preflight
   gate_phase: session_preflight
   run_when_attached: true
@@ -143,6 +168,7 @@ rules:
     state: RUNNING
   assert:
   - damage_slider_checked
+  - orb_distance_checked
   - '!gc_session_preflight_attempted'
   cooldown_sec: 30.0
   do:
@@ -193,6 +219,13 @@ rules:
       damage_slider:
         mode: enforce
         value: 1E2%
+      orb_distance:
+        mode: enforce
+        preset: tournament_range_98_38
+        resolved:
+          range_basis: 98.38m
+          extra: 87.16m
+          workshop: 80.37m
 run_configuration:
   schema_version: 2
   profile: tournament
@@ -242,6 +275,13 @@ run_configuration:
     damage_slider:
       mode: enforce
       value: 1E2%
+    orb_distance:
+      mode: enforce
+      preset: tournament_range_98_38
+      resolved:
+        range_basis: 98.38m
+        extra: 87.16m
+        workshop: 80.37m
   runtime_policy:
     handlers:
     - ad_gem

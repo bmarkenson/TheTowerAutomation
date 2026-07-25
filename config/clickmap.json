@@ -1977,6 +1977,19 @@
       },
       "match_threshold": 0.9
     },
+    "distance_adjuster": {
+      "match_template": "navigation/distance_adjuster.png",
+      "match_region": {
+        "x": 960,
+        "y": 430,
+        "w": 120,
+        "h": 120
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "navigation"
+      ]
+    },
     "menu_close_button": {
       "match_template": "navigation/menu_close_button.png",
       "match_region": {
@@ -2109,6 +2122,19 @@
         "h": 120
       },
       "match_threshold": 0.9
+    },
+    "close:distance_adjuster": {
+      "match_template": "buttons/close:target_priority.png",
+      "match_region": {
+        "x": 890,
+        "y": 980,
+        "w": 130,
+        "h": 140
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
     },
     "module:equipped_outer_left_top": {
       "roles": [
@@ -2387,6 +2413,58 @@
         "h": 150
       },
       "match_threshold": 0.9
+    },
+    "distance_adjuster:extra:decrease": {
+      "match_template": "buttons/damage_adjuster:decrease.png",
+      "match_region": {
+        "x": 170,
+        "y": 1245,
+        "w": 220,
+        "h": 160
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
+    "distance_adjuster:extra:increase": {
+      "match_template": "buttons/damage_adjuster:increase.png",
+      "match_region": {
+        "x": 690,
+        "y": 1245,
+        "w": 220,
+        "h": 160
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
+    "distance_adjuster:workshop:decrease": {
+      "match_template": "buttons/damage_adjuster:decrease.png",
+      "match_region": {
+        "x": 170,
+        "y": 1575,
+        "w": 220,
+        "h": 170
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
+    "distance_adjuster:workshop:increase": {
+      "match_template": "buttons/damage_adjuster:increase.png",
+      "match_region": {
+        "x": 690,
+        "y": 1575,
+        "w": 220,
+        "h": 170
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
     },
     "yes:end_round": {
       "match_template": "buttons/yes:end_round.png",

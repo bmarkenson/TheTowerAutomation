@@ -706,8 +706,24 @@ class FarmProfileTests(unittest.TestCase):
             configuration["loadout"]["damage_slider"],
             {"mode": "enforce", "value": "1E-22%"},
         )
+        self.assertEqual(
+            configuration["loadout"]["orb_distance"],
+            {
+                "mode": "enforce",
+                "preset": "farm_min_range",
+                "resolved": {
+                    "range_basis": "30.00m",
+                    "extra": "30.00m",
+                    "workshop": "39.00m",
+                },
+            },
+        )
         self.assertIn(
             "damage_slider_checked",
+            plan["run_initialization"]["complete_when"],
+        )
+        self.assertIn(
+            "orb_distance_checked",
             plan["run_initialization"]["complete_when"],
         )
         damage_rule = next(
@@ -735,6 +751,30 @@ class FarmProfileTests(unittest.TestCase):
             damage_rule["assert"],
             ["ehls_completed", "eals_completed", "!damage_slider_checked"],
         )
+        orb_rule = next(
+            rule for rule in plan["rules"]
+            if rule["name"] == "enforce_orb_distance"
+        )
+        self.assertEqual(
+            orb_rule["do"],
+            [
+                {
+                    "type": "orb_distance_configure",
+                    "mode": "enforce",
+                    "range_basis": "30.00m",
+                    "extra": "30.00m",
+                    "workshop": "39.00m",
+                }
+            ],
+        )
+        self.assertGreater(
+            plan["rules"].index(orb_rule),
+            plan["rules"].index(damage_rule),
+        )
+        self.assertEqual(
+            orb_rule["assert"],
+            ["ehls_completed", "eals_completed", "!orb_distance_checked"],
+        )
 
     def test_damage_slider_gate_and_evidence_reset_for_every_run(self):
         strategy = get_strategy("farm")
@@ -748,6 +788,22 @@ class FarmProfileTests(unittest.TestCase):
 
         self.assertFalse(mv["damage_slider_checked"])
         self.assertEqual(mv["damage_slider_observation"], {})
+
+    def test_orb_distance_gate_and_evidence_reset_for_every_run(self):
+        strategy = get_strategy("farm")
+        ctx = MissionContext()
+        strategy.on_start(ctx)
+        mv = ctx.data["mission_vars"]
+        mv["orb_distance_checked"] = True
+        mv["orb_distance_observation"] = {
+            "final_extra": "30.00m",
+            "final_workshop": "39.00m",
+        }
+
+        strategy.on_run_start(ctx)
+
+        self.assertFalse(mv["orb_distance_checked"])
+        self.assertEqual(mv["orb_distance_observation"], {})
 
     def test_runtime_exposes_an_isolated_resolved_configuration_snapshot(self):
         strategy = get_strategy("farm")
@@ -795,6 +851,16 @@ class FarmProfileTests(unittest.TestCase):
         }
 
         with self.assertRaisesRegex(ValueError, "must not supply a value"):
+            build_strategy_yaml(source)
+
+    def test_orb_distance_rejects_an_unknown_preset(self):
+        source = self._source()
+        source["loadout"]["orb_distance"]["preset"] = "missing"
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "unknown orb_distance preset",
+        ):
             build_strategy_yaml(source)
 
     def test_observed_damage_slider_is_nonblocking_and_emits_one_read(self):

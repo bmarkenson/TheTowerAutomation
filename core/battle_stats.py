@@ -1007,6 +1007,7 @@ def render_battle_markdown(record: Mapping[str, Any]) -> str:
         for key, label in (
             ("modules", "Modules"),
             ("damage_slider", "Damage Slider"),
+            ("orb_distance", "Orb Distance"),
             ("target_priority", "Target Priority"),
         ):
             policy = loadout.get(key)

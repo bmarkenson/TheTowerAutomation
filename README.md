@@ -43,11 +43,11 @@ python main.py \
 Bundled Farm strategies are generated from a shared invariant baseline, named
 loadout catalogs, and compact Tier profiles:
 
-- `farm` and `farm_t18` select the Tier 18 profile. Its configured Target
-  Priority order is verified and enforced after EHLS/EALS.
+- `farm` and `farm_t18` select the Tier 18 profile. Its configured Orb Distance
+  and Target Priority presets are verified and enforced after EHLS/EALS.
 - `farm_t19_experiment` selects the experimental Tier 19 profile. It runs
-  EHLS/EALS but preserves the current Target Priority order without inspecting
-  it or including it in the startup completion gate.
+  EHLS/EALS but preserves the current Orb Distance and Target Priority settings
+  without inspecting them or including them in the startup completion gate.
 
 For example:
 
@@ -134,19 +134,22 @@ the three Free Upgrade locks, Poison Swamp Stun, Bots `Farm`, the supported
 Attack/Ally/Scout → Fetch/Summon/Scout Guardian transition, and Modules. It
 retains screen-derived configuration evidence for session preflight, which
 consumes that boundary proof instead of starting the battle and returning Home
-to repeat those checks. Target Priority, Auto Pick Perks, Ultimate Weapon
-primary toggles, and game speed remain battle-only. Unknown no-battle layouts
-fail closed.
+to repeat those checks. Damage Slider, Orb Distance, Target Priority, Auto Pick
+Perks, Ultimate Weapon primary toggles, and game speed remain battle-only.
+Unknown no-battle layouts fail closed.
 
-Modules, Damage Slider, and Target Priority are the only per-Tier or
-experimental loadout fields. Each compact profile declares `enforce`, `observe`,
-or `preserve` for all three. `enforce` blocks on mismatch and may use an
-explicit safe repair path; `observe` records evidence without blocking or
-changing it; `preserve` neither inspects nor changes it. Modules and Target
-Priority resolve named presets at build time. Damage Slider profiles use an
-explicit percentage; Tier 18 enforces `1E-22%` during every new-run
-initialization after EHLS/EALS. The fully resolved configuration is embedded in
-the generated plan and copied into each battle's JSON record.
+Modules, Damage Slider, Orb Distance, and Target Priority are the only per-Tier
+or experimental loadout fields. Each compact profile declares `enforce`,
+`observe`, or `preserve` for all four. `enforce` blocks on mismatch and may use
+an explicit safe repair path; `observe` records evidence without blocking or
+changing it; `preserve` neither inspects nor changes it. Modules, Orb Distance,
+and Target Priority resolve named presets at build time. Orb Distance presets
+bind an Extra/Workshop pair to an expected Attack Range; automation refuses to
+apply the pair unless fresh Range OCR matches that basis. Tier 18 Farm binds
+Range `30.00m` to Extra `30.00m` and Workshop `39.00m`. Damage Slider profiles
+use an explicit percentage; Tier 18 enforces `1E-22%` during every new-run
+initialization after EHLS/EALS. The fully resolved configuration is embedded
+in the generated plan and copied into each battle's JSON record.
 
 When an enforced module repair replaces an occupied Primary or Assist module,
 automation always accepts the presented level transfer and requires the dialog

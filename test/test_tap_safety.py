@@ -127,6 +127,10 @@ def test_home_target_priority_control_does_not_exist():
         ("navigation.goto_store_home", "home_screen_no_reward_badges_20260714.png"),
         ("navigation.goto_home", "workshop_farm_active_20260714.png"),
         ("navigation.target_priority", "running_menu_no_reward_badges_20260715.png"),
+        (
+            "navigation.distance_adjuster",
+            "running_menu_no_reward_badges_20260715.png",
+        ),
         ("navigation.open_perks", "ui_state_20260714/active_wave_stats.png"),
         ("navigation.open_perks", "open_perks_dynamic_progress_20260723.png"),
         ("navigation.workshop:upgrade", "workshop_farm_active_20260714.png"),
@@ -150,6 +154,26 @@ def test_home_target_priority_control_does_not_exist():
         ),
         ("buttons.damage_adjuster:decrease", "damage_adjuster_1e22_20260714.png"),
         ("buttons.damage_adjuster:increase", "damage_adjuster_1e22_20260714.png"),
+        (
+            "buttons.close:distance_adjuster",
+            "ui_state_20260714/active_distance_adjuster.png",
+        ),
+        (
+            "buttons.distance_adjuster:extra:decrease",
+            "ui_state_20260714/active_distance_adjuster.png",
+        ),
+        (
+            "buttons.distance_adjuster:extra:increase",
+            "ui_state_20260714/active_distance_adjuster.png",
+        ),
+        (
+            "buttons.distance_adjuster:workshop:decrease",
+            "ui_state_20260714/active_distance_adjuster.png",
+        ),
+        (
+            "buttons.distance_adjuster:workshop:increase",
+            "ui_state_20260714/active_distance_adjuster.png",
+        ),
         (
             "buttons.guardian:scout_inventory",
             "guild_guardian_gc_inactive_20260715.png",

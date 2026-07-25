@@ -9,6 +9,7 @@ run_initialization:
   - eals_completed
   - target_priority_checked
   - damage_slider_checked
+  - orb_distance_checked
 session_preflight:
   complete_when:
   - gc_session_preflight_completed
@@ -100,6 +101,8 @@ vars:
   target_priority_checked: false
   damage_slider_checked: false
   damage_slider_observation: {}
+  orb_distance_checked: false
+  orb_distance_observation: {}
   gc_no_battle_setup_completed: false
   gc_no_battle_setup_evidence: {}
   gc_session_preflight_completed: false
@@ -135,6 +138,8 @@ per_run_reset:
 - level_skip_last_reason
 - damage_slider_checked
 - damage_slider_observation
+- orb_distance_checked
+- orb_distance_observation
 rules:
 - name: reset_on_game_over
   when:
@@ -205,6 +210,12 @@ rules:
     value: false
   - type: set
     var: damage_slider_observation
+    value: {}
+  - type: set
+    var: orb_distance_checked
+    value: false
+  - type: set
+    var: orb_distance_observation
     value: {}
 - name: initialise_fast_loop
   gate_phase: run_initialization
@@ -279,6 +290,12 @@ rules:
   - type: set
     var: damage_slider_observation
     value: {}
+  - type: set
+    var: orb_distance_checked
+    value: false
+  - type: set
+    var: orb_distance_observation
+    value: {}
 - name: disable_fast_loop
   gate_phase: run_initialization
   when:
@@ -317,6 +334,21 @@ rules:
   - type: damage_slider_configure
     mode: enforce
     value: 1E-22%
+- name: enforce_orb_distance
+  gate_phase: run_initialization
+  when:
+    state: RUNNING
+  assert:
+  - ehls_completed
+  - eals_completed
+  - '!orb_distance_checked'
+  cooldown_sec: 30.0
+  do:
+  - type: orb_distance_configure
+    mode: enforce
+    range_basis: 30.00m
+    extra: 30.00m
+    workshop: 39.00m
 - name: ensure_target_priority
   gate_phase: run_initialization
   when:
@@ -348,6 +380,7 @@ rules:
   - eals_completed
   - target_priority_checked
   - damage_slider_checked
+  - orb_distance_checked
   - '!gc_session_preflight_completed'
   - '!gc_session_preflight_attempted'
   cooldown_sec: 30.0
@@ -465,6 +498,13 @@ run_configuration:
     damage_slider:
       mode: enforce
       value: 1E-22%
+    orb_distance:
+      mode: enforce
+      preset: farm_min_range
+      resolved:
+        range_basis: 30.00m
+        extra: 30.00m
+        workshop: 39.00m
     target_priority:
       mode: enforce
       preset: farm_t18

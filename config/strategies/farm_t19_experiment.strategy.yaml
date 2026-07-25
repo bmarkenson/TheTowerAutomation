@@ -387,6 +387,8 @@ run_configuration:
         core_assist: Dimension Core
     damage_slider:
       mode: preserve
+    orb_distance:
+      mode: preserve
     target_priority:
       mode: preserve
   gate_fallbacks:

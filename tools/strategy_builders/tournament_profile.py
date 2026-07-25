@@ -56,6 +56,8 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
 
     requirements = load_tournament_requirements()
     damage_slider = copy.deepcopy(requirements["damage_slider"])
+    orb_distance = copy.deepcopy(requirements["orb_distance"])
+    orb_distance_values = copy.deepcopy(orb_distance["resolved"])
     runtime_policy = copy.deepcopy(TOURNAMENT_RUNTIME_POLICY)
     variables = {
         "exclusive_validation_battle": False,
@@ -72,6 +74,8 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
         "level_skip_last_reason": "",
         "damage_slider_checked": False,
         "damage_slider_observation": {},
+        "orb_distance_checked": False,
+        "orb_distance_observation": {},
         "gc_session_preflight_completed": False,
         "gc_session_preflight_attempted": False,
         "gc_session_preflight_blocked": False,
@@ -95,6 +99,7 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
             # natural Game Over handling.
             "complete_when": [
                 "damage_slider_checked",
+                "orb_distance_checked",
                 "gc_session_preflight_attempted",
             ],
             "requirements": copy.deepcopy(requirements),
@@ -142,12 +147,31 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
                 ],
             },
             {
+                "name": "enforce_tournament_orb_distance",
+                "gate_phase": "session_preflight",
+                "run_when_attached": True,
+                "when": {"state": "RUNNING"},
+                "assert": [
+                    "damage_slider_checked",
+                    "!orb_distance_checked",
+                ],
+                "cooldown_sec": 30.0,
+                "do": [
+                    {
+                        "type": "orb_distance_configure",
+                        "mode": orb_distance["mode"],
+                        **orb_distance_values,
+                    }
+                ],
+            },
+            {
                 "name": "validate_tournament_session_preflight",
                 "gate_phase": "session_preflight",
                 "run_when_attached": True,
                 "when": {"state": "RUNNING"},
                 "assert": [
                     "damage_slider_checked",
+                    "orb_distance_checked",
                     "!gc_session_preflight_attempted",
                 ],
                 "cooldown_sec": 30.0,
@@ -183,6 +207,7 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
                     "resolved": copy.deepcopy(requirements["modules"]),
                 },
                 "damage_slider": damage_slider,
+                "orb_distance": orb_distance,
             },
             "runtime_policy": copy.deepcopy(runtime_policy),
         },

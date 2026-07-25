@@ -15,8 +15,13 @@ MODULE_PRESETS_PATH = ROOT / "config" / "loadouts" / "modules.yaml"
 TARGET_PRIORITY_PRESETS_PATH = (
     ROOT / "config" / "loadouts" / "target_priorities.yaml"
 )
+ORB_DISTANCE_PRESETS_PATH = (
+    ROOT / "config" / "loadouts" / "orb_distances.yaml"
+)
 POLICY_MODES = frozenset({"enforce", "observe", "preserve"})
-LOADOUT_KEYS = frozenset({"modules", "damage_slider", "target_priority"})
+LOADOUT_KEYS = frozenset(
+    {"modules", "damage_slider", "orb_distance", "target_priority"}
+)
 
 
 def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
@@ -61,7 +66,8 @@ def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
     if missing or extra:
         raise ValueError(
             "farm profile loadout must define exactly modules, damage_slider, "
-            f"and target_priority (missing={missing}, extra={extra})"
+            f"orb_distance, and target_priority (missing={missing}, "
+            f"extra={extra})"
         )
 
     module_policy = _resolve_preset_policy(
@@ -75,6 +81,9 @@ def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
         TARGET_PRIORITY_PRESETS_PATH,
     )
     damage_policy = _resolve_damage_slider_policy(loadout["damage_slider"])
+    orb_distance_policy = _resolve_orb_distance_policy(
+        loadout["orb_distance"]
+    )
 
     requirements = invariants
     gate_fallbacks = _normalize_gate_fallbacks(
@@ -116,6 +125,7 @@ def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
         "loadout": {
             "modules": module_policy,
             "damage_slider": damage_policy,
+            "orb_distance": orb_distance_policy,
             "target_priority": target_policy,
         },
         "gate_fallbacks": copy.deepcopy(gate_fallbacks),
@@ -126,6 +136,7 @@ def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
         "builder": "gc_farm",
         "initialization": {
             "damage_slider": copy.deepcopy(damage_policy),
+            "orb_distance": copy.deepcopy(orb_distance_policy),
             "target_priority": target_priority,
         },
         "session_preflight": requirements,
@@ -224,6 +235,23 @@ def _resolve_damage_slider_policy(raw: Any) -> dict[str, Any]:
     except ValueError as exc:
         raise ValueError(f"farm loadout damage_slider {exc}") from exc
     return {"mode": mode, "value": value}
+
+
+def _resolve_orb_distance_policy(raw: Any) -> dict[str, Any]:
+    policy = _resolve_preset_policy(
+        "orb_distance",
+        raw,
+        ORB_DISTANCE_PRESETS_PATH,
+    )
+    if policy["mode"] == "preserve":
+        return policy
+    from core.orb_distance import normalize_orb_distance_preset
+
+    try:
+        policy["resolved"] = normalize_orb_distance_preset(policy["resolved"])
+    except ValueError as exc:
+        raise ValueError(f"farm loadout orb_distance {exc}") from exc
+    return policy
 
 
 def _normalize_policy(setting: str, raw: Any) -> dict[str, Any]:

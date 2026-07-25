@@ -40,6 +40,7 @@ from core.damage_adjuster import (
     configure_damage_slider,
     format_damage_percentage,
 )
+from core.orb_distance import configure_orb_distance
 from core.gc_preflight_navigation import (
     GcPreflightNavigationStatus,
     run_read_only_gc_preflight,
@@ -236,6 +237,41 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                     f"final={format_damage_percentage(result.final)} "
                     f"steps={result.steps} success={result.success} "
                     f"reason={result.reason}",
+                    "INFO" if result.success or mode == "observe" else "WARN",
+                )
+            elif t == "orb_distance_configure":
+                if is_strategy_action and last_state not in allowed_states:
+                    log_mission(
+                        f"[EXEC] Skip orb_distance_configure while "
+                        f"state={last_state}",
+                        "DEBUG",
+                    )
+                    continue
+                mode = str(act.get("mode") or "").strip().lower()
+                result = configure_orb_distance(
+                    range_basis=act.get("range_basis"),
+                    extra=act.get("extra"),
+                    workshop=act.get("workshop"),
+                    mode=mode,
+                )
+                payload = result.as_dict()
+                if mv is not None:
+                    mv["orb_distance_observation"] = payload
+                    if mode == "enforce":
+                        mv["orb_distance_checked"] = result.success
+                    elif mode == "observe":
+                        mv["orb_distance_observed"] = True
+                log_mission(
+                    "[ORB_DISTANCE] "
+                    f"mode={mode} range={result.range_observed}/"
+                    f"{result.range_basis} "
+                    f"expected=({result.expected_extra},"
+                    f"{result.expected_workshop}) "
+                    f"initial=({result.initial_extra},"
+                    f"{result.initial_workshop}) "
+                    f"final=({result.final_extra},{result.final_workshop}) "
+                    f"steps=({result.extra_steps},{result.workshop_steps}) "
+                    f"success={result.success} reason={result.reason}",
                     "INFO" if result.success or mode == "observe" else "WARN",
                 )
             elif t == "target_priority_ensure":

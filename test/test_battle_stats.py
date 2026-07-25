@@ -199,6 +199,15 @@ def _record(*, source_complete=True, source_reason="edge_reached"):
                     "resolved": {"core_primary": "Multiverse Nexus"},
                 },
                 "damage_slider": {"mode": "preserve"},
+                "orb_distance": {
+                    "mode": "observe",
+                    "preset": "farm_min_range",
+                    "resolved": {
+                        "range_basis": "30.00m",
+                        "extra": "30.00m",
+                        "workshop": "39.00m",
+                    },
+                },
                 "target_priority": {
                     "mode": "observe",
                     "preset": "priority_test_a",
@@ -243,6 +252,11 @@ def test_battle_record_retains_resolved_run_configuration():
     assert "Observed tier: 19" in markdown
     assert "Modules: mode `observe`; preset `module_test_a`" in markdown
     assert "core_primary=Multiverse Nexus" in markdown
+    assert "Orb Distance: mode `observe`; preset `farm_min_range`" in markdown
+    assert (
+        "resolved: range_basis=30.00m; extra=30.00m; workshop=39.00m"
+        in markdown
+    )
     assert "Target Priority: mode `observe`; preset `priority_test_a`" in markdown
     assert "resolved: Fleets > Boss" in markdown
     assert "Bots preset: Farm" in markdown

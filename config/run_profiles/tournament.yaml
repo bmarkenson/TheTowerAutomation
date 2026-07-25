@@ -36,3 +36,4 @@ loadout:
   damage_slider:
     mode: enforce
     value: "100%"
+  orb_distance: tournament_range_98_38

@@ -14,6 +14,9 @@ loadout:
   damage_slider:
     mode: enforce
     value: "1e-22"
+  orb_distance:
+    mode: enforce
+    preset: farm_min_range
   target_priority:
     mode: enforce
     preset: farm_t18

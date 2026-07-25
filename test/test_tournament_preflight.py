@@ -116,6 +116,15 @@ def test_tournament_profile_omits_non_applicable_auto_pick_perks():
         "mode": "enforce",
         "value": "1E2%",
     }
+    assert requirements["orb_distance"] == {
+        "mode": "enforce",
+        "preset": "tournament_range_98_38",
+        "resolved": {
+            "range_basis": "98.38m",
+            "extra": "87.16m",
+            "workshop": "80.37m",
+        },
+    }
 
 
 def test_live_tournament_validation_requires_persisted_pause(tmp_path):

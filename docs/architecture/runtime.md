@@ -40,8 +40,9 @@ and Bounce Shot Range Free Upgrade locks; Guardian chips; Auto Pick Perks; and
 Ultimate Weapon controls. Compact Tier profiles cannot override those
 invariants.
 
-Only Modules, Damage Slider, and Target Priority vary by Tier or experiment.
-Every compact Farm profile names all three and assigns one of these policies:
+Only Modules, Damage Slider, Orb Distance, and Target Priority vary by Tier or
+experiment. Every compact Farm profile names all four and assigns one of these
+policies:
 
 | Policy | Runtime contract |
 | --- | --- |
@@ -49,20 +50,23 @@ Every compact Farm profile names all three and assigns one of these policies:
 | `observe` | Inspect and record the resolved expectation and evidence without blocking or changing the setting. |
 | `preserve` | Do not inspect or change the setting. |
 
-Named module and Target Priority presets are resolved at build time into an
-explicit self-contained strategy plan. Modules are checked from verified Home
-`NEW_BATTLE` before Battle may start. A guarded module replacement accepts
-every presented level-transfer dialog for both Primary and Assist roles so the
-slot's existing level follows the incoming module; an unverified transfer
-prompt fails closed. Target Priority is not a Home control: its Home-boundary
-evidence remains explicitly deferred, and its policy is checked from the
-verified in-battle side menu after the new run reaches `RUNNING`. Damage Slider
-`observe` and `enforce` policies resolve an explicit percentage; Tier 18
-enforces `1E-22%` during every new-run initialization after the time-sensitive
-EHLS/EALS setup. `YamlStrategy` exposes the plan's resolved `run_configuration`
-generically, and Game Over records copy that snapshot into the versioned battle
-JSON. Runtime code does not inherit configuration or branch on a Farm strategy
-name.
+Named module, Orb Distance, and Target Priority presets are resolved at build
+time into an explicit self-contained strategy plan. Modules are checked from
+verified Home `NEW_BATTLE` before Battle may start. A guarded module
+replacement accepts every presented level-transfer dialog for both Primary and
+Assist roles so the slot's existing level follows the incoming module; an
+unverified transfer prompt fails closed. Target Priority and Orb Distance are
+not Home controls: their Home-boundary evidence remains explicitly deferred,
+and their policies are checked after the new run reaches `RUNNING`. Orb
+Distance first OCRs the Attack Range and requires the preset's exact Range
+basis, then reads and feedback-steps the Extra and Workshop rows independently.
+Tier 18 Farm binds Range `30.00m` to Extra `30.00m` and Workshop `39.00m`.
+Damage Slider `observe` and `enforce` policies resolve an explicit percentage;
+Tier 18 enforces `1E-22%` during every new-run initialization after the
+time-sensitive EHLS/EALS setup. `YamlStrategy` exposes the plan's resolved
+`run_configuration` generically, and Game Over records copy that snapshot into
+the versioned battle JSON. Runtime code does not inherit configuration or
+branch on a Farm strategy name.
 
 Game speed is a global battle-only invariant. A periodic guard requires
 authoritative `RUNNING` evidence, reads the localized speed value and visible
@@ -79,9 +83,10 @@ authority. Pause is rechecked before every speed tap.
 `Tournament` owns a one-shot exclusive validation before it becomes a passive
 single-battle observer. Its generated plan declares Tournament Cards, Tourney
 Workshop, Amplify Bots, Attack/Ally/Scout Guardians, Tournament/Milestone
-modules, Poison Swamp Stun `on`, Damage Slider `100%`, all nine Ultimate
-Weapons, and Spotlight Missiles. Tournament battles have no Perks, so Perks
-and Auto Perks are outside this contract.
+modules, Poison Swamp Stun `on`, Damage Slider `100%`, the Range `98.38m` Orb
+Distance pair Extra `87.16m` / Workshop `80.37m`, all nine Ultimate Weapons,
+and Spotlight Missiles. Tournament battles have no Perks, so Perks and Auto
+Perks are outside this contract.
 
 Every explicit Tournament selection or managed process Start creates a durable
 validation request tied to the strategy request identity and the complete
@@ -94,26 +99,28 @@ first battle input.
 At verified Home `NEW_BATTLE`, the profile first completes every declared
 no-battle check: Tournament Cards, Tourney Workshop, Amplify Bots,
 Attack/Ally/Scout Guardians, the Tournament module loadout, and Poison Swamp
-Stun `on`. Damage Slider and Ultimate Weapon enablement remain explicitly
-deferred because their authoritative controls are battle-only. Exclusive
-validation does not claim staged one-run waivers; a failed Home check consumes
-the request with its reason and never starts a battle. Once Home preflight is
-complete, the runtime atomically claims the matching receipt and then uses a
-fresh verified control to start exactly one ordinary `NEW_BATTLE`. It rejects
-Home `RESUME_BATTLE` and never opens the Tournament screen or starts a
-Tournament battle.
+Stun `on`. Damage Slider, Orb Distance, and Ultimate Weapon enablement remain
+explicitly deferred because their authoritative controls are battle-only.
+Exclusive validation does not claim staged one-run waivers; a failed Home
+check consumes the request with its reason and never starts a battle. Once Home
+preflight is complete, the runtime atomically claims the matching receipt and
+then uses a fresh verified control to start exactly one ordinary `NEW_BATTLE`.
+It rejects Home `RESUME_BATTLE` and never opens the Tournament screen or starts
+a Tournament battle.
 
 The disposable ordinary battle bypasses EHLS/EALS initialization without
 seeding either completion flag. It does not toggle Auto Perks. Session
-preflight enforces Damage Slider `100%`, then verifies all configured Ultimate
-Weapon primary toggles and Spotlight Missiles. A conclusive pass or failure,
-or the bounded timeout, moves the same receipt to cleanup before any terminal
-input. Surrender is allowed only while the current runtime/ADB owner still
-matches and fresh `RUNNING` evidence excludes Tournament identity. Cleanup
-must reach Game Over and verified Home `NEW_BATTLE` before the receipt reports
-ready or the failure reason. Process replacement, owner mismatch, Tournament
-identity, a resumed/pre-existing battle, or an ambiguous transition fails
-closed without inheriting Surrender authority.
+preflight enforces Damage Slider `100%`, verifies Attack Range `98.38m`,
+enforces Orb Distance Extra `87.16m` / Workshop `80.37m`, then verifies all
+configured Ultimate Weapon primary toggles and Spotlight Missiles. A
+conclusive pass or failure, or the bounded timeout, moves the same receipt to
+cleanup before any terminal input. Surrender is allowed only while the current
+runtime/ADB owner still matches and fresh `RUNNING` evidence excludes
+Tournament identity. Cleanup must reach Game Over and verified Home
+`NEW_BATTLE` before the receipt reports ready or the failure reason. Process
+replacement, owner mismatch, Tournament identity, a resumed/pre-existing
+battle, or an ambiguous transition fails closed without inheriting Surrender
+authority.
 
 After a ready result, the control surface publishes a one-shot operator launch
 prompt tied to that exact ready receipt and configuration fingerprint. The
@@ -152,10 +159,11 @@ Attachment to an already-running Tournament remains observer-only and does
 not use the exclusive validation receipt. Without Home boundary evidence, the
 guarded compatibility route inspects Cards, Ultimate Weapons, Modules, Bots,
 and Guardians in battle. Workshop is the only check that takes resumable Exit
-Battle → Go Home. It may enforce only Damage Slider `100%` and Poison Swamp
-Stun `on`; it never selects a preset or equips a loadout and must verify that
-Resume returns to the same Tournament. A mismatch is retained as session
-evidence but cannot request Home repair or block result capture. It publishes
+Battle → Go Home. It may enforce only Damage Slider `100%`, the Range `98.38m`
+Orb Distance preset, and Poison Swamp Stun `on`; it never selects a Home preset
+or equips a loadout and must verify that Resume returns to the same Tournament.
+A mismatch is retained as session evidence but cannot request Home repair or
+block result capture. It publishes
 a non-blocking operator decision to pause for manual changes, retry with fresh
 evidence, or continue observation with a run-scoped waiver. This attachment
 path never gains Surrender authority.
@@ -317,6 +325,14 @@ evidence is attached.
   verified final value, and returns to `RUNNING/ATTACK_MENU`. Unknown sequences
   fall back to single-step feedback; unknown or incomplete evidence remains
   blocked.
+- Orb Distance enforcement first locates the Attack Range tile and requires
+  authoritative OCR equal to the resolved preset's `range_basis`. It then
+  opens the freshly matched in-run Distance Adjuster, OCRs both values, and
+  matches each direction arrow immediately before one tap. Every step
+  reacquires the panel, requires the selected row to move strictly closer to
+  its target, and stops on unknown, unchanged, cycling, or non-progressing
+  evidence. Success requires both exact values and verified return to the
+  running side menu.
 - Complete no-battle setup owns every supported profile check available from
   verified Home `NEW_BATTLE`: Cards, Workshop and its Free Upgrade locks,
   Poison Swamp Stun, Bots, Guardians, and Modules. It retains screen-derived

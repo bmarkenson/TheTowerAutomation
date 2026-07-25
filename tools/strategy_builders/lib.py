@@ -161,6 +161,40 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
         except ValueError as exc:
             raise ValueError(f"gc_farm Damage Slider {exc}") from exc
 
+    orb_distance = initialization.get("orb_distance") or {"mode": "preserve"}
+    orb_distance_mode = str(
+        orb_distance.get("mode") or ""
+    ).strip().lower()
+    if orb_distance_mode not in {"preserve", "observe", "enforce"}:
+        raise ValueError(
+            "gc_farm initialization.orb_distance.mode must be preserve, "
+            "observe, or enforce"
+        )
+    orb_distance_values: Dict[str, str] | None = None
+    configured_orb_distance = orb_distance.get("resolved")
+    if orb_distance_mode == "preserve":
+        if (
+            orb_distance.get("preset") is not None
+            or configured_orb_distance is not None
+        ):
+            raise ValueError(
+                "gc_farm preserved Orb Distance must not supply a preset"
+            )
+    else:
+        if not isinstance(configured_orb_distance, dict):
+            raise ValueError(
+                f"gc_farm {orb_distance_mode} Orb Distance requires a "
+                "resolved preset"
+            )
+        from core.orb_distance import normalize_orb_distance_preset
+
+        try:
+            orb_distance_values = normalize_orb_distance_preset(
+                configured_orb_distance
+            )
+        except ValueError as exc:
+            raise ValueError(f"gc_farm Orb Distance {exc}") from exc
+
     session_requirements = _normalize_gc_session_preflight(
         source.get("session_preflight")
     )
@@ -204,6 +238,13 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
     elif damage_slider_mode == "observe":
         vars_block["damage_slider_observed"] = False
         vars_block["damage_slider_observation"] = {}
+    if orb_distance_mode == "enforce":
+        vars_block["orb_distance_checked"] = False
+        vars_block["orb_distance_observation"] = {}
+        complete_when.append("orb_distance_checked")
+    elif orb_distance_mode == "observe":
+        vars_block["orb_distance_observed"] = False
+        vars_block["orb_distance_observation"] = {}
     vars_block.update(
         gc_no_battle_setup_completed=False,
         gc_no_battle_setup_evidence={},
@@ -249,6 +290,14 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
         per_run_reset.extend(
             ["damage_slider_observed", "damage_slider_observation"]
         )
+    if orb_distance_mode == "enforce":
+        per_run_reset.extend(
+            ["orb_distance_checked", "orb_distance_observation"]
+        )
+    elif orb_distance_mode == "observe":
+        per_run_reset.extend(
+            ["orb_distance_observed", "orb_distance_observation"]
+        )
 
     reset_values = {
         "run_initialised": False,
@@ -281,6 +330,16 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
         reset_values.update(
             damage_slider_observed=False,
             damage_slider_observation={},
+        )
+    if orb_distance_mode == "enforce":
+        reset_values.update(
+            orb_distance_checked=False,
+            orb_distance_observation={},
+        )
+    elif orb_distance_mode == "observe":
+        reset_values.update(
+            orb_distance_observed=False,
+            orb_distance_observation={},
         )
     initialize_values = copy.deepcopy(reset_values)
     initialize_values.update(
@@ -353,6 +412,34 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
                         "type": "damage_slider_configure",
                         "mode": damage_slider_mode,
                         "value": damage_slider_value,
+                    }
+                ],
+            }
+        )
+
+    if orb_distance_mode in {"observe", "enforce"}:
+        completion_var = (
+            "orb_distance_checked"
+            if orb_distance_mode == "enforce"
+            else "orb_distance_observed"
+        )
+        assert orb_distance_values is not None
+        rules.append(
+            {
+                "name": f"{orb_distance_mode}_orb_distance",
+                "gate_phase": "run_initialization",
+                "when": {"state": "RUNNING"},
+                "assert": [
+                    "ehls_completed",
+                    "eals_completed",
+                    f"!{completion_var}",
+                ],
+                "cooldown_sec": 30.0,
+                "do": [
+                    {
+                        "type": "orb_distance_configure",
+                        "mode": orb_distance_mode,
+                        **copy.deepcopy(orb_distance_values),
                     }
                 ],
             }

@@ -21,6 +21,9 @@ from core.gc_preflight import (
 ROOT = Path(__file__).resolve().parents[1]
 TOURNAMENT_PROFILE_PATH = ROOT / "config" / "run_profiles" / "tournament.yaml"
 MODULE_LOADOUTS_PATH = ROOT / "config" / "loadouts" / "modules.yaml"
+ORB_DISTANCE_LOADOUTS_PATH = (
+    ROOT / "config" / "loadouts" / "orb_distances.yaml"
+)
 
 
 TOURNAMENT_SECTION_SPECS = {
@@ -80,6 +83,7 @@ def load_tournament_requirements(
     *,
     profile_path: Path = TOURNAMENT_PROFILE_PATH,
     modules_path: Path = MODULE_LOADOUTS_PATH,
+    orb_distances_path: Path = ORB_DISTANCE_LOADOUTS_PATH,
 ) -> dict[str, Any]:
     """Resolve and validate the compact Tournament preflight contract."""
 
@@ -134,6 +138,12 @@ def load_tournament_requirements(
     loadout = profile.get("loadout")
     if not isinstance(loadout, dict):
         raise ValueError("Tournament profile loadout must be a mapping")
+    expected_loadout_keys = {"modules", "damage_slider", "orb_distance"}
+    if set(loadout) != expected_loadout_keys:
+        raise ValueError(
+            "Tournament loadout must define exactly modules, damage_slider, "
+            "and orb_distance"
+        )
     preset_name = str(loadout.get("modules") or "").strip()
     catalog = _load_mapping(modules_path, "Module loadout catalog")
     presets = catalog.get("presets")
@@ -155,6 +165,29 @@ def load_tournament_requirements(
     if damage_value != "1E2%":
         raise ValueError("Tournament damage_slider value must be 100%")
 
+    orb_distance_name = str(loadout.get("orb_distance") or "").strip()
+    orb_distance_catalog = _load_mapping(
+        orb_distances_path,
+        "Orb Distance loadout catalog",
+    )
+    orb_distance_presets = orb_distance_catalog.get("presets")
+    if (
+        not isinstance(orb_distance_presets, dict)
+        or orb_distance_name not in orb_distance_presets
+    ):
+        raise ValueError(
+            f"unknown Tournament Orb Distance preset "
+            f"{orb_distance_name!r}"
+        )
+    from core.orb_distance import normalize_orb_distance_preset
+
+    try:
+        orb_distance = normalize_orb_distance_preset(
+            orb_distance_presets[orb_distance_name]
+        )
+    except ValueError as exc:
+        raise ValueError(f"Tournament Orb Distance {exc}") from exc
+
     return {
         **requirements,
         "loadout_policies": {"modules": "enforce"},
@@ -162,6 +195,11 @@ def load_tournament_requirements(
         "damage_slider": {
             "mode": "enforce",
             "value": damage_value,
+        },
+        "orb_distance": {
+            "mode": "enforce",
+            "preset": orb_distance_name,
+            "resolved": orb_distance,
         },
     }
 
