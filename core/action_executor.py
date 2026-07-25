@@ -36,7 +36,10 @@ from core.target_priority import (
     observe_target_priority_order,
 )
 from core.level_skip_initializer import initialize_level_skips
-from core.damage_adjuster import configure_damage_slider
+from core.damage_adjuster import (
+    configure_damage_slider,
+    format_damage_percentage,
+)
 from core.gc_preflight_navigation import (
     GcPreflightNavigationStatus,
     run_read_only_gc_preflight,
@@ -227,8 +230,10 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                         mv["damage_slider_observed"] = True
                 log_mission(
                     "[DAMAGE_SLIDER] "
-                    f"mode={mode} expected={result.expected} "
-                    f"initial={result.initial} final={result.final} "
+                    f"mode={mode} "
+                    f"expected={format_damage_percentage(result.expected)} "
+                    f"initial={format_damage_percentage(result.initial)} "
+                    f"final={format_damage_percentage(result.final)} "
                     f"steps={result.steps} success={result.success} "
                     f"reason={result.reason}",
                     "INFO" if result.success or mode == "observe" else "WARN",

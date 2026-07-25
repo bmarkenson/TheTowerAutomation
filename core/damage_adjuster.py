@@ -81,6 +81,18 @@ def normalize_damage_percentage(value: Any) -> str:
     return f"{normalized}%"
 
 
+def format_damage_percentage(value: Optional[Any]) -> Optional[str]:
+    """Render a canonical percentage using the notation shown to operators."""
+
+    if value is None:
+        return None
+    canonical = normalize_damage_percentage(value)
+    numeric = Decimal(canonical[:-1])
+    if numeric == numeric.to_integral_value():
+        return f"{format(numeric, 'f')}%"
+    return canonical
+
+
 def _percentage_value(value: Optional[str]) -> Optional[Decimal]:
     if value is None:
         return None
@@ -254,20 +266,22 @@ def configure_damage_slider(
     if canonical_mode not in {"observe", "enforce"}:
         raise ValueError("Damage Slider mode must be observe or enforce")
     canonical_expected = normalize_damage_percentage(expected)
+    display_expected = format_damage_percentage(canonical_expected)
     expected_value = _percentage_value(canonical_expected)
     assert expected_value is not None
+    assert display_expected is not None
 
     if canonical_mode == "observe":
         log_action_intent(
             "Checking the Damage Slider",
             reason=(
                 f"record whether its current value matches "
-                f"{canonical_expected} without changing it"
+                f"{display_expected} without changing it"
             ),
         )
     else:
         log_action_intent(
-            f"Setting the Damage Slider to {canonical_expected}",
+            f"Setting the Damage Slider to {display_expected}",
             reason=(
                 "the selected strategy requires that starting value before "
                 "normal run actions continue"
@@ -347,7 +361,8 @@ def configure_damage_slider(
                     log(
                         "[DAMAGE_ADJUSTER] Applying "
                         f"{batch_steps} {button.rsplit(':', 1)[-1]} tap(s) "
-                        f"from {final} toward {canonical_expected}",
+                        f"from {format_damage_percentage(final)} "
+                        f"toward {display_expected}",
                         "INFO",
                     )
 
@@ -550,6 +565,7 @@ __all__ = [
     "DamageSliderResult",
     "configure_damage_slider",
     "dismiss_damage_adjuster",
+    "format_damage_percentage",
     "normalize_damage_percentage",
     "open_damage_adjuster",
     "read_damage_adjuster",

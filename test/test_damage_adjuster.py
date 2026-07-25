@@ -9,6 +9,7 @@ from core.damage_adjuster import (
     DamageAdjusterReading,
     configure_damage_slider,
     dismiss_damage_adjuster,
+    format_damage_percentage,
     normalize_damage_percentage,
     open_damage_adjuster,
     read_damage_adjuster,
@@ -88,6 +89,14 @@ def test_damage_slider_arrow_actions_have_explicit_geometry():
 def test_damage_percentage_normalization_uses_screen_notation():
     assert normalize_damage_percentage("1e-22") == "1E-22%"
     assert normalize_damage_percentage("1E-22%") == "1E-22%"
+    assert normalize_damage_percentage("100%") == "1E2%"
+
+
+def test_damage_percentage_operator_format_uses_screen_notation():
+    assert format_damage_percentage("1E2%") == "100%"
+    assert format_damage_percentage("1E1%") == "10%"
+    assert format_damage_percentage("1E-22%") == "1E-22%"
+    assert format_damage_percentage(None) is None
 
 
 def _reading(percentage, *, confidence=95.0, screenshot=None):
@@ -142,6 +151,38 @@ def test_damage_slider_enforcement_batches_known_power_of_ten_steps():
         for _point, kwargs in taps
     )
     assert read.call_count == 1
+
+
+def test_damage_slider_operator_logs_format_integral_target():
+    with (
+        patch(
+            "core.damage_adjuster.open_damage_adjuster",
+            return_value=_reading("1E-22%"),
+        ),
+        patch(
+            "core.damage_adjuster.read_damage_adjuster",
+            return_value=_reading("100%"),
+        ),
+        patch("core.damage_adjuster.dismiss_damage_adjuster", return_value=True),
+        patch("core.damage_adjuster.log_action_intent") as action_log,
+        patch("core.damage_adjuster.log") as progress_log,
+    ):
+        result = configure_damage_slider(
+            "100%",
+            capture_fn=lambda: object(),
+            tap_fn=lambda *_args, **_kwargs: True,
+            ensure_menu_fn=lambda *_args, **_kwargs: object(),
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert result.success
+    assert result.expected == "1E2%"
+    assert action_log.call_args.args[0] == "Setting the Damage Slider to 100%"
+    assert any(
+        "Applying 24 increase tap(s) from 1E-22% toward 100%"
+        in call.args[0]
+        for call in progress_log.call_args_list
+    )
 
 
 def test_damage_slider_batches_full_live_observed_exponent_gap():

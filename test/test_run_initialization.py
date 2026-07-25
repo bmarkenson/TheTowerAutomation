@@ -856,6 +856,45 @@ class FarmProfileTests(unittest.TestCase):
         self.assertTrue(mv["damage_slider_checked"])
         self.assertEqual(mv["damage_slider_observation"], payload)
 
+    def test_damage_slider_result_log_uses_operator_percentage_notation(self):
+        ctx = MissionContext()
+        ctx.data["mission_vars"] = {"last_detection_state": "RUNNING"}
+        result = SimpleNamespace(
+            success=True,
+            expected="1E2%",
+            initial="1E-22%",
+            final="100%",
+            steps=24,
+            reason="matched",
+            as_dict=lambda: {"expected": "1E2%", "success": True},
+        )
+
+        with (
+            patch(
+                "core.action_executor.configure_damage_slider",
+                return_value=result,
+            ),
+            patch("core.action_executor.log_mission") as mission_log,
+        ):
+            execute_actions(
+                object(),
+                [
+                    {
+                        "type": "damage_slider_configure",
+                        "mode": "enforce",
+                        "value": "1E2%",
+                        "_strategy": True,
+                    }
+                ],
+                ctx,
+            )
+
+        mission_log.assert_called_once_with(
+            "[DAMAGE_SLIDER] mode=enforce expected=100% "
+            "initial=1E-22% final=100% steps=24 success=True reason=matched",
+            "INFO",
+        )
+
     def test_preserved_modules_are_omitted_from_runtime_requirements(self):
         source = self._source()
         source["loadout"]["modules"] = {"mode": "preserve"}
