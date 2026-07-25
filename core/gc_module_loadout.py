@@ -880,6 +880,7 @@ def _equip_inventory_module(
     catalog,
     required_inventory_level: Optional[int] = None,
     require_level_transfer: bool = True,
+    allow_level_transfer: bool = True,
 ):
     detail = _find_inventory_detail(
         slot.expected,
@@ -973,6 +974,11 @@ def _equip_inventory_module(
     while time.monotonic() < deadline:
         frame = _capture_modules(capture_fn, detector)
         if _transfer_prompt_visible(frame):
+            if not allow_level_transfer:
+                raise ModuleLoadoutCorrectionError(
+                    f"{slot.expected} unexpectedly offered level transfer for "
+                    f"empty {slot.slot_key}"
+                )
             if not safe_tap_fn(
                 "buttons.module:accept_level_transfer",
                 dispatch="now",

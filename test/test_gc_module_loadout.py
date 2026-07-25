@@ -380,6 +380,63 @@ def test_module_replacement_rejects_missing_level_transfer_prompt():
             )
 
 
+def test_empty_slot_recovery_rejects_unexpected_level_transfer_prompt():
+    detail = np.full((1920, 1080, 3), 10, dtype=np.uint8)
+    role_prompt = np.full((1920, 1080, 3), 20, dtype=np.uint8)
+    transfer_prompt = np.full((1920, 1080, 3), 30, dtype=np.uint8)
+    taps = []
+    slot = GcModuleSlotEvidence(
+        slot_key="armor_assist",
+        family="armor",
+        role="assist",
+        expected="Orbital Augment",
+        actual=None,
+        match_status="not_ancestral",
+        valid=False,
+        confidence=0.0,
+        margin=0.0,
+        green_fraction=0.0,
+    )
+
+    with (
+        patch("core.gc_module_loadout._find_inventory_detail", return_value=detail),
+        patch("core.gc_module_loadout._detail_for", return_value=True),
+        patch(
+            "core.gc_module_loadout._role_prompt_visible",
+            side_effect=lambda frame: int(frame[0, 0, 0]) == 20,
+        ),
+        patch(
+            "core.gc_module_loadout._transfer_prompt_visible",
+            side_effect=lambda frame: int(frame[0, 0, 0]) == 30,
+        ),
+        patch(
+            "core.gc_module_loadout._capture_modules",
+            return_value=transfer_prompt,
+        ),
+        patch("core.gc_module_loadout._wait_for", return_value=role_prompt),
+    ):
+        with pytest.raises(
+            ModuleLoadoutCorrectionError,
+            match="unexpectedly offered level transfer",
+        ):
+            _equip_inventory_module(
+                slot,
+                capture_fn=lambda: pytest.fail("capture is wrapped"),
+                detector=lambda _frame: {"state": "MODULES"},
+                safe_tap_fn=lambda target, **_kwargs: taps.append(target) or True,
+                swipe_fn=lambda _label: True,
+                sleep_fn=lambda _seconds: None,
+                catalog=load_module_icon_catalog(),
+                require_level_transfer=False,
+                allow_level_transfer=False,
+            )
+
+    assert taps == [
+        "buttons.module:detail_equip_toggle",
+        "buttons.module:select_assist",
+    ]
+
+
 def test_module_replacement_retries_a_dropped_equip_input_once():
     detail = np.full((1920, 1080, 3), 10, dtype=np.uint8)
     role_prompt = np.full((1920, 1080, 3), 20, dtype=np.uint8)
