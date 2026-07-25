@@ -37,6 +37,21 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-25 Range-bound Orb Distance presets
+
+- Added named Orb Distance presets and enforced Tier 18 Farm at Attack Range
+  `30.00m` with Extra `30.00m` / Workshop `39.00m`, and Tournament at Attack
+  Range `98.38m` with Extra `87.16m` / Workshop `80.37m`.
+- The battle-only controller requires authoritative Range and panel OCR,
+  freshly matches every single arrow tap, verifies strict progress, and blocks
+  strategy completion until both values match exactly and the panel closes
+  back to the running side menu.
+- Retained fixtures validate both Range values, the Distance Adjuster values,
+  and every new tap target. Repository-wide validation passed 703
+  sandbox-compatible tests plus the separately permitted localhost HTTP test,
+  for 704 total. No live battle validation was performed.
+- Implemented in commit `5448e82`.
+
 ### 2026-07-25 confirmed Tournament launch
 
 - Added a durable, one-shot launch decision to a successful Tournament
