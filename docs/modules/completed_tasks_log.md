@@ -37,6 +37,26 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-25 one-shot Tournament validation
+
+- Made each explicit Tournament selection or managed Start authorize one
+  durable, fingerprint-bound validation request. After complete unwaived Home
+  preflight, the same runtime atomically owns and starts one verified ordinary
+  New Battle, enforces Damage Slider `100%`, validates Ultimate Weapons and
+  Spotlight Missiles, and returns only that battle to Home.
+- Ownership is checked before every terminal action. Restart, ADB-target
+  change, Resume, Tournament identity, stale evidence, or another ambiguous
+  boundary fails closed without inherited Surrender authority. Browser and
+  native clients show pending, running, cleanup, ready, and failed results.
+- The disposable validation battle does not toggle Auto Perks or seed upgrade
+  completion. The manually started Tournament still runs normal EHLS/EALS
+  initialization before settling into observer behavior.
+- Focused validation passed 212 tests. Repository-wide validation passed 665
+  sandbox-compatible tests plus the separately permitted localhost HTTP test,
+  for 666 total. The standalone Windows client published successfully, and no
+  live process or device interaction was used.
+- Implemented in commit `edc53ea`.
+
 ### 2026-07-25 action-intent log headers
 
 - Added a reusable operator-facing `ACTION` header that states what a guarded
