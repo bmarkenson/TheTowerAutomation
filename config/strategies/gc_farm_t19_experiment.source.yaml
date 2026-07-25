@@ -12,6 +12,9 @@ initialization:
     mode: preserve
 session_preflight:
   cards_deck: Farm
+  card_recharge_modes:
+    Demon Mode: auto
+    Nuke: manual
   workshop_preset: Farm
   bots_preset: Farm
   guardian_chips:

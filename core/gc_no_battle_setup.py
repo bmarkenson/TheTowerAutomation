@@ -7,6 +7,11 @@ from enum import Enum
 import time
 from typing import Any, Callable, Mapping
 
+from core.card_recharge_modes import (
+    CardRechargeModesResult,
+    ensure_card_recharge_modes,
+    normalize_card_recharge_modes,
+)
 from core.battle_lifecycle import HomeBattleControl
 from core.damage_adjuster import normalize_damage_percentage
 from core.free_upgrade_locks import (
@@ -25,7 +30,13 @@ from core.gc_module_loadout import (
     normalize_gc_module_requirements,
 )
 from core.gc_preflight import GC_SECTION_SPECS, validate_gc_preflight_screens
-from core.input import TapVerification, safe_tap, swipe_now, tap_if_visible
+from core.input import (
+    TapVerification,
+    safe_long_press,
+    safe_tap,
+    swipe_now,
+    tap_if_visible,
+)
 from core.perk_configuration import (
     normalize_perk_configuration_requirements,
     perk_configuration_label,
@@ -105,6 +116,7 @@ _SUPPORTED_HOME_CONFIGURATIONS = {
 _HOME_PREFLIGHT_LABELS = {
     "home_boundary": "Home boundary",
     "cards_deck": "Cards deck",
+    "card_recharge_modes": "Card recharge modes",
     "workshop_preset": "Workshop preset",
     "free_upgrade_locks": "Free Upgrade locks",
     "ultimate_weapons": "Ultimate Weapons",
@@ -174,7 +186,11 @@ def run_gc_no_battle_setup(
     ensure_perk_configuration_fn: Callable[
         ..., HomePerkConfigurationResult
     ] = ensure_home_perk_configuration,
+    ensure_card_recharge_modes_fn: Callable[
+        ..., CardRechargeModesResult
+    ] = ensure_card_recharge_modes,
     validate_configuration_fn: Callable[..., Any] = validate_gc_preflight_screens,
+    safe_long_press_fn: Callable[..., bool] = safe_long_press,
     action_guard_fn: Callable[[], bool] | None = None,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> GcNoBattleSetupResult:
@@ -200,6 +216,7 @@ def run_gc_no_battle_setup(
     )
 
     original_safe_tap_fn = safe_tap_fn
+    original_safe_long_press_fn = safe_long_press_fn
     original_tap_visible_fn = tap_visible_fn
     original_swipe_fn = swipe_fn
     original_workshop_swipe_fn = workshop_swipe_fn
@@ -227,6 +244,10 @@ def run_gc_no_battle_setup(
         require_action()
         return original_safe_tap_fn(*args, **kwargs)
 
+    def guarded_safe_long_press(*args, **kwargs):
+        require_action()
+        return original_safe_long_press_fn(*args, **kwargs)
+
     def guarded_visible_tap(*args, **kwargs):
         require_action()
         return original_tap_visible_fn(*args, **kwargs)
@@ -240,6 +261,7 @@ def run_gc_no_battle_setup(
         return original_workshop_swipe_fn(*args, **kwargs)
 
     safe_tap_fn = guarded_safe_tap
+    safe_long_press_fn = guarded_safe_long_press
     tap_visible_fn = guarded_visible_tap
     swipe_fn = guarded_swipe
     workshop_swipe_fn = guarded_workshop_swipe
@@ -302,6 +324,34 @@ def run_gc_no_battle_setup(
             )
             evidence[current_check] = requirements[current_check]
         log_check(current_check)
+
+        current_check = "card_recharge_modes"
+        card_recharge_requirements = requirements.get(current_check)
+        if current_check in active_waivers:
+            evidence[current_check] = _waived_evidence(
+                current_check,
+                card_recharge_requirements,
+                active_waivers[current_check],
+            )
+        elif card_recharge_requirements is not None:
+            recharge_result = ensure_card_recharge_modes_fn(
+                card_recharge_requirements,
+                cards_screenshot=cards,
+                capture_fn=capture_fn,
+                detector=detector,
+                safe_long_press_fn=safe_long_press_fn,
+                safe_tap_fn=safe_tap_fn,
+                swipe_fn=swipe_fn,
+                sleep_fn=sleep_fn,
+            )
+            evidence[current_check] = recharge_result.as_dict()
+            cards = recharge_result.screenshot
+            if not recharge_result.valid:
+                raise _SetupFailure(
+                    "Card recharge modes remained invalid after correction"
+                )
+        if card_recharge_requirements is not None:
+            log_check(current_check)
         current = _return_home(
             cards,
             capture_fn,
@@ -902,6 +952,18 @@ def _log_home_preflight_evidence(
             else:
                 observed = "module loadout observed"
                 disposition = "observed" if mode == "observe" else "passed"
+        elif check_id == "card_recharge_modes":
+            modes = check_evidence.get("modes") or []
+            observed = ", ".join(
+                f"{mode.get('label')}={mode.get('observed')}"
+                for mode in modes
+                if isinstance(mode, Mapping)
+            ) or "unavailable"
+            if check_evidence.get("changed"):
+                observed = f"{observed} after correction"
+            if check_evidence.get("valid") is False:
+                disposition = "failed"
+                level = "ERROR"
         elif check_id in {"perk_bans", "perk_auto_pick_order"}:
             expected_labels = check_evidence.get("expected_labels") or []
             observed_labels = check_evidence.get("observed_labels") or []
@@ -968,6 +1030,8 @@ def _home_preflight_value(check_id: str, value: object) -> str:
         return f"{len(value)} configured priorities"
     if check_id == "damage_slider" and isinstance(value, Mapping):
         return str(value.get("value") or value.get("mode") or value)
+    if check_id == "card_recharge_modes" and isinstance(value, Mapping):
+        return ", ".join(f"{key}={item}" for key, item in value.items())
     if check_id in {"perk_bans", "perk_auto_pick_order"} and isinstance(
         value,
         (list, tuple),
@@ -1049,6 +1113,11 @@ def _unsupported_requirement(requirements: Mapping[str, Any]) -> str | None:
     ):
         try:
             normalize_perk_configuration_requirements(requirements)
+        except ValueError as exc:
+            return str(exc)
+    if "card_recharge_modes" in requirements:
+        try:
+            normalize_card_recharge_modes(requirements["card_recharge_modes"])
         except ValueError as exc:
             return str(exc)
     damage_slider = requirements.get("damage_slider")

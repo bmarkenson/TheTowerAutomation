@@ -13,6 +13,9 @@ session_preflight:
   - gc_session_preflight_completed
   requirements:
     cards_deck: Farm
+    card_recharge_modes:
+      Demon Mode: auto
+      Nuke: manual
     workshop_preset: Farm
     bots_preset: Farm
     guardian_chips:
@@ -299,6 +302,9 @@ rules:
   - type: gc_session_preflight
     requirements:
       cards_deck: Farm
+      card_recharge_modes:
+        Demon Mode: auto
+        Nuke: manual
       workshop_preset: Farm
       bots_preset: Farm
       guardian_chips:

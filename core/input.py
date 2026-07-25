@@ -227,6 +227,79 @@ def tap_if_visible(
     )
 
 
+def safe_long_press(
+    name: str,
+    *,
+    duration_ms: int = 800,
+    retries: int = 0,
+    retry_delay: float = 0.5,
+    screenshot=None,
+    log_label: Optional[str] = None,
+) -> bool:
+    """Long-press a freshly template-matched target.
+
+    Long presses are dispatched as a zero-distance swipe.  Unlike
+    :func:`safe_tap`, this helper deliberately accepts only template-backed
+    clickmap names; callers cannot turn a static coordinate into long-press
+    authority.
+    """
+
+    entry = resolve_dot_path(name)
+    if not isinstance(entry, dict) or not entry.get("match_template"):
+        log(
+            f"[SKIP] LONG_PRESS_SAFE requires a template-backed target: {name}",
+            "WARN",
+        )
+        return False
+    try:
+        duration = int(duration_ms)
+    except (TypeError, ValueError):
+        duration = 0
+    if not 1 <= duration <= 5000:
+        log(
+            f"[SKIP] LONG_PRESS_SAFE invalid duration for {name}: "
+            f"{duration_ms!r}",
+            "WARN",
+        )
+        return False
+
+    label = log_label or name
+    attempts = max(0, int(retries)) + 1
+    last_err: Optional[Exception] = None
+    for attempt in range(attempts):
+        try:
+            x, y, width, height = get_label_match(
+                name,
+                screenshot=screenshot if attempt == 0 else None,
+            )
+            offset = _compute_offset(entry)
+            press_x = x + (offset[0] if offset else width // 2)
+            press_y = y + (offset[1] if offset else height // 2)
+            log_action(
+                f"Long press requested: {_operator_label(str(label))}",
+                detail=(
+                    f"LONG_PRESS_SAFE label={label} at ({press_x},{press_y}) "
+                    f"duration_ms={duration} verified=template "
+                    f"attempt={attempt+1}/{attempts}"
+                ),
+            )
+            _dispatch_swipe(
+                press_x,
+                press_y,
+                press_x,
+                press_y,
+                duration,
+            )
+            return True
+        except Exception as exc:
+            last_err = exc
+            if attempt < attempts - 1:
+                time.sleep(max(0.0, float(retry_delay)))
+    if last_err is not None:
+        log(f"[SKIP] LONG_PRESS_SAFE failed for {label}: {last_err}", "WARN")
+    return False
+
+
 def tap_unchecked_for_tooling(name: str, *, reason: str) -> bool:
     """Issue an explicit static tap from an operator-invoked development tool."""
 
@@ -267,6 +340,7 @@ def swipe_now(name: str) -> bool:
 
 __all__ = [
     "TapVerification",
+    "safe_long_press",
     "safe_tap",
     "tap_if_visible",
     "tap_unchecked_for_tooling",

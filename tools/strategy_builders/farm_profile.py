@@ -114,6 +114,7 @@ def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
             key: copy.deepcopy(requirements[key])
             for key in (
                 "cards_deck",
+                "card_recharge_modes",
                 "workshop_preset",
                 "free_upgrade_locks",
                 "bots_preset",

@@ -15,6 +15,9 @@ session_preflight:
   - gc_session_preflight_completed
   requirements:
     cards_deck: Farm
+    card_recharge_modes:
+      Demon Mode: auto
+      Nuke: manual
     workshop_preset: Farm
     free_upgrade_locks:
     - Shockwave Size
@@ -415,6 +418,9 @@ rules:
   - type: gc_session_preflight
     requirements:
       cards_deck: Farm
+      card_recharge_modes:
+        Demon Mode: auto
+        Nuke: manual
       workshop_preset: Farm
       free_upgrade_locks:
       - Shockwave Size
@@ -497,6 +503,9 @@ run_configuration:
   tier: 18
   settings:
     cards_deck: Farm
+    card_recharge_modes:
+      Demon Mode: auto
+      Nuke: manual
     workshop_preset: Farm
     free_upgrade_locks:
     - Shockwave Size

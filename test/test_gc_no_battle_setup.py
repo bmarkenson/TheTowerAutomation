@@ -90,6 +90,7 @@ class _NoBattleRouter:
         self.visible_actions = []
         self.module_checks = []
         self.module_observations = []
+        self.card_recharge_checks = []
         self.bots_offscreen = bots_offscreen
         self.deny_bots_preset = deny_bots_preset
         self.swipes = []
@@ -189,6 +190,29 @@ class _NoBattleRouter:
         return SimpleNamespace(
             valid=True,
             as_dict=lambda: {"valid": True, "slots": []},
+        )
+
+    def ensure_card_recharge_modes(self, requirements, **kwargs):
+        assert self.state == "cards"
+        assert kwargs["cards_screenshot"] == "cards"
+        self.card_recharge_checks.append(dict(requirements))
+        return SimpleNamespace(
+            valid=True,
+            screenshot="cards",
+            as_dict=lambda: {
+                "valid": True,
+                "changed": False,
+                "changed_labels": [],
+                "modes": [
+                    {
+                        "label": label,
+                        "required": mode,
+                        "observed": mode,
+                        "valid": True,
+                    }
+                    for label, mode in requirements.items()
+                ],
+            },
         )
 
     def evaluate_modules(self, _screen, requirements):
@@ -373,6 +397,7 @@ def _run(
         evaluate_modules_fn=router.evaluate_modules,
         select_workshop_menu_fn=router.select_workshop_menu,
         ensure_poison_swamp_stun_fn=router.ensure_stun,
+        ensure_card_recharge_modes_fn=router.ensure_card_recharge_modes,
         validate_configuration_fn=router.validate_configuration,
         action_guard_fn=action_guard_fn,
         sleep_fn=lambda _seconds: None,
@@ -409,6 +434,39 @@ def test_no_battle_setup_corrects_supported_farm_presets_and_guardians():
         "indicators.guardian:ally_equipped",
         "buttons.guardian:summon_inventory",
         "buttons.return_to_game",
+    ]
+
+
+def test_no_battle_setup_enforces_card_recharge_modes_before_leaving_cards():
+    router = _NoBattleRouter()
+    requirements = {
+        **REQUIREMENTS,
+        "card_recharge_modes": {
+            "Demon Mode": "auto",
+            "Nuke": "manual",
+        },
+    }
+
+    result = _run(router, requirements)
+
+    assert result.complete
+    assert router.card_recharge_checks == [
+        {"Demon Mode": "auto", "Nuke": "manual"}
+    ]
+    assert result.evidence["card_recharge_modes"]["valid"] is True
+    assert result.evidence["card_recharge_modes"]["modes"] == [
+        {
+            "label": "Demon Mode",
+            "required": "auto",
+            "observed": "auto",
+            "valid": True,
+        },
+        {
+            "label": "Nuke",
+            "required": "manual",
+            "observed": "manual",
+            "valid": True,
+        },
     ]
 
 

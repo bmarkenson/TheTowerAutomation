@@ -9,6 +9,7 @@ from typing import Any, Callable, Mapping, Sequence
 VALID_GATE_DECISION_ACTIONS = frozenset({"pause", "retry", "waive"})
 STARTUP_GATE_CHECK_LABELS = {
     "cards_deck": "Cards deck",
+    "card_recharge_modes": "Card recharge modes",
     "workshop_preset": "Workshop preset",
     "free_upgrade_locks": "Free Upgrade locks",
     "bots_preset": "Bot preset",

@@ -8,6 +8,7 @@ from typing import Any, Mapping
 
 import yaml
 
+from core.card_recharge_modes import normalize_card_recharge_modes
 from core.damage_adjuster import normalize_damage_percentage
 from core.gc_preflight import (
     Detector,
@@ -101,6 +102,15 @@ def load_tournament_requirements(
     for key, expected in fixed_values.items():
         if str(requirements.get(key) or "").strip() != expected:
             raise ValueError(f"Tournament profile {key} must be {expected!r}")
+    try:
+        recharge_modes = normalize_card_recharge_modes(
+            requirements.get("card_recharge_modes")
+        )
+    except ValueError as exc:
+        raise ValueError(f"Tournament profile {exc}") from exc
+    requirements["card_recharge_modes"] = {
+        label: mode.value for label, mode in recharge_modes.items()
+    }
     guardian_chips = {
         str(chip).strip() for chip in requirements.get("guardian_chips") or ()
     }

@@ -975,6 +975,7 @@ def render_battle_markdown(record: Mapping[str, Any]) -> str:
             lines.extend(["### Profile Settings", ""])
             for key, label in (
                 ("cards_deck", "Cards deck"),
+                ("card_recharge_modes", "Card recharge modes"),
                 ("workshop_preset", "Workshop preset"),
                 ("bots_preset", "Bots preset"),
                 ("guardian_chips", "Guardian chips"),
@@ -985,6 +986,10 @@ def render_battle_markdown(record: Mapping[str, Any]) -> str:
                 value = settings[key]
                 if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
                     rendered = " > ".join(str(item) for item in value)
+                elif isinstance(value, Mapping):
+                    rendered = ", ".join(
+                        f"{name}={mode}" for name, mode in value.items()
+                    )
                 elif isinstance(value, bool):
                     rendered = "enabled" if value else "disabled"
                 else:

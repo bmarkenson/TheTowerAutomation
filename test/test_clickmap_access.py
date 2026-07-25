@@ -3,7 +3,7 @@ from unittest.mock import patch
 import numpy as np
 
 from core.clickmap_access import get_click, get_explicit_tap, resolve_dot_path
-from core.input import TapVerification, safe_tap
+from core.input import TapVerification, safe_long_press, safe_tap
 
 
 def test_legacy_get_click_preserves_direct_match_region_center():
@@ -99,6 +99,36 @@ def test_reusable_tap_authority_evaluates_initial_frame_once():
 
     assert dispatch.call_count == 2
     assert verifier_calls == 1
+
+
+def test_safe_long_press_uses_fresh_template_geometry_and_configured_offset():
+    screenshot = np.full((1920, 1080, 3), 32, dtype=np.uint8)
+
+    with (
+        patch(
+            "core.input.get_label_match",
+            return_value=(300, 1200, 230, 43),
+        ) as match,
+        patch("core.input._dispatch_swipe") as dispatch,
+    ):
+        assert safe_long_press(
+            "buttons.card_inventory:demon_mode",
+            duration_ms=800,
+            screenshot=screenshot,
+        )
+
+    match.assert_called_once_with(
+        "buttons.card_inventory:demon_mode",
+        screenshot=screenshot,
+    )
+    dispatch.assert_called_once_with(415, 1280, 415, 1280, 800)
+
+
+def test_safe_long_press_rejects_static_targets():
+    with patch("core.input._dispatch_swipe") as dispatch:
+        assert not safe_long_press("gesture_targets.dismiss_damage_adjuster")
+
+    dispatch.assert_not_called()
 
 
 def test_navigation_targets_preserve_expected_tap_geometry():

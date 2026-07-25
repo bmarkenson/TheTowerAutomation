@@ -3,6 +3,9 @@ name: tournament
 
 invariants:
   cards_deck: Tournament
+  card_recharge_modes:
+    Demon Mode: auto
+    Nuke: manual
   workshop_preset: Tourney
   bots_preset: Amplify
   guardian_chips:

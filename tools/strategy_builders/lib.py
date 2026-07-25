@@ -565,6 +565,18 @@ def _normalize_gc_session_preflight(raw: Any) -> Dict[str, Any]:
             )
         requirements[key] = actual
 
+    from core.card_recharge_modes import normalize_card_recharge_modes
+
+    try:
+        recharge_modes = normalize_card_recharge_modes(
+            requirements.get("card_recharge_modes")
+        )
+    except ValueError as exc:
+        raise ValueError(f"gc_farm session_preflight.{exc}") from exc
+    requirements["card_recharge_modes"] = {
+        label: mode.value for label, mode in recharge_modes.items()
+    }
+
     if "free_upgrade_locks" in requirements:
         from core.free_upgrade_locks import (
             normalize_free_upgrade_lock_requirements,

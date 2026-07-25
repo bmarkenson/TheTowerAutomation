@@ -196,6 +196,7 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
                 key: copy.deepcopy(requirements[key])
                 for key in (
                     "cards_deck",
+                    "card_recharge_modes",
                     "workshop_preset",
                     "bots_preset",
                     "guardian_chips",

@@ -140,6 +140,10 @@ def test_tournament_strategy_declares_exclusive_validation_then_observes():
     assert action["type"] == "session_preflight"
     assert action["validator"] == "tournament"
     assert "auto_pick_perks" not in action["requirements"]
+    assert action["requirements"]["card_recharge_modes"] == {
+        "Demon Mode": "auto",
+        "Nuke": "manual",
+    }
     assert action["allow_repair"] is False
     assert action["mismatch_policy"] == "notify"
     assert action["requirements"]["ultimate_weapons"]["Poison Swamp"]["stun"] == "on"
@@ -150,6 +154,10 @@ def test_tournament_strategy_declares_exclusive_validation_then_observes():
         "gc_session_preflight_attempted",
     ]
     assert "auto_pick_perks" not in strategy.run_configuration()["settings"]
+    assert strategy.run_configuration()["settings"]["card_recharge_modes"] == {
+        "Demon Mode": "auto",
+        "Nuke": "manual",
+    }
     assert (
         strategy.run_configuration()["settings"]["ultimate_weapons"][
             "Poison Swamp"

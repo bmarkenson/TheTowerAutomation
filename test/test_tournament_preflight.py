@@ -111,6 +111,10 @@ def test_tournament_profile_omits_non_applicable_auto_pick_perks():
     requirements = load_tournament_requirements()
 
     assert "auto_pick_perks" not in requirements
+    assert requirements["card_recharge_modes"] == {
+        "Demon Mode": "auto",
+        "Nuke": "manual",
+    }
     assert requirements["ultimate_weapons"]["Poison Swamp"]["stun"] == "on"
     assert requirements["damage_slider"] == {
         "mode": "enforce",

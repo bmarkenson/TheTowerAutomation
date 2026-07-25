@@ -179,6 +179,32 @@
         "duration_ms": 250
       }
     },
+    "goto_top:cards_inventory": {
+      "roles": [
+        "gesture"
+      ],
+      "swipe": {
+        "type": "swipe",
+        "x1": 540,
+        "y1": 900,
+        "x2": 540,
+        "y2": 1650,
+        "duration_ms": 600
+      }
+    },
+    "goto_next:cards_inventory": {
+      "roles": [
+        "gesture"
+      ],
+      "swipe": {
+        "type": "swipe",
+        "x1": 540,
+        "y1": 1650,
+        "x2": 540,
+        "y2": 900,
+        "duration_ms": 600
+      }
+    },
     "goto_next:perks": {
       "roles": [
         "gesture"
@@ -572,6 +598,32 @@
         "h": 60
       },
       "match_threshold": 0.9,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "card_detail:demon_mode": {
+      "match_template": "indicators/card_detail:demon_mode.png",
+      "match_region": {
+        "x": 100,
+        "y": 220,
+        "w": 880,
+        "h": 250
+      },
+      "match_threshold": 0.88,
+      "roles": [
+        "indicator"
+      ]
+    },
+    "card_detail:nuke": {
+      "match_template": "indicators/card_detail:nuke.png",
+      "match_region": {
+        "x": 100,
+        "y": 220,
+        "w": 880,
+        "h": 250
+      },
+      "match_threshold": 0.88,
       "roles": [
         "indicator"
       ]
@@ -2578,6 +2630,53 @@
         "y": 180
       },
       "match_threshold": 0.85,
+      "roles": [
+        "button"
+      ]
+    },
+    "card_detail:close": {
+      "match_template": "buttons/card_detail:close.png",
+      "match_region": {
+        "x": 850,
+        "y": 220,
+        "w": 150,
+        "h": 150
+      },
+      "match_threshold": 0.88,
+      "roles": [
+        "button"
+      ]
+    },
+    "card_inventory:demon_mode": {
+      "match_template": "buttons/card_inventory:demon_mode.png",
+      "match_region": {
+        "x": 0,
+        "y": 1000,
+        "w": 1080,
+        "h": 690
+      },
+      "match_threshold": 0.88,
+      "tap_offset": {
+        "x": 115,
+        "y": 80
+      },
+      "roles": [
+        "button"
+      ]
+    },
+    "card_inventory:nuke": {
+      "match_template": "buttons/card_inventory:nuke.png",
+      "match_region": {
+        "x": 0,
+        "y": 1000,
+        "w": 1080,
+        "h": 690
+      },
+      "match_threshold": 0.88,
+      "tap_offset": {
+        "x": 115,
+        "y": 80
+      },
       "roles": [
         "button"
       ]

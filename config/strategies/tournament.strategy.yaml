@@ -36,6 +36,9 @@ session_preflight:
   - gc_session_preflight_attempted
   requirements:
     cards_deck: Tournament
+    card_recharge_modes:
+      Demon Mode: auto
+      Nuke: manual
     workshop_preset: Tourney
     bots_preset: Amplify
     guardian_chips:
@@ -192,6 +195,9 @@ rules:
     mismatch_policy: notify
     requirements:
       cards_deck: Tournament
+      card_recharge_modes:
+        Demon Mode: auto
+        Nuke: manual
       workshop_preset: Tourney
       bots_preset: Amplify
       guardian_chips:
@@ -253,6 +259,9 @@ run_configuration:
   profile_version: 1
   settings:
     cards_deck: Tournament
+    card_recharge_modes:
+      Demon Mode: auto
+      Nuke: manual
     workshop_preset: Tourney
     bots_preset: Amplify
     guardian_chips:

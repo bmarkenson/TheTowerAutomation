@@ -650,6 +650,10 @@ class FarmProfileTests(unittest.TestCase):
 
         self.assertEqual(plan["meta"]["family"], "farm")
         self.assertEqual(requirements["cards_deck"], "Farm")
+        self.assertEqual(
+            requirements["card_recharge_modes"],
+            {"Demon Mode": "auto", "Nuke": "manual"},
+        )
         self.assertEqual(requirements["workshop_preset"], "Farm")
         self.assertEqual(requirements["bots_preset"], "Farm")
         self.assertTrue(requirements["auto_pick_perks"])
@@ -675,6 +679,10 @@ class FarmProfileTests(unittest.TestCase):
         self.assertEqual(configuration["tier"], 18)
         self.assertEqual(configuration["schema_version"], 2)
         self.assertEqual(configuration["settings"]["cards_deck"], "Farm")
+        self.assertEqual(
+            configuration["settings"]["card_recharge_modes"],
+            {"Demon Mode": "auto", "Nuke": "manual"},
+        )
         self.assertEqual(configuration["settings"]["bots_preset"], "Farm")
         self.assertEqual(
             configuration["settings"]["perk_auto_pick_order"][2],

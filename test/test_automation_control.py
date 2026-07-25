@@ -596,7 +596,7 @@ def test_cli_can_stage_and_restore_a_strategy_aware_run_skip(tmp_path):
 def test_cli_configure_run_prompt_dynamically_toggles_a_check(tmp_path):
     control_file = tmp_path / "automation_ctl.json"
 
-    with patch("builtins.input", side_effect=["4", ""]):
+    with patch("builtins.input", side_effect=["5", ""]):
         assert automation_ctl_main(
             ["--control-file", str(control_file), "configure-run"]
         ) == 0
