@@ -84,6 +84,13 @@ session_preflight:
         range_basis: 98.38m
         extra: 87.16m
         workshop: 80.37m
+      range_presets:
+      - range_basis: 30.00m
+        extra: 30.00m
+        workshop: 39.00m
+      - range_basis: 98.38m
+        extra: 87.16m
+        workshop: 80.37m
 vars:
   exclusive_validation_battle: false
   ehls_completed: false
@@ -161,6 +168,13 @@ rules:
     range_basis: 98.38m
     extra: 87.16m
     workshop: 80.37m
+    range_presets:
+    - range_basis: 30.00m
+      extra: 30.00m
+      workshop: 39.00m
+    - range_basis: 98.38m
+      extra: 87.16m
+      workshop: 80.37m
 - name: validate_tournament_session_preflight
   gate_phase: session_preflight
   run_when_attached: true
@@ -226,6 +240,13 @@ rules:
           range_basis: 98.38m
           extra: 87.16m
           workshop: 80.37m
+        range_presets:
+        - range_basis: 30.00m
+          extra: 30.00m
+          workshop: 39.00m
+        - range_basis: 98.38m
+          extra: 87.16m
+          workshop: 80.37m
 run_configuration:
   schema_version: 2
   profile: tournament
@@ -280,6 +301,13 @@ run_configuration:
       preset: tournament_range_98_38
       resolved:
         range_basis: 98.38m
+        extra: 87.16m
+        workshop: 80.37m
+      range_presets:
+      - range_basis: 30.00m
+        extra: 30.00m
+        workshop: 39.00m
+      - range_basis: 98.38m
         extra: 87.16m
         workshop: 80.37m
   runtime_policy:

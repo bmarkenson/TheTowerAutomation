@@ -248,11 +248,18 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                     )
                     continue
                 mode = str(act.get("mode") or "").strip().lower()
+                orb_distance_kwargs = {
+                    "range_basis": act.get("range_basis"),
+                    "extra": act.get("extra"),
+                    "workshop": act.get("workshop"),
+                    "mode": mode,
+                }
+                if "range_presets" in act:
+                    orb_distance_kwargs["range_presets"] = act.get(
+                        "range_presets"
+                    )
                 result = configure_orb_distance(
-                    range_basis=act.get("range_basis"),
-                    extra=act.get("extra"),
-                    workshop=act.get("workshop"),
-                    mode=mode,
+                    **orb_distance_kwargs,
                 )
                 payload = result.as_dict()
                 if mv is not None:

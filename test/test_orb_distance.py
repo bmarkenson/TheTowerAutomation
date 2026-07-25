@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import cv2
+import numpy as np
 
 from automation.missions.base import MissionContext
 from core.action_executor import execute_actions
@@ -14,6 +15,7 @@ from core.orb_distance import (
     dismiss_orb_distance,
     normalize_distance,
     normalize_orb_distance_preset,
+    normalize_orb_distance_presets,
     open_orb_distance,
     read_attack_range,
     read_orb_distance,
@@ -106,6 +108,31 @@ def test_distance_normalization_and_preset_validation():
         "extra": "87.16m",
         "workshop": "80.37m",
     }
+    assert normalize_orb_distance_presets(
+        [
+            {
+                "range_basis": "30",
+                "extra": "30",
+                "workshop": "39",
+            },
+            {
+                "range_basis": "98.38",
+                "extra": "87.16",
+                "workshop": "80.37",
+            },
+        ]
+    ) == [
+        {
+            "range_basis": "30.00m",
+            "extra": "30.00m",
+            "workshop": "39.00m",
+        },
+        {
+            "range_basis": "98.38m",
+            "extra": "87.16m",
+            "workshop": "80.37m",
+        },
+    ]
 
 
 def test_range_guard_reads_farm_and_tournament_fixtures():
@@ -126,6 +153,31 @@ def test_range_guard_reads_farm_and_tournament_fixtures():
 
         assert reading.authoritative
         assert reading.distance == expected
+
+
+def test_range_guard_retries_dim_max_value_with_adaptive_threshold():
+    screen = _load(TOURNAMENT_RANGE_FIXTURE)
+    result = SimpleNamespace(
+        screenshot=screen,
+        box=SimpleNamespace(rect=(26, 1680, 511, 190)),
+    )
+
+    with patch(
+        "core.orb_distance.ocr_text_and_conf",
+        side_effect=[("", -1.0), ("98.38m", 86.0)],
+    ) as ocr:
+        reading = read_attack_range(
+            capture_fn=lambda: screen,
+            find_upgrade_fn=lambda *_args, **_kwargs: result,
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert reading.authoritative
+    assert reading.distance == "98.38m"
+    assert ocr.call_count == 2
+    retry_crop = ocr.call_args_list[1].args[0]
+    assert retry_crop.ndim == 2
+    assert set(np.unique(retry_crop)).issubset({0, 255})
 
 
 def test_orb_distance_runtime_targets_match_retained_evidence():
@@ -271,6 +323,80 @@ def test_range_basis_mismatch_blocks_before_opening_or_tapping():
     open_panel.assert_not_called()
 
 
+def test_configured_range_selects_its_own_preset():
+    taps = []
+    presets = [
+        {
+            "range_basis": "30.00m",
+            "extra": "30.00m",
+            "workshop": "39.00m",
+        },
+        {
+            "range_basis": "98.38m",
+            "extra": "87.16m",
+            "workshop": "80.37m",
+        },
+    ]
+    with (
+        patch(
+            "core.orb_distance.open_orb_distance",
+            return_value=_reading("30.00m", "39.00m"),
+        ),
+        patch("core.orb_distance.dismiss_orb_distance", return_value=True),
+    ):
+        result = configure_orb_distance(
+            range_basis="98.38m",
+            extra="87.16m",
+            workshop="80.37m",
+            range_presets=presets,
+            read_range_fn=lambda **_kwargs: _range("30.00m"),
+            tap_visible_fn=lambda *args, **kwargs: taps.append(
+                (args, kwargs)
+            ) or True,
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert result.success
+    assert not result.preserved
+    assert result.range_basis == "30.00m"
+    assert result.expected_extra == "30.00m"
+    assert result.expected_workshop == "39.00m"
+    assert taps == []
+
+
+def test_unconfigured_range_is_preserved_without_opening_or_tapping():
+    presets = [
+        {
+            "range_basis": "30.00m",
+            "extra": "30.00m",
+            "workshop": "39.00m",
+        },
+        {
+            "range_basis": "98.38m",
+            "extra": "87.16m",
+            "workshop": "80.37m",
+        },
+    ]
+    with patch("core.orb_distance.open_orb_distance") as open_panel:
+        result = configure_orb_distance(
+            range_basis="98.38m",
+            extra="87.16m",
+            workshop="80.37m",
+            range_presets=presets,
+            read_range_fn=lambda **_kwargs: _range("45.00m"),
+            tap_visible_fn=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("unconfigured Range must not tap")
+            ),
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert result.success
+    assert result.preserved
+    assert result.range_observed == "45.00m"
+    assert result.reason == "unconfigured_range_preserved"
+    open_panel.assert_not_called()
+
+
 def test_action_executor_records_successful_orb_distance_enforcement():
     payload = {
         "range_basis": "30.00m",
@@ -296,12 +422,25 @@ def test_action_executor_records_successful_orb_distance_enforcement():
     ctx = MissionContext(
         data={"mission_vars": {"last_detection_state": "RUNNING"}}
     )
+    range_presets = [
+        {
+            "range_basis": "30.00m",
+            "extra": "30.00m",
+            "workshop": "39.00m",
+        },
+        {
+            "range_basis": "98.38m",
+            "extra": "87.16m",
+            "workshop": "80.37m",
+        },
+    ]
     action = {
         "type": "orb_distance_configure",
         "mode": "enforce",
         "range_basis": "30.00m",
         "extra": "30.00m",
         "workshop": "39.00m",
+        "range_presets": range_presets,
         "_strategy": True,
     }
 
@@ -319,6 +458,7 @@ def test_action_executor_records_successful_orb_distance_enforcement():
         extra="30.00m",
         workshop="39.00m",
         mode="enforce",
+        range_presets=range_presets,
     )
     assert ctx.data["mission_vars"]["orb_distance_checked"]
     assert ctx.data["mission_vars"]["orb_distance_observation"] == payload

@@ -124,6 +124,18 @@ def test_tournament_profile_omits_non_applicable_auto_pick_perks():
             "extra": "87.16m",
             "workshop": "80.37m",
         },
+        "range_presets": [
+            {
+                "range_basis": "30.00m",
+                "extra": "30.00m",
+                "workshop": "39.00m",
+            },
+            {
+                "range_basis": "98.38m",
+                "extra": "87.16m",
+                "workshop": "80.37m",
+            },
+        ],
     }
 
 

@@ -6,8 +6,9 @@ from dataclasses import asdict, dataclass, field
 from decimal import Decimal, InvalidOperation
 import re
 import time
-from typing import Any, Callable, Final, Mapping, Optional
+from typing import Any, Callable, Final, Mapping, Optional, Sequence
 
+import cv2
 import numpy as np
 
 from core.input import tap_if_visible
@@ -85,10 +86,13 @@ class OrbDistanceResult:
     workshop_steps: int
     dismissed: bool
     reason: str
+    preserved: bool = False
 
     @property
     def success(self) -> bool:
-        return self.observed and self.matches and self.dismissed
+        return self.preserved or (
+            self.observed and self.matches and self.dismissed
+        )
 
     def as_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -131,6 +135,33 @@ def normalize_orb_distance_preset(raw: Any) -> dict[str, str]:
         key: normalize_distance(raw[key])
         for key in ("range_basis", "extra", "workshop")
     }
+
+
+def normalize_orb_distance_presets(raw: Any) -> list[dict[str, str]]:
+    """Normalize the complete set of Range-selectable distance presets."""
+
+    candidates: Sequence[Any]
+    if isinstance(raw, Mapping):
+        candidates = list(raw.values())
+    elif isinstance(raw, Sequence) and not isinstance(raw, (str, bytes)):
+        candidates = list(raw)
+    else:
+        raise ValueError("Orb Distance presets must be a mapping or list")
+    if not candidates:
+        raise ValueError("Orb Distance presets cannot be empty")
+
+    normalized: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        preset = normalize_orb_distance_preset(candidate)
+        basis = preset["range_basis"]
+        if basis in seen:
+            raise ValueError(
+                f"Orb Distance presets repeat Range basis {basis}"
+            )
+        normalized.append(preset)
+        seen.add(basis)
+    return normalized
 
 
 def _canonical_distance(text: str) -> Optional[str]:
@@ -208,7 +239,30 @@ def _read_range_from_result(
     if crop.size == 0:
         return RangeReading(None, "", -1.0)
     text, confidence = ocr_text_and_conf(crop, psm=6)
-    return RangeReading(_canonical_distance(text), text, confidence)
+    direct = RangeReading(_canonical_distance(text), text, confidence)
+    if direct.authoritative:
+        return direct
+
+    # Maxed upgrade values are dim gray. On the taller live Attack tile,
+    # unprocessed OCR can return no tokens even though the meter value is
+    # visibly clear. Preserve the complete value crop but isolate its local
+    # contrast before the one bounded retry.
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    isolated = cv2.adaptiveThreshold(
+        gray,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        31,
+        3,
+    )
+    retry_text, retry_confidence = ocr_text_and_conf(isolated, psm=6)
+    retry = RangeReading(
+        _canonical_distance(retry_text),
+        retry_text,
+        retry_confidence,
+    )
+    return retry if retry.authoritative else direct
 
 
 def read_attack_range(
@@ -384,6 +438,7 @@ def configure_orb_distance(
     range_basis: Any,
     extra: Any,
     workshop: Any,
+    range_presets: Any = None,
     mode: str = "enforce",
     capture_fn: CaptureFn = capture_adb_screenshot,
     tap_visible_fn: Callable[..., bool] = tap_if_visible,
@@ -405,22 +460,26 @@ def configure_orb_distance(
             "workshop": workshop,
         }
     )
+    configured_presets = (
+        normalize_orb_distance_presets(range_presets)
+        if range_presets is not None
+        else None
+    )
     if canonical_mode == "observe":
         log_action_intent(
-            "Checking Orb Distance",
+            "Checking Orb Distance for the observed Attack Range",
             reason=(
-                "record whether both distances match the selected strategy "
-                f"for Range {expected['range_basis']} without changing them"
+                "select a matching configured Range preset when one exists "
+                "and preserve unconfigured experimental Ranges"
             ),
         )
     else:
         log_action_intent(
-            "Setting Orb Distance to "
-            f"Extra {expected['extra']} / Workshop {expected['workshop']}",
+            "Enforcing Orb Distance only for configured Attack Ranges",
             reason=(
-                "the selected strategy requires this preset for "
-                f"Range {expected['range_basis']} before normal run actions "
-                "continue"
+                "read Attack Range, select its matching preset, and preserve "
+                "unconfigured experimental Ranges without Distance Adjuster "
+                "input"
             ),
         )
 
@@ -437,6 +496,7 @@ def configure_orb_distance(
         "workshop_steps": 0,
         "dismissed": False,
         "reason": "not_started",
+        "preserved": False,
     }
 
     range_reading = read_range_fn(
@@ -453,7 +513,37 @@ def configure_orb_distance(
             expected_workshop=expected["workshop"],
             **result_values,
         )
-    if range_reading.distance != expected["range_basis"]:
+    if configured_presets is not None:
+        matching_preset = next(
+            (
+                preset
+                for preset in configured_presets
+                if preset["range_basis"] == range_reading.distance
+            ),
+            None,
+        )
+        if matching_preset is None:
+            result_values.update(
+                observed=True,
+                dismissed=True,
+                reason="unconfigured_range_preserved",
+                preserved=True,
+            )
+            log(
+                "[ORB_DISTANCE] Preserving unconfigured Attack Range "
+                f"{range_reading.distance}; no Distance Adjuster input is "
+                "authorized",
+                "INFO",
+            )
+            return OrbDistanceResult(
+                mode=canonical_mode,
+                range_basis=expected["range_basis"],
+                expected_extra=expected["extra"],
+                expected_workshop=expected["workshop"],
+                **result_values,
+            )
+        expected = matching_preset
+    elif range_reading.distance != expected["range_basis"]:
         result_values["reason"] = "range_basis_mismatch"
         return OrbDistanceResult(
             mode=canonical_mode,
@@ -461,6 +551,22 @@ def configure_orb_distance(
             expected_extra=expected["extra"],
             expected_workshop=expected["workshop"],
             **result_values,
+        )
+
+    if canonical_mode == "observe":
+        log(
+            "[ORB_DISTANCE] Observed Attack Range "
+            f"{range_reading.distance} selected preset "
+            f"Extra {expected['extra']} / Workshop {expected['workshop']} "
+            "for read-only comparison",
+            "INFO",
+        )
+    else:
+        log(
+            "[ORB_DISTANCE] Observed Attack Range "
+            f"{range_reading.distance} selected preset "
+            f"Extra {expected['extra']} / Workshop {expected['workshop']}",
+            "INFO",
         )
 
     reading = open_orb_distance(
@@ -602,6 +708,7 @@ __all__ = [
     "dismiss_orb_distance",
     "normalize_distance",
     "normalize_orb_distance_preset",
+    "normalize_orb_distance_presets",
     "open_orb_distance",
     "read_attack_range",
     "read_orb_distance",

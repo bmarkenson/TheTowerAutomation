@@ -179,11 +179,17 @@ def load_tournament_requirements(
             f"unknown Tournament Orb Distance preset "
             f"{orb_distance_name!r}"
         )
-    from core.orb_distance import normalize_orb_distance_preset
+    from core.orb_distance import (
+        normalize_orb_distance_preset,
+        normalize_orb_distance_presets,
+    )
 
     try:
         orb_distance = normalize_orb_distance_preset(
             orb_distance_presets[orb_distance_name]
+        )
+        range_presets = normalize_orb_distance_presets(
+            orb_distance_presets
         )
     except ValueError as exc:
         raise ValueError(f"Tournament Orb Distance {exc}") from exc
@@ -200,6 +206,7 @@ def load_tournament_requirements(
             "mode": "enforce",
             "preset": orb_distance_name,
             "resolved": orb_distance,
+            "range_presets": range_presets,
         },
     }
 

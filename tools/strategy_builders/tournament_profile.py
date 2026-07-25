@@ -58,6 +58,7 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
     damage_slider = copy.deepcopy(requirements["damage_slider"])
     orb_distance = copy.deepcopy(requirements["orb_distance"])
     orb_distance_values = copy.deepcopy(orb_distance["resolved"])
+    orb_distance_presets = copy.deepcopy(orb_distance["range_presets"])
     runtime_policy = copy.deepcopy(TOURNAMENT_RUNTIME_POLICY)
     variables = {
         "exclusive_validation_battle": False,
@@ -161,6 +162,7 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
                         "type": "orb_distance_configure",
                         "mode": orb_distance["mode"],
                         **orb_distance_values,
+                        "range_presets": orb_distance_presets,
                     }
                 ],
             },

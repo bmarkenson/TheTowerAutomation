@@ -171,6 +171,7 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
             "observe, or enforce"
         )
     orb_distance_values: Dict[str, str] | None = None
+    orb_distance_presets: List[Dict[str, str]] | None = None
     configured_orb_distance = orb_distance.get("resolved")
     if orb_distance_mode == "preserve":
         if (
@@ -186,11 +187,17 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
                 f"gc_farm {orb_distance_mode} Orb Distance requires a "
                 "resolved preset"
             )
-        from core.orb_distance import normalize_orb_distance_preset
+        from core.orb_distance import (
+            normalize_orb_distance_preset,
+            normalize_orb_distance_presets,
+        )
 
         try:
             orb_distance_values = normalize_orb_distance_preset(
                 configured_orb_distance
+            )
+            orb_distance_presets = normalize_orb_distance_presets(
+                orb_distance.get("range_presets")
             )
         except ValueError as exc:
             raise ValueError(f"gc_farm Orb Distance {exc}") from exc
@@ -424,6 +431,7 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
             else "orb_distance_observed"
         )
         assert orb_distance_values is not None
+        assert orb_distance_presets is not None
         rules.append(
             {
                 "name": f"{orb_distance_mode}_orb_distance",
@@ -440,6 +448,9 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
                         "type": "orb_distance_configure",
                         "mode": orb_distance_mode,
                         **copy.deepcopy(orb_distance_values),
+                        "range_presets": copy.deepcopy(
+                            orb_distance_presets
+                        ),
                     }
                 ],
             }

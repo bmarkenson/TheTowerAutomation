@@ -247,10 +247,20 @@ def _resolve_orb_distance_policy(raw: Any) -> dict[str, Any]:
     )
     if policy["mode"] == "preserve":
         return policy
-    from core.orb_distance import normalize_orb_distance_preset
+    from core.orb_distance import (
+        normalize_orb_distance_preset,
+        normalize_orb_distance_presets,
+    )
 
     try:
         policy["resolved"] = normalize_orb_distance_preset(policy["resolved"])
+        catalog = _load_mapping(
+            ORB_DISTANCE_PRESETS_PATH,
+            "orb_distance preset catalog",
+        )
+        policy["range_presets"] = normalize_orb_distance_presets(
+            catalog.get("presets")
+        )
     except ValueError as exc:
         raise ValueError(f"farm loadout orb_distance {exc}") from exc
     return policy

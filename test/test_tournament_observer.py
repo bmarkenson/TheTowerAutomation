@@ -118,6 +118,18 @@ def test_tournament_strategy_declares_exclusive_validation_then_observes():
         "range_basis": "98.38m",
         "extra": "87.16m",
         "workshop": "80.37m",
+        "range_presets": [
+            {
+                "range_basis": "30.00m",
+                "extra": "30.00m",
+                "workshop": "39.00m",
+            },
+            {
+                "range_basis": "98.38m",
+                "extra": "87.16m",
+                "workshop": "80.37m",
+            },
+        ],
     }
     session_rule = next(
         rule
@@ -156,6 +168,18 @@ def test_tournament_strategy_declares_exclusive_validation_then_observes():
             "extra": "87.16m",
             "workshop": "80.37m",
         },
+        "range_presets": [
+            {
+                "range_basis": "30.00m",
+                "extra": "30.00m",
+                "workshop": "39.00m",
+            },
+            {
+                "range_basis": "98.38m",
+                "extra": "87.16m",
+                "workshop": "80.37m",
+            },
+        ],
     }
 
 
@@ -225,6 +249,18 @@ def test_tournament_attachment_enforces_battle_loadout_before_preflight():
         "range_basis": "98.38m",
         "extra": "87.16m",
         "workshop": "80.37m",
+        "range_presets": [
+            {
+                "range_basis": "30.00m",
+                "extra": "30.00m",
+                "workshop": "39.00m",
+            },
+            {
+                "range_basis": "98.38m",
+                "extra": "87.16m",
+                "workshop": "80.37m",
+            },
+        ],
     }
 
     manager.ctx.data["mission_vars"]["orb_distance_checked"] = True

@@ -726,6 +726,18 @@ class FarmProfileTests(unittest.TestCase):
                     "extra": "30.00m",
                     "workshop": "39.00m",
                 },
+                "range_presets": [
+                    {
+                        "range_basis": "30.00m",
+                        "extra": "30.00m",
+                        "workshop": "39.00m",
+                    },
+                    {
+                        "range_basis": "98.38m",
+                        "extra": "87.16m",
+                        "workshop": "80.37m",
+                    },
+                ],
             },
         )
         self.assertIn(
@@ -774,6 +786,18 @@ class FarmProfileTests(unittest.TestCase):
                     "range_basis": "30.00m",
                     "extra": "30.00m",
                     "workshop": "39.00m",
+                    "range_presets": [
+                        {
+                            "range_basis": "30.00m",
+                            "extra": "30.00m",
+                            "workshop": "39.00m",
+                        },
+                        {
+                            "range_basis": "98.38m",
+                            "extra": "87.16m",
+                            "workshop": "80.37m",
+                        },
+                    ],
                 }
             ],
         )
