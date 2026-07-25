@@ -62,7 +62,7 @@ from core.mission_reward_scheduler import (
     MissionRewardScheduler,
     daily_mission_claims_allowed,
 )
-from core.run_state import AUTOMATION, ExecMode
+from core.run_state import AUTOMATION, ExecMode, RunState
 from core.app_setup import AppConfig
 from core.status_report import StateChangeTracker, StatusReporter
 from core.recovery import handle_unknown_state, update_unknown_state
@@ -2006,7 +2006,7 @@ class App:
 
         if self._supervisor.apply_control():
             self._status_reporter.request_immediate_report()
-        return not self._supervisor.is_paused
+        return AUTOMATION.state is RunState.RUNNING
 
     def _game_speed_priority_ready(
         self,
@@ -2544,10 +2544,15 @@ class App:
                 waivers = dict(getattr(self, "_startup_gate_waivers", {}))
                 if exclusive_validation is not None:
                     waivers = {}
-                setup_kwargs: Dict[str, Any] = {"screenshot": img}
+                setup_kwargs: Dict[str, Any] = {
+                    "screenshot": img,
+                    "action_guard_fn": self._runtime_action_guard,
+                }
                 if waivers:
                     setup_kwargs["waivers"] = waivers
                 setup = run_gc_no_battle_setup(requirements, **setup_kwargs)
+                if setup.interrupted:
+                    return
                 if not setup.complete:
                     check_id = setup.failed_check or "startup_setup"
                     if exclusive_validation is not None:
@@ -2596,10 +2601,15 @@ class App:
                     waivers = dict(
                         getattr(self, "_startup_gate_waivers", {})
                     )
-                    retry_kwargs: Dict[str, Any] = {"screenshot": fresh}
+                    retry_kwargs: Dict[str, Any] = {
+                        "screenshot": fresh,
+                        "action_guard_fn": self._runtime_action_guard,
+                    }
                     if waivers:
                         retry_kwargs["waivers"] = waivers
                     setup = run_gc_no_battle_setup(requirements, **retry_kwargs)
+                    if setup.interrupted:
+                        return
                     if not setup.complete:
                         next_check = setup.failed_check or "startup_setup"
                         self._publish_gate_decision(

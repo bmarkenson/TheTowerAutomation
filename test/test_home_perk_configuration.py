@@ -4,10 +4,12 @@ import numpy as np
 import pytest
 
 from core.home_perk_configuration import (
+    BAN_SELECTED_TOGGLE_X,
     HomePerkConfigurationError,
     _repair_auto_pick_order,
     _repair_bans,
     _tap_configuration_row,
+    ensure_home_perk_configuration,
 )
 from core.perk_configuration import (
     FARM_PERK_BANS,
@@ -107,7 +109,7 @@ def test_ban_repair_toggles_only_the_strategy_set():
         "lifesteal_knockback_tradeoff",
         "interest",
         "defense_absolute",
-        "max_health",
+        "coin_tradeoff",
     ]
 
     def screenshot():
@@ -119,9 +121,10 @@ def test_ban_repair_toggles_only_the_strategy_set():
 
     def rows(_frame):
         if page["value"] == 0:
-            keys = [*selected, "empty_slot"]
+            keys = [*selected]
+            keys.extend(["empty_slot"] * (6 - len(keys)))
         else:
-            keys = ["max_health", "cash_tradeoff"]
+            keys = ["coin_tradeoff", "cash_tradeoff"]
         return [_row(key, index) for index, key in enumerate(keys)]
 
     def swipe(_current, _key, **_kwargs):
@@ -130,7 +133,7 @@ def test_ban_repair_toggles_only_the_strategy_set():
 
     def toggle(current, row, **_kwargs):
         key = classify_perk_configuration_text(row["display_text"])
-        configured = key or "max_health"
+        configured = key
         if configured in selected:
             selected.remove(configured)
         else:
@@ -170,6 +173,101 @@ def test_ban_repair_toggles_only_the_strategy_set():
 
     assert set(selected) == set(FARM_PERK_BANS)
     assert tap.call_count == 2
+    assert tap.call_args_list[0].kwargs["x"] == BAN_SELECTED_TOGGLE_X
+    assert (
+        tap.call_args_list[0].kwargs["action"]
+        == "perk_ban_deselect:coin_tradeoff"
+    )
+    assert (
+        tap.call_args_list[1].kwargs["action"]
+        == "perk_ban_toggle:cash_tradeoff"
+    )
+
+
+def test_home_perk_repair_finishes_bans_before_opening_auto_pick():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    events = []
+    selected = [
+        {
+            **_row(key, index),
+            "key": key,
+        }
+        for index, key in enumerate([*FARM_PERK_BANS, "coin_tradeoff"])
+    ]
+
+    def select(current, *, field, **_kwargs):
+        events.append(f"select:{field}")
+        return current
+
+    def repair(current, _expected, **_kwargs):
+        events.append("repair:perk_bans")
+        return current
+
+    evidence = {
+        "boundary": "NEW_BATTLE",
+        "checked": True,
+        "valid": True,
+        "failed_checks": [],
+        "perk_bans": {
+            "valid": True,
+            "expected": list(FARM_PERK_BANS),
+            "observed": list(FARM_PERK_BANS),
+        },
+        "perk_auto_pick_order": {
+            "valid": True,
+            "expected": ["perk_wave_requirement"],
+            "observed": ["perk_wave_requirement"],
+        },
+    }
+
+    with (
+        patch("core.home_perk_configuration._require_new_battle_home"),
+        patch(
+            "core.home_perk_configuration._open_configuration",
+            return_value=frame,
+        ),
+        patch(
+            "core.home_perk_configuration._select_and_scroll_top",
+            side_effect=select,
+        ),
+        patch(
+            "core.home_perk_configuration.extract_configured_perk_bans",
+            return_value={
+                "quality": {"valid": True},
+                "selected": selected,
+            },
+        ),
+        patch(
+            "core.home_perk_configuration._repair_bans",
+            side_effect=repair,
+        ),
+        patch(
+            "core.home_perk_configuration._capture_ranked_frames",
+            return_value=([frame], frame),
+        ),
+        patch(
+            "core.home_perk_configuration.evaluate_profile_perk_configuration",
+            return_value=evidence,
+        ),
+        patch(
+            "core.home_perk_configuration._close_to_home",
+            return_value=frame,
+        ),
+    ):
+        result = ensure_home_perk_configuration(
+            {
+                "perk_bans": list(FARM_PERK_BANS),
+                "perk_auto_pick_order": ["perk_wave_requirement"],
+            },
+            home_screenshot=frame,
+        )
+
+    assert result.valid
+    assert events == [
+        "select:perk_bans",
+        "repair:perk_bans",
+        "select:perk_auto_pick_order",
+    ]
 
 
 def test_auto_pick_move_requires_fresh_identity_and_strict_upward_progress():

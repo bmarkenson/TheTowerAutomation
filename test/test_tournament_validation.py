@@ -546,6 +546,7 @@ def test_home_preflight_failure_consumes_request_without_waiver_or_battle(
         (),
         {
             "complete": False,
+            "interrupted": False,
             "failed_check": "guardian_chips",
             "reason": "Attack chip could not be equipped",
         },
@@ -569,7 +570,10 @@ def test_home_preflight_failure_consumes_request_without_waiver_or_battle(
         app._handle_primary_states("HOME_SCREEN", set(), frame)
 
     run_setup.assert_called_once()
-    assert run_setup.call_args.kwargs == {"screenshot": frame}
+    assert run_setup.call_args.kwargs == {
+        "screenshot": frame,
+        "action_guard_fn": app._runtime_action_guard,
+    }
     decision.assert_not_called()
     start.assert_not_called()
     result = _current_receipt(store)

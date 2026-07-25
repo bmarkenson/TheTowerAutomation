@@ -123,6 +123,7 @@ _HOME_PREFLIGHT_LABELS = {
 class GcNoBattleSetupStatus(str, Enum):
     COMPLETE = "complete"
     FAILED = "failed"
+    INTERRUPTED = "interrupted"
     UNSUPPORTED = "unsupported"
 
 
@@ -137,8 +138,16 @@ class GcNoBattleSetupResult:
     def complete(self) -> bool:
         return self.status is GcNoBattleSetupStatus.COMPLETE
 
+    @property
+    def interrupted(self) -> bool:
+        return self.status is GcNoBattleSetupStatus.INTERRUPTED
+
 
 class _SetupFailure(RuntimeError):
+    pass
+
+
+class _SetupControlInterrupted(RuntimeError):
     pass
 
 
@@ -166,6 +175,7 @@ def run_gc_no_battle_setup(
         ..., HomePerkConfigurationResult
     ] = ensure_home_perk_configuration,
     validate_configuration_fn: Callable[..., Any] = validate_gc_preflight_screens,
+    action_guard_fn: Callable[[], bool] | None = None,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> GcNoBattleSetupResult:
     """Correct supported persistent profile settings before a battle starts."""
@@ -188,6 +198,51 @@ def run_gc_no_battle_setup(
             "outside battle before restart"
         ),
     )
+
+    original_safe_tap_fn = safe_tap_fn
+    original_tap_visible_fn = tap_visible_fn
+    original_swipe_fn = swipe_fn
+    original_workshop_swipe_fn = workshop_swipe_fn
+
+    def require_action() -> None:
+        if action_guard_fn is None:
+            return
+        control_blocked = False
+        while not action_guard_fn():
+            if not control_blocked:
+                log(
+                    "[GC_NO_BATTLE] Pause/stop blocked Home setup input; "
+                    "waiting without cleanup actions",
+                    "INFO",
+                    console=True,
+                )
+            control_blocked = True
+            sleep_fn(0.25)
+        if control_blocked:
+            raise _SetupControlInterrupted(
+                "Home setup input was interrupted by persistent control"
+            )
+
+    def guarded_safe_tap(*args, **kwargs):
+        require_action()
+        return original_safe_tap_fn(*args, **kwargs)
+
+    def guarded_visible_tap(*args, **kwargs):
+        require_action()
+        return original_tap_visible_fn(*args, **kwargs)
+
+    def guarded_swipe(*args, **kwargs):
+        require_action()
+        return original_swipe_fn(*args, **kwargs)
+
+    def guarded_workshop_swipe(*args, **kwargs):
+        require_action()
+        return original_workshop_swipe_fn(*args, **kwargs)
+
+    safe_tap_fn = guarded_safe_tap
+    tap_visible_fn = guarded_visible_tap
+    swipe_fn = guarded_swipe
+    workshop_swipe_fn = guarded_workshop_swipe
 
     module_mode = _module_policy(requirements)
     target_priority_mode = _target_priority_policy(requirements)
@@ -706,6 +761,27 @@ def run_gc_no_battle_setup(
             section_specs=section_specs,
         )
         evidence["configuration"] = configuration.as_dict()
+    except _SetupControlInterrupted as exc:
+        log(
+            "[GC_NO_BATTLE] Home setup control interruption ended; "
+            "restoring verified Home before a fresh retry",
+            "INFO",
+            console=True,
+        )
+        _recover_home(
+            capture_fn,
+            detector,
+            detect_home_control_fn,
+            safe_tap_fn,
+            tap_visible_fn,
+            sleep_fn,
+        )
+        return GcNoBattleSetupResult(
+            GcNoBattleSetupStatus.INTERRUPTED,
+            str(exc),
+            evidence,
+            current_check,
+        )
     except Exception as exc:
         _log_home_preflight_failure(
             current_check,

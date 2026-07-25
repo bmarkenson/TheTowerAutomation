@@ -52,6 +52,7 @@ MAX_BAN_SCAN_SWIPES = 14
 MAX_AUTO_PICK_SCAN_SWIPES = 20
 MAX_AUTO_PICK_MOVE_TAPS = 300
 AUTO_PICK_UP_X = 915
+BAN_SELECTED_TOGGLE_X = 540
 BAN_TOGGLE_X = 944
 
 
@@ -142,27 +143,108 @@ def ensure_home_perk_configuration(
     )
 
     changed_fields: set[str] = set()
-    try:
-        bans_top = _select_and_scroll_top(
-            perks,
-            field="perk_bans",
+    bans_top = _select_and_scroll_top(
+        perks,
+        field="perk_bans",
+        capture_fn=capture_fn,
+        detector=detector,
+        safe_tap_fn=safe_tap_fn,
+        visible_fn=visible_fn,
+        swipe_fn=swipe_fn,
+        measure_selection_fn=measure_selection_fn,
+        sleep_fn=sleep_fn,
+    )
+    captured_bans = extract_configured_perk_bans(
+        bans_top,
+        row_fn=row_fn,
+    )
+    repair_intent_logged = False
+    if (
+        "perk_bans" not in waived
+        and not _ban_capture_matches(required_bans, captured_bans)
+    ):
+        log_action_intent(
+            "Restoring strategy-owned Perk configuration",
+            reason=(
+                "the verified Home Ban Perks did not match the selected "
+                "run strategy"
+            ),
+        )
+        repair_intent_logged = True
+        bans_top = _repair_bans(
+            bans_top,
+            required_bans,
             capture_fn=capture_fn,
             detector=detector,
             safe_tap_fn=safe_tap_fn,
             visible_fn=visible_fn,
             swipe_fn=swipe_fn,
-            measure_selection_fn=measure_selection_fn,
+            row_fn=row_fn,
+            row_near_fn=row_near_fn,
             sleep_fn=sleep_fn,
         )
-        auto_top = _select_and_scroll_top(
-            bans_top,
-            field="perk_auto_pick_order",
+        changed_fields.add("perk_bans")
+
+    auto_top = _select_and_scroll_top(
+        bans_top,
+        field="perk_auto_pick_order",
+        capture_fn=capture_fn,
+        detector=detector,
+        safe_tap_fn=safe_tap_fn,
+        visible_fn=visible_fn,
+        swipe_fn=swipe_fn,
+        measure_selection_fn=measure_selection_fn,
+        sleep_fn=sleep_fn,
+    )
+    auto_frames, current = _capture_ranked_frames(
+        auto_top,
+        ranking_count=len(required_auto_pick),
+        capture_fn=capture_fn,
+        visible_fn=visible_fn,
+        swipe_fn=swipe_fn,
+        row_fn=row_fn,
+        sleep_fn=sleep_fn,
+    )
+    evidence = evaluate_profile_perk_configuration(
+        requirements,
+        bans_frame=bans_top,
+        auto_pick_frames=auto_frames,
+        row_fn=row_fn,
+    )
+    if (
+        evidence["perk_auto_pick_order"]["valid"] is not True
+        and "perk_auto_pick_order" not in waived
+        and _field_values_differ(
+            evidence["perk_auto_pick_order"],
+            ordered=True,
+        )
+    ):
+        if not repair_intent_logged:
+            log_action_intent(
+                "Restoring strategy-owned Perk configuration",
+                reason=(
+                    "the verified Home Auto Pick order did not match the "
+                    "selected run strategy"
+                ),
+            )
+        current = _repair_auto_pick_order(
+            auto_top,
+            required_auto_pick,
             capture_fn=capture_fn,
             detector=detector,
             safe_tap_fn=safe_tap_fn,
             visible_fn=visible_fn,
             swipe_fn=swipe_fn,
-            measure_selection_fn=measure_selection_fn,
+            row_fn=row_fn,
+            row_near_fn=row_near_fn,
+            sleep_fn=sleep_fn,
+        )
+        changed_fields.add("perk_auto_pick_order")
+        auto_top = _scroll_configuration_top(
+            current,
+            capture_fn=capture_fn,
+            visible_fn=visible_fn,
+            swipe_fn=swipe_fn,
             sleep_fn=sleep_fn,
         )
         auto_frames, current = _capture_ranked_frames(
@@ -180,124 +262,6 @@ def ensure_home_perk_configuration(
             auto_pick_frames=auto_frames,
             row_fn=row_fn,
         )
-        blocking_invalid = any(
-            evidence[check_id]["valid"] is not True
-            and check_id not in waived
-            for check_id in ("perk_bans", "perk_auto_pick_order")
-        )
-        if blocking_invalid:
-            log_action_intent(
-                "Restoring strategy-owned Perk configuration",
-                reason=(
-                    "the verified Home Ban Perks or Auto Pick order did not "
-                    "match the selected run strategy"
-                ),
-            )
-            if (
-                evidence["perk_bans"]["valid"] is not True
-                and "perk_bans" not in waived
-                and _field_values_differ(
-                    evidence["perk_bans"],
-                    ordered=False,
-                )
-            ):
-                bans_top = _select_and_scroll_top(
-                    current,
-                    field="perk_bans",
-                    capture_fn=capture_fn,
-                    detector=detector,
-                    safe_tap_fn=safe_tap_fn,
-                    visible_fn=visible_fn,
-                    swipe_fn=swipe_fn,
-                    measure_selection_fn=measure_selection_fn,
-                    sleep_fn=sleep_fn,
-                )
-                bans_top = _repair_bans(
-                    bans_top,
-                    required_bans,
-                    capture_fn=capture_fn,
-                    detector=detector,
-                    safe_tap_fn=safe_tap_fn,
-                    visible_fn=visible_fn,
-                    swipe_fn=swipe_fn,
-                    row_fn=row_fn,
-                    row_near_fn=row_near_fn,
-                    sleep_fn=sleep_fn,
-                )
-                changed_fields.add("perk_bans")
-                current = bans_top
-            if (
-                evidence["perk_auto_pick_order"]["valid"] is not True
-                and "perk_auto_pick_order" not in waived
-                and _field_values_differ(
-                    evidence["perk_auto_pick_order"],
-                    ordered=True,
-                )
-            ):
-                auto_top = _select_and_scroll_top(
-                    current,
-                    field="perk_auto_pick_order",
-                    capture_fn=capture_fn,
-                    detector=detector,
-                    safe_tap_fn=safe_tap_fn,
-                    visible_fn=visible_fn,
-                    swipe_fn=swipe_fn,
-                    measure_selection_fn=measure_selection_fn,
-                    sleep_fn=sleep_fn,
-                )
-                current = _repair_auto_pick_order(
-                    auto_top,
-                    required_auto_pick,
-                    capture_fn=capture_fn,
-                    detector=detector,
-                    safe_tap_fn=safe_tap_fn,
-                    visible_fn=visible_fn,
-                    swipe_fn=swipe_fn,
-                    row_fn=row_fn,
-                    row_near_fn=row_near_fn,
-                    sleep_fn=sleep_fn,
-                )
-                changed_fields.add("perk_auto_pick_order")
-
-            bans_top = _select_and_scroll_top(
-                current,
-                field="perk_bans",
-                capture_fn=capture_fn,
-                detector=detector,
-                safe_tap_fn=safe_tap_fn,
-                visible_fn=visible_fn,
-                swipe_fn=swipe_fn,
-                measure_selection_fn=measure_selection_fn,
-                sleep_fn=sleep_fn,
-            )
-            auto_top = _select_and_scroll_top(
-                bans_top,
-                field="perk_auto_pick_order",
-                capture_fn=capture_fn,
-                detector=detector,
-                safe_tap_fn=safe_tap_fn,
-                visible_fn=visible_fn,
-                swipe_fn=swipe_fn,
-                measure_selection_fn=measure_selection_fn,
-                sleep_fn=sleep_fn,
-            )
-            auto_frames, current = _capture_ranked_frames(
-                auto_top,
-                ranking_count=len(required_auto_pick),
-                capture_fn=capture_fn,
-                visible_fn=visible_fn,
-                swipe_fn=swipe_fn,
-                row_fn=row_fn,
-                sleep_fn=sleep_fn,
-            )
-            evidence = evaluate_profile_perk_configuration(
-                requirements,
-                bans_frame=bans_top,
-                auto_pick_frames=auto_frames,
-                row_fn=row_fn,
-            )
-    except Exception:
-        raise
 
     home = _close_to_home(
         current,
@@ -359,22 +323,116 @@ def _repair_bans(
         if isinstance(entry, Mapping)
     ]
     expected = set(expected_keys)
-    current_keys = {entry.get("key") for entry in selected}
-    pending = [
-        entry for entry in selected if entry.get("key") not in expected
+    current = top
+    recognized_required = {
+        entry.get("key")
+        for entry in selected
+        if entry.get("key") in expected
+    }
+    missing_before_removal = expected - recognized_required
+    known_extras = [
+        entry
+        for entry in selected
+        if entry.get("key") is not None
+        and entry.get("key") not in expected
     ]
-    pending.extend(
+    unknown_entries = [
+        entry for entry in selected if entry.get("key") is None
+    ]
+    if unknown_entries and missing_before_removal:
+        raise HomePerkConfigurationError(
+            "Ban Perks selected block was ambiguous; an unrecognized row "
+            "could be a required ban"
+        )
+
+    # Removing an extra selection is both shorter and more authoritative from
+    # the fixed Selected Perks block than searching the complete Available
+    # list for that row's checkbox.
+    for target in [*known_extras, *unknown_entries]:
+        fresh_capture = extract_configured_perk_bans(current, row_fn=row_fn)
+        if fresh_capture["quality"]["valid"] is not True:
+            raise HomePerkConfigurationError(
+                "Ban Perks selected block became unreadable before deselection"
+            )
+        fresh_selected = [
+            dict(entry)
+            for entry in fresh_capture["selected"]
+            if isinstance(entry, Mapping)
+        ]
+        row = next(
+            (
+                entry
+                for entry in fresh_selected
+                if perk_entries_match(target, entry)
+            ),
+            None,
+        )
+        if row is None:
+            raise HomePerkConfigurationError(
+                "Ban Perks extra selection changed identity before deselection"
+            )
+        before_count = len(fresh_selected)
+        current = _tap_configuration_row(
+            current,
+            row,
+            x=BAN_SELECTED_TOGGLE_X,
+            action=(
+                "perk_ban_deselect:"
+                f"{target.get('key') or 'unknown'}"
+            ),
+            capture_fn=capture_fn,
+            detector=detector,
+            safe_tap_fn=safe_tap_fn,
+            visible_fn=visible_fn,
+            row_near_fn=row_near_fn,
+            sleep_fn=sleep_fn,
+            require_vertical_move=False,
+            require_identity_after=False,
+        )
+        after_capture = extract_configured_perk_bans(current, row_fn=row_fn)
+        after_selected = [
+            dict(entry)
+            for entry in after_capture["selected"]
+            if isinstance(entry, Mapping)
+        ]
+        if (
+            after_capture["quality"]["valid"] is not True
+            or len(after_selected) != before_count - 1
+            or any(perk_entries_match(target, entry) for entry in after_selected)
+        ):
+            raise HomePerkConfigurationError(
+                "Ban Perks selected row did not disappear after deselection"
+            )
+
+    current_top = _scroll_configuration_top(
+        current,
+        capture_fn=capture_fn,
+        visible_fn=visible_fn,
+        swipe_fn=swipe_fn,
+        sleep_fn=sleep_fn,
+    )
+    captured = extract_configured_perk_bans(current_top, row_fn=row_fn)
+    if captured["quality"]["valid"] is not True:
+        raise HomePerkConfigurationError(
+            "Ban Perks selected block became unreadable after deselection"
+        )
+    current_keys = {
+        entry.get("key")
+        for entry in captured["selected"]
+        if isinstance(entry, Mapping)
+    }
+    pending = [
         {
             "key": key,
             "display_text": perk_configuration_label(key),
         }
         for key in expected_keys
         if key not in current_keys
-    )
+    ]
     if not pending:
-        return top
+        return current_top
 
-    current = top
+    current = current_top
     for _ in range(BAN_AVAILABLE_START_SWIPES):
         current = _swipe_configuration(
             current,
@@ -406,6 +464,7 @@ def _repair_bans(
                 row_near_fn=row_near_fn,
                 sleep_fn=sleep_fn,
                 require_vertical_move=False,
+                require_identity_after=True,
             )
             pending.remove(target)
             if not pending:
@@ -649,6 +708,7 @@ def _tap_configuration_row(
     row_near_fn: Callable[..., Optional[dict[str, Any]]],
     sleep_fn: Callable[[float], None],
     require_vertical_move: bool,
+    require_identity_after: bool = True,
     direction: int = 0,
 ) -> Frame:
     top = int(row["top"])
@@ -703,6 +763,8 @@ def _tap_configuration_row(
             raise HomePerkConfigurationError(
                 f"Ban Perks row did not change after {action}"
             )
+        if not require_identity_after:
+            return fresh
         candidate = row_near_fn(fresh, center)
         if not candidate or not perk_entries_match(
             expected,
@@ -983,6 +1045,26 @@ def _wait_for_state(
 
 def _content_difference(before: Frame, after: Frame) -> float:
     return _region_difference(before, after, PERK_CONTENT_REGION)
+
+
+def _ban_capture_matches(
+    expected_keys: Sequence[str],
+    captured: Mapping[str, Any],
+) -> bool:
+    quality = captured.get("quality")
+    selected = [
+        entry
+        for entry in captured.get("selected") or ()
+        if isinstance(entry, Mapping)
+    ]
+    observed = [entry.get("key") for entry in selected]
+    return bool(
+        isinstance(quality, Mapping)
+        and quality.get("valid") is True
+        and all(key is not None for key in observed)
+        and len(observed) == len(expected_keys)
+        and set(observed) == set(expected_keys)
+    )
 
 
 def _field_values_differ(

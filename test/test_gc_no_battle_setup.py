@@ -353,6 +353,7 @@ def _run(
     *,
     waivers=None,
     ensure_perk_configuration_fn=None,
+    action_guard_fn=None,
 ):
     kwargs = {}
     if ensure_perk_configuration_fn is not None:
@@ -373,6 +374,7 @@ def _run(
         select_workshop_menu_fn=router.select_workshop_menu,
         ensure_poison_swamp_stun_fn=router.ensure_stun,
         validate_configuration_fn=router.validate_configuration,
+        action_guard_fn=action_guard_fn,
         sleep_fn=lambda _seconds: None,
         **kwargs,
     )
@@ -407,6 +409,23 @@ def test_no_battle_setup_corrects_supported_farm_presets_and_guardians():
         "indicators.guardian:ally_equipped",
         "buttons.guardian:summon_inventory",
         "buttons.return_to_game",
+    ]
+
+
+def test_no_battle_setup_blocks_inputs_during_pause_then_restores_home():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+    guard_results = iter([True, False, False, True, True])
+
+    def action_guard():
+        return next(guard_results, True)
+
+    result = _run(router, action_guard_fn=action_guard)
+
+    assert result.status is GcNoBattleSetupStatus.INTERRUPTED
+    assert router.state == "home"
+    assert router.static_actions == [
+        "navigation.goto_cards_home",
+        "navigation.goto_home",
     ]
 
 
@@ -1030,7 +1049,11 @@ def test_app_runs_no_battle_setup_before_starting_profile_battle():
     ):
         app._handle_primary_states("HOME_SCREEN", set(), frame)
 
-    run_setup.assert_called_once_with(REQUIREMENTS, screenshot=frame)
+    run_setup.assert_called_once_with(
+        REQUIREMENTS,
+        screenshot=frame,
+        action_guard_fn=app._runtime_action_guard,
+    )
     manager.mark_no_battle_setup_complete.assert_called_once_with(setup.evidence)
     handle_home.assert_called_once_with(restart_enabled=True)
     manager.on_home.assert_called_once_with()
@@ -1075,7 +1098,11 @@ def test_app_runs_tournament_home_preflight_without_starting_battle():
     ):
         app._handle_primary_states("HOME_SCREEN", set(), frame)
 
-    run_setup.assert_called_once_with(TOURNAMENT_REQUIREMENTS, screenshot=frame)
+    run_setup.assert_called_once_with(
+        TOURNAMENT_REQUIREMENTS,
+        screenshot=frame,
+        action_guard_fn=app._runtime_action_guard,
+    )
     manager.mark_no_battle_setup_complete.assert_called_once_with(setup.evidence)
     handle_home.assert_not_called()
     manager.on_home.assert_not_called()
@@ -1170,6 +1197,46 @@ def test_app_blocks_battle_start_when_no_battle_setup_fails():
     ):
         app._handle_primary_states("HOME_SCREEN", set(), frame)
 
+    manager.mark_no_battle_setup_complete.assert_not_called()
+    handle_home.assert_not_called()
+    manager.on_home.assert_not_called()
+
+
+def test_app_does_not_publish_gate_or_start_after_control_interruption():
+    frame = object()
+    manager = Mock()
+    manager.no_battle_setup_requirements.return_value = REQUIREMENTS
+    app = App.__new__(App)
+    app._auto_start_enabled = True
+    app._mission_mgr = manager
+    app._fast_game_over = False
+    app._last_wave_value = None
+    app._last_wave_conf = -1.0
+    app._status_reporter = Mock()
+    app._supervisor = Mock()
+    app._publish_gate_decision = Mock()
+    app._handle_daily_gem_if_due = Mock(return_value=False)
+    app._handle_mission_rewards_if_due = Mock(return_value=False)
+    setup = GcNoBattleSetupResult(
+        GcNoBattleSetupStatus.INTERRUPTED,
+        "automation paused during Home setup",
+    )
+
+    with (
+        patch(
+            "core.app.detect_home_battle_control",
+            return_value=HomeBattleEvidence(
+                HomeBattleControl.NEW_BATTLE,
+                "test",
+                100.0,
+            ),
+        ),
+        patch("core.app.run_gc_no_battle_setup", return_value=setup),
+        patch("core.app.handle_home_screen") as handle_home,
+    ):
+        app._handle_primary_states("HOME_SCREEN", set(), frame)
+
+    app._publish_gate_decision.assert_not_called()
     manager.mark_no_battle_setup_complete.assert_not_called()
     handle_home.assert_not_called()
     manager.on_home.assert_not_called()
@@ -1273,10 +1340,15 @@ def test_app_configured_fallback_waives_only_failed_check_and_retries_setup():
         "reason": "preset did not become selected",
     }
     assert run_setup.call_args_list == [
-        call(REQUIREMENTS, screenshot=frame),
+        call(
+            REQUIREMENTS,
+            screenshot=frame,
+            action_guard_fn=app._runtime_action_guard,
+        ),
         call(
             REQUIREMENTS,
             screenshot=recovered_home,
+            action_guard_fn=app._runtime_action_guard,
             waivers={"bots_preset": waiver},
         ),
     ]
@@ -1353,6 +1425,7 @@ def test_app_claims_optional_configured_skip_before_home_setup():
     run_setup.assert_called_once_with(
         REQUIREMENTS,
         screenshot=frame,
+        action_guard_fn=app._runtime_action_guard,
         waivers={"bots_preset": waiver},
     )
     manager.mark_no_battle_setup_complete.assert_called_once_with(
