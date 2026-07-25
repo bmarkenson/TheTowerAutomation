@@ -37,7 +37,7 @@ def test_tournament_generated_plan_matches_compact_source():
     assert build_strategy_yaml(_load(SOURCE_PATH)) == _load(PLAN_PATH)
 
 
-def test_tournament_strategy_is_a_passive_observer():
+def test_tournament_strategy_declares_exclusive_validation_then_observes():
     strategy = get_strategy("tournament")
 
     assert strategy is not None
@@ -49,9 +49,33 @@ def test_tournament_strategy_is_a_passive_observer():
         "home_preflight": True,
         "session_preflight_on_attach": True,
         "preflight_mismatch": "notify",
+        "exclusive_validation": {
+            "battle_kind": "ordinary_new_battle",
+            "timeout_seconds": 300,
+            "ready_message": (
+                "Tournament is ready to begin manually; automation will not "
+                "enter Tournament or start it"
+            ),
+            "failure_prefix": "Tournament validation failed",
+        },
     }
     assert strategy.run_configuration()["profile"] == "tournament"
-    assert len(strategy.rules) == 2
+    assert strategy._run_initialization_assertions == [
+        "ehls_completed",
+        "eals_completed",
+    ]
+    assert len(strategy.rules) == 3
+    level_skip_rule = next(
+        rule
+        for rule in strategy.rules
+        if rule["name"] == "initialize_tournament_level_skips"
+    )
+    assert level_skip_rule["gate_phase"] == "run_initialization"
+    assert level_skip_rule["assert"] == [
+        "!exclusive_validation_battle",
+        "!eals_completed",
+    ]
+    assert level_skip_rule["do"] == [{"type": "level_skip_initialize"}]
     damage_rule = next(
         rule
         for rule in strategy.rules

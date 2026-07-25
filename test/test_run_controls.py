@@ -53,6 +53,21 @@ def test_ensure_menu_open_only_uses_verified_toggle():
     )
 
 
+def test_ensure_menu_open_rechecks_ownership_before_tap():
+    screenshot = _frame()
+    with (
+        patch("core.run_controls.capture_adb_screenshot", return_value=screenshot),
+        patch(
+            "core.run_controls.detect_state_and_overlays",
+            return_value={"state": "RUNNING", "overlays": ["MENU_CLOSED"]},
+        ),
+        patch("core.run_controls.tap_if_visible") as tap,
+    ):
+        assert not ensure_menu_open(timeout_s=2.0, action_guard=lambda: False)
+
+    tap.assert_not_called()
+
+
 def test_restart_run_is_the_surrender_compatibility_action():
     with patch("core.run_controls.surrender_run", return_value=True) as surrender:
         assert restart_run(timeout_s=7.0)

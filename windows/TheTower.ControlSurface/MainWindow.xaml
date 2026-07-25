@@ -126,6 +126,7 @@
                 <Button x:Name="AdoptStrategyButton" Content="Adopt for active battle" Click="AdoptStrategy_Click" Style="{StaticResource PrimaryButton}" IsEnabled="False" />
               </UniformGrid>
               <TextBlock x:Name="StrategySelectionText" Text="Waiting for strategy status." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,4,6,0" />
+              <TextBlock x:Name="TournamentValidationText" Text="No exclusive strategy validation request." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,2,6,0" />
               <TextBlock Text="Select a strategy, then choose its disposition. Queue preserves the current battle strategy; selecting Current and queueing cancels a different pending request. Adopt changes behavior and Battle End identity after fresh active-battle evidence; new-run gates wait for the next genuine boundary unless the observer declares a read-only attachment check." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,2,6,4" />
               <Button x:Name="ConfigureRunButton" Content="Configure run..." Click="ConfigureRun_Click" Style="{StaticResource PrimaryButton}" IsEnabled="False" Margin="4,4,4,2" />
               <TextBlock x:Name="ConfigureRunText" Text="Strategy defaults; no one-run skips staged." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,0,6,4" />

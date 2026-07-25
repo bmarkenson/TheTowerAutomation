@@ -215,6 +215,31 @@ start. An absent file defaults to port `5555`, strategy `farm`, and immediate
 startup gates. Explicit manual `main.py --adb-port PORT --strategy NAME
 --startup-gates POLICY` arguments still win.
 
+Selecting Tournament, or starting the stopped managed service with Tournament
+selected, authorizes one validation run. The control file records a durable
+request tied to that exact strategy request and generated-plan fingerprint.
+After every declared Home check passes, the runtime atomically claims the
+request and then taps only a freshly verified ordinary **New Battle** control.
+It does not tap **Resume Battle**, enter the Tournament screen, or start a
+Tournament. In that disposable ordinary battle it leaves Auto Perks unchanged,
+enforces Damage Slider `100%`, and verifies the configured Ultimate Weapons and
+Spotlight Missiles. Staged one-run waivers are not claimed for this validation;
+a Home preflight failure consumes the request and reports its failed check
+without starting a battle. A conclusive in-battle pass or failure starts
+guarded cleanup: only the same runtime/ADB owner may Surrender that battle and
+return from Game Over to verified Home **New Battle**. The status panel then
+reports either **Tournament is ready to begin manually** or the validation
+failure reason.
+
+Each later explicit Tournament selection or managed Start creates a new
+request. Restarting an unattended runtime does not: a claimed, running, or
+cleanup receipt owned by the former process is failed without a tap or
+Surrender. A changed plan fingerprint likewise requires another explicit
+selection. After readiness, start the real Tournament manually. Its opening
+run-initialization gate maxes Enemy Health Level Skip and Enemy Attack Level
+Skip before normal observer handling; the disposable validation battle does
+not buy those upgrades or fabricate their completion.
+
 When replacing automation during a battle, select **Attach to current battle;
 run gates next battle** before starting. The new process observes and controls
 that existing run normally but suppresses only rules tagged as run
@@ -419,6 +444,13 @@ the API, authority boundaries, and planned capabilities.
   cannot be changed during battle. The same guarded workflow must own Game Over
   → Home, correction, restart, and fresh revalidation. Uncertain evidence and
   failures outside that repair class remain blocked without Surrender.
+- The sole validation-only exception is a profile-declared exclusive
+  validation of one ordinary `NEW_BATTLE`. Its durable receipt must be claimed
+  atomically before the verified Home tap and must still name the same live
+  runtime and ADB target before menu, Exit Battle, Surrender, and Game Over
+  Home actions. Fresh battle evidence must exclude Tournament identity. A
+  process restart, owner mismatch, `RESUME_BATTLE`, Tournament identity, or
+  ambiguous transition fails closed and cannot inherit cleanup authority.
 - A profile-declared setting may be repaired in battle only through an explicit
   safe-transition contract. Poison Swamp Stun `on` → `off` requires a freshly
   detected Poison Swamp tile, authoritative detail and checked-control matches,

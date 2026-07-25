@@ -12,6 +12,16 @@ runtime_policy:
   home_preflight: true
   session_preflight_on_attach: true
   preflight_mismatch: notify
+  exclusive_validation:
+    battle_kind: ordinary_new_battle
+    timeout_seconds: 300
+    ready_message: Tournament is ready to begin manually; automation will not enter
+      Tournament or start it
+    failure_prefix: Tournament validation failed
+run_initialization:
+  complete_when:
+  - ehls_completed
+  - eals_completed
 session_preflight:
   complete_when:
   - damage_slider_checked
@@ -60,6 +70,18 @@ session_preflight:
       mode: enforce
       value: 1E2%
 vars:
+  exclusive_validation_battle: false
+  ehls_completed: false
+  eals_completed: false
+  maxed_enemy_health_level_skip: false
+  maxed_enemy_attack_level_skip: false
+  ehls_completion_wave: null
+  eals_completion_wave: null
+  eals_first_tap_wave: null
+  eals_first_tap_elapsed_s: null
+  level_skip_elapsed_s: 0.0
+  level_skip_taps_sent: 0
+  level_skip_last_reason: ''
   damage_slider_checked: false
   damage_slider_observation: {}
   gc_session_preflight_completed: false
@@ -71,8 +93,30 @@ vars:
   gc_session_preflight_last_reason: ''
   gc_session_preflight_evidence: {}
   gc_session_preflight_advisory: false
-per_run_reset: []
+per_run_reset:
+- exclusive_validation_battle
+- ehls_completed
+- eals_completed
+- maxed_enemy_health_level_skip
+- maxed_enemy_attack_level_skip
+- ehls_completion_wave
+- eals_completion_wave
+- eals_first_tap_wave
+- eals_first_tap_elapsed_s
+- level_skip_elapsed_s
+- level_skip_taps_sent
+- level_skip_last_reason
 rules:
+- name: initialize_tournament_level_skips
+  gate_phase: run_initialization
+  when:
+    state: RUNNING
+  assert:
+  - '!exclusive_validation_battle'
+  - '!eals_completed'
+  cooldown_sec: 0.25
+  do:
+  - type: level_skip_initialize
 - name: enforce_tournament_damage_slider
   gate_phase: session_preflight
   run_when_attached: true
@@ -201,3 +245,9 @@ run_configuration:
     home_preflight: true
     session_preflight_on_attach: true
     preflight_mismatch: notify
+    exclusive_validation:
+      battle_kind: ordinary_new_battle
+      timeout_seconds: 300
+      ready_message: Tournament is ready to begin manually; automation will not enter
+        Tournament or start it
+      failure_prefix: Tournament validation failed

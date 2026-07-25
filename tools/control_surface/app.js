@@ -151,7 +151,46 @@ function renderStatus(payload) {
     control,
     processActive,
   );
+  renderExclusiveValidation(control);
   renderGateDecision(control.gate_decision);
+}
+
+function renderExclusiveValidation(control) {
+  const ledger = control.exclusive_validation || {};
+  const receipts = ledger.receipts || {};
+  let receipt = Object.values(receipts).find((candidate) =>
+    ["claimed", "running", "cleanup"].includes(candidate?.status));
+  if (!receipt) {
+    receipt = receipts[ledger.current_request_id];
+  }
+  if (!receipt) {
+    setText("exclusiveValidationSummary", "No exclusive strategy validation request.");
+    return;
+  }
+  if (receipt.status === "result") {
+    if (receipt.outcome === "ready") {
+      setText(
+        "exclusiveValidationSummary",
+        "Tournament is ready to begin manually. Automation will not enter or start Tournament.",
+      );
+    } else {
+      setText(
+        "exclusiveValidationSummary",
+        `Tournament validation ${receipt.outcome || "failed"}: ${receipt.reason || "reason unavailable"}`,
+      );
+    }
+    return;
+  }
+  const labels = {
+    pending: "waiting for completed Home preflight",
+    claimed: "ordinary New Battle ownership recorded",
+    running: "checking Damage Slider and Ultimate Weapons",
+    cleanup: "returning the owned validation battle to Home",
+  };
+  setText(
+    "exclusiveValidationSummary",
+    `Tournament validation: ${labels[receipt.status] || receipt.status || "unknown"}.`,
+  );
 }
 
 function matchingRunSkips(control) {

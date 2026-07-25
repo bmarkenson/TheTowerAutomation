@@ -1008,6 +1008,8 @@ public partial class MainWindow : Window
         StrategySelectionText.Text = string.IsNullOrWhiteSpace(_strategyRequestMessage)
             ? strategyState
             : $"{strategyState} | {_strategyRequestMessage}";
+        TournamentValidationText.Text = FormatExclusiveValidation(
+            status.Control.ExclusiveValidation);
         var stateDisposition = !processActive
             ? "saved; process inactive"
             : statePending ? "awaiting runtime" : "active directive";
@@ -1351,6 +1353,45 @@ public partial class MainWindow : Window
             "none" => "none",
             _ => strategy,
         };
+
+    private static string FormatExclusiveValidation(
+        ExclusiveValidationLedgerStatus? ledger)
+    {
+        if (ledger is null || ledger.Receipts.Count == 0)
+        {
+            return "No exclusive strategy validation request.";
+        }
+        ExclusiveValidationReceiptStatus? receipt =
+            ledger.Receipts.Values.FirstOrDefault(candidate =>
+                candidate.Status is "claimed" or "running" or "cleanup");
+        if (receipt is null && !string.IsNullOrWhiteSpace(ledger.CurrentRequestId))
+        {
+            ledger.Receipts.TryGetValue(ledger.CurrentRequestId, out receipt);
+        }
+        if (receipt is null)
+        {
+            return "No exclusive strategy validation request.";
+        }
+        if (string.Equals(receipt.Status, "result", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Equals(
+                receipt.Outcome,
+                "ready",
+                StringComparison.OrdinalIgnoreCase)
+                ? "Tournament is ready to begin manually. Automation will not enter or start Tournament."
+                : $"Tournament validation {receipt.Outcome ?? "failed"}: "
+                    + $"{receipt.Reason ?? "reason unavailable"}";
+        }
+        var disposition = receipt.Status.ToLowerInvariant() switch
+        {
+            "pending" => "waiting for completed Home preflight",
+            "claimed" => "ordinary New Battle ownership recorded",
+            "running" => "checking Damage Slider and Ultimate Weapons",
+            "cleanup" => "returning the owned validation battle to Home",
+            _ => receipt.Status,
+        };
+        return $"Tournament validation: {disposition}.";
+    }
 
     private static string StrategyDisplayName(string? strategy) =>
         NormalizeStrategy(strategy) switch

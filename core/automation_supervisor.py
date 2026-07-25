@@ -26,6 +26,7 @@ import time
 from decimal import Decimal
 from pathlib import Path
 from typing import Callable, Dict, Mapping, Optional, Tuple
+from uuid import uuid4
 
 import numpy as np
 from numpy.typing import NDArray
@@ -67,9 +68,13 @@ class AutomationSupervisor:
         initial_directives = self._load_control_directive()
         self._strategy_request = self._parse_strategy_request(initial_directives)
         self._gate_decision = self._parse_gate_decision(initial_directives)
+        self._exclusive_validation = self._parse_exclusive_validation(
+            initial_directives
+        )
         self._startup_gate_waivers = self._parse_startup_gate_waivers(
             initial_directives
         )
+        self._runtime_id = uuid4().hex
         self.auto_return_secs = max(0, int(auto_return_secs))
         self.auto_return_enabled = bool(auto_return_enabled)
         self.auto_return_conf_threshold = float(auto_return_conf_threshold)
@@ -116,6 +121,23 @@ class AutomationSupervisor:
         return dict(self._gate_decision) if self._gate_decision else None
 
     @property
+    def exclusive_validation(self) -> Dict[str, object]:
+        """Return the durable one-shot strategy-validation ledger."""
+
+        return {
+            "schema_version": 1,
+            "current_request_id": self._exclusive_validation.get(
+                "current_request_id"
+            ),
+            "receipts": {
+                request_id: dict(receipt)
+                for request_id, receipt in self._exclusive_validation.get(
+                    "receipts", {}
+                ).items()
+            },
+        }
+
+    @property
     def startup_gate_waivers(self) -> Dict[str, Dict[str, object]]:
         """Return proactive check waivers still waiting for an applicable run."""
 
@@ -142,6 +164,9 @@ class AutomationSupervisor:
             self._last_state_directive_revision = state_revision
             self._strategy_request = self._parse_strategy_request(directives)
             self._gate_decision = self._parse_gate_decision(directives)
+            self._exclusive_validation = self._parse_exclusive_validation(
+                directives
+            )
             self._startup_gate_waivers = self._parse_startup_gate_waivers(
                 directives
             )
@@ -196,6 +221,38 @@ class AutomationSupervisor:
         parsed["request_id"] = request_id
         parsed["status"] = status
         return parsed
+
+    @staticmethod
+    def _parse_exclusive_validation(
+        directives: Mapping[str, object],
+    ) -> Dict[str, object]:
+        value = directives.get("exclusive_validation")
+        if not isinstance(value, Mapping):
+            return {
+                "schema_version": 1,
+                "current_request_id": None,
+                "receipts": {},
+            }
+        raw_receipts = value.get("receipts")
+        receipts: Dict[str, Dict[str, object]] = {}
+        if isinstance(raw_receipts, Mapping):
+            for raw_id, raw_receipt in raw_receipts.items():
+                request_id = str(raw_id or "").strip()
+                if not request_id or not isinstance(raw_receipt, Mapping):
+                    continue
+                if str(raw_receipt.get("request_id") or "") != request_id:
+                    continue
+                receipts[request_id] = dict(raw_receipt)
+        current_request_id = str(
+            value.get("current_request_id") or ""
+        ).strip()
+        if current_request_id not in receipts:
+            current_request_id = ""
+        return {
+            "schema_version": 1,
+            "current_request_id": current_request_id or None,
+            "receipts": receipts,
+        }
 
     @staticmethod
     def _parse_startup_gate_waivers(
@@ -307,6 +364,173 @@ class AutomationSupervisor:
             check_id: dict(waiver)
             for check_id, waiver in claimed.items()
         }
+
+    def current_exclusive_validation_owner(self) -> Dict[str, object]:
+        """Return this process identity on its currently selected ADB target."""
+
+        return {
+            "runtime_id": self._runtime_id,
+            "pid": os.getpid(),
+            "adb_target": os.getenv("ADB_DEVICE") or "unknown",
+        }
+
+    def exclusive_validation_receipt(
+        self,
+        *,
+        request_id: Optional[str] = None,
+        strategy_request_id: Optional[object] = None,
+    ) -> Optional[Dict[str, object]]:
+        """Find one locally cached receipt by validation or strategy request."""
+
+        receipts = self._exclusive_validation.get("receipts")
+        if not isinstance(receipts, Mapping):
+            return None
+        if request_id:
+            receipt = receipts.get(str(request_id))
+            return dict(receipt) if isinstance(receipt, Mapping) else None
+        identity = str(strategy_request_id or "").strip()
+        if identity:
+            for receipt in receipts.values():
+                if (
+                    isinstance(receipt, Mapping)
+                    and str(receipt.get("strategy_request_id") or "") == identity
+                ):
+                    return dict(receipt)
+            return None
+        current_request_id = str(
+            self._exclusive_validation.get("current_request_id") or ""
+        )
+        receipt = receipts.get(current_request_id)
+        return dict(receipt) if isinstance(receipt, Mapping) else None
+
+    def claim_exclusive_validation(
+        self,
+        *,
+        strategy_request_id: object,
+        configuration_fingerprint: str,
+        timeout_seconds: float,
+    ) -> Optional[Dict[str, object]]:
+        """Claim a pending validation under this exact runtime owner."""
+
+        try:
+            receipt = self._control_store.claim_exclusive_validation(
+                strategy_request_id=str(strategy_request_id or ""),
+                configuration_fingerprint=configuration_fingerprint,
+                owner=self.current_exclusive_validation_owner(),
+                timeout_seconds=timeout_seconds,
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(f"[VALIDATION] Failed claiming exclusive request: {exc}", "WARN")
+            return None
+        self._refresh_exclusive_validation()
+        return dict(receipt) if receipt else None
+
+    def mark_exclusive_validation_running(
+        self,
+        request_id: str,
+    ) -> Optional[Dict[str, object]]:
+        try:
+            receipt = self._control_store.mark_exclusive_validation_running(
+                request_id,
+                owner=self.current_exclusive_validation_owner(),
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(f"[VALIDATION] Failed recording owned battle: {exc}", "WARN")
+            return None
+        self._refresh_exclusive_validation()
+        return dict(receipt) if receipt else None
+
+    def begin_exclusive_validation_cleanup(
+        self,
+        request_id: str,
+        *,
+        outcome: str,
+        reason: str,
+    ) -> Optional[Dict[str, object]]:
+        try:
+            receipt = self._control_store.begin_exclusive_validation_cleanup(
+                request_id,
+                owner=self.current_exclusive_validation_owner(),
+                outcome=outcome,
+                reason=reason,
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(f"[VALIDATION] Failed claiming cleanup: {exc}", "WARN")
+            return None
+        self._refresh_exclusive_validation()
+        return dict(receipt) if receipt else None
+
+    def finish_exclusive_validation(
+        self,
+        request_id: str,
+        *,
+        outcome: str,
+        reason: str,
+        allowed_statuses=("cleanup",),
+    ) -> Optional[Dict[str, object]]:
+        try:
+            receipt = self._control_store.finish_exclusive_validation(
+                request_id,
+                outcome=outcome,
+                reason=reason,
+                owner=(
+                    None
+                    if set(allowed_statuses) == {"pending"}
+                    else self.current_exclusive_validation_owner()
+                ),
+                allowed_statuses=allowed_statuses,
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(f"[VALIDATION] Failed persisting result: {exc}", "WARN")
+            return None
+        self._refresh_exclusive_validation()
+        return dict(receipt) if receipt else None
+
+    def fail_orphaned_exclusive_validation(
+        self,
+        request_id: str,
+        *,
+        reason: str,
+    ) -> Optional[Dict[str, object]]:
+        try:
+            receipt = self._control_store.fail_orphaned_exclusive_validation(
+                request_id,
+                current_owner=self.current_exclusive_validation_owner(),
+                reason=reason,
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(f"[VALIDATION] Failed recording lost ownership: {exc}", "WARN")
+            return None
+        self._refresh_exclusive_validation()
+        return dict(receipt) if receipt else None
+
+    def owns_exclusive_validation(
+        self,
+        request_id: str,
+        *,
+        statuses=("claimed", "running", "cleanup"),
+    ) -> bool:
+        """Re-read durable ownership immediately before a guarded action."""
+
+        try:
+            ledger = self._control_store.status().get("exclusive_validation")
+        except ControlDirectiveError as exc:
+            log(f"[VALIDATION] Ownership recheck failed: {exc}", "WARN")
+            return False
+        self._exclusive_validation = dict(ledger or {})
+        receipt = self.exclusive_validation_receipt(request_id=request_id)
+        return bool(
+            receipt
+            and str(receipt.get("status") or "") in set(statuses)
+            and receipt.get("owner") == self.current_exclusive_validation_owner()
+        )
+
+    def _refresh_exclusive_validation(self) -> None:
+        try:
+            ledger = self._control_store.status().get("exclusive_validation")
+        except ControlDirectiveError:
+            return
+        self._exclusive_validation = dict(ledger or {})
 
     def persist_state(self, state: str) -> bool:
         """Persist and immediately apply a runtime-owned state transition."""

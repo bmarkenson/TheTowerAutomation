@@ -9,6 +9,8 @@ from typing import Callable, Final, Optional
 import numpy as np
 
 from core.input import safe_tap, tap_if_visible
+from core.battle_lifecycle import HomeBattleControl
+from core.home_battle import detect_home_battle_control
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import StateDetectionResult, detect_state_and_overlays
 from utils.logger import log
@@ -20,7 +22,12 @@ _RETRY_DELAY: Final[float] = 0.6
 _EXIT_DIALOG_REGION: Final[tuple[int, int, int, int]] = (130, 690, 820, 540)
 
 
-def ensure_menu_open(timeout_s: float = 5.0) -> bool:
+def ensure_menu_open(
+    timeout_s: float = 5.0,
+    *,
+    action_guard: Optional[Callable[[], bool]] = None,
+    running_guard: Optional[Callable[[StateDetectionResult], bool]] = None,
+) -> bool:
     """Open the in-run menu without touching any action inside the menu."""
 
     deadline = time.monotonic() + max(0.0, timeout_s)
@@ -38,10 +45,16 @@ def ensure_menu_open(timeout_s: float = 5.0) -> bool:
                 "WARN",
             )
             return False
+        if running_guard is not None and not running_guard(detection):
+            log("[RUN_CONTROL] Battle identity guard rejected menu access", "WARN")
+            return False
         if "MENU_OPEN" in overlays:
             return True
         if "MENU_CLOSED" not in overlays:
             log("[RUN_CONTROL] Menu state is neither open nor closed", "WARN")
+            return False
+        if action_guard is not None and not action_guard():
+            log("[RUN_CONTROL] Action ownership changed before menu tap", "WARN")
             return False
         if not tap_if_visible(
             "navigation.menu_open_button",
@@ -89,8 +102,17 @@ def _wait_for_screen(
     return None
 
 
-def _open_exit_battle_dialog(timeout_s: float) -> bool:
-    if not ensure_menu_open(timeout_s=max(1.0, timeout_s / 2)):
+def _open_exit_battle_dialog(
+    timeout_s: float,
+    *,
+    action_guard: Optional[Callable[[], bool]] = None,
+    running_guard: Optional[Callable[[StateDetectionResult], bool]] = None,
+) -> bool:
+    if not ensure_menu_open(
+        timeout_s=max(1.0, timeout_s / 2),
+        action_guard=action_guard,
+        running_guard=running_guard,
+    ):
         return False
     screenshot = capture_adb_screenshot()
     if screenshot is None:
@@ -98,6 +120,12 @@ def _open_exit_battle_dialog(timeout_s: float) -> bool:
     detection = detect_state_and_overlays(screenshot)
     if detection["state"] != "RUNNING" or "MENU_OPEN" not in detection["overlays"]:
         log("[RUN_CONTROL] Run/menu guard failed before Exit Battle tap", "WARN")
+        return False
+    if running_guard is not None and not running_guard(detection):
+        log("[RUN_CONTROL] Battle identity changed before Exit Battle tap", "WARN")
+        return False
+    if action_guard is not None and not action_guard():
+        log("[RUN_CONTROL] Action ownership changed before Exit Battle tap", "WARN")
         return False
     if not safe_tap("buttons.exit_battle", dispatch="now"):
         return False
@@ -116,10 +144,14 @@ def _choose_exit_battle_action(
     *,
     expected_state: str,
     timeout_s: float,
+    action_guard: Optional[Callable[[], bool]] = None,
 ) -> bool:
     screenshot = capture_adb_screenshot()
     if not _exit_battle_dialog_visible(screenshot):
         log(f"[RUN_CONTROL] Refusing '{button_key}': Exit Battle dialog missing", "WARN")
+        return False
+    if action_guard is not None and not action_guard():
+        log("[RUN_CONTROL] Action ownership changed before terminal action", "WARN")
         return False
     if not safe_tap(button_key, dispatch="now"):
         return False
@@ -137,15 +169,25 @@ def _choose_exit_battle_action(
     return True
 
 
-def surrender_run(timeout_s: float = 12.0) -> bool:
+def surrender_run(
+    timeout_s: float = 12.0,
+    *,
+    action_guard: Optional[Callable[[], bool]] = None,
+    running_guard: Optional[Callable[[StateDetectionResult], bool]] = None,
+) -> bool:
     """End the current run through Exit Battle -> Surrender."""
 
-    if not _open_exit_battle_dialog(timeout_s):
+    if not _open_exit_battle_dialog(
+        timeout_s,
+        action_guard=action_guard,
+        running_guard=running_guard,
+    ):
         return False
     return _choose_exit_battle_action(
         "buttons.surrender:exit_battle",
         expected_state="GAME_OVER",
         timeout_s=timeout_s / 2,
+        action_guard=action_guard,
     )
 
 
@@ -161,6 +203,55 @@ def go_home_from_run(timeout_s: float = 12.0) -> bool:
     )
 
 
+def return_home_from_game_over(
+    timeout_s: float = 8.0,
+    *,
+    action_guard: Optional[Callable[[], bool]] = None,
+) -> bool:
+    """Leave a completed owned battle through its verified Home control."""
+
+    screenshot = capture_adb_screenshot()
+    if screenshot is None:
+        return False
+    detection = detect_state_and_overlays(screenshot)
+    if detection["state"] != "GAME_OVER":
+        log(
+            "[RUN_CONTROL] Refusing Game Over Home action from "
+            f"state={detection['state']!r}",
+            "WARN",
+        )
+        return False
+    if action_guard is not None and not action_guard():
+        log("[RUN_CONTROL] Action ownership changed before Game Over Home", "WARN")
+        return False
+    if not tap_if_visible(
+        "buttons.home:game_over",
+        screenshot=screenshot,
+        retries=1,
+    ):
+        return False
+
+    def reached_new_battle_home(frame: Frame) -> bool:
+        current = detect_state_and_overlays(frame)
+        return bool(
+            current["state"] == "HOME_SCREEN"
+            and detect_home_battle_control(frame).control
+            is HomeBattleControl.NEW_BATTLE
+        )
+
+    result = _wait_for_screen(
+        reached_new_battle_home,
+        timeout_s=max(1.0, timeout_s),
+    )
+    if result is None:
+        log(
+            "[RUN_CONTROL] Game Over Home action did not reach verified NEW_BATTLE",
+            "WARN",
+        )
+        return False
+    return True
+
+
 def restart_run(timeout_s: float = 12.0) -> bool:
     """Compatibility action: end the current run so Game Over can retry it."""
 
@@ -170,6 +261,7 @@ def restart_run(timeout_s: float = 12.0) -> bool:
 __all__ = [
     "ensure_menu_open",
     "go_home_from_run",
+    "return_home_from_game_over",
     "restart_run",
     "surrender_run",
 ]

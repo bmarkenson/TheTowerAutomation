@@ -11,7 +11,7 @@ from typing import Optional, Callable, Dict, Any, Mapping, Set, Tuple
 import numpy as np
 from numpy.typing import NDArray
 
-from utils.logger import log, set_mission_log_path
+from utils.logger import log, log_action_intent, set_mission_log_path
 from core.watchdog import watchdog_process_check, ensure_adb_connected
 from core.adb_target_session import AdbTargetSession
 from core.ss_capture import capture_and_save_screenshot
@@ -48,6 +48,10 @@ from core.gate_decisions import (
     build_gate_decision_options,
     startup_gate_check_catalog,
 )
+from core.exclusive_validation import (
+    ExclusiveValidationDefinition,
+    exclusive_validation_definition,
+)
 from core.menu_reward_badges import (
     measure_home_reward_badges,
     measure_menu_reward_badges,
@@ -61,14 +65,14 @@ from core.run_state import AUTOMATION, ExecMode
 from core.app_setup import AppConfig
 from core.status_report import StateChangeTracker, StatusReporter
 from core.recovery import handle_unknown_state, update_unknown_state
-from core.run_controls import surrender_run
+from core.run_controls import return_home_from_game_over, surrender_run
 from automation.missions.manager import MissionManager
 from automation.missions import get_mission
 from automation.missions.yaml_mission import YamlMission
 from automation.strategies import get_strategy
 from handlers.game_over_handler import handle_game_over
 from handlers.tournament_result_handler import handle_tournament_results
-from handlers.home_screen_handler import handle_home_screen
+from handlers.home_screen_handler import handle_home_screen, tap_verified_new_battle
 from handlers.ad_gem_handler import (
     handle_ad_gem,
     handle_home_ad_gem,
@@ -126,6 +130,9 @@ class App:
         self._last_strategy_request: Optional[Tuple[str, object, str]] = None
         self._pending_strategy_request: Optional[Tuple[str, object, str]] = None
         self._strategy_boundary_confirmed = False
+        self._active_exclusive_validation_request_id: Optional[str] = None
+        self._exclusive_validation_terminal_hold: Optional[str] = None
+        self._exclusive_validation_ownership_hold = False
         self._observe_strategy_request()
         log(
             f"[RUN_INIT] Startup gate policy={config.startup_gate_policy}",
@@ -193,6 +200,457 @@ class App:
         strategy = self._mission_mgr.strategy
         return str(strategy.name if strategy else "none").strip().lower()
 
+    def _exclusive_validation_definition(
+        self,
+    ) -> Optional[ExclusiveValidationDefinition]:
+        try:
+            return exclusive_validation_definition(self._mission_mgr.strategy)
+        except (TypeError, ValueError) as exc:
+            log(f"[VALIDATION] Invalid strategy validation policy: {exc}", "ERROR")
+            return None
+
+    def _exclusive_validation_receipt(self) -> Optional[Dict[str, object]]:
+        active_request_id = getattr(
+            self,
+            "_active_exclusive_validation_request_id",
+            None,
+        )
+        if active_request_id:
+            receipt = self._supervisor.exclusive_validation_receipt(
+                request_id=active_request_id
+            )
+            if receipt is not None:
+                return receipt
+        strategy_request = self._supervisor.strategy_request
+        if (
+            not isinstance(strategy_request, tuple)
+            or len(strategy_request) not in {2, 3}
+            or str(strategy_request[0] or "").strip().lower()
+            != self._current_strategy_name()
+        ):
+            return None
+        return self._supervisor.exclusive_validation_receipt(
+            strategy_request_id=strategy_request[1]
+        )
+
+    def _reconcile_exclusive_validation(
+        self,
+    ) -> Optional[Dict[str, object]]:
+        ledger = self._supervisor.exclusive_validation
+        receipts = ledger.get("receipts")
+        if isinstance(receipts, Mapping):
+            for candidate in list(receipts.values()):
+                if (
+                    not isinstance(candidate, Mapping)
+                    or str(candidate.get("status") or "")
+                    not in {"claimed", "running", "cleanup"}
+                ):
+                    continue
+                candidate_id = str(candidate.get("request_id") or "")
+                if self._supervisor.owns_exclusive_validation(
+                    candidate_id,
+                    statuses=(str(candidate.get("status") or ""),),
+                ):
+                    self._active_exclusive_validation_request_id = candidate_id
+                    break
+                failed = self._supervisor.fail_orphaned_exclusive_validation(
+                    candidate_id,
+                    reason=(
+                        "validation ownership belongs to a prior runtime or ADB "
+                        "target; no Surrender or battle action was taken"
+                    ),
+                )
+                if failed:
+                    self._exclusive_validation_ownership_hold = True
+                    self._announce_exclusive_validation_result(failed)
+
+        receipt = self._exclusive_validation_receipt()
+        if receipt is None:
+            return None
+        request_id = str(receipt.get("request_id") or "")
+        status = str(receipt.get("status") or "")
+        if status in {"claimed", "running", "cleanup"}:
+            if self._supervisor.owns_exclusive_validation(
+                request_id,
+                statuses=(status,),
+            ):
+                self._active_exclusive_validation_request_id = request_id
+                return self._supervisor.exclusive_validation_receipt(
+                    request_id=request_id
+                )
+            failed = self._supervisor.fail_orphaned_exclusive_validation(
+                request_id,
+                reason=(
+                    "validation ownership belongs to a prior runtime or ADB "
+                    "target; no Surrender or battle action was taken"
+                ),
+            )
+            self._active_exclusive_validation_request_id = None
+            if failed:
+                self._announce_exclusive_validation_result(failed)
+                return failed
+        return receipt
+
+    def _finish_exclusive_validation_without_cleanup(
+        self,
+        receipt: Mapping[str, object],
+        reason: str,
+    ) -> Optional[Dict[str, object]]:
+        request_id = str(receipt.get("request_id") or "")
+        status = str(receipt.get("status") or "")
+        result = self._supervisor.finish_exclusive_validation(
+            request_id,
+            outcome="failed",
+            reason=reason,
+            allowed_statuses=(status,),
+        )
+        self._active_exclusive_validation_request_id = None
+        if result:
+            self._announce_exclusive_validation_result(result)
+        return result
+
+    def _prepare_exclusive_validation_home_request(
+        self,
+        definition: ExclusiveValidationDefinition,
+    ) -> bool:
+        """Re-arm Home checks once for the current valid pending request."""
+
+        receipt = self._reconcile_exclusive_validation()
+        if receipt is None or str(receipt.get("status") or "") != "pending":
+            return False
+        if (
+            str(receipt.get("configuration_fingerprint") or "")
+            != definition.configuration_fingerprint
+        ):
+            self._finish_exclusive_validation_without_cleanup(
+                receipt,
+                "strategy configuration changed after the explicit request; "
+                "select Tournament again to authorize the new configuration",
+            )
+            return False
+        request_id = str(receipt.get("request_id") or "")
+        self._mission_mgr.prepare_exclusive_validation_request(request_id)
+        self._startup_gate_waivers = {}
+        return True
+
+    def _maybe_start_exclusive_validation(
+        self,
+        *,
+        home_control: HomeBattleControl,
+    ) -> bool:
+        """Claim and start exactly one verified ordinary validation battle."""
+
+        definition = self._exclusive_validation_definition()
+        if definition is None:
+            return False
+        receipt = self._reconcile_exclusive_validation()
+        if receipt is None:
+            return False
+        if str(receipt.get("status") or "") != "pending":
+            return False
+        if (
+            str(receipt.get("configuration_fingerprint") or "")
+            != definition.configuration_fingerprint
+        ):
+            self._finish_exclusive_validation_without_cleanup(
+                receipt,
+                "strategy configuration changed after the explicit request; "
+                "select Tournament again to authorize the new configuration",
+            )
+            return False
+        if self._mission_mgr.prepare_exclusive_validation_request(
+            str(receipt.get("request_id") or "")
+        ):
+            # Home handling normally prepares before it evaluates requirements.
+            # A direct caller must recapture and complete that re-armed pass.
+            return False
+        if (
+            home_control is not HomeBattleControl.NEW_BATTLE
+            or self._mission_mgr.no_battle_setup_requirements()
+            or self._supervisor.is_paused
+        ):
+            return False
+        strategy_request_id = str(receipt.get("strategy_request_id") or "")
+        claimed = self._supervisor.claim_exclusive_validation(
+            strategy_request_id=strategy_request_id,
+            configuration_fingerprint=definition.configuration_fingerprint,
+            timeout_seconds=definition.timeout_seconds,
+        )
+        if claimed is None:
+            return False
+        request_id = str(claimed["request_id"])
+        self._active_exclusive_validation_request_id = request_id
+        log_action_intent(
+            "Starting the one-shot Tournament validation battle",
+            reason=(
+                "use the verified ordinary New Battle control to inspect "
+                "battle-only Tournament settings, then Surrender only this "
+                "automation-owned battle"
+            ),
+        )
+        if tap_verified_new_battle():
+            log(
+                "[TOURNAMENT_VALIDATION] Ordinary NEW_BATTLE dispatched after "
+                f"durable ownership claim {request_id}",
+                "INFO",
+                console=True,
+            )
+            return True
+        self._finish_exclusive_validation_without_cleanup(
+            claimed,
+            "the verified ordinary NEW_BATTLE control could not be tapped; "
+            "no validation battle ownership was assumed",
+        )
+        return True
+
+    @staticmethod
+    def _ordinary_validation_battle_guard(
+        detection: Mapping[str, object],
+    ) -> bool:
+        return bool(
+            str(detection.get("state") or "").upper() == "RUNNING"
+            and "TOURNAMENT"
+            not in {
+                str(value).upper()
+                for value in detection.get("secondary_states", []) or []
+            }
+        )
+
+    def _observe_exclusive_validation_battle_start(
+        self,
+        detection: Mapping[str, object],
+        *,
+        battle_started: bool,
+    ) -> None:
+        receipt = self._reconcile_exclusive_validation()
+        if receipt is None:
+            return
+        status = str(receipt.get("status") or "")
+        request_id = str(receipt.get("request_id") or "")
+        if status == "running":
+            if self._supervisor.owns_exclusive_validation(
+                request_id,
+                statuses=("running",),
+            ):
+                self._mission_mgr.set_exclusive_validation_battle(True)
+            return
+        if status != "claimed" or str(
+            detection.get("state") or ""
+        ).upper() != "RUNNING":
+            if status == "claimed":
+                try:
+                    deadline_at = float(receipt.get("deadline_at") or 0.0)
+                except (TypeError, ValueError):
+                    deadline_at = 0.0
+                if deadline_at and time.time() >= deadline_at:
+                    self._finish_exclusive_validation_without_cleanup(
+                        receipt,
+                        "the claimed ordinary NEW_BATTLE did not reach fresh "
+                        "RUNNING evidence before its timeout; ownership is "
+                        "ambiguous and no Surrender was attempted",
+                    )
+            return
+        if not battle_started or not self._ordinary_validation_battle_guard(
+            detection
+        ):
+            self._finish_exclusive_validation_without_cleanup(
+                receipt,
+                "the claimed Home transition did not establish a new ordinary "
+                "battle; ownership is ambiguous and no Surrender was attempted",
+            )
+            return
+        running = self._supervisor.mark_exclusive_validation_running(request_id)
+        if running is None:
+            return
+        self._active_exclusive_validation_request_id = request_id
+        self._mission_mgr.set_exclusive_validation_battle(True)
+        log(
+            "[TOURNAMENT_VALIDATION] Owned ordinary battle reached RUNNING; "
+            "Damage Slider and Ultimate Weapon validation is active",
+            "INFO",
+            console=True,
+        )
+
+    def _exclusive_validation_disposition(
+        self,
+        receipt: Mapping[str, object],
+    ) -> Optional[Tuple[str, str]]:
+        receipt_strategy = str(receipt.get("strategy") or "").strip().lower()
+        if receipt_strategy != self._current_strategy_name():
+            return (
+                "failed",
+                "the active strategy changed after validation started",
+            )
+        mission_vars = self._mission_mgr.ctx.data.setdefault("mission_vars", {})
+        if (
+            mission_vars.get("damage_slider_checked")
+            and mission_vars.get("gc_session_preflight_completed")
+        ):
+            return (
+                "ready",
+                "Damage Slider is 100% and all configured Ultimate Weapons, "
+                "including Spotlight Missiles, are enabled",
+            )
+        if mission_vars.get("gc_session_preflight_attempted"):
+            reason = str(
+                mission_vars.get("gc_session_preflight_last_reason")
+                or "Ultimate Weapon validation reported a mismatch"
+            )
+            return "failed", reason
+        try:
+            deadline_at = float(receipt.get("deadline_at") or 0.0)
+        except (TypeError, ValueError):
+            deadline_at = 0.0
+        if deadline_at and time.time() >= deadline_at:
+            damage = mission_vars.get("damage_slider_observation")
+            damage_reason = (
+                str(damage.get("reason") or "")
+                if isinstance(damage, Mapping)
+                else ""
+            )
+            detail = damage_reason or str(
+                mission_vars.get("gc_session_preflight_last_reason") or ""
+            )
+            return (
+                "failed",
+                "validation timed out before battle-only checks completed"
+                + (f": {detail}" if detail else ""),
+            )
+        return None
+
+    def _exclusive_validation_in_progress(self) -> bool:
+        receipt = self._exclusive_validation_receipt()
+        return bool(
+            receipt
+            and str(receipt.get("status") or "") in {"claimed", "running", "cleanup"}
+            and self._supervisor.owns_exclusive_validation(
+                str(receipt.get("request_id") or ""),
+                statuses=(str(receipt.get("status") or ""),),
+            )
+        )
+
+    def _advance_exclusive_validation(
+        self,
+        detection: Mapping[str, object],
+    ) -> bool:
+        """Conclude validation and Surrender only its still-owned battle."""
+
+        receipt = self._reconcile_exclusive_validation()
+        if receipt is None or str(receipt.get("status") or "") != "running":
+            return False
+        request_id = str(receipt.get("request_id") or "")
+        if not self._ordinary_validation_battle_guard(detection):
+            if str(detection.get("state") or "").upper() == "RUNNING":
+                self._finish_exclusive_validation_without_cleanup(
+                    receipt,
+                    "Tournament identity appeared in the owned validation "
+                    "window; refusing Surrender because the battle is ambiguous",
+                )
+            return False
+        disposition = self._exclusive_validation_disposition(receipt)
+        if disposition is None or self._supervisor.is_paused:
+            return False
+        outcome, reason = disposition
+        cleanup = self._supervisor.begin_exclusive_validation_cleanup(
+            request_id,
+            outcome=outcome,
+            reason=reason,
+        )
+        if cleanup is None:
+            return False
+        log_action_intent(
+            "Cleaning up the owned Tournament validation battle",
+            reason=(
+                f"validation reached {outcome}; return the disposable ordinary "
+                "battle to Home without touching any Tournament entry"
+            ),
+        )
+        surrendered = surrender_run(
+            timeout_s=12.0,
+            action_guard=lambda: self._supervisor.owns_exclusive_validation(
+                request_id,
+                statuses=("cleanup",),
+            ),
+            running_guard=self._ordinary_validation_battle_guard,
+        )
+        if surrendered:
+            log(
+                "[TOURNAMENT_VALIDATION] Owned validation battle reached Game Over",
+                "INFO",
+                console=True,
+            )
+            return True
+        self._finish_exclusive_validation_without_cleanup(
+            cleanup,
+            reason
+            + "; guarded Surrender did not conclusively reach Game Over, so "
+            "no retry or further battle action was attempted",
+        )
+        return True
+
+    def _handle_exclusive_validation_game_over(self) -> bool:
+        if getattr(self, "_exclusive_validation_terminal_hold", None):
+            return True
+        receipt = self._reconcile_exclusive_validation()
+        if receipt is None or str(receipt.get("status") or "") != "cleanup":
+            return False
+        request_id = str(receipt.get("request_id") or "")
+        if not self._supervisor.owns_exclusive_validation(
+            request_id,
+            statuses=("cleanup",),
+        ):
+            return False
+        returned_home = return_home_from_game_over(
+            timeout_s=8.0,
+            action_guard=lambda: self._supervisor.owns_exclusive_validation(
+                request_id,
+                statuses=("cleanup",),
+            ),
+        )
+        outcome = str(receipt.get("pending_outcome") or "failed")
+        reason = str(receipt.get("pending_reason") or "validation completed")
+        if not returned_home:
+            outcome = "failed"
+            reason += "; the owned battle ended, but verified NEW_BATTLE Home was not reached"
+            self._exclusive_validation_terminal_hold = request_id
+        else:
+            self._exclusive_validation_terminal_hold = None
+        result = self._supervisor.finish_exclusive_validation(
+            request_id,
+            outcome=outcome,
+            reason=reason,
+            allowed_statuses=("cleanup",),
+        )
+        self._active_exclusive_validation_request_id = None
+        if result:
+            self._announce_exclusive_validation_result(result)
+        return True
+
+    def _announce_exclusive_validation_result(
+        self,
+        receipt: Mapping[str, object],
+    ) -> None:
+        definition = self._exclusive_validation_definition()
+        outcome = str(receipt.get("outcome") or "")
+        reason = str(receipt.get("reason") or "reason unavailable")
+        if outcome == "ready" and definition is not None:
+            log(
+                f"[TOURNAMENT_READY] {definition.ready_message}",
+                "INFO",
+                console=True,
+            )
+            return
+        prefix = (
+            definition.failure_prefix
+            if definition is not None
+            else "Tournament validation failed"
+        )
+        log(
+            f"[TOURNAMENT_VALIDATION_FAILED] {prefix}: {reason}",
+            "ERROR",
+            console=True,
+        )
+
     def _report_home_policy(
         self,
         *,
@@ -213,6 +671,22 @@ class App:
         session_valid = bool(
             mission_vars.get("gc_session_preflight_completed")
         )
+        validation_receipt = self._exclusive_validation_receipt()
+        validation_status = (
+            str(validation_receipt.get("status") or "")
+            if validation_receipt
+            else ""
+        )
+        validation_outcome = (
+            str(validation_receipt.get("outcome") or "")
+            if validation_receipt
+            else ""
+        )
+        validation_reason = (
+            str(validation_receipt.get("reason") or "")
+            if validation_receipt
+            else ""
+        )
         signature: Tuple[object, ...] = (
             self._current_strategy_name(),
             home_control,
@@ -220,40 +694,71 @@ class App:
             home_preflight_enabled,
             requirements_pending,
             session_valid,
+            validation_status,
+            validation_outcome,
+            validation_reason,
         )
         if signature == getattr(self, "_last_home_policy_signature", None):
             return
         self._last_home_policy_signature = signature
 
-        passive_tournament_home = bool(
-            self._current_strategy_name() == "tournament"
+        definition = self._exclusive_validation_definition()
+        exclusive_validation_home = bool(
+            definition is not None
             and home_preflight_enabled
             and not home_handler_enabled
             and home_control is HomeBattleControl.NEW_BATTLE
         )
-        if not passive_tournament_home:
+        if not exclusive_validation_home:
             log("Detected HOME_SCREEN. Evaluating Home policy.", "INFO")
             return
-        if requirements_pending:
+        if validation_status == "result" and validation_outcome == "ready":
             log(
-                "[TOURNAMENT] Home preflight is pending; automation will not "
-                "start a battle",
+                f"[TOURNAMENT_READY] {definition.ready_message}",
                 "INFO",
                 console=True,
             )
-        elif session_valid:
+        elif validation_status == "result":
             log(
-                "[TOURNAMENT_READY] Home and in-battle preflight passed. "
-                "Start Tournament manually; automation will not start it",
+                "[TOURNAMENT_VALIDATION_FAILED] "
+                f"{definition.failure_prefix}: "
+                f"{validation_reason or 'reason unavailable'}",
+                "ERROR",
+                console=True,
+            )
+        elif requirements_pending:
+            log(
+                "[TOURNAMENT_VALIDATION] Home preflight is pending; the ordinary "
+                "validation battle has not started",
+                "INFO",
+                console=True,
+            )
+        elif validation_status in {"claimed", "running", "cleanup"}:
+            log(
+                "[TOURNAMENT_VALIDATION] The one-shot ordinary validation "
+                f"battle is {validation_status}",
+                "INFO",
+                console=True,
+            )
+        elif validation_status == "pending" and self._supervisor.is_paused:
+            log(
+                "[TOURNAMENT_VALIDATION] Home preflight is complete; Resume "
+                "automation to start the authorized ordinary validation battle",
+                "INFO",
+                console=True,
+            )
+        elif validation_status == "pending":
+            log(
+                "[TOURNAMENT_VALIDATION] Home preflight is complete; the "
+                "authorized ordinary validation battle is pending",
                 "INFO",
                 console=True,
             )
         else:
             log(
-                "[TOURNAMENT] Home preflight complete; holding ordinary Home. "
-                "In-battle checks remain pending and automation will not start "
-                "a battle",
-                "INFO",
+                "[TOURNAMENT_VALIDATION_FAILED] Tournament validation failed: "
+                "no explicit request receipt exists; select Tournament again",
+                "ERROR",
                 console=True,
             )
 
@@ -554,10 +1059,12 @@ class App:
         )
         if state in {"GAME_OVER", "TOURNAMENT_RESULTS"}:
             self._strategy_boundary_confirmed = True
+            self._exclusive_validation_ownership_hold = False
             return
         if state in {"HOME", "HOME_SCREEN"}:
             if control is HomeBattleControl.NEW_BATTLE:
                 self._strategy_boundary_confirmed = True
+                self._exclusive_validation_ownership_hold = False
             elif control is HomeBattleControl.RESUME_BATTLE:
                 self._strategy_boundary_confirmed = False
         elif state == "WORKSHOP":
@@ -565,6 +1072,7 @@ class App:
             # This is authoritative no-battle evidence even when the operator
             # navigated here manually while Pause blocks runtime actions.
             self._strategy_boundary_confirmed = True
+            self._exclusive_validation_ownership_hold = False
 
         pending = getattr(self, "_pending_strategy_request", None)
         if (
@@ -655,6 +1163,9 @@ class App:
         self._startup_gate_waivers = {}
         self._no_strategy_inventory_complete = False
         self._no_strategy_inventory_retry_at = 0.0
+        self._active_exclusive_validation_request_id = None
+        self._exclusive_validation_terminal_hold = None
+        self._exclusive_validation_ownership_hold = False
 
     def _handler_enabled(self, name: str) -> bool:
         """Honor an optional strategy handler allowlist; legacy plans allow all."""
@@ -722,7 +1233,24 @@ class App:
                 # authority. No overlay handler, recovery tap, mission action,
                 # or blind tapper may run before this gate clears.
                 battle_started = self._mission_mgr.maybe_run_start(detection)
-                if battle_started is True:
+                self._observe_exclusive_validation_battle_start(
+                    detection,
+                    battle_started=battle_started is True,
+                )
+                exclusive_validation_ownership_hold = bool(
+                    getattr(
+                        self,
+                        "_exclusive_validation_ownership_hold",
+                        False,
+                    )
+                )
+                if (
+                    battle_started is True
+                    and not exclusive_validation_ownership_hold
+                    and not self._mission_mgr.ctx.data.get(
+                        "exclusive_validation_battle"
+                    )
+                ):
                     self._claim_proactive_gate_waivers(
                         for_home_setup=False
                     )
@@ -731,7 +1259,14 @@ class App:
                     not initialization_pending
                     and self._mission_mgr.session_preflight_pending()
                 )
-                if initialization_pending or session_preflight_pending:
+                if exclusive_validation_ownership_hold:
+                    initialization_pending = False
+                    session_preflight_pending = False
+                if (
+                    initialization_pending or session_preflight_pending
+                ) and not self._mission_mgr.ctx.data.get(
+                    "exclusive_validation_battle"
+                ):
                     if self._claim_proactive_gate_waivers(for_home_setup=False):
                         initialization_pending = (
                             self._mission_mgr.run_initialization_pending()
@@ -744,6 +1279,8 @@ class App:
                 if game_speed_guard is not None:
                     game_speed_allowed = bool(
                         not is_paused
+                        and not exclusive_validation_ownership_hold
+                        and not self._exclusive_validation_in_progress()
                         and self._handler_enabled("game_speed")
                         and self._game_speed_priority_ready(
                             initialization_pending=initialization_pending
@@ -760,6 +1297,8 @@ class App:
                         # walking the speed control. Re-enter through capture
                         # before any other consumer sees the stale frame.
                         continue
+                if self._advance_exclusive_validation(detection):
+                    continue
                 session_preflight_terminally_blocked = bool(
                     session_preflight_pending
                     and self._mission_mgr.session_preflight_terminally_blocked()
@@ -777,6 +1316,8 @@ class App:
                 advisory_pending = bool(
                     not session_preflight_pending
                     and not self._supervisor.is_paused
+                    and not exclusive_validation_ownership_hold
+                    and not self._exclusive_validation_in_progress()
                     and self._runtime_policy().get("preflight_mismatch") == "notify"
                     and self._mission_mgr.session_preflight_advisory_pending()
                 )
@@ -859,13 +1400,18 @@ class App:
                     self._session_preflight_terminal_blocked_logged = False
                     self._session_preflight_repair_denial_logged = False
 
+                if self._advance_exclusive_validation(detection):
+                    continue
+
                 actions_blocked = (
                     is_paused
+                    or exclusive_validation_ownership_hold
                     or initialization_pending
                     or session_preflight_pending
                 )
                 safe_runtime_actions_blocked = (
                     is_paused
+                    or exclusive_validation_ownership_hold
                     or initialization_pending
                     or (
                         session_preflight_pending
@@ -1458,6 +2004,8 @@ class App:
         selector = getattr(self, "_run_perk_selector", None)
         if selector is not None:
             selector.observe_state(new_state)
+        if new_state != "GAME_OVER":
+            self._exclusive_validation_terminal_hold = None
         if new_state != "HOME_SCREEN":
             self._last_home_policy_signature = None
         self._recover_no_strategy_post_run(new_state, img)
@@ -1534,6 +2082,17 @@ class App:
                 self._status_reporter.reset_coin_rate_samples()
                 self._strategy_boundary_confirmed = True
                 self._apply_pending_strategy()
+            return
+
+        if (
+            new_state == "GAME_OVER"
+            and self._handle_exclusive_validation_game_over()
+        ):
+            self._mission_mgr.on_game_over()
+            self._mission_mgr.set_exclusive_validation_battle(False)
+            self._status_reporter.reset_coin_rate_samples()
+            self._strategy_boundary_confirmed = True
+            self._apply_pending_strategy()
             return
 
         if new_state == "GAME_OVER" and self._handler_enabled("game_over"):
@@ -1625,30 +2184,64 @@ class App:
             home_preflight_enabled = bool(
                 self._runtime_policy().get("home_preflight") is True
             )
+            exclusive_validation = self._exclusive_validation_definition()
+            exclusive_request_pending = bool(
+                exclusive_validation is not None
+                and self._prepare_exclusive_validation_home_request(
+                    exclusive_validation
+                )
+            )
             home_control = detect_home_battle_control(img).control
             requirements = self._mission_mgr.no_battle_setup_requirements()
             if (
                 (self._auto_start_enabled or home_preflight_enabled)
                 and home_control is HomeBattleControl.NEW_BATTLE
                 and requirements
-            ):
-                self._claim_proactive_gate_waivers(
-                    for_home_setup=True,
-                    requirements=requirements,
+                and (
+                    exclusive_validation is None
+                    or exclusive_request_pending
                 )
-                directive = self._matching_gate_decision("home_setup")
-                if directive and not self._apply_gate_decision(
-                    directive,
-                    phase="home_setup",
-                ):
-                    return
+            ):
+                if exclusive_validation is None:
+                    self._claim_proactive_gate_waivers(
+                        for_home_setup=True,
+                        requirements=requirements,
+                    )
+                    directive = self._matching_gate_decision("home_setup")
+                    if directive and not self._apply_gate_decision(
+                        directive,
+                        phase="home_setup",
+                    ):
+                        return
                 waivers = dict(getattr(self, "_startup_gate_waivers", {}))
+                if exclusive_validation is not None:
+                    waivers = {}
                 setup_kwargs: Dict[str, Any] = {"screenshot": img}
                 if waivers:
                     setup_kwargs["waivers"] = waivers
                 setup = run_gc_no_battle_setup(requirements, **setup_kwargs)
                 if not setup.complete:
                     check_id = setup.failed_check or "startup_setup"
+                    if exclusive_validation is not None:
+                        receipt = self._reconcile_exclusive_validation()
+                        if (
+                            receipt is not None
+                            and str(receipt.get("status") or "") == "pending"
+                        ):
+                            self._finish_exclusive_validation_without_cleanup(
+                                receipt,
+                                f"Home preflight failed at {check_id}: "
+                                f"{setup.reason}",
+                            )
+                        else:
+                            log(
+                                "[TOURNAMENT_VALIDATION_FAILED] Tournament "
+                                f"Home preflight failed at {check_id}: "
+                                f"{setup.reason}",
+                                "ERROR",
+                                console=True,
+                            )
+                        return
                     directive = self._publish_gate_decision(
                         phase="home_setup",
                         check_id=check_id,
@@ -1701,12 +2294,20 @@ class App:
                 else:
                     self._mission_mgr.mark_no_battle_setup_complete(setup.evidence)
                 self._startup_gate_waivers = {}
+            if self._maybe_start_exclusive_validation(
+                home_control=home_control,
+            ):
+                return
             self._report_home_policy(
                 home_control=home_control,
                 home_handler_enabled=home_handler_enabled,
                 home_preflight_enabled=home_preflight_enabled,
                 requirements_pending=bool(
                     self._mission_mgr.no_battle_setup_requirements()
+                    and (
+                        exclusive_validation is None
+                        or exclusive_request_pending
+                    )
                 ),
             )
             if home_handler_enabled:

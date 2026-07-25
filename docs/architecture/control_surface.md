@@ -53,8 +53,8 @@ agnostic.
   configuration, fixed managed-service start/stop, and one guarded active-
   battle automation reload. Active strategy
   requests are declarative runtime configuration, not direct tap authority.
-  There is no arbitrary tap, shell command, process kill, Surrender, file-path,
-  or ADB endpoint.
+  There is no arbitrary tap, shell command, process kill, direct Surrender,
+  file-path, or ADB endpoint.
 - Complete stop persists `STOPPED` before asking the fixed systemd user service
   to stop. Start always crosses the service boundary under `PAUSED`; a requested
   `RUNNING` directive is saved only after systemd reports the unit active.
@@ -84,6 +84,14 @@ agnostic.
   while paused. Home `RESUME_BATTLE` never authorizes a boundary switch.
   Selecting the current strategy replaces and thereby cancels a different
   pending request.
+- Every explicit Tournament selection, including a stopped process Start with
+  Tournament selected, also creates a one-use exclusive-validation receipt
+  bound to that strategy request and generated-plan fingerprint. Status exposes
+  its pending, owned, cleanup, or result disposition. The request authorizes
+  only the runtime's profile-declared ordinary `NEW_BATTLE` validation; the
+  control surface has no endpoint that directly starts or Surrenders a battle.
+  A replacement process reports an active receipt owned by the former runtime
+  as failed and cannot replay or clean it up.
 - An explicit `apply_to_active_run` strategy request may instead be adopted
   after fresh `RUNNING` or Home `RESUME_BATTLE` evidence. Adoption changes
   normal strategy behavior and the strategy/profile identity used by Battle
@@ -238,6 +246,11 @@ Process request examples:
   deferring new-run gates. The dropdown preserves an unsent selection across
   status refreshes, action buttons disable requests that would be no-ops, and
   status reports selected, current, and pending strategies separately.
+- Durable Tournament-validation status in both clients. It distinguishes Home
+  preflight pending, ordinary-battle ownership, battle-only checks, cleanup,
+  manual readiness, and a failed/cancelled result with its reason. This
+  requires server revision 6 and capability
+  `exclusive_strategy_validation_status`.
 - Native control of a passwordless Windows OpenSSH tunnel.
 - Separate operator-directive and observed-UI state, with acknowledgement and
   stale-heartbeat indicators.

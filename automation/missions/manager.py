@@ -29,6 +29,7 @@ class MissionManager:
         self._mission_was_complete = False
         self._startup_gates_deferred = bool(defer_startup_gates_until_next_run)
         self._new_battle_home_observed = False
+        self._exclusive_validation_prepared_request_id: Optional[str] = None
         self._battle_lifecycle = BattleLifecycle(
             adopt_initial_battle=self._startup_gates_deferred,
         )
@@ -44,6 +45,10 @@ class MissionManager:
                 self._mission_was_complete = False
         if self.strategy:
             self.strategy.on_start(self.ctx)
+        self.ctx.data["exclusive_validation_battle"] = False
+        self.ctx.data.setdefault("mission_vars", {})[
+            "exclusive_validation_battle"
+        ] = False
         self.ctx.data["startup_gates_deferred"] = self._startup_gates_deferred
         if self._startup_gates_deferred:
             self._record_deferred_free_upgrade_lock_evidence()
@@ -83,6 +88,7 @@ class MissionManager:
             )
         if battle_started:
             self._arm_startup_gates()
+            self.set_exclusive_validation_battle(False)
             if self.mission:
                 self.mission.on_run_start(self.ctx)
                 try:
@@ -201,6 +207,7 @@ class MissionManager:
             mv["gc_session_preflight_evidence"] = {}
         mv["gc_session_preflight_waivers"] = {}
         mv["gc_session_preflight_failed_checks"] = []
+        self.set_exclusive_validation_battle(False)
 
     def replace_strategy_at_boundary(
         self,
@@ -236,6 +243,7 @@ class MissionManager:
             for key in old_vars:
                 mission_vars.pop(str(key), None)
         self.ctx.data["rule_last_fire"] = {}
+        self._exclusive_validation_prepared_request_id = None
         self.strategy = strategy
         if self.strategy:
             self.strategy.on_start(self.ctx)
@@ -247,11 +255,54 @@ class MissionManager:
             self._startup_gates_deferred
             or not self._battle_lifecycle.active_battle_observed
             or not self.strategy
+            or self.ctx.data.get("exclusive_validation_battle") is True
         ):
             return False
         if not self.strategy.requires_run_initialization():
             return False
         return not self.strategy.is_run_initialization_complete(self.ctx)
+
+    def set_exclusive_validation_battle(self, active: bool) -> None:
+        """Mark only the disposable owned battle as exempt from run setup."""
+
+        value = bool(active)
+        previous = self.ctx.data.get("exclusive_validation_battle") is True
+        self.ctx.data["exclusive_validation_battle"] = value
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        mv["exclusive_validation_battle"] = value
+        if value and not previous:
+            # Every durable request must collect fresh battle-only evidence.
+            # Do not let a prior Tournament observation or one-run waiver turn
+            # this disposable battle into a seeded success.
+            mv["damage_slider_checked"] = False
+            mv["damage_slider_observation"] = {}
+            mv["gc_session_preflight_attempted"] = False
+            mv["gc_session_preflight_completed"] = False
+            mv["gc_session_preflight_blocked"] = False
+            mv["gc_session_preflight_repair_required"] = False
+            mv["gc_session_preflight_repair_in_progress"] = False
+            mv["gc_session_preflight_last_status"] = ""
+            mv["gc_session_preflight_last_reason"] = ""
+            mv["gc_session_preflight_evidence"] = {}
+            mv["gc_session_preflight_advisory"] = False
+            mv["gc_session_preflight_failed_checks"] = []
+            mv["gc_session_preflight_waivers"] = {}
+
+    def prepare_exclusive_validation_request(self, request_id: str) -> bool:
+        """Re-arm Home evidence exactly once for one durable request."""
+
+        normalized = str(request_id or "").strip()
+        if (
+            not normalized
+            or normalized == self._exclusive_validation_prepared_request_id
+        ):
+            return False
+        self._exclusive_validation_prepared_request_id = normalized
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        mv["gc_no_battle_setup_completed"] = False
+        mv["gc_no_battle_setup_evidence"] = {}
+        mv["gc_session_preflight_waivers"] = {}
+        return True
 
     def session_preflight_pending(self) -> bool:
         """Return whether the active battle is waiting on session validation."""

@@ -123,6 +123,15 @@ Current strategy and queueing it cancels a different pending request. Actions
 that would be no-ops are disabled; the panel reports request acceptance
 immediately and shows selected, current, and pending values separately.
 
+Every explicit Tournament selection or Start with Tournament selected creates
+one durable validation request. The panel reports Home preflight, ownership of
+the one ordinary New Battle used for battle-only checks, cleanup, and the
+terminal readiness or failure reason. Automation never enters or starts the
+Tournament itself. Wait for **Tournament is ready to begin manually**, then
+start the real Tournament yourself; its first automation phase maxes EHLS and
+EALS. A process restart cannot replay or Surrender a validation battle owned
+by the former runtime.
+
 **Configure run...** is an optional pre-start dialog populated from the
 selected strategy's declared checks. Check a requirement to skip it once, or
 leave every item unchecked to retain the complete strategy defaults. Saving
@@ -187,7 +196,8 @@ Linux process.
 The Tournament observer is the deliberate exception to session-preflight
 suppression: it performs its read-only check on the attached run so the warning
 above can report mismatches without changing configuration or blocking natural
-terminal capture.
+terminal capture. That attachment path does not use the one-shot validation
+request and never gains Surrender authority.
 
 The ADB port, bundled strategy, and startup-gate policy share the managed
 Linux environment file while remaining independent settings. Changing the ADB

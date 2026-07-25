@@ -133,11 +133,38 @@ public sealed class ControlStatus
     [JsonPropertyName("startup_gate_context")]
     public StartupGateContext? StartupGateContext { get; set; }
 
+    [JsonPropertyName("exclusive_validation")]
+    public ExclusiveValidationLedgerStatus? ExclusiveValidation { get; set; }
+
     [JsonPropertyName("updated_at")]
     public string? UpdatedAt { get; set; }
 
     [JsonPropertyName("error")]
     public string? Error { get; set; }
+}
+
+public sealed class ExclusiveValidationLedgerStatus
+{
+    [JsonPropertyName("current_request_id")]
+    public string? CurrentRequestId { get; set; }
+
+    [JsonPropertyName("receipts")]
+    public Dictionary<string, ExclusiveValidationReceiptStatus> Receipts { get; set; } = [];
+}
+
+public sealed class ExclusiveValidationReceiptStatus
+{
+    [JsonPropertyName("request_id")]
+    public string RequestId { get; set; } = "";
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "unknown";
+
+    [JsonPropertyName("outcome")]
+    public string? Outcome { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
 }
 
 public sealed class GateDecisionStatus

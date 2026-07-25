@@ -1,4 +1,4 @@
-"""Build the passive Tournament observer from its compact profile."""
+"""Build the Tournament exclusive validator and observer from its profile."""
 
 from __future__ import annotations
 
@@ -15,11 +15,20 @@ TOURNAMENT_RUNTIME_POLICY = {
     "home_preflight": True,
     "session_preflight_on_attach": True,
     "preflight_mismatch": "notify",
+    "exclusive_validation": {
+        "battle_kind": "ordinary_new_battle",
+        "timeout_seconds": 300,
+        "ready_message": (
+            "Tournament is ready to begin manually; automation will not enter "
+            "Tournament or start it"
+        ),
+        "failure_prefix": "Tournament validation failed",
+    },
 }
 
 
 def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
-    """Expand a Tournament source into a self-contained observer plan."""
+    """Expand a Tournament source into a self-contained validation plan."""
 
     if source.get("run_profile") != "tournament":
         raise ValueError("tournament builder requires run_profile: tournament")
@@ -36,6 +45,18 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
     damage_slider = copy.deepcopy(requirements["damage_slider"])
     runtime_policy = copy.deepcopy(TOURNAMENT_RUNTIME_POLICY)
     variables = {
+        "exclusive_validation_battle": False,
+        "ehls_completed": False,
+        "eals_completed": False,
+        "maxed_enemy_health_level_skip": False,
+        "maxed_enemy_attack_level_skip": False,
+        "ehls_completion_wave": None,
+        "eals_completion_wave": None,
+        "eals_first_tap_wave": None,
+        "eals_first_tap_elapsed_s": None,
+        "level_skip_elapsed_s": 0.0,
+        "level_skip_taps_sent": 0,
+        "level_skip_last_reason": "",
         "damage_slider_checked": False,
         "damage_slider_observation": {},
         "gc_session_preflight_completed": False,
@@ -52,6 +73,9 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "meta": meta,
         "runtime_policy": runtime_policy,
+        "run_initialization": {
+            "complete_when": ["ehls_completed", "eals_completed"],
+        },
         "session_preflight": {
             # A conclusive mismatch is still a completed observer check. It is
             # recorded and reported, but it never authorizes a repair or blocks
@@ -63,8 +87,32 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
             "requirements": copy.deepcopy(requirements),
         },
         "vars": variables,
-        "per_run_reset": [],
+        "per_run_reset": [
+            "exclusive_validation_battle",
+            "ehls_completed",
+            "eals_completed",
+            "maxed_enemy_health_level_skip",
+            "maxed_enemy_attack_level_skip",
+            "ehls_completion_wave",
+            "eals_completion_wave",
+            "eals_first_tap_wave",
+            "eals_first_tap_elapsed_s",
+            "level_skip_elapsed_s",
+            "level_skip_taps_sent",
+            "level_skip_last_reason",
+        ],
         "rules": [
+            {
+                "name": "initialize_tournament_level_skips",
+                "gate_phase": "run_initialization",
+                "when": {"state": "RUNNING"},
+                "assert": [
+                    "!exclusive_validation_battle",
+                    "!eals_completed",
+                ],
+                "cooldown_sec": 0.25,
+                "do": [{"type": "level_skip_initialize"}],
+            },
             {
                 "name": "enforce_tournament_damage_slider",
                 "gate_phase": "session_preflight",

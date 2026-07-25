@@ -1,0 +1,524 @@
+from __future__ import annotations
+
+from unittest.mock import patch
+
+from automation.missions.manager import MissionManager
+from automation.strategies import get_strategy
+from core.automation_supervisor import AutomationSupervisor
+from core.battle_lifecycle import HomeBattleControl
+from core.control_directives import ControlDirectiveStore
+from core.exclusive_validation import (
+    exclusive_validation_definition_for_strategy,
+)
+from core.app import App
+
+
+OWNER_ONE = {
+    "runtime_id": "runtime-one",
+    "pid": 101,
+    "adb_target": "localhost:5555",
+}
+OWNER_TWO = {
+    "runtime_id": "runtime-two",
+    "pid": 202,
+    "adb_target": "localhost:5555",
+}
+
+
+def _current_receipt(store: ControlDirectiveStore):
+    ledger = store.status()["exclusive_validation"]
+    return ledger["receipts"][ledger["current_request_id"]]
+
+
+def _app_for_pending_validation(tmp_path, *, home_preflight_complete=True):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    store.set_strategy("tournament", source="test")
+    supervisor = AutomationSupervisor(control_file=str(control_file))
+    strategy = get_strategy("tournament")
+    assert strategy is not None
+    manager = MissionManager(None, strategy)
+    manager.start()
+    manager.prepare_exclusive_validation_request(
+        _current_receipt(store)["request_id"]
+    )
+    if home_preflight_complete:
+        manager.mark_no_battle_setup_complete({})
+
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = manager
+    app._active_exclusive_validation_request_id = None
+    app._exclusive_validation_terminal_hold = None
+    return app, store, manager
+
+
+def test_explicit_tournament_requests_get_distinct_durable_receipts(tmp_path):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    first = store.set_strategy("tournament", source="test")
+    first_receipt = _current_receipt(store)
+
+    second = store.set_strategy("tournament", source="test")
+    second_receipt = _current_receipt(store)
+
+    assert first["strategy_request_id"] != second["strategy_request_id"]
+    assert first_receipt["request_id"] != second_receipt["request_id"]
+    assert first_receipt["strategy_request_id"] == first["strategy_request_id"]
+    assert second_receipt["strategy_request_id"] == second["strategy_request_id"]
+    assert first_receipt["configuration_fingerprint"] == (
+        second_receipt["configuration_fingerprint"]
+    )
+    ledger = store.status()["exclusive_validation"]
+    assert ledger["receipts"][first_receipt["request_id"]]["outcome"] == "cancelled"
+    assert second_receipt["status"] == "pending"
+
+
+def test_claim_is_atomic_and_only_same_owner_can_advance_or_finish(tmp_path):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    saved = store.set_strategy("tournament", source="test")
+    definition = exclusive_validation_definition_for_strategy("tournament")
+    assert definition is not None
+
+    claimed = store.claim_exclusive_validation(
+        strategy_request_id=saved["strategy_request_id"],
+        configuration_fingerprint=definition.configuration_fingerprint,
+        owner=OWNER_ONE,
+        timeout_seconds=definition.timeout_seconds,
+    )
+    assert claimed is not None
+    assert claimed["status"] == "claimed"
+    assert claimed["owner"] == OWNER_ONE
+    assert (
+        store.claim_exclusive_validation(
+            strategy_request_id=saved["strategy_request_id"],
+            configuration_fingerprint=definition.configuration_fingerprint,
+            owner=OWNER_TWO,
+            timeout_seconds=definition.timeout_seconds,
+        )
+        is None
+    )
+    assert (
+        store.mark_exclusive_validation_running(
+            claimed["request_id"],
+            owner=OWNER_TWO,
+        )
+        is None
+    )
+
+    running = store.mark_exclusive_validation_running(
+        claimed["request_id"],
+        owner=OWNER_ONE,
+    )
+    assert running is not None
+    assert (
+        store.begin_exclusive_validation_cleanup(
+            running["request_id"],
+            owner=OWNER_TWO,
+            outcome="ready",
+            reason="not the owner",
+        )
+        is None
+    )
+    cleanup = store.begin_exclusive_validation_cleanup(
+        running["request_id"],
+        owner=OWNER_ONE,
+        outcome="ready",
+        reason="checks passed",
+    )
+    assert cleanup is not None
+    assert (
+        store.finish_exclusive_validation(
+            cleanup["request_id"],
+            outcome="ready",
+            reason="wrong owner",
+            owner=OWNER_TWO,
+        )
+        is None
+    )
+
+
+def test_restart_fails_claimed_receipt_closed_without_reclaim(tmp_path):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    saved = store.set_strategy("tournament", source="test")
+    definition = exclusive_validation_definition_for_strategy("tournament")
+    assert definition is not None
+    claimed = store.claim_exclusive_validation(
+        strategy_request_id=saved["strategy_request_id"],
+        configuration_fingerprint=definition.configuration_fingerprint,
+        owner=OWNER_ONE,
+        timeout_seconds=definition.timeout_seconds,
+    )
+    assert claimed is not None
+
+    restarted_store = ControlDirectiveStore(store.path)
+    assert (
+        restarted_store.claim_exclusive_validation(
+            strategy_request_id=saved["strategy_request_id"],
+            configuration_fingerprint=definition.configuration_fingerprint,
+            owner=OWNER_TWO,
+            timeout_seconds=definition.timeout_seconds,
+        )
+        is None
+    )
+    failed = restarted_store.fail_orphaned_exclusive_validation(
+        claimed["request_id"],
+        current_owner=OWNER_TWO,
+        reason="prior runtime ownership is unavailable",
+    )
+
+    assert failed is not None
+    assert failed["status"] == "result"
+    assert failed["outcome"] == "failed"
+    assert failed["owner"] == OWNER_ONE
+
+
+def test_restart_fails_old_owner_before_exposing_new_pending_request(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    first = store.set_strategy("tournament", source="test")
+    definition = exclusive_validation_definition_for_strategy("tournament")
+    assert definition is not None
+    claimed = store.claim_exclusive_validation(
+        strategy_request_id=first["strategy_request_id"],
+        configuration_fingerprint=definition.configuration_fingerprint,
+        owner=OWNER_ONE,
+        timeout_seconds=definition.timeout_seconds,
+    )
+    assert claimed is not None
+    second = store.set_strategy("tournament", source="test")
+
+    app = App.__new__(App)
+    app._supervisor = AutomationSupervisor(control_file=str(control_file))
+    app._mission_mgr = MissionManager(None, get_strategy("tournament"))
+    app._mission_mgr.start()
+    app._active_exclusive_validation_request_id = None
+    app._exclusive_validation_ownership_hold = False
+    with patch("core.app.log"):
+        receipt = app._reconcile_exclusive_validation()
+
+    assert receipt is not None
+    assert receipt["status"] == "pending"
+    assert receipt["strategy_request_id"] == second["strategy_request_id"]
+    assert app._exclusive_validation_ownership_hold
+    old = store.status()["exclusive_validation"]["receipts"][claimed["request_id"]]
+    assert old["outcome"] == "failed"
+
+
+def test_new_explicit_request_stays_current_while_owned_run_finishes(tmp_path):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    first = store.set_strategy("tournament", source="test")
+    definition = exclusive_validation_definition_for_strategy("tournament")
+    assert definition is not None
+    claimed = store.claim_exclusive_validation(
+        strategy_request_id=first["strategy_request_id"],
+        configuration_fingerprint=definition.configuration_fingerprint,
+        owner=OWNER_ONE,
+        timeout_seconds=definition.timeout_seconds,
+    )
+    assert claimed is not None
+    running = store.mark_exclusive_validation_running(
+        claimed["request_id"],
+        owner=OWNER_ONE,
+    )
+    assert running is not None
+
+    second = store.set_strategy("tournament", source="test")
+    second_receipt = _current_receipt(store)
+    assert second_receipt["strategy_request_id"] == second["strategy_request_id"]
+    cleanup = store.begin_exclusive_validation_cleanup(
+        running["request_id"],
+        owner=OWNER_ONE,
+        outcome="ready",
+        reason="checks passed",
+    )
+    assert cleanup is not None
+    result = store.finish_exclusive_validation(
+        cleanup["request_id"],
+        owner=OWNER_ONE,
+        outcome="ready",
+        reason="checks passed",
+    )
+    assert result is not None
+
+    assert _current_receipt(store)["request_id"] == second_receipt["request_id"]
+
+
+def test_each_validation_request_rearms_home_preflight_once():
+    strategy = get_strategy("tournament")
+    assert strategy is not None
+    manager = MissionManager(None, strategy)
+    manager.start()
+
+    assert manager.prepare_exclusive_validation_request("request-one")
+    manager.mark_no_battle_setup_complete({})
+    assert manager.no_battle_setup_requirements() == {}
+    assert not manager.prepare_exclusive_validation_request("request-one")
+    assert manager.no_battle_setup_requirements() == {}
+
+    assert manager.prepare_exclusive_validation_request("request-two")
+    assert manager.no_battle_setup_requirements()
+
+
+def test_validation_lifecycle_taps_one_new_battle_surrenders_and_returns_home(
+    tmp_path,
+):
+    app, store, manager = _app_for_pending_validation(tmp_path)
+
+    with (
+        patch("core.app.tap_verified_new_battle", return_value=True) as start,
+        patch("core.app.log"),
+        patch("core.app.log_action_intent"),
+    ):
+        assert app._maybe_start_exclusive_validation(
+            home_control=HomeBattleControl.NEW_BATTLE
+        )
+        assert not app._maybe_start_exclusive_validation(
+            home_control=HomeBattleControl.NEW_BATTLE
+        )
+    start.assert_called_once_with()
+    claimed = _current_receipt(store)
+    assert claimed["status"] == "claimed"
+
+    detection = {"state": "RUNNING", "secondary_states": []}
+    battle_started = manager.maybe_run_start(detection)
+    assert battle_started
+    with patch("core.app.log"):
+        app._observe_exclusive_validation_battle_start(
+            detection,
+            battle_started=battle_started,
+        )
+    assert manager.ctx.data["exclusive_validation_battle"] is True
+    assert not manager.run_initialization_pending()
+    running = _current_receipt(store)
+    assert running["status"] == "running"
+
+    mission_vars = manager.ctx.data["mission_vars"]
+    mission_vars.update(
+        damage_slider_checked=True,
+        gc_session_preflight_attempted=True,
+        gc_session_preflight_completed=True,
+    )
+    with (
+        patch("core.app.surrender_run", return_value=True) as surrender,
+        patch("core.app.log"),
+        patch("core.app.log_action_intent"),
+    ):
+        assert app._advance_exclusive_validation(detection)
+    assert surrender.call_count == 1
+    assert surrender.call_args.kwargs["timeout_s"] == 12.0
+    assert _current_receipt(store)["status"] == "cleanup"
+
+    with (
+        patch("core.app.return_home_from_game_over", return_value=True) as go_home,
+        patch("core.app.log"),
+    ):
+        assert app._handle_exclusive_validation_game_over()
+    go_home.assert_called_once()
+    result = _current_receipt(store)
+    assert result["status"] == "result"
+    assert result["outcome"] == "ready"
+    assert "Spotlight Missiles" in result["reason"]
+
+
+def test_home_preflight_failure_consumes_request_without_waiver_or_battle(
+    tmp_path,
+):
+    app, store, _manager = _app_for_pending_validation(
+        tmp_path,
+        home_preflight_complete=False,
+    )
+    app._auto_start_enabled = False
+    app._startup_gate_waivers = {
+        "ultimate_weapons": {"status": "pending"},
+    }
+    setup = type(
+        "SetupResult",
+        (),
+        {
+            "complete": False,
+            "failed_check": "guardian_chips",
+            "reason": "Attack chip could not be equipped",
+        },
+    )()
+    frame = object()
+
+    with (
+        patch(
+            "core.app.detect_home_battle_control",
+            return_value=type(
+                "HomeEvidence",
+                (),
+                {"control": HomeBattleControl.NEW_BATTLE},
+            )(),
+        ),
+        patch("core.app.run_gc_no_battle_setup", return_value=setup) as run_setup,
+        patch.object(app, "_publish_gate_decision") as decision,
+        patch("core.app.tap_verified_new_battle") as start,
+        patch("core.app.log"),
+    ):
+        app._handle_primary_states("HOME_SCREEN", set(), frame)
+
+    run_setup.assert_called_once()
+    assert run_setup.call_args.kwargs == {"screenshot": frame}
+    decision.assert_not_called()
+    start.assert_not_called()
+    result = _current_receipt(store)
+    assert result["status"] == "result"
+    assert result["outcome"] == "failed"
+    assert "guardian_chips" in result["reason"]
+
+
+def test_claimed_validation_timeout_fails_without_surrender(tmp_path):
+    app, store, _manager = _app_for_pending_validation(tmp_path)
+    with (
+        patch("core.app.tap_verified_new_battle", return_value=True),
+        patch("core.app.log"),
+        patch("core.app.log_action_intent"),
+    ):
+        app._maybe_start_exclusive_validation(
+            home_control=HomeBattleControl.NEW_BATTLE
+        )
+    claimed = _current_receipt(store)
+
+    with (
+        patch("core.app.time.time", return_value=claimed["deadline_at"] + 1),
+        patch("core.app.surrender_run") as surrender,
+        patch("core.app.log"),
+    ):
+        app._observe_exclusive_validation_battle_start(
+            {"state": "HOME_SCREEN", "secondary_states": []},
+            battle_started=False,
+        )
+
+    surrender.assert_not_called()
+    result = _current_receipt(store)
+    assert result["status"] == "result"
+    assert result["outcome"] == "failed"
+    assert "did not reach fresh RUNNING" in result["reason"]
+
+
+def test_tournament_identity_never_authorizes_validation_surrender(tmp_path):
+    app, store, manager = _app_for_pending_validation(tmp_path)
+    with (
+        patch("core.app.tap_verified_new_battle", return_value=True),
+        patch("core.app.log"),
+        patch("core.app.log_action_intent"),
+    ):
+        app._maybe_start_exclusive_validation(
+            home_control=HomeBattleControl.NEW_BATTLE
+        )
+    detection = {"state": "RUNNING", "secondary_states": []}
+    app._observe_exclusive_validation_battle_start(
+        detection,
+        battle_started=manager.maybe_run_start(detection),
+    )
+
+    tournament_detection = {
+        "state": "RUNNING",
+        "secondary_states": ["TOURNAMENT"],
+    }
+    with (
+        patch("core.app.surrender_run") as surrender,
+        patch("core.app.log"),
+    ):
+        assert not app._advance_exclusive_validation(tournament_detection)
+    surrender.assert_not_called()
+    result = _current_receipt(store)
+    assert result["outcome"] == "failed"
+    assert "refusing Surrender" in result["reason"]
+
+
+def test_active_strategy_change_cleans_up_only_the_owned_validation_battle(
+    tmp_path,
+):
+    app, store, manager = _app_for_pending_validation(tmp_path)
+    with (
+        patch("core.app.tap_verified_new_battle", return_value=True),
+        patch("core.app.log"),
+        patch("core.app.log_action_intent"),
+    ):
+        app._maybe_start_exclusive_validation(
+            home_control=HomeBattleControl.NEW_BATTLE
+        )
+    detection = {"state": "RUNNING", "secondary_states": []}
+    app._observe_exclusive_validation_battle_start(
+        detection,
+        battle_started=manager.maybe_run_start(detection),
+    )
+    manager.adopt_strategy_for_active_battle(get_strategy("farm_t18"))
+
+    with (
+        patch("core.app.surrender_run", return_value=True) as surrender,
+        patch("core.app.log"),
+        patch("core.app.log_action_intent"),
+    ):
+        assert app._advance_exclusive_validation(detection)
+
+    surrender.assert_called_once()
+    cleanup = _current_receipt(store)
+    assert cleanup["status"] == "cleanup"
+    assert cleanup["pending_outcome"] == "failed"
+    assert "active strategy changed" in cleanup["pending_reason"]
+
+
+def test_manual_tournament_runs_level_skip_initialization_after_readiness():
+    strategy = get_strategy("tournament")
+    assert strategy is not None
+    manager = MissionManager(None, strategy)
+    manager.start()
+
+    validation_detection = {"state": "RUNNING", "secondary_states": []}
+    assert manager.maybe_run_start(validation_detection)
+    manager.set_exclusive_validation_battle(True)
+    mission_vars = manager.ctx.data["mission_vars"]
+    mission_vars.update(
+        damage_slider_checked=True,
+        gc_session_preflight_attempted=True,
+        gc_session_preflight_completed=True,
+    )
+    manager.maybe_run_start({"state": "GAME_OVER", "secondary_states": []})
+    manager.on_game_over()
+
+    detection = {"state": "RUNNING", "secondary_states": ["TOURNAMENT"]}
+    assert manager.maybe_run_start(detection)
+    assert manager.run_initialization_pending()
+    assert mission_vars["gc_session_preflight_completed"]
+    assert not mission_vars["ehls_completed"]
+    assert not mission_vars["eals_completed"]
+    actions = strategy.tick(manager.ctx, object(), detection)
+
+    assert actions == [{"type": "level_skip_initialize"}]
+
+
+def test_validation_battle_bypasses_level_skips_without_seeding_completion():
+    strategy = get_strategy("tournament")
+    assert strategy is not None
+    manager = MissionManager(None, strategy)
+    manager.start()
+    detection = {"state": "RUNNING", "secondary_states": []}
+
+    assert manager.maybe_run_start(detection)
+    mission_vars = manager.ctx.data["mission_vars"]
+    mission_vars.update(
+        damage_slider_checked=True,
+        gc_session_preflight_attempted=True,
+        gc_session_preflight_completed=True,
+        gc_session_preflight_waivers={"ultimate_weapons": {"status": "claimed"}},
+    )
+    manager.set_exclusive_validation_battle(True)
+    assert not mission_vars["ehls_completed"]
+    assert not mission_vars["eals_completed"]
+    assert not mission_vars["damage_slider_checked"]
+    assert not mission_vars["gc_session_preflight_attempted"]
+    assert not mission_vars["gc_session_preflight_completed"]
+    assert mission_vars["gc_session_preflight_waivers"] == {}
+    assert not manager.run_initialization_pending()
+
+    actions = strategy.tick(manager.ctx, object(), detection)
+    assert actions == [
+        {
+            "type": "damage_slider_configure",
+            "mode": "enforce",
+            "value": "1E2%",
+        }
+    ]

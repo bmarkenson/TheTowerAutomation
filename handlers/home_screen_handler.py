@@ -9,7 +9,9 @@ from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
 
 
-def _tap_verified_home_battle_control() -> bool:
+def _tap_verified_home_battle_control(
+    required_control: HomeBattleControl | None = None,
+) -> bool:
     """OCR and tap Battle/Resume only on a verified home screen."""
 
     screenshot = capture_adb_screenshot()
@@ -27,6 +29,13 @@ def _tap_verified_home_battle_control() -> bool:
         log(
             f"[HOME] Battle fallback was not verified: source={evidence.source} "
             f"text={evidence.raw_text!r} confidence={evidence.confidence:.1f}",
+            "WARN",
+        )
+        return False
+    if required_control is not None and evidence.control is not required_control:
+        log(
+            f"[HOME] Refusing {evidence.control.value}; this action requires "
+            f"{required_control.value}",
             "WARN",
         )
         return False
@@ -48,6 +57,12 @@ def _tap_verified_home_battle_control() -> bool:
             ),
         ),
     )
+
+
+def tap_verified_new_battle() -> bool:
+    """Tap only the ordinary Home NEW_BATTLE control on fresh evidence."""
+
+    return _tap_verified_home_battle_control(HomeBattleControl.NEW_BATTLE)
 
 
 def handle_home_screen(restart_enabled=True):

@@ -5,6 +5,7 @@ from unittest.mock import Mock, call, patch
 import cv2
 import numpy as np
 
+from automation.strategies import get_strategy
 from core.app import App
 from core.battle_lifecycle import HomeBattleControl
 from core.free_upgrade_locks import FARM_FREE_UPGRADE_LOCKS
@@ -908,8 +909,15 @@ def test_app_runs_tournament_home_preflight_without_starting_battle():
 
 
 def test_tournament_home_policy_reports_changed_readiness_without_heartbeat():
+    strategy = get_strategy("tournament")
+    assert strategy is not None
+    receipt = {
+        "request_id": "validation-request",
+        "strategy_request_id": "strategy-request",
+        "status": "pending",
+    }
     manager = SimpleNamespace(
-        strategy=SimpleNamespace(name="tournament"),
+        strategy=strategy,
         ctx=SimpleNamespace(
             data={
                 "mission_vars": {
@@ -920,6 +928,11 @@ def test_tournament_home_policy_reports_changed_readiness_without_heartbeat():
     )
     app = App.__new__(App)
     app._mission_mgr = manager
+    app._supervisor = SimpleNamespace(
+        strategy_request=("tournament", "strategy-request", "next_boundary"),
+        exclusive_validation_receipt=lambda **_kwargs: dict(receipt),
+        is_paused=False,
+    )
     app._last_home_policy_signature = None
 
     with patch("core.app.log") as emit:
@@ -932,9 +945,15 @@ def test_tournament_home_policy_reports_changed_readiness_without_heartbeat():
             )
 
         assert emit.call_count == 1
-        assert "In-battle checks remain pending" in emit.call_args.args[0]
+        assert "authorized ordinary validation battle is pending" in (
+            emit.call_args.args[0]
+        )
 
-        manager.ctx.data["mission_vars"]["gc_session_preflight_completed"] = True
+        receipt.update(
+            status="result",
+            outcome="ready",
+            reason="checks passed",
+        )
         app._report_home_policy(
             home_control=HomeBattleControl.NEW_BATTLE,
             home_handler_enabled=False,
@@ -944,7 +963,7 @@ def test_tournament_home_policy_reports_changed_readiness_without_heartbeat():
 
     assert emit.call_count == 2
     assert emit.call_args.args[0].startswith("[TOURNAMENT_READY]")
-    assert "Start Tournament manually" in emit.call_args.args[0]
+    assert "ready to begin manually" in emit.call_args.args[0]
 
 
 def test_app_blocks_battle_start_when_no_battle_setup_fails():

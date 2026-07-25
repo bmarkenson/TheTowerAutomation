@@ -31,8 +31,14 @@ current process and device.
   it. Runtime automation may Surrender only through an implemented,
   profile-declared recovery that authoritatively detects a failed Home-only
   configuration gate and owns the complete Home repair, restart, and
-  revalidation sequence. Leaving through the verified Exit Battle → Go Home
-  route is allowed only when the task authorizes it and the active run remains
+  revalidation sequence. The only validation-only exception is one ordinary
+  `NEW_BATTLE` that a profile-declared exclusive-validation receipt claims
+  atomically before the verified Home tap. Only that same live runtime and ADB
+  target may Surrender it, only while fresh evidence still excludes Tournament
+  identity, and only as part of its bounded return-to-Home cleanup. A crash,
+  owner mismatch, resumed battle, or ambiguous identity fails closed without
+  Surrender. Leaving through the verified Exit Battle → Go Home route is
+  allowed only when the task authorizes it and the active run remains
   resumable.
 - Before any live action, inspect the control file, lock/PID, ADB target,
   current screen, and recent `logs/actions.log` entries.

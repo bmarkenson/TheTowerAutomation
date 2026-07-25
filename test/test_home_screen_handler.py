@@ -8,7 +8,10 @@ from core.input import TapVerification
 from core.matcher import get_match
 from core.battle_lifecycle import HomeBattleControl
 from core.home_battle import HomeBattleEvidence, detect_home_battle_control
-from handlers.home_screen_handler import _tap_verified_home_battle_control
+from handlers.home_screen_handler import (
+    _tap_verified_home_battle_control,
+    tap_verified_new_battle,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -61,6 +64,32 @@ def test_home_battle_fallback_refuses_unknown_screen():
         patch("handlers.home_screen_handler.safe_tap") as tap,
     ):
         assert not _tap_verified_home_battle_control()
+
+    tap.assert_not_called()
+
+
+def test_validation_new_battle_tap_refuses_resume_control():
+    with (
+        patch(
+            "handlers.home_screen_handler.capture_adb_screenshot",
+            return_value=_screenshot(),
+        ),
+        patch(
+            "handlers.home_screen_handler.detect_state_and_overlays",
+            return_value={"state": "HOME_SCREEN"},
+        ),
+        patch(
+            "handlers.home_screen_handler.detect_home_battle_control",
+            return_value=HomeBattleEvidence(
+                HomeBattleControl.RESUME_BATTLE,
+                "ocr",
+                96.0,
+                "RESUME BATTLE",
+            ),
+        ),
+        patch("handlers.home_screen_handler.safe_tap") as tap,
+    ):
+        assert not tap_verified_new_battle()
 
     tap.assert_not_called()
 

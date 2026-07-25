@@ -18,12 +18,20 @@ from core.gate_decisions import (
     STARTUP_GATE_CHECK_LABELS,
     VALID_GATE_DECISION_ACTIONS,
 )
+from core.exclusive_validation import (
+    exclusive_validation_definition_for_strategy,
+)
 
 
 VALID_STATES = frozenset({"RUNNING", "PAUSED", "STOPPED"})
 VALID_MODES = frozenset({"RETRY", "WAIT", "HOME"})
 STRATEGY_APPLY_MODES = frozenset({"next_boundary", "active_battle"})
 GATE_DECISION_STATUSES = frozenset({"pending", "resolved", "consumed"})
+EXCLUSIVE_VALIDATION_STATUSES = frozenset(
+    {"pending", "claimed", "running", "cleanup", "result"}
+)
+EXCLUSIVE_VALIDATION_OUTCOMES = frozenset({"ready", "failed", "cancelled"})
+_MAX_EXCLUSIVE_VALIDATION_RECEIPTS = 12
 
 
 class ControlDirectiveError(RuntimeError):
@@ -79,6 +87,9 @@ class ControlDirectiveStore:
             "gate_decision": _valid_gate_decision(data.get("gate_decision")),
             "startup_gate_waivers": _valid_startup_gate_waivers(
                 data.get("startup_gate_waivers")
+            ),
+            "exclusive_validation": _valid_exclusive_validation_ledger(
+                data.get("exclusive_validation")
             ),
             "path": str(self.path),
             "exists": self.path.exists(),
@@ -185,22 +196,344 @@ class ControlDirectiveStore:
                 "Strategy apply mode must be one of: "
                 + ", ".join(sorted(STRATEGY_APPLY_MODES))
             )
+        validation_definition = (
+            exclusive_validation_definition_for_strategy(normalized)
+        )
 
         def mutate(data: dict[str, Any]) -> dict[str, Any]:
             timestamp = _updated_at()
             previous = _valid_strategy(data.get("strategy"))
+            strategy_request_id = uuid4().hex
             data["strategy"] = normalized
             data["strategy_apply_mode"] = normalized_apply_mode
             if previous != normalized:
                 data["startup_gate_waivers"] = {}
             data["updated_at"] = timestamp
             data["strategy_updated_at"] = timestamp
-            data["strategy_request_id"] = uuid4().hex
+            data["strategy_request_id"] = strategy_request_id
+            ledger = _valid_exclusive_validation_ledger(
+                data.get("exclusive_validation")
+            )
+            receipts = dict(ledger["receipts"])
+            if validation_definition is not None:
+                for request_id, receipt in list(receipts.items()):
+                    if receipt["status"] != "pending":
+                        continue
+                    receipts[request_id] = {
+                        **receipt,
+                        "status": "result",
+                        "outcome": "cancelled",
+                        "reason": (
+                            f"superseded by explicit {normalized} strategy request"
+                        ),
+                        "completed_at": timestamp,
+                        "updated_at": timestamp,
+                    }
+                validation_request_id = uuid4().hex
+                receipts[validation_request_id] = {
+                    "request_id": validation_request_id,
+                    "strategy_request_id": strategy_request_id,
+                    "strategy": normalized,
+                    "configuration_fingerprint": (
+                        validation_definition.configuration_fingerprint
+                    ),
+                    "battle_kind": validation_definition.battle_kind,
+                    "status": "pending",
+                    "created_at": timestamp,
+                    "updated_at": timestamp,
+                }
+                ledger["current_request_id"] = validation_request_id
+            else:
+                for request_id, receipt in list(receipts.items()):
+                    if receipt["status"] != "pending":
+                        continue
+                    receipts[request_id] = {
+                        **receipt,
+                        "status": "result",
+                        "outcome": "cancelled",
+                        "reason": (
+                            f"superseded by explicit {normalized} strategy request"
+                        ),
+                        "completed_at": timestamp,
+                        "updated_at": timestamp,
+                    }
+                    ledger["current_request_id"] = request_id
+            ledger["receipts"] = _prune_exclusive_validation_receipts(receipts)
+            data["exclusive_validation"] = ledger
             if source:
                 data["updated_by"] = source
             return data
 
         return self.update(mutate)
+
+    def claim_exclusive_validation(
+        self,
+        *,
+        strategy_request_id: str,
+        configuration_fingerprint: str,
+        owner: Mapping[str, Any],
+        timeout_seconds: float,
+    ) -> Optional[dict[str, Any]]:
+        """Atomically own one pending validation before its Battle tap."""
+
+        normalized_owner = _valid_exclusive_validation_owner(owner)
+        if normalized_owner is None:
+            raise ValueError("exclusive validation owner is incomplete")
+        request_identity = _bounded_text(strategy_request_id, 100)
+        fingerprint = _bounded_text(configuration_fingerprint, 100)
+        try:
+            timeout = float(timeout_seconds)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("exclusive validation timeout must be numeric") from exc
+        if not request_identity or len(fingerprint) != 64:
+            raise ValueError(
+                "exclusive validation requires a strategy request and fingerprint"
+            )
+        if not 30.0 <= timeout <= 900.0:
+            raise ValueError(
+                "exclusive validation timeout must be between 30 and 900 seconds"
+            )
+
+        with self._lock():
+            current = self._read_unlocked()
+            ledger = _valid_exclusive_validation_ledger(
+                current.get("exclusive_validation")
+            )
+            receipts = dict(ledger["receipts"])
+            receipt = next(
+                (
+                    dict(candidate)
+                    for candidate in receipts.values()
+                    if candidate["strategy_request_id"] == request_identity
+                ),
+                None,
+            )
+            if (
+                receipt is None
+                or receipt["status"] != "pending"
+                or receipt["configuration_fingerprint"] != fingerprint
+            ):
+                return None
+            if any(
+                candidate["status"] in {"claimed", "running", "cleanup"}
+                for candidate in receipts.values()
+                if candidate["request_id"] != receipt["request_id"]
+            ):
+                return None
+            timestamp = _updated_at()
+            now = datetime.now().timestamp()
+            receipt.update(
+                {
+                    "status": "claimed",
+                    "owner": normalized_owner,
+                    "claimed_at": timestamp,
+                    "deadline_at": now + timeout,
+                    "updated_at": timestamp,
+                }
+            )
+            receipts[receipt["request_id"]] = receipt
+            ledger["receipts"] = receipts
+            if ledger.get("current_request_id") not in receipts:
+                ledger["current_request_id"] = receipt["request_id"]
+            current["exclusive_validation"] = ledger
+            current["updated_at"] = timestamp
+            current["updated_by"] = "runtime-exclusive-validation"
+            self._write_unlocked(current)
+            return dict(receipt)
+
+    def mark_exclusive_validation_running(
+        self,
+        request_id: str,
+        *,
+        owner: Mapping[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        """Record the owned NEW_BATTLE transition after fresh RUNNING evidence."""
+
+        return self._transition_owned_exclusive_validation(
+            request_id,
+            owner=owner,
+            expected_status="claimed",
+            status="running",
+            fields={"started_at": _updated_at()},
+        )
+
+    def begin_exclusive_validation_cleanup(
+        self,
+        request_id: str,
+        *,
+        owner: Mapping[str, Any],
+        outcome: str,
+        reason: str,
+    ) -> Optional[dict[str, Any]]:
+        """Commit the intended result before the owned Surrender sequence."""
+
+        normalized_outcome = str(outcome or "").strip().lower()
+        if normalized_outcome not in {"ready", "failed"}:
+            raise ValueError("validation cleanup outcome must be ready or failed")
+        return self._transition_owned_exclusive_validation(
+            request_id,
+            owner=owner,
+            expected_status="running",
+            status="cleanup",
+            fields={
+                "pending_outcome": normalized_outcome,
+                "pending_reason": _bounded_text(reason, 1000),
+                "cleanup_started_at": _updated_at(),
+            },
+        )
+
+    def finish_exclusive_validation(
+        self,
+        request_id: str,
+        *,
+        outcome: str,
+        reason: str,
+        owner: Optional[Mapping[str, Any]] = None,
+        allowed_statuses: Sequence[str] = ("cleanup",),
+    ) -> Optional[dict[str, Any]]:
+        """Persist a conclusive result without broadening battle ownership."""
+
+        normalized_outcome = str(outcome or "").strip().lower()
+        if normalized_outcome not in EXCLUSIVE_VALIDATION_OUTCOMES:
+            raise ValueError(
+                "exclusive validation outcome must be ready, failed, or cancelled"
+            )
+        allowed = {
+            str(status or "").strip().lower()
+            for status in allowed_statuses
+            if str(status or "").strip().lower()
+            in EXCLUSIVE_VALIDATION_STATUSES
+        }
+        if not allowed:
+            raise ValueError("exclusive validation result requires an allowed status")
+        normalized_owner = (
+            _valid_exclusive_validation_owner(owner)
+            if owner is not None
+            else None
+        )
+        if owner is not None and normalized_owner is None:
+            raise ValueError("exclusive validation owner is incomplete")
+
+        with self._lock():
+            current = self._read_unlocked()
+            ledger = _valid_exclusive_validation_ledger(
+                current.get("exclusive_validation")
+            )
+            receipts = dict(ledger["receipts"])
+            receipt = receipts.get(str(request_id))
+            if receipt is None or receipt["status"] not in allowed:
+                return None
+            if receipt["status"] != "pending":
+                if normalized_owner is None or receipt.get("owner") != normalized_owner:
+                    return None
+            timestamp = _updated_at()
+            completed = {
+                **receipt,
+                "status": "result",
+                "outcome": normalized_outcome,
+                "reason": _bounded_text(reason, 1000),
+                "completed_at": timestamp,
+                "updated_at": timestamp,
+            }
+            completed.pop("pending_outcome", None)
+            completed.pop("pending_reason", None)
+            receipts[completed["request_id"]] = completed
+            ledger["receipts"] = _prune_exclusive_validation_receipts(receipts)
+            if ledger.get("current_request_id") not in ledger["receipts"]:
+                ledger["current_request_id"] = completed["request_id"]
+            current["exclusive_validation"] = ledger
+            current["updated_at"] = timestamp
+            current["updated_by"] = "runtime-exclusive-validation"
+            self._write_unlocked(current)
+            return dict(completed)
+
+    def fail_orphaned_exclusive_validation(
+        self,
+        request_id: str,
+        *,
+        current_owner: Mapping[str, Any],
+        reason: str,
+    ) -> Optional[dict[str, Any]]:
+        """Fail a prior runtime's active receipt without touching its battle."""
+
+        normalized_owner = _valid_exclusive_validation_owner(current_owner)
+        if normalized_owner is None:
+            raise ValueError("exclusive validation owner is incomplete")
+        with self._lock():
+            current = self._read_unlocked()
+            ledger = _valid_exclusive_validation_ledger(
+                current.get("exclusive_validation")
+            )
+            receipts = dict(ledger["receipts"])
+            receipt = receipts.get(str(request_id))
+            if (
+                receipt is None
+                or receipt["status"] not in {"claimed", "running", "cleanup"}
+                or receipt.get("owner") == normalized_owner
+            ):
+                return None
+            timestamp = _updated_at()
+            failed = {
+                **receipt,
+                "status": "result",
+                "outcome": "failed",
+                "reason": _bounded_text(reason, 1000),
+                "completed_at": timestamp,
+                "updated_at": timestamp,
+            }
+            failed.pop("pending_outcome", None)
+            failed.pop("pending_reason", None)
+            receipts[failed["request_id"]] = failed
+            ledger["receipts"] = _prune_exclusive_validation_receipts(receipts)
+            if ledger.get("current_request_id") not in ledger["receipts"]:
+                ledger["current_request_id"] = failed["request_id"]
+            current["exclusive_validation"] = ledger
+            current["updated_at"] = timestamp
+            current["updated_by"] = "runtime-exclusive-validation-orphan"
+            self._write_unlocked(current)
+            return dict(failed)
+
+    def _transition_owned_exclusive_validation(
+        self,
+        request_id: str,
+        *,
+        owner: Mapping[str, Any],
+        expected_status: str,
+        status: str,
+        fields: Mapping[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        normalized_owner = _valid_exclusive_validation_owner(owner)
+        if normalized_owner is None:
+            raise ValueError("exclusive validation owner is incomplete")
+        with self._lock():
+            current = self._read_unlocked()
+            ledger = _valid_exclusive_validation_ledger(
+                current.get("exclusive_validation")
+            )
+            receipts = dict(ledger["receipts"])
+            receipt = receipts.get(str(request_id))
+            if (
+                receipt is None
+                or receipt["status"] != expected_status
+                or receipt.get("owner") != normalized_owner
+            ):
+                return None
+            timestamp = _updated_at()
+            receipt = {
+                **receipt,
+                **dict(fields),
+                "status": status,
+                "updated_at": timestamp,
+            }
+            receipts[receipt["request_id"]] = receipt
+            ledger["receipts"] = receipts
+            if ledger.get("current_request_id") not in receipts:
+                ledger["current_request_id"] = receipt["request_id"]
+            current["exclusive_validation"] = ledger
+            current["updated_at"] = timestamp
+            current["updated_by"] = "runtime-exclusive-validation"
+            self._write_unlocked(current)
+            return dict(receipt)
 
     def publish_gate_decision(
         self,
@@ -748,6 +1081,150 @@ def _valid_startup_gate_waivers(value: object) -> dict[str, dict[str, Any]]:
     return waivers
 
 
+def _valid_exclusive_validation_owner(
+    value: object,
+) -> Optional[dict[str, Any]]:
+    if not isinstance(value, Mapping):
+        return None
+    runtime_id = _bounded_text(value.get("runtime_id"), 100)
+    adb_target = _bounded_text(value.get("adb_target"), 200)
+    pid = value.get("pid")
+    if (
+        not runtime_id
+        or not adb_target
+        or isinstance(pid, bool)
+        or not isinstance(pid, int)
+        or pid <= 0
+    ):
+        return None
+    return {
+        "runtime_id": runtime_id,
+        "pid": pid,
+        "adb_target": adb_target,
+    }
+
+
+def _valid_exclusive_validation_receipt(
+    value: object,
+) -> Optional[dict[str, Any]]:
+    if not isinstance(value, Mapping):
+        return None
+    request_id = _bounded_text(value.get("request_id"), 100)
+    strategy_request_id = _bounded_text(value.get("strategy_request_id"), 100)
+    strategy = _valid_strategy(value.get("strategy"))
+    fingerprint = _bounded_text(value.get("configuration_fingerprint"), 100)
+    battle_kind = _bounded_text(value.get("battle_kind"), 100).lower()
+    status = _bounded_text(value.get("status"), 50).lower()
+    if (
+        not request_id
+        or not strategy_request_id
+        or strategy is None
+        or len(fingerprint) != 64
+        or battle_kind != "ordinary_new_battle"
+        or status not in EXCLUSIVE_VALIDATION_STATUSES
+    ):
+        return None
+    receipt = dict(value)
+    receipt.update(
+        {
+            "request_id": request_id,
+            "strategy_request_id": strategy_request_id,
+            "strategy": strategy,
+            "configuration_fingerprint": fingerprint,
+            "battle_kind": battle_kind,
+            "status": status,
+        }
+    )
+    if status in {"claimed", "running", "cleanup"}:
+        owner = _valid_exclusive_validation_owner(value.get("owner"))
+        deadline_at = _finite_number(value.get("deadline_at"))
+        if owner is None or deadline_at is None:
+            return None
+        receipt["owner"] = owner
+        receipt["deadline_at"] = deadline_at
+    if status == "cleanup":
+        pending_outcome = _bounded_text(
+            value.get("pending_outcome"), 50
+        ).lower()
+        if pending_outcome not in {"ready", "failed"}:
+            return None
+        receipt["pending_outcome"] = pending_outcome
+        receipt["pending_reason"] = _bounded_text(
+            value.get("pending_reason"), 1000
+        )
+    if status == "result":
+        outcome = _bounded_text(value.get("outcome"), 50).lower()
+        if outcome not in EXCLUSIVE_VALIDATION_OUTCOMES:
+            return None
+        receipt["outcome"] = outcome
+        receipt["reason"] = _bounded_text(value.get("reason"), 1000)
+    return receipt
+
+
+def _valid_exclusive_validation_ledger(value: object) -> dict[str, Any]:
+    receipts: dict[str, dict[str, Any]] = {}
+    current_request_id = ""
+    if isinstance(value, Mapping):
+        raw_receipts = value.get("receipts")
+        if isinstance(raw_receipts, Mapping):
+            for raw_id, raw_receipt in raw_receipts.items():
+                receipt = _valid_exclusive_validation_receipt(raw_receipt)
+                if receipt is None or receipt["request_id"] != str(raw_id):
+                    continue
+                receipts[receipt["request_id"]] = receipt
+        candidate = _bounded_text(value.get("current_request_id"), 100)
+        if candidate in receipts:
+            current_request_id = candidate
+    if not current_request_id and receipts:
+        current_request_id = max(
+            receipts,
+            key=lambda request_id: str(
+                receipts[request_id].get("updated_at")
+                or receipts[request_id].get("created_at")
+                or ""
+            ),
+        )
+    return {
+        "schema_version": 1,
+        "current_request_id": current_request_id or None,
+        "receipts": receipts,
+    }
+
+
+def _prune_exclusive_validation_receipts(
+    receipts: Mapping[str, Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    copied = {
+        str(request_id): dict(receipt)
+        for request_id, receipt in receipts.items()
+    }
+    if len(copied) <= _MAX_EXCLUSIVE_VALIDATION_RECEIPTS:
+        return copied
+    active = {
+        request_id: receipt
+        for request_id, receipt in copied.items()
+        if receipt.get("status") != "result"
+    }
+    completed = sorted(
+        (
+            (request_id, receipt)
+            for request_id, receipt in copied.items()
+            if receipt.get("status") == "result"
+        ),
+        key=lambda item: str(
+            item[1].get("completed_at")
+            or item[1].get("updated_at")
+            or ""
+        ),
+        reverse=True,
+    )
+    remaining = max(0, _MAX_EXCLUSIVE_VALIDATION_RECEIPTS - len(active))
+    return {
+        **active,
+        **dict(completed[:remaining]),
+    }
+
+
 def _bounded_text(value: object, limit: int) -> str:
     return str(value or "").strip()[:limit]
 
@@ -759,6 +1236,8 @@ def _updated_at() -> str:
 __all__ = [
     "ControlDirectiveError",
     "ControlDirectiveStore",
+    "EXCLUSIVE_VALIDATION_OUTCOMES",
+    "EXCLUSIVE_VALIDATION_STATUSES",
     "GATE_DECISION_STATUSES",
     "VALID_MODES",
     "VALID_STATES",

@@ -556,6 +556,26 @@ def test_start_persists_selected_strategy_before_process_reaches_home(tmp_path):
     }
 
 
+def test_start_with_saved_tournament_creates_fresh_validation_request(tmp_path):
+    manager = FakeManager()
+    manager.strategy = "tournament"
+    service = _service(tmp_path, manager)
+
+    service.apply_process_action({"action": "start", "run_state": "PAUSED"})
+    first = service.control_store.status()["exclusive_validation"]
+    first_request_id = first["current_request_id"]
+    assert first["receipts"][first_request_id]["status"] == "pending"
+
+    service.apply_process_action({"action": "stop"})
+    service.apply_process_action({"action": "start", "run_state": "PAUSED"})
+    second = service.control_store.status()["exclusive_validation"]
+    second_request_id = second["current_request_id"]
+
+    assert second_request_id != first_request_id
+    assert second["receipts"][second_request_id]["status"] == "pending"
+    assert manager.calls == ["start", "stop", "start"]
+
+
 @pytest.mark.parametrize("policy", ["", "later", 1, True])
 def test_start_rejects_invalid_startup_gate_policy(tmp_path, policy):
     manager = FakeManager()

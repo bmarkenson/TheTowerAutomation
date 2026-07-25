@@ -74,44 +74,66 @@ EHLS/EALS purchase remains incomplete; attachment and non-Farm profiles may
 correct speed as soon as their runtime policy grants the handler action
 authority. Pause is rechecked before every speed tap.
 
-## Tournament observer profile
+## Tournament exclusive validation and observer profile
 
-`Tournament` is a single-battle observer profile that becomes passive after
-its declared preflight corrections. Its generated plan owns the Tournament
-Cards, Tourney Workshop, Amplify Bots, Attack/Ally/Scout Guardians,
-Tournament/Milestone modules, Poison Swamp Stun `on`, Damage Slider `100%`,
-all nine Ultimate Weapons, and Spotlight missiles. Tournament battles have no
-Perks, so Perks are not part of this contract.
+`Tournament` owns a one-shot exclusive validation before it becomes a passive
+single-battle observer. Its generated plan declares Tournament Cards, Tourney
+Workshop, Amplify Bots, Attack/Ally/Scout Guardians, Tournament/Milestone
+modules, Poison Swamp Stun `on`, Damage Slider `100%`, all nine Ultimate
+Weapons, and Spotlight Missiles. Tournament battles have no Perks, so Perks
+and Auto Perks are outside this contract.
 
-At verified Home `NEW_BATTLE`, the profile's no-battle route selects Tournament
-Cards, Tourney Workshop, Amplify Bots, Attack/Ally/Scout Guardians, and the
-Tournament module loadout. It also opens Poison Swamp through Workshop Ultimate
-Upgrades and verifies or corrects Stun to `on`. The evidence is retained for
-session preflight, and the runtime deliberately leaves Tournament entry to the
-operator instead of pressing the normal Battle control. Damage Slider remains
-explicitly deferred at Home because its control is battle-only. Session
-preflight first enforces Damage Slider `100%`, then checks the nine primary
-Ultimate Weapon toggles and Spotlight missiles from the active battle.
+Every explicit Tournament selection or managed process Start creates a durable
+validation request tied to the strategy request identity and the complete
+generated-plan fingerprint. A pending request is one-use authorization, not a
+recurring strategy permission. An unattended restart cannot recreate it. The
+receipt records `pending`, `claimed`, `running`, `cleanup`, and terminal result
+states, with the runtime ID, PID, ADB target, and deadline attached before the
+first battle input.
 
-Without Home boundary evidence, including attachment to an already-running
-Tournament, the guarded compatibility route inspects Cards, Ultimate Weapons,
-Modules, Bots, and Guardians in battle. Workshop is the only check that takes
-resumable Exit Battle → Go Home. It may enforce only the two declared controls:
-Damage Slider `100%` and Poison Swamp Stun `on`. It never selects a preset or
-equips a loadout and must verify that Resume returns to the same Tournament.
+At verified Home `NEW_BATTLE`, the profile first completes every declared
+no-battle check: Tournament Cards, Tourney Workshop, Amplify Bots,
+Attack/Ally/Scout Guardians, the Tournament module loadout, and Poison Swamp
+Stun `on`. Damage Slider and Ultimate Weapon enablement remain explicitly
+deferred because their authoritative controls are battle-only. Exclusive
+validation does not claim staged one-run waivers; a failed Home check consumes
+the request with its reason and never starts a battle. Once Home preflight is
+complete, the runtime atomically claims the matching receipt and then uses a
+fresh verified control to start exactly one ordinary `NEW_BATTLE`. It rejects
+Home `RESUME_BATTLE` and never opens the Tournament screen or starts a
+Tournament battle.
 
-Readiness requires both a successfully enforced Damage Slider and one
-conclusive configuration-validation attempt. After that, the Tournament runtime
-policy grants action authority only to game-speed maintenance, ad-gem
-collection, and terminal-result handling. An ad gem starts the same bounded
-floating-gem sweep used by normal battles; the Tournament policy does not run
-an independent or continuous floating-gem handler. A configuration mismatch is
-retained as session evidence but cannot request Home repair or block result
-capture. Attached-run mismatches publish a non-blocking operator decision:
-pause for manual changes, retry with fresh evidence, or continue observation
-with a run-scoped waiver for the displayed check. The profile does not buy
-upgrades, Surrender, auto-return Home, enter a Tournament, or start a normal
-battle.
+The disposable ordinary battle bypasses EHLS/EALS initialization without
+seeding either completion flag. It does not toggle Auto Perks. Session
+preflight enforces Damage Slider `100%`, then verifies all configured Ultimate
+Weapon primary toggles and Spotlight Missiles. A conclusive pass or failure,
+or the bounded timeout, moves the same receipt to cleanup before any terminal
+input. Surrender is allowed only while the current runtime/ADB owner still
+matches and fresh `RUNNING` evidence excludes Tournament identity. Cleanup
+must reach Game Over and verified Home `NEW_BATTLE` before the receipt reports
+ready or the failure reason. Process replacement, owner mismatch, Tournament
+identity, a resumed/pre-existing battle, or an ambiguous transition fails
+closed without inheriting Surrender authority.
+
+After a ready result, the operator enters and starts the actual Tournament
+manually. That genuine run performs the standard run-initialization route at
+its fresh boundary, maxing EHLS first and EALS second. It then retains the
+validation battle's session evidence and becomes passive except for game-speed
+maintenance, ad-gem collection, and terminal-result handling. An ad gem starts
+the same bounded floating-gem sweep used by normal battles; the profile does
+not run an independent or continuous floating-gem handler.
+
+Attachment to an already-running Tournament remains observer-only and does
+not use the exclusive validation receipt. Without Home boundary evidence, the
+guarded compatibility route inspects Cards, Ultimate Weapons, Modules, Bots,
+and Guardians in battle. Workshop is the only check that takes resumable Exit
+Battle → Go Home. It may enforce only Damage Slider `100%` and Poison Swamp
+Stun `on`; it never selects a preset or equips a loadout and must verify that
+Resume returns to the same Tournament. A mismatch is retained as session
+evidence but cannot request Home repair or block result capture. It publishes
+a non-blocking operator decision to pause for manual changes, retry with fresh
+evidence, or continue observation with a run-scoped waiver. This attachment
+path never gains Surrender authority.
 
 In-battle side-menu destinations and Event/Guild tabs require visible template
 matches and tap the matched bounding box. Their static coordinates are not

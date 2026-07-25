@@ -21,17 +21,21 @@ from core.battle_classification import (
 )
 from core.control_directives import ControlDirectiveError, ControlDirectiveStore
 from core.gate_decisions import startup_gate_context_for_strategy
+from core.exclusive_validation import (
+    exclusive_validation_definition_for_strategy,
+)
 
 
 MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 5
+CONTROL_SURFACE_REVISION = 6
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
     "attached_automation_restart",
+    "exclusive_strategy_validation_status",
     "explicit_strategy_disposition",
     "selected_strategy_process_start",
 )
@@ -128,6 +132,11 @@ class ControlSurfaceService:
                 "strategy_request_id": None,
                 "gate_decision": None,
                 "startup_gate_waivers": {},
+                "exclusive_validation": {
+                    "schema_version": 1,
+                    "current_request_id": None,
+                    "receipts": {},
+                },
                 "exists": self.control_path.exists(),
             }
         control["path"] = self._display_path(self.control_path)
@@ -401,6 +410,24 @@ class ControlSurfaceService:
                             apply_mode="next_boundary",
                             source="control-surface-process-start",
                         )
+                    else:
+                        effective_strategy = str(
+                            before.get("strategy") or ""
+                        ).strip().lower()
+                        if (
+                            effective_strategy in CONFIGURABLE_STRATEGIES
+                            and exclusive_validation_definition_for_strategy(
+                                effective_strategy
+                            )
+                            is not None
+                        ):
+                            # Pressing Start is an explicit authorization even
+                            # when a fallback client reuses the saved strategy.
+                            self.control_store.set_strategy(
+                                effective_strategy,
+                                apply_mode="next_boundary",
+                                source="control-surface-process-start",
+                            )
                     # A new process always crosses its startup boundary paused.
                     # RUNNING is persisted only after systemd proves it active.
                     self.control_store.set_state(
@@ -411,7 +438,11 @@ class ControlSurfaceService:
                     requested_state,
                     source="control-surface-process-start",
                 )
-            except (AutomationProcessError, ControlDirectiveError) as exc:
+            except (
+                AutomationProcessError,
+                ControlDirectiveError,
+                ValueError,
+            ) as exc:
                 after = manager.status()
                 if not after.get("active"):
                     try:
@@ -526,7 +557,11 @@ class ControlSurfaceService:
                         apply_mode=apply_mode,
                         source="control-surface-strategy",
                     )
-                except (AutomationProcessError, ControlDirectiveError) as exc:
+                except (
+                    AutomationProcessError,
+                    ControlDirectiveError,
+                    ValueError,
+                ) as exc:
                     self._append_audit(f"Failed to configure strategy: {exc}")
                     raise ControlSurfaceRequestError(str(exc), status=409) from exc
                 strategy = strategy.strip().lower()
