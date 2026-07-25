@@ -28,6 +28,13 @@ PERK_TEXT_X1 = 270
 PERK_TEXT_X2 = 950
 MIN_FULL_ROW_HEIGHT = 150
 DEFAULT_CONFIDENCE_THRESHOLD = 80.0
+CONFIGURATION_ROW_X1 = 239
+CONFIGURATION_ROW_X2 = 840
+CONFIGURATION_TEXT_X1 = 400
+CONFIGURATION_SCAN_TOP = 410
+CONFIGURATION_SCAN_BOTTOM = 1780
+CONFIGURATION_MIN_ROW_HEIGHT = 120
+CONFIGURATION_MIN_BACKGROUND_VALUE = 55
 
 
 def ocr_perk_rows(
@@ -59,6 +66,100 @@ def ocr_perk_rows(
             }
         )
     return rows
+
+
+def ocr_perk_configuration_rows(
+    frame: Frame,
+    *,
+    text_fn: Optional[PerkTextFn] = None,
+) -> list[dict[str, Any]]:
+    """OCR Home-configuration rows, including low-saturation blue tiles.
+
+    The in-battle scanner intentionally requires saturated perk colors. Home
+    Ban Perks and Auto Pick lists also contain pale blue rows, so their row
+    geometry is recovered from the bright center tile instead.
+    """
+
+    recognize = text_fn or _ocr_perk_text
+    rows = []
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    for top, bottom in _perk_configuration_row_regions(frame):
+        raw_text, confidence, text_candidates = _recognize_configuration_text(
+            frame,
+            top,
+            bottom,
+            recognize,
+        )
+        raw_text = " ".join(str(raw_text or "").split())
+        if not raw_text:
+            continue
+        display_text = _normalize_perk_ocr(raw_text)
+        background = hsv[
+            top : bottom + 1,
+            CONFIGURATION_ROW_X1:CONFIGURATION_ROW_X2,
+            2,
+        ]
+        rows.append(
+            {
+                "top": top,
+                "bottom": bottom,
+                "text_raw": raw_text,
+                "display_text": display_text,
+                "key": _slug(display_text),
+                "confidence": round(float(confidence), 1),
+                "background_value_median": float(np.median(background)),
+                "text_candidates": text_candidates,
+            }
+        )
+    return rows
+
+
+def ocr_perk_configuration_row_near(
+    frame: Frame,
+    y: int,
+    *,
+    tolerance: int = 100,
+    text_fn: Optional[PerkTextFn] = None,
+) -> Optional[dict[str, Any]]:
+    """OCR only the configuration row nearest one expected vertical center."""
+
+    regions = _perk_configuration_row_regions(frame)
+    if not regions:
+        return None
+    target = int(y)
+    top, bottom = min(
+        regions,
+        key=lambda region: abs(((region[0] + region[1]) // 2) - target),
+    )
+    if abs(((top + bottom) // 2) - target) > max(0, int(tolerance)):
+        return None
+    recognize = text_fn or _ocr_perk_text
+    raw_text, confidence, text_candidates = _recognize_configuration_text(
+        frame,
+        top,
+        bottom,
+        recognize,
+    )
+    raw_text = " ".join(str(raw_text or "").split())
+    if not raw_text:
+        return None
+    display_text = _normalize_perk_ocr(raw_text)
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    background = hsv[
+        top : bottom + 1,
+        CONFIGURATION_ROW_X1:CONFIGURATION_ROW_X2,
+        2,
+    ]
+    return {
+        "top": top,
+        "bottom": bottom,
+        "text_raw": raw_text,
+        "display_text": display_text,
+        "key": _slug(display_text),
+        "confidence": round(float(confidence), 1),
+        "background_value_median": float(np.median(background)),
+        "text_candidates": text_candidates,
+    }
 
 
 def ocr_selected_perks(
@@ -219,6 +320,80 @@ def _perk_row_regions(frame: Frame) -> list[tuple[int, int]]:
     ]
 
 
+def _perk_configuration_row_regions(frame: Frame) -> list[tuple[int, int]]:
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    roi = hsv[
+        CONFIGURATION_SCAN_TOP:CONFIGURATION_SCAN_BOTTOM,
+        CONFIGURATION_ROW_X1:CONFIGURATION_ROW_X2,
+        2,
+    ]
+    active = (
+        roi > CONFIGURATION_MIN_BACKGROUND_VALUE
+    ).mean(axis=1) > 0.70
+    indices = np.flatnonzero(active)
+    if len(indices) == 0:
+        return []
+
+    regions: list[tuple[int, int]] = []
+    start = previous = int(indices[0])
+    for raw_index in indices[1:]:
+        index = int(raw_index)
+        if index > previous + 1:
+            regions.append(
+                (
+                    start + CONFIGURATION_SCAN_TOP,
+                    previous + CONFIGURATION_SCAN_TOP,
+                )
+            )
+            start = index
+        previous = index
+    regions.append(
+        (
+            start + CONFIGURATION_SCAN_TOP,
+            previous + CONFIGURATION_SCAN_TOP,
+        )
+    )
+    return [
+        (top, bottom)
+        for top, bottom in regions
+        if bottom - top + 1 >= CONFIGURATION_MIN_ROW_HEIGHT
+    ]
+
+
+def _recognize_configuration_text(
+    frame: Frame,
+    top: int,
+    bottom: int,
+    recognize: PerkTextFn,
+) -> tuple[str, float, list[dict[str, Any]]]:
+    candidates = []
+    for x1 in (PERK_TEXT_X1, CONFIGURATION_TEXT_X1):
+        raw_text, confidence = recognize(
+            frame[top : bottom + 1, x1:CONFIGURATION_ROW_X2]
+        )
+        normalized = " ".join(str(raw_text or "").split())
+        candidates.append(
+            {
+                "text_raw": normalized,
+                "display_text": _normalize_perk_ocr(normalized),
+                "confidence": round(float(confidence), 1),
+                "text_x1": x1,
+            }
+        )
+    best = max(
+        candidates,
+        key=lambda item: (
+            bool(item["text_raw"]),
+            float(item["confidence"]),
+        ),
+    )
+    return (
+        str(best["text_raw"]),
+        float(best["confidence"]),
+        candidates,
+    )
+
+
 def _perk_color(frame: Frame, top: int, bottom: int) -> str:
     hsv = cv2.cvtColor(frame[top : bottom + 1, PERKS_X1:PERKS_X2], cv2.COLOR_BGR2HSV)
     colored_hues = hsv[:, :, 0][(hsv[:, :, 1] > 50) & (hsv[:, :, 2] > 70)]
@@ -296,6 +471,8 @@ def _slug(text: str) -> str:
 
 __all__ = [
     "DEFAULT_CONFIDENCE_THRESHOLD",
+    "ocr_perk_configuration_row_near",
+    "ocr_perk_configuration_rows",
     "ocr_perk_rows",
     "ocr_selected_perks",
 ]

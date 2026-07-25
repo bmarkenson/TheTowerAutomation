@@ -3,7 +3,14 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from core.perk_configuration import parse_perk_configuration_selection
+from core.battle_perks import ocr_perk_configuration_rows
+from core.perk_configuration import (
+    FARM_AUTO_PICK_ORDER,
+    FARM_PERK_BANS,
+    evaluate_profile_perk_configuration,
+    parse_perk_configuration_selection,
+    semantic_perk_entry,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -97,3 +104,108 @@ def test_incomplete_capture_retains_rows_but_is_not_authoritative():
     assert result["selected"]
     assert result["quality"]["valid"] is False
     assert "incomplete" in result["quality"]["warnings"][0]
+
+
+def test_configuration_row_scanner_includes_pale_blue_home_rows():
+    frame = cv2.imread(str(FIXTURE))
+
+    rows = ocr_perk_configuration_rows(frame)
+
+    assert len(rows) >= 6
+    assert semantic_perk_entry(rows[0])["key"] == (
+        "perk_wave_requirement"
+    )
+    assert any(
+        semantic_perk_entry(row)["key"] == "coins_bonus"
+        for row in rows
+    )
+
+
+def test_farm_perk_configuration_requires_coin_tradeoff_at_rank_three():
+    frames = [
+        np.full((4, 4, 3), marker, dtype=np.uint8)
+        for marker in (1, 2, 3, 4)
+    ]
+    labels = {
+        "cash_tradeoff": "x13.20 cash per wave, but enemy kills don't give cash",
+        "enemies_damage_tradeoff": (
+            "Enemies damage -55.0%, but tower damage -50%"
+        ),
+        "lifesteal_knockback_tradeoff": (
+            "Lifesteal x2.75, but knockback force -70%"
+        ),
+        "interest": "Interest x1.88",
+        "defense_absolute": "x1.44 Defense Absolute",
+        "empty_slot": "Empty Slot",
+        "perk_wave_requirement": "Perk wave requirement -25.00%",
+        "game_speed": "Increase max game speed by +1.25",
+        "coin_tradeoff": "x1.98 coins, but tower max health -70.0%",
+        "golden_tower_bonus": "Golden tower bonus x1.5",
+        "black_hole_duration": "Black Hole duration +12.0s",
+        "death_wave_quantity": "+1 wave on death wave",
+        "coins_bonus": "x1.44 all coins bonuses",
+        "free_upgrade_chance": "Free upgrade chance for all +6.25%",
+        "orbs": "Orbs +1",
+        "chain_lightning_damage": "Chain lightning damage x2",
+        "inner_land_mines": "Extra set of inner mines",
+        "spotlight_damage": "Spotlight damage bonus x1.5",
+        "damage": "x1.44 Damage",
+    }
+
+    def rows(keys):
+        return [
+            {
+                "top": 430 + index * 172,
+                "bottom": 587 + index * 172,
+                "display_text": labels[key],
+                "text_raw": labels[key],
+                "confidence": 95.0,
+                "background_value_median": 100.0,
+            }
+            for index, key in enumerate(keys)
+        ]
+
+    correct = {
+        1: rows([*FARM_PERK_BANS, "empty_slot"]),
+        2: rows(FARM_AUTO_PICK_ORDER[:8]),
+        3: rows(FARM_AUTO_PICK_ORDER[5:13]),
+        4: rows(FARM_AUTO_PICK_ORDER[10:]),
+    }
+
+    def row_fn(frame):
+        return correct[int(frame[0, 0, 0])]
+
+    requirements = {
+        "perk_bans": list(FARM_PERK_BANS),
+        "perk_auto_pick_order": list(FARM_AUTO_PICK_ORDER),
+    }
+    result = evaluate_profile_perk_configuration(
+        requirements,
+        bans_frame=frames[0],
+        auto_pick_frames=frames[1:],
+        row_fn=row_fn,
+    )
+    assert result["valid"] is True
+    assert result["perk_auto_pick_order"]["observed"][2] == "coin_tradeoff"
+
+    missing_cto = dict(correct)
+    changed_order = list(FARM_AUTO_PICK_ORDER)
+    changed_order.remove("coin_tradeoff")
+    changed_order.append("coin_tradeoff")
+    missing_cto[2] = rows(changed_order[:8])
+    missing_cto[3] = rows(changed_order[5:13])
+    missing_cto[4] = rows(changed_order[10:])
+
+    def changed_row_fn(frame):
+        return missing_cto[int(frame[0, 0, 0])]
+
+    result = evaluate_profile_perk_configuration(
+        requirements,
+        bans_frame=frames[0],
+        auto_pick_frames=frames[1:],
+        row_fn=changed_row_fn,
+    )
+    assert result["valid"] is False
+    assert result["failed_checks"] == ["perk_auto_pick_order"]
+    assert result["perk_auto_pick_order"]["observed"][2] != "coin_tradeoff"
+    assert result["perk_auto_pick_order"]["observed"][-1] == "coin_tradeoff"

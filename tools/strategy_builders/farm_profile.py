@@ -119,6 +119,8 @@ def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
                 "bots_preset",
                 "guardian_chips",
                 "auto_pick_perks",
+                "perk_bans",
+                "perk_auto_pick_order",
                 "ultimate_weapons",
             )
         },

@@ -15,6 +15,10 @@ from core.free_upgrade_locks import (
     select_workshop_upgrade_menu,
 )
 from core.home_battle import detect_home_battle_control
+from core.home_perk_configuration import (
+    HomePerkConfigurationResult,
+    ensure_home_perk_configuration,
+)
 from core.gc_module_loadout import (
     evaluate_gc_module_loadout,
     ensure_gc_module_loadout,
@@ -22,6 +26,10 @@ from core.gc_module_loadout import (
 )
 from core.gc_preflight import GC_SECTION_SPECS, validate_gc_preflight_screens
 from core.input import TapVerification, safe_tap, swipe_now, tap_if_visible
+from core.perk_configuration import (
+    normalize_perk_configuration_requirements,
+    perk_configuration_label,
+)
 from core.poison_swamp_stun import (
     PoisonSwampStunResult,
     ensure_poison_swamp_stun,
@@ -106,6 +114,9 @@ _HOME_PREFLIGHT_LABELS = {
     "target_priority": "Target Priority",
     "damage_slider": "Damage Slider",
     "auto_pick_perks": "Auto Pick Perks",
+    "perk_configuration": "Perk configuration",
+    "perk_bans": "Perk Bans",
+    "perk_auto_pick_order": "Auto Pick priority",
 }
 
 
@@ -151,6 +162,9 @@ def run_gc_no_battle_setup(
     ensure_poison_swamp_stun_fn: Callable[
         ..., PoisonSwampStunResult
     ] = ensure_poison_swamp_stun,
+    ensure_perk_configuration_fn: Callable[
+        ..., HomePerkConfigurationResult
+    ] = ensure_home_perk_configuration,
     validate_configuration_fn: Callable[..., Any] = validate_gc_preflight_screens,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> GcNoBattleSetupResult:
@@ -242,6 +256,59 @@ def run_gc_no_battle_setup(
             tap_visible_fn,
             sleep_fn,
         )
+
+        if (
+            "perk_bans" in requirements
+            or "perk_auto_pick_order" in requirements
+        ):
+            current_check = "perk_configuration"
+            perk_result = ensure_perk_configuration_fn(
+                requirements,
+                home_screenshot=current,
+                capture_fn=capture_fn,
+                detector=detector,
+                detect_home_control_fn=detect_home_control_fn,
+                safe_tap_fn=safe_tap_fn,
+                tap_visible_fn=tap_visible_fn,
+                swipe_fn=swipe_fn,
+                measure_selection_fn=measure_selection_fn,
+                waived_fields=tuple(
+                    check_id
+                    for check_id in (
+                        "perk_bans",
+                        "perk_auto_pick_order",
+                    )
+                    if check_id in active_waivers
+                ),
+                sleep_fn=sleep_fn,
+            )
+            for check_id in ("perk_bans", "perk_auto_pick_order"):
+                if check_id in active_waivers:
+                    field_evidence = _waived_evidence(
+                        check_id,
+                        requirements.get(check_id),
+                        active_waivers[check_id],
+                    )
+                else:
+                    field_evidence = dict(
+                        perk_result.evidence[check_id]
+                    )
+                    field_evidence.setdefault(
+                        "changed",
+                        perk_result.changed,
+                    )
+                evidence[check_id] = field_evidence
+                _log_home_preflight_evidence(
+                    check_id,
+                    requirements.get(check_id),
+                    field_evidence,
+                )
+            current = perk_result.home_screenshot
+            if not perk_result.valid:
+                current_check = (
+                    perk_result.failed_check or "perk_configuration"
+                )
+                raise _SetupFailure(perk_result.reason)
 
         current_check = "workshop_preset"
         workshop = _open_static(
@@ -759,6 +826,21 @@ def _log_home_preflight_evidence(
             else:
                 observed = "module loadout observed"
                 disposition = "observed" if mode == "observe" else "passed"
+        elif check_id in {"perk_bans", "perk_auto_pick_order"}:
+            expected_labels = check_evidence.get("expected_labels") or []
+            observed_labels = check_evidence.get("observed_labels") or []
+            if expected_labels:
+                expected_value = " > ".join(
+                    str(item) for item in expected_labels
+                )
+            observed = " > ".join(
+                str(item) for item in observed_labels
+            ) or "unavailable"
+            if check_evidence.get("changed"):
+                observed = f"{observed} after correction"
+            if check_evidence.get("valid") is False:
+                disposition = "failed"
+                level = "ERROR"
         elif check_evidence.get("valid") is False:
             disposition = "failed"
             level = "ERROR"
@@ -810,6 +892,13 @@ def _home_preflight_value(check_id: str, value: object) -> str:
         return f"{len(value)} configured priorities"
     if check_id == "damage_slider" and isinstance(value, Mapping):
         return str(value.get("value") or value.get("mode") or value)
+    if check_id in {"perk_bans", "perk_auto_pick_order"} and isinstance(
+        value,
+        (list, tuple),
+    ):
+        return " > ".join(
+            perk_configuration_label(str(item)) for item in value
+        )
     if isinstance(value, Mapping):
         return ", ".join(f"{key}={item}" for key, item in value.items())
     if isinstance(value, (list, tuple, set)):
@@ -878,6 +967,14 @@ def _unsupported_requirement(requirements: Mapping[str, Any]) -> str | None:
         _home_poison_swamp_stun_requirement(requirements)
     except ValueError as exc:
         return str(exc)
+    if (
+        "perk_bans" in requirements
+        or "perk_auto_pick_order" in requirements
+    ):
+        try:
+            normalize_perk_configuration_requirements(requirements)
+        except ValueError as exc:
+            return str(exc)
     damage_slider = requirements.get("damage_slider")
     if damage_slider is not None:
         if not isinstance(damage_slider, Mapping):
@@ -1381,6 +1478,25 @@ def _recover_home(
             sleep_fn(0.8)
             frame = capture_fn()
         if detector(frame).get("state") == "HOME_SCREEN":
+            return
+        if detector(frame).get("state") == "PERKS":
+            if not tap_visible_fn(
+                "buttons.close:perks",
+                screenshot=frame,
+                retries=1,
+            ):
+                return
+            home = _wait_for(
+                state="HOME_SCREEN",
+                capture_fn=capture_fn,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
+            _require_no_battle_home(
+                home,
+                detector,
+                detect_home_control_fn,
+            )
             return
         _return_home(
             frame,

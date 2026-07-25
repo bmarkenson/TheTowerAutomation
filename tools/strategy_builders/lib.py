@@ -635,6 +635,19 @@ def _normalize_gc_session_preflight(raw: Any) -> Dict[str, Any]:
             "gc_farm session_preflight.auto_pick_perks must currently be true"
         )
 
+    from core.perk_configuration import (
+        normalize_perk_configuration_requirements,
+    )
+
+    try:
+        perk_bans, perk_auto_pick_order = (
+            normalize_perk_configuration_requirements(requirements)
+        )
+    except ValueError as exc:
+        raise ValueError(f"gc_farm session_preflight.{exc}") from exc
+    requirements["perk_bans"] = perk_bans
+    requirements["perk_auto_pick_order"] = perk_auto_pick_order
+
     weapons = requirements.get("ultimate_weapons")
     if not isinstance(weapons, dict) or not weapons:
         raise ValueError(

@@ -23,6 +23,7 @@ from core.gc_preflight_navigation import (
     GcLivePreflightResult,
     GcPreflightNavigationStatus,
 )
+from core.perk_configuration import FARM_AUTO_PICK_ORDER, FARM_PERK_BANS
 from core.run_state import AUTOMATION, RunState
 from core.status_report import StatusReporter
 from tools.strategy_builders.lib import build_strategy_yaml
@@ -652,6 +653,11 @@ class FarmProfileTests(unittest.TestCase):
         self.assertEqual(requirements["workshop_preset"], "Farm")
         self.assertEqual(requirements["bots_preset"], "Farm")
         self.assertTrue(requirements["auto_pick_perks"])
+        self.assertEqual(requirements["perk_bans"], list(FARM_PERK_BANS))
+        self.assertEqual(
+            requirements["perk_auto_pick_order"],
+            list(FARM_AUTO_PICK_ORDER),
+        )
         self.assertEqual(
             requirements["ultimate_weapons"]["Poison Swamp"]["stun"],
             "off",
@@ -670,6 +676,10 @@ class FarmProfileTests(unittest.TestCase):
         self.assertEqual(configuration["schema_version"], 2)
         self.assertEqual(configuration["settings"]["cards_deck"], "Farm")
         self.assertEqual(configuration["settings"]["bots_preset"], "Farm")
+        self.assertEqual(
+            configuration["settings"]["perk_auto_pick_order"][2],
+            "coin_tradeoff",
+        )
         self.assertEqual(
             plan["session_preflight"]["fallbacks"]["bots_preset"][0],
             {

@@ -19,7 +19,9 @@ from core.gc_no_battle_setup import (
 from core.gc_module_loadout import ModuleLoadoutCorrectionError
 from core.gate_decisions import build_gate_decision_options
 from core.home_battle import HomeBattleEvidence
+from core.home_perk_configuration import HomePerkConfigurationResult
 from core.matcher import get_match
+from core.perk_configuration import FARM_AUTO_PICK_ORDER, FARM_PERK_BANS
 from core.poison_swamp_stun import PoisonSwampStunState
 from core.target_priority import TARGETS
 from core.workshop_preset import (
@@ -345,7 +347,16 @@ class _TournamentRouter(_NoBattleRouter):
         return super().validate_configuration(**kwargs)
 
 
-def _run(router, requirements=REQUIREMENTS, *, waivers=None):
+def _run(
+    router,
+    requirements=REQUIREMENTS,
+    *,
+    waivers=None,
+    ensure_perk_configuration_fn=None,
+):
+    kwargs = {}
+    if ensure_perk_configuration_fn is not None:
+        kwargs["ensure_perk_configuration_fn"] = ensure_perk_configuration_fn
     return run_gc_no_battle_setup(
         requirements,
         screenshot="home",
@@ -363,6 +374,7 @@ def _run(router, requirements=REQUIREMENTS, *, waivers=None):
         ensure_poison_swamp_stun_fn=router.ensure_stun,
         validate_configuration_fn=router.validate_configuration,
         sleep_fn=lambda _seconds: None,
+        **kwargs,
     )
 
 
@@ -396,6 +408,93 @@ def test_no_battle_setup_corrects_supported_farm_presets_and_guardians():
         "buttons.guardian:summon_inventory",
         "buttons.return_to_game",
     ]
+
+
+def test_no_battle_setup_applies_strategy_owned_perk_configuration():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+    requirements = {
+        **REQUIREMENTS,
+        "perk_bans": list(FARM_PERK_BANS),
+        "perk_auto_pick_order": list(FARM_AUTO_PICK_ORDER),
+    }
+    evidence = {
+        "valid": True,
+        "failed_checks": [],
+        "perk_bans": {
+            "valid": True,
+            "expected_labels": ["Cash Trade-Off"],
+            "observed_labels": ["Cash Trade-Off"],
+        },
+        "perk_auto_pick_order": {
+            "valid": True,
+            "expected_labels": ["Coin Trade-Off"],
+            "observed_labels": ["Coin Trade-Off"],
+        },
+    }
+    ensure = Mock(
+        return_value=HomePerkConfigurationResult(
+            valid=True,
+            changed=True,
+            reason="strategy Perk configuration verified",
+            failed_check=None,
+            evidence=evidence,
+            home_screenshot="home",
+        )
+    )
+
+    result = _run(
+        router,
+        requirements,
+        ensure_perk_configuration_fn=ensure,
+    )
+
+    assert result.complete
+    ensure.assert_called_once()
+    assert ensure.call_args.kwargs["home_screenshot"] == "home"
+    assert result.evidence["perk_bans"]["changed"] is True
+    assert result.evidence["perk_auto_pick_order"]["changed"] is True
+
+
+def test_invalid_strategy_perk_configuration_blocks_before_workshop():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+    requirements = {
+        **REQUIREMENTS,
+        "perk_bans": list(FARM_PERK_BANS),
+        "perk_auto_pick_order": list(FARM_AUTO_PICK_ORDER),
+    }
+    ensure = Mock(
+        return_value=HomePerkConfigurationResult(
+            valid=False,
+            changed=True,
+            reason="Coin Trade-Off remained below rank 3",
+            failed_check="perk_auto_pick_order",
+            evidence={
+                "valid": False,
+                "failed_checks": ["perk_auto_pick_order"],
+                "perk_bans": {
+                    "valid": True,
+                    "expected_labels": [],
+                    "observed_labels": [],
+                },
+                "perk_auto_pick_order": {
+                    "valid": False,
+                    "expected_labels": ["Coin Trade-Off"],
+                    "observed_labels": [],
+                },
+            },
+            home_screenshot="home",
+        )
+    )
+
+    result = _run(
+        router,
+        requirements,
+        ensure_perk_configuration_fn=ensure,
+    )
+
+    assert result.status is GcNoBattleSetupStatus.FAILED
+    assert result.failed_check == "perk_auto_pick_order"
+    assert "navigation.goto_workshop_home" not in router.static_actions
 
 
 def test_home_preflight_logs_concise_check_results_for_operator_activity():

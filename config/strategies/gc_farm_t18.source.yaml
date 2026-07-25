@@ -38,6 +38,26 @@ session_preflight:
     core_primary: Multiverse Nexus
     core_assist: Dimension Core
   auto_pick_perks: true
+  perk_bans:
+    - cash_tradeoff
+    - enemies_damage_tradeoff
+    - lifesteal_knockback_tradeoff
+    - interest
+    - defense_absolute
+  perk_auto_pick_order:
+    - perk_wave_requirement
+    - game_speed
+    - coin_tradeoff
+    - golden_tower_bonus
+    - black_hole_duration
+    - death_wave_quantity
+    - coins_bonus
+    - free_upgrade_chance
+    - orbs
+    - chain_lightning_damage
+    - inner_land_mines
+    - spotlight_damage
+    - damage
   ultimate_weapons:
     Chain Lightning:
       primary: on

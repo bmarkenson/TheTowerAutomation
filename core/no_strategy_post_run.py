@@ -19,6 +19,9 @@ from core.free_upgrade_locks import (
     inspect_free_upgrade_locks,
 )
 from core.home_battle import detect_home_battle_control
+from core.home_perk_configuration import (
+    detect_home_perks_configuration_control,
+)
 from core.input import TapVerification, safe_tap, swipe_now, tap_if_visible
 from core.label_tapper import is_visible
 from core.perk_configuration import parse_perk_configuration_selection
@@ -37,7 +40,6 @@ Detector = Callable[[Frame], Mapping[str, Any]]
 PERK_CONFIGURATION_INDICATOR = "indicators.perks_configuration"
 PERK_CONTENT_REGION = (100, 420, 880, 1330)
 HOME_PERKS_CONTROL_REGION = (985, 475, 90, 100)
-_MIN_HOME_PERKS_GRAY_PIXELS = 800
 PERK_TABS = (
     ("perk_first_choice", "First Perk", (218, 210, 210, 90)),
     ("perk_bans", "Ban Perks", (436, 210, 210, 90)),
@@ -156,40 +158,6 @@ def _observation_coverage(record: Mapping[str, Any]) -> int:
         int(coverage.get(name) or 0)
         for name in ("observed", "evidence_captured", "unavailable")
     )
-
-
-def detect_home_perks_configuration_control(
-    screenshot: Optional[Frame],
-) -> dict[str, Any]:
-    """Recognize the expanded Home-menu Perks item beside Cards."""
-
-    x, y, width, height = HOME_PERKS_CONTROL_REGION
-    if (
-        screenshot is None
-        or not isinstance(screenshot, np.ndarray)
-        or screenshot.ndim != 3
-        or y + height > screenshot.shape[0]
-        or x + width > screenshot.shape[1]
-    ):
-        return {
-            "visible": False,
-            "gray_pixels": 0,
-            "region": list(HOME_PERKS_CONTROL_REGION),
-        }
-    crop = screenshot[y : y + height, x : x + width]
-    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-    gray_pixels = int(
-        (
-            (hsv[:, :, 1] < 60)
-            & (hsv[:, :, 2] >= 20)
-        ).sum()
-    )
-    return {
-        "visible": gray_pixels >= _MIN_HOME_PERKS_GRAY_PIXELS,
-        "gray_pixels": gray_pixels,
-        "minimum_gray_pixels": _MIN_HOME_PERKS_GRAY_PIXELS,
-        "region": list(HOME_PERKS_CONTROL_REGION),
-    }
 
 
 def inspect_post_run_free_upgrade_locks(
