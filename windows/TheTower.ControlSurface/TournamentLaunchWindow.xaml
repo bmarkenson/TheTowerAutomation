@@ -1,0 +1,51 @@
+<Window x:Class="TheTower.ControlSurface.TournamentLaunchWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Tournament validation passed"
+        Width="640" Height="430" MinWidth="520" MinHeight="390"
+        WindowStartupLocation="CenterOwner"
+        Background="#0A0E16" Foreground="#EDF2F7"
+        ShowInTaskbar="False">
+  <Grid Margin="18">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <TextBlock x:Name="HeadingText"
+               Text="Tournament validation passed"
+               FontSize="20" FontWeight="SemiBold" Margin="0,0,0,12"
+               TextWrapping="Wrap" />
+    <Border Grid.Row="1" Background="#111827" BorderBrush="#263349"
+            BorderThickness="1" CornerRadius="8" Padding="12">
+      <TextBlock x:Name="MessageText" TextWrapping="Wrap" />
+    </Border>
+    <Border Grid.Row="2" Background="#2A2112" BorderBrush="#8A6829"
+            BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,12,0,0">
+      <StackPanel>
+        <TextBlock Text="TARGET PRIORITY REMINDER"
+                   Foreground="#F1BF5B" FontSize="10" FontWeight="Bold" />
+        <TextBlock x:Name="ReminderText" TextWrapping="Wrap" Margin="0,5,0,0" />
+      </StackPanel>
+    </Border>
+    <TextBlock Grid.Row="3" x:Name="DispositionText"
+               Text="Start performs lightweight freshness and screen checks; it does not repeat validation. Cancel consumes this automatic launch offer. Closing this window leaves the decision pending."
+               TextWrapping="Wrap" Foreground="#93A4BB" FontSize="11"
+               Margin="0,14,0,0" />
+    <Grid Grid.Row="4" Margin="0,14,0,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+      <Button Grid.Column="1" Content="Cancel launch" Click="Cancel_Click"
+              Style="{StaticResource DangerButton}" />
+      <Button Grid.Column="2" x:Name="StartButton"
+              Content="Start Tournament" Click="Start_Click"
+              Style="{StaticResource PrimaryButton}" />
+    </Grid>
+  </Grid>
+</Window>

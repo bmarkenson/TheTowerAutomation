@@ -9,6 +9,17 @@ from typing import Any, Mapping, Optional
 
 
 @dataclass(frozen=True)
+class ExclusiveValidationLaunchDefinition:
+    """Operator-confirmed launch offered after successful validation."""
+
+    kind: str
+    timeout_seconds: float
+    prompt_title: str
+    prompt_message: str
+    reminder: str
+
+
+@dataclass(frozen=True)
 class ExclusiveValidationDefinition:
     """Resolved policy and stable plan identity for one validation request."""
 
@@ -18,6 +29,7 @@ class ExclusiveValidationDefinition:
     configuration_fingerprint: str
     ready_message: str
     failure_prefix: str
+    operator_launch: Optional[ExclusiveValidationLaunchDefinition]
 
 
 def exclusive_validation_definition(
@@ -63,6 +75,8 @@ def exclusive_validation_definition(
             "exclusive_validation requires ready_message and failure_prefix"
         )
 
+    operator_launch = _operator_launch_definition(raw.get("operator_launch"))
+
     plan = getattr(strategy, "config", None)
     if not isinstance(plan, Mapping):
         run_configuration_fn = getattr(strategy, "run_configuration", None)
@@ -92,6 +106,49 @@ def exclusive_validation_definition(
         configuration_fingerprint=fingerprint,
         ready_message=ready_message,
         failure_prefix=failure_prefix,
+        operator_launch=operator_launch,
+    )
+
+
+def _operator_launch_definition(
+    raw: object,
+) -> Optional[ExclusiveValidationLaunchDefinition]:
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise ValueError(
+            "exclusive_validation operator_launch must be a mapping"
+        )
+    kind = str(raw.get("kind") or "").strip().lower()
+    if kind != "tournament_battle":
+        raise ValueError(
+            "exclusive_validation operator_launch kind must be tournament_battle"
+        )
+    try:
+        timeout_seconds = float(raw.get("timeout_seconds"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "exclusive_validation operator_launch timeout_seconds must be numeric"
+        ) from exc
+    if not 30.0 <= timeout_seconds <= 120.0:
+        raise ValueError(
+            "exclusive_validation operator_launch timeout_seconds must be "
+            "between 30 and 120"
+        )
+    prompt_title = str(raw.get("prompt_title") or "").strip()
+    prompt_message = str(raw.get("prompt_message") or "").strip()
+    reminder = str(raw.get("reminder") or "").strip()
+    if not prompt_title or not prompt_message or not reminder:
+        raise ValueError(
+            "exclusive_validation operator_launch requires prompt_title, "
+            "prompt_message, and reminder"
+        )
+    return ExclusiveValidationLaunchDefinition(
+        kind=kind,
+        timeout_seconds=timeout_seconds,
+        prompt_title=prompt_title,
+        prompt_message=prompt_message,
+        reminder=reminder,
     )
 
 
@@ -107,6 +164,7 @@ def exclusive_validation_definition_for_strategy(
 
 __all__ = [
     "ExclusiveValidationDefinition",
+    "ExclusiveValidationLaunchDefinition",
     "exclusive_validation_definition",
     "exclusive_validation_definition_for_strategy",
 ]

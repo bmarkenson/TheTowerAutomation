@@ -6,6 +6,7 @@ const state = {
   timer: null,
   lastStatus: null,
   lastGatePrompted: null,
+  lastTournamentLaunchPrompted: null,
 };
 
 const byId = (id) => document.getElementById(id);
@@ -165,13 +166,24 @@ function renderExclusiveValidation(control) {
   }
   if (!receipt) {
     setText("exclusiveValidationSummary", "No exclusive strategy validation request.");
+    renderTournamentLaunch(null);
     return;
   }
   if (receipt.status === "result") {
     if (receipt.outcome === "ready") {
+      const launchStatus = receipt.launch?.status;
+      const labels = {
+        awaiting_operator: "Tournament validation passed; waiting for Start Tournament or Cancel.",
+        requested: "Tournament Start is authorized and waiting for the runtime.",
+        claimed: "Tournament launch is in progress under the current runtime owner.",
+        started: receipt.launch?.reason || "Tournament was started.",
+        cancelled: receipt.launch?.reason || "Automatic Tournament launch was cancelled.",
+        failed: `Tournament launch failed: ${receipt.launch?.reason || "reason unavailable"}`,
+      };
       setText(
         "exclusiveValidationSummary",
-        "Tournament is ready to begin manually. Automation will not enter or start Tournament.",
+        labels[launchStatus]
+          || "Tournament validation passed before automatic launch confirmation was available; start manually.",
       );
     } else {
       setText(
@@ -179,8 +191,10 @@ function renderExclusiveValidation(control) {
         `Tournament validation ${receipt.outcome || "failed"}: ${receipt.reason || "reason unavailable"}`,
       );
     }
+    renderTournamentLaunch(receipt);
     return;
   }
+  renderTournamentLaunch(null);
   const labels = {
     pending: "waiting for completed Home preflight",
     claimed: "ordinary New Battle ownership recorded",
@@ -190,6 +204,53 @@ function renderExclusiveValidation(control) {
   setText(
     "exclusiveValidationSummary",
     `Tournament validation: ${labels[receipt.status] || receipt.status || "unknown"}.`,
+  );
+}
+
+function renderTournamentLaunch(receipt) {
+  const launch = receipt?.outcome === "ready" ? receipt.launch : null;
+  const waiting = launch?.status === "awaiting_operator";
+  const reviewButton = byId("tournamentLaunchButton");
+  reviewButton.hidden = !waiting;
+  reviewButton.disabled = !waiting;
+  const dialog = byId("tournamentLaunchDialog");
+  if (!waiting) {
+    if (dialog.open) dialog.close();
+    return;
+  }
+  const policy = receipt.launch_policy || {};
+  byId("tournamentLaunchTitle").textContent =
+    policy.prompt_title || "Tournament validation passed";
+  byId("tournamentLaunchMessage").textContent =
+    policy.prompt_message || "Start the Tournament now?";
+  byId("tournamentLaunchReminder").textContent =
+    policy.reminder
+    || "Set Target Priorities for the current Tournament Battle Conditions.";
+  dialog.dataset.requestId = receipt.request_id;
+  if (receipt.request_id === state.lastTournamentLaunchPrompted) return;
+  state.lastTournamentLaunchPrompted = receipt.request_id;
+  if (!dialog.open) dialog.showModal();
+}
+
+function openTournamentLaunch() {
+  const dialog = byId("tournamentLaunchDialog");
+  if (dialog.dataset.requestId && !dialog.open) dialog.showModal();
+}
+
+function resolveTournamentLaunch(decision) {
+  const dialog = byId("tournamentLaunchDialog");
+  const requestId = dialog.dataset.requestId;
+  if (!requestId) return;
+  dialog.close();
+  sendControl(
+    {
+      action: "resolve_tournament_launch",
+      request_id: requestId,
+      decision,
+    },
+    decision === "start"
+      ? "Tournament Start authorized"
+      : "Automatic Tournament launch cancelled",
   );
 }
 
@@ -667,6 +728,15 @@ byId("battleRows").addEventListener("keydown", (event) => {
 
 byId("authButton").addEventListener("click", showAuthDialog);
 byId("configureRunButton").addEventListener("click", openRunConfiguration);
+byId("tournamentLaunchButton").addEventListener("click", openTournamentLaunch);
+byId("startTournamentLaunchButton").addEventListener(
+  "click",
+  () => resolveTournamentLaunch("start"),
+);
+byId("cancelTournamentLaunchButton").addEventListener(
+  "click",
+  () => resolveTournamentLaunch("cancel"),
+);
 byId("authForm").addEventListener("submit", (event) => {
   event.preventDefault();
   state.token = byId("tokenInput").value.trim();

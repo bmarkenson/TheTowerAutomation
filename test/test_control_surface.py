@@ -18,6 +18,9 @@ from core.control_surface import (
     ControlSurfaceRequestError,
     ControlSurfaceService,
 )
+from core.exclusive_validation import (
+    exclusive_validation_definition_for_strategy,
+)
 from core.gate_decisions import build_gate_decision_options
 from tools.control_surface_server import ControlSurfaceHTTPServer, STATIC_DIR, main
 
@@ -67,6 +70,65 @@ def _write_battle(root: Path, battle_id: str = "Battle20260719T101126-0700") -> 
     path.parent.mkdir(parents=True)
     path.write_text(json.dumps(record), encoding="utf-8")
     return path
+
+
+def _ready_tournament_launch(service: ControlSurfaceService):
+    store = service.control_store
+    saved = store.set_strategy("tournament", source="test")
+    definition = exclusive_validation_definition_for_strategy("tournament")
+    assert definition is not None
+    owner = {
+        "runtime_id": "validation-runtime",
+        "pid": 101,
+        "adb_target": "localhost:5555",
+    }
+    claimed = store.claim_exclusive_validation(
+        strategy_request_id=saved["strategy_request_id"],
+        configuration_fingerprint=definition.configuration_fingerprint,
+        owner=owner,
+        timeout_seconds=definition.timeout_seconds,
+    )
+    running = store.mark_exclusive_validation_running(
+        claimed["request_id"],
+        owner=owner,
+    )
+    cleanup = store.begin_exclusive_validation_cleanup(
+        running["request_id"],
+        owner=owner,
+        outcome="ready",
+        reason="checks passed",
+    )
+    return store.finish_exclusive_validation(
+        cleanup["request_id"],
+        owner=owner,
+        outcome="ready",
+        reason="checks passed",
+    )
+
+
+def _fresh_runtime_lock(root: Path, *, state: str):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+    log_path = root / "logs" / "actions.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text(
+        f"[STATUS {timestamp}] State={state} | Wave=— | Coins/min=—\n",
+        encoding="utf-8",
+    )
+    lock_path = root / "logs" / "automation-localhost_5555.lock"
+    lock_path.write_text(
+        json.dumps(
+            {
+                "pid": os.getpid(),
+                "target": "localhost:5555",
+                "started_at": now.isoformat(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    lock_handle = lock_path.open("r", encoding="utf-8")
+    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    return lock_handle
 
 
 def test_control_store_preserves_fields_and_resumes_only_matching_deadline(tmp_path):
@@ -440,6 +502,85 @@ def test_control_surface_resolves_only_an_offered_pending_gate_choice(tmp_path):
                 "decision_id": "retry",
             }
         )
+
+
+def test_control_surface_starts_or_cancels_only_current_ready_tournament(
+    tmp_path,
+):
+    service = _service(tmp_path)
+    ready = _ready_tournament_launch(service)
+    service.control_store.set_state("RUNNING", source="test")
+    lock_handle = _fresh_runtime_lock(tmp_path, state="HOME_SCREEN")
+    try:
+        response = service.apply_control(
+            {
+                "action": "resolve_tournament_launch",
+                "request_id": ready["request_id"],
+                "decision": "start",
+            }
+        )
+    finally:
+        lock_handle.close()
+
+    assert response["request"] == {
+        "accepted": True,
+        "action": "resolve_tournament_launch",
+        "request_id": ready["request_id"],
+        "decision_id": "start",
+    }
+    receipt = service.control_store.status()["exclusive_validation"][
+        "receipts"
+    ][ready["request_id"]]
+    assert receipt["launch"]["status"] == "requested"
+
+    other_root = tmp_path / "cancel"
+    cancel_service = _service(other_root)
+    cancel_ready = _ready_tournament_launch(cancel_service)
+    cancelled = cancel_service.apply_control(
+        {
+            "action": "resolve_tournament_launch",
+            "request_id": cancel_ready["request_id"],
+            "decision": "cancel",
+        }
+    )
+    assert cancelled["request"]["decision_id"] == "cancel"
+    assert cancel_service.control_store.status()["exclusive_validation"][
+        "receipts"
+    ][cancel_ready["request_id"]]["launch"]["status"] == "cancelled"
+
+
+def test_control_surface_rejects_start_without_fresh_safe_runtime(tmp_path):
+    service = _service(tmp_path)
+    ready = _ready_tournament_launch(service)
+    service.control_store.set_state("RUNNING", source="test")
+
+    with pytest.raises(
+        ControlSurfaceRequestError,
+        match="active automation runtime",
+    ):
+        service.apply_control(
+            {
+                "action": "resolve_tournament_launch",
+                "request_id": ready["request_id"],
+                "decision": "start",
+            }
+        )
+
+    assert service.control_store.status()["exclusive_validation"]["receipts"][
+        ready["request_id"]
+    ]["launch"]["status"] == "awaiting_operator"
+
+
+def test_browser_client_exposes_tournament_start_cancel_and_reminder():
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert 'id="startTournamentLaunchButton"' in html
+    assert 'id="cancelTournamentLaunchButton"' in html
+    assert "Target Priority reminder" in html
+    assert 'action: "resolve_tournament_launch"' in script
+    assert 'resolveTournamentLaunch("start")' in script
+    assert 'resolveTournamentLaunch("cancel")' in script
 
 
 def test_control_surface_configures_run_from_selected_strategy_checks(tmp_path):

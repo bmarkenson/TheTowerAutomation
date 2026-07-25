@@ -71,6 +71,9 @@
         <button id="configureRunButton" class="primary" type="button" disabled>Configure run...</button>
         <p id="configureRunSummary" class="fine-print">Strategy defaults; no one-run skips staged.</p>
         <p id="exclusiveValidationSummary" class="fine-print">No exclusive strategy validation request.</p>
+        <button id="tournamentLaunchButton" class="success" type="button" hidden>
+          Review Tournament launch
+        </button>
 
         <div class="mode-control">
           <label for="modeSelect">Game Over mode</label>
@@ -239,6 +242,29 @@
         <button class="primary" type="submit">Save configuration</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="tournamentLaunchDialog" class="gate-dialog">
+    <div>
+      <span class="eyebrow">Tournament ready</span>
+      <h2 id="tournamentLaunchTitle">Tournament validation passed</h2>
+      <p id="tournamentLaunchMessage"></p>
+      <div class="callout warning">
+        <strong>Target Priority reminder</strong>
+        <span id="tournamentLaunchReminder"></span>
+      </div>
+      <p class="fine-print">
+        Start performs only lightweight receipt, configuration, and current-screen
+        checks. It does not repeat validation. Cancel consumes this automatic
+        launch offer; you may make changes and select Tournament again for a new
+        validation, or start manually.
+      </p>
+      <div class="dialog-actions">
+        <button type="button" data-close-dialog="tournamentLaunchDialog">Decide later</button>
+        <button id="cancelTournamentLaunchButton" class="danger" type="button">Cancel launch</button>
+        <button id="startTournamentLaunchButton" class="primary" type="button">Start Tournament</button>
+      </div>
+    </div>
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>

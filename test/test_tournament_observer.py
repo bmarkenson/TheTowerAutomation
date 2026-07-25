@@ -53,10 +53,23 @@ def test_tournament_strategy_declares_exclusive_validation_then_observes():
             "battle_kind": "ordinary_new_battle",
             "timeout_seconds": 300,
             "ready_message": (
-                "Tournament is ready to begin manually; automation will not "
-                "enter Tournament or start it"
+                "Tournament validation passed; waiting for operator confirmation"
             ),
             "failure_prefix": "Tournament validation failed",
+            "operator_launch": {
+                "kind": "tournament_battle",
+                "timeout_seconds": 60,
+                "prompt_title": "Tournament validation passed",
+                "prompt_message": (
+                    "Start the Tournament now? Automation will verify the "
+                    "current Home or Tournament entry screen and start exactly "
+                    "one Tournament battle."
+                ),
+                "reminder": (
+                    "Before starting, set Target Priorities for the current "
+                    "Tournament Battle Conditions."
+                ),
+            },
         },
     }
     assert strategy.run_configuration()["profile"] == "tournament"

@@ -30,7 +30,7 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 6
+CONTROL_SURFACE_REVISION = 7
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -38,6 +38,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "exclusive_strategy_validation_status",
     "explicit_strategy_disposition",
     "selected_strategy_process_start",
+    "tournament_launch_confirmation",
 )
 ATTACHED_RESTART_TIMEOUT_SECONDS = 20.0
 ATTACHED_RESTART_POLL_SECONDS = 0.25
@@ -248,6 +249,67 @@ class ControlSurfaceService:
                     f"Resolved startup gate {directive['check_id']} with "
                     f"{directive['decision_id']} ({directive['request_id']})"
                 )
+            elif action == "resolve_tournament_launch":
+                request_id = str(request.get("request_id") or "").strip()
+                decision = str(request.get("decision") or "").strip().lower()
+                if not request_id or decision not in {"start", "cancel"}:
+                    raise ControlSurfaceRequestError(
+                        "resolve_tournament_launch requires request_id and "
+                        "decision start or cancel"
+                    )
+                if decision == "start":
+                    current_status = self.status()
+                    runtime = current_status.get("runtime") or {}
+                    process = current_status.get("process_service") or {}
+                    observation = current_status.get("observation")
+                    process_active = bool(
+                        runtime.get("active") or process.get("active")
+                    )
+                    observed_state = (
+                        str(observation.get("state_label") or "")
+                        if isinstance(observation, Mapping)
+                        else ""
+                    )
+                    observation_fresh = bool(
+                        isinstance(observation, Mapping)
+                        and not observation.get("stale")
+                    )
+                    if not process_active:
+                        raise ControlSurfaceRequestError(
+                            "Start Tournament requires an active automation runtime",
+                            status=409,
+                        )
+                    if current_status["control"].get("state") != "RUNNING":
+                        raise ControlSurfaceRequestError(
+                            "Resume automation before starting Tournament",
+                            status=409,
+                        )
+                    if (
+                        not observation_fresh
+                        or observed_state
+                        not in {"HOME_SCREEN", "TOURNAMENT_SCREEN"}
+                    ):
+                        raise ControlSurfaceRequestError(
+                            "Start Tournament requires fresh Home or Tournament "
+                            "entry evidence",
+                            status=409,
+                        )
+                receipt = (
+                    self.control_store.resolve_exclusive_validation_launch(
+                        request_id,
+                        decision,
+                        source="control-surface",
+                    )
+                )
+                if receipt is None:
+                    raise ControlSurfaceRequestError(
+                        "Tournament launch decision is no longer pending",
+                        status=409,
+                    )
+                audit = (
+                    f"Tournament launch {decision} selected "
+                    f"({receipt['request_id']})"
+                )
             elif action == "configure_run":
                 raw_checks = request.get("skip_checks")
                 if not isinstance(raw_checks, list):
@@ -301,7 +363,7 @@ class ControlSurfaceService:
             else:
                 raise ControlSurfaceRequestError(
                     "action must be pause, resume, stop, mode, resolve_gate, "
-                    "or configure_run"
+                    "resolve_tournament_launch, or configure_run"
                 )
         except ControlDirectiveError as exc:
             raise ControlSurfaceRequestError(str(exc), status=409) from exc
@@ -316,6 +378,9 @@ class ControlSurfaceService:
         if action == "resolve_gate":
             response["request"]["request_id"] = directive["request_id"]
             response["request"]["decision_id"] = directive["decision_id"]
+        elif action == "resolve_tournament_launch":
+            response["request"]["request_id"] = receipt["request_id"]
+            response["request"]["decision_id"] = decision
         elif action == "configure_run":
             response["request"]["skip_checks"] = sorted(configured)
         if audit_warning:

@@ -953,6 +953,7 @@ def test_tournament_home_policy_reports_changed_readiness_without_heartbeat():
             status="result",
             outcome="ready",
             reason="checks passed",
+            launch={"status": "awaiting_operator"},
         )
         app._report_home_policy(
             home_control=HomeBattleControl.NEW_BATTLE,
@@ -963,7 +964,7 @@ def test_tournament_home_policy_reports_changed_readiness_without_heartbeat():
 
     assert emit.call_count == 2
     assert emit.call_args.args[0].startswith("[TOURNAMENT_READY]")
-    assert "ready to begin manually" in emit.call_args.args[0]
+    assert "waiting for operator confirmation" in emit.call_args.args[0]
 
 
 def test_app_blocks_battle_start_when_no_battle_setup_fails():

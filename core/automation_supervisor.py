@@ -504,6 +504,177 @@ class AutomationSupervisor:
         self._refresh_exclusive_validation()
         return dict(receipt) if receipt else None
 
+    def claim_exclusive_validation_launch(
+        self,
+        request_id: str,
+        *,
+        configuration_fingerprint: str,
+    ) -> Optional[Dict[str, object]]:
+        """Claim one operator Start decision before its first device input."""
+
+        try:
+            receipt = self._control_store.claim_exclusive_validation_launch(
+                request_id,
+                configuration_fingerprint=configuration_fingerprint,
+                owner=self.current_exclusive_validation_owner(),
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(f"[VALIDATION_LAUNCH] Failed claiming request: {exc}", "WARN")
+            return None
+        self._refresh_exclusive_validation()
+        return dict(receipt) if receipt else None
+
+    def finish_exclusive_validation_launch(
+        self,
+        request_id: str,
+        *,
+        outcome: str,
+        reason: str,
+    ) -> Optional[Dict[str, object]]:
+        """Finish the Tournament launch owned by this runtime."""
+
+        try:
+            receipt = self._control_store.finish_exclusive_validation_launch(
+                request_id,
+                owner=self.current_exclusive_validation_owner(),
+                outcome=outcome,
+                reason=reason,
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(f"[VALIDATION_LAUNCH] Failed recording result: {exc}", "WARN")
+            return None
+        self._refresh_exclusive_validation()
+        return dict(receipt) if receipt else None
+
+    def record_manual_exclusive_validation_launch(
+        self,
+        request_id: str,
+        *,
+        reason: str,
+    ) -> Optional[Dict[str, object]]:
+        """Consume an unclaimed launch prompt after a fresh manual start."""
+
+        try:
+            receipt = (
+                self._control_store.record_manual_exclusive_validation_launch(
+                    request_id,
+                    reason=reason,
+                )
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(
+                f"[VALIDATION_LAUNCH] Failed recording manual start: {exc}",
+                "WARN",
+            )
+            return None
+        self._refresh_exclusive_validation()
+        return dict(receipt) if receipt else None
+
+    def fail_orphaned_exclusive_validation_launch(
+        self,
+        request_id: str,
+        *,
+        reason: str,
+    ) -> Optional[Dict[str, object]]:
+        """Fail a launch claimed by a prior runtime without device input."""
+
+        try:
+            receipt = (
+                self._control_store.fail_orphaned_exclusive_validation_launch(
+                    request_id,
+                    current_owner=self.current_exclusive_validation_owner(),
+                    reason=reason,
+                )
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(
+                f"[VALIDATION_LAUNCH] Failed recording lost ownership: {exc}",
+                "WARN",
+            )
+            return None
+        self._refresh_exclusive_validation()
+        return dict(receipt) if receipt else None
+
+    def fail_unclaimed_exclusive_validation_launch(
+        self,
+        request_id: str,
+        *,
+        reason: str,
+    ) -> Optional[Dict[str, object]]:
+        """Fail a Start request before this runtime claims tap authority."""
+
+        try:
+            receipt = (
+                self._control_store.fail_unclaimed_exclusive_validation_launch(
+                    request_id,
+                    reason=reason,
+                )
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(
+                f"[VALIDATION_LAUNCH] Failed rejecting request: {exc}",
+                "WARN",
+            )
+            return None
+        self._refresh_exclusive_validation()
+        return dict(receipt) if receipt else None
+
+    def owns_exclusive_validation_launch(self, request_id: str) -> bool:
+        """Re-read durable launch ownership immediately before an action."""
+
+        try:
+            ledger = self._control_store.status().get("exclusive_validation")
+        except ControlDirectiveError as exc:
+            log(
+                f"[VALIDATION_LAUNCH] Ownership recheck failed: {exc}",
+                "WARN",
+            )
+            return False
+        self._exclusive_validation = dict(ledger or {})
+        receipt = self.exclusive_validation_receipt(request_id=request_id)
+        launch = receipt.get("launch") if receipt else None
+        return bool(
+            isinstance(launch, Mapping)
+            and launch.get("status") == "claimed"
+            and launch.get("owner")
+            == self.current_exclusive_validation_owner()
+        )
+
+    def exclusive_validation_launch_action_allowed(
+        self,
+        request_id: str,
+    ) -> bool:
+        """Require fresh RUNNING intent plus this runtime's launch ownership."""
+
+        try:
+            control = self._control_store.status()
+        except ControlDirectiveError as exc:
+            log(
+                f"[VALIDATION_LAUNCH] Action guard failed: {exc}",
+                "WARN",
+            )
+            return False
+        self._exclusive_validation = dict(
+            control.get("exclusive_validation") or {}
+        )
+        receipt = self.exclusive_validation_receipt(request_id=request_id)
+        launch = receipt.get("launch") if receipt else None
+        strategy_request = self._parse_strategy_request(control)
+        return bool(
+            control.get("state") == "RUNNING"
+            and self._exclusive_validation.get("current_request_id")
+            == request_id
+            and strategy_request is not None
+            and receipt is not None
+            and receipt.get("strategy") == strategy_request[0]
+            and receipt.get("strategy_request_id")
+            == str(strategy_request[1] or "")
+            and isinstance(launch, Mapping)
+            and launch.get("status") == "claimed"
+            and launch.get("owner")
+            == self.current_exclusive_validation_owner()
+        )
+
     def owns_exclusive_validation(
         self,
         request_id: str,

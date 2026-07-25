@@ -31,6 +31,16 @@ EXCLUSIVE_VALIDATION_STATUSES = frozenset(
     {"pending", "claimed", "running", "cleanup", "result"}
 )
 EXCLUSIVE_VALIDATION_OUTCOMES = frozenset({"ready", "failed", "cancelled"})
+EXCLUSIVE_VALIDATION_LAUNCH_STATUSES = frozenset(
+    {
+        "awaiting_operator",
+        "requested",
+        "claimed",
+        "started",
+        "cancelled",
+        "failed",
+    }
+)
 _MAX_EXCLUSIVE_VALIDATION_RECEIPTS = 12
 
 
@@ -215,6 +225,25 @@ class ControlDirectiveStore:
                 data.get("exclusive_validation")
             )
             receipts = dict(ledger["receipts"])
+            for request_id, receipt in list(receipts.items()):
+                launch = receipt.get("launch")
+                if (
+                    isinstance(launch, Mapping)
+                    and launch.get("status") in {"awaiting_operator", "requested"}
+                ):
+                    receipts[request_id] = {
+                        **receipt,
+                        "launch": {
+                            **dict(launch),
+                            "status": "cancelled",
+                            "reason": (
+                                f"superseded by explicit {normalized} "
+                                "strategy request"
+                            ),
+                            "completed_at": timestamp,
+                            "updated_at": timestamp,
+                        },
+                    }
             if validation_definition is not None:
                 for request_id, receipt in list(receipts.items()):
                     if receipt["status"] != "pending":
@@ -242,6 +271,15 @@ class ControlDirectiveStore:
                     "created_at": timestamp,
                     "updated_at": timestamp,
                 }
+                if validation_definition.operator_launch is not None:
+                    launch = validation_definition.operator_launch
+                    receipts[validation_request_id]["launch_policy"] = {
+                        "kind": launch.kind,
+                        "timeout_seconds": launch.timeout_seconds,
+                        "prompt_title": launch.prompt_title,
+                        "prompt_message": launch.prompt_message,
+                        "reminder": launch.reminder,
+                    }
                 ledger["current_request_id"] = validation_request_id
             else:
                 for request_id, receipt in list(receipts.items()):
@@ -437,6 +475,17 @@ class ControlDirectiveStore:
             }
             completed.pop("pending_outcome", None)
             completed.pop("pending_reason", None)
+            if normalized_outcome == "ready":
+                launch_policy = _valid_exclusive_validation_launch_policy(
+                    completed.get("launch_policy")
+                )
+                if launch_policy is not None:
+                    completed["launch"] = {
+                        "status": "awaiting_operator",
+                        "updated_at": timestamp,
+                    }
+            else:
+                completed.pop("launch", None)
             receipts[completed["request_id"]] = completed
             ledger["receipts"] = _prune_exclusive_validation_receipts(receipts)
             if ledger.get("current_request_id") not in ledger["receipts"]:
@@ -446,6 +495,351 @@ class ControlDirectiveStore:
             current["updated_by"] = "runtime-exclusive-validation"
             self._write_unlocked(current)
             return dict(completed)
+
+    def resolve_exclusive_validation_launch(
+        self,
+        request_id: str,
+        decision: str,
+        *,
+        source: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Persist one explicit Start or Cancel decision for a ready receipt."""
+
+        normalized_decision = str(decision or "").strip().lower()
+        if normalized_decision not in {"start", "cancel"}:
+            raise ValueError(
+                "exclusive validation launch decision must be start or cancel"
+            )
+        with self._lock():
+            current = self._read_unlocked()
+            ledger = _valid_exclusive_validation_ledger(
+                current.get("exclusive_validation")
+            )
+            receipts = dict(ledger["receipts"])
+            receipt = receipts.get(str(request_id))
+            if (
+                receipt is None
+                or ledger.get("current_request_id") != str(request_id)
+                or receipt.get("status") != "result"
+                or receipt.get("outcome") != "ready"
+                or receipt.get("strategy") != _valid_strategy(
+                    current.get("strategy")
+                )
+                or receipt.get("strategy_request_id")
+                != _bounded_text(current.get("strategy_request_id"), 100)
+            ):
+                return None
+            definition = exclusive_validation_definition_for_strategy(
+                str(receipt["strategy"])
+            )
+            if (
+                definition is None
+                or definition.operator_launch is None
+                or receipt.get("configuration_fingerprint")
+                != definition.configuration_fingerprint
+            ):
+                return None
+            launch = _valid_exclusive_validation_launch(receipt.get("launch"))
+            if launch is None or launch.get("status") != "awaiting_operator":
+                return None
+            timestamp = _updated_at()
+            if normalized_decision == "start":
+                launch = {
+                    **launch,
+                    "status": "requested",
+                    "launch_request_id": uuid4().hex,
+                    "requested_at": timestamp,
+                    "updated_at": timestamp,
+                }
+            else:
+                launch = {
+                    **launch,
+                    "status": "cancelled",
+                    "reason": (
+                        "operator cancelled automatic Tournament launch"
+                    ),
+                    "completed_at": timestamp,
+                    "updated_at": timestamp,
+                }
+            if source:
+                launch["updated_by"] = source
+            receipt = {**receipt, "launch": launch, "updated_at": timestamp}
+            receipts[receipt["request_id"]] = receipt
+            ledger["receipts"] = receipts
+            current["exclusive_validation"] = ledger
+            current["updated_at"] = timestamp
+            if source:
+                current["updated_by"] = source
+            self._write_unlocked(current)
+            return dict(receipt)
+
+    def claim_exclusive_validation_launch(
+        self,
+        request_id: str,
+        *,
+        configuration_fingerprint: str,
+        owner: Mapping[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        """Atomically consume one Start decision before its first device tap."""
+
+        normalized_owner = _valid_exclusive_validation_owner(owner)
+        if normalized_owner is None:
+            raise ValueError("exclusive validation launch owner is incomplete")
+        fingerprint = _bounded_text(configuration_fingerprint, 100)
+        if len(fingerprint) != 64:
+            raise ValueError(
+                "exclusive validation launch requires a configuration fingerprint"
+            )
+        with self._lock():
+            current = self._read_unlocked()
+            ledger = _valid_exclusive_validation_ledger(
+                current.get("exclusive_validation")
+            )
+            receipts = dict(ledger["receipts"])
+            receipt = receipts.get(str(request_id))
+            launch = (
+                _valid_exclusive_validation_launch(receipt.get("launch"))
+                if receipt
+                else None
+            )
+            policy = (
+                _valid_exclusive_validation_launch_policy(
+                    receipt.get("launch_policy")
+                )
+                if receipt
+                else None
+            )
+            if (
+                receipt is None
+                or ledger.get("current_request_id") != str(request_id)
+                or receipt.get("status") != "result"
+                or receipt.get("outcome") != "ready"
+                or receipt.get("configuration_fingerprint") != fingerprint
+                or receipt.get("strategy") != _valid_strategy(
+                    current.get("strategy")
+                )
+                or receipt.get("strategy_request_id")
+                != _bounded_text(current.get("strategy_request_id"), 100)
+                or launch is None
+                or launch.get("status") != "requested"
+                or policy is None
+            ):
+                return None
+            timestamp = _updated_at()
+            launch = {
+                **launch,
+                "status": "claimed",
+                "owner": normalized_owner,
+                "claimed_at": timestamp,
+                "deadline_at": (
+                    datetime.now().timestamp()
+                    + float(policy["timeout_seconds"])
+                ),
+                "updated_at": timestamp,
+            }
+            receipt = {**receipt, "launch": launch, "updated_at": timestamp}
+            receipts[receipt["request_id"]] = receipt
+            ledger["receipts"] = receipts
+            current["exclusive_validation"] = ledger
+            current["updated_at"] = timestamp
+            current["updated_by"] = "runtime-exclusive-validation-launch"
+            self._write_unlocked(current)
+            return dict(receipt)
+
+    def finish_exclusive_validation_launch(
+        self,
+        request_id: str,
+        *,
+        owner: Mapping[str, Any],
+        outcome: str,
+        reason: str,
+    ) -> Optional[dict[str, Any]]:
+        """Finish only the launch claimed by the same live runtime owner."""
+
+        normalized_owner = _valid_exclusive_validation_owner(owner)
+        if normalized_owner is None:
+            raise ValueError("exclusive validation launch owner is incomplete")
+        normalized_outcome = str(outcome or "").strip().lower()
+        if normalized_outcome not in {"started", "failed"}:
+            raise ValueError(
+                "exclusive validation launch outcome must be started or failed"
+            )
+        with self._lock():
+            current = self._read_unlocked()
+            ledger = _valid_exclusive_validation_ledger(
+                current.get("exclusive_validation")
+            )
+            receipts = dict(ledger["receipts"])
+            receipt = receipts.get(str(request_id))
+            launch = (
+                _valid_exclusive_validation_launch(receipt.get("launch"))
+                if receipt
+                else None
+            )
+            if (
+                receipt is None
+                or launch is None
+                or launch.get("status") != "claimed"
+                or launch.get("owner") != normalized_owner
+            ):
+                return None
+            timestamp = _updated_at()
+            launch = {
+                **launch,
+                "status": normalized_outcome,
+                "reason": _bounded_text(reason, 1000),
+                "completed_at": timestamp,
+                "updated_at": timestamp,
+            }
+            receipt = {**receipt, "launch": launch, "updated_at": timestamp}
+            receipts[receipt["request_id"]] = receipt
+            ledger["receipts"] = receipts
+            current["exclusive_validation"] = ledger
+            current["updated_at"] = timestamp
+            current["updated_by"] = "runtime-exclusive-validation-launch"
+            self._write_unlocked(current)
+            return dict(receipt)
+
+    def record_manual_exclusive_validation_launch(
+        self,
+        request_id: str,
+        *,
+        reason: str,
+    ) -> Optional[dict[str, Any]]:
+        """Consume an unclaimed prompt after a fresh manual battle start."""
+
+        with self._lock():
+            current = self._read_unlocked()
+            ledger = _valid_exclusive_validation_ledger(
+                current.get("exclusive_validation")
+            )
+            receipts = dict(ledger["receipts"])
+            receipt = receipts.get(str(request_id))
+            launch = (
+                _valid_exclusive_validation_launch(receipt.get("launch"))
+                if receipt
+                else None
+            )
+            if (
+                receipt is None
+                or launch is None
+                or launch.get("status") not in {
+                    "awaiting_operator",
+                    "requested",
+                }
+            ):
+                return None
+            timestamp = _updated_at()
+            launch = {
+                **launch,
+                "status": "started",
+                "reason": _bounded_text(reason, 1000),
+                "started_by": "manual_observation",
+                "completed_at": timestamp,
+                "updated_at": timestamp,
+            }
+            receipt = {**receipt, "launch": launch, "updated_at": timestamp}
+            receipts[receipt["request_id"]] = receipt
+            ledger["receipts"] = receipts
+            current["exclusive_validation"] = ledger
+            current["updated_at"] = timestamp
+            current["updated_by"] = "runtime-manual-tournament-observation"
+            self._write_unlocked(current)
+            return dict(receipt)
+
+    def fail_unclaimed_exclusive_validation_launch(
+        self,
+        request_id: str,
+        *,
+        reason: str,
+    ) -> Optional[dict[str, Any]]:
+        """Fail a launch that has not acquired device-input ownership."""
+
+        with self._lock():
+            current = self._read_unlocked()
+            ledger = _valid_exclusive_validation_ledger(
+                current.get("exclusive_validation")
+            )
+            receipts = dict(ledger["receipts"])
+            receipt = receipts.get(str(request_id))
+            launch = (
+                _valid_exclusive_validation_launch(receipt.get("launch"))
+                if receipt
+                else None
+            )
+            if (
+                receipt is None
+                or launch is None
+                or launch.get("status") not in {
+                    "awaiting_operator",
+                    "requested",
+                }
+            ):
+                return None
+            timestamp = _updated_at()
+            launch = {
+                **launch,
+                "status": "failed",
+                "reason": _bounded_text(reason, 1000),
+                "completed_at": timestamp,
+                "updated_at": timestamp,
+            }
+            receipt = {**receipt, "launch": launch, "updated_at": timestamp}
+            receipts[receipt["request_id"]] = receipt
+            ledger["receipts"] = receipts
+            current["exclusive_validation"] = ledger
+            current["updated_at"] = timestamp
+            current["updated_by"] = "runtime-exclusive-validation-launch"
+            self._write_unlocked(current)
+            return dict(receipt)
+
+    def fail_orphaned_exclusive_validation_launch(
+        self,
+        request_id: str,
+        *,
+        current_owner: Mapping[str, Any],
+        reason: str,
+    ) -> Optional[dict[str, Any]]:
+        """Fail a prior runtime's claimed launch without sending more input."""
+
+        normalized_owner = _valid_exclusive_validation_owner(current_owner)
+        if normalized_owner is None:
+            raise ValueError("exclusive validation launch owner is incomplete")
+        with self._lock():
+            current = self._read_unlocked()
+            ledger = _valid_exclusive_validation_ledger(
+                current.get("exclusive_validation")
+            )
+            receipts = dict(ledger["receipts"])
+            receipt = receipts.get(str(request_id))
+            launch = (
+                _valid_exclusive_validation_launch(receipt.get("launch"))
+                if receipt
+                else None
+            )
+            if (
+                receipt is None
+                or launch is None
+                or launch.get("status") != "claimed"
+                or launch.get("owner") == normalized_owner
+            ):
+                return None
+            timestamp = _updated_at()
+            launch = {
+                **launch,
+                "status": "failed",
+                "reason": _bounded_text(reason, 1000),
+                "completed_at": timestamp,
+                "updated_at": timestamp,
+            }
+            receipt = {**receipt, "launch": launch, "updated_at": timestamp}
+            receipts[receipt["request_id"]] = receipt
+            ledger["receipts"] = receipts
+            current["exclusive_validation"] = ledger
+            current["updated_at"] = timestamp
+            current["updated_by"] = "runtime-exclusive-validation-launch-orphan"
+            self._write_unlocked(current)
+            return dict(receipt)
 
     def fail_orphaned_exclusive_validation(
         self,
@@ -1104,6 +1498,63 @@ def _valid_exclusive_validation_owner(
     }
 
 
+def _valid_exclusive_validation_launch_policy(
+    value: object,
+) -> Optional[dict[str, Any]]:
+    if not isinstance(value, Mapping):
+        return None
+    kind = _bounded_text(value.get("kind"), 100).lower()
+    timeout_seconds = _finite_number(value.get("timeout_seconds"))
+    prompt_title = _bounded_text(value.get("prompt_title"), 200)
+    prompt_message = _bounded_text(value.get("prompt_message"), 1000)
+    reminder = _bounded_text(value.get("reminder"), 1000)
+    if (
+        kind != "tournament_battle"
+        or timeout_seconds is None
+        or not 30.0 <= timeout_seconds <= 120.0
+        or not prompt_title
+        or not prompt_message
+        or not reminder
+    ):
+        return None
+    return {
+        "kind": kind,
+        "timeout_seconds": timeout_seconds,
+        "prompt_title": prompt_title,
+        "prompt_message": prompt_message,
+        "reminder": reminder,
+    }
+
+
+def _valid_exclusive_validation_launch(
+    value: object,
+) -> Optional[dict[str, Any]]:
+    if not isinstance(value, Mapping):
+        return None
+    status = _bounded_text(value.get("status"), 50).lower()
+    if status not in EXCLUSIVE_VALIDATION_LAUNCH_STATUSES:
+        return None
+    launch = dict(value)
+    launch["status"] = status
+    if status in {"requested", "claimed"}:
+        launch_request_id = _bounded_text(
+            value.get("launch_request_id"), 100
+        )
+        if not launch_request_id:
+            return None
+        launch["launch_request_id"] = launch_request_id
+    if status == "claimed":
+        owner = _valid_exclusive_validation_owner(value.get("owner"))
+        deadline_at = _finite_number(value.get("deadline_at"))
+        if owner is None or deadline_at is None:
+            return None
+        launch["owner"] = owner
+        launch["deadline_at"] = deadline_at
+    if status in {"started", "cancelled", "failed"}:
+        launch["reason"] = _bounded_text(value.get("reason"), 1000)
+    return launch
+
+
 def _valid_exclusive_validation_receipt(
     value: object,
 ) -> Optional[dict[str, Any]]:
@@ -1135,6 +1586,11 @@ def _valid_exclusive_validation_receipt(
             "status": status,
         }
     )
+    launch_policy = _valid_exclusive_validation_launch_policy(
+        value.get("launch_policy")
+    )
+    if launch_policy is not None:
+        receipt["launch_policy"] = launch_policy
     if status in {"claimed", "running", "cleanup"}:
         owner = _valid_exclusive_validation_owner(value.get("owner"))
         deadline_at = _finite_number(value.get("deadline_at"))
@@ -1158,6 +1614,13 @@ def _valid_exclusive_validation_receipt(
             return None
         receipt["outcome"] = outcome
         receipt["reason"] = _bounded_text(value.get("reason"), 1000)
+        launch = _valid_exclusive_validation_launch(value.get("launch"))
+        if (
+            outcome == "ready"
+            and launch_policy is not None
+            and launch is not None
+        ):
+            receipt["launch"] = launch
     return receipt
 
 

@@ -73,6 +73,7 @@ from automation.strategies import get_strategy
 from handlers.game_over_handler import handle_game_over
 from handlers.tournament_result_handler import handle_tournament_results
 from handlers.home_screen_handler import handle_home_screen, tap_verified_new_battle
+from handlers.tournament_launch_handler import dispatch_tournament_launch
 from handlers.ad_gem_handler import (
     handle_ad_gem,
     handle_home_ad_gem,
@@ -131,6 +132,7 @@ class App:
         self._pending_strategy_request: Optional[Tuple[str, object, str]] = None
         self._strategy_boundary_confirmed = False
         self._active_exclusive_validation_request_id: Optional[str] = None
+        self._active_exclusive_validation_launch_request_id: Optional[str] = None
         self._exclusive_validation_terminal_hold: Optional[str] = None
         self._exclusive_validation_ownership_hold = False
         self._observe_strategy_request()
@@ -651,6 +653,264 @@ class App:
             console=True,
         )
 
+    def _reconcile_exclusive_validation_launch(
+        self,
+    ) -> Optional[Dict[str, object]]:
+        """Recover only same-owner launch work; fail prior ownership closed."""
+
+        ledger = self._supervisor.exclusive_validation
+        receipts = ledger.get("receipts")
+        if isinstance(receipts, Mapping):
+            for candidate in list(receipts.values()):
+                if not isinstance(candidate, Mapping):
+                    continue
+                launch = candidate.get("launch")
+                if (
+                    not isinstance(launch, Mapping)
+                    or launch.get("status") != "claimed"
+                ):
+                    continue
+                candidate_id = str(candidate.get("request_id") or "")
+                if self._supervisor.owns_exclusive_validation_launch(
+                    candidate_id
+                ):
+                    self._active_exclusive_validation_launch_request_id = (
+                        candidate_id
+                    )
+                    return self._supervisor.exclusive_validation_receipt(
+                        request_id=candidate_id
+                    )
+                failed = (
+                    self._supervisor.fail_orphaned_exclusive_validation_launch(
+                        candidate_id,
+                        reason=(
+                            "Tournament launch ownership belongs to a prior "
+                            "runtime or ADB target; no navigation or battle "
+                            "input was attempted"
+                        ),
+                    )
+                )
+                if failed:
+                    self._announce_exclusive_validation_launch(failed)
+
+        receipt = self._exclusive_validation_receipt()
+        if receipt is None:
+            return None
+        launch = receipt.get("launch")
+        if not isinstance(launch, Mapping):
+            return None
+        return receipt
+
+    @staticmethod
+    def _tournament_battle_guard(
+        detection: Mapping[str, object],
+    ) -> bool:
+        return bool(
+            str(detection.get("state") or "").upper() == "RUNNING"
+            and "TOURNAMENT"
+            in {
+                str(value).upper()
+                for value in detection.get("secondary_states", []) or []
+            }
+        )
+
+    def _announce_exclusive_validation_launch(
+        self,
+        receipt: Mapping[str, object],
+    ) -> None:
+        launch = receipt.get("launch")
+        if not isinstance(launch, Mapping):
+            return
+        status = str(launch.get("status") or "")
+        reason = str(launch.get("reason") or "reason unavailable")
+        if status == "started":
+            log(
+                f"[TOURNAMENT_LAUNCH] {reason}",
+                "INFO",
+                console=True,
+            )
+        elif status in {"failed", "cancelled"}:
+            log(
+                f"[TOURNAMENT_LAUNCH_{status.upper()}] {reason}",
+                "WARN" if status == "cancelled" else "ERROR",
+                console=True,
+            )
+
+    def _advance_exclusive_validation_launch(
+        self,
+        screenshot: Frame,
+        detection: Mapping[str, object],
+        *,
+        battle_started: bool,
+    ) -> bool:
+        """Handle one confirmed Tournament launch without rerunning validation."""
+
+        receipt = self._reconcile_exclusive_validation_launch()
+        if receipt is None:
+            return False
+        request_id = str(receipt.get("request_id") or "")
+        launch = receipt.get("launch")
+        if not isinstance(launch, Mapping):
+            return False
+        launch_status = str(launch.get("status") or "")
+        if (
+            launch_status in {"awaiting_operator", "requested"}
+            and battle_started
+            and self._tournament_battle_guard(detection)
+        ):
+            started = (
+                self._supervisor.record_manual_exclusive_validation_launch(
+                    request_id,
+                    reason=(
+                        "Fresh Tournament battle start was observed; the "
+                        "operator started it manually"
+                    ),
+                )
+            )
+            if started:
+                self._announce_exclusive_validation_launch(started)
+            return False
+        if launch_status not in {"requested", "claimed"}:
+            return False
+
+        definition = self._exclusive_validation_definition()
+        launch_definition = (
+            definition.operator_launch if definition is not None else None
+        )
+        fingerprint_matches = bool(
+            definition is not None
+            and receipt.get("configuration_fingerprint")
+            == definition.configuration_fingerprint
+        )
+        launch_kind_matches = bool(
+            launch_definition is not None
+            and launch_definition.kind == "tournament_battle"
+        )
+        if launch_status == "requested":
+            if self._supervisor.is_paused:
+                return True
+            if not fingerprint_matches or not launch_kind_matches:
+                failed = (
+                    self._supervisor.fail_unclaimed_exclusive_validation_launch(
+                        request_id,
+                        reason=(
+                            "Tournament launch request no longer matches the "
+                            "validated strategy configuration"
+                        ),
+                    )
+                )
+                if failed:
+                    self._announce_exclusive_validation_launch(failed)
+                return False
+            claimed = self._supervisor.claim_exclusive_validation_launch(
+                request_id,
+                configuration_fingerprint=definition.configuration_fingerprint,
+            )
+            if claimed is None:
+                return False
+            self._active_exclusive_validation_launch_request_id = request_id
+            log_action_intent(
+                "Starting the operator-confirmed Tournament",
+                reason=(
+                    "use fresh Home or Tournament-entry evidence to enter and "
+                    "start exactly one Tournament battle; validation is not "
+                    "being repeated"
+                ),
+            )
+            dispatched = dispatch_tournament_launch(
+                screenshot,
+                action_guard=lambda: (
+                    self._supervisor.exclusive_validation_launch_action_allowed(
+                        request_id
+                    )
+                ),
+            )
+            if dispatched.dispatched:
+                log(
+                    "[TOURNAMENT_LAUNCH] Verified Tournament BATTLE dispatched "
+                    f"under durable launch claim {request_id}",
+                    "INFO",
+                    console=True,
+                )
+                return True
+            failed = self._supervisor.finish_exclusive_validation_launch(
+                request_id,
+                outcome="failed",
+                reason=dispatched.reason,
+            )
+            self._active_exclusive_validation_launch_request_id = None
+            if failed:
+                self._announce_exclusive_validation_launch(failed)
+            return False
+
+        if not self._supervisor.owns_exclusive_validation_launch(request_id):
+            return False
+        current_request_id = str(
+            self._supervisor.exclusive_validation.get("current_request_id")
+            or ""
+        )
+        if (
+            current_request_id != request_id
+            or not fingerprint_matches
+            or not launch_kind_matches
+        ):
+            failed = self._supervisor.finish_exclusive_validation_launch(
+                request_id,
+                outcome="failed",
+                reason=(
+                    "Tournament launch was superseded or its validated "
+                    "configuration changed; no further input was attempted"
+                ),
+            )
+            self._active_exclusive_validation_launch_request_id = None
+            if failed:
+                self._announce_exclusive_validation_launch(failed)
+            return False
+        if str(detection.get("state") or "").upper() == "RUNNING":
+            if battle_started and self._tournament_battle_guard(detection):
+                started = self._supervisor.finish_exclusive_validation_launch(
+                    request_id,
+                    outcome="started",
+                    reason=(
+                        "Tournament battle started from the operator-confirmed "
+                        "launch; EHLS/EALS initialization is active"
+                    ),
+                )
+                self._active_exclusive_validation_launch_request_id = None
+                if started:
+                    self._announce_exclusive_validation_launch(started)
+                return False
+            failed = self._supervisor.finish_exclusive_validation_launch(
+                request_id,
+                outcome="failed",
+                reason=(
+                    "Launch reached RUNNING without a fresh Tournament battle "
+                    "boundary; no further input was attempted"
+                ),
+            )
+            self._active_exclusive_validation_launch_request_id = None
+            if failed:
+                self._announce_exclusive_validation_launch(failed)
+            return False
+        try:
+            deadline_at = float(launch.get("deadline_at") or 0.0)
+        except (TypeError, ValueError):
+            deadline_at = 0.0
+        if deadline_at and time.time() >= deadline_at:
+            failed = self._supervisor.finish_exclusive_validation_launch(
+                request_id,
+                outcome="failed",
+                reason=(
+                    "Tournament BATTLE did not reach fresh Tournament RUNNING "
+                    "evidence before the bounded launch timeout"
+                ),
+            )
+            self._active_exclusive_validation_launch_request_id = None
+            if failed:
+                self._announce_exclusive_validation_launch(failed)
+            return False
+        return True
+
     def _report_home_policy(
         self,
         *,
@@ -687,6 +947,11 @@ class App:
             if validation_receipt
             else ""
         )
+        validation_launch_status = ""
+        if validation_receipt:
+            launch = validation_receipt.get("launch")
+            if isinstance(launch, Mapping):
+                validation_launch_status = str(launch.get("status") or "")
         signature: Tuple[object, ...] = (
             self._current_strategy_name(),
             home_control,
@@ -697,6 +962,7 @@ class App:
             validation_status,
             validation_outcome,
             validation_reason,
+            validation_launch_status,
         )
         if signature == getattr(self, "_last_home_policy_signature", None):
             return
@@ -713,11 +979,19 @@ class App:
             log("Detected HOME_SCREEN. Evaluating Home policy.", "INFO")
             return
         if validation_status == "result" and validation_outcome == "ready":
-            log(
-                f"[TOURNAMENT_READY] {definition.ready_message}",
-                "INFO",
-                console=True,
-            )
+            if validation_launch_status == "awaiting_operator":
+                log(
+                    f"[TOURNAMENT_READY] {definition.ready_message}",
+                    "INFO",
+                    console=True,
+                )
+            elif validation_launch_status == "requested":
+                log(
+                    "[TOURNAMENT_LAUNCH] Operator Start is waiting for the "
+                    "runtime to claim it",
+                    "INFO",
+                    console=True,
+                )
         elif validation_status == "result":
             log(
                 "[TOURNAMENT_VALIDATION_FAILED] "
@@ -1164,6 +1438,7 @@ class App:
         self._no_strategy_inventory_complete = False
         self._no_strategy_inventory_retry_at = 0.0
         self._active_exclusive_validation_request_id = None
+        self._active_exclusive_validation_launch_request_id = None
         self._exclusive_validation_terminal_hold = None
         self._exclusive_validation_ownership_hold = False
 
@@ -1237,6 +1512,12 @@ class App:
                     detection,
                     battle_started=battle_started is True,
                 )
+                if self._advance_exclusive_validation_launch(
+                    img,
+                    detection,
+                    battle_started=battle_started is True,
+                ):
+                    continue
                 exclusive_validation_ownership_hold = bool(
                     getattr(
                         self,

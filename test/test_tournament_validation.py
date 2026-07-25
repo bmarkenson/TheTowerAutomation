@@ -11,6 +11,7 @@ from core.exclusive_validation import (
     exclusive_validation_definition_for_strategy,
 )
 from core.app import App
+from handlers.tournament_launch_handler import TournamentLaunchDispatch
 
 
 OWNER_ONE = {
@@ -53,6 +54,58 @@ def _app_for_pending_validation(tmp_path, *, home_preflight_complete=True):
     return app, store, manager
 
 
+def _ready_validation(store: ControlDirectiveStore):
+    saved = store.set_strategy("tournament", source="test")
+    definition = exclusive_validation_definition_for_strategy("tournament")
+    assert definition is not None
+    claimed = store.claim_exclusive_validation(
+        strategy_request_id=saved["strategy_request_id"],
+        configuration_fingerprint=definition.configuration_fingerprint,
+        owner=OWNER_ONE,
+        timeout_seconds=definition.timeout_seconds,
+    )
+    assert claimed is not None
+    running = store.mark_exclusive_validation_running(
+        claimed["request_id"],
+        owner=OWNER_ONE,
+    )
+    assert running is not None
+    cleanup = store.begin_exclusive_validation_cleanup(
+        running["request_id"],
+        owner=OWNER_ONE,
+        outcome="ready",
+        reason="checks passed",
+    )
+    assert cleanup is not None
+    ready = store.finish_exclusive_validation(
+        cleanup["request_id"],
+        owner=OWNER_ONE,
+        outcome="ready",
+        reason="checks passed",
+    )
+    assert ready is not None
+    return ready, definition
+
+
+def _app_for_ready_launch(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    ready, definition = _ready_validation(store)
+    supervisor = AutomationSupervisor(control_file=str(control_file))
+    strategy = get_strategy("tournament")
+    assert strategy is not None
+    manager = MissionManager(None, strategy)
+    manager.start()
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = manager
+    app._active_exclusive_validation_request_id = None
+    app._active_exclusive_validation_launch_request_id = None
+    app._exclusive_validation_terminal_hold = None
+    app._exclusive_validation_ownership_hold = False
+    return app, store, manager, ready, definition
+
+
 def test_explicit_tournament_requests_get_distinct_durable_receipts(tmp_path):
     store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
     first = store.set_strategy("tournament", source="test")
@@ -71,6 +124,163 @@ def test_explicit_tournament_requests_get_distinct_durable_receipts(tmp_path):
     ledger = store.status()["exclusive_validation"]
     assert ledger["receipts"][first_receipt["request_id"]]["outcome"] == "cancelled"
     assert second_receipt["status"] == "pending"
+
+
+def test_ready_receipt_offers_one_durable_start_or_cancel_decision(tmp_path):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    ready, definition = _ready_validation(store)
+
+    assert ready["launch_policy"] == {
+        "kind": "tournament_battle",
+        "timeout_seconds": 60.0,
+        "prompt_title": "Tournament validation passed",
+        "prompt_message": (
+            "Start the Tournament now? Automation will verify the current Home "
+            "or Tournament entry screen and start exactly one Tournament battle."
+        ),
+        "reminder": (
+            "Before starting, set Target Priorities for the current Tournament "
+            "Battle Conditions."
+        ),
+    }
+    assert ready["launch"]["status"] == "awaiting_operator"
+
+    requested = store.resolve_exclusive_validation_launch(
+        ready["request_id"],
+        "start",
+        source="test",
+    )
+    assert requested is not None
+    assert requested["launch"]["status"] == "requested"
+    assert requested["launch"]["launch_request_id"]
+    assert (
+        store.resolve_exclusive_validation_launch(
+            ready["request_id"],
+            "cancel",
+            source="test",
+        )
+        is None
+    )
+
+    claimed = store.claim_exclusive_validation_launch(
+        ready["request_id"],
+        configuration_fingerprint=definition.configuration_fingerprint,
+        owner=OWNER_ONE,
+    )
+    assert claimed is not None
+    assert claimed["launch"]["status"] == "claimed"
+    assert claimed["launch"]["owner"] == OWNER_ONE
+    assert (
+        store.finish_exclusive_validation_launch(
+            ready["request_id"],
+            owner=OWNER_TWO,
+            outcome="started",
+            reason="wrong owner",
+        )
+        is None
+    )
+    started = store.finish_exclusive_validation_launch(
+        ready["request_id"],
+        owner=OWNER_ONE,
+        outcome="started",
+        reason="Tournament RUNNING verified",
+    )
+    assert started is not None
+    assert started["launch"]["status"] == "started"
+
+
+def test_cancel_consumes_launch_without_changing_validation_result(tmp_path):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    ready, definition = _ready_validation(store)
+
+    cancelled = store.resolve_exclusive_validation_launch(
+        ready["request_id"],
+        "cancel",
+        source="test",
+    )
+
+    assert cancelled is not None
+    assert cancelled["outcome"] == "ready"
+    assert cancelled["launch"]["status"] == "cancelled"
+    assert (
+        store.claim_exclusive_validation_launch(
+            ready["request_id"],
+            configuration_fingerprint=definition.configuration_fingerprint,
+            owner=OWNER_ONE,
+        )
+        is None
+    )
+
+
+def test_new_strategy_request_cancels_unclaimed_launch(tmp_path):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    ready, _definition = _ready_validation(store)
+
+    store.set_strategy("tournament", source="test")
+
+    old = store.status()["exclusive_validation"]["receipts"][
+        ready["request_id"]
+    ]
+    assert old["outcome"] == "ready"
+    assert old["launch"]["status"] == "cancelled"
+    assert "superseded" in old["launch"]["reason"]
+    assert _current_receipt(store)["status"] == "pending"
+
+
+def test_restart_fails_claimed_launch_without_replay(tmp_path):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    ready, definition = _ready_validation(store)
+    store.resolve_exclusive_validation_launch(
+        ready["request_id"],
+        "start",
+        source="test",
+    )
+    claimed = store.claim_exclusive_validation_launch(
+        ready["request_id"],
+        configuration_fingerprint=definition.configuration_fingerprint,
+        owner=OWNER_ONE,
+    )
+    assert claimed is not None
+
+    failed = store.fail_orphaned_exclusive_validation_launch(
+        ready["request_id"],
+        current_owner=OWNER_TWO,
+        reason="prior launch owner is unavailable",
+    )
+
+    assert failed is not None
+    assert failed["launch"]["status"] == "failed"
+    assert failed["launch"]["owner"] == OWNER_ONE
+
+
+def test_launch_action_guard_stops_after_strategy_request_is_superseded(
+    tmp_path,
+):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    ready, definition = _ready_validation(store)
+    store.set_state("RUNNING", source="test")
+    store.resolve_exclusive_validation_launch(
+        ready["request_id"],
+        "start",
+        source="test",
+    )
+    supervisor = AutomationSupervisor(control_file=str(control_file))
+    claimed = supervisor.claim_exclusive_validation_launch(
+        ready["request_id"],
+        configuration_fingerprint=definition.configuration_fingerprint,
+    )
+    assert claimed is not None
+    assert supervisor.exclusive_validation_launch_action_allowed(
+        ready["request_id"]
+    )
+
+    store.set_strategy("tournament", source="test")
+
+    assert supervisor.owns_exclusive_validation_launch(ready["request_id"])
+    assert not supervisor.exclusive_validation_launch_action_allowed(
+        ready["request_id"]
+    )
 
 
 def test_claim_is_atomic_and_only_same_owner_can_advance_or_finish(tmp_path):
@@ -488,6 +698,96 @@ def test_manual_tournament_runs_level_skip_initialization_after_readiness():
     actions = strategy.tick(manager.ctx, object(), detection)
 
     assert actions == [{"type": "level_skip_initialize"}]
+
+
+def test_confirmed_launch_starts_once_then_runs_level_skip_initialization(
+    tmp_path,
+):
+    app, store, manager, ready, _definition = _app_for_ready_launch(tmp_path)
+    store.resolve_exclusive_validation_launch(
+        ready["request_id"],
+        "start",
+        source="test",
+    )
+    app._supervisor.apply_control()
+    frame = object()
+    home = {"state": "HOME_SCREEN", "secondary_states": []}
+
+    with (
+        patch(
+            "core.app.dispatch_tournament_launch",
+            return_value=TournamentLaunchDispatch(
+                True,
+                "verified Tournament BATTLE was dispatched",
+            ),
+        ) as dispatch,
+        patch("core.app.log"),
+        patch("core.app.log_action_intent"),
+    ):
+        assert app._advance_exclusive_validation_launch(
+            frame,
+            home,
+            battle_started=False,
+        )
+
+    dispatch.assert_called_once()
+    assert _current_receipt(store)["launch"]["status"] == "claimed"
+
+    tournament = {"state": "RUNNING", "secondary_states": ["TOURNAMENT"]}
+    battle_started = manager.maybe_run_start(tournament)
+    assert battle_started
+    with patch("core.app.log"):
+        assert not app._advance_exclusive_validation_launch(
+            frame,
+            tournament,
+            battle_started=battle_started,
+        )
+
+    result = _current_receipt(store)
+    assert result["launch"]["status"] == "started"
+    assert manager.run_initialization_pending()
+    mission_vars = manager.ctx.data["mission_vars"]
+    assert not mission_vars["ehls_completed"]
+    assert not mission_vars["eals_completed"]
+    assert manager.strategy.tick(manager.ctx, frame, tournament) == [
+        {"type": "level_skip_initialize"}
+    ]
+
+
+def test_manual_tournament_start_consumes_unclaimed_prompt(tmp_path):
+    app, store, manager, ready, _definition = _app_for_ready_launch(tmp_path)
+    tournament = {"state": "RUNNING", "secondary_states": ["TOURNAMENT"]}
+    battle_started = manager.maybe_run_start(tournament)
+
+    with patch("core.app.log"):
+        assert not app._advance_exclusive_validation_launch(
+            object(),
+            tournament,
+            battle_started=battle_started,
+        )
+
+    result = _current_receipt(store)
+    assert result["launch"]["status"] == "started"
+    assert result["launch"]["started_by"] == "manual_observation"
+    assert manager.run_initialization_pending()
+
+
+def test_requested_launch_waits_while_paused_without_claiming(tmp_path):
+    app, store, _manager, ready, _definition = _app_for_ready_launch(tmp_path)
+    store.resolve_exclusive_validation_launch(
+        ready["request_id"],
+        "start",
+        source="test",
+    )
+    store.set_state("PAUSED", source="test")
+    app._supervisor.apply_control()
+
+    assert app._advance_exclusive_validation_launch(
+        object(),
+        {"state": "HOME_SCREEN", "secondary_states": []},
+        battle_started=False,
+    )
+    assert _current_receipt(store)["launch"]["status"] == "requested"
 
 
 def test_validation_battle_bypasses_level_skips_without_seeding_completion():

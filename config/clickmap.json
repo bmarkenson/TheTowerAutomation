@@ -2072,6 +2072,26 @@
         "y": 1550
       }
     },
+    "tournament_open:home": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 120,
+        "y": 555
+      }
+    },
+    "battle:tournament": {
+      "roles": [
+        "button"
+      ],
+      "tap": {
+        "type": "tap",
+        "x": 540,
+        "y": 1550
+      }
+    },
     "close:target_priority": {
       "roles": [
         "button"

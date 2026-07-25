@@ -165,6 +165,36 @@ public sealed class ExclusiveValidationReceiptStatus
 
     [JsonPropertyName("reason")]
     public string? Reason { get; set; }
+
+    [JsonPropertyName("launch_policy")]
+    public ExclusiveValidationLaunchPolicyStatus? LaunchPolicy { get; set; }
+
+    [JsonPropertyName("launch")]
+    public ExclusiveValidationLaunchStatus? Launch { get; set; }
+}
+
+public sealed class ExclusiveValidationLaunchPolicyStatus
+{
+    [JsonPropertyName("kind")]
+    public string Kind { get; set; } = "";
+
+    [JsonPropertyName("prompt_title")]
+    public string PromptTitle { get; set; } = "";
+
+    [JsonPropertyName("prompt_message")]
+    public string PromptMessage { get; set; } = "";
+
+    [JsonPropertyName("reminder")]
+    public string Reminder { get; set; } = "";
+}
+
+public sealed class ExclusiveValidationLaunchStatus
+{
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "unknown";
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
 }
 
 public sealed class GateDecisionStatus

@@ -45,6 +45,10 @@ public partial class MainWindow : Window
     private GateDecisionStatus? _currentGateDecision;
     private string? _autoPromptedGateRequestId;
     private bool _gateDecisionDialogOpen;
+    private ExclusiveValidationReceiptStatus? _currentTournamentLaunch;
+    private string? _autoPromptedTournamentLaunchRequestId;
+    private bool _tournamentLaunchDialogOpen;
+    private bool _tournamentLaunchCanStart;
 
     public MainWindow()
     {
@@ -407,6 +411,61 @@ public partial class MainWindow : Window
         finally
         {
             _gateDecisionDialogOpen = false;
+        }
+    }
+
+    private async void TournamentLaunch_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (_currentTournamentLaunch is not { Launch.Status: "awaiting_operator" }
+            receipt)
+        {
+            return;
+        }
+        await ShowTournamentLaunchAsync(receipt);
+    }
+
+    private async Task ShowTournamentLaunchAsync(
+        ExclusiveValidationReceiptStatus receipt)
+    {
+        if (_tournamentLaunchDialogOpen)
+        {
+            return;
+        }
+        _tournamentLaunchDialogOpen = true;
+        try
+        {
+            var dialog = new TournamentLaunchWindow(
+                receipt,
+                _tournamentLaunchCanStart)
+            {
+                Owner = this,
+            };
+            if (dialog.ShowDialog() != true
+                || string.IsNullOrWhiteSpace(dialog.Decision))
+            {
+                return;
+            }
+            var response = await _api.PostControlAsync(
+                new
+                {
+                    action = "resolve_tournament_launch",
+                    request_id = receipt.RequestId,
+                    decision = dialog.Decision,
+                },
+                CancellationToken.None);
+            RenderStatus(response);
+            await RefreshActivityAsync(force: true);
+        }
+        catch (Exception exc)
+        {
+            ShowError(exc);
+            await RefreshStatusAsync(force: true);
+        }
+        finally
+        {
+            _tournamentLaunchDialogOpen = false;
         }
     }
 
@@ -1010,6 +1069,29 @@ public partial class MainWindow : Window
             : $"{strategyState} | {_strategyRequestMessage}";
         TournamentValidationText.Text = FormatExclusiveValidation(
             status.Control.ExclusiveValidation);
+        _currentTournamentLaunch = CurrentTournamentLaunch(
+            status.Control.ExclusiveValidation);
+        _tournamentLaunchCanStart = processActive
+            && _serverCompatibility?.IsCompatible == true
+            && string.Equals(
+                status.Control.State,
+                "RUNNING",
+                StringComparison.OrdinalIgnoreCase)
+            && status.Observation is { Stale: false }
+            && status.Observation.StateLabel is "HOME_SCREEN" or "TOURNAMENT_SCREEN";
+        TournamentLaunchButton.IsEnabled =
+            _currentTournamentLaunch is { Launch.Status: "awaiting_operator" }
+            && _serverCompatibility?.IsCompatible == true;
+        if (_currentTournamentLaunch is
+                { Launch.Status: "awaiting_operator" } launchReceipt
+            && launchReceipt.RequestId
+                != _autoPromptedTournamentLaunchRequestId
+            && _serverCompatibility?.IsCompatible == true)
+        {
+            _autoPromptedTournamentLaunchRequestId = launchReceipt.RequestId;
+            Dispatcher.BeginInvoke(new Action(async () =>
+                await ShowTournamentLaunchAsync(launchReceipt)));
+        }
         var stateDisposition = !processActive
             ? "saved; process inactive"
             : statePending ? "awaiting runtime" : "active directive";
@@ -1374,13 +1456,33 @@ public partial class MainWindow : Window
         }
         if (string.Equals(receipt.Status, "result", StringComparison.OrdinalIgnoreCase))
         {
-            return string.Equals(
-                receipt.Outcome,
-                "ready",
-                StringComparison.OrdinalIgnoreCase)
-                ? "Tournament is ready to begin manually. Automation will not enter or start Tournament."
-                : $"Tournament validation {receipt.Outcome ?? "failed"}: "
+            if (!string.Equals(
+                    receipt.Outcome,
+                    "ready",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return $"Tournament validation {receipt.Outcome ?? "failed"}: "
                     + $"{receipt.Reason ?? "reason unavailable"}";
+            }
+            return receipt.Launch?.Status switch
+            {
+                "awaiting_operator" =>
+                    "Tournament validation passed; waiting for Start Tournament or Cancel.",
+                "requested" =>
+                    "Tournament Start is authorized and waiting for the runtime.",
+                "claimed" =>
+                    "Tournament launch is in progress under the current runtime owner.",
+                "started" =>
+                    receipt.Launch.Reason ?? "Tournament was started.",
+                "cancelled" =>
+                    receipt.Launch.Reason ?? "Automatic Tournament launch was cancelled.",
+                "failed" =>
+                    $"Tournament launch failed: "
+                    + $"{receipt.Launch.Reason ?? "reason unavailable"}",
+                _ =>
+                    "Tournament validation passed before automatic launch "
+                    + "confirmation was available; start manually.",
+            };
         }
         var disposition = receipt.Status.ToLowerInvariant() switch
         {
@@ -1391,6 +1493,26 @@ public partial class MainWindow : Window
             _ => receipt.Status,
         };
         return $"Tournament validation: {disposition}.";
+    }
+
+    private static ExclusiveValidationReceiptStatus? CurrentTournamentLaunch(
+        ExclusiveValidationLedgerStatus? ledger)
+    {
+        if (ledger is null || string.IsNullOrWhiteSpace(ledger.CurrentRequestId))
+        {
+            return null;
+        }
+        if (!ledger.Receipts.TryGetValue(ledger.CurrentRequestId, out var receipt))
+        {
+            return null;
+        }
+        return string.Equals(
+                receipt.Outcome,
+                "ready",
+                StringComparison.OrdinalIgnoreCase)
+            && receipt.Launch is not null
+            ? receipt
+            : null;
     }
 
     private static string StrategyDisplayName(string? strategy) =>
