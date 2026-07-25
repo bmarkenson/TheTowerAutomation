@@ -59,6 +59,12 @@ current process and device.
   when doing so preserves clear ownership and semantics; create a new helper
   only when adapting existing code would distort its contract or architectural
   boundary.
+- Write operator-facing logs for comprehension, not just internal mechanics:
+  state what automation is doing and why. Before a guarded or multi-step input
+  workflow, emit one `log_action_intent(...)` header before its first input,
+  retain the individual tap/swipe `ACTION` records, and keep coordinates,
+  matches, and retries in paired `DEBUG` detail. Follow the action-log contract
+  in [`docs/runtime_operations.md`](docs/runtime_operations.md).
 - Keep `YamlStrategy` and the runtime evaluator generic. Prefer compact source
   configuration plus explicit generated plans over strategy-name conditionals
   or duplicated expanded YAML.
