@@ -253,6 +253,7 @@ class _NoBattleRouter:
             "buttons.guardian:fetch_inventory": (None, "fetch"),
             "indicators.guardian:ally_equipped": ("ally", None),
             "buttons.guardian:summon_inventory": (None, "summon"),
+            "buttons.guardian:scout_inventory": (None, "scout"),
         }
         remove, add = guardian_actions.get(label, ("unknown", "unknown"))
         if remove == "unknown":
@@ -433,11 +434,9 @@ def test_guardian_replacement_reacquires_after_empty_slot_settles():
         wrong_label="indicators.guardian:attack_equipped",
         wrong_secondary="GUARDIAN_ATTACK_EQUIPPED",
         inventory_label="buttons.guardian:fetch_inventory",
-        inventory_visible=True,
         expected_secondary="GUARDIAN_FETCH_EQUIPPED",
         capture_fn=capture,
         detector=detect,
-        safe_tap_fn=lambda *_args, **_kwargs: False,
         tap_visible_fn=visible_tap,
         sleep_fn=sleep,
     )
@@ -457,7 +456,7 @@ def test_no_battle_setup_fills_a_missing_scout_guardian_slot():
 
     assert result.complete
     assert router.guardians == {"fetch", "summon", "scout"}
-    assert "buttons.guardian:scout_inventory" in router.static_actions
+    assert "buttons.guardian:scout_inventory" in router.visible_actions
 
 
 def test_no_battle_setup_leaves_already_correct_settings_untouched():
@@ -518,6 +517,22 @@ def test_no_battle_setup_corrects_tournament_home_configuration():
     assert result.evidence["bots_preset"] == "Amplify"
     assert "buttons.guardian:attack_inventory" in router.visible_actions
     assert "buttons.guardian:ally_inventory" in router.visible_actions
+
+
+def test_no_battle_setup_resumes_interrupted_tournament_guardian_replacements():
+    expected = {"attack", "ally", "scout"}
+    for missing_chip, inventory_label in (
+        ("attack", "buttons.guardian:attack_inventory"),
+        ("ally", "buttons.guardian:ally_inventory"),
+    ):
+        router = _TournamentRouter(selected=True, correct_guardians=True)
+        router.guardians.remove(missing_chip)
+
+        result = _run(router, TOURNAMENT_REQUIREMENTS)
+
+        assert result.complete
+        assert router.guardians == expected
+        assert inventory_label in router.visible_actions
 
 
 def test_tournament_guardian_inventory_actions_have_explicit_geometry():

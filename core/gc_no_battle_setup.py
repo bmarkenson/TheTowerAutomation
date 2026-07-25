@@ -448,7 +448,6 @@ def run_gc_no_battle_setup(
                 requirements[current_check],
                 capture_fn,
                 detector,
-                safe_tap_fn,
                 tap_visible_fn,
                 sleep_fn,
             )
@@ -888,7 +887,6 @@ def _ensure_guardian_loadout(
     required,
     capture_fn,
     detector,
-    safe_tap_fn,
     tap_visible_fn,
     sleep_fn,
 ):
@@ -900,14 +898,18 @@ def _ensure_guardian_loadout(
                 "GUARDIAN_ATTACK_EQUIPPED",
                 "indicators.guardian:attack_equipped",
                 "buttons.guardian:fetch_inventory",
-                True,
             ),
             (
                 "GUARDIAN_SUMMON_EQUIPPED",
                 "GUARDIAN_ALLY_EQUIPPED",
                 "indicators.guardian:ally_equipped",
                 "buttons.guardian:summon_inventory",
-                True,
+            ),
+            (
+                "GUARDIAN_SCOUT_EQUIPPED",
+                None,
+                None,
+                "buttons.guardian:scout_inventory",
             ),
         )
     elif required_chips == {"Attack", "Ally", "Scout"}:
@@ -917,14 +919,18 @@ def _ensure_guardian_loadout(
                 "GUARDIAN_FETCH_EQUIPPED",
                 "indicators.guardian:fetch_equipped",
                 "buttons.guardian:attack_inventory",
-                True,
             ),
             (
                 "GUARDIAN_ALLY_EQUIPPED",
                 "GUARDIAN_SUMMON_EQUIPPED",
                 "indicators.guardian:summon_equipped",
                 "buttons.guardian:ally_inventory",
-                True,
+            ),
+            (
+                "GUARDIAN_SCOUT_EQUIPPED",
+                None,
+                None,
+                "buttons.guardian:scout_inventory",
             ),
         )
     else:
@@ -941,32 +947,30 @@ def _ensure_guardian_loadout(
         replacement_source_secondary,
         wrong_label,
         inventory_label,
-        inventory_visible,
     ) in replacements:
         detected = set(detector(current).get("secondary_states") or ())
         if expected_secondary in detected:
             continue
-        if replacement_source_secondary not in detected:
-            raise _SetupFailure(
-                "unsupported Guardian mismatch: expected "
-                f"{expected_secondary}, found {sorted(detected)}"
+        if (
+            replacement_source_secondary is not None
+            and replacement_source_secondary in detected
+        ):
+            current = _replace_guardian_chip(
+                current,
+                wrong_label=wrong_label,
+                wrong_secondary=replacement_source_secondary,
+                inventory_label=inventory_label,
+                expected_secondary=expected_secondary,
+                capture_fn=capture_fn,
+                detector=detector,
+                tap_visible_fn=tap_visible_fn,
+                sleep_fn=sleep_fn,
             )
-        current = _replace_guardian_chip(
-            current,
-            wrong_label=wrong_label,
-            wrong_secondary=replacement_source_secondary,
-            inventory_label=inventory_label,
-            inventory_visible=inventory_visible,
-            expected_secondary=expected_secondary,
-            capture_fn=capture_fn,
-            detector=detector,
-            safe_tap_fn=safe_tap_fn,
-            tap_visible_fn=tap_visible_fn,
-            sleep_fn=sleep_fn,
-        )
-    detected = set(detector(current).get("secondary_states") or ())
-    missing = desired - detected
-    if missing == {"GUARDIAN_SCOUT_EQUIPPED"}:
+            continue
+
+        # A prior fail-closed replacement can leave this slot empty after the
+        # old chip was removed. Reacquire settled Guardian evidence and fill
+        # the exact missing slot from a freshly matched inventory card.
         sleep_fn(GUARDIAN_INVENTORY_SETTLE_SECONDS)
         current = _wait_for(
             state="GUILD",
@@ -975,20 +979,39 @@ def _ensure_guardian_loadout(
             detector=detector,
             sleep_fn=sleep_fn,
         )
-        if not safe_tap_fn(
-            "buttons.guardian:scout_inventory",
-            dispatch="now",
+        detected = set(detector(current).get("secondary_states") or ())
+        if expected_secondary in detected:
+            continue
+        if (
+            replacement_source_secondary is not None
+            and replacement_source_secondary in detected
         ):
-            raise _SetupFailure("Guardian Scout inventory selection failed")
+            current = _replace_guardian_chip(
+                current,
+                wrong_label=wrong_label,
+                wrong_secondary=replacement_source_secondary,
+                inventory_label=inventory_label,
+                expected_secondary=expected_secondary,
+                capture_fn=capture_fn,
+                detector=detector,
+                tap_visible_fn=tap_visible_fn,
+                sleep_fn=sleep_fn,
+            )
+            continue
+        if not tap_visible_fn(inventory_label, screenshot=current, retries=1):
+            raise _SetupFailure(
+                f"Guardian empty-slot target missing: {inventory_label}"
+            )
         current = _wait_for(
             state="GUILD",
-            secondary="GUARDIAN_SCOUT_EQUIPPED",
+            secondary=expected_secondary,
             capture_fn=capture_fn,
             detector=detector,
             sleep_fn=sleep_fn,
         )
-        detected = set(detector(current).get("secondary_states") or ())
-        missing = desired - detected
+
+    detected = set(detector(current).get("secondary_states") or ())
+    missing = desired - detected
     if missing:
         raise _SetupFailure(
             "unsupported Guardian mismatch: " + ", ".join(sorted(missing))
@@ -1002,11 +1025,9 @@ def _replace_guardian_chip(
     wrong_label,
     wrong_secondary,
     inventory_label,
-    inventory_visible,
     expected_secondary,
     capture_fn,
     detector,
-    safe_tap_fn,
     tap_visible_fn,
     sleep_fn,
 ):
@@ -1029,13 +1050,7 @@ def _replace_guardian_chip(
         detector=detector,
         sleep_fn=sleep_fn,
     )
-    if inventory_visible:
-        selected = tap_visible_fn(inventory_label, screenshot=emptied, retries=1)
-    else:
-        selected = safe_tap_fn(
-            inventory_label,
-            dispatch="now",
-        )
+    selected = tap_visible_fn(inventory_label, screenshot=emptied, retries=1)
     if not selected:
         raise _SetupFailure(f"Guardian inventory target missing: {inventory_label}")
     return _wait_for(
