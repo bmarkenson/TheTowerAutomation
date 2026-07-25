@@ -217,10 +217,10 @@ When replacing automation during a battle, select **Attach to current battle;
 run gates next battle** before starting. The new process observes and controls
 that existing run normally but suppresses only rules tagged as run
 initialization or session preflight. The Tournament observer is the narrow
-exception: it runs its declared read-only preflight on attachment so a bad
-setting can be reported without acquiring repair authority. The suppression
-survives transient Unknown screens and Home `RESUME_BATTLE`. It ends only at
-Game Over, Tournament
+exception: it runs its declared preflight on attachment, enforces only Damage
+Slider `100%` and Poison Swamp Stun `on`, and reports other bad settings without
+acquiring Home-repair authority. The suppression survives transient Unknown
+screens and Home `RESUME_BATTLE`. It ends only at Game Over, Tournament
 Results, or verified Home `NEW_BATTLE`; the following battle then performs the
 real gates. Do not select this for a process that is expected to configure a
 newly started battle immediately.
@@ -257,7 +257,7 @@ readiness, or state-restoration protocol.
 
 If attached Tournament preflight finds an authoritative mismatch, the control
 surface opens a non-blocking warning. **Pause for manual changes** persists
-Pause without ending the run; **Retry** captures fresh read-only evidence; and
+Pause without ending the run; **Retry** captures fresh validation evidence; and
 **Continue observing** waives only the displayed mismatch for that run. Closing
 the warning leaves it pending while natural Tournament Results/Game Over
 capture remains active. If Pause is selected, terminal handling waits until the

@@ -8,6 +8,38 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Tournament preflight omitted Poison Swamp Stun and Damage Slider
+
+- **Observed:** 2026-07-25 while reviewing which Tournament requirements
+  actually need an in-battle validation run.
+- **Symptom:** The Tournament contract required Poison Swamp's primary toggle
+  but omitted its Stun control, even though Tournament requires Stun `on`.
+  Damage Slider was also absent even though Tournament requires `100%`.
+- **Evidence:** Static tracing showed that Home setup already reaches Poison
+  Swamp through Workshop Ultimate Upgrades, but its guarded helper and boundary
+  evidence accepted only Farm's Stun `off`. Damage Slider was implemented only
+  in Farm run initialization and is available exclusively from the in-battle
+  Attack menu.
+- **Safety response:** No battle, Surrender, Tournament screen, or live device
+  action was used for this repair.
+- **Cause:** The original Tournament profile modeled only primary Ultimate
+  Weapon toggles plus Spotlight missiles. The reusable Poison Swamp correction
+  was hard-coded to Farm's desired state, and the Tournament builder had no
+  Damage Slider gate.
+- **Resolution:** Tournament now declares Poison Swamp Stun `on` and enforces it
+  during Home preflight with fresh detail-panel evidence. The guarded helper
+  supports either required state, preserving Farm's Stun `off`. Tournament also
+  declares Damage Slider `100%`; Home evidence marks it
+  `battle_only_control`, and session validation must enforce it successfully
+  before inspecting Ultimate Weapons or announcing readiness.
+- **Regression:** Poison Swamp tests cover both toggle directions and the
+  retained live templates. Home, navigation, compact-profile, generated-plan,
+  and observer tests require Tournament Stun `on`, Damage Slider `100%`, and
+  slider-before-UW sequencing. Repository validation passed 647
+  sandbox-compatible tests plus the separately permitted localhost HTTP test,
+  for 648 total.
+- **Fixed by:** `534a221`.
+
 ### Tournament Home idle state spammed an ambiguous policy message
 
 - **Observed:** 2026-07-25 after Tournament Home pre-flight completed at a

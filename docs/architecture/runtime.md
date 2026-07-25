@@ -76,35 +76,42 @@ authority. Pause is rechecked before every speed tap.
 
 ## Tournament observer profile
 
-`Tournament` is a passive, single-battle observer profile. Its generated plan
-owns the Tournament Cards, Tourney Workshop, Amplify Bots, Attack/Ally/Scout
-Guardians, Tournament/Milestone modules, all nine Ultimate Weapons, and
-Spotlight missiles. Tournament battles have no Perks, so Perks are not part of
-this contract.
+`Tournament` is a single-battle observer profile that becomes passive after
+its declared preflight corrections. Its generated plan owns the Tournament
+Cards, Tourney Workshop, Amplify Bots, Attack/Ally/Scout Guardians,
+Tournament/Milestone modules, Poison Swamp Stun `on`, Damage Slider `100%`,
+all nine Ultimate Weapons, and Spotlight missiles. Tournament battles have no
+Perks, so Perks are not part of this contract.
 
 At verified Home `NEW_BATTLE`, the profile's no-battle route selects Tournament
 Cards, Tourney Workshop, Amplify Bots, Attack/Ally/Scout Guardians, and the
-Tournament module loadout. The evidence is retained for session preflight, and
-the runtime deliberately leaves Tournament entry to the operator instead of
-pressing the normal Battle control. Session preflight then checks only Ultimate
-Weapons from the active Tournament.
+Tournament module loadout. It also opens Poison Swamp through Workshop Ultimate
+Upgrades and verifies or corrects Stun to `on`. The evidence is retained for
+session preflight, and the runtime deliberately leaves Tournament entry to the
+operator instead of pressing the normal Battle control. Damage Slider remains
+explicitly deferred at Home because its control is battle-only. Session
+preflight first enforces Damage Slider `100%`, then checks the nine primary
+Ultimate Weapon toggles and Spotlight missiles from the active battle.
 
 Without Home boundary evidence, including attachment to an already-running
-Tournament, the guarded read-only compatibility route inspects Cards, Ultimate
-Weapons, Modules, Bots, and Guardians in battle. Workshop is the only check
-that takes resumable Exit Battle → Go Home. The route never selects or equips a
-setting and must verify that Resume returns to the same Tournament.
+Tournament, the guarded compatibility route inspects Cards, Ultimate Weapons,
+Modules, Bots, and Guardians in battle. Workshop is the only check that takes
+resumable Exit Battle → Go Home. It may enforce only the two declared controls:
+Damage Slider `100%` and Poison Swamp Stun `on`. It never selects a preset or
+equips a loadout and must verify that Resume returns to the same Tournament.
 
-After one conclusive validation attempt, the Tournament runtime policy grants
-action authority only to ad-gem collection and terminal-result handling. An ad
-gem starts the same bounded floating-gem sweep used by normal battles; the
-Tournament policy does not run an independent or continuous floating-gem
-handler. A configuration mismatch is retained as session evidence but cannot
-request repair or block result capture. Attached-run mismatches publish a
-non-blocking operator decision: pause for manual changes, retry with fresh
-evidence, or continue observation with a run-scoped waiver for the displayed
-check. The profile does not buy upgrades, Surrender, auto-return Home, enter a
-Tournament, or start a normal battle.
+Readiness requires both a successfully enforced Damage Slider and one
+conclusive configuration-validation attempt. After that, the Tournament runtime
+policy grants action authority only to game-speed maintenance, ad-gem
+collection, and terminal-result handling. An ad gem starts the same bounded
+floating-gem sweep used by normal battles; the Tournament policy does not run
+an independent or continuous floating-gem handler. A configuration mismatch is
+retained as session evidence but cannot request Home repair or block result
+capture. Attached-run mismatches publish a non-blocking operator decision:
+pause for manual changes, retry with fresh evidence, or continue observation
+with a run-scoped waiver for the displayed check. The profile does not buy
+upgrades, Surrender, auto-return Home, enter a Tournament, or start a normal
+battle.
 
 In-battle side-menu destinations and Event/Guild tabs require visible template
 matches and tap the matched bounding box. Their static coordinates are not

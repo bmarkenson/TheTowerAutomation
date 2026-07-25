@@ -37,6 +37,21 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-25 Tournament Stun and Damage Slider preflight
+
+- Added Poison Swamp Stun `on` to the Tournament Home contract. The guarded
+  detail-panel correction now supports either required state while Farm remains
+  Stun `off`.
+- Added the battle-only Tournament Damage Slider requirement at `100%`.
+  Session validation enforces it before scanning Ultimate Weapons, and Home
+  evidence records the control as deferred rather than claiming it was checked.
+- The remaining Tournament configuration checks that truly require a battle
+  are Damage Slider plus the nine Ultimate Weapon primary toggles and Spotlight
+  missiles. Game speed is maintained separately by its runtime handler.
+- Regression and full repository validation passed 648 tests, including the
+  separately permitted localhost HTTP test.
+- Implemented in commit `534a221`.
+
 ### 2026-07-25 Tournament Guardian tap authority
 
 - Added retained-fixture-backed Attack and Ally inventory targets so
