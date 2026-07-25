@@ -37,6 +37,18 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-25 action-intent log headers
+
+- Added a reusable operator-facing `ACTION` header that states what a guarded
+  or multi-step workflow is beginning and why before its tap and swipe details.
+- Adopted the header for level-skip initialization, Target Priority, Damage
+  Slider, session preflight and Home repair, Daily Gem and mission rewards, and
+  Game Over handling.
+- Focused validation passed 139 tests. Repository-wide validation passed 649
+  sandbox-compatible tests plus the separately permitted localhost HTTP test,
+  for 650 total. No live process or device interaction was used.
+- Implemented in commit `8bbd3eb`.
+
 ### 2026-07-25 Tournament Stun and Damage Slider preflight
 
 - Added Poison Swamp Stun `on` to the Tournament Home contract. The guarded

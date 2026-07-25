@@ -71,11 +71,13 @@ timeout 8s adb -s localhost:5555 get-state
 - The lock records the last owner PID and target, but may be stale after a
   crash. Confirm its PID against the host process table before treating it as a
   live owner.
-- `actions.log` records what the automation actually observed and dispatched.
-  It retains both concise operator entries and paired diagnostic evidence;
-  control-surface Recent Activity defaults to the operational levels, while
-  `Diagnostics` or `All levels` exposes coordinates, detector state, retries,
-  and other low-level detail.
+- `actions.log` records what the automation intended, observed, and dispatched.
+  Guarded and multi-step workflows begin with a concise `ACTION` header that
+  explains their purpose before the individual input records. The log retains
+  both concise operator entries and paired diagnostic evidence; control-surface
+  Recent Activity defaults to the operational levels, while `Diagnostics` or
+  `All levels` exposes coordinates, detector state, retries, and other
+  low-level detail.
 - A fresh screenshot is authoritative for the visible UI and can disprove a
   stale wave/status hint.
 - Never infer `RUNNING`, `PAUSED`, Game Over, or Home solely from a dated

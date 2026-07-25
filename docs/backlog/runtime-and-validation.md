@@ -198,9 +198,11 @@ evidence.
    - [ ] On Windows, verify that the default view remains concise during normal
      automation, `Diagnostics` exposes the paired status/input evidence, and
      `All levels` preserves the complete ordering.
-   - [ ] Before a guarded or multi-step operation, log a human-readable intent
+   - [x] Before a guarded or multi-step operation, log a human-readable intent
      summary describing what automation is trying to accomplish and why, not
-     only the individual actions it performs.
+     only the individual actions it performs. Commit `8bbd3eb` adds the shared
+     intent-header helper and adopts it across the primary session, setup,
+     reward, and terminal workflows.
    - [ ] Give every startup, session-preflight, and recovery check a concise
      human-readable result that includes the requirement, expected and observed
      state, and final disposition such as passed, failed, waived, or fallback.
