@@ -21,6 +21,7 @@ from core.module_icon_index import (
 )
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
+from utils.logger import log
 from utils.ocr_utils import ocr_text_and_conf
 
 
@@ -739,9 +740,13 @@ def _find_inventory_detail(
 
 
 def _role_prompt_visible(frame) -> bool:
-    text, _ = ocr_text_and_conf(frame[850:1250, 220:860], psm=6)
-    normalized = _normalized(text)
-    return "PRIMARY" in normalized and "ASSIST" in normalized
+    crop = frame[850:1250, 220:860]
+    for psm in (6, 11):
+        text, _ = ocr_text_and_conf(crop, psm=psm)
+        normalized = _normalized(text)
+        if "PRIMARY" in normalized and "ASSIST" in normalized:
+            return True
+    return False
 
 
 def _transfer_prompt_visible(frame) -> bool:
@@ -782,30 +787,59 @@ def _equip_inventory_module(
         raise ModuleLoadoutCorrectionError(
             f"inventory detail guard failed for {slot.expected}"
         )
-    if not safe_tap_fn(
-        "buttons.module:detail_equip_toggle",
-        dispatch="now",
-        verification=TapVerification(
-            screenshot=detail,
-            target_region=(120, 1610, 310, 130),
-            description=f"module_detail:equip:{slot.expected}",
-            verifier=lambda frame: _detail_for(
-                frame,
-                slot.expected,
-                action="EQUIP",
+    role_prompt = None
+    for attempt in range(1, 3):
+        if not safe_tap_fn(
+            "buttons.module:detail_equip_toggle",
+            dispatch="now",
+            verification=TapVerification(
+                screenshot=detail,
+                target_region=(120, 1610, 310, 130),
+                description=f"module_detail:equip:{slot.expected}",
+                verifier=lambda frame: _detail_for(
+                    frame,
+                    slot.expected,
+                    action="EQUIP",
+                ),
             ),
-        ),
-    ):
-        raise ModuleLoadoutCorrectionError(f"Equip tap failed for {slot.expected}")
-    _wait_for(
-        _role_prompt_visible,
-        capture_fn=capture_fn,
-        detector=detector,
-        sleep_fn=sleep_fn,
-        reason="Primary/Assist module role prompt",
-    )
+        ):
+            raise ModuleLoadoutCorrectionError(
+                f"Equip tap failed for {slot.expected}"
+            )
+        try:
+            role_prompt = _wait_for(
+                _role_prompt_visible,
+                capture_fn=capture_fn,
+                detector=detector,
+                sleep_fn=sleep_fn,
+                timeout=4.0,
+                reason="Primary/Assist module role prompt",
+            )
+            break
+        except ModuleLoadoutCorrectionError:
+            if attempt >= 2:
+                raise
+            detail = _capture_modules(capture_fn, detector)
+            if _role_prompt_visible(detail):
+                role_prompt = detail
+                break
+            if not _detail_for(detail, slot.expected, action="EQUIP"):
+                raise ModuleLoadoutCorrectionError(
+                    f"Equip transition left the verified {slot.expected} detail "
+                    "without opening the role prompt"
+                )
+            log(
+                f"[MODULE_LOADOUT] Equip input for {slot.expected} did not "
+                "open the role prompt; retrying once",
+                "WARN",
+            )
+
+    if role_prompt is None:
+        raise ModuleLoadoutCorrectionError(
+            f"role prompt was unavailable for {slot.expected}"
+        )
     role_key = f"buttons.module:select_{slot.role}"
-    frame = _capture_modules(capture_fn, detector)
+    frame = role_prompt
     if not _role_prompt_visible(frame):
         raise ModuleLoadoutCorrectionError("module role prompt guard was lost")
     role_region = (

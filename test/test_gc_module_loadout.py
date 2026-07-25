@@ -14,6 +14,7 @@ from core.gc_module_loadout import (
     _equip_inventory_module,
     _filter_option_visible,
     _find_inventory_detail,
+    _role_prompt_visible,
     _scroll_inventory_to_top,
     _detail_ready,
     _set_module_rarity_filter,
@@ -315,6 +316,80 @@ def test_module_replacement_fails_when_level_transfer_cannot_be_accepted():
             )
 
 
+def test_module_replacement_retries_a_dropped_equip_input_once():
+    detail = np.full((1920, 1080, 3), 10, dtype=np.uint8)
+    role_prompt = np.full((1920, 1080, 3), 20, dtype=np.uint8)
+    transfer_prompt = np.full((1920, 1080, 3), 30, dtype=np.uint8)
+    overview = np.full((1920, 1080, 3), 40, dtype=np.uint8)
+    captures = iter((detail, transfer_prompt))
+    taps = []
+    slot = GcModuleSlotEvidence(
+        slot_key="generator_primary",
+        family="generator",
+        role="primary",
+        expected="Black Hole Digestor",
+        actual="Project Funding",
+        match_status="matched",
+        valid=False,
+        confidence=1.0,
+        margin=1.0,
+        green_fraction=1.0,
+    )
+    prompt_waits = 0
+
+    def safe_tap(target, **_kwargs):
+        taps.append(target)
+        return True
+
+    def wait_for(_predicate, *, reason, **_kwargs):
+        nonlocal prompt_waits
+        if reason == "Primary/Assist module role prompt":
+            prompt_waits += 1
+            if prompt_waits == 1:
+                raise ModuleLoadoutCorrectionError(
+                    "timed out waiting for Primary/Assist module role prompt"
+                )
+            return role_prompt
+        assert reason == "Modules overview after accepted level transfer"
+        return overview
+
+    with (
+        patch("core.gc_module_loadout._find_inventory_detail", return_value=detail),
+        patch("core.gc_module_loadout._detail_for", return_value=True),
+        patch(
+            "core.gc_module_loadout._role_prompt_visible",
+            side_effect=lambda frame: int(frame[0, 0, 0]) == 20,
+        ),
+        patch(
+            "core.gc_module_loadout._transfer_prompt_visible",
+            side_effect=lambda frame: int(frame[0, 0, 0]) == 30,
+        ),
+        patch(
+            "core.gc_module_loadout._overview_visible",
+            side_effect=lambda frame: int(frame[0, 0, 0]) == 40,
+        ),
+        patch("core.gc_module_loadout._capture_modules", side_effect=captures),
+        patch("core.gc_module_loadout._wait_for", side_effect=wait_for),
+    ):
+        result = _equip_inventory_module(
+            slot,
+            capture_fn=lambda: pytest.fail("capture is wrapped"),
+            detector=lambda _frame: {"state": "MODULES"},
+            safe_tap_fn=safe_tap,
+            swipe_fn=lambda _label: True,
+            sleep_fn=lambda _seconds: None,
+            catalog=load_module_icon_catalog(),
+        )
+
+    assert result is overview
+    assert taps == [
+        "buttons.module:detail_equip_toggle",
+        "buttons.module:detail_equip_toggle",
+        "buttons.module:select_primary",
+        "buttons.module:accept_level_transfer",
+    ]
+
+
 def test_module_level_transfer_clickmap_has_only_the_accept_action():
     assert get_click("buttons.module:accept_level_transfer") == (730, 1125)
     assert resolve_dot_path("buttons.module:decline_level_transfer") is None
@@ -463,6 +538,19 @@ def test_ancestral_filter_ocr_excludes_the_adjacent_mythic_row():
         assert _filter_option_visible(frame, "ANCESTRAL")
 
     assert crops == [((115, 370, 3), 7)]
+
+
+def test_role_prompt_ocr_falls_back_to_sparse_text_layout():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    reads = iter(
+        (
+            ("Equip a module", 95.0),
+            ("Primary Assist", 95.0),
+        )
+    )
+
+    with patch("core.gc_module_loadout.ocr_text_and_conf", side_effect=reads):
+        assert _role_prompt_visible(frame)
 
 
 def test_module_actions_reject_incomplete_frames_and_partial_detail_renders():
