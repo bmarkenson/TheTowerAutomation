@@ -340,14 +340,17 @@ evidence is attached.
   strategy declares both semantic lists. Ban repair completes before Auto Pick:
   extra selections are removed from the fixed Selected Perks block, while only
   missing required bans search the Available list. Each Ban toggle and Auto
-  Pick move requires fresh row identity, strict transition evidence, and a
-  final exact comparison; ambiguous OCR, an unavailable perk, or non-progress
-  blocks New Battle. Persistent control is synchronized before every Home
-  setup tap or swipe. Pause holds the workflow action-free, and Resume restores
-  verified Home before a fresh setup pass. The setup retains screen-derived
-  configuration evidence for session preflight, which consumes that boundary
-  proof and checks only battle-only settings instead of leaving the newly
-  started run to repeat Home checks.
+  Pick move recaptures the panel immediately before input, uniquely reacquires
+  the same semantic row at its settled coordinates, and requires strict
+  transition evidence. Auto Pick then rebuilds semantic rank from the top and
+  requires exactly one-rank upward progress after every tap. A final exact
+  comparison remains mandatory; ambiguous OCR, an unavailable perk, or
+  non-progress blocks New Battle. Persistent control is synchronized before
+  every Home setup tap or swipe. Pause holds the workflow action-free, and
+  Resume restores verified Home before a fresh setup pass. The setup retains
+  screen-derived configuration evidence for session preflight, which consumes
+  that boundary proof and checks only battle-only settings instead of leaving
+  the newly started run to repeat Home checks.
   Target Priority records
   `battle_only_control` at Home and remains unsatisfied until the generated
   `RUNNING` action observes or enforces it; there is no Home Target Priority

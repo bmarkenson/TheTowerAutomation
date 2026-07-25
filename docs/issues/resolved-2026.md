@@ -8,6 +8,45 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Auto Pick repair used a row position captured during scroll settling
+
+- **Observed:** 2026-07-25 during two authorized live Tier 19 Farm Home
+  preflight retries.
+- **Symptom:** The first retry tapped Coin Trade-Off's matched up control, then
+  blocked because the row at the assumed post-move position had another
+  identity. A stronger rank-based retry proved that Coin remained at rank 29
+  after the tap instead of advancing to rank 28.
+- **Evidence:** `logs/actions.log` records the failures at 11:33:24 and
+  11:45:32. The paused inspection located Coin with a stale OCR center near
+  `y=1421`, while a screenshot captured after the list settled placed the same
+  row at `y=1343`. The failed retry tapped `y=1467`; the repaired retry
+  reacquired and tapped Coin at `y=1339`. It then proved all 26 single-rank
+  moves from rank 29 to the Farm target at rank 3 and reported the exact
+  13-entry order at 12:10:43.
+- **Safety response:** Both failed attempts published a blocking
+  `perk_configuration` decision, closed Perks, and returned to verified Home
+  without starting a battle. The runtime was paused before the bounded panel
+  inspection.
+- **Cause:** OCR of the long Auto Pick list was authoritative for identity but
+  expensive. A frame captured 0.8 seconds after the last swipe could still
+  represent a coasting list; by the time OCR completed and the input was
+  dispatched, its row center was stale. The original postcondition also
+  assumed a one-rank move had a fixed 172-pixel displacement.
+- **Resolution:** Every Ban or Auto Pick action now captures the panel again
+  immediately before input, uniquely reacquires the same semantic perk, and
+  derives the tap coordinate from that action-authority frame. After every
+  Auto Pick up-arrow input, repair scrolls from the top and requires the perk's
+  authoritative semantic rank to improve by exactly one before another input.
+  The exact final prefix comparison remains mandatory.
+- **Regression:** `test/test_home_perk_configuration.py` covers 78-pixel
+  pre-action row drift, viewport reflow, exact one-rank progress, unchanged
+  input refusal, and final order repair.
+- **Validation:** Repository-wide validation passed 725 sandbox-compatible
+  tests plus the separately permitted localhost HTTP test, for 726 total. The
+  live retry restored Coin Trade-Off from rank 29 to rank 3 and passed both
+  strategy-owned Perk checks.
+- **Fixed by:** `227465b`.
+
 ### Home Perk repair searched unnecessarily and continued after Pause
 
 - **Observed:** 2026-07-25 during the authorized live Tier 19 Farm Home

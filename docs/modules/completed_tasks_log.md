@@ -53,14 +53,20 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   blocking Home workflow did not consume Pause. The follow-up synchronizes
   persistent control before every setup input; Pause is action-free and Resume
   restores Home before a fresh pass.
+- The Auto Pick live retry also exposed row coordinates captured while the
+  list was still settling after a swipe. Actions now recapture and uniquely
+  reacquire the semantic row immediately before input, then rebuild rank from
+  the top and require exactly one-rank progress. Live validation moved Coin
+  Trade-Off from rank 29 to rank 3 through 26 proven steps and passed the exact
+  13-entry final comparison.
 - Retained July 22 Farm screenshots verify all five configured bans and all
   thirteen priorities. Automated coverage exercises the missing Coin
   Trade-Off repair, direct selected-ban removal, Ban-before-Auto sequencing,
-  Pause/Stop authority, row identity/progress guards, strategy expansion,
-  Home-gate integration, and No Strategy compatibility.
-- Repository-wide follow-up validation passed 723 sandbox-compatible tests
-  plus the separately permitted localhost HTTP test, for 724 total.
-- Implemented in commits `bafeff4` and `c4cb745`.
+  Pause/Stop authority, pre-action row drift, exact rank progress, strategy
+  expansion, Home-gate integration, and No Strategy compatibility.
+- Repository-wide follow-up validation passed 725 sandbox-compatible tests
+  plus the separately permitted localhost HTTP test, for 726 total.
+- Implemented in commits `bafeff4`, `c4cb745`, and `227465b`.
 
 ### 2026-07-25 Farm module preflight visibility and transitions
 
