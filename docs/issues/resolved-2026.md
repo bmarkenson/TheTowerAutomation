@@ -1671,6 +1671,42 @@ and actionable work lives in
   module identities. Automation remained paused.
 - **Fixed by:** `859351f`, `1121bff`, `983e1f0`, and `4edc809`.
 
+### Dim Max-state Range prevented Orb Distance validation from opening
+
+- **Observed:** 2026-07-25 during an automation-owned ordinary battle for
+  one-shot Tournament validation.
+- **Symptom:** Orb Distance enforcement repeatedly reported
+  `range_not_authoritative` and never opened Distance Adjuster even though the
+  Attack menu visibly showed Range `98.38m`.
+- **Evidence:** `logs/actions.log` records repeated empty Range OCR from
+  15:16:45 through 15:20:52 with no Distance Adjuster tap. The exact live frame
+  located the Range tile at `(26, 1400, 511, 246)`. Its original OCR crop
+  returned no tokens; adaptive local-contrast isolation read `98.38m` at 86%
+  confidence.
+- **Safety response:** The runtime sent no uncertain Distance Adjuster input.
+  Its exclusive-validation receipt retained complete cleanup ownership,
+  Surrendered only that disposable ordinary battle after timeout, passed
+  through Game Over, and returned to verified Home `NEW_BATTLE`.
+- **Cause:** The Range reader passed a tall, unprocessed tile crop to OCR. The
+  Maxed value was rendered in dim gray, so the correct tile detector result
+  still produced an empty value reading.
+- **Resolution:** A failed direct value read now receives one bounded adaptive-
+  threshold OCR retry. Generated actions also carry the complete Orb Distance
+  preset set: the observed authoritative Range selects its matching preset,
+  while a readable Range outside the set records
+  `unconfigured_range_preserved` and passes without opening or changing
+  Distance Adjuster. Truly unreadable Range evidence continues to fail closed.
+- **Regression:** `test/test_orb_distance.py` covers the adaptive Max-value
+  retry, configured-Range preset selection, unconfigured-Range preservation
+  without any panel or tap, and propagation of the preset set through the
+  action executor. `test/test_run_initialization.py`,
+  `test/test_tournament_preflight.py`, and
+  `test/test_tournament_observer.py` cover the self-contained generated plans.
+- **Validation:** The focused Orb Distance and builder suite passed 105 tests.
+  Repository-wide validation passed 734 sandbox-compatible tests plus the
+  separately permitted localhost HTTP test, for 735 total.
+- **Fixed by:** `3bc3ab4`.
+
 ## Operational lessons
 
 ### A detached child may not survive the agent execution wrapper

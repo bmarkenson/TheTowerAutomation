@@ -37,6 +37,24 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-25 Range-selected Orb Distance enforcement
+
+- Reproduced the Tournament validation failure against its exact live Attack
+  frame: the Range tile was correctly located and visibly showed `98.38m`, but
+  raw OCR returned no text for the dim Max-state value. One bounded
+  adaptive-contrast retry now reads that frame as `98.38m` at 86% confidence.
+- Generated Farm and Tournament actions now carry every configured Orb
+  Distance preset. The authoritative observed Range selects its matching
+  Extra/Workshop pair. A readable Range outside the configured set is retained
+  as an operator experiment and completes without opening or changing Distance
+  Adjuster; unreadable Range evidence still fails closed.
+- The failed one-shot validation retained ownership through timeout, Surrender,
+  Game Over, and verified Home cleanup. No battle remained after diagnosis.
+- Focused Orb Distance and strategy-builder coverage passed 105 tests.
+  Repository-wide validation passed 734 sandbox-compatible tests plus the
+  separately permitted localhost HTTP test, for 735 total. Implemented in
+  commit `3bc3ab4`.
+
 ### 2026-07-25 slot-level module replacement and exclusive-check skips
 
 - Replaced Unequip-based Primary/Assist cycle handling with a verified

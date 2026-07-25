@@ -60,9 +60,11 @@ aligned icon match with configured confidence and margin plus exact detail
 name/action/level evidence; unexpected transfer prompts and unsettled
 overviews fail closed. Target Priority and Orb Distance are not Home controls:
 their Home-boundary evidence remains explicitly deferred, and their policies
-are checked after the new run reaches `RUNNING`. Orb Distance first OCRs the
-Attack Range and requires the preset's exact Range basis, then reads and
-feedback-steps the Extra and Workshop rows independently. Tier 18 Farm binds
+are checked after the new run reaches `RUNNING`. Each generated Orb Distance
+action carries the complete configured preset set. The authoritative observed
+Attack Range selects its matching Extra/Workshop pair; a readable Range
+outside that set is preserved as an operator experiment without opening
+Distance Adjuster. Unreadable Range evidence still blocks. Tier 18 Farm binds
 Range `30.00m` to Extra `30.00m` and Workshop `39.00m`. Damage Slider
 `observe` and `enforce` policies resolve an explicit percentage; Tier 18
 enforces `1E-22%` during every new-run initialization after the time-sensitive
@@ -114,9 +116,10 @@ never opens the Tournament screen or starts a Tournament battle.
 
 The disposable ordinary battle bypasses EHLS/EALS initialization without
 seeding either completion flag. It does not toggle Auto Perks. Session
-preflight enforces Damage Slider `100%`, verifies Attack Range `98.38m`,
-enforces Orb Distance Extra `87.16m` / Workshop `80.37m`, then verifies all
-configured Ultimate Weapon primary toggles and Spotlight Missiles. A
+preflight enforces Damage Slider `100%`, reads Attack Range, enforces the
+matching configured Orb Distance pair for `30.00m` or `98.38m`, preserves any
+other readable experimental Range, then verifies all configured Ultimate
+Weapon primary toggles and Spotlight Missiles. A
 conclusive pass or failure, or the bounded timeout, moves the same receipt to
 cleanup before any terminal input. Surrender is allowed only while the current
 runtime/ADB owner still matches and fresh `RUNNING` evidence excludes
@@ -164,8 +167,10 @@ not use the exclusive validation receipt. Without Home boundary evidence, the
 guarded compatibility route inspects Cards, Ultimate Weapons, Modules, Bots,
 and Guardians in battle. Workshop is the only check that takes resumable Exit
 Battle → Go Home. It may enforce only Damage Slider `100%`, the Range `98.38m`
-Orb Distance preset, and Poison Swamp Stun `on`; it never selects a Home preset
-or equips a loadout and must verify that Resume returns to the same Tournament.
+or `30.00m` Orb Distance preset selected by the observed Range, and Poison
+Swamp Stun `on`; other readable Ranges remain untouched. It never selects a
+Home preset or equips a loadout and must verify that Resume returns to the same
+Tournament.
 A mismatch is retained as session evidence but cannot request Home repair or
 block result capture. It publishes
 a non-blocking operator decision to pause for manual changes, retry with fresh
@@ -330,7 +335,11 @@ evidence is attached.
   fall back to single-step feedback; unknown or incomplete evidence remains
   blocked.
 - Orb Distance enforcement first locates the Attack Range tile and requires
-  authoritative OCR equal to the resolved preset's `range_basis`. It then
+  authoritative OCR, with one adaptive-threshold retry for the dim value on a
+  Maxed tile. The observed Range selects a matching entry from the complete
+  generated preset set. A readable unconfigured Range records
+  `unconfigured_range_preserved` and completes without Distance Adjuster input;
+  unreadable evidence remains blocked. For a configured Range, the runtime
   opens the freshly matched in-run Distance Adjuster, OCRs both values, and
   matches each direction arrow immediately before one tap. Every step
   reacquires the panel, requires the selected row to move strictly closer to
