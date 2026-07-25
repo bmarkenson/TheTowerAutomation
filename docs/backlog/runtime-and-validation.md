@@ -82,11 +82,6 @@ checked-item detail remains in the
   produced `182T`; the resulting split disagreed with the copied `2.72T` total,
   correctly invalidated record quality, and retained source screenshots.
 
-## Farm session preflight
-
-- [ ] Decide whether session preflight should validate perk bans and Auto Pick
-  Perk order. Keep automation-owned perk selection as a later option.
-
 ## Runtime control
 
 - [ ] Finish the operator-control lifecycle.

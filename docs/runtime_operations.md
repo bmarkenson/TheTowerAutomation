@@ -161,13 +161,42 @@ script or remote shell. `force-continue` remains only as a compatibility alias
 for `gate bypass_once`; it cannot create an exception before a real failure and
 it no longer skips the complete preflight.
 
+Farm strategies declare their Home Perks configuration as semantic profile
+data. The current Farm baseline bans **Cash Trade-Off**, **Enemies Damage /
+Tower Damage Trade-Off**, **Lifesteal / Knockback Trade-Off**, **Interest**,
+and **Defense Absolute**. Its Auto Pick priority is:
+
+1. Perk Wave Requirement
+2. Game Speed
+3. Coin Trade-Off
+4. Golden Tower Bonus
+5. Black Hole Duration
+6. Death Wave Quantity
+7. Coins Bonus
+8. Free Upgrade Chance
+9. Orbs
+10. Chain Lightning Damage
+11. Inner Land Mines
+12. Spotlight Damage
+13. Damage
+
+At verified Home `NEW_BATTLE`, setup opens the independently verified Perks
+configuration control after returning from Cards. It reads the complete
+selected Ban block and the strategy-sized Auto Pick prefix. A mismatch is
+repaired through the Available-list checkbox and the matched Auto Pick up
+arrow. Every input reacquires the same semantic row, every move must make
+strict upward progress, and completion requires an exact final list followed
+by closing Perks and revalidating Home `NEW_BATTLE`. A strategy that does not
+declare both lists cannot trigger these changes. Uncertain OCR, an unavailable
+row, unchanged input, or an exhausted move/scroll bound fails closed.
+
 Every decision is requirement-scoped. For example, accepting the configured
 Flame fallback waives only `bots_preset`; Workshop locks, Modules, Cards,
-Guardian Chips, Ultimate Weapons, and Auto Pick Perks still run normally. A
-retry or waiver captures fresh evidence and resumes at the appropriate setup
-boundary. The decision, selected option, fallback value, and observed failure
-remain in the shared control record, while the in-memory waiver is cleared at
-the run boundary.
+Guardian Chips, Ultimate Weapons, Auto Pick Perks, Perk Bans, and Auto Pick
+priority still run normally. A retry or waiver captures fresh evidence and
+resumes at the appropriate setup boundary. The decision, selected option,
+fallback value, and observed failure remain in the shared control record,
+while the in-memory waiver is cleared at the run boundary.
 
 Profiles can add named choices under `gate_fallbacks`. The Farm profile
 currently offers **Continue with Flame for this run** for `bots_preset`:

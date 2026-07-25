@@ -335,10 +335,15 @@ evidence is attached.
   running side menu.
 - Complete no-battle setup owns every supported profile check available from
   verified Home `NEW_BATTLE`: Cards, Workshop and its Free Upgrade locks,
-  Poison Swamp Stun, Bots, Guardians, and Modules. It retains screen-derived
-  configuration evidence for session preflight, which consumes that boundary
-  proof and checks only battle-only settings instead of leaving the newly
-  started run to repeat Home checks. Target Priority records
+  strategy-declared Perk Bans and Auto Pick priority, Poison Swamp Stun, Bots,
+  Guardians, and Modules. Perk configuration is changed only when the selected
+  strategy declares both semantic lists. Each Ban toggle and Auto Pick move
+  requires fresh row identity, strict transition evidence, and a final exact
+  comparison; ambiguous OCR, an unavailable perk, or non-progress blocks New
+  Battle. The setup retains screen-derived configuration evidence for session
+  preflight, which consumes that boundary proof and checks only battle-only
+  settings instead of leaving the newly started run to repeat Home checks.
+  Target Priority records
   `battle_only_control` at Home and remains unsatisfied until the generated
   `RUNNING` action observes or enforces it; there is no Home Target Priority
   tap. Attaching to an existing battle without boundary proof retains the
