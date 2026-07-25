@@ -46,9 +46,16 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Both directions now drag between `y=1100` and `y=1650`, keeping the complete
   gesture inside the inventory viewport, and use the established 300 ms
   duration.
-- The focused Card recharge and clickmap suites passed 26 tests. The exact
-  clickmap geometry is covered by `test/test_card_swipe_geometry.py`.
-  Implemented in commit `fea3242`.
+- Card search now checks both unresolved Cards at the initial position and
+  after every upward or downward swipe. It validates whichever appears first
+  and stops immediately after both pass instead of completing the reset or
+  searching in a fixed Demon Mode/Nuke order.
+- The exact clickmap geometry is covered by
+  `test/test_card_swipe_geometry.py`. A reverse-order traversal regression
+  validates Nuke first, reaches Demon Mode in one upward swipe, and proves
+  there are no extra gestures. Focused Card and Home/Tournament caller
+  validation passed 130 tests without device interaction.
+- Implemented in commits `fea3242` and `ff1670a`.
 
 ### 2026-07-25 Demon Mode/Nuke recharge activation preflight
 

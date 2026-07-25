@@ -1734,6 +1734,13 @@ and actionable work lives in
   clickmap suites passed 26 tests; JSON parsing and `git diff --check` also
   passed.
 - **Fixed by:** `fea3242`.
+- **Follow-up:** Commit `ff1670a` checks both unresolved Cards on the initial
+  frame and after each swipe, validates them in whichever order they appear,
+  and stops immediately once both pass. The reverse-order regression starts at
+  Nuke, validates it first, reaches Demon Mode with one upward swipe, and
+  requires no additional reset or forward-search gesture. Focused Card and
+  Home/Tournament caller validation passed 130 tests without device
+  interaction.
 
 ## Operational lessons
 

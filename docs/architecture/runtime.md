@@ -353,8 +353,11 @@ evidence is attached.
   verified Home `NEW_BATTLE`: Cards and the declared Demon Mode/Nuke recharge
   activation modes, Workshop and its Free Upgrade locks, strategy-declared
   Perk Bans and Auto Pick priority, Poison Swamp Stun, Bots, Guardians, and
-  Modules. Card recharge inspection opens each exact inventory card through a
-  verified long press, requires the matching detail identity and an
+  Modules. Card recharge traversal checks both unresolved Cards on the initial
+  inventory frame and after every bounded upward or downward swipe, validates
+  whichever is visible in any order, and stops without another swipe as soon as
+  both have authoritative evidence. Inspection opens each exact inventory card
+  through a verified long press, requires the matching detail identity and an
   authoritative checkbox state, changes only a mismatched checkbox, rechecks
   the requested state, and returns to the Cards inventory. Missing cards and
   ambiguous details fail closed. Perk configuration is changed only when the
