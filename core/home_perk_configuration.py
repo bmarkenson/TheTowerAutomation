@@ -384,9 +384,9 @@ def _repair_bans(
             detector=detector,
             safe_tap_fn=safe_tap_fn,
             visible_fn=visible_fn,
+            row_fn=row_fn,
             row_near_fn=row_near_fn,
             sleep_fn=sleep_fn,
-            require_vertical_move=False,
             require_identity_after=False,
         )
         after_capture = extract_configured_perk_bans(current, row_fn=row_fn)
@@ -461,9 +461,9 @@ def _repair_bans(
                 detector=detector,
                 safe_tap_fn=safe_tap_fn,
                 visible_fn=visible_fn,
+                row_fn=row_fn,
                 row_near_fn=row_near_fn,
                 sleep_fn=sleep_fn,
-                require_vertical_move=False,
                 require_identity_after=True,
             )
             pending.remove(target)
@@ -550,64 +550,39 @@ def _repair_auto_pick_order(
                 raise HomePerkConfigurationError(
                     "Auto Pick repair exceeded its bounded move budget"
                 )
-            before_top = int(row["top"])
-            try:
-                current = _tap_configuration_row(
-                    current,
-                    row,
-                    x=AUTO_PICK_UP_X,
-                    action=f"auto_pick_move_up:{key}",
-                    capture_fn=capture_fn,
-                    detector=detector,
-                    safe_tap_fn=safe_tap_fn,
-                    visible_fn=visible_fn,
-                    row_near_fn=row_near_fn,
-                    sleep_fn=sleep_fn,
-                    require_vertical_move=True,
-                    direction=-1,
-                )
-            except HomePerkConfigurationError as exc:
-                if "moved out of the current viewport" not in str(exc):
-                    raise
-                rank, current, row = _locate_auto_pick_key(
-                    current,
-                    key,
-                    capture_fn=capture_fn,
-                    visible_fn=visible_fn,
-                    swipe_fn=swipe_fn,
-                    row_fn=row_fn,
-                    sleep_fn=sleep_fn,
-                )
-                remaining = rank - desired_rank
-                continue
-            total_taps += 1
-            remaining -= 1
-            candidates = [
-                semantic_perk_entry(candidate)
-                for candidate in row_fn(current)
-            ]
-            fresh = next(
-                (
-                    candidate
-                    for candidate in candidates
-                    if candidate.get("key") == key
-                    and int(candidate["top"]) < before_top
-                ),
-                None,
+            before_rank = rank
+            current = _tap_configuration_row(
+                current,
+                row,
+                x=AUTO_PICK_UP_X,
+                action=f"auto_pick_move_up:{key}",
+                capture_fn=capture_fn,
+                detector=detector,
+                safe_tap_fn=safe_tap_fn,
+                visible_fn=visible_fn,
+                row_fn=row_fn,
+                row_near_fn=row_near_fn,
+                sleep_fn=sleep_fn,
+                require_identity_after=False,
             )
-            if fresh is None:
-                rank, current, row = _locate_auto_pick_key(
-                    current,
-                    key,
-                    capture_fn=capture_fn,
-                    visible_fn=visible_fn,
-                    swipe_fn=swipe_fn,
-                    row_fn=row_fn,
-                    sleep_fn=sleep_fn,
+            total_taps += 1
+            observed_rank, current, row = _locate_auto_pick_key(
+                current,
+                key,
+                capture_fn=capture_fn,
+                visible_fn=visible_fn,
+                swipe_fn=swipe_fn,
+                row_fn=row_fn,
+                sleep_fn=sleep_fn,
+            )
+            if observed_rank != before_rank - 1:
+                raise HomePerkConfigurationError(
+                    f"{perk_configuration_label(key)} moved from rank "
+                    f"{before_rank} to {observed_rank}; expected exactly "
+                    "one-rank upward progress"
                 )
-                remaining = rank - desired_rank
-            else:
-                row = fresh
+            rank = observed_rank
+            remaining = rank - desired_rank
 
         verified_rank, current, _row = _locate_auto_pick_key(
             current,
@@ -705,22 +680,45 @@ def _tap_configuration_row(
     detector: Detector,
     safe_tap_fn: Callable[..., bool],
     visible_fn: Callable[..., bool],
+    row_fn: RowsFn,
     row_near_fn: Callable[..., Optional[dict[str, Any]]],
     sleep_fn: Callable[[float], None],
-    require_vertical_move: bool,
     require_identity_after: bool = True,
-    direction: int = 0,
 ) -> Frame:
-    top = int(row["top"])
-    bottom = int(row["bottom"])
-    center = (top + bottom) // 2
-    region_x = 850 if x > 800 else 239
-    region_width = 130 if x > 800 else 601
     expected = (
         dict(row)
         if "key" in row
         else semantic_perk_entry(row)
     )
+    authority = capture_fn()
+    if (
+        authority is None
+        or detector(authority).get("state") != "PERKS"
+        or not visible_fn(PERK_CONFIGURATION_INDICATOR, screenshot=authority)
+    ):
+        raise HomePerkConfigurationError(
+            f"Perks configuration identity lost before {action}"
+        )
+    matches = [
+        semantic_perk_entry(candidate)
+        for candidate in row_fn(authority)
+        if perk_entries_match(
+            expected,
+            semantic_perk_entry(candidate),
+        )
+    ]
+    if len(matches) != 1:
+        raise HomePerkConfigurationError(
+            f"Perk configuration target was not uniquely reacquired before "
+            f"{action}"
+        )
+    current = authority
+    row = matches[0]
+    top = int(row["top"])
+    bottom = int(row["bottom"])
+    center = (top + bottom) // 2
+    region_x = 850 if x > 800 else 239
+    region_width = 130 if x > 800 else 601
 
     def verifies(frame: Frame) -> bool:
         if (
@@ -754,42 +752,24 @@ def _tap_configuration_row(
         raise HomePerkConfigurationError(
             f"Perks configuration identity lost after {action}"
         )
-    if not require_vertical_move:
-        if _region_difference(
-            current,
-            fresh,
-            (239, top, 733, bottom - top + 1),
-        ) <= 0.10:
-            raise HomePerkConfigurationError(
-                f"Ban Perks row did not change after {action}"
-            )
-        if not require_identity_after:
-            return fresh
-        candidate = row_near_fn(fresh, center)
-        if not candidate or not perk_entries_match(
-            expected,
-            semantic_perk_entry(candidate),
-        ):
-            raise HomePerkConfigurationError(
-                f"Ban Perks target changed identity after {action}"
-            )
+    if _region_difference(
+        current,
+        fresh,
+        (239, top, 733, bottom - top + 1),
+    ) <= 0.10:
+        raise HomePerkConfigurationError(
+            f"Perk configuration row did not change after {action}"
+        )
+    if not require_identity_after:
         return fresh
 
-    expected_center = center + (172 * int(direction))
-    candidate = row_near_fn(fresh, expected_center, tolerance=115)
-    if candidate is None:
+    candidate = row_near_fn(fresh, center)
+    if not candidate or not perk_entries_match(
+        expected,
+        semantic_perk_entry(candidate),
+    ):
         raise HomePerkConfigurationError(
-            f"{perk_configuration_label(str(row.get('key') or '') or None, str(row.get('display_text') or ''))} "
-            "moved out of the current viewport"
-        )
-    semantic = semantic_perk_entry(candidate)
-    if not perk_entries_match(expected, semantic):
-        raise HomePerkConfigurationError(
-            f"Auto Pick target changed identity after {action}"
-        )
-    if direction < 0 and int(semantic["top"]) >= top:
-        raise HomePerkConfigurationError(
-            f"Auto Pick target made no upward progress after {action}"
+            f"Perk configuration target changed identity after {action}"
         )
     return fresh
 

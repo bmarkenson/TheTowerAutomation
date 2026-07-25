@@ -102,6 +102,114 @@ def test_auto_pick_repair_inserts_missing_coin_tradeoff_at_strategy_rank():
     assert tap.call_args.kwargs["action"] == "auto_pick_move_up:coin_tradeoff"
 
 
+def test_auto_pick_repair_rechecks_rank_after_viewport_reflow():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    order = [
+        "perk_wave_requirement",
+        "game_speed",
+        "golden_tower_bonus",
+        "coin_tradeoff",
+    ]
+    viewport_offset = {"value": 0}
+
+    def rows(_frame):
+        result = [_row(key, index) for index, key in enumerate(order)]
+        for row in result:
+            row["top"] += viewport_offset["value"]
+            row["bottom"] += viewport_offset["value"]
+        return result
+
+    def scroll_top(current, **_kwargs):
+        viewport_offset["value"] = 0
+        return current
+
+    def move_up(current, row, **_kwargs):
+        key = classify_perk_configuration_text(row["display_text"])
+        index = order.index(key)
+        order[index - 1], order[index] = order[index], order[index - 1]
+        # Simulate the live list reflow keeping the moved row at the same
+        # physical Y coordinate even though its semantic rank advanced.
+        viewport_offset["value"] = 172
+        return current
+
+    with (
+        patch(
+            "core.home_perk_configuration._scroll_configuration_top",
+            side_effect=scroll_top,
+        ),
+        patch(
+            "core.home_perk_configuration._tap_configuration_row",
+            side_effect=move_up,
+        ),
+    ):
+        _repair_auto_pick_order(
+            frame,
+            [
+                "perk_wave_requirement",
+                "game_speed",
+                "coin_tradeoff",
+            ],
+            capture_fn=lambda: frame,
+            detector=lambda _frame: {"state": "PERKS"},
+            safe_tap_fn=lambda *_args, **_kwargs: True,
+            visible_fn=lambda *_args, **_kwargs: True,
+            swipe_fn=lambda _key: True,
+            row_fn=rows,
+            row_near_fn=lambda *_args, **_kwargs: None,
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert order[:3] == [
+        "perk_wave_requirement",
+        "game_speed",
+        "coin_tradeoff",
+    ]
+
+
+def test_auto_pick_repair_refuses_move_without_one_rank_progress():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    order = [
+        "perk_wave_requirement",
+        "game_speed",
+        "golden_tower_bonus",
+        "coin_tradeoff",
+    ]
+
+    def rows(_frame):
+        return [_row(key, index) for index, key in enumerate(order)]
+
+    with (
+        patch(
+            "core.home_perk_configuration._scroll_configuration_top",
+            side_effect=lambda current, **_kwargs: current,
+        ),
+        patch(
+            "core.home_perk_configuration._tap_configuration_row",
+            side_effect=lambda current, _row, **_kwargs: current,
+        ),
+    ):
+        with pytest.raises(
+            HomePerkConfigurationError,
+            match="expected exactly one-rank upward progress",
+        ):
+            _repair_auto_pick_order(
+                frame,
+                [
+                    "perk_wave_requirement",
+                    "game_speed",
+                    "coin_tradeoff",
+                ],
+                capture_fn=lambda: frame,
+                detector=lambda _frame: {"state": "PERKS"},
+                safe_tap_fn=lambda *_args, **_kwargs: True,
+                visible_fn=lambda *_args, **_kwargs: True,
+                swipe_fn=lambda _key: True,
+                row_fn=rows,
+                row_near_fn=lambda *_args, **_kwargs: None,
+                sleep_fn=lambda _seconds: None,
+            )
+
+
 def test_ban_repair_toggles_only_the_strategy_set():
     page = {"value": 0}
     selected = [
@@ -270,50 +378,57 @@ def test_home_perk_repair_finishes_bans_before_opening_auto_pick():
     ]
 
 
-def test_auto_pick_move_requires_fresh_identity_and_strict_upward_progress():
+def test_auto_pick_move_requires_fresh_identity_and_visual_change():
+    stale = np.full((1920, 1080, 3), 10, dtype=np.uint8)
     before = np.full((1920, 1080, 3), 20, dtype=np.uint8)
     after = np.full((1920, 1080, 3), 40, dtype=np.uint8)
     expected = _row("coin_tradeoff", 2)
+    reacquired = dict(expected)
+    reacquired["top"] -= 78
+    reacquired["bottom"] -= 78
+    captures = iter((before, after))
+    tapped = []
 
-    def safe_tap(_target, *, verification, **_kwargs):
-        return verification.authorizes((915, (expected["top"] + expected["bottom"]) // 2))
-
-    def row_near(frame, _y, **_kwargs):
-        row = dict(expected)
-        if frame is after:
-            row["top"] -= 172
-            row["bottom"] -= 172
-        return row
+    def safe_tap(target, *, verification, **_kwargs):
+        tapped.append(target)
+        return verification.authorizes(target)
 
     result = _tap_configuration_row(
-        before,
+        stale,
         expected,
         x=915,
         action="auto_pick_move_up:coin_tradeoff",
-        capture_fn=lambda: after,
+        capture_fn=lambda: next(captures),
         detector=lambda _frame: {"state": "PERKS"},
         safe_tap_fn=safe_tap,
         visible_fn=lambda *_args, **_kwargs: True,
-        row_near_fn=row_near,
+        row_fn=lambda _frame: [dict(reacquired)],
+        row_near_fn=lambda _frame, _y, **_kwargs: dict(reacquired),
         sleep_fn=lambda _seconds: None,
-        require_vertical_move=True,
-        direction=-1,
+        require_identity_after=False,
     )
 
     assert result is after
+    assert tapped == [
+        (915, (reacquired["top"] + reacquired["bottom"]) // 2)
+    ]
 
-    with pytest.raises(HomePerkConfigurationError, match="no upward progress"):
+    with pytest.raises(
+        HomePerkConfigurationError,
+        match="row did not change",
+    ):
+        unchanged_captures = iter((before, before.copy()))
         _tap_configuration_row(
-            before,
+            stale,
             expected,
             x=915,
             action="auto_pick_move_up:coin_tradeoff",
-            capture_fn=lambda: after,
+            capture_fn=lambda: next(unchanged_captures),
             detector=lambda _frame: {"state": "PERKS"},
             safe_tap_fn=safe_tap,
             visible_fn=lambda *_args, **_kwargs: True,
-            row_near_fn=lambda _frame, _y, **_kwargs: dict(expected),
+            row_fn=lambda _frame: [dict(reacquired)],
+            row_near_fn=lambda _frame, _y, **_kwargs: dict(reacquired),
             sleep_fn=lambda _seconds: None,
-            require_vertical_move=True,
-            direction=-1,
+            require_identity_after=False,
         )
