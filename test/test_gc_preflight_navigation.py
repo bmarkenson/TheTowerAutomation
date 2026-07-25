@@ -529,7 +529,11 @@ def test_profile_without_perks_skips_perks_navigation_and_validation():
         return SimpleNamespace(valid=True)
 
     result = run_read_only_gc_preflight(
-        {**PREFLIGHT_REQUIREMENTS, "auto_pick_perks": False},
+        {
+            key: value
+            for key, value in PREFLIGHT_REQUIREMENTS.items()
+            if key != "auto_pick_perks"
+        },
         capture_fn=ui.capture,
         detector=ui.detect,
         safe_tap_fn=ui.safe_tap,

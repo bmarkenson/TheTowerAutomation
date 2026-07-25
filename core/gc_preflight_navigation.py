@@ -669,9 +669,9 @@ def run_read_only_gc_preflight(
             )
 
         auto_pick_perks = requirements.get("auto_pick_perks")
-        if auto_pick_perks not in {True, False}:
+        if auto_pick_perks not in {True, False, None}:
             raise _NavigationFailure(
-                "profile did not supply a boolean Auto Pick Perks requirement"
+                "profile supplied an invalid Auto Pick Perks requirement"
             )
         perks = None
         if auto_pick_perks:

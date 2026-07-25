@@ -103,8 +103,11 @@ def load_tournament_requirements(
         raise ValueError(
             "Tournament profile guardian_chips must contain Attack, Ally, and Scout"
         )
-    if requirements.get("auto_pick_perks") is not False:
-        raise ValueError("Tournament profile auto_pick_perks must be false")
+    if "auto_pick_perks" in requirements:
+        raise ValueError(
+            "Tournament profile must omit auto_pick_perks because Perks do "
+            "not apply to Tournament"
+        )
 
     ultimate_weapons = requirements.get("ultimate_weapons")
     if not isinstance(ultimate_weapons, dict) or not ultimate_weapons:

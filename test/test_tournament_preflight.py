@@ -107,10 +107,10 @@ def test_tournament_slot_identity_does_not_imply_selection():
         assert not selection.selected
 
 
-def test_tournament_profile_explicitly_excludes_perks():
+def test_tournament_profile_omits_non_applicable_auto_pick_perks():
     requirements = load_tournament_requirements()
 
-    assert requirements["auto_pick_perks"] is False
+    assert "auto_pick_perks" not in requirements
 
 
 def test_live_tournament_validation_requires_persisted_pause(tmp_path):

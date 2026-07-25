@@ -9,7 +9,6 @@ invariants:
     - Attack
     - Ally
     - Scout
-  auto_pick_perks: false
   ultimate_weapons:
     Chain Lightning:
       primary: on

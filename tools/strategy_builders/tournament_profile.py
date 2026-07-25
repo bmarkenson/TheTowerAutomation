@@ -88,7 +88,6 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
                     "workshop_preset",
                     "bots_preset",
                     "guardian_chips",
-                    "auto_pick_perks",
                     "ultimate_weapons",
                 )
             },

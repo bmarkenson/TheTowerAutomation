@@ -55,12 +55,14 @@ def test_tournament_strategy_is_a_passive_observer():
     action = strategy.rules[0]["do"][0]
     assert action["type"] == "session_preflight"
     assert action["validator"] == "tournament"
+    assert "auto_pick_perks" not in action["requirements"]
     assert action["allow_repair"] is False
     assert action["mismatch_policy"] == "notify"
     assert strategy.rules[0]["run_when_attached"] is True
     assert strategy._session_preflight_assertions == [
         "gc_session_preflight_attempted"
     ]
+    assert "auto_pick_perks" not in strategy.run_configuration()["settings"]
 
 
 def test_tournament_mismatch_is_recorded_without_requesting_repair():
