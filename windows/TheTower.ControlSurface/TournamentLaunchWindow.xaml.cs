@@ -19,7 +19,8 @@ public partial class TournamentLaunchWindow : Window
             ? "Start the Tournament now?"
             : policy.PromptMessage;
         ReminderText.Text = string.IsNullOrWhiteSpace(policy?.Reminder)
-            ? "Set Target Priorities for the current Tournament Battle Conditions."
+            ? "When the Tournament battle begins, set Target Priorities for "
+                + "the current Tournament Battle Conditions."
             : policy.Reminder;
         StartButton.IsEnabled = canStart;
         if (!canStart)

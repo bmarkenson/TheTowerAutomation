@@ -225,7 +225,7 @@ function renderTournamentLaunch(receipt) {
     policy.prompt_message || "Start the Tournament now?";
   byId("tournamentLaunchReminder").textContent =
     policy.reminder
-    || "Set Target Priorities for the current Tournament Battle Conditions.";
+    || "When the Tournament battle begins, set Target Priorities for the current Tournament Battle Conditions.";
   dialog.dataset.requestId = receipt.request_id;
   if (receipt.request_id === state.lastTournamentLaunchPrompted) return;
   state.lastTournamentLaunchPrompted = receipt.request_id;

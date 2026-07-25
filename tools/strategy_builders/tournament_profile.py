@@ -32,8 +32,8 @@ TOURNAMENT_RUNTIME_POLICY = {
                 "Tournament battle."
             ),
             "reminder": (
-                "Before starting, set Target Priorities for the current "
-                "Tournament Battle Conditions."
+                "When the Tournament battle begins, set Target Priorities for "
+                "the current Tournament Battle Conditions."
             ),
         },
     },

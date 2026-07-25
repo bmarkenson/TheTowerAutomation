@@ -66,8 +66,8 @@ def test_tournament_strategy_declares_exclusive_validation_then_observes():
                     "one Tournament battle."
                 ),
                 "reminder": (
-                    "Before starting, set Target Priorities for the current "
-                    "Tournament Battle Conditions."
+                    "When the Tournament battle begins, set Target Priorities "
+                    "for the current Tournament Battle Conditions."
                 ),
             },
         },

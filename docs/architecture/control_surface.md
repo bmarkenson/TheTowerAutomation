@@ -254,7 +254,8 @@ Process request examples:
   preflight pending, ordinary-battle ownership, battle-only checks, cleanup,
   launch confirmation, and a failed/cancelled result with its reason. A ready
   result automatically opens an operator prompt that reminds the operator to
-  set Target Priorities for the current Tournament Battle Conditions.
+  set Target Priorities for the current Tournament Battle Conditions when the
+  battle begins.
   **Start Tournament** performs lightweight receipt, configuration, runtime,
   and screen checks and authorizes one verified Tournament launch without
   rerunning validation. **Cancel launch** consumes only the automatic launch

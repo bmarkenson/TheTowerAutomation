@@ -128,8 +128,9 @@ one durable validation request. The panel reports Home preflight, ownership of
 the one ordinary New Battle used for battle-only checks, cleanup, and the
 terminal readiness or failure reason. Validation itself never enters or starts
 the Tournament. Once ready, the app opens **Tournament is ready** and reminds
-you to set Target Priorities for the current Tournament Battle Conditions.
-Target Priorities are not yet inspected or changed automatically.
+you to set Target Priorities for the current Tournament Battle Conditions when
+the battle begins. Target Priorities are not yet inspected or changed
+automatically.
 
 **Start Tournament** performs lightweight current-receipt, configuration,
 runtime, and screen checks, then authorizes one verified Tournament launch; it

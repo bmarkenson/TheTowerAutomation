@@ -118,12 +118,12 @@ closed without inheriting Surrender authority.
 After a ready result, the control surface publishes a one-shot operator launch
 prompt tied to that exact ready receipt and configuration fingerprint. The
 prompt reminds the operator to set Target Priorities for the displayed
-Tournament Battle Conditions; Target Priority selection is not yet automated
-or included in validation. **Decide later** closes the prompt without changing
-the receipt. **Cancel launch** consumes only the automatic launch offer while
-retaining the successful validation result. **Start Tournament** is explicit
-authorization for the matching live runtime to enter and start one Tournament
-battle.
+Tournament Battle Conditions when the battle begins; those controls are
+in-battle, and their selection is not yet automated or included in validation.
+**Decide later** closes the prompt without changing the receipt. **Cancel
+launch** consumes only the automatic launch offer while retaining the
+successful validation result. **Start Tournament** is explicit authorization
+for the matching live runtime to enter and start one Tournament battle.
 
 Start confirmation does not repeat Home or session validation. The API first
 checks that the matching receipt and configuration are still current, the

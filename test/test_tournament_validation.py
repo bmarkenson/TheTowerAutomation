@@ -139,8 +139,8 @@ def test_ready_receipt_offers_one_durable_start_or_cancel_decision(tmp_path):
             "or Tournament entry screen and start exactly one Tournament battle."
         ),
         "reminder": (
-            "Before starting, set Target Priorities for the current Tournament "
-            "Battle Conditions."
+            "When the Tournament battle begins, set Target Priorities for the "
+            "current Tournament Battle Conditions."
         ),
     }
     assert ready["launch"]["status"] == "awaiting_operator"

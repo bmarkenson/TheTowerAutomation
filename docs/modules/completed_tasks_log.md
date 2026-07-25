@@ -47,7 +47,7 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Added automatic and persistent browser/native prompts with **Start
   Tournament**, **Cancel launch**, and **Decide later**. The prompt reminds the
   operator to set Target Priorities for the current Tournament Battle
-  Conditions; that setting remains manual.
+  Conditions when the battle begins; that setting remains manual.
 - Pause, restart, owner mismatch, request supersession, timeout, wrong battle,
   and ambiguous navigation fail closed. Manual launch remains supported, a real
   Tournament never gains Surrender authority, and its normal EHLS/EALS

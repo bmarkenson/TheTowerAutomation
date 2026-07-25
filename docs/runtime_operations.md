@@ -237,9 +237,10 @@ cleanup receipt owned by the former process is failed without a tap or
 Surrender. A changed plan fingerprint likewise requires another explicit
 selection.
 
-After readiness, first set Target Priorities to suit the current Tournament
-Battle Conditions. The prompt is a reminder only: automation does not yet
-inspect, choose, or validate Target Priorities. Then choose one of:
+After readiness, review the reminder to set Target Priorities to suit the
+current Tournament Battle Conditions when the battle begins. Those controls
+are in-battle. The prompt is a reminder only: automation does not yet inspect,
+choose, or validate Target Priorities. Then choose one of:
 
 - **Start Tournament** — authorize the current runtime to enter and start
   exactly one Tournament battle. This performs only lightweight checks that the
