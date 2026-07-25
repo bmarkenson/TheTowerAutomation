@@ -183,12 +183,17 @@ and **Defense Absolute**. Its Auto Pick priority is:
 At verified Home `NEW_BATTLE`, setup opens the independently verified Perks
 configuration control after returning from Cards. It reads the complete
 selected Ban block and the strategy-sized Auto Pick prefix. A mismatch is
-repaired through the Available-list checkbox and the matched Auto Pick up
-arrow. Every input reacquires the same semantic row, every move must make
-strict upward progress, and completion requires an exact final list followed
-by closing Perks and revalidating Home `NEW_BATTLE`. A strategy that does not
-declare both lists cannot trigger these changes. Uncertain OCR, an unavailable
-row, unchanged input, or an exhausted move/scroll bound fails closed.
+repaired before moving to the next tab. Extra bans are removed directly from
+the fixed Selected Perks block; only missing required bans require an
+Available-list checkbox search. Auto Pick uses the matched up arrow. Every
+input reacquires the same semantic row, every move must make strict upward
+progress, and completion requires an exact final list followed by closing
+Perks and revalidating Home `NEW_BATTLE`. The complete Home setup synchronizes
+persistent control before every tap and swipe. Pause waits without cleanup
+input; after Resume it restores verified Home and restarts setup with fresh
+evidence. A strategy that does not declare both lists cannot trigger these
+changes. Uncertain OCR, an unavailable row, unchanged input, or an exhausted
+move/scroll bound fails closed.
 
 Every decision is requirement-scoped. For example, accepting the configured
 Flame fallback waives only `bots_preset`; Workshop locks, Modules, Cards,

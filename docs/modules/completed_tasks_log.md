@@ -43,18 +43,24 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   invariants. The canonical order includes Coin Trade-Off at priority 3 and is
   expanded into both current Farm plans and the retained GC aliases.
 - Added Home `NEW_BATTLE` OCR and guarded repair. Ban changes use matched
-  Available-list rows; Auto Pick repair inserts each declared perk into its
-  exact rank through freshly verified upward moves. Ambiguous identity,
-  missing rows, unchanged inputs, non-progress, and bounded-search exhaustion
-  all fail closed before battle.
+  Selected Perks rows to remove extras and search Available rows only for
+  missing required bans. Ban repair completes before Auto Pick opens; Auto
+  Pick then inserts each declared perk into its exact rank through freshly
+  verified upward moves. Ambiguous identity, missing rows, unchanged inputs,
+  non-progress, and bounded-search exhaustion all fail closed before battle.
+- Live Farm T19 testing detected and corrected an extra Coin Trade-Off ban.
+  The first revision took the longer Available-list route and exposed that the
+  blocking Home workflow did not consume Pause. The follow-up synchronizes
+  persistent control before every setup input; Pause is action-free and Resume
+  restores Home before a fresh pass.
 - Retained July 22 Farm screenshots verify all five configured bans and all
   thirteen priorities. Automated coverage exercises the missing Coin
-  Trade-Off repair, Ban-set correction, row identity/progress guards, strategy
-  expansion, Home-gate integration, and No Strategy compatibility.
-- Repository-wide validation passed 719 sandbox-compatible tests plus the
-  separately permitted localhost HTTP test, for 720 total. No live device
-  action was performed.
-- Implemented in commit `bafeff4`.
+  Trade-Off repair, direct selected-ban removal, Ban-before-Auto sequencing,
+  Pause/Stop authority, row identity/progress guards, strategy expansion,
+  Home-gate integration, and No Strategy compatibility.
+- Repository-wide follow-up validation passed 723 sandbox-compatible tests
+  plus the separately permitted localhost HTTP test, for 724 total.
+- Implemented in commits `bafeff4` and `c4cb745`.
 
 ### 2026-07-25 Farm module preflight visibility and transitions
 

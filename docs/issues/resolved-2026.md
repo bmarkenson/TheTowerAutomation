@@ -8,6 +8,41 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Home Perk repair searched unnecessarily and continued after Pause
+
+- **Observed:** 2026-07-25 during the authorized live Tier 19 Farm Home
+  preflight.
+- **Symptom:** The operator saw Coin Trade-Off remain selected while setup
+  switched from Ban Perks to Auto Pick and then back to Ban Perks. At 11:14:03
+  the persistent control was set to `PAUSED`, but the blocking repair continued
+  Available-list swipes and dispatched the eventual deselection at 11:14:24.
+- **Evidence:** `logs/actions.log` records the initial Ban and Auto Pick
+  inventory, seven downward Ban-list swipes, the single guarded
+  `perk_ban_toggle` input, the Pause request interval, and clean managed stop at
+  11:14:31. A fresh stopped-screen capture showed the resulting exact five
+  selected Farm bans; Coin Trade-Off was no longer selected.
+- **Safety response:** No battle had started. Once the continued actions were
+  confirmed, the managed service was stopped and left on the Home Perks panel.
+  No manual Perk tap or battle action followed.
+- **Cause:** The first implementation inventoried both tabs before repairing
+  either one and treated extra and missing bans alike, so it searched the
+  complete Available list for an already-visible selected extra. The complete
+  blocking Home setup also received raw input functions instead of the
+  runtime's persistent-control action guard.
+- **Resolution:** Ban repair now completes before Auto Pick. It removes an
+  authoritative extra directly from the fixed Selected Perks block and scans
+  Available rows only for a missing required ban. Every Home setup tap and
+  swipe now synchronizes control; Pause waits without cleanup input, and Resume
+  restores verified Home before a fresh setup attempt. `STOPPED` no longer
+  passes the shared runtime action guard.
+- **Regression:** `test/test_home_perk_configuration.py` covers direct selected
+  removal and Ban-before-Auto order. `test/test_gc_no_battle_setup.py` covers
+  action-free Pause, Home restoration, and suppression of a false startup-gate
+  decision.
+- **Validation:** Repository-wide validation passed 723 sandbox-compatible
+  tests plus the separately permitted localhost HTTP test, for 724 total.
+- **Fixed by:** `c4cb745`.
+
 ### Farm module preflight rejected Ancestral and could lose the Equip transition
 
 - **Observed:** 2026-07-25 during the Farm Tier 19 experiment Home preflight;
