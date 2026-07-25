@@ -2732,6 +2732,14 @@
       ]
     },
     "guardian:attack_inventory": {
+      "match_template": "buttons/guardian:attack_inventory.png",
+      "match_region": {
+        "x": 35,
+        "y": 1080,
+        "w": 330,
+        "h": 340
+      },
+      "match_threshold": 0.9,
       "roles": [
         "button"
       ],
@@ -2742,6 +2750,14 @@
       }
     },
     "guardian:ally_inventory": {
+      "match_template": "buttons/guardian:ally_inventory.png",
+      "match_region": {
+        "x": 380,
+        "y": 1080,
+        "w": 330,
+        "h": 340
+      },
+      "match_threshold": 0.9,
       "roles": [
         "button"
       ],

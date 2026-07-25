@@ -305,17 +305,6 @@ class _TournamentRouter(_NoBattleRouter):
             return {"state": "GUILD", "secondary_states": secondary}
         return super().detect(frame)
 
-    def static_tap(self, label, **kwargs):
-        if self.state == "guardians" and label == "buttons.guardian:attack_inventory":
-            self.static_actions.append(label)
-            self.guardians.add("attack")
-            return True
-        if self.state == "guardians" and label == "buttons.guardian:ally_inventory":
-            self.static_actions.append(label)
-            self.guardians.add("ally")
-            return True
-        return super().static_tap(label, **kwargs)
-
     def visible_tap(self, label, **kwargs):
         if self.state == "cards" and label == "indicators.cards:tournament_slot":
             self.visible_actions.append(label)
@@ -336,6 +325,14 @@ class _TournamentRouter(_NoBattleRouter):
             self.visible_actions.append(label)
             chip = "fetch" if "fetch" in label else "summon"
             self.guardians.remove(chip)
+            return True
+        if self.state == "guardians" and label in {
+            "buttons.guardian:attack_inventory",
+            "buttons.guardian:ally_inventory",
+        }:
+            self.visible_actions.append(label)
+            chip = "attack" if "attack" in label else "ally"
+            self.guardians.add(chip)
             return True
         return super().visible_tap(label, **kwargs)
 
@@ -519,8 +516,8 @@ def test_no_battle_setup_corrects_tournament_home_configuration():
     assert result.evidence["cards_deck"] == "Tournament"
     assert result.evidence["workshop_preset"] == "Tourney"
     assert result.evidence["bots_preset"] == "Amplify"
-    assert "buttons.guardian:attack_inventory" in router.static_actions
-    assert "buttons.guardian:ally_inventory" in router.static_actions
+    assert "buttons.guardian:attack_inventory" in router.visible_actions
+    assert "buttons.guardian:ally_inventory" in router.visible_actions
 
 
 def test_tournament_guardian_inventory_actions_have_explicit_geometry():

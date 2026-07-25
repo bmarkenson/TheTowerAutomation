@@ -154,6 +154,14 @@ def test_home_target_priority_control_does_not_exist():
             "buttons.guardian:scout_inventory",
             "guild_guardian_gc_inactive_20260715.png",
         ),
+        (
+            "buttons.guardian:attack_inventory",
+            "guild_guardian_gc_loadout_20260713.png",
+        ),
+        (
+            "buttons.guardian:ally_inventory",
+            "guild_guardian_gc_loadout_20260713.png",
+        ),
     ),
 )
 def test_new_runtime_tap_templates_match_retained_evidence(target, fixture):

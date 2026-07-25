@@ -917,14 +917,14 @@ def _ensure_guardian_loadout(
                 "GUARDIAN_FETCH_EQUIPPED",
                 "indicators.guardian:fetch_equipped",
                 "buttons.guardian:attack_inventory",
-                False,
+                True,
             ),
             (
                 "GUARDIAN_ALLY_EQUIPPED",
                 "GUARDIAN_SUMMON_EQUIPPED",
                 "indicators.guardian:summon_equipped",
                 "buttons.guardian:ally_inventory",
-                False,
+                True,
             ),
         )
     else:
