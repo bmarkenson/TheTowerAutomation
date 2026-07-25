@@ -8,6 +8,41 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Tournament Home idle state spammed an ambiguous policy message
+
+- **Observed:** 2026-07-25 after Tournament Home pre-flight completed at a
+  verified no-battle boundary.
+- **Symptom:** `Detected HOME_SCREEN. Evaluating Home policy.` repeated about
+  every seven seconds with no completion or next-step message. The repetition
+  made the intentionally passive Tournament strategy look stuck even though it
+  had completed every available Home check and had no Home handler capable of
+  starting a battle.
+- **Evidence:** `logs/actions.log` records
+  `[GC_NO_BATTLE] Profile Home settings verified/corrected before Battle` at
+  00:25:50, followed by uninterrupted `Home control=NEW_BATTLE` and
+  `Evaluating Home policy` pairs until the authorized validation battle began
+  at 00:32:58. Fresh control, owner, ADB, and screenshot evidence confirmed
+  ordinary Tier 18 Home rather than Tournament or an active battle.
+- **Safety response:** No automatic Battle or Tournament action followed the
+  completed Home pass. A separately authorized, ownership-recorded Tier 18
+  validation battle ran the Tournament session checks, passed, used guarded
+  Surrender, and returned to verified `NEW_BATTLE` Home.
+- **Cause:** The Home dispatcher emitted its generic INFO message on every
+  polling frame. It did not distinguish passive Tournament Home pre-flight,
+  pending battle-only checks, or a completed validation session.
+- **Resolution:** Home policy reporting is now transition-deduplicated.
+  Passive Tournament Home emits one explicit state: Home checks pending, Home
+  checks complete with in-battle checks pending, or
+  `TOURNAMENT_READY` with a manual-start-only instruction. The Tournament
+  profile still has no Home handler and cannot start Battle or Tournament.
+- **Regression:** `test/test_gc_no_battle_setup.py::
+  test_tournament_home_policy_reports_changed_readiness_without_heartbeat`
+  requires two identical Home observations to emit only once and requires a
+  changed, successful session result to announce manual Tournament readiness.
+  Repository validation passed 645 sandbox-compatible tests plus the separate
+  localhost HTTP test, for 646 total.
+- **Fixed by:** `f9c68b6`.
+
 ### Tournament Guardian Ally selection was rejected as unverified
 
 - **Observed:** 2026-07-25 during an operator-requested Tournament pre-flight
@@ -54,10 +89,12 @@ and actionable work lives in
   requires each pre-flight to resume through its visible inventory target. The
   focused Guardian, tap-safety, and clickmap suites pass all 59 tests.
 - **Fixed by:** `2bfb653` and follow-up `1e0c860`.
-- **Live validation:** Pending. The operator-owned runtime remains on the
-  pre-follow-up process with the requirement-scoped Guardian gate pending; no
-  reload, retry, or Tournament start was inferred from repository repair
-  authority.
+- **Live validation:** The replacement runtime completed Tournament Home setup
+  at 00:25:50. An explicitly agent-owned Tier 18 validation battle then
+  authoritatively detected Attack, Ally, and Scout together, passed every
+  Tournament session requirement at 00:33:26, and was Surrendered through the
+  guarded route. Cleanup returned to verified `NEW_BATTLE` Home. No Tournament
+  UI or Tournament start action was used.
 
 ### Offscreen weekly mission chest was skipped
 
