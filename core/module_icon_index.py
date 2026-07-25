@@ -50,6 +50,8 @@ class ModuleIconCatalog:
     alignment_radius: int
     minimum_confidence: float
     minimum_margin: float
+    inventory_minimum_confidence: float
+    inventory_minimum_margin: float
     green_hsv_lower: tuple[int, int, int]
     green_hsv_upper: tuple[int, int, int]
     minimum_green_fraction: float
@@ -154,11 +156,18 @@ def _load_module_icon_catalog(path: str) -> ModuleIconCatalog:
 
     normalization = raw.get("normalization")
     authority = raw.get("authority")
+    inventory_authority = raw.get("inventory_authority")
     ancestral_green = raw.get("ancestral_green")
     roles = raw.get("roles")
     if not all(
         isinstance(section, dict)
-        for section in (normalization, authority, ancestral_green, roles)
+        for section in (
+            normalization,
+            authority,
+            inventory_authority,
+            ancestral_green,
+            roles,
+        )
     ):
         raise ValueError("catalog matching sections must be JSON objects")
 
@@ -185,6 +194,18 @@ def _load_module_icon_catalog(path: str) -> ModuleIconCatalog:
     minimum_margin = _number(
         authority.get("minimum_margin"),
         label="authority.minimum_margin",
+        minimum=0.0,
+        maximum=2.0,
+    )
+    inventory_minimum_confidence = _number(
+        inventory_authority.get("minimum_confidence"),
+        label="inventory_authority.minimum_confidence",
+        minimum=-1.0,
+        maximum=1.0,
+    )
+    inventory_minimum_margin = _number(
+        inventory_authority.get("minimum_margin"),
+        label="inventory_authority.minimum_margin",
         minimum=0.0,
         maximum=2.0,
     )
@@ -281,6 +302,8 @@ def _load_module_icon_catalog(path: str) -> ModuleIconCatalog:
         alignment_radius=alignment_radius,
         minimum_confidence=minimum_confidence,
         minimum_margin=minimum_margin,
+        inventory_minimum_confidence=inventory_minimum_confidence,
+        inventory_minimum_margin=inventory_minimum_margin,
         green_hsv_lower=green_hsv_lower,
         green_hsv_upper=green_hsv_upper,
         minimum_green_fraction=minimum_green_fraction,

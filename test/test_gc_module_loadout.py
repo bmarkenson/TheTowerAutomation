@@ -14,6 +14,7 @@ from core.gc_module_loadout import (
     _equip_inventory_module,
     _filter_option_visible,
     _find_inventory_detail,
+    _inventory_candidates,
     _role_prompt_visible,
     _scroll_inventory_to_top,
     _detail_ready,
@@ -77,7 +78,7 @@ def test_already_correct_gc_modules_do_not_send_correction_actions():
         screenshot=_load("gc_modules_overview.png"),
         detector=lambda _frame: {"state": "MODULES"},
         equip_fn=lambda _slot: pytest.fail("must not equip"),
-        unequip_fn=lambda _slot: pytest.fail("must not unequip"),
+        temporary_equip_fn=lambda *_args: pytest.fail("must not use temporary"),
     )
 
     assert result.valid
@@ -118,7 +119,7 @@ def _evidence(actual_by_slot):
     return GcModuleLoadoutEvidence(tuple(slots))
 
 
-def test_module_correction_breaks_a_swap_cycle_then_revalidates_every_step():
+def test_module_correction_preserves_a_swap_cycle_through_temporary_module():
     module_frame = np.full((1920, 1080, 3), 32, dtype=np.uint8)
     actual = dict(GC_MODULES)
     actual["cannon_assist"] = "Amplifying Strike"
@@ -130,9 +131,16 @@ def test_module_correction_breaks_a_swap_cycle_then_revalidates_every_step():
         evaluations.append(dict(actual))
         return _evidence(actual)
 
-    def unequip(slot):
-        actions.append(("unequip", slot.slot_key, slot.actual))
-        actual[slot.slot_key] = None
+    def temporary_equip(slot, excluded_names):
+        actions.append(
+            (
+                "temporary",
+                slot.slot_key,
+                slot.actual,
+                frozenset(excluded_names),
+            )
+        )
+        actual[slot.slot_key] = "Shrink Ray"
         return module_frame
 
     def equip(slot):
@@ -146,12 +154,17 @@ def test_module_correction_breaks_a_swap_cycle_then_revalidates_every_step():
         detector=lambda _frame: {"state": "MODULES"},
         evaluate_fn=evaluate,
         equip_fn=equip,
-        unequip_fn=unequip,
+        temporary_equip_fn=temporary_equip,
     )
 
     assert result.valid
     assert actions == [
-        ("unequip", "cannon_assist", "Amplifying Strike"),
+        (
+            "temporary",
+            "cannon_assist",
+            "Amplifying Strike",
+            frozenset(GC_MODULES.values()),
+        ),
         ("equip", "cannon_primary", "Amplifying Strike"),
         ("equip", "cannon_assist", "Being Annihilator"),
     ]
@@ -181,7 +194,9 @@ def test_module_correction_refuses_unknown_overview_evidence():
                 tuple(uncertain)
             ),
             equip_fn=lambda _slot: pytest.fail("must not equip"),
-            unequip_fn=lambda _slot: pytest.fail("must not unequip"),
+            temporary_equip_fn=lambda *_args: pytest.fail(
+                "must not use temporary"
+            ),
         )
     assert not GcModuleLoadoutEvidence(tuple(uncertain)).has_authoritative_mismatch
 
@@ -218,7 +233,9 @@ def test_module_replacement_always_accepts_level_transfer(role):
     def wait_for(_predicate, *, reason, **_kwargs):
         if reason == "Primary/Assist module role prompt":
             return role_prompt
-        assert reason == "Modules overview after accepted level transfer"
+        assert reason == (
+            "settled Ancestral Modules overview after accepted level transfer"
+        )
         return overview
 
     with (
@@ -316,6 +333,53 @@ def test_module_replacement_fails_when_level_transfer_cannot_be_accepted():
             )
 
 
+def test_module_replacement_rejects_missing_level_transfer_prompt():
+    detail = np.full((1920, 1080, 3), 10, dtype=np.uint8)
+    role_prompt = np.full((1920, 1080, 3), 20, dtype=np.uint8)
+    overview = np.full((1920, 1080, 3), 40, dtype=np.uint8)
+    slot = GcModuleSlotEvidence(
+        slot_key="armor_primary",
+        family="armor",
+        role="primary",
+        expected="Orbital Augment",
+        actual="Anti-Cube Portal",
+        match_status="matched",
+        valid=False,
+        confidence=1.0,
+        margin=1.0,
+        green_fraction=1.0,
+    )
+
+    with (
+        patch("core.gc_module_loadout._find_inventory_detail", return_value=detail),
+        patch("core.gc_module_loadout._detail_for", return_value=True),
+        patch(
+            "core.gc_module_loadout._role_prompt_visible",
+            side_effect=lambda frame: int(frame[0, 0, 0]) == 20,
+        ),
+        patch("core.gc_module_loadout._transfer_prompt_visible", return_value=False),
+        patch(
+            "core.gc_module_loadout._overview_visible",
+            side_effect=lambda frame: int(frame[0, 0, 0]) == 40,
+        ),
+        patch("core.gc_module_loadout._capture_modules", return_value=overview),
+        patch("core.gc_module_loadout._wait_for", return_value=role_prompt),
+    ):
+        with pytest.raises(
+            ModuleLoadoutCorrectionError,
+            match="without offering the required level transfer",
+        ):
+            _equip_inventory_module(
+                slot,
+                capture_fn=lambda: pytest.fail("capture is wrapped"),
+                detector=lambda _frame: {"state": "MODULES"},
+                safe_tap_fn=lambda *_args, **_kwargs: True,
+                swipe_fn=lambda _label: True,
+                sleep_fn=lambda _seconds: None,
+                catalog=load_module_icon_catalog(),
+            )
+
+
 def test_module_replacement_retries_a_dropped_equip_input_once():
     detail = np.full((1920, 1080, 3), 10, dtype=np.uint8)
     role_prompt = np.full((1920, 1080, 3), 20, dtype=np.uint8)
@@ -350,7 +414,9 @@ def test_module_replacement_retries_a_dropped_equip_input_once():
                     "timed out waiting for Primary/Assist module role prompt"
                 )
             return role_prompt
-        assert reason == "Modules overview after accepted level transfer"
+        assert reason == (
+            "settled Ancestral Modules overview after accepted level transfer"
+        )
         return overview
 
     with (
@@ -424,6 +490,24 @@ def test_inventory_search_rewinds_to_top_before_ranking_candidates():
     }
 
 
+def test_inventory_candidates_require_authoritative_target_identity():
+    frame = _load("gc_modules_overview.png")
+    catalog = load_module_icon_catalog()
+
+    # Both desired cannon/armor modules are equipped in this fixture. The
+    # inventory contains other same-family Ancestral modules, but none may be
+    # opened merely because it has a weak positive score for the absent target.
+    assert _inventory_candidates(frame, "Being Annihilator", catalog) == []
+    assert _inventory_candidates(frame, "Orbital Augment", catalog) == []
+
+    funding = _inventory_candidates(frame, "Project Funding", catalog)
+    assert funding
+    score, margin, center = funding[0]
+    assert center == (741, 1090)
+    assert score >= catalog.inventory_minimum_confidence
+    assert margin >= catalog.inventory_minimum_margin
+
+
 def test_inventory_candidate_waits_for_fresh_detail_before_ocr():
     frame = np.full((1920, 1080, 3), 32, dtype=np.uint8)
     events = []
@@ -439,7 +523,7 @@ def test_inventory_candidate_waits_for_fresh_detail_before_ocr():
         ),
         patch(
             "core.gc_module_loadout._inventory_candidates",
-            return_value=[(0.9, (145, 1090))],
+            return_value=[(0.9, 0.4, (145, 1090))],
         ),
         patch(
             "core.gc_module_loadout.ancestral_green_fraction",
@@ -456,6 +540,7 @@ def test_inventory_candidate_waits_for_fresh_detail_before_ocr():
                 rarity="ANCESTRAL",
                 equipped="",
                 action="EQUIP",
+                level=1,
             ),
         ),
     ):
@@ -567,12 +652,14 @@ def test_module_actions_reject_incomplete_frames_and_partial_detail_renders():
         rarity="ANCESTRAL",
         equipped="",
         action="",
+        level=None,
     )
     complete = ModuleDetailEvidence(
         name="Project Funding",
         rarity="ANCESTRAL",
         equipped="",
         action="EQUIP",
+        level=1,
     )
     with patch("core.gc_module_loadout._read_detail", return_value=partial):
         assert not _detail_ready(incomplete)

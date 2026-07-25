@@ -15,6 +15,10 @@
     "minimum_confidence": 0.23,
     "minimum_margin": 0.08
   },
+  "inventory_authority": {
+    "minimum_confidence": 0.20,
+    "minimum_margin": 0.08
+  },
   "roles": {
     "primary": {
       "crop_size": 134,

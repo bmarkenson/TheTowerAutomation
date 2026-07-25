@@ -2530,11 +2530,11 @@ class App:
                     or exclusive_request_pending
                 )
             ):
+                self._claim_proactive_gate_waivers(
+                    for_home_setup=True,
+                    requirements=requirements,
+                )
                 if exclusive_validation is None:
-                    self._claim_proactive_gate_waivers(
-                        for_home_setup=True,
-                        requirements=requirements,
-                    )
                     directive = self._matching_gate_decision("home_setup")
                     if directive and not self._apply_gate_decision(
                         directive,
@@ -2542,8 +2542,6 @@ class App:
                     ):
                         return
                 waivers = dict(getattr(self, "_startup_gate_waivers", {}))
-                if exclusive_validation is not None:
-                    waivers = {}
                 setup_kwargs: Dict[str, Any] = {
                     "screenshot": img,
                     "action_guard_fn": self._runtime_action_guard,

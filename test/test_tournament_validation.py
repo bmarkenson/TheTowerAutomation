@@ -538,9 +538,7 @@ def test_home_preflight_failure_consumes_request_without_waiver_or_battle(
         home_preflight_complete=False,
     )
     app._auto_start_enabled = False
-    app._startup_gate_waivers = {
-        "ultimate_weapons": {"status": "pending"},
-    }
+    app._startup_gate_waivers = {}
     setup = type(
         "SetupResult",
         (),
@@ -580,6 +578,73 @@ def test_home_preflight_failure_consumes_request_without_waiver_or_battle(
     assert result["status"] == "result"
     assert result["outcome"] == "failed"
     assert "guardian_chips" in result["reason"]
+
+
+def test_exclusive_validation_claims_configured_module_skip(tmp_path):
+    app, store, manager = _app_for_pending_validation(
+        tmp_path,
+        home_preflight_complete=False,
+    )
+    store.configure_startup_gate_waivers(
+        ["modules"],
+        strategy="tournament",
+        source="test",
+    )
+    app._auto_start_enabled = False
+    app._startup_gate_waivers = {}
+    setup = type(
+        "SetupResult",
+        (),
+        {
+            "complete": True,
+            "interrupted": False,
+            "failed_check": None,
+            "reason": "ok",
+            "evidence": {"modules": {"status": "waived"}},
+        },
+    )()
+    frame = object()
+
+    with (
+        patch(
+            "core.app.detect_home_battle_control",
+            return_value=type(
+                "HomeEvidence",
+                (),
+                {"control": HomeBattleControl.NEW_BATTLE},
+            )(),
+        ),
+        patch("core.app.run_gc_no_battle_setup", return_value=setup) as run_setup,
+        patch.object(
+            manager,
+            "mark_no_battle_setup_complete",
+            wraps=manager.mark_no_battle_setup_complete,
+        ) as mark_complete,
+        patch.object(
+            app,
+            "_maybe_start_exclusive_validation",
+            return_value=True,
+        ),
+        patch("core.app.log"),
+    ):
+        app._handle_primary_states("HOME_SCREEN", set(), frame)
+
+    waiver = run_setup.call_args.kwargs["waivers"]["modules"]
+    assert waiver == {
+        "request_id": waiver["request_id"],
+        "decision_id": "proactive_skip",
+        "label": "Modules",
+        "kind": "proactive",
+        "value": "",
+        "reason": "configured before the run",
+    }
+    assert waiver["request_id"]
+    assert run_setup.call_args.kwargs["screenshot"] is frame
+    mark_complete.assert_called_once_with(
+        setup.evidence,
+        waivers={"modules": waiver},
+    )
+    assert store.status()["startup_gate_waivers"] == {}
 
 
 def test_claimed_validation_timeout_fails_without_surrender(tmp_path):

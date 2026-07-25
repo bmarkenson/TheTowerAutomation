@@ -42,6 +42,8 @@ def test_ancestral_catalog_has_six_reviewed_icons_per_family():
     catalog = load_module_icon_catalog()
 
     assert catalog.rarity == "Ancestral"
+    assert catalog.inventory_minimum_confidence == 0.20
+    assert catalog.inventory_minimum_margin == 0.08
     assert len(catalog.modules) == 24
     assert len({module.slug for module in catalog.modules}) == 24
     assert len({module.name for module in catalog.modules}) == 24

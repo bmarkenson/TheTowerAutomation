@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import re
 import time
 from typing import Any, Callable, Mapping, Optional
@@ -21,7 +21,7 @@ from core.module_icon_index import (
 )
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
-from utils.logger import log
+from utils.logger import log, log_action_intent
 from utils.ocr_utils import ocr_text_and_conf
 
 
@@ -78,10 +78,15 @@ class ModuleDetailEvidence:
     rarity: str
     equipped: str
     action: str
+    level: Optional[int]
 
 
 class ModuleLoadoutCorrectionError(RuntimeError):
     pass
+
+
+class ModuleInventorySelectionError(ModuleLoadoutCorrectionError):
+    """The requested inventory module was not authoritatively available."""
 
 
 def gc_module_loadout_evidence_from_dict(
@@ -222,18 +227,19 @@ def ensure_gc_module_loadout(
     sleep_fn: Callable[[float], None] = time.sleep,
     evaluate_fn: Callable[..., GcModuleLoadoutEvidence] = evaluate_gc_module_loadout,
     equip_fn: Optional[Callable[[GcModuleSlotEvidence], Any]] = None,
-    unequip_fn: Optional[Callable[[GcModuleSlotEvidence], Any]] = None,
+    temporary_equip_fn: Optional[
+        Callable[[GcModuleSlotEvidence, set[str]], Any]
+    ] = None,
     catalog: Optional[ModuleIconCatalog] = None,
 ) -> GcModuleLoadoutEvidence:
     """Correct a GC module loadout while remaining on the Modules screen.
 
-    Direct replacements are preferred. An incorrect slot is unequipped only to
-    break a cycle where every desired module is currently equipped in another
-    wrong slot. Every inventory choice is confirmed by its detail name before
-    the Equip action, and the complete overview is re-evaluated after each
-    transition. Every level-transfer prompt is accepted so the role's existing
-    module level follows the replacement; an unverified prompt blocks the
-    correction.
+    Every occupied slot is replaced through the game's verified level-transfer
+    prompt, so module levels behave as persistent slot levels. A Primary/Assist
+    cycle is broken with a verified level-1 same-family temporary module rather
+    than Unequip. Every inventory choice is authoritatively classified by icon
+    before its detail name is confirmed, and the complete settled overview is
+    re-evaluated after each transition.
     """
 
     selected_catalog = catalog or load_module_icon_catalog()
@@ -253,26 +259,63 @@ def ensure_gc_module_loadout(
             swipe_fn=swipe_fn,
             sleep_fn=sleep_fn,
             catalog=selected_catalog,
+            require_level_transfer=True,
         )
 
-    def live_unequip(slot: GcModuleSlotEvidence):
-        return _unequip_module_slot(
-            slot,
-            capture_fn=capture_fn,
-            detector=detector,
-            safe_tap_fn=safe_tap_fn,
-            sleep_fn=sleep_fn,
-            catalog=selected_catalog,
+    def live_temporary_equip(
+        slot: GcModuleSlotEvidence,
+        excluded_names: set[str],
+    ):
+        attempted: list[str] = []
+        for module in selected_catalog.modules:
+            if module.family != slot.family or module.name in excluded_names:
+                continue
+            attempted.append(module.name)
+            temporary_slot = replace(slot, expected=module.name)
+            try:
+                result = _equip_inventory_module(
+                    temporary_slot,
+                    capture_fn=capture_fn,
+                    detector=detector,
+                    safe_tap_fn=safe_tap_fn,
+                    swipe_fn=swipe_fn,
+                    sleep_fn=sleep_fn,
+                    catalog=selected_catalog,
+                    required_inventory_level=1,
+                    require_level_transfer=True,
+                )
+            except ModuleInventorySelectionError as exc:
+                log(
+                    "[MODULE_LOADOUT] Cannot use "
+                    f"{module.name} as the {slot.family} level-transfer "
+                    f"intermediate: {exc}",
+                    "WARN",
+                )
+                continue
+            log(
+                "[MODULE_LOADOUT] Preserved "
+                f"{slot.slot_key} through level-1 {module.name}",
+                "INFO",
+            )
+            return result
+        raise ModuleLoadoutCorrectionError(
+            f"no verified level-1 {slot.family} temporary module was available "
+            f"outside the desired loadout (tried={attempted})"
         )
 
     equip_action = equip_fn or live_equip
-    unequip_action = unequip_fn or live_unequip
+    temporary_action = temporary_equip_fn or live_temporary_equip
     changed = False
+    announced = False
 
     for _step in range(_MAX_CORRECTION_STEPS):
         evidence = evaluate_fn(current, expected, catalog=selected_catalog)
         if evidence.valid:
-            if changed and equip_fn is None and unequip_fn is None:
+            if (
+                changed
+                and equip_fn is None
+                and temporary_equip_fn is None
+            ):
                 current = _set_module_rarity_filter(
                     "all",
                     capture_fn=capture_fn,
@@ -290,7 +333,7 @@ def ensure_gc_module_loadout(
         uncertain = [
             slot
             for slot in evidence.slots
-            if not slot.valid and slot.match_status in {"unknown", "ambiguous"}
+            if not slot.valid and slot.match_status != "matched"
         ]
         if uncertain:
             labels = ", ".join(
@@ -300,6 +343,16 @@ def ensure_gc_module_loadout(
                 "refusing module correction with uncertain overview evidence: "
                 + labels
             )
+
+        if not announced:
+            log_action_intent(
+                "Restoring the strategy Module loadout",
+                reason=(
+                    "replace occupied slots through verified level transfer and "
+                    "use a level-1 intermediate for Primary/Assist swaps"
+                ),
+            )
+            announced = True
 
         invalid = [slot for slot in evidence.slots if not slot.valid]
         equipped_names = {
@@ -320,7 +373,14 @@ def ensure_gc_module_loadout(
             raise ModuleLoadoutCorrectionError(
                 "module correction made no progress and no cycle could be broken"
             )
-        current = unequip_action(cycle)
+        excluded_names = set(expected.values()) | equipped_names
+        log(
+            "[MODULE_LOADOUT] "
+            f"{cycle.family} Primary/Assist reassignment requires a level-1 "
+            f"intermediate before moving {cycle.actual}",
+            "INFO",
+        )
+        current = temporary_action(cycle, excluded_names)
         changed = True
         _require_modules(current, detector)
 
@@ -387,11 +447,14 @@ def _read_detail(frame) -> ModuleDetailEvidence:
     name, _ = ocr_text_and_conf(frame[285:365, 405:970], psm=7)
     equipped, _ = ocr_text_and_conf(frame[440:510, 400:850], psm=7)
     action, _ = ocr_text_and_conf(frame[1620:1740, 130:405], psm=7)
+    level_text, _ = ocr_text_and_conf(frame[480:560, 150:400], psm=6)
+    level_match = re.search(r"\bL[VY]\s*\.?\s*(\d+)", level_text.upper())
     return ModuleDetailEvidence(
         name=name.strip(),
         rarity=_normalized(rarity),
         equipped=_normalized(equipped),
         action=_normalized(action),
+        level=int(level_match.group(1)) if level_match else None,
     )
 
 
@@ -560,7 +623,7 @@ def _inventory_fingerprint(frame) -> np.ndarray:
 
 
 def _inventory_candidates(frame, target: str, catalog: ModuleIconCatalog):
-    candidates: list[tuple[float, tuple[int, int]]] = []
+    candidates: list[tuple[float, float, tuple[int, int]]] = []
     for y in INVENTORY_ROWS:
         for x in INVENTORY_COLUMNS:
             center = (x, y)
@@ -575,12 +638,30 @@ def _inventory_candidates(frame, target: str, catalog: ModuleIconCatalog):
             ):
                 continue
             icon_crop = _crop_centered(frame, center, INVENTORY_ICON_CROP_SIZE)
-            score = module_icon_similarity(
-                icon_crop,
-                target,
-                catalog=catalog,
+            scores = sorted(
+                (
+                    (
+                        module_icon_similarity(
+                            icon_crop,
+                            module.name,
+                            catalog=catalog,
+                        ),
+                        module.name,
+                    )
+                    for module in catalog.modules
+                ),
+                reverse=True,
             )
-            candidates.append((score, center))
+            best_score, best_name = scores[0]
+            runner_score, _runner_name = scores[1]
+            margin = best_score - runner_score
+            if best_name != target:
+                continue
+            if best_score < catalog.inventory_minimum_confidence:
+                continue
+            if margin < catalog.inventory_minimum_margin:
+                continue
+            candidates.append((best_score, margin, center))
     candidates.sort(key=lambda item: item[0], reverse=True)
     return candidates
 
@@ -617,6 +698,7 @@ def _find_inventory_detail(
     swipe_fn,
     sleep_fn,
     catalog,
+    required_level: Optional[int] = None,
 ):
     current = _set_module_rarity_filter(
         "ancestral",
@@ -641,7 +723,11 @@ def _find_inventory_detail(
             break
         seen_viewports.append(fingerprint)
 
-        for score, center in _inventory_candidates(current, target, catalog):
+        for score, margin, center in _inventory_candidates(
+            current,
+            target,
+            catalog,
+        ):
             fresh = _capture_modules(capture_fn, detector)
             frame_crop = _crop_centered(
                 fresh,
@@ -657,7 +743,8 @@ def _find_inventory_detail(
                 center,
                 dispatch="now",
                 log_label=(
-                    f"gc_module_inventory_candidate:{target}:score={score:.3f}"
+                    f"gc_module_inventory_candidate:{target}:"
+                    f"score={score:.3f}:margin={margin:.3f}"
                 ),
                 verification=TapVerification(
                     screenshot=fresh,
@@ -698,6 +785,10 @@ def _find_inventory_detail(
             if (
                 normalized_name == _normalized(target)
                 and "EQUIP" in observed.action.split()
+                and (
+                    required_level is None
+                    or observed.level == required_level
+                )
             ):
                 return detail
             if normalized_name:
@@ -734,7 +825,7 @@ def _find_inventory_detail(
         current = updated
 
     suffix = f" after reviewing {len(seen_names)} named candidate(s)"
-    raise ModuleLoadoutCorrectionError(
+    raise ModuleInventorySelectionError(
         f"Ancestral inventory module {target!r} was not found{suffix}"
     )
 
@@ -764,6 +855,20 @@ def _overview_visible(frame) -> bool:
     )
 
 
+def _settled_ancestral_overview_visible(
+    frame,
+    *,
+    catalog: ModuleIconCatalog,
+) -> bool:
+    return _overview_visible(frame) and all(
+        match.status == "matched"
+        for match in identify_equipped_ancestral_modules(
+            frame,
+            catalog=catalog,
+        )
+    )
+
+
 def _equip_inventory_module(
     slot: GcModuleSlotEvidence,
     *,
@@ -773,6 +878,8 @@ def _equip_inventory_module(
     swipe_fn,
     sleep_fn,
     catalog,
+    required_inventory_level: Optional[int] = None,
+    require_level_transfer: bool = True,
 ):
     detail = _find_inventory_detail(
         slot.expected,
@@ -782,6 +889,7 @@ def _equip_inventory_module(
         swipe_fn=swipe_fn,
         sleep_fn=sleep_fn,
         catalog=catalog,
+        required_level=required_inventory_level,
     )
     if not _detail_for(detail, slot.expected, action="EQUIP"):
         raise ModuleLoadoutCorrectionError(
@@ -879,96 +987,37 @@ def _equip_inventory_module(
                     "failed to accept module level transfer"
                 )
             return _wait_for(
-                _overview_visible,
+                lambda candidate: _settled_ancestral_overview_visible(
+                    candidate,
+                    catalog=catalog,
+                ),
                 capture_fn=capture_fn,
                 detector=detector,
                 sleep_fn=sleep_fn,
-                reason="Modules overview after accepted level transfer",
+                reason=(
+                    "settled Ancestral Modules overview after accepted "
+                    "level transfer"
+                ),
             )
         if _overview_visible(frame):
-            return frame
+            if require_level_transfer:
+                raise ModuleLoadoutCorrectionError(
+                    f"{slot.expected} replaced occupied {slot.slot_key} "
+                    "without offering the required level transfer"
+                )
+            return _wait_for(
+                lambda candidate: _settled_ancestral_overview_visible(
+                    candidate,
+                    catalog=catalog,
+                ),
+                capture_fn=capture_fn,
+                detector=detector,
+                sleep_fn=sleep_fn,
+                reason="settled Ancestral Modules overview",
+            )
         sleep_fn(0.25)
     raise ModuleLoadoutCorrectionError(
         f"timed out equipping {slot.expected} as {slot.role}"
-    )
-
-
-def _unequip_module_slot(
-    slot: GcModuleSlotEvidence,
-    *,
-    capture_fn,
-    detector,
-    safe_tap_fn,
-    sleep_fn,
-    catalog,
-):
-    catalog_slot = next(item for item in catalog.slots if item.key == slot.slot_key)
-    frame = _capture_modules(capture_fn, detector)
-    if not safe_tap_fn(
-        catalog_slot.center,
-        dispatch="now",
-        log_label=f"gc_module_cycle_unequip:{slot.slot_key}",
-        verification=TapVerification(
-            screenshot=frame,
-            target_region=(
-                catalog_slot.center[0] - INVENTORY_FRAME_CROP_SIZE // 2,
-                catalog_slot.center[1] - INVENTORY_FRAME_CROP_SIZE // 2,
-                INVENTORY_FRAME_CROP_SIZE,
-                INVENTORY_FRAME_CROP_SIZE,
-            ),
-            description=f"equipped_module:{slot.slot_key}:{slot.actual}",
-            verifier=lambda candidate: any(
-                match.slot_key == slot.slot_key
-                and match.status == "matched"
-                and match.name == slot.actual
-                for match in identify_equipped_ancestral_modules(
-                    candidate,
-                    catalog=catalog,
-                )
-            ),
-        ),
-    ):
-        raise ModuleLoadoutCorrectionError(
-            f"failed to open equipped slot {slot.slot_key}"
-        )
-    detail = _wait_for(
-        lambda candidate: _detail_for(
-            candidate,
-            slot.actual or "",
-            action="UNEQUIP",
-        ),
-        capture_fn=capture_fn,
-        detector=detector,
-        sleep_fn=sleep_fn,
-        reason=f"equipped module detail for {slot.slot_key}",
-    )
-    if not _detail_for(detail, slot.actual or "", action="UNEQUIP"):
-        raise ModuleLoadoutCorrectionError(
-            f"equipped detail guard failed for {slot.slot_key}"
-        )
-    if not safe_tap_fn(
-        "buttons.module:detail_equip_toggle",
-        dispatch="now",
-        verification=TapVerification(
-            screenshot=detail,
-            target_region=(120, 1610, 310, 130),
-            description=f"module_detail:unequip:{slot.actual}",
-            verifier=lambda frame: _detail_for(
-                frame,
-                slot.actual or "",
-                action="UNEQUIP",
-            ),
-        ),
-    ):
-        raise ModuleLoadoutCorrectionError(
-            f"Unequip tap failed for {slot.slot_key}"
-        )
-    return _wait_for(
-        _overview_visible,
-        capture_fn=capture_fn,
-        detector=detector,
-        sleep_fn=sleep_fn,
-        reason="Modules overview after Unequip",
     )
 
 
