@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import cv2
@@ -362,6 +363,71 @@ def test_open_damage_adjuster_uses_settled_screenshot_workflow():
     assert reading.percentage == "1E-22%"
     assert taps[0][0] == "buttons.damage_adjuster:attack"
     assert taps[0][1]["retries"] == 1
+
+
+def test_open_damage_adjuster_finds_damage_above_current_viewport():
+    attack = _load(ATTACK_FIXTURE)
+    panel = _load(PANEL_FIXTURE)
+    scrolled = attack.copy()
+    scrolled[1253:1477, 26:276] = 0
+    current = scrolled
+    swipes = []
+    tap_frames = []
+
+    def capture():
+        return current
+
+    def swipe(direction, span):
+        nonlocal current
+        swipes.append((direction, span))
+        current = attack
+
+    def tap_visible(name, **kwargs):
+        nonlocal current
+        tap_frames.append((name, kwargs["screenshot"]))
+        if kwargs["screenshot"] is scrolled:
+            return False
+        current = panel
+        return True
+
+    reading = open_damage_adjuster(
+        capture_fn=capture,
+        tap_visible_fn=tap_visible,
+        swipe_fn=swipe,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert reading is not None
+    assert reading.percentage == "1E-22%"
+    assert swipes == [("towards_top", "short")]
+    assert [name for name, _frame in tap_frames] == [
+        "buttons.damage_adjuster:attack",
+        "buttons.damage_adjuster:attack",
+    ]
+    assert tap_frames[0][1] is scrolled
+    assert tap_frames[1][1] is attack
+
+
+def test_open_damage_adjuster_fails_closed_if_attack_changes_during_search():
+    attack = _load(ATTACK_FIXTURE)
+    changed = _load(PANEL_FIXTURE)
+    frames = iter((attack, changed, changed))
+    finder = SimpleNamespace(called=False)
+
+    def find_upgrade_stub(_menu, _label, **kwargs):
+        finder.called = True
+        assert kwargs["capture_fn"]() is None
+        return None
+
+    reading = open_damage_adjuster(
+        capture_fn=lambda: next(frames),
+        tap_visible_fn=lambda *_args, **_kwargs: False,
+        find_upgrade_fn=find_upgrade_stub,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert reading is None
+    assert finder.called
 
 
 def test_dismiss_is_guarded_and_restores_attack_menu():

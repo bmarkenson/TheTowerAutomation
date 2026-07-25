@@ -15,7 +15,7 @@ from core.input import TapVerification, safe_tap, tap_if_visible
 from core.matcher import get_match
 from core.ss_capture import capture_adb_screenshot, is_complete_screenshot
 from core.state_detector import detect_state_and_overlays
-from core.upgrade_navigation import ensure_upgrade_menu
+from core.upgrade_navigation import ensure_upgrade_menu, find_upgrade
 from utils.logger import log, log_action_intent
 from utils.ocr_utils import ocr_text_and_conf
 
@@ -164,6 +164,8 @@ def open_damage_adjuster(
     *,
     capture_fn: CaptureFn = capture_adb_screenshot,
     tap_visible_fn: Callable[..., bool] = tap_if_visible,
+    find_upgrade_fn: Callable[..., Any] = find_upgrade,
+    swipe_fn: Optional[Callable[..., Any]] = None,
     sleep_fn: SleepFn = time.sleep,
     attempts: int = 6,
 ) -> Optional[DamageAdjusterReading]:
@@ -185,13 +187,67 @@ def open_damage_adjuster(
             "WARN",
         )
         return None
-    if not tap_visible_fn(
+    opened = tap_visible_fn(
         "buttons.damage_adjuster:attack",
         screenshot=screenshot,
         retries=1,
-    ):
-        log("[DAMAGE_ADJUSTER] Damage label did not match", "WARN")
-        return None
+    )
+    if not opened:
+        log_action_intent(
+            "Locating the Damage Slider",
+            reason=(
+                "the Damage label is outside or did not match in the current "
+                "Attack upgrade viewport"
+            ),
+        )
+
+        def capture_verified_attack() -> Optional[Frame]:
+            frame = capture_fn()
+            if frame is None:
+                return None
+            current = detect_state_and_overlays(frame)
+            if (
+                current["state"] != "RUNNING"
+                or current["menu"] != "ATTACK_MENU"
+            ):
+                log(
+                    "[DAMAGE_ADJUSTER] Attack menu changed while locating "
+                    "the Damage label: "
+                    f"state={current['state']!r} menu={current['menu']!r}",
+                    "WARN",
+                )
+                return None
+            return frame
+
+        find_kwargs: dict[str, Any] = {
+            "attempt_purchase": False,
+            "capture_fn": capture_verified_attack,
+            "sleep_fn": sleep_fn,
+            "ensure_menu": False,
+        }
+        if swipe_fn is not None:
+            find_kwargs["swipe_fn"] = swipe_fn
+        located = find_upgrade_fn("attack", "Damage", **find_kwargs)
+        if located is None:
+            log(
+                "[DAMAGE_ADJUSTER] Damage label was not found in the "
+                "Attack upgrade list",
+                "WARN",
+            )
+            return None
+        screenshot = located.screenshot
+        opened = tap_visible_fn(
+            "buttons.damage_adjuster:attack",
+            screenshot=screenshot,
+            retries=1,
+        )
+        if not opened:
+            log(
+                "[DAMAGE_ADJUSTER] Located Damage tile did not pass the "
+                "final label guard",
+                "WARN",
+            )
+            return None
 
     for _ in range(max(1, attempts)):
         sleep_fn(0.25)

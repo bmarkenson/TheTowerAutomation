@@ -372,6 +372,7 @@ def run_no_strategy_in_battle_inventory(
                 detector=detector,
                 safe_tap_fn=guarded_safe_tap,
                 tap_visible_fn=guarded_visible_tap,
+                swipe_fn=guarded_swipe,
                 sleep_fn=sleep_fn,
             )
 
@@ -463,6 +464,7 @@ def _capture_damage_slider(
     detector: Detector,
     safe_tap_fn: Callable[..., bool],
     tap_visible_fn: Callable[..., bool],
+    swipe_fn: Callable[[str, str], Any],
     sleep_fn: Callable[[float], None],
 ) -> None:
     try:
@@ -477,6 +479,7 @@ def _capture_damage_slider(
         reading = open_damage_adjuster(
             capture_fn=capture_fn,
             tap_visible_fn=tap_visible_fn,
+            swipe_fn=swipe_fn,
             sleep_fn=sleep_fn,
         )
         if reading is None or not reading.visible:
