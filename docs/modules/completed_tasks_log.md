@@ -37,6 +37,32 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-25 slot-level module replacement and exclusive-check skips
+
+- Replaced Unequip-based Primary/Assist cycle handling with a verified
+  same-family level-1 intermediate. Every occupied replacement now requires
+  the game's level-transfer prompt, while filling a known empty recovery slot
+  rejects an unexpected transfer prompt. The generated loadout remains generic
+  and strategy-owned.
+- Hardened inventory selection with aligned icon ranking, independent
+  confidence and runner-up-margin authority, exact detail name/action/level
+  checks, settled rarity-row reacquisition, and complete settled-overview
+  validation.
+- Repaired the interrupted Farm armor assignment live without losing either
+  slot level: Anti-Cube Portal finished in armor Assist at level 194, Orbital
+  Augment finished in armor Primary at level 201, and fresh overview evidence
+  matched all eight configured Farm modules. Automation remained paused and no
+  battle was started.
+- Tournament exclusive validation now claims the staged, strategy-scoped
+  one-run check waivers used by normal startup, so selecting **skip Modules**
+  actually suppresses module work on that validation path.
+- Focused regression coverage exercises direct transfers, level-1
+  intermediates, unexpected prompts, settled filter rows, aligned candidates,
+  confidence/margin refusal, and the exclusive-validation Module skip.
+  Repository-wide validation passed 731 sandbox-compatible tests plus the
+  separately permitted localhost HTTP test, for 732 total. Implemented in
+  commits `859351f`, `1121bff`, `983e1f0`, and `4edc809`.
+
 ### 2026-07-25 Farm Perk configuration enforcement
 
 - Promoted Perk Bans and Auto Pick priority into strategy-owned Farm

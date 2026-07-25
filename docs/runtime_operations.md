@@ -197,6 +197,19 @@ restarts setup with fresh evidence. A strategy that does not declare both
 lists cannot trigger these changes. Uncertain OCR, an unavailable row,
 unchanged input, or an exhausted move/scroll bound fails closed.
 
+Module replacement treats each equipped slot's level as persistent slot-owned
+state. Replacing an occupied Primary or Assist must present and accept the
+verified level-transfer prompt. Moving two configured modules between Primary
+and Assist uses a verified level-1 module of the same family as an
+intermediate: the outgoing slot level is transferred to the intermediate, the
+other configured module is transferred into its destination, and the displaced
+configured module is transferred back over the intermediate. Do not resolve a
+role cycle by Unequipping a configured module. Inventory selection requires an
+aligned icon match with the configured confidence and runner-up margin,
+followed by exact detail name, action, and level evidence. Missing or
+unexpected transfer prompts, uncertain candidates, and unsettled overview or
+filter rows fail closed.
+
 Every decision is requirement-scoped. For example, accepting the configured
 Flame fallback waives only `bots_preset`; Workshop locks, Modules, Cards,
 Guardian Chips, Ultimate Weapons, Auto Pick Perks, Perk Bans, and Auto Pick
@@ -261,12 +274,15 @@ Tournament during validation. In that disposable ordinary battle it leaves
 Auto Perks unchanged, enforces Damage Slider `100%`, requires Attack Range
 `98.38m`, enforces Orb Distance Extra `87.16m` / Workshop `80.37m`, and
 verifies the configured Ultimate Weapons and Spotlight Missiles. Staged
-one-run waivers are not claimed for this validation; a Home preflight failure
-consumes the request and reports its failed check without starting a battle. A
-conclusive in-battle pass or failure starts guarded cleanup: only the same
-runtime/ADB owner may Surrender that battle and return from Game Over to
-verified Home **New Battle**. The status panel then reports either readiness
-and a Tournament-launch prompt or the validation failure reason.
+one-run waivers associated with the exact Tournament strategy request are
+claimed and passed through the same Home setup as an ordinary startup; for
+example, a configured Modules skip suppresses module inspection and changes
+during validation. An unwaived Home preflight failure consumes the request and
+reports its failed check without starting a battle. A conclusive in-battle pass
+or failure starts guarded cleanup: only the same runtime/ADB owner may
+Surrender that battle and return from Game Over to verified Home **New
+Battle**. The status panel then reports either readiness and a
+Tournament-launch prompt or the validation failure reason.
 
 Each later explicit Tournament selection or managed Start creates a new
 request. Restarting an unattended runtime does not: a claimed, running, or

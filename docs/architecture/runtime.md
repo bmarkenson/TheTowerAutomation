@@ -52,18 +52,21 @@ policies:
 
 Named module, Orb Distance, and Target Priority presets are resolved at build
 time into an explicit self-contained strategy plan. Modules are checked from
-verified Home `NEW_BATTLE` before Battle may start. A guarded module
-replacement accepts every presented level-transfer dialog for both Primary and
-Assist roles so the slot's existing level follows the incoming module; an
-unverified transfer prompt fails closed. Target Priority and Orb Distance are
-not Home controls: their Home-boundary evidence remains explicitly deferred,
-and their policies are checked after the new run reaches `RUNNING`. Orb
-Distance first OCRs the Attack Range and requires the preset's exact Range
-basis, then reads and feedback-steps the Extra and Workshop rows independently.
-Tier 18 Farm binds Range `30.00m` to Extra `30.00m` and Workshop `39.00m`.
-Damage Slider `observe` and `enforce` policies resolve an explicit percentage;
-Tier 18 enforces `1E-22%` during every new-run initialization after the
-time-sensitive EHLS/EALS setup. `YamlStrategy` exposes the plan's resolved
+verified Home `NEW_BATTLE` before Battle may start. Module level is treated as
+slot-owned state: every occupied replacement requires a verified level
+transfer, and a Primary/Assist cycle is resolved through a verified level-1
+same-family intermediate instead of Unequip. Inventory candidates require an
+aligned icon match with configured confidence and margin plus exact detail
+name/action/level evidence; unexpected transfer prompts and unsettled
+overviews fail closed. Target Priority and Orb Distance are not Home controls:
+their Home-boundary evidence remains explicitly deferred, and their policies
+are checked after the new run reaches `RUNNING`. Orb Distance first OCRs the
+Attack Range and requires the preset's exact Range basis, then reads and
+feedback-steps the Extra and Workshop rows independently. Tier 18 Farm binds
+Range `30.00m` to Extra `30.00m` and Workshop `39.00m`. Damage Slider
+`observe` and `enforce` policies resolve an explicit percentage; Tier 18
+enforces `1E-22%` during every new-run initialization after the time-sensitive
+EHLS/EALS setup. `YamlStrategy` exposes the plan's resolved
 `run_configuration` generically, and Game Over records copy that snapshot into
 the versioned battle JSON. Runtime code does not inherit configuration or
 branch on a Farm strategy name.
@@ -101,12 +104,13 @@ no-battle check: Tournament Cards, Tourney Workshop, Amplify Bots,
 Attack/Ally/Scout Guardians, the Tournament module loadout, and Poison Swamp
 Stun `on`. Damage Slider, Orb Distance, and Ultimate Weapon enablement remain
 explicitly deferred because their authoritative controls are battle-only.
-Exclusive validation does not claim staged one-run waivers; a failed Home
-check consumes the request with its reason and never starts a battle. Once Home
-preflight is complete, the runtime atomically claims the matching receipt and
-then uses a fresh verified control to start exactly one ordinary `NEW_BATTLE`.
-It rejects Home `RESUME_BATTLE` and never opens the Tournament screen or starts
-a Tournament battle.
+Exclusive validation claims staged one-run waivers tied to the same Tournament
+strategy request before Home setup, so a configured check skip applies to this
+path as well. An unwaived failed Home check consumes the request with its reason
+and never starts a battle. Once Home preflight is complete, the runtime
+atomically claims the matching receipt and then uses a fresh verified control
+to start exactly one ordinary `NEW_BATTLE`. It rejects Home `RESUME_BATTLE` and
+never opens the Tournament screen or starts a Tournament battle.
 
 The disposable ordinary battle bypasses EHLS/EALS initialization without
 seeding either completion flag. It does not toggle Auto Perks. Session

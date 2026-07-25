@@ -1604,6 +1604,73 @@ and actionable work lives in
   produced no speed input or repeated no-op log.
 - **Fixed by:** `1f6385a`.
 
+### Tournament exclusive validation ignored the configured Modules skip
+
+- **Observed:** 2026-07-25 when the operator had explicitly selected a
+  one-run Module skip for Tournament validation.
+- **Symptom:** Exclusive validation entered Modules and began changing the
+  loadout anyway, making the runtime's behavior appear unrelated to the
+  selected check policy.
+- **Evidence:** Source inspection found that the exclusive-validation branch
+  skipped `_claim_proactive_gate_waivers()` and then explicitly replaced the
+  Home-setup waiver map with an empty mapping. The strategy-scoped skip was
+  therefore present in control state but unavailable to the setup evaluator.
+- **Safety response:** The operator stopped the running battle. Automation was
+  paused at no-battle Home before bounded diagnosis or repair; no replacement
+  battle was started.
+- **Cause:** Exclusive validation had a special-case waiver exclusion even
+  though proactive skips are already bound to the exact strategy request and
+  consumed for only one run.
+- **Resolution:** Exclusive validation now claims the same strategy-scoped
+  proactive waivers before Home setup and passes the claimed map into both
+  setup and retained preflight evidence. Unwaived checks retain their existing
+  blocking behavior.
+- **Regression:**
+  `test/test_tournament_validation.py::test_exclusive_validation_claims_configured_module_skip`
+  configures a Tournament Module skip and requires it to be claimed, passed to
+  Home setup, retained, and consumed.
+- **Fixed by:** `859351f`.
+
+### Primary/Assist module cycle resolution discarded slot levels
+
+- **Observed:** 2026-07-25 during Farm Home setup after an armor Primary/Assist
+  reassignment was required.
+- **Symptom:** The correction Unequipped Orbital Augment from armor Assist,
+  leaving the slot empty and the module in inventory at level 194. Anti-Cube
+  Portal remained armor Primary at level 201. The search later reviewed a
+  weakly matched Space Displacer candidate while looking for Anti-Cube Portal.
+- **Evidence:** The action log records the interrupted correction and the
+  bounded recovery's verified transfers. Fresh final overview evidence matched
+  Anti-Cube Portal in armor Assist with level 194 and Orbital Augment in armor
+  Primary with level 201, alongside the other six configured Farm modules.
+- **Safety response:** Automation was paused before recovery. Candidate detail
+  verification rejected Space Displacer without equipping it. Every recovery
+  input rechecked persistent Pause and the live ADB lock owner; no battle was
+  started.
+- **Cause:** Direct replacements accepted level transfer, but cycle resolution
+  still used Unequip to free a role. That separated the outgoing module from
+  the slot level instead of preserving both role levels. Inventory matching
+  also used one fixed-center crop, so small icon displacement could produce a
+  misleading best candidate.
+- **Resolution:** Occupied replacements require a verified transfer prompt.
+  Role cycles use a verified level-1 module of the same family as an
+  intermediate, moving each configured module into its destination through
+  level transfer and never using Unequip. Empty-slot recovery rejects an
+  unexpected prompt. Inventory classification aligns nearby crops, enforces
+  separate confidence and runner-up margins, confirms exact detail
+  name/action/level evidence, and reacquires settled rarity rows.
+- **Regression:** `test/test_gc_module_loadout.py` covers direct replacements,
+  intermediate cycle planning, level-1 temporary selection, missing and
+  unexpected transfer prompts, and settled filter traversal.
+  `test/test_module_icon_index.py` covers aligned inventory candidates and
+  authority thresholds.
+- **Live validation:** A bounded no-battle recovery transferred armor Assist
+  level 194 through Negative Mass Projector, moved Orbital Augment into armor
+  Primary with level 201, then transferred Anti-Cube Portal into armor Assist
+  with level 194. The final evaluator authoritatively matched all eight Farm
+  module identities. Automation remained paused.
+- **Fixed by:** `859351f`, `1121bff`, `983e1f0`, and `4edc809`.
+
 ## Operational lessons
 
 ### A detached child may not survive the agent execution wrapper
