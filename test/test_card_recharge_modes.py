@@ -114,7 +114,7 @@ def test_invalid_card_recharge_contracts_are_rejected(raw):
 
 
 class _CardRouter:
-    def __init__(self, *, mismatched: bool):
+    def __init__(self, *, mismatched: bool, start: str = "top"):
         self.top = _load("cards_gc_active_20260713.png")
         self.demon_inventory = _load(DEMON_INVENTORY)
         self.nuke_inventory = _load(NUKE_INVENTORY)
@@ -130,7 +130,11 @@ class _CardRouter:
             self.nuke_detail[y : y + height, x : x + width] = (
                 self.demon_auto_reactivate[y : y + height, x : x + width]
             )
-        self.current = self.top
+        self.current = {
+            "top": self.top,
+            "demon": self.demon_inventory,
+            "nuke": self.nuke_inventory,
+        }[start]
         self.detail_label = None
         self.long_presses = []
         self.checkbox_taps = []
@@ -143,12 +147,15 @@ class _CardRouter:
     def swipe(self, target):
         self.swipes.append(target)
         if target == "gesture_targets.goto_top:cards_inventory":
-            self.current = self.top
+            if self.current is self.nuke_inventory:
+                self.current = self.demon_inventory
+            elif self.current is self.demon_inventory:
+                self.current = self.top
             return True
         assert target == "gesture_targets.goto_next:cards_inventory"
         if self.current is self.top:
             self.current = self.demon_inventory
-        else:
+        elif self.current is self.demon_inventory:
             self.current = self.nuke_inventory
         return True
 
@@ -235,6 +242,22 @@ def test_matching_card_recharge_modes_are_verified_without_toggling():
             "valid": True,
         },
     ]
+
+
+def test_visible_cards_are_verified_in_any_order_and_stop_upward_search_early():
+    router = _CardRouter(mismatched=False, start="nuke")
+
+    result = _ensure(router)
+
+    assert result.valid
+    assert not result.changed
+    assert router.long_presses == [
+        "buttons.card_inventory:nuke",
+        "buttons.card_inventory:demon_mode",
+    ]
+    assert router.close_taps == ["Nuke", "Demon Mode"]
+    assert router.swipes == ["gesture_targets.goto_top:cards_inventory"]
+    assert [mode.label for mode in result.modes] == ["Demon Mode", "Nuke"]
 
 
 def test_mismatched_card_recharge_modes_are_toggled_and_reverified():

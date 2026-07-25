@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from enum import Enum
 import time
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Iterator, Mapping, Optional
 
 import cv2
 import numpy as np
@@ -215,125 +215,65 @@ def ensure_card_recharge_modes(
     required = normalize_card_recharge_modes(requirements)
     current = cards_screenshot if cards_screenshot is not None else capture_fn()
     _require_cards_inventory(current, detector)
-    current = _scroll_inventory_to_top(
+
+    evidence_by_label: dict[str, CardRechargeModeEvidence] = {}
+    changed_labels: set[str] = set()
+    for current in _inventory_search_frames(
         current,
         capture_fn=capture_fn,
         detector=detector,
         swipe_fn=swipe_fn,
         sleep_fn=sleep_fn,
-    )
-
-    evidence: list[CardRechargeModeEvidence] = []
-    changed: list[str] = []
-    detail_open = False
-    try:
+    ):
         for label in CARD_RECHARGE_LABELS:
-            current = _find_inventory_card(
+            if label in evidence_by_label:
+                continue
+            if not get_match_result(
+                _CARD_TEMPLATE_KEYS[label],
+                screenshot=current,
+            ).matched:
+                continue
+            current, observed, changed = _ensure_inventory_card_mode(
                 label,
                 current,
+                required=required[label],
                 capture_fn=capture_fn,
                 detector=detector,
-                swipe_fn=swipe_fn,
-                sleep_fn=sleep_fn,
-            )
-            template_key = _CARD_TEMPLATE_KEYS[label]
-            if not safe_long_press_fn(
-                template_key,
-                duration_ms=800,
-                retries=1,
-                retry_delay=0.25,
-                screenshot=current,
-            ):
-                raise CardRechargeModeError(
-                    f"verified long press failed for {label}"
-                )
-            detail_open = True
-            detail, observed = _wait_for_detail(
-                label,
-                required[label],
-                capture_fn=capture_fn,
-                sleep_fn=sleep_fn,
-            )
-            if observed.observed is CardRechargeMode.UNKNOWN:
-                raise CardRechargeModeError(
-                    f"{label} recharge checkbox state was ambiguous"
-                )
-            if not observed.valid:
-                fresh = _capture_complete(capture_fn, sleep_fn)
-                fresh_evidence = measure_card_recharge_mode(
-                    fresh,
-                    label,
-                    required=required[label],
-                )
-                if fresh_evidence.observed is not observed.observed:
-                    raise CardRechargeModeError(
-                        f"{label} recharge evidence changed before correction"
-                    )
-                if not safe_tap_fn(
-                    _CHECKBOX_POINT,
-                    dispatch="now",
-                    log_label=f"card_recharge:{label}",
-                    verification=TapVerification(
-                        screenshot=fresh,
-                        target_region=_CHECKBOX_REGION,
-                        description=(
-                            f"card_recharge:{label}:"
-                            f"{fresh_evidence.observed.value}"
-                        ),
-                        verifier=lambda frame, card=label, mode=required[label], state=(
-                            fresh_evidence.observed
-                        ): (
-                            measure_card_recharge_mode(
-                                frame,
-                                card,
-                                required=mode,
-                            ).observed
-                            is state
-                        ),
-                    ),
-                ):
-                    raise CardRechargeModeError(
-                        f"{label} recharge checkbox tap failed"
-                    )
-                detail, observed = _wait_for_detail(
-                    label,
-                    required[label],
-                    capture_fn=capture_fn,
-                    sleep_fn=sleep_fn,
-                    expected=required[label],
-                )
-                changed.append(label)
-            evidence.append(observed)
-            log(
-                f"[CARD_RECHARGE] {label}={observed.observed.value} "
-                f"required={required[label].value} "
-                f"detail_conf={observed.detail_confidence:.3f} "
-                f"outline_pixels={observed.checkbox_outline_pixels} "
-                f"checkmark_pixels={observed.checkmark_pixels}",
-                "INFO",
-            )
-            current = _dismiss_detail(
-                label,
-                detail,
-                capture_fn=capture_fn,
-                detector=detector,
+                safe_long_press_fn=safe_long_press_fn,
                 safe_tap_fn=safe_tap_fn,
                 sleep_fn=sleep_fn,
             )
-            detail_open = False
-    except Exception:
-        if detail_open:
-            _best_effort_dismiss(
-                capture_fn=capture_fn,
-                safe_tap_fn=safe_tap_fn,
-                sleep_fn=sleep_fn,
+            evidence_by_label[label] = observed
+            if changed:
+                changed_labels.add(label)
+        if len(evidence_by_label) == len(CARD_RECHARGE_LABELS):
+            break
+
+    missing = [
+        label
+        for label in CARD_RECHARGE_LABELS
+        if label not in evidence_by_label
+    ]
+    if missing:
+        if len(missing) == 1:
+            raise CardRechargeModeError(
+                f"{missing[0]} Card was not found in inventory"
             )
-        raise
+        raise CardRechargeModeError(
+            f"{' and '.join(missing)} Cards were not found in inventory"
+        )
 
     result = CardRechargeModesResult(
         screenshot=current,
-        modes=tuple(evidence),
-        changed_labels=tuple(changed),
+        modes=tuple(
+            evidence_by_label[label]
+            for label in CARD_RECHARGE_LABELS
+        ),
+        changed_labels=tuple(
+            label
+            for label in CARD_RECHARGE_LABELS
+            if label in changed_labels
+        ),
     )
     if not result.valid:
         raise CardRechargeModeError(
@@ -342,51 +282,137 @@ def ensure_card_recharge_modes(
     return result
 
 
-def _scroll_inventory_to_top(
+def _inventory_search_frames(
     current: Frame,
     *,
     capture_fn: Capture,
     detector: Detector,
     swipe_fn: Callable[[str], bool],
     sleep_fn: Callable[[float], None],
-) -> Frame:
+) -> Iterator[Frame]:
+    _require_cards_inventory(current, detector)
+    yield current
     for _ in range(_TOP_SWIPES):
-        current = _capture_complete(capture_fn, sleep_fn)
-        _require_cards_inventory(current, detector)
+        fresh = _capture_complete(capture_fn, sleep_fn)
+        _require_cards_inventory(fresh, detector)
         if not swipe_fn("gesture_targets.goto_top:cards_inventory"):
             raise CardRechargeModeError("Cards inventory top swipe failed")
         sleep_fn(0.35)
-    current = _capture_complete(capture_fn, sleep_fn)
-    _require_cards_inventory(current, detector)
-    return current
-
-
-def _find_inventory_card(
-    label: str,
-    current: Frame,
-    *,
-    capture_fn: Capture,
-    detector: Detector,
-    swipe_fn: Callable[[str], bool],
-    sleep_fn: Callable[[float], None],
-) -> Frame:
-    template_key = _CARD_TEMPLATE_KEYS[label]
-    for attempt in range(_SEARCH_SWIPES + 1):
+        current = _capture_complete(capture_fn, sleep_fn)
         _require_cards_inventory(current, detector)
-        match = get_match_result(template_key, screenshot=current)
-        if match.matched:
-            return current
-        if attempt >= _SEARCH_SWIPES:
-            break
+        yield current
+    for _ in range(_SEARCH_SWIPES):
         fresh = _capture_complete(capture_fn, sleep_fn)
         _require_cards_inventory(fresh, detector)
         if not swipe_fn("gesture_targets.goto_next:cards_inventory"):
-            raise CardRechargeModeError(
-                f"Cards inventory swipe failed while locating {label}"
-            )
+            raise CardRechargeModeError("Cards inventory search swipe failed")
         sleep_fn(0.35)
         current = _capture_complete(capture_fn, sleep_fn)
-    raise CardRechargeModeError(f"{label} Card was not found in inventory")
+        _require_cards_inventory(current, detector)
+        yield current
+
+
+def _ensure_inventory_card_mode(
+    label: str,
+    current: Frame,
+    *,
+    required: CardRechargeMode,
+    capture_fn: Capture,
+    detector: Detector,
+    safe_long_press_fn: Callable[..., bool],
+    safe_tap_fn: Callable[..., bool],
+    sleep_fn: Callable[[float], None],
+) -> tuple[Frame, CardRechargeModeEvidence, bool]:
+    template_key = _CARD_TEMPLATE_KEYS[label]
+    if not safe_long_press_fn(
+        template_key,
+        duration_ms=800,
+        retries=1,
+        retry_delay=0.25,
+        screenshot=current,
+    ):
+        raise CardRechargeModeError(f"verified long press failed for {label}")
+    try:
+        detail, observed = _wait_for_detail(
+            label,
+            required,
+            capture_fn=capture_fn,
+            sleep_fn=sleep_fn,
+        )
+        if observed.observed is CardRechargeMode.UNKNOWN:
+            raise CardRechargeModeError(
+                f"{label} recharge checkbox state was ambiguous"
+            )
+        changed = False
+        if not observed.valid:
+            fresh = _capture_complete(capture_fn, sleep_fn)
+            fresh_evidence = measure_card_recharge_mode(
+                fresh,
+                label,
+                required=required,
+            )
+            if fresh_evidence.observed is not observed.observed:
+                raise CardRechargeModeError(
+                    f"{label} recharge evidence changed before correction"
+                )
+            if not safe_tap_fn(
+                _CHECKBOX_POINT,
+                dispatch="now",
+                log_label=f"card_recharge:{label}",
+                verification=TapVerification(
+                    screenshot=fresh,
+                    target_region=_CHECKBOX_REGION,
+                    description=(
+                        f"card_recharge:{label}:"
+                        f"{fresh_evidence.observed.value}"
+                    ),
+                    verifier=lambda frame, card=label, mode=required, state=(
+                        fresh_evidence.observed
+                    ): (
+                        measure_card_recharge_mode(
+                            frame,
+                            card,
+                            required=mode,
+                        ).observed
+                        is state
+                    ),
+                ),
+            ):
+                raise CardRechargeModeError(
+                    f"{label} recharge checkbox tap failed"
+                )
+            detail, observed = _wait_for_detail(
+                label,
+                required,
+                capture_fn=capture_fn,
+                sleep_fn=sleep_fn,
+                expected=required,
+            )
+            changed = True
+        log(
+            f"[CARD_RECHARGE] {label}={observed.observed.value} "
+            f"required={required.value} "
+            f"detail_conf={observed.detail_confidence:.3f} "
+            f"outline_pixels={observed.checkbox_outline_pixels} "
+            f"checkmark_pixels={observed.checkmark_pixels}",
+            "INFO",
+        )
+        current = _dismiss_detail(
+            label,
+            detail,
+            capture_fn=capture_fn,
+            detector=detector,
+            safe_tap_fn=safe_tap_fn,
+            sleep_fn=sleep_fn,
+        )
+        return current, observed, changed
+    except Exception:
+        _best_effort_dismiss(
+            capture_fn=capture_fn,
+            safe_tap_fn=safe_tap_fn,
+            sleep_fn=sleep_fn,
+        )
+        raise
 
 
 def _wait_for_detail(
