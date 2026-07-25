@@ -94,6 +94,20 @@ _SUPPORTED_HOME_CONFIGURATIONS = {
     ("Tournament", "Tourney", "Amplify"): TOURNAMENT_SECTION_SPECS,
 }
 
+_HOME_PREFLIGHT_LABELS = {
+    "home_boundary": "Home boundary",
+    "cards_deck": "Cards deck",
+    "workshop_preset": "Workshop preset",
+    "free_upgrade_locks": "Free Upgrade locks",
+    "ultimate_weapons": "Ultimate Weapons",
+    "bots_preset": "Bot preset",
+    "guardian_chips": "Guardian Chips",
+    "modules": "Modules",
+    "target_priority": "Target Priority",
+    "damage_slider": "Damage Slider",
+    "auto_pick_perks": "Auto Pick Perks",
+}
+
 
 class GcNoBattleSetupStatus(str, Enum):
     COMPLETE = "complete"
@@ -144,6 +158,11 @@ def run_gc_no_battle_setup(
 
     unsupported = _unsupported_requirement(requirements)
     if unsupported:
+        _log_home_preflight_failure(
+            "home_boundary",
+            "supported profile configuration",
+            unsupported,
+        )
         return GcNoBattleSetupResult(
             GcNoBattleSetupStatus.UNSUPPORTED,
             unsupported,
@@ -169,6 +188,15 @@ def run_gc_no_battle_setup(
     current = screenshot if screenshot is not None else capture_fn()
     section_specs = _configuration_section_specs(requirements)
     current_check = "home_boundary"
+
+    def log_check(check_id: str) -> None:
+        if check_id in evidence:
+            _log_home_preflight_evidence(
+                check_id,
+                requirements.get(check_id),
+                evidence[check_id],
+            )
+
     try:
         _require_no_battle_home(current, detector, detect_home_control_fn)
 
@@ -204,6 +232,7 @@ def run_gc_no_battle_setup(
                 sleep_fn=sleep_fn,
             )
             evidence[current_check] = requirements[current_check]
+        log_check(current_check)
         current = _return_home(
             cards,
             capture_fn,
@@ -246,6 +275,7 @@ def run_gc_no_battle_setup(
                 sleep_fn=sleep_fn,
             )
             evidence[current_check] = requirements[current_check]
+        log_check(current_check)
         current_check = "free_upgrade_locks"
         free_upgrade_lock_requirements = requirements.get("free_upgrade_locks")
         if current_check in active_waivers:
@@ -298,6 +328,7 @@ def run_gc_no_battle_setup(
                     "Free Upgrade locks remained invalid after correction"
                 )
             workshop = lock_result.screenshot
+        log_check(current_check)
 
         current_check = "ultimate_weapons"
         home_stun_required = _home_poison_swamp_stun_requirement(requirements)
@@ -343,12 +374,6 @@ def run_gc_no_battle_setup(
                     f"{stun_state} after Home correction to "
                     f"{home_stun_required}"
                 )
-            log(
-                "[GC_NO_BATTLE] Poison Swamp Stun verified "
-                f"{home_stun_required} at Home"
-                + (" after correction" if stun_result.changed else ""),
-                "INFO",
-            )
         elif isinstance(requirements.get(current_check), Mapping):
             evidence[current_check] = {
                 "boundary": HomeBattleControl.NEW_BATTLE.value,
@@ -357,6 +382,7 @@ def run_gc_no_battle_setup(
                 "valid": True,
                 "reason": "no_supported_home_controls_required",
             }
+        log_check(current_check)
         current = _return_home(
             workshop,
             capture_fn,
@@ -416,6 +442,7 @@ def run_gc_no_battle_setup(
                 sleep_fn=sleep_fn,
             )
             evidence[current_check] = requirements[current_check]
+        log_check(current_check)
         current = _return_home(
             bots,
             capture_fn,
@@ -464,6 +491,7 @@ def run_gc_no_battle_setup(
                 sleep_fn,
             )
             evidence[current_check] = list(requirements[current_check])
+        log_check(current_check)
         current = _return_home(
             guardians,
             capture_fn,
@@ -549,6 +577,7 @@ def run_gc_no_battle_setup(
                 "mode": module_mode,
                 "checked": False,
             }
+        log_check(current_check)
 
         current_check = "target_priority"
         target_priority_requirement = requirements.get("target_priority")
@@ -574,6 +603,7 @@ def run_gc_no_battle_setup(
                 "mode": target_priority_mode,
                 "checked": False,
             }
+        log_check(current_check)
 
         current_check = "damage_slider"
         damage_slider = requirements.get("damage_slider")
@@ -586,6 +616,19 @@ def run_gc_no_battle_setup(
                 "boundary": "RUNNING",
                 "reason": "battle_only_control",
             }
+        log_check(current_check)
+
+        if "auto_pick_perks" in requirements:
+            _log_home_preflight_evidence(
+                "auto_pick_perks",
+                requirements["auto_pick_perks"],
+                {
+                    "checked": False,
+                    "valid": None,
+                    "boundary": "RUNNING",
+                    "reason": "battle_only_control",
+                },
+            )
 
         configuration = validate_configuration_fn(
             cards_screen=cards,
@@ -597,6 +640,11 @@ def run_gc_no_battle_setup(
         )
         evidence["configuration"] = configuration.as_dict()
     except Exception as exc:
+        _log_home_preflight_failure(
+            current_check,
+            requirements.get(current_check, "valid no-battle Home"),
+            exc,
+        )
         _recover_home(
             capture_fn,
             detector,
@@ -622,6 +670,153 @@ def run_gc_no_battle_setup(
         "supported no-battle requirements verified",
         evidence,
     )
+
+
+def _log_home_preflight_evidence(
+    check_id: str,
+    expected: object,
+    check_evidence: object,
+) -> None:
+    expected_value = expected
+    disposition = "passed"
+    level = "INFO"
+    observed: object = check_evidence
+
+    if isinstance(check_evidence, Mapping):
+        status = str(check_evidence.get("status") or "").strip().lower()
+        reason = str(check_evidence.get("reason") or "").strip()
+        if status == "waived":
+            waiver = check_evidence.get("waiver")
+            if isinstance(waiver, Mapping):
+                observed = (
+                    waiver.get("label")
+                    or waiver.get("value")
+                    or waiver.get("reason")
+                    or "configured one-run waiver"
+                )
+            else:
+                observed = waiver or "configured one-run waiver"
+            disposition = "waived"
+            level = "WARN"
+        elif reason in {
+            "battle_only_control",
+            "no_supported_home_controls_required",
+        }:
+            observed = (
+                "in-battle control pending"
+                if check_id in {"target_priority", "damage_slider"}
+                else "in-battle validation pending"
+            )
+            disposition = "deferred"
+        elif check_id == "free_upgrade_locks":
+            required = check_evidence.get("required") or []
+            locks = check_evidence.get("locks") or []
+            valid_count = sum(
+                bool(lock.get("valid"))
+                for lock in locks
+                if isinstance(lock, Mapping)
+            )
+            observed = f"{valid_count}/{len(required)} required locks verified"
+            if check_evidence.get("valid") is False:
+                disposition = "failed"
+                level = "ERROR"
+        elif check_id == "ultimate_weapons":
+            poison_swamp = (
+                check_evidence.get("observations", {}).get("Poison Swamp", {})
+                if isinstance(check_evidence.get("observations"), Mapping)
+                else {}
+            )
+            observed_stun = (
+                poison_swamp.get("stun")
+                if isinstance(poison_swamp, Mapping)
+                else None
+            )
+            observed = (
+                f"Poison Swamp Stun {observed_stun}"
+                if observed_stun
+                else "Home-supported subset verified"
+            )
+            if check_evidence.get("changed"):
+                observed = f"{observed} after correction"
+            disposition = "Home subset passed"
+        elif check_id == "modules":
+            mode = str(check_evidence.get("mode") or "enforce")
+            if expected_value is None and mode == "preserve":
+                expected_value = "preserve current module loadout"
+            slots = check_evidence.get("slots") or []
+            if not check_evidence.get("checked") and mode == "preserve":
+                observed = "unchanged"
+            elif slots:
+                valid_count = sum(
+                    bool(slot.get("valid"))
+                    for slot in slots
+                    if isinstance(slot, Mapping)
+                )
+                observed = (
+                    f"{valid_count}/{len(slots)} configured assignments matched"
+                )
+                disposition = "observed" if mode == "observe" else "passed"
+            else:
+                observed = "module loadout observed"
+                disposition = "observed" if mode == "observe" else "passed"
+        elif check_evidence.get("valid") is False:
+            disposition = "failed"
+            level = "ERROR"
+        if (
+            check_id == "target_priority"
+            and expected_value is None
+            and str(check_evidence.get("mode") or "") == "preserve"
+        ):
+            expected_value = "preserve current priority order"
+
+    label = _HOME_PREFLIGHT_LABELS.get(
+        check_id,
+        str(check_id).replace("_", " ").title(),
+    )
+    log(
+        f"[HOME_PREFLIGHT] {label} {disposition}; "
+        f"expected={_home_preflight_value(check_id, expected_value)}; "
+        f"observed={_home_preflight_value(check_id, observed)}",
+        level,
+    )
+
+
+def _log_home_preflight_failure(
+    check_id: str,
+    expected: object,
+    reason: object,
+) -> None:
+    label = _HOME_PREFLIGHT_LABELS.get(
+        check_id,
+        str(check_id).replace("_", " ").title(),
+    )
+    log(
+        f"[HOME_PREFLIGHT] {label} failed; "
+        f"expected={_home_preflight_value(check_id, expected)}; "
+        f"observed={reason}",
+        "ERROR",
+    )
+
+
+def _home_preflight_value(check_id: str, value: object) -> str:
+    if check_id == "modules" and isinstance(value, Mapping):
+        return f"{len(value)} configured assignments"
+    if check_id == "ultimate_weapons" and isinstance(value, Mapping):
+        poison_swamp = value.get("Poison Swamp")
+        if isinstance(poison_swamp, Mapping) and poison_swamp.get("stun"):
+            return f"Poison Swamp Stun {poison_swamp['stun']}"
+        return f"{len(value)} configured weapons"
+    if check_id == "target_priority" and isinstance(value, (list, tuple)):
+        return f"{len(value)} configured priorities"
+    if check_id == "damage_slider" and isinstance(value, Mapping):
+        return str(value.get("value") or value.get("mode") or value)
+    if isinstance(value, Mapping):
+        return ", ".join(f"{key}={item}" for key, item in value.items())
+    if isinstance(value, (list, tuple, set)):
+        return ", ".join(str(item) for item in value)
+    if isinstance(value, bool):
+        return "enabled" if value else "disabled"
+    return str(value)
 
 
 def _waived_evidence(

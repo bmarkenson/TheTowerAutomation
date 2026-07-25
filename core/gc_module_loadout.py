@@ -420,9 +420,12 @@ def _filter_panel_visible(frame) -> bool:
 
 def _filter_option_visible(frame, option: str) -> bool:
     regions = {
-        "NONE": (430, 420, 910, 550),
-        "ANCESTRAL": (430, 1350, 1010, 1535),
-        "ALL RARITIES": (430, 1510, 910, 1630),
+        "NONE": (430, 420, 800, 550),
+        # Keep each single-line OCR crop clear of the adjacent rarity row and
+        # the checkbox. In particular, the former Ancestral crop also
+        # included Mythic+, causing otherwise-clear live panels to fail closed.
+        "ANCESTRAL": (430, 1420, 800, 1535),
+        "ALL RARITIES": (430, 1525, 800, 1630),
     }
     x1, y1, x2, y2 = regions[option]
     text, _ = ocr_text_and_conf(frame[y1:y2, x1:x2], psm=7)

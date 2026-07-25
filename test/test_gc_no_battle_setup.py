@@ -16,6 +16,7 @@ from core.gc_no_battle_setup import (
     _replace_guardian_chip,
     run_gc_no_battle_setup,
 )
+from core.gc_module_loadout import ModuleLoadoutCorrectionError
 from core.gate_decisions import build_gate_decision_options
 from core.home_battle import HomeBattleEvidence
 from core.matcher import get_match
@@ -395,6 +396,79 @@ def test_no_battle_setup_corrects_supported_farm_presets_and_guardians():
         "buttons.guardian:summon_inventory",
         "buttons.return_to_game",
     ]
+
+
+def test_home_preflight_logs_concise_check_results_for_operator_activity():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+
+    with patch("core.gc_no_battle_setup.log") as emit:
+        result = _run(router)
+
+    assert result.complete
+    messages = [entry.args[0] for entry in emit.call_args_list]
+    assert any(
+        "[HOME_PREFLIGHT] Cards deck passed; "
+        "expected=Farm; observed=Farm" in message
+        for message in messages
+    )
+    assert any(
+        "[HOME_PREFLIGHT] Modules passed; "
+        "expected=8 configured assignments" in message
+        for message in messages
+    )
+    assert any(
+        "[HOME_PREFLIGHT] Target Priority deferred; "
+        "expected=10 configured priorities; "
+        "observed=in-battle control pending" in message
+        for message in messages
+    )
+
+
+def test_home_preflight_logs_the_failed_requirement_and_reason():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+
+    with (
+        patch.object(
+            router,
+            "ensure_modules",
+            side_effect=ModuleLoadoutCorrectionError(
+                "failed to select Ancestral rarity"
+            ),
+        ),
+        patch("core.gc_no_battle_setup.log") as emit,
+    ):
+        result = _run(router)
+
+    assert result.status is GcNoBattleSetupStatus.FAILED
+    messages = [entry.args[0] for entry in emit.call_args_list]
+    assert any(
+        "[HOME_PREFLIGHT] Modules failed; "
+        "expected=8 configured assignments; "
+        "observed=failed to select Ancestral rarity" in message
+        for message in messages
+    )
+
+
+def test_home_preflight_logs_a_one_run_waiver_disposition():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+
+    with patch("core.gc_no_battle_setup.log") as emit:
+        result = _run(
+            router,
+            waivers={
+                "bots_preset": {
+                    "label": "Continue with Flame for this run",
+                    "value": "Flame",
+                }
+            },
+        )
+
+    assert result.complete
+    assert any(
+        "[HOME_PREFLIGHT] Bot preset waived; expected=Farm; "
+        "observed=Continue with Flame for this run" in entry.args[0]
+        for entry in emit.call_args_list
+    )
 
 
 def test_guardian_replacement_reacquires_after_empty_slot_settles():

@@ -12,6 +12,7 @@ from core.gc_module_loadout import (
     ModuleDetailEvidence,
     ModuleLoadoutCorrectionError,
     _equip_inventory_module,
+    _filter_option_visible,
     _find_inventory_detail,
     _scroll_inventory_to_top,
     _detail_ready,
@@ -448,6 +449,20 @@ def test_rarity_filter_actions_use_each_fresh_panel_frame():
             (initial, panel, cleared, selected),
         )
     )
+
+
+def test_ancestral_filter_ocr_excludes_the_adjacent_mythic_row():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    crops = []
+
+    def read_text(crop, *, psm):
+        crops.append((crop.shape, psm))
+        return "Ancestral", 95.0
+
+    with patch("core.gc_module_loadout.ocr_text_and_conf", side_effect=read_text):
+        assert _filter_option_visible(frame, "ANCESTRAL")
+
+    assert crops == [((115, 370, 3), 7)]
 
 
 def test_module_actions_reject_incomplete_frames_and_partial_detail_renders():

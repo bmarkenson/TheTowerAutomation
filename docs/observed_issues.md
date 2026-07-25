@@ -11,6 +11,32 @@ for a matching recurrence or historical investigation.
 
 ## Open
 
+### Module rarity guard rejected the visible Ancestral option
+
+- **Observed:** 2026-07-25 during the Farm Tier 19 experiment Home preflight;
+  the same shared module-correction path also serves Farm Tier 18.
+- **Symptom:** Home setup opened the Modules rarity panel, selected `None`, and
+  then blocked the `modules` requirement with `failed to select Ancestral
+  rarity` even though the Ancestral row and its configured checkbox tap target
+  were visibly present. The same preflight pass emitted navigation and tap
+  activity but no concise result for each completed requirement.
+- **Evidence:** `logs/actions.log` records the original rejection at 05:59:06
+  and the bounded paused reproduction at 06:04:44. The retained live panel
+  showed Ancestral at the configured `(850,1475)` tap. The verifier's former
+  OCR crop spanned both `Mythic+` and `Ancestral`; single-line OCR returned
+  `— im` at confidence 21.5. A label-only crop returned `Ancestral` at
+  confidence 95.0.
+- **Safety response:** The requirement-scoped gate blocked Battle start at
+  verified Tier 19 `NEW_BATTLE` Home. The runtime was acknowledged paused for
+  one guarded reproduction, the panel was closed, verified Home was restored,
+  and the prior `RUNNING` directive was re-acknowledged. No battle was started,
+  exited, or Surrendered.
+- **Status:** Cause confirmed. The working-tree repair isolates single-line
+  rarity OCR from adjacent rows and adds concise Home-preflight passed,
+  deferred, waived, and failed result logs. Regression coverage is in
+  `test/test_gc_module_loadout.py` and `test/test_gc_no_battle_setup.py`;
+  fixing commit and live Retry validation are pending.
+
 ### Home Poison Swamp Stun verification transiently timed out after its source tap
 
 - **Observed:** 2026-07-23 during the authorized Tier 18 Farm Home setup.
