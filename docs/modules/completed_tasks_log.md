@@ -37,6 +37,22 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-25 Farm module preflight visibility and transitions
+
+- Isolated each Modules rarity verifier from adjacent rows, including the live
+  `Mythic+`/`Ancestral` collision, and restored concise expected/observed result
+  logs for every reached Home-preflight requirement.
+- Hardened the Equip-to-role-prompt transition with a second OCR layout and one
+  bounded retry that remains authorized only while the same verified
+  Ancestral detail still offers `EQUIP`.
+- Live Farm T19 validation corrected the remaining generator and core
+  assignments, accepted their level transfers, matched all eight configured
+  modules, completed every Home and session check without a waiver, and
+  resumed normal battle handlers.
+- Repository-wide validation passed 709 sandbox-compatible tests plus the
+  separately permitted localhost HTTP test, for 710 total.
+- Implemented in commits `1629bb3` and `31e0191`.
+
 ### 2026-07-25 Range-bound Orb Distance presets
 
 - Added named Orb Distance presets and enforced Tier 18 Farm at Attack Range

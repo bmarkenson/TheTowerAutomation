@@ -8,6 +8,53 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Farm module preflight rejected Ancestral and could lose the Equip transition
+
+- **Observed:** 2026-07-25 during the Farm Tier 19 experiment Home preflight;
+  the same shared module-correction path also serves Farm Tier 18.
+- **Symptom:** Home setup opened the Modules rarity panel, selected `None`, and
+  then blocked `modules` with `failed to select Ancestral rarity` even though
+  the Ancestral row and its configured checkbox tap target were visibly
+  present. The same preflight pass emitted navigation and tap activity but no
+  concise result for each completed requirement.
+- **Evidence:** `logs/actions.log` records the original rejection at 05:59:06
+  and the bounded paused reproduction at 06:04:44. The retained live panel
+  showed Ancestral at the configured `(850,1475)` tap. The verifier's former
+  OCR crop spanned both `Mythic+` and `Ancestral`; single-line OCR returned
+  `— im` at confidence 21.5, while a label-only crop returned `Ancestral` at
+  confidence 95.0. The first repaired Retry then dispatched a verified Black
+  Hole Digestor Equip input at 06:21:00 without observing the role prompt; a
+  guarded paused reproduction retained the stable prompt and read it at
+  confidence 94.7.
+- **Safety response:** Each failure remained behind the requirement-scoped
+  gate at verified Tier 19 `NEW_BATTLE` Home. Bounded reproduction and reload
+  work used acknowledged pauses and restored verified Home before resuming.
+  Battle began only after the complete Home pass; no battle was exited or
+  Surrendered.
+- **Cause:** The Ancestral single-line OCR region included the adjacent
+  `Mythic+` row. Home preflight had no per-requirement result emitter, so only
+  input mechanics and terminal setup messages appeared. The module Equip
+  transition also allowed one dropped or unobserved input to consume the
+  complete prompt timeout, and prompt recognition depended on one OCR layout.
+- **Resolution:** Rarity options now use non-overlapping label crops. Home
+  preflight logs concise expected, observed, and passed/deferred/waived/failed
+  dispositions for every reached check. Equip waits use two OCR layouts and
+  retry once only when fresh evidence still shows the same exact Ancestral
+  module detail with the `EQUIP` action; all other transitions continue to fail
+  closed.
+- **Regression:** `test/test_gc_module_loadout.py` covers the isolated
+  Ancestral crop, sparse-layout role-prompt OCR, and the bounded dropped-Equip
+  retry. `test/test_gc_no_battle_setup.py` covers concise success, failure, and
+  one-run-waiver results. Repository validation passed 709 sandbox-compatible
+  tests plus the separately permitted localhost HTTP test, for 710 total.
+- **Live validation:** Managed PID `2729993` corrected Multiverse Nexus to
+  core-primary and Dimension Core to core-assist, accepted both level
+  transfers, restored All Rarities, and logged `Modules passed` with all 8
+  assignments matched. The normal Tier 19 Battle then completed session
+  preflight with every retained Home check, Auto Pick, all eight Modules, and
+  all configured Ultimate Weapons valid. Normal handlers resumed.
+- **Fixed by:** `1629bb3`, `31e0191`.
+
 ### Tournament preflight omitted Poison Swamp Stun and Damage Slider
 
 - **Observed:** 2026-07-25 while reviewing which Tournament requirements

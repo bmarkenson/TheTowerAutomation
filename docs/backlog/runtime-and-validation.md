@@ -206,6 +206,11 @@ evidence.
    - [ ] Give every startup, session-preflight, and recovery check a concise
      human-readable result that includes the requirement, expected and observed
      state, and final disposition such as passed, failed, waived, or fallback.
+     - [x] Home preflight now emits concise passed, failed, waived, and deferred
+       results for every reached requirement. Commit `1629bb3`; live Farm T19
+       validation completed the full Home pass on 2026-07-25.
+     - [ ] Extend the same result contract to in-battle session-preflight and
+       recovery checks.
 5. [ ] Publish and display Peak Coins/min for the active and completed run.
    - Maintain the active peak within an authoritative run boundary and expose
      it through the runtime snapshot; after a mid-battle attach, label a peak
