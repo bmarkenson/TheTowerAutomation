@@ -24,7 +24,7 @@ from core.home_battle import (
 from core.input import TapVerification, safe_tap, swipe_now, tap_if_visible
 from core.poison_swamp_stun import (
     PoisonSwampStunResult,
-    ensure_poison_swamp_stun_off,
+    ensure_poison_swamp_stun,
 )
 from core.run_controls import go_home_from_run
 from core.ss_capture import capture_adb_screenshot
@@ -519,12 +519,16 @@ def _home_ultimate_weapon_observations(
     ):
         return {}
     for label, toggles in observations.items():
+        stun_state = (
+            str(toggles.get("stun") or "").strip().lower()
+            if isinstance(toggles, Mapping)
+            else ""
+        )
         if (
             str(label or "").strip().lower() == "poison swamp"
-            and isinstance(toggles, Mapping)
-            and str(toggles.get("stun") or "").strip().lower() == "off"
+            and stun_state in {"on", "off"}
         ):
-            return {"Poison Swamp": {"stun": "off"}}
+            return {"Poison Swamp": {"stun": stun_state}}
     return {}
 
 
@@ -569,7 +573,7 @@ def run_read_only_gc_preflight(
     ] = detect_visible_boxes,
     ensure_poison_swamp_stun_fn: Callable[
         ..., PoisonSwampStunResult
-    ] = ensure_poison_swamp_stun_off,
+    ] = ensure_poison_swamp_stun,
     measure_auto_pick_fn: Callable[[Frame], Any] = measure_auto_pick_perks,
     no_battle_setup_evidence: Optional[Mapping[str, Any]] = None,
     free_upgrade_lock_boundary_evidence: Optional[Mapping[str, Any]] = None,
@@ -733,21 +737,22 @@ def run_read_only_gc_preflight(
             for label, toggles in ultimate_boundary_observations.items()
         }
         poison_swamp_label: Optional[str] = None
-        poison_swamp_stun_required = False
+        poison_swamp_stun_required: Optional[str] = None
         for label, toggles in ultimate_requirements.items():
             if str(label).strip().lower() != "poison swamp":
                 continue
             poison_swamp_label = str(label).strip()
-            if isinstance(toggles, Mapping) and str(
-                toggles.get("stun") or ""
-            ).strip().lower() == "off":
-                poison_swamp_stun_required = True
+            if isinstance(toggles, Mapping) and "stun" in toggles:
+                poison_swamp_stun_required = str(
+                    toggles.get("stun") or ""
+                ).strip().lower()
             break
         poison_swamp_stun_observed = (
-            not poison_swamp_stun_required
+            poison_swamp_stun_required is None
             or any(
                 str(label).strip().lower() == "poison swamp"
-                and str(toggles.get("stun") or "").strip().lower() == "off"
+                and str(toggles.get("stun") or "").strip().lower()
+                == poison_swamp_stun_required
                 for label, toggles in ultimate_observations.items()
             )
         )
@@ -781,6 +786,7 @@ def run_read_only_gc_preflight(
             ):
                 result = ensure_poison_swamp_stun_fn(
                     screenshot=frame,
+                    required_state=poison_swamp_stun_required,
                     capture_fn=capture_fn,
                     detector=detector,
                     detect_boxes_fn=detect_boxes_fn,
@@ -795,7 +801,8 @@ def run_read_only_gc_preflight(
                 )["stun"] = result.evidence.state.value
                 poison_swamp_stun_observed = True
                 log(
-                    "[GC_PREFLIGHT] Poison Swamp Stun verified off"
+                    "[GC_PREFLIGHT] Poison Swamp Stun verified "
+                    f"{poison_swamp_stun_required}"
                     + (" after correction" if result.changed else ""),
                     "INFO",
                 )

@@ -14,6 +14,7 @@ runtime_policy:
   preflight_mismatch: notify
 session_preflight:
   complete_when:
+  - damage_slider_checked
   - gc_session_preflight_attempted
   requirements:
     cards_deck: Tournament
@@ -38,6 +39,7 @@ session_preflight:
         primary: 'on'
       Poison Swamp:
         primary: 'on'
+        stun: 'on'
       Black Hole:
         primary: 'on'
       Spotlight:
@@ -54,7 +56,12 @@ session_preflight:
       armor_primary: Orbital Augment
       core_primary: Dimension Core
       core_assist: Harmony Conductor
+    damage_slider:
+      mode: enforce
+      value: 1E2%
 vars:
+  damage_slider_checked: false
+  damage_slider_observation: {}
   gc_session_preflight_completed: false
   gc_session_preflight_attempted: false
   gc_session_preflight_blocked: false
@@ -66,12 +73,25 @@ vars:
   gc_session_preflight_advisory: false
 per_run_reset: []
 rules:
+- name: enforce_tournament_damage_slider
+  gate_phase: session_preflight
+  run_when_attached: true
+  when:
+    state: RUNNING
+  assert:
+  - '!damage_slider_checked'
+  cooldown_sec: 30.0
+  do:
+  - type: damage_slider_configure
+    mode: enforce
+    value: 1E2%
 - name: validate_tournament_session_preflight
   gate_phase: session_preflight
   run_when_attached: true
   when:
     state: RUNNING
   assert:
+  - damage_slider_checked
   - '!gc_session_preflight_attempted'
   cooldown_sec: 30.0
   do:
@@ -102,6 +122,7 @@ rules:
           primary: 'on'
         Poison Swamp:
           primary: 'on'
+          stun: 'on'
         Black Hole:
           primary: 'on'
         Spotlight:
@@ -118,6 +139,9 @@ rules:
         armor_primary: Orbital Augment
         core_primary: Dimension Core
         core_assist: Harmony Conductor
+      damage_slider:
+        mode: enforce
+        value: 1E2%
 run_configuration:
   schema_version: 2
   profile: tournament
@@ -145,6 +169,7 @@ run_configuration:
         primary: 'on'
       Poison Swamp:
         primary: 'on'
+        stun: 'on'
       Black Hole:
         primary: 'on'
       Spotlight:
@@ -163,6 +188,9 @@ run_configuration:
         armor_primary: Orbital Augment
         core_primary: Dimension Core
         core_assist: Harmony Conductor
+    damage_slider:
+      mode: enforce
+      value: 1E2%
   runtime_policy:
     handlers:
     - ad_gem

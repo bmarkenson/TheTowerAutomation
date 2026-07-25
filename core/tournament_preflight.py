@@ -8,6 +8,7 @@ from typing import Any, Mapping
 
 import yaml
 
+from core.damage_adjuster import normalize_damage_percentage
 from core.gc_preflight import (
     Detector,
     GcSectionSpec,
@@ -141,11 +142,27 @@ def load_tournament_requirements(
     modules = presets[preset_name]
     if not isinstance(modules, dict):
         raise ValueError(f"Tournament module preset {preset_name!r} must be a mapping")
+    damage_slider = loadout.get("damage_slider")
+    if not isinstance(damage_slider, dict):
+        raise ValueError("Tournament damage_slider loadout must be a mapping")
+    if set(damage_slider) != {"mode", "value"}:
+        raise ValueError(
+            "Tournament damage_slider must define exactly mode and value"
+        )
+    if str(damage_slider.get("mode") or "").strip().lower() != "enforce":
+        raise ValueError("Tournament damage_slider mode must be enforce")
+    damage_value = normalize_damage_percentage(damage_slider.get("value"))
+    if damage_value != "1E2%":
+        raise ValueError("Tournament damage_slider value must be 100%")
 
     return {
         **requirements,
         "loadout_policies": {"modules": "enforce"},
         "modules": copy.deepcopy(modules),
+        "damage_slider": {
+            "mode": "enforce",
+            "value": damage_value,
+        },
     }
 
 

@@ -8,6 +8,7 @@ import time
 from typing import Any, Callable, Mapping
 
 from core.battle_lifecycle import HomeBattleControl
+from core.damage_adjuster import normalize_damage_percentage
 from core.free_upgrade_locks import (
     inspect_free_upgrade_locks,
     normalize_free_upgrade_lock_requirements,
@@ -23,7 +24,7 @@ from core.gc_preflight import GC_SECTION_SPECS, validate_gc_preflight_screens
 from core.input import TapVerification, safe_tap, swipe_now, tap_if_visible
 from core.poison_swamp_stun import (
     PoisonSwampStunResult,
-    ensure_poison_swamp_stun_off,
+    ensure_poison_swamp_stun,
 )
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
@@ -135,7 +136,7 @@ def run_gc_no_battle_setup(
     select_workshop_menu_fn: Callable[..., Any] = select_workshop_upgrade_menu,
     ensure_poison_swamp_stun_fn: Callable[
         ..., PoisonSwampStunResult
-    ] = ensure_poison_swamp_stun_off,
+    ] = ensure_poison_swamp_stun,
     validate_configuration_fn: Callable[..., Any] = validate_gc_preflight_screens,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> GcNoBattleSetupResult:
@@ -292,14 +293,14 @@ def run_gc_no_battle_setup(
             workshop = lock_result.screenshot
 
         current_check = "ultimate_weapons"
-        home_stun_required = _home_poison_swamp_stun_required(requirements)
-        if home_stun_required and current_check in active_waivers:
+        home_stun_required = _home_poison_swamp_stun_requirement(requirements)
+        if home_stun_required is not None and current_check in active_waivers:
             evidence[current_check] = _waived_evidence(
                 current_check,
                 requirements.get(current_check),
                 active_waivers[current_check],
             )
-        elif home_stun_required:
+        elif home_stun_required is not None:
             workshop = select_workshop_menu_fn(
                 workshop,
                 "ultimate weapons",
@@ -310,6 +311,7 @@ def run_gc_no_battle_setup(
             )
             stun_result = ensure_poison_swamp_stun_fn(
                 screenshot=workshop,
+                required_state=home_stun_required,
                 capture_fn=capture_fn,
                 detector=detector,
                 safe_tap_fn=safe_tap_fn,
@@ -325,15 +327,18 @@ def run_gc_no_battle_setup(
                 "observations": {
                     "Poison Swamp": {"stun": stun_state},
                 },
-                "valid": stun_state == "off",
+                "valid": stun_state == home_stun_required,
                 "changed": stun_result.changed,
             }
-            if stun_state != "off":
+            if stun_state != home_stun_required:
                 raise _SetupFailure(
-                    "Poison Swamp Stun remained enabled after Home correction"
+                    "Poison Swamp Stun remained "
+                    f"{stun_state} after Home correction to "
+                    f"{home_stun_required}"
                 )
             log(
-                "[GC_NO_BATTLE] Poison Swamp Stun verified off at Home"
+                "[GC_NO_BATTLE] Poison Swamp Stun verified "
+                f"{home_stun_required} at Home"
                 + (" after correction" if stun_result.changed else ""),
                 "INFO",
             )
@@ -563,6 +568,18 @@ def run_gc_no_battle_setup(
                 "checked": False,
             }
 
+        current_check = "damage_slider"
+        damage_slider = requirements.get("damage_slider")
+        if damage_slider is not None:
+            evidence[current_check] = {
+                "mode": str(damage_slider["mode"]),
+                "value": str(damage_slider["value"]),
+                "checked": False,
+                "valid": None,
+                "boundary": "RUNNING",
+                "reason": "battle_only_control",
+            }
+
         configuration = validate_configuration_fn(
             cards_screen=cards,
             workshop_screen=workshop,
@@ -656,9 +673,21 @@ def _unsupported_requirement(requirements: Mapping[str, Any]) -> str | None:
     except ValueError as exc:
         return str(exc)
     try:
-        _home_poison_swamp_stun_required(requirements)
+        _home_poison_swamp_stun_requirement(requirements)
     except ValueError as exc:
         return str(exc)
+    damage_slider = requirements.get("damage_slider")
+    if damage_slider is not None:
+        if not isinstance(damage_slider, Mapping):
+            return "damage_slider must be a mapping"
+        if set(damage_slider) != {"mode", "value"}:
+            return "damage_slider must define exactly mode and value"
+        if str(damage_slider.get("mode") or "").strip().lower() != "enforce":
+            return "Home-deferred damage_slider mode must be enforce"
+        try:
+            normalize_damage_percentage(damage_slider.get("value"))
+        except ValueError as exc:
+            return f"damage_slider {exc}"
     return None
 
 
@@ -712,12 +741,12 @@ def _target_priority_policy(requirements: Mapping[str, Any]) -> str:
     return mode
 
 
-def _home_poison_swamp_stun_required(
+def _home_poison_swamp_stun_requirement(
     requirements: Mapping[str, Any],
-) -> bool:
+) -> str | None:
     ultimate_weapons = requirements.get("ultimate_weapons")
     if ultimate_weapons is None:
-        return False
+        return None
     if not isinstance(ultimate_weapons, Mapping):
         raise ValueError("ultimate_weapons must be a mapping")
     for label, toggles in ultimate_weapons.items():
@@ -726,12 +755,12 @@ def _home_poison_swamp_stun_required(
         if not isinstance(toggles, Mapping):
             raise ValueError("Poison Swamp requirements must be a mapping")
         if "stun" not in toggles:
-            return False
+            return None
         state = str(toggles.get("stun") or "").strip().lower()
-        if state != "off":
-            raise ValueError("Home Poison Swamp Stun supports only off")
-        return True
-    return False
+        if state not in {"on", "off"}:
+            raise ValueError("Home Poison Swamp Stun must be on or off")
+        return state
+    return None
 
 
 def _require_no_battle_home(frame, detector, detect_home_control_fn) -> None:

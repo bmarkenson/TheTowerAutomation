@@ -33,8 +33,11 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
     meta["family"] = "tournament"
 
     requirements = load_tournament_requirements()
+    damage_slider = copy.deepcopy(requirements["damage_slider"])
     runtime_policy = copy.deepcopy(TOURNAMENT_RUNTIME_POLICY)
     variables = {
+        "damage_slider_checked": False,
+        "damage_slider_observation": {},
         "gc_session_preflight_completed": False,
         "gc_session_preflight_attempted": False,
         "gc_session_preflight_blocked": False,
@@ -53,18 +56,39 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
             # A conclusive mismatch is still a completed observer check. It is
             # recorded and reported, but it never authorizes a repair or blocks
             # natural Game Over handling.
-            "complete_when": ["gc_session_preflight_attempted"],
+            "complete_when": [
+                "damage_slider_checked",
+                "gc_session_preflight_attempted",
+            ],
             "requirements": copy.deepcopy(requirements),
         },
         "vars": variables,
         "per_run_reset": [],
         "rules": [
             {
+                "name": "enforce_tournament_damage_slider",
+                "gate_phase": "session_preflight",
+                "run_when_attached": True,
+                "when": {"state": "RUNNING"},
+                "assert": ["!damage_slider_checked"],
+                "cooldown_sec": 30.0,
+                "do": [
+                    {
+                        "type": "damage_slider_configure",
+                        "mode": damage_slider["mode"],
+                        "value": damage_slider["value"],
+                    }
+                ],
+            },
+            {
                 "name": "validate_tournament_session_preflight",
                 "gate_phase": "session_preflight",
                 "run_when_attached": True,
                 "when": {"state": "RUNNING"},
-                "assert": ["!gc_session_preflight_attempted"],
+                "assert": [
+                    "damage_slider_checked",
+                    "!gc_session_preflight_attempted",
+                ],
                 "cooldown_sec": 30.0,
                 "do": [
                     {
@@ -96,7 +120,8 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
                     "mode": "enforce",
                     "preset": "tournament_standard",
                     "resolved": copy.deepcopy(requirements["modules"]),
-                }
+                },
+                "damage_slider": damage_slider,
             },
             "runtime_policy": copy.deepcopy(runtime_policy),
         },

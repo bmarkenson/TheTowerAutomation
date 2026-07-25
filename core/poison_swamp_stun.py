@@ -258,9 +258,10 @@ def measure_poison_swamp_stun(screenshot: Frame) -> PoisonSwampStunEvidence:
     )
 
 
-def ensure_poison_swamp_stun_off(
+def ensure_poison_swamp_stun(
     screenshot: Optional[Frame] = None,
     *,
+    required_state: PoisonSwampStunState | str,
     capture_fn: Capture = capture_adb_screenshot,
     detector: Detector = detect_state_and_overlays,
     detect_boxes_fn: Callable[..., Mapping[str, list[Any]]] = detect_visible_boxes,
@@ -277,9 +278,26 @@ def ensure_poison_swamp_stun_off(
     swipe_fn: Callable[[str, str], Any] = swipe_upgrade_menu,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> PoisonSwampStunResult:
-    """Ensure Stun is off from either Workshop or the active UW menu."""
+    """Ensure Stun has the required state from Workshop or the active UW menu."""
 
     del screenshot  # Actions always reacquire a fresh UW source frame.
+    try:
+        required = PoisonSwampStunState(
+            str(
+                required_state.value
+                if isinstance(required_state, PoisonSwampStunState)
+                else required_state
+            ).strip().lower()
+        )
+    except ValueError as exc:
+        raise PoisonSwampStunError(
+            f"unsupported Poison Swamp Stun requirement {required_state!r}"
+        ) from exc
+    if required is PoisonSwampStunState.UNKNOWN:
+        raise PoisonSwampStunError(
+            "Poison Swamp Stun requirement cannot be unknown"
+        )
+
     current = _capture_complete(capture_fn, sleep_fn)
     detection = detector(current)
     source_kind: str
@@ -362,18 +380,25 @@ def ensure_poison_swamp_stun_off(
         sleep_fn,
     )
     changed = False
-    if evidence.state is PoisonSwampStunState.ON:
-        if not tap_visible_fn("buttons.poison_swamp_stun_on", screenshot=detail):
-            raise PoisonSwampStunError("verified Stun-on checkbox tap failed")
+    if evidence.state is PoisonSwampStunState.UNKNOWN:
+        raise PoisonSwampStunError("Poison Swamp Stun state was ambiguous")
+    if evidence.state is not required:
+        visible_control = (
+            "buttons.poison_swamp_stun_on"
+            if evidence.state is PoisonSwampStunState.ON
+            else "buttons.poison_swamp_stun_off"
+        )
+        if not tap_visible_fn(visible_control, screenshot=detail):
+            raise PoisonSwampStunError(
+                f"verified Stun-{evidence.state.value} checkbox tap failed"
+            )
         changed = True
         detail, evidence = _wait_for_stun(
             capture_fn,
             measure_fn,
             sleep_fn,
-            expected=PoisonSwampStunState.OFF,
+            expected=required,
         )
-    elif evidence.state is not PoisonSwampStunState.OFF:
-        raise PoisonSwampStunError("Poison Swamp Stun state was ambiguous")
 
     cleared = dismiss_fn(
         screenshot=detail,
@@ -399,6 +424,19 @@ def ensure_poison_swamp_stun_off(
     if not restored:
         raise PoisonSwampStunError("Poison Swamp detail dismissal was not verified")
     return PoisonSwampStunResult(cleared, evidence, changed)
+
+
+def ensure_poison_swamp_stun_off(
+    screenshot: Optional[Frame] = None,
+    **kwargs: Any,
+) -> PoisonSwampStunResult:
+    """Backward-compatible Farm helper for the Stun-off requirement."""
+
+    return ensure_poison_swamp_stun(
+        screenshot,
+        required_state=PoisonSwampStunState.OFF,
+        **kwargs,
+    )
 
 
 def _battle_poison_swamp_boxes(
@@ -539,6 +577,7 @@ __all__ = [
     "PoisonSwampStunResult",
     "PoisonSwampStunState",
     "WorkshopPoisonSwampSource",
+    "ensure_poison_swamp_stun",
     "ensure_poison_swamp_stun_off",
     "locate_workshop_poison_swamp_source",
     "measure_poison_swamp_stun",

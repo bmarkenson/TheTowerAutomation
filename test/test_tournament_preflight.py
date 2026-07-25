@@ -111,6 +111,11 @@ def test_tournament_profile_omits_non_applicable_auto_pick_perks():
     requirements = load_tournament_requirements()
 
     assert "auto_pick_perks" not in requirements
+    assert requirements["ultimate_weapons"]["Poison Swamp"]["stun"] == "on"
+    assert requirements["damage_slider"] == {
+        "mode": "enforce",
+        "value": "1E2%",
+    }
 
 
 def test_live_tournament_validation_requires_persisted_pause(tmp_path):

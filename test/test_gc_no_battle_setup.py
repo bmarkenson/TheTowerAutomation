@@ -210,9 +210,10 @@ class _NoBattleRouter:
     def ensure_stun(self, **kwargs):
         assert self.state == "workshop_uw"
         assert kwargs["screenshot"] == "workshop_uw"
+        required_state = PoisonSwampStunState(kwargs["required_state"])
         return SimpleNamespace(
             screenshot="workshop_uw",
-            evidence=SimpleNamespace(state=PoisonSwampStunState.OFF),
+            evidence=SimpleNamespace(state=required_state),
             changed=False,
         )
 
@@ -495,8 +496,6 @@ def test_no_battle_setup_verifies_poison_swamp_stun_before_battle():
         "valid": True,
         "changed": False,
     }
-
-
 def test_no_battle_setup_corrects_tournament_home_configuration():
     router = _TournamentRouter()
 
@@ -515,6 +514,21 @@ def test_no_battle_setup_corrects_tournament_home_configuration():
     assert result.evidence["cards_deck"] == "Tournament"
     assert result.evidence["workshop_preset"] == "Tourney"
     assert result.evidence["bots_preset"] == "Amplify"
+    assert result.evidence["ultimate_weapons"] == {
+        "boundary": "NEW_BATTLE",
+        "checked": ["Poison Swamp.stun"],
+        "observations": {"Poison Swamp": {"stun": "on"}},
+        "valid": True,
+        "changed": False,
+    }
+    assert result.evidence["damage_slider"] == {
+        "mode": "enforce",
+        "value": "1E2%",
+        "checked": False,
+        "valid": None,
+        "boundary": "RUNNING",
+        "reason": "battle_only_control",
+    }
     assert "buttons.guardian:attack_inventory" in router.visible_actions
     assert "buttons.guardian:ally_inventory" in router.visible_actions
 

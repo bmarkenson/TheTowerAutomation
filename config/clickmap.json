@@ -2036,6 +2036,19 @@
     }
   },
   "buttons": {
+    "poison_swamp_stun_off": {
+      "match_template": "indicators/poison_swamp_stun_off.png",
+      "match_region": {
+        "x": 840,
+        "y": 1540,
+        "w": 140,
+        "h": 160
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
     "poison_swamp_stun_on": {
       "match_template": "buttons/poison_swamp_stun_on.png",
       "match_region": {

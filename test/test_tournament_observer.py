@@ -51,24 +51,57 @@ def test_tournament_strategy_is_a_passive_observer():
         "preflight_mismatch": "notify",
     }
     assert strategy.run_configuration()["profile"] == "tournament"
-    assert len(strategy.rules) == 1
-    action = strategy.rules[0]["do"][0]
+    assert len(strategy.rules) == 2
+    damage_rule = next(
+        rule
+        for rule in strategy.rules
+        if rule["name"] == "enforce_tournament_damage_slider"
+    )
+    damage_action = damage_rule["do"][0]
+    assert damage_rule["run_when_attached"] is True
+    assert damage_action == {
+        "type": "damage_slider_configure",
+        "mode": "enforce",
+        "value": "1E2%",
+    }
+    session_rule = next(
+        rule
+        for rule in strategy.rules
+        if rule["name"] == "validate_tournament_session_preflight"
+    )
+    action = session_rule["do"][0]
     assert action["type"] == "session_preflight"
     assert action["validator"] == "tournament"
     assert "auto_pick_perks" not in action["requirements"]
     assert action["allow_repair"] is False
     assert action["mismatch_policy"] == "notify"
-    assert strategy.rules[0]["run_when_attached"] is True
+    assert action["requirements"]["ultimate_weapons"]["Poison Swamp"]["stun"] == "on"
+    assert session_rule["run_when_attached"] is True
     assert strategy._session_preflight_assertions == [
+        "damage_slider_checked",
         "gc_session_preflight_attempted"
     ]
     assert "auto_pick_perks" not in strategy.run_configuration()["settings"]
+    assert (
+        strategy.run_configuration()["settings"]["ultimate_weapons"][
+            "Poison Swamp"
+        ]["stun"]
+        == "on"
+    )
+    assert strategy.run_configuration()["loadout"]["damage_slider"] == {
+        "mode": "enforce",
+        "value": "1E2%",
+    }
 
 
 def test_tournament_mismatch_is_recorded_without_requesting_repair():
     strategy = get_strategy("tournament")
     assert strategy is not None
-    action = strategy.rules[0]["do"][0]
+    action = next(
+        rule
+        for rule in strategy.rules
+        if rule["name"] == "validate_tournament_session_preflight"
+    )["do"][0]
     ctx = MissionContext(data={"mission_vars": {"last_detection_state": "RUNNING"}})
     evidence = SimpleNamespace(
         as_dict=lambda: {"valid": False},
@@ -98,7 +131,7 @@ def test_tournament_mismatch_is_recorded_without_requesting_repair():
     assert variables["gc_session_preflight_advisory"]
 
 
-def test_tournament_attachment_runs_read_only_preflight_without_run_boundary():
+def test_tournament_attachment_enforces_damage_before_read_only_preflight():
     strategy = get_strategy("tournament")
     assert strategy is not None
     manager = MissionManager(
@@ -112,6 +145,14 @@ def test_tournament_attachment_runs_read_only_preflight_without_run_boundary():
     actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
 
     assert manager.session_preflight_pending()
+    assert len(actions) == 1
+    assert actions[0]["type"] == "damage_slider_configure"
+    assert actions[0]["mode"] == "enforce"
+    assert actions[0]["value"] == "1E2%"
+
+    manager.ctx.data["mission_vars"]["damage_slider_checked"] = True
+    actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
+
     assert len(actions) == 1
     assert actions[0]["type"] == "session_preflight"
     assert actions[0]["validator"] == "tournament"

@@ -9,6 +9,7 @@ from core.gc_preflight_navigation import (
     GcPreflightNavigationStatus,
     _ensure_auto_pick_perks_enabled,
     _guarded_visible_tap,
+    _home_ultimate_weapon_observations,
     _select_running_menu,
     run_read_only_gc_preflight,
 )
@@ -327,6 +328,21 @@ def test_farm_route_consumes_home_boundary_evidence_without_revisiting_sections(
     assert "navigation.menu_guild" not in ui.visible_taps
     assert "navigation.goto_workshop_home" not in ui.static_taps
     assert "buttons.battle_control:home" not in ui.static_taps
+
+
+def test_home_boundary_accepts_tournament_poison_swamp_stun_on():
+    observations = _home_ultimate_weapon_observations(
+        {
+            "ultimate_weapons": {
+                "boundary": "NEW_BATTLE",
+                "checked": ["Poison Swamp.stun"],
+                "observations": {"Poison Swamp": {"stun": "on"}},
+                "valid": True,
+            }
+        }
+    )
+
+    assert observations == {"Poison Swamp": {"stun": "on"}}
 
 
 def test_active_farm_route_never_inspects_locks_and_carries_boundary_evidence():

@@ -24,6 +24,7 @@ invariants:
       primary: on
     Poison Swamp:
       primary: on
+      stun: on
     Black Hole:
       primary: on
     Spotlight:
@@ -32,3 +33,6 @@ invariants:
 
 loadout:
   modules: tournament_standard
+  damage_slider:
+    mode: enforce
+    value: "100%"
