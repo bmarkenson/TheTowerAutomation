@@ -170,6 +170,7 @@ class App:
         self._session_preflight_gate_logged = False
         self._session_preflight_terminal_blocked_logged = False
         self._session_preflight_repair_denial_logged = False
+        self._last_home_policy_signature: Optional[Tuple[object, ...]] = None
         rollover_state = Path(config.control_file).parent / "daily_gem_state.json"
         self._daily_gem_scheduler = DailyGemScheduler(rollover_state)
         self._mission_reward_scheduler = MissionRewardScheduler()
@@ -191,6 +192,70 @@ class App:
     def _current_strategy_name(self) -> str:
         strategy = self._mission_mgr.strategy
         return str(strategy.name if strategy else "none").strip().lower()
+
+    def _report_home_policy(
+        self,
+        *,
+        home_control: HomeBattleControl,
+        home_handler_enabled: bool,
+        home_preflight_enabled: bool,
+        requirements_pending: bool,
+    ) -> None:
+        """Report a changed Home disposition without a per-frame INFO heartbeat."""
+
+        mission_vars: Mapping[str, Any] = {}
+        ctx = getattr(self._mission_mgr, "ctx", None)
+        data = getattr(ctx, "data", None)
+        if isinstance(data, Mapping):
+            candidate = data.get("mission_vars")
+            if isinstance(candidate, Mapping):
+                mission_vars = candidate
+        session_valid = bool(
+            mission_vars.get("gc_session_preflight_completed")
+        )
+        signature: Tuple[object, ...] = (
+            self._current_strategy_name(),
+            home_control,
+            home_handler_enabled,
+            home_preflight_enabled,
+            requirements_pending,
+            session_valid,
+        )
+        if signature == getattr(self, "_last_home_policy_signature", None):
+            return
+        self._last_home_policy_signature = signature
+
+        passive_tournament_home = bool(
+            self._current_strategy_name() == "tournament"
+            and home_preflight_enabled
+            and not home_handler_enabled
+            and home_control is HomeBattleControl.NEW_BATTLE
+        )
+        if not passive_tournament_home:
+            log("Detected HOME_SCREEN. Evaluating Home policy.", "INFO")
+            return
+        if requirements_pending:
+            log(
+                "[TOURNAMENT] Home preflight is pending; automation will not "
+                "start a battle",
+                "INFO",
+                console=True,
+            )
+        elif session_valid:
+            log(
+                "[TOURNAMENT_READY] Home and in-battle preflight passed. "
+                "Start Tournament manually; automation will not start it",
+                "INFO",
+                console=True,
+            )
+        else:
+            log(
+                "[TOURNAMENT] Home preflight complete; holding ordinary Home. "
+                "In-battle checks remain pending and automation will not start "
+                "a battle",
+                "INFO",
+                console=True,
+            )
 
     def _gate_decision_directive(self) -> Optional[Dict[str, Any]]:
         directive = self._supervisor.gate_decision
@@ -1393,6 +1458,8 @@ class App:
         selector = getattr(self, "_run_perk_selector", None)
         if selector is not None:
             selector.observe_state(new_state)
+        if new_state != "HOME_SCREEN":
+            self._last_home_policy_signature = None
         self._recover_no_strategy_post_run(new_state, img)
         if self._handle_no_strategy_post_run(new_state, img):
             return
@@ -1558,7 +1625,6 @@ class App:
             home_preflight_enabled = bool(
                 self._runtime_policy().get("home_preflight") is True
             )
-            log("Detected HOME_SCREEN. Evaluating Home policy.", "INFO")
             home_control = detect_home_battle_control(img).control
             requirements = self._mission_mgr.no_battle_setup_requirements()
             if (
@@ -1635,6 +1701,14 @@ class App:
                 else:
                     self._mission_mgr.mark_no_battle_setup_complete(setup.evidence)
                 self._startup_gate_waivers = {}
+            self._report_home_policy(
+                home_control=home_control,
+                home_handler_enabled=home_handler_enabled,
+                home_preflight_enabled=home_preflight_enabled,
+                requirements_pending=bool(
+                    self._mission_mgr.no_battle_setup_requirements()
+                ),
+            )
             if home_handler_enabled:
                 restart_enabled = (
                     self._auto_start_enabled

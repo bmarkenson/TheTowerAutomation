@@ -893,6 +893,46 @@ def test_app_runs_tournament_home_preflight_without_starting_battle():
     manager.on_home.assert_not_called()
 
 
+def test_tournament_home_policy_reports_changed_readiness_without_heartbeat():
+    manager = SimpleNamespace(
+        strategy=SimpleNamespace(name="tournament"),
+        ctx=SimpleNamespace(
+            data={
+                "mission_vars": {
+                    "gc_session_preflight_completed": False,
+                }
+            }
+        ),
+    )
+    app = App.__new__(App)
+    app._mission_mgr = manager
+    app._last_home_policy_signature = None
+
+    with patch("core.app.log") as emit:
+        for _ in range(2):
+            app._report_home_policy(
+                home_control=HomeBattleControl.NEW_BATTLE,
+                home_handler_enabled=False,
+                home_preflight_enabled=True,
+                requirements_pending=False,
+            )
+
+        assert emit.call_count == 1
+        assert "In-battle checks remain pending" in emit.call_args.args[0]
+
+        manager.ctx.data["mission_vars"]["gc_session_preflight_completed"] = True
+        app._report_home_policy(
+            home_control=HomeBattleControl.NEW_BATTLE,
+            home_handler_enabled=False,
+            home_preflight_enabled=True,
+            requirements_pending=False,
+        )
+
+    assert emit.call_count == 2
+    assert emit.call_args.args[0].startswith("[TOURNAMENT_READY]")
+    assert "Start Tournament manually" in emit.call_args.args[0]
+
+
 def test_app_blocks_battle_start_when_no_battle_setup_fails():
     frame = object()
     manager = Mock()
