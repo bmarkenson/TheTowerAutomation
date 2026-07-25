@@ -7,7 +7,7 @@ from typing import Any, Callable, Mapping, Optional
 
 import cv2
 
-from utils.logger import log
+from utils.logger import log, log_action_intent
 from core.android_clipboard import read_battle_report_clipboard
 from core.ss_capture import capture_adb_screenshot
 from core.run_state import AUTOMATION, ExecMode, RunState
@@ -90,6 +90,15 @@ def handle_game_over(
     session_id = _make_session_id(captured_at.timetuple())
     battle_id = make_battle_id(captured_at)
     completed_record = None
+    log_action_intent(
+        "Completing the finished battle",
+        reason=(
+            "preserve its stats and perks before following the configured "
+            "post-run route"
+            if capture_stats
+            else "follow the configured post-run route without stats capture"
+        ),
+    )
     log(f"Handling GAME OVER — Session: {session_id}", "INFO", console=True)
 
     if capture_stats:

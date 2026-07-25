@@ -15,6 +15,7 @@ from core.level_skip_initializer import (
     initialize_level_skips,
 )
 from core.upgrade_box_detector import UpgradeBox
+from utils.logger import log_action
 
 
 def _frame(value: int):
@@ -108,6 +109,75 @@ def test_fallback_initializer_taps_ehls_before_eals():
         index < first_wave_ocr
         for index, event in enumerate(events)
         if event.startswith("level_skip:")
+    )
+
+
+def test_initializer_logs_why_before_its_tap_sequence(tmp_path, monkeypatch):
+    action_log = tmp_path / "actions.log"
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(action_log))
+    initial = _frame(1)
+    after_ehls = _frame(2)
+    complete = _frame(3)
+    captures = iter((after_ehls, complete))
+
+    def logged_tap(_point, *, label, verification):
+        assert verification is not None
+        log_action(f"Synthetic tap: {label}", console=False)
+        return True
+
+    def gold_box(frame, rect):
+        value = int(frame[0, 0, 0])
+        is_ehls = rect[0] < 500
+        return value >= (2 if is_ehls else 3), {}
+
+    with (
+        patch(
+            "core.level_skip_initializer.detect_state_and_overlays",
+            return_value={"state": "RUNNING", "menu": "UTILITY_MENU"},
+        ),
+        patch(
+            "core.level_skip_initializer.detect_current_buy_quantity",
+            return_value="max",
+        ),
+        patch(
+            "core.level_skip_initializer._target_boxes",
+            return_value={
+                EHLS: _box(EHLS, "affordable"),
+                EALS: _box(EALS, "affordable"),
+            },
+        ),
+        patch(
+            "core.level_skip_initializer.evaluate_upgrade_box_gold_box",
+            side_effect=gold_box,
+        ),
+        patch(
+            "core.level_skip_initializer.detect_wave_number_from_image",
+            return_value=(20, 99.0),
+        ),
+    ):
+        result = initialize_level_skips(
+            screenshot=initial,
+            capture_fn=lambda: next(captures),
+            tap_fn=logged_tap,
+            sleep_fn=lambda _seconds: None,
+            frame_stream_factory=None,
+        )
+
+    assert result.success
+    action_lines = [
+        line
+        for line in action_log.read_text(encoding="utf-8").splitlines()
+        if line.startswith("[ACTION ")
+    ]
+    assert action_lines[0].endswith(
+        "] Initializing level skips — maximize Enemy Health and Attack Level "
+        "Skip before wave 40 so normal strategy actions can continue"
+    )
+    assert action_lines[1].endswith(
+        f"] Synthetic tap: level_skip:{EHLS}"
+    )
+    assert action_lines[2].endswith(
+        f"] Synthetic tap: level_skip:{EALS}"
     )
 
 

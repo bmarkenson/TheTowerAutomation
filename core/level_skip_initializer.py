@@ -22,7 +22,7 @@ from core.upgrade_box_detector import (
     evaluate_upgrade_box_gold_box,
 )
 from core.upgrade_buy_quantity import detect_current_buy_quantity, ensure_buy_quantity
-from utils.logger import log, log_mission
+from utils.logger import log, log_action_intent, log_mission
 from utils.wave_detector import detect_wave_number_from_image
 
 
@@ -209,6 +209,13 @@ def initialize_level_skips(
 ) -> LevelSkipInitializationResult:
     """Gold-box EHLS then EALS with minimum capture and navigation overhead."""
 
+    log_action_intent(
+        "Initializing level skips",
+        reason=(
+            f"maximize Enemy Health and Attack Level Skip before wave "
+            f"{target_wave} so normal strategy actions can continue"
+        ),
+    )
     started = monotonic_fn()
     deadline = started + max(5.0, float(timeout_s))
     taps_sent = 0

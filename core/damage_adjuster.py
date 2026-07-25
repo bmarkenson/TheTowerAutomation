@@ -16,7 +16,7 @@ from core.matcher import get_match
 from core.ss_capture import capture_adb_screenshot, is_complete_screenshot
 from core.state_detector import detect_state_and_overlays
 from core.upgrade_navigation import ensure_upgrade_menu
-from utils.logger import log
+from utils.logger import log, log_action_intent
 from utils.ocr_utils import ocr_text_and_conf
 
 
@@ -256,6 +256,23 @@ def configure_damage_slider(
     canonical_expected = normalize_damage_percentage(expected)
     expected_value = _percentage_value(canonical_expected)
     assert expected_value is not None
+
+    if canonical_mode == "observe":
+        log_action_intent(
+            "Checking the Damage Slider",
+            reason=(
+                f"record whether its current value matches "
+                f"{canonical_expected} without changing it"
+            ),
+        )
+    else:
+        log_action_intent(
+            f"Setting the Damage Slider to {canonical_expected}",
+            reason=(
+                "the selected strategy requires that starting value before "
+                "normal run actions continue"
+            ),
+        )
 
     initial: Optional[str] = None
     final: Optional[str] = None

@@ -158,6 +158,30 @@ def log_action(
     )
 
 
+def log_action_intent(
+    purpose: str,
+    *,
+    reason: str,
+    detail: Optional[str] = None,
+    extra_path: Optional[str] = None,
+    console: Optional[bool] = None,
+) -> None:
+    """Log one human-readable header before a guarded action sequence."""
+
+    normalized_purpose = " ".join(str(purpose or "").split())
+    normalized_reason = " ".join(str(reason or "").split())
+    if not normalized_purpose:
+        raise ValueError("Action intent purpose must not be empty")
+    if not normalized_reason:
+        raise ValueError("Action intent reason must not be empty")
+    log_action(
+        f"{normalized_purpose} — {normalized_reason}",
+        detail=detail,
+        extra_path=extra_path,
+        console=console,
+    )
+
+
 def log_status(msg: str, *, detail: Optional[str] = None) -> None:
     """Log an operator status heartbeat with optional diagnostic detail."""
 

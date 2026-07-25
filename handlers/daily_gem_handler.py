@@ -10,7 +10,7 @@ from core.label_tapper import is_visible
 from core.scrolling import scroll_to_edge, scroll_until_visible
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
-from utils.logger import log
+from utils.logger import log, log_action_intent
 from utils.ocr_utils import ocr_text_and_conf
 
 STORE_MENU_INDICATOR = "indicators.menu_store"
@@ -91,6 +91,10 @@ def _open_store_for_current_screen() -> str | None:
 
 def handle_daily_gem() -> DailyGemResult:
     session_id = _make_session_id()
+    log_action_intent(
+        "Checking Daily Gem availability",
+        reason="the daily Store reward may be claimable after rollover",
+    )
     log(f"Handling DAILY AD GEM — Session: {session_id}", "INFO")
 
     # Tap into Store

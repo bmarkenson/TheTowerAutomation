@@ -21,7 +21,7 @@ from core.menu_reward_badges import (
 from core.scrolling import ScrollResult, scroll_to_edge, scroll_until_visible
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
-from utils.logger import log
+from utils.logger import log, log_action_intent
 from utils.ocr_utils import ocr_text_and_conf
 
 
@@ -88,6 +88,13 @@ def handle_mission_rewards(
 ) -> MissionRewardResult:
     """Inspect relevant badges, claim proven rewards, and restore the source UI."""
 
+    log_action_intent(
+        "Reviewing mission rewards",
+        reason=(
+            "reward badges may indicate claimable Daily, Event, or Guild "
+            "rewards"
+        ),
+    )
     initial = screenshot if screenshot is not None else capture_adb_screenshot()
     source_state = _reward_source_state(initial)
     reward_hub = _ensure_reward_hub(initial, source_state=source_state)

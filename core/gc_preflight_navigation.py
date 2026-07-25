@@ -31,7 +31,7 @@ from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
 from core.upgrade_box_detector import detect_visible_boxes
 from core.upgrade_navigation import swipe_upgrade_menu
-from utils.logger import log
+from utils.logger import log, log_action_intent
 
 
 Frame = np.ndarray
@@ -585,6 +585,13 @@ def run_read_only_gc_preflight(
 ) -> GcLivePreflightResult:
     """Verify GC requirements, apply safe in-run corrections, and return."""
 
+    log_action_intent(
+        "Checking session configuration",
+        reason=(
+            "confirm active loadouts and combat settings match the selected "
+            "run profile before automation continues"
+        ),
+    )
     route_completed = False
     try:
         ultimate_requirements = requirements.get("ultimate_weapons")

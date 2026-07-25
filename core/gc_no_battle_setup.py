@@ -40,7 +40,7 @@ from core.workshop_preset import (
     TOURNEY_PRESET_SLOT,
     measure_preset_slot_selection,
 )
-from utils.logger import log
+from utils.logger import log, log_action_intent
 from utils.ocr_utils import ocr_text_and_conf
 
 
@@ -148,6 +148,13 @@ def run_gc_no_battle_setup(
             GcNoBattleSetupStatus.UNSUPPORTED,
             unsupported,
         )
+    log_action_intent(
+        "Repairing Home-only run configuration",
+        reason=(
+            "preflight found persistent settings that must be corrected "
+            "outside battle before restart"
+        ),
+    )
 
     module_mode = _module_policy(requirements)
     target_priority_mode = _target_priority_policy(requirements)

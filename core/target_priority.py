@@ -19,7 +19,7 @@ from core.target_priority_config import (
     validate_target_priority_order,
 )
 from utils.ocr_utils import ocr_text_and_conf
-from utils.logger import log
+from utils.logger import log, log_action_intent
 
 
 TARGETS = TARGET_PRIORITY_TARGETS
@@ -135,6 +135,13 @@ def observe_target_priority_order(
     """Read and compare Target Priority without changing its order."""
 
     expected_list = validate_target_priority_order(expected)
+    log_action_intent(
+        "Checking Target Priority",
+        reason=(
+            "compare the current order with the selected strategy without "
+            "changing it"
+        ),
+    )
     opened_here = panel_open
     try:
         if not panel_open:
@@ -183,6 +190,13 @@ def ensure_target_priority_order(
 ) -> bool:
     """Open or consume the panel, enforce with Up arrows, and verify it."""
     expected_list = validate_target_priority_order(expected)
+    log_action_intent(
+        "Aligning Target Priority",
+        reason=(
+            "the selected strategy requires a specific target order before "
+            "normal run actions continue"
+        ),
+    )
     opened_here = panel_open
     if not panel_open:
         if not ensure_menu_fn():
