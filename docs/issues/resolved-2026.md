@@ -41,7 +41,20 @@ and actionable work lives in
   changed, successful session result to announce manual Tournament readiness.
   Repository validation passed 645 sandbox-compatible tests plus the separate
   localhost HTTP test, for 646 total.
-- **Fixed by:** `f9c68b6`.
+- **Follow-up:** The Tournament profile still described
+  `auto_pick_perks: false` even though Tournament has no Perks. The existing
+  navigator skipped the Perks panel for that value, but retaining it as a
+  desired run setting could authorize a future consumer to disable Auto Pick
+  unnecessarily. Tournament now omits Auto Pick from its source invariants,
+  generated requirements, action payload, and recorded run configuration; its
+  profile loader rejects either Auto Pick state as inapplicable. The generic
+  preflight navigator accepts an omitted requirement without opening Perks,
+  while Farm continues to require and enforce Auto Pick enabled.
+- **Follow-up regression:** `test/test_tournament_preflight.py` and
+  `test/test_tournament_observer.py` require complete omission from the compact
+  and generated contracts. `test/test_gc_preflight_navigation.py` requires an
+  omitted requirement to send no Perks navigation or control action.
+- **Fixed by:** `f9c68b6`; Auto Pick follow-up `0a726b7`.
 
 ### Tournament Guardian Ally selection was rejected as unverified
 
