@@ -30,7 +30,8 @@
           <CheckBox IsChecked="{Binding Skip, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                     Margin="8,7" VerticalContentAlignment="Top">
             <StackPanel>
-              <TextBlock Text="{Binding Label}" FontWeight="SemiBold" TextWrapping="Wrap" />
+              <TextBlock Text="{Binding Label}" Foreground="#EDF2F7"
+                         FontWeight="SemiBold" TextWrapping="Wrap" />
               <TextBlock Text="{Binding ExpectedText}" Foreground="#93A4BB"
                          FontSize="11" TextWrapping="Wrap" Margin="0,3,0,0" />
             </StackPanel>
