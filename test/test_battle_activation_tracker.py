@@ -1,10 +1,15 @@
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import patch
 
+import cv2
 import numpy as np
 
 from core.battle_activation_tracker import BattleActivationTracker
 from core.matcher import MatchResult
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _match(*, visible: bool, failure_reason: str | None = None) -> MatchResult:
@@ -123,7 +128,7 @@ def test_nonrunning_and_match_failures_cannot_confirm_disappearance():
 
 def test_reset_clears_prior_battle_events_and_arming():
     tracker = BattleActivationTracker(
-        ready_confirmation_frames=1,
+        presence_confirmation_frames=1,
         absence_confirmation_frames=1,
     )
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
@@ -158,3 +163,53 @@ def test_reset_clears_prior_battle_events_and_arming():
     tracker.reset()
     assert tracker.snapshot()["demon_mode_first_activation"] is None
     assert tracker.snapshot()["nuke_activations"] == []
+
+
+def test_intro_sprint_disabled_buttons_register_as_present():
+    """Live wave-100 evidence must arm both buttons before they disappear."""
+
+    strip = cv2.imread(
+        str(
+            FIXTURES
+            / "intro_sprint_disabled_floating_buttons_20260725_wave100.png"
+        )
+    )
+    assert strip is not None
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    frame[790:903, 7:915] = strip
+    missing = np.zeros_like(frame)
+    tracker = BattleActivationTracker()
+
+    assert tracker.observe(
+        frame,
+        ui_state="RUNNING",
+        wave=100,
+        wave_confidence=99.0,
+        wave_observed_at=None,
+    ) == []
+    assert tracker.observe(
+        frame,
+        ui_state="RUNNING",
+        wave=110,
+        wave_confidence=99.0,
+        wave_observed_at=None,
+    ) == []
+    assert tracker.observe(
+        missing,
+        ui_state="RUNNING",
+        wave=120,
+        wave_confidence=99.0,
+        wave_observed_at=None,
+    ) == []
+    events = tracker.observe(
+        missing,
+        ui_state="RUNNING",
+        wave=130,
+        wave_confidence=99.0,
+        wave_observed_at=None,
+    )
+
+    assert [event["ability"] for event in events] == ["demon_mode", "nuke"]
+    assert events[0]["presence_confidence"] >= 0.8
+    assert events[1]["presence_confidence"] >= 0.9
+    assert tracker.snapshot()["schema_version"] == 2

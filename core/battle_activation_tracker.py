@@ -19,7 +19,14 @@ _BUTTON_PATHS = {
     "demon_mode": "floating_buttons.demon_mode",
     "nuke": "floating_buttons.nuke",
 }
-_DETECTION_SOURCE = "ready_button_disappearance"
+_PRESENCE_THRESHOLDS = {
+    # The disabled Intro Sprint Demon Mode icon scored 0.856-0.875 against
+    # the existing enabled template in retained live frames. Its next-best
+    # candidate after removing the button scored 0.399.
+    "demon_mode": 0.8,
+    "nuke": 0.9,
+}
+_DETECTION_SOURCE = "button_disappearance"
 
 
 @dataclass
@@ -27,7 +34,7 @@ class _ButtonObservation:
     visible_streak: int = 0
     absent_streak: int = 0
     armed: bool = False
-    last_ready_confidence: float = 0.0
+    last_presence_confidence: float = 0.0
     last_absence_confidence: float = 0.0
 
     def reset_streaks(self) -> None:
@@ -36,24 +43,25 @@ class _ButtonObservation:
 
 
 class BattleActivationTracker:
-    """Infer activations from confirmed ready-button disappearance.
+    """Infer activations from confirmed floating-button disappearance.
 
-    Demon Mode and Nuke expose stable floating buttons while ready. With their
-    automatic activation options enabled, the corresponding ready button
-    disappears when the ability fires and remains unavailable until its
-    wave-based cooldown completes. Requiring consecutive present and absent
-    frames makes that transition useful without depending on a brief animation.
+    Demon Mode and Nuke remain visible while disabled during Intro Sprint as
+    well as when enabled. With automatic activation configured, disappearance
+    is the useful transition. Requiring consecutive present and absent frames
+    avoids depending on a brief animation.
     """
 
     def __init__(
         self,
         *,
-        ready_confirmation_frames: int = 2,
+        presence_confirmation_frames: int = 2,
         absence_confirmation_frames: int = 2,
     ) -> None:
-        if ready_confirmation_frames < 1 or absence_confirmation_frames < 1:
+        if presence_confirmation_frames < 1 or absence_confirmation_frames < 1:
             raise ValueError("confirmation frame counts must be positive")
-        self._ready_confirmation_frames = int(ready_confirmation_frames)
+        self._presence_confirmation_frames = int(
+            presence_confirmation_frames
+        )
         self._absence_confirmation_frames = int(absence_confirmation_frames)
         self._buttons = {
             name: _ButtonObservation() for name in _BUTTON_PATHS
@@ -99,7 +107,7 @@ class BattleActivationTracker:
                 self._buttons[name].reset_streaks()
                 if name not in self._reported_match_errors:
                     log(
-                        f"[BATTLE_EVENT] Could not observe {name} ready button: {exc}",
+                        f"[BATTLE_EVENT] Could not observe {name} button: {exc}",
                         "WARN",
                     )
                     self._reported_match_errors.add(name)
@@ -123,7 +131,7 @@ class BattleActivationTracker:
         """Return serializable completed-run evidence."""
 
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "source": _DETECTION_SOURCE,
             "demon_mode_first_activation": copy.deepcopy(
                 self._demon_mode_first_activation
@@ -145,11 +153,12 @@ class BattleActivationTracker:
         if match.failure_reason is not None:
             state.reset_streaks()
             return None
-        if match.matched:
+        present = match.confidence >= _PRESENCE_THRESHOLDS[name]
+        if present:
             state.visible_streak += 1
             state.absent_streak = 0
-            state.last_ready_confidence = float(match.confidence)
-            if state.visible_streak >= self._ready_confirmation_frames:
+            state.last_presence_confidence = float(match.confidence)
+            if state.visible_streak >= self._presence_confirmation_frames:
                 state.armed = True
             return None
 
@@ -177,8 +186,8 @@ class BattleActivationTracker:
             ),
             "detected_at": observed_at.isoformat(timespec="seconds"),
             "detection_source": _DETECTION_SOURCE,
-            "ready_button_confidence": round(
-                state.last_ready_confidence,
+            "presence_confidence": round(
+                state.last_presence_confidence,
                 3,
             ),
             "absence_confidence": round(

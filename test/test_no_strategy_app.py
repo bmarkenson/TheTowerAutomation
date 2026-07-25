@@ -62,8 +62,8 @@ def test_no_strategy_game_over_forces_full_capture_and_home_inventory():
         "fields": {"run_identity": {"status": "observed"}}
     }
     assert kwargs["battle_context"]["survival_ability_activations"] == {
-        "schema_version": 1,
-        "source": "ready_button_disappearance",
+        "schema_version": 2,
+        "source": "button_disappearance",
         "demon_mode_first_activation": None,
         "nuke_activations": [],
     }

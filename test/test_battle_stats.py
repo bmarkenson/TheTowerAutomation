@@ -228,8 +228,8 @@ def _record(*, source_complete=True, source_reason="edge_reached"):
                 }
             ],
             "survival_ability_activations": {
-                "schema_version": 1,
-                "source": "ready_button_disappearance",
+                "schema_version": 2,
+                "source": "button_disappearance",
                 "demon_mode_first_activation": {
                     "ability": "demon_mode",
                     "sequence": 1,
