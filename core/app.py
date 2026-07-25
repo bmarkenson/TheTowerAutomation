@@ -25,6 +25,7 @@ from core.battle_stats import (
     attach_observed_run_configuration,
     persist_battle_record,
 )
+from core.battle_activation_tracker import BattleActivationTracker
 from core.no_strategy_inventory import (
     NoStrategyInventoryStatus,
     RECOVERABLE_INVENTORY_STATES,
@@ -160,6 +161,7 @@ class App:
         self._last_wave_value: Optional[int] = None
         self._last_wave_conf: float = -1.0
         self._last_wave_ts: float = 0.0
+        self._battle_activation_tracker = BattleActivationTracker()
         self._blind_tapper_suspended = False
         self._tournament_results_captured = False
         self._no_strategy_observer = NoStrategyRunObserver()
@@ -187,6 +189,15 @@ class App:
             Path(config.control_file).parent / "event_mission_tracker.json"
         )
         self._event_mission_tracker = EventMissionTracker(event_mission_state)
+
+    def _activation_tracker(self) -> BattleActivationTracker:
+        """Return the run-scoped passive tracker, including in partial test apps."""
+
+        tracker = getattr(self, "_battle_activation_tracker", None)
+        if tracker is None:
+            tracker = BattleActivationTracker()
+            self._battle_activation_tracker = tracker
+        return tracker
 
     def _runtime_policy(self) -> Dict[str, Any]:
         strategy = self._mission_mgr.strategy
@@ -1508,6 +1519,8 @@ class App:
                 # authority. No overlay handler, recovery tap, mission action,
                 # or blind tapper may run before this gate clears.
                 battle_started = self._mission_mgr.maybe_run_start(detection)
+                if battle_started is True:
+                    self._activation_tracker().reset()
                 self._observe_exclusive_validation_battle_start(
                     detection,
                     battle_started=battle_started is True,
@@ -1752,6 +1765,34 @@ class App:
                 mv["last_wave"] = wave_val
                 mv["last_wave_conf"] = wave_conf
                 mv["last_wave_ts"] = self._last_wave_ts
+                wave_observed_at = (
+                    datetime.fromtimestamp(
+                        self._last_wave_ts,
+                        tz=timezone.utc,
+                    ).astimezone()
+                    if self._last_wave_ts > 0
+                    else None
+                )
+                activation_events = self._activation_tracker().observe(
+                    img,
+                    ui_state=str(detection.get("state") or "UNKNOWN"),
+                    wave=wave_val,
+                    wave_confidence=wave_conf,
+                    wave_observed_at=wave_observed_at,
+                )
+                for event in activation_events:
+                    name = (
+                        "Demon Mode"
+                        if event.get("ability") == "demon_mode"
+                        else "Nuke"
+                    )
+                    wave_text = event.get("approximate_wave")
+                    log(
+                        f"[BATTLE_EVENT] {name} activation observed at "
+                        f"approximately wave {wave_text if wave_text is not None else 'unknown'}",
+                        "INFO",
+                        console=True,
+                    )
 
                 new_state, menu, secondary, overlays = self._normalise_detection(detection)
 
@@ -2349,6 +2390,9 @@ class App:
                     "last_wave": self._last_wave_value,
                     "last_wave_confidence": self._last_wave_conf,
                     "coin_rate_samples": self._status_reporter.coin_rate_samples,
+                    "survival_ability_activations": (
+                        self._activation_tracker().snapshot()
+                    ),
                     "session_preflight_evidence": dict(
                         self._mission_mgr.ctx.data.get("mission_vars", {}).get(
                             "gc_session_preflight_evidence",
@@ -2429,6 +2473,9 @@ class App:
                     "last_wave": self._last_wave_value,
                     "last_wave_confidence": self._last_wave_conf,
                     "coin_rate_samples": self._status_reporter.coin_rate_samples,
+                    "survival_ability_activations": (
+                        self._activation_tracker().snapshot()
+                    ),
                     "observed_run_configuration": observed_run_configuration,
                     "session_preflight_evidence": dict(
                         self._mission_mgr.ctx.data.get("mission_vars", {}).get(

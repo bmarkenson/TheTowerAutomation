@@ -227,6 +227,30 @@ def _record(*, source_complete=True, source_reason="edge_reached"):
                     "confidence": 98.5,
                 }
             ],
+            "survival_ability_activations": {
+                "schema_version": 1,
+                "source": "ready_button_disappearance",
+                "demon_mode_first_activation": {
+                    "ability": "demon_mode",
+                    "sequence": 1,
+                    "approximate_wave": 4210,
+                    "detected_at": "2026-07-15T11:30:00-07:00",
+                },
+                "nuke_activations": [
+                    {
+                        "ability": "nuke",
+                        "sequence": 1,
+                        "approximate_wave": 4211,
+                        "detected_at": "2026-07-15T11:30:02-07:00",
+                    },
+                    {
+                        "ability": "nuke",
+                        "sequence": 2,
+                        "approximate_wave": 4611,
+                        "detected_at": "2026-07-15T11:40:02-07:00",
+                    },
+                ],
+            },
         },
         data_fn=_data_fn,
         game_stats_text_fn=_game_text,
@@ -236,7 +260,7 @@ def _record(*, source_complete=True, source_reason="edge_reached"):
 def test_battle_record_retains_resolved_run_configuration():
     record = _record()
 
-    assert record["schema_version"] == 3
+    assert record["schema_version"] == 4
     assert record["battle_type"] == "farm"
     assert record["battle_type_analysis"]["confidence"] == "high"
     assert record["runtime"]["observed_tier"] == 19
@@ -265,6 +289,10 @@ def test_battle_record_retains_resolved_run_configuration():
     assert "Poison Swamp: primary=on, stun=off" in markdown
     assert "## Coins/min progression" in markdown
     assert "| 2026-07-15T11:00:00-07:00 | 1000 | 1.25T | 98.5% |" in markdown
+    assert "## Survival ability activations" in markdown
+    assert "Demon Mode first activation: approximately wave 4210" in markdown
+    assert "| 1 | 4211 | 2026-07-15T11:30:02-07:00 |" in markdown
+    assert "| 2 | 4611 | 2026-07-15T11:40:02-07:00 |" in markdown
 
 
 def test_no_strategy_record_retains_terminal_tier_without_guessing_type():

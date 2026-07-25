@@ -61,6 +61,12 @@ def test_no_strategy_game_over_forces_full_capture_and_home_inventory():
     assert kwargs["battle_context"]["observed_run_configuration"] == {
         "fields": {"run_identity": {"status": "observed"}}
     }
+    assert kwargs["battle_context"]["survival_ability_activations"] == {
+        "schema_version": 1,
+        "source": "ready_button_disappearance",
+        "demon_mode_first_activation": None,
+        "nuke_activations": [],
+    }
     assert app._pending_no_strategy_record is record
     assert app._no_strategy_post_run_stage == "locks"
 

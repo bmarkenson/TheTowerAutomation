@@ -29,7 +29,7 @@ except Exception:  # pragma: no cover - exercised through the unavailable path
 Frame = np.ndarray
 OcrDataFn = Callable[[Frame], Mapping[str, Sequence[Any]]]
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 DEFAULT_RECORDS_DIR = Path("logs/battles")
 MORE_STATS_CROP = (140, 330, 800, 1370)
 GAME_STATS_CROP = (40, 400, 995, 1110)
@@ -1125,6 +1125,11 @@ def render_battle_markdown(record: Mapping[str, Any]) -> str:
             record.get("runtime", {}).get("coin_rate_samples", [])
         )
     )
+    lines.extend(
+        render_survival_ability_activations_markdown(
+            record.get("runtime", {}).get("survival_ability_activations", {})
+        )
+    )
 
     game_fields = record.get("game_stats", {}).get("fields", {})
     lines.extend(["", "## Game Stats-only fields", "", "| Stat | Value |", "| --- | ---: |"])
@@ -1210,6 +1215,61 @@ def render_coin_rate_samples_markdown(samples: Any) -> list[str]:
             f"{rate} | {confidence_text} |"
         )
     return lines
+
+
+def render_survival_ability_activations_markdown(
+    observations: Any,
+) -> list[str]:
+    """Render approximate Demon Mode and Nuke activation waves."""
+
+    if not isinstance(observations, Mapping):
+        return []
+    demon = observations.get("demon_mode_first_activation")
+    raw_nukes = observations.get("nuke_activations")
+    nukes = (
+        [event for event in raw_nukes if isinstance(event, Mapping)]
+        if isinstance(raw_nukes, Sequence)
+        and not isinstance(raw_nukes, (str, bytes))
+        else []
+    )
+    if not isinstance(demon, Mapping) and not nukes:
+        return []
+
+    lines = ["", "## Survival ability activations", ""]
+    if isinstance(demon, Mapping):
+        lines.append(
+            "- Demon Mode first activation: "
+            + _render_activation_wave(demon)
+        )
+    else:
+        lines.append("- Demon Mode first activation: not observed")
+    if nukes:
+        lines.extend(
+            [
+                "",
+                "| Nuke activation | Approximate wave | Detected |",
+                "| ---: | ---: | --- |",
+            ]
+        )
+        for index, event in enumerate(nukes, start=1):
+            sequence = event.get("sequence", index)
+            wave = event.get("approximate_wave")
+            lines.append(
+                f"| {sequence} | {wave if wave is not None else 'unknown'} | "
+                f"{event.get('detected_at', '')} |"
+            )
+    else:
+        lines.append("- Nuke activations: none observed")
+    return lines
+
+
+def _render_activation_wave(event: Mapping[str, Any]) -> str:
+    wave = event.get("approximate_wave")
+    wave_text = str(wave) if wave is not None else "unknown wave"
+    detected_at = event.get("detected_at")
+    if detected_at:
+        return f"approximately wave {wave_text} (detected {detected_at})"
+    return f"approximately wave {wave_text}"
 
 
 def _default_ocr_data(frame: Frame) -> Mapping[str, Sequence[Any]]:
@@ -1963,4 +2023,5 @@ __all__ = [
     "persist_battle_record",
     "render_battle_markdown",
     "render_coin_rate_samples_markdown",
+    "render_survival_ability_activations_markdown",
 ]
