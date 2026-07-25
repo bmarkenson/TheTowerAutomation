@@ -1707,6 +1707,34 @@ and actionable work lives in
   separately permitted localhost HTTP test, for 735 total.
 - **Fixed by:** `3bc3ab4`.
 
+### Cards inventory reset dragged outside the scrollable inventory
+
+- **Observed:** 2026-07-25 during Tournament Home preflight after the Cards
+  inventory had been left at its bottom position.
+- **Symptom:** Automation issued three go-to-top swipes and six forward search
+  swipes, but never found Demon Mode and blocked the
+  `card_recharge_modes` gate.
+- **Evidence:** `logs/actions.log` records the complete failed traversal from
+  16:03:05 through 16:03:38. The retained top, Demon Mode, and Nuke inventory
+  frames show that the inventory viewport begins below approximately
+  `y=1000`; the old go-to-top gesture began at `(540,900)`, in the fixed Active
+  Cards area. A prior bounded inspection proved that a drag beginning inside
+  the inventory could advance from Demon Mode to Nuke.
+- **Safety response:** The failed preflight returned through verified Home
+  navigation and blocked Tournament start. No battle was started or altered.
+- **Cause:** The reset gesture began outside the inventory's scrollable
+  viewport, so it could not move a Cards screen retained at the bottom. The
+  subsequent forward search correctly dragged farther down, which also could
+  not reach Demon Mode from that position.
+- **Resolution:** Both directions now use the same path wholly inside the
+  inventory viewport, from `y=1100` to `y=1650` or its inverse, with the
+  established 300 ms input duration.
+- **Regression:** `test/test_card_swipe_geometry.py` fixes both clickmap
+  gestures to the verified in-viewport geometry. The focused Card recharge and
+  clickmap suites passed 26 tests; JSON parsing and `git diff --check` also
+  passed.
+- **Fixed by:** `fea3242`.
+
 ## Operational lessons
 
 ### A detached child may not survive the agent execution wrapper

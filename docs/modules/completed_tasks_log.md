@@ -37,6 +37,19 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-25 Cards inventory swipe traversal
+
+- Repaired the Card-recharge preflight's inventory reset after a failure left
+  Cards at its bottom position. The old downward reset began above the
+  inventory viewport, so it was ignored and the forward search could never
+  return to Demon Mode.
+- Both directions now drag between `y=1100` and `y=1650`, keeping the complete
+  gesture inside the inventory viewport, and use the established 300 ms
+  duration.
+- The focused Card recharge and clickmap suites passed 26 tests. The exact
+  clickmap geometry is covered by `test/test_card_swipe_geometry.py`.
+  Implemented in commit `fea3242`.
+
 ### 2026-07-25 Demon Mode/Nuke recharge activation preflight
 
 - Added strategy-owned recharge activation defaults for Farm and Tournament:
