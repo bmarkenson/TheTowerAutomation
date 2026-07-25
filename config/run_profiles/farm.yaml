@@ -4,8 +4,8 @@ name: farm
 invariants:
   cards_deck: Farm
   card_recharge_modes:
-    Demon Mode: auto
-    Nuke: manual
+    Demon Mode: auto_reactivate
+    Nuke: ready_after_recharge
   workshop_preset: Farm
   free_upgrade_locks:
     - Shockwave Size

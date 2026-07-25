@@ -18,8 +18,8 @@ from core.state_detector import detect_state_and_overlays
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "test" / "fixtures"
 REQUIRED = {
-    "Demon Mode": "auto",
-    "Nuke": "manual",
+    "Demon Mode": "auto_reactivate",
+    "Nuke": "ready_after_recharge",
 }
 
 
@@ -35,25 +35,25 @@ DEMON_DETAIL = "card_demon_mode_recharge_auto_20260725.png"
 NUKE_DETAIL = "card_nuke_recharge_manual_20260725.png"
 
 
-def test_live_card_detail_fixtures_separate_auto_and_manual_modes():
+def test_live_card_details_separate_reactivation_and_ready_after_recharge():
     demon = measure_card_recharge_mode(
         _load(DEMON_DETAIL),
         "Demon Mode",
-        required="auto",
+        required="auto_reactivate",
     )
     nuke = measure_card_recharge_mode(
         _load(NUKE_DETAIL),
         "Nuke",
-        required="manual",
+        required="ready_after_recharge",
     )
 
-    assert demon.observed is CardRechargeMode.AUTO
+    assert demon.observed is CardRechargeMode.AUTO_REACTIVATE
     assert demon.valid
     assert demon.detail_confidence >= 0.88
     assert demon.checkbox_outline_pixels >= 350
     assert demon.checkmark_pixels >= 100
 
-    assert nuke.observed is CardRechargeMode.MANUAL
+    assert nuke.observed is CardRechargeMode.READY_AFTER_RECHARGE
     assert nuke.valid
     assert nuke.detail_confidence >= 0.88
     assert nuke.checkbox_outline_pixels >= 350
@@ -80,12 +80,12 @@ def test_card_detail_identity_is_required_for_checkbox_authority():
     wrong_detail = measure_card_recharge_mode(
         _load(NUKE_DETAIL),
         "Demon Mode",
-        required="auto",
+        required="auto_reactivate",
     )
     inventory = measure_card_recharge_mode(
         _load(DEMON_INVENTORY),
         "Demon Mode",
-        required="auto",
+        required="auto_reactivate",
     )
 
     assert wrong_detail.observed is CardRechargeMode.UNKNOWN
@@ -98,9 +98,14 @@ def test_card_detail_identity_is_required_for_checkbox_authority():
     "raw",
     (
         None,
-        {"Demon Mode": "auto"},
-        {"Demon Mode": "auto", "Nuke": "again"},
-        {"Demon Mode": "auto", "Nuke": "manual", "Other": "manual"},
+        {"Demon Mode": "auto_reactivate"},
+        {"Demon Mode": "auto_reactivate", "Nuke": "again"},
+        {
+            "Demon Mode": "auto_reactivate",
+            "Nuke": "ready_after_recharge",
+            "Other": "ready_after_recharge",
+        },
+        {"Demon Mode": "auto", "Nuke": "manual"},
     ),
 )
 def test_invalid_card_recharge_contracts_are_rejected(raw):
@@ -113,17 +118,17 @@ class _CardRouter:
         self.top = _load("cards_gc_active_20260713.png")
         self.demon_inventory = _load(DEMON_INVENTORY)
         self.nuke_inventory = _load(NUKE_INVENTORY)
-        self.demon_auto = _load(DEMON_DETAIL)
-        self.nuke_manual = _load(NUKE_DETAIL)
-        self.demon_detail = self.demon_auto.copy()
-        self.nuke_detail = self.nuke_manual.copy()
+        self.demon_auto_reactivate = _load(DEMON_DETAIL)
+        self.nuke_ready_after_recharge = _load(NUKE_DETAIL)
+        self.demon_detail = self.demon_auto_reactivate.copy()
+        self.nuke_detail = self.nuke_ready_after_recharge.copy()
         if mismatched:
             x, y, width, height = recharge._CHECKMARK_REGION
             self.demon_detail[y : y + height, x : x + width] = (
-                self.nuke_manual[y : y + height, x : x + width]
+                self.nuke_ready_after_recharge[y : y + height, x : x + width]
             )
             self.nuke_detail[y : y + height, x : x + width] = (
-                self.demon_auto[y : y + height, x : x + width]
+                self.demon_auto_reactivate[y : y + height, x : x + width]
             )
         self.current = self.top
         self.detail_label = None
@@ -165,9 +170,9 @@ class _CardRouter:
             assert kwargs["verification"].authorizes(target)
             self.checkbox_taps.append(self.detail_label)
             if self.detail_label == "Demon Mode":
-                self.current = self.demon_auto
+                self.current = self.demon_auto_reactivate
             else:
-                self.current = self.nuke_manual
+                self.current = self.nuke_ready_after_recharge
             return True
 
         assert target == "buttons.card_detail:close"
@@ -211,8 +216,8 @@ def test_matching_card_recharge_modes_are_verified_without_toggling():
     assert result.as_dict()["modes"] == [
         {
             "label": "Demon Mode",
-            "required": "auto",
-            "observed": "auto",
+            "required": "auto_reactivate",
+            "observed": "auto_reactivate",
             "detail_visible": True,
             "detail_confidence": pytest.approx(1.0),
             "checkbox_outline_pixels": 462,
@@ -221,8 +226,8 @@ def test_matching_card_recharge_modes_are_verified_without_toggling():
         },
         {
             "label": "Nuke",
-            "required": "manual",
-            "observed": "manual",
+            "required": "ready_after_recharge",
+            "observed": "ready_after_recharge",
             "detail_visible": True,
             "detail_confidence": pytest.approx(1.0),
             "checkbox_outline_pixels": 462,
@@ -241,4 +246,7 @@ def test_mismatched_card_recharge_modes_are_toggled_and_reverified():
     assert result.changed
     assert result.changed_labels == ("Demon Mode", "Nuke")
     assert router.checkbox_taps == ["Demon Mode", "Nuke"]
-    assert [mode.observed.value for mode in result.modes] == ["auto", "manual"]
+    assert [mode.observed.value for mode in result.modes] == [
+        "auto_reactivate",
+        "ready_after_recharge",
+    ]

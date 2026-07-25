@@ -442,8 +442,8 @@ def test_no_battle_setup_enforces_card_recharge_modes_before_leaving_cards():
     requirements = {
         **REQUIREMENTS,
         "card_recharge_modes": {
-            "Demon Mode": "auto",
-            "Nuke": "manual",
+            "Demon Mode": "auto_reactivate",
+            "Nuke": "ready_after_recharge",
         },
     }
 
@@ -451,20 +451,23 @@ def test_no_battle_setup_enforces_card_recharge_modes_before_leaving_cards():
 
     assert result.complete
     assert router.card_recharge_checks == [
-        {"Demon Mode": "auto", "Nuke": "manual"}
+        {
+            "Demon Mode": "auto_reactivate",
+            "Nuke": "ready_after_recharge",
+        }
     ]
     assert result.evidence["card_recharge_modes"]["valid"] is True
     assert result.evidence["card_recharge_modes"]["modes"] == [
         {
             "label": "Demon Mode",
-            "required": "auto",
-            "observed": "auto",
+            "required": "auto_reactivate",
+            "observed": "auto_reactivate",
             "valid": True,
         },
         {
             "label": "Nuke",
-            "required": "manual",
-            "observed": "manual",
+            "required": "ready_after_recharge",
+            "observed": "ready_after_recharge",
             "valid": True,
         },
     ]

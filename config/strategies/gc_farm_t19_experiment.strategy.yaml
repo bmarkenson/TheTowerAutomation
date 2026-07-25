@@ -14,8 +14,8 @@ session_preflight:
   requirements:
     cards_deck: Farm
     card_recharge_modes:
-      Demon Mode: auto
-      Nuke: manual
+      Demon Mode: auto_reactivate
+      Nuke: ready_after_recharge
     workshop_preset: Farm
     bots_preset: Farm
     guardian_chips:
@@ -303,8 +303,8 @@ rules:
     requirements:
       cards_deck: Farm
       card_recharge_modes:
-        Demon Mode: auto
-        Nuke: manual
+        Demon Mode: auto_reactivate
+        Nuke: ready_after_recharge
       workshop_preset: Farm
       bots_preset: Farm
       guardian_chips:

@@ -652,7 +652,10 @@ class FarmProfileTests(unittest.TestCase):
         self.assertEqual(requirements["cards_deck"], "Farm")
         self.assertEqual(
             requirements["card_recharge_modes"],
-            {"Demon Mode": "auto", "Nuke": "manual"},
+            {
+                "Demon Mode": "auto_reactivate",
+                "Nuke": "ready_after_recharge",
+            },
         )
         self.assertEqual(requirements["workshop_preset"], "Farm")
         self.assertEqual(requirements["bots_preset"], "Farm")
@@ -681,7 +684,10 @@ class FarmProfileTests(unittest.TestCase):
         self.assertEqual(configuration["settings"]["cards_deck"], "Farm")
         self.assertEqual(
             configuration["settings"]["card_recharge_modes"],
-            {"Demon Mode": "auto", "Nuke": "manual"},
+            {
+                "Demon Mode": "auto_reactivate",
+                "Nuke": "ready_after_recharge",
+            },
         )
         self.assertEqual(configuration["settings"]["bots_preset"], "Farm")
         self.assertEqual(

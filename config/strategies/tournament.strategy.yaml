@@ -37,8 +37,8 @@ session_preflight:
   requirements:
     cards_deck: Tournament
     card_recharge_modes:
-      Demon Mode: auto
-      Nuke: manual
+      Demon Mode: auto_reactivate
+      Nuke: ready_after_recharge
     workshop_preset: Tourney
     bots_preset: Amplify
     guardian_chips:
@@ -196,8 +196,8 @@ rules:
     requirements:
       cards_deck: Tournament
       card_recharge_modes:
-        Demon Mode: auto
-        Nuke: manual
+        Demon Mode: auto_reactivate
+        Nuke: ready_after_recharge
       workshop_preset: Tourney
       bots_preset: Amplify
       guardian_chips:
@@ -260,8 +260,8 @@ run_configuration:
   settings:
     cards_deck: Tournament
     card_recharge_modes:
-      Demon Mode: auto
-      Nuke: manual
+      Demon Mode: auto_reactivate
+      Nuke: ready_after_recharge
     workshop_preset: Tourney
     bots_preset: Amplify
     guardian_chips:

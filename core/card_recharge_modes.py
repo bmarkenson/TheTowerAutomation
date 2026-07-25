@@ -43,8 +43,8 @@ _SEARCH_SWIPES = 6
 
 
 class CardRechargeMode(str, Enum):
-    MANUAL = "manual"
-    AUTO = "auto"
+    AUTO_REACTIVATE = "auto_reactivate"
+    READY_AFTER_RECHARGE = "ready_after_recharge"
     UNKNOWN = "unknown"
 
 
@@ -117,11 +117,13 @@ def normalize_card_recharge_modes(raw: Any) -> dict[str, CardRechargeMode]:
             mode = CardRechargeMode(value)
         except ValueError as exc:
             raise ValueError(
-                f"card_recharge_modes.{label} must be auto or manual"
+                f"card_recharge_modes.{label} must be auto_reactivate "
+                "or ready_after_recharge"
             ) from exc
         if mode is CardRechargeMode.UNKNOWN:
             raise ValueError(
-                f"card_recharge_modes.{label} must be auto or manual"
+                f"card_recharge_modes.{label} must be auto_reactivate "
+                "or ready_after_recharge"
             )
         normalized[label] = mode
     return normalized
@@ -133,7 +135,7 @@ def measure_card_recharge_mode(
     *,
     required: CardRechargeMode | str,
 ) -> CardRechargeModeEvidence:
-    """Classify one auto-activate checkbox on its verified Card detail."""
+    """Classify one activation-on-recharge checkbox on verified Card detail."""
 
     try:
         required_mode = CardRechargeMode(
@@ -177,13 +179,13 @@ def measure_card_recharge_mode(
         and checkbox_visible
         and checkmark_pixels >= _MIN_CHECKMARK_PIXELS
     ):
-        observed = CardRechargeMode.AUTO
+        observed = CardRechargeMode.AUTO_REACTIVATE
     elif (
         detail_visible
         and checkbox_visible
         and checkmark_pixels <= _MAX_EMPTY_CHECKMARK_PIXELS
     ):
-        observed = CardRechargeMode.MANUAL
+        observed = CardRechargeMode.READY_AFTER_RECHARGE
     else:
         observed = CardRechargeMode.UNKNOWN
     return CardRechargeModeEvidence(
@@ -208,7 +210,7 @@ def ensure_card_recharge_modes(
     swipe_fn: Callable[[str], bool] = swipe_now,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> CardRechargeModesResult:
-    """Restore Demon Mode/Nuke auto-activation from the Cards inventory."""
+    """Restore Demon Mode/Nuke recharge behavior from the Cards inventory."""
 
     required = normalize_card_recharge_modes(requirements)
     current = cards_screenshot if cards_screenshot is not None else capture_fn()

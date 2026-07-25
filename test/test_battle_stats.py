@@ -185,8 +185,8 @@ def _record(*, source_complete=True, source_reason="edge_reached"):
             "settings": {
                 "cards_deck": "Farm",
                 "card_recharge_modes": {
-                    "Demon Mode": "auto",
-                    "Nuke": "manual",
+                    "Demon Mode": "auto_reactivate",
+                    "Nuke": "ready_after_recharge",
                 },
                 "workshop_preset": "Farm",
                 "bots_preset": "Farm",
@@ -288,7 +288,10 @@ def test_battle_record_retains_resolved_run_configuration():
     assert "Target Priority: mode `observe`; preset `priority_test_a`" in markdown
     assert "resolved: Fleets > Boss" in markdown
     assert "Bots preset: Farm" in markdown
-    assert "Card recharge modes: Demon Mode=auto, Nuke=manual" in markdown
+    assert (
+        "Card recharge modes: Demon Mode=auto_reactivate, "
+        "Nuke=ready_after_recharge"
+    ) in markdown
     assert "Guardian chips: Fetch > Summon > Scout" in markdown
     assert "Auto Pick Perks: enabled" in markdown
     assert "Poison Swamp: primary=on, stun=off" in markdown
