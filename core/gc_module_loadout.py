@@ -511,27 +511,31 @@ def _set_module_rarity_filter(
     sleep_fn,
 ):
     frame = _capture_modules(capture_fn, detector)
-    if not safe_tap_fn(
-        "buttons.module:rarity_filter",
-        dispatch="now",
-        verification=TapVerification(
-            screenshot=frame,
-            target_region=(450, 1630, 430, 120),
-            description="module_rarity_filter:closed",
-            verifier=lambda candidate: (
-                detector(candidate).get("state") == "MODULES"
-                and not _filter_panel_visible(candidate)
-                and bool(_filter_label(candidate))
+    if not _filter_panel_visible(frame):
+        if not safe_tap_fn(
+            "buttons.module:rarity_filter",
+            dispatch="now",
+            verification=TapVerification(
+                screenshot=frame,
+                target_region=(450, 1630, 430, 120),
+                description="module_rarity_filter:closed",
+                verifier=lambda candidate: (
+                    detector(candidate).get("state") == "MODULES"
+                    and not _filter_panel_visible(candidate)
+                    and bool(_filter_label(candidate))
+                ),
             ),
-        ),
-    ):
-        raise ModuleLoadoutCorrectionError("failed to open module rarity filter")
+        ):
+            raise ModuleLoadoutCorrectionError("failed to open module rarity filter")
     frame = _wait_for(
-        _filter_panel_visible,
+        lambda candidate: (
+            _filter_panel_visible(candidate)
+            and _filter_option_visible(candidate, "NONE")
+        ),
         capture_fn=capture_fn,
         detector=detector,
         sleep_fn=sleep_fn,
-        reason="module rarity filter",
+        reason="settled module rarity filter",
     )
 
     if mode == "ancestral":
@@ -550,11 +554,14 @@ def _set_module_rarity_filter(
         ):
             raise ModuleLoadoutCorrectionError("failed to clear module rarities")
         frame = _wait_for(
-            _filter_panel_visible,
+            lambda candidate: (
+                _filter_panel_visible(candidate)
+                and _filter_option_visible(candidate, "ANCESTRAL")
+            ),
             capture_fn=capture_fn,
             detector=detector,
             sleep_fn=sleep_fn,
-            reason="cleared module rarity filter",
+            reason="settled cleared module rarity filter",
         )
         if not safe_tap_fn(
             "buttons.module:rarity_ancestral",
@@ -590,9 +597,19 @@ def _set_module_rarity_filter(
     else:
         raise ValueError(f"unsupported module rarity filter mode: {mode!r}")
 
-    frame = _capture_modules(capture_fn, detector)
-    if not _filter_panel_visible(frame):
-        raise ModuleLoadoutCorrectionError("module rarity filter closed unexpectedly")
+    frame = _wait_for(
+        lambda candidate: (
+            _filter_panel_visible(candidate)
+            and _filter_option_visible(
+                candidate,
+                "ANCESTRAL" if mode == "ancestral" else "ALL RARITIES",
+            )
+        ),
+        capture_fn=capture_fn,
+        detector=detector,
+        sleep_fn=sleep_fn,
+        reason=f"settled {wanted} module rarity selection",
+    )
     if not safe_tap_fn(
         "buttons.module:rarity_filter",
         dispatch="now",

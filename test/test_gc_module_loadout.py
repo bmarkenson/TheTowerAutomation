@@ -634,13 +634,16 @@ def test_rarity_filter_actions_use_each_fresh_panel_frame():
     with (
         patch(
             "core.gc_module_loadout._capture_modules",
-            side_effect=(initial, selected),
+            return_value=initial,
         ),
         patch(
             "core.gc_module_loadout._wait_for",
-            side_effect=(panel, cleared, closed),
+            side_effect=(panel, cleared, selected, closed),
         ),
-        patch("core.gc_module_loadout._filter_panel_visible", return_value=True),
+        patch(
+            "core.gc_module_loadout._filter_panel_visible",
+            side_effect=lambda frame: int(frame[0, 0, 0]) in {20, 30, 40},
+        ),
         patch("core.gc_module_loadout._filter_option_visible", return_value=True),
         patch("core.gc_module_loadout._filter_label", return_value="ANCESTRAL"),
     ):
@@ -666,6 +669,42 @@ def test_rarity_filter_actions_use_each_fresh_panel_frame():
             (initial, panel, cleared, selected),
         )
     )
+
+
+def test_rarity_filter_recovers_from_an_already_open_panel():
+    panel = np.full((1920, 1080, 3), 20, dtype=np.uint8)
+    cleared = np.full((1920, 1080, 3), 30, dtype=np.uint8)
+    selected = np.full((1920, 1080, 3), 40, dtype=np.uint8)
+    closed = np.full((1920, 1080, 3), 50, dtype=np.uint8)
+    taps = []
+
+    with (
+        patch("core.gc_module_loadout._capture_modules", return_value=panel),
+        patch(
+            "core.gc_module_loadout._wait_for",
+            side_effect=(panel, cleared, selected, closed),
+        ),
+        patch(
+            "core.gc_module_loadout._filter_panel_visible",
+            side_effect=lambda frame: int(frame[0, 0, 0]) != 50,
+        ),
+        patch("core.gc_module_loadout._filter_option_visible", return_value=True),
+        patch("core.gc_module_loadout._filter_label", return_value="ANCESTRAL"),
+    ):
+        result = _set_module_rarity_filter(
+            "ancestral",
+            capture_fn=lambda: pytest.fail("capture is wrapped"),
+            detector=lambda _frame: {"state": "MODULES"},
+            safe_tap_fn=lambda target, **_kwargs: taps.append(target) or True,
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert result is closed
+    assert taps == [
+        "buttons.module:rarity_none",
+        "buttons.module:rarity_ancestral",
+        "buttons.module:rarity_filter",
+    ]
 
 
 def test_ancestral_filter_ocr_excludes_the_adjacent_mythic_row():
