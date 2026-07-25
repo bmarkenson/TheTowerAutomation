@@ -44,8 +44,13 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   to forbidden coordinate-only taps.
 - Regression coverage requires visible-target selection and validates both
   unequipped inventory cards against the retained Farm loadout. The focused
-  Guardian, tap-safety, and clickmap suites pass all 58 tests.
-- Implemented in commit `2bfb653`; live reload and gate retry remain pending.
+  Guardian, tap-safety, and clickmap suites initially passed all 58 tests.
+- Follow-up `1e0c860` lets the same reconciler safely resume when a prior
+  fail-closed replacement left Attack, Ally, Fetch, Summon, or Scout empty.
+  Interrupted Attack and Ally cases raise the focused total to 59 passing
+  tests.
+- Implemented in commits `2bfb653` and `1e0c860`; live reload and gate retry
+  remain pending.
 
 ### 2026-07-23 offscreen weekly mission chest
 

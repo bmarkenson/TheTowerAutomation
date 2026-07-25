@@ -38,10 +38,26 @@ and actionable work lives in
   `test/test_gc_no_battle_setup.py` requires Tournament correction to use
   visible Attack and Ally actions. The focused Guardian, tap-safety, and
   clickmap suites pass all 58 tests.
-- **Fixed by:** `2bfb653`.
+- **Recurrence:** On the first repaired retry, the new process detected Attack
+  and Scout but no Ally or Summon. The original failed attempt had already
+  removed Summon before its Ally selection was rejected. Home setup then
+  blocked without tapping Ally because its reconciler supported
+  `Summon → Ally` replacement but not an already-empty Ally slot.
+- **Follow-up resolution:** Guardian reconciliation now treats each supported
+  chip category as either already correct, occupied by its known replacement
+  source, or empty. An empty slot is filled only after settled Guardian-screen
+  evidence and a fresh match of the exact requested inventory card, followed
+  by authoritative equipped-state verification. The same recovery covers
+  interrupted Attack, Ally, Fetch, Summon, and missing Scout selections.
+- **Follow-up regression:** `test/test_gc_no_battle_setup.py` removes Attack
+  and Ally independently from an otherwise-correct Tournament loadout and
+  requires each pre-flight to resume through its visible inventory target. The
+  focused Guardian, tap-safety, and clickmap suites pass all 59 tests.
+- **Fixed by:** `2bfb653` and follow-up `1e0c860`.
 - **Live validation:** Pending. The operator-owned runtime remains on the
-  pre-fix process with the original requirement-scoped gate pending; no reload,
-  retry, or Tournament start was inferred from repository repair authority.
+  pre-follow-up process with the requirement-scoped Guardian gate pending; no
+  reload, retry, or Tournament start was inferred from repository repair
+  authority.
 
 ### Offscreen weekly mission chest was skipped
 
