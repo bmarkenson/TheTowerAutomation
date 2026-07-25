@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 import json
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Iterable, Literal, Optional
 
 import cv2
 import numpy as np
@@ -424,6 +424,45 @@ def module_icon_similarity(
     )
 
 
+def rank_module_icon_candidates(
+    images: Iterable[NDArray[np.uint8]],
+    *,
+    catalog: Optional[ModuleIconCatalog] = None,
+) -> tuple[tuple[float, ModuleIconRecord], ...]:
+    """Rank catalog identities across aligned observations of one icon."""
+
+    selected_catalog = catalog or load_module_icon_catalog()
+    observed_features: list[NDArray[np.float32]] = []
+    for image in images:
+        if (
+            not isinstance(image, np.ndarray)
+            or image.ndim != 3
+            or image.shape[2] != 3
+        ):
+            continue
+        observed = _unit_feature(
+            image,
+            size=selected_catalog.normalization_size,
+            radius_fraction=selected_catalog.mask_radius_fraction,
+        )
+        if observed is not None:
+            observed_features.append(observed)
+    if not observed_features:
+        return ()
+
+    observed_matrix = np.stack(observed_features)
+    scores = []
+    for module in selected_catalog.modules:
+        template = _template_feature(
+            str(module.template_path),
+            selected_catalog.normalization_size,
+            selected_catalog.mask_radius_fraction,
+        )
+        scores.append((float(np.max(observed_matrix @ template)), module))
+    scores.sort(key=lambda item: item[0], reverse=True)
+    return tuple(scores)
+
+
 def _rejected_match(
     slot: EquippedModuleSlot,
     *,
@@ -579,4 +618,5 @@ __all__ = [
     "identify_equipped_ancestral_modules",
     "load_module_icon_catalog",
     "module_icon_similarity",
+    "rank_module_icon_candidates",
 ]

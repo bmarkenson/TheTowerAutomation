@@ -17,7 +17,7 @@ from core.module_icon_index import (
     ancestral_green_fraction,
     identify_equipped_ancestral_modules,
     load_module_icon_catalog,
-    module_icon_similarity,
+    rank_module_icon_candidates,
 )
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
@@ -654,21 +654,34 @@ def _inventory_candidates(frame, target: str, catalog: ModuleIconCatalog):
                 < catalog.minimum_green_fraction
             ):
                 continue
-            icon_crop = _crop_centered(frame, center, INVENTORY_ICON_CROP_SIZE)
-            scores = sorted(
-                (
-                    (
-                        module_icon_similarity(
-                            icon_crop,
-                            module.name,
-                            catalog=catalog,
-                        ),
-                        module.name,
-                    )
-                    for module in catalog.modules
-                ),
-                reverse=True,
+            icon_crops = (
+                _crop_centered(
+                    frame,
+                    (x + x_offset, y + y_offset),
+                    INVENTORY_ICON_CROP_SIZE,
+                )
+                for y_offset in range(
+                    -catalog.alignment_radius,
+                    catalog.alignment_radius + 1,
+                )
+                for x_offset in range(
+                    -catalog.alignment_radius,
+                    catalog.alignment_radius + 1,
+                )
             )
+            ranked = rank_module_icon_candidates(
+                icon_crops,
+                catalog=catalog,
+            )
+            if len(ranked) < 2:
+                continue
+            scores = [
+                (
+                    score,
+                    module.name,
+                )
+                for score, module in ranked
+            ]
             best_score, best_name = scores[0]
             runner_score, _runner_name = scores[1]
             margin = best_score - runner_score

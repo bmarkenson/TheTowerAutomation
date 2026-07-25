@@ -7,6 +7,7 @@ import numpy as np
 from core.module_icon_index import (
     identify_equipped_ancestral_modules,
     load_module_icon_catalog,
+    rank_module_icon_candidates,
 )
 
 
@@ -162,6 +163,33 @@ def test_unreadable_icon_returns_unknown_without_authoritative_name():
     assert result.name is None
     assert result.slug is None
     assert result.best_candidate is None
+
+
+def test_inventory_alignment_distinguishes_space_displacer_from_anti_cube():
+    catalog = load_module_icon_catalog()
+    space_displacer = next(
+        module for module in catalog.modules if module.name == "Space Displacer"
+    )
+    template = cv2.imread(str(space_displacer.template_path))
+    assert template is not None
+    screen = np.zeros((190, 190, 3), dtype=np.uint8)
+    rendered = cv2.resize(template, (134, 134), interpolation=cv2.INTER_AREA)
+    screen[34:168, 22:156] = rendered
+    observations = []
+    for y_offset in range(-catalog.alignment_radius, catalog.alignment_radius + 1):
+        for x_offset in range(
+            -catalog.alignment_radius,
+            catalog.alignment_radius + 1,
+        ):
+            x = 95 + x_offset
+            y = 95 + y_offset
+            observations.append(screen[y - 67 : y + 67, x - 67 : x + 67])
+
+    ranked = rank_module_icon_candidates(observations, catalog=catalog)
+
+    assert ranked[0][1].name == "Space Displacer"
+    assert ranked[0][0] >= 0.90
+    assert ranked[0][0] - ranked[1][0] >= 0.50
 
 
 def test_non_green_slots_are_not_claimed_as_ancestral_modules():
