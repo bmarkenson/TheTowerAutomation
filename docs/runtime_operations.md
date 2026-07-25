@@ -180,6 +180,25 @@ and **Defense Absolute**. Its Auto Pick priority is:
 12. Spotlight Damage
 13. Damage
 
+Farm and Tournament also declare the recharge activation mode for both
+death-prevention Cards:
+
+- **Demon Mode: auto** — after its 300-wave recharge, the checked detail option
+  allows Demon Mode to activate automatically.
+- **Nuke: manual** — after its 300-wave recharge, the unchecked detail option
+  makes Nuke available but does not activate it automatically.
+
+At verified Home `NEW_BATTLE`, setup checks these settings from the Cards
+inventory after selecting the strategy's deck. It searches for each exact card,
+opens its detail with a template-verified long press, requires the matching
+detail title and an unambiguous checkbox, and leaves an already-correct setting
+untouched. A mismatch receives one target-verified checkbox tap followed by
+fresh state verification. Missing cards, the wrong detail, or an ambiguous
+checkbox blocks the startup gate. The card detail observed on 2026-07-25
+described a 300-wave recharge for both Cards; only the activation checkbox is
+strategy-configurable. The in-battle greyed-out Intro Sprint icon is not used
+as Home preflight authority.
+
 At verified Home `NEW_BATTLE`, setup opens the independently verified Perks
 configuration control after returning from Cards. It reads the complete
 selected Ban block and the strategy-sized Auto Pick prefix. A mismatch is

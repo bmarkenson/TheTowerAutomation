@@ -35,10 +35,11 @@ milestones, or some Dissonance runs, so it does not own Farm configuration.
 Legacy `gc*` strategy names remain aliases during migration.
 
 The Farm baseline owns settings that must be true for every Farm run: the
-`Farm` Cards, Workshop, and Bots presets; Shockwave Size, Bounce Shot Targets,
-and Bounce Shot Range Free Upgrade locks; Guardian chips; Auto Pick Perks; and
-Ultimate Weapon controls. Compact Tier profiles cannot override those
-invariants.
+`Farm` Cards, Workshop, and Bots presets; Demon Mode automatic recharge
+activation and Nuke manual-after-recharge activation; Shockwave Size, Bounce
+Shot Targets, and Bounce Shot Range Free Upgrade locks; Guardian chips; Auto
+Pick Perks; and Ultimate Weapon controls. Compact Tier profiles cannot override
+those invariants.
 
 Only Modules, Damage Slider, Orb Distance, and Target Priority vary by Tier or
 experiment. Every compact Farm profile names all four and assigns one of these
@@ -86,12 +87,13 @@ authority. Pause is rechecked before every speed tap.
 ## Tournament exclusive validation and observer profile
 
 `Tournament` owns a one-shot exclusive validation before it becomes a passive
-single-battle observer. Its generated plan declares Tournament Cards, Tourney
-Workshop, Amplify Bots, Attack/Ally/Scout Guardians, Tournament/Milestone
-modules, Poison Swamp Stun `on`, Damage Slider `100%`, the Range `98.38m` Orb
-Distance pair Extra `87.16m` / Workshop `80.37m`, all nine Ultimate Weapons,
-and Spotlight Missiles. Tournament battles have no Perks, so Perks and Auto
-Perks are outside this contract.
+single-battle observer. Its generated plan declares Tournament Cards, Demon
+Mode automatic recharge activation, Nuke manual-after-recharge activation,
+Tourney Workshop, Amplify Bots, Attack/Ally/Scout Guardians,
+Tournament/Milestone modules, Poison Swamp Stun `on`, Damage Slider `100%`, the
+Range `98.38m` Orb Distance pair Extra `87.16m` / Workshop `80.37m`, all nine
+Ultimate Weapons, and Spotlight Missiles. Tournament battles have no Perks, so
+Perks and Auto Perks are outside this contract.
 
 Every explicit Tournament selection or managed process Start creates a durable
 validation request tied to the strategy request identity and the complete
@@ -102,10 +104,11 @@ states, with the runtime ID, PID, ADB target, and deadline attached before the
 first battle input.
 
 At verified Home `NEW_BATTLE`, the profile first completes every declared
-no-battle check: Tournament Cards, Tourney Workshop, Amplify Bots,
-Attack/Ally/Scout Guardians, the Tournament module loadout, and Poison Swamp
-Stun `on`. Damage Slider, Orb Distance, and Ultimate Weapon enablement remain
-explicitly deferred because their authoritative controls are battle-only.
+no-battle check: Tournament Cards, the Demon Mode/Nuke recharge activation
+modes, Tourney Workshop, Amplify Bots, Attack/Ally/Scout Guardians, the
+Tournament module loadout, and Poison Swamp Stun `on`. Damage Slider, Orb
+Distance, and Ultimate Weapon enablement remain explicitly deferred because
+their authoritative controls are battle-only.
 Exclusive validation claims staged one-run waivers tied to the same Tournament
 strategy request before Home setup, so a configured check skip applies to this
 path as well. An unwaived failed Home check consumes the request with its reason
@@ -347,17 +350,22 @@ evidence is attached.
   evidence. Success requires both exact values and verified return to the
   running side menu.
 - Complete no-battle setup owns every supported profile check available from
-  verified Home `NEW_BATTLE`: Cards, Workshop and its Free Upgrade locks,
-  strategy-declared Perk Bans and Auto Pick priority, Poison Swamp Stun, Bots,
-  Guardians, and Modules. Perk configuration is changed only when the selected
-  strategy declares both semantic lists. Ban repair completes before Auto Pick:
-  extra selections are removed from the fixed Selected Perks block, while only
-  missing required bans search the Available list. Each Ban toggle and Auto
-  Pick move recaptures the panel immediately before input, uniquely reacquires
-  the same semantic row at its settled coordinates, and requires strict
-  transition evidence. Auto Pick then rebuilds semantic rank from the top and
-  requires exactly one-rank upward progress after every tap. A final exact
-  comparison remains mandatory; ambiguous OCR, an unavailable perk, or
+  verified Home `NEW_BATTLE`: Cards and the declared Demon Mode/Nuke recharge
+  activation modes, Workshop and its Free Upgrade locks, strategy-declared
+  Perk Bans and Auto Pick priority, Poison Swamp Stun, Bots, Guardians, and
+  Modules. Card recharge inspection opens each exact inventory card through a
+  verified long press, requires the matching detail identity and an
+  authoritative checkbox state, changes only a mismatched checkbox, rechecks
+  the requested state, and returns to the Cards inventory. Missing cards and
+  ambiguous details fail closed. Perk configuration is changed only when the
+  selected strategy declares both semantic lists. Ban repair completes before
+  Auto Pick: extra selections are removed from the fixed Selected Perks block,
+  while only missing required bans search the Available list. Each Ban toggle
+  and Auto Pick move recaptures the panel immediately before input, uniquely
+  reacquires the same semantic row at its settled coordinates, and requires
+  strict transition evidence. Auto Pick then rebuilds semantic rank from the
+  top and requires exactly one-rank upward progress after every tap. A final
+  exact comparison remains mandatory; ambiguous OCR, an unavailable perk, or
   non-progress blocks New Battle. Persistent control is synchronized before
   every Home setup tap or swipe. Pause holds the workflow action-free, and
   Resume restores verified Home before a fresh setup pass. The setup retains

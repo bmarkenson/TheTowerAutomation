@@ -37,6 +37,23 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-25 Demon Mode/Nuke recharge activation preflight
+
+- Added strategy-owned recharge activation defaults for Farm and Tournament:
+  Demon Mode automatically activates when its recharge completes, while Nuke
+  becomes available but waits for manual activation.
+- Home `NEW_BATTLE` setup now locates both Cards in inventory, opens the exact
+  detail through a guarded long press, classifies the checkbox from retained
+  live evidence, leaves matching states untouched, and corrects and re-verifies
+  only authoritative mismatches. Missing or ambiguous evidence fails closed.
+- Live observation confirmed both card details describe a 300-wave recharge,
+  with Demon Mode checked and Nuke unchecked. The observation did not change
+  either checkbox or start a battle.
+- Focused strategy, Home-gate, clickmap, reporting, and control coverage passed
+  191 tests. Repository-wide validation passed 751 sandbox-compatible tests
+  plus the separately permitted localhost HTTP test, for 752 total.
+  Implemented in commit `7e542f4`.
+
 ### 2026-07-25 Range-selected Orb Distance enforcement
 
 - Reproduced the Tournament validation failure against its exact live Attack
