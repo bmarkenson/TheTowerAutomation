@@ -126,11 +126,19 @@ immediately and shows selected, current, and pending values separately.
 Every explicit Tournament selection or Start with Tournament selected creates
 one durable validation request. The panel reports Home preflight, ownership of
 the one ordinary New Battle used for battle-only checks, cleanup, and the
-terminal readiness or failure reason. Automation never enters or starts the
-Tournament itself. Wait for **Tournament is ready to begin manually**, then
-start the real Tournament yourself; its first automation phase maxes EHLS and
-EALS. A process restart cannot replay or Surrender a validation battle owned
-by the former runtime.
+terminal readiness or failure reason. Validation itself never enters or starts
+the Tournament. Once ready, the app opens **Tournament is ready** and reminds
+you to set Target Priorities for the current Tournament Battle Conditions.
+Target Priorities are not yet inspected or changed automatically.
+
+**Start Tournament** performs lightweight current-receipt, configuration,
+runtime, and screen checks, then authorizes one verified Tournament launch; it
+does not rerun validation. **Cancel launch** consumes only the automatic launch
+offer, so you can still start manually or explicitly select Tournament again
+for fresh validation. **Decide later** leaves the offer pending under **Review
+Tournament launch**. The real Tournament's first automation phase maxes EHLS
+and EALS. A process restart cannot replay or Surrender a validation battle or
+continue a launch owned by the former runtime.
 
 **Configure run...** is an optional pre-start dialog populated from the
 selected strategy's declared checks. Check a requirement to skip it once, or

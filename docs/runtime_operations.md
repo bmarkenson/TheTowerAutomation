@@ -221,24 +221,50 @@ request tied to that exact strategy request and generated-plan fingerprint.
 After every declared Home check passes, the runtime atomically claims the
 request and then taps only a freshly verified ordinary **New Battle** control.
 It does not tap **Resume Battle**, enter the Tournament screen, or start a
-Tournament. In that disposable ordinary battle it leaves Auto Perks unchanged,
-enforces Damage Slider `100%`, and verifies the configured Ultimate Weapons and
-Spotlight Missiles. Staged one-run waivers are not claimed for this validation;
-a Home preflight failure consumes the request and reports its failed check
-without starting a battle. A conclusive in-battle pass or failure starts
-guarded cleanup: only the same runtime/ADB owner may Surrender that battle and
-return from Game Over to verified Home **New Battle**. The status panel then
-reports either **Tournament is ready to begin manually** or the validation
-failure reason.
+Tournament during validation. In that disposable ordinary battle it leaves
+Auto Perks unchanged, enforces Damage Slider `100%`, and verifies the
+configured Ultimate Weapons and Spotlight Missiles. Staged one-run waivers are
+not claimed for this validation; a Home preflight failure consumes the request
+and reports its failed check without starting a battle. A conclusive in-battle
+pass or failure starts guarded cleanup: only the same runtime/ADB owner may
+Surrender that battle and return from Game Over to verified Home **New
+Battle**. The status panel then reports either readiness and a
+Tournament-launch prompt or the validation failure reason.
 
 Each later explicit Tournament selection or managed Start creates a new
 request. Restarting an unattended runtime does not: a claimed, running, or
 cleanup receipt owned by the former process is failed without a tap or
 Surrender. A changed plan fingerprint likewise requires another explicit
-selection. After readiness, start the real Tournament manually. Its opening
-run-initialization gate maxes Enemy Health Level Skip and Enemy Attack Level
-Skip before normal observer handling; the disposable validation battle does
-not buy those upgrades or fabricate their completion.
+selection.
+
+After readiness, first set Target Priorities to suit the current Tournament
+Battle Conditions. The prompt is a reminder only: automation does not yet
+inspect, choose, or validate Target Priorities. Then choose one of:
+
+- **Start Tournament** — authorize the current runtime to enter and start
+  exactly one Tournament battle. This performs only lightweight checks that the
+  ready receipt, configuration, runtime owner, `RUNNING` acknowledgement, and
+  Home/Tournament-entry screen are still current; it does not rerun the Home or
+  in-battle validation suite.
+- **Cancel launch** — consume the automatic launch offer without invalidating
+  the successful validation evidence. The operator may still start manually or
+  explicitly select Tournament again to request a fresh validation.
+- **Decide later** or close the prompt — leave the offer pending and reopen it
+  later through **Review Tournament launch**.
+
+For confirmed launch, the runtime atomically claims the receipt before input,
+then uses only freshly verified **New Battle**, Tournament **Open**, and
+Tournament **Battle** controls. It rechecks the same live owner, current
+request, and Pause state before every tap. A timeout, restart, owner mismatch,
+superseded request, unexpected battle, or ambiguous transition fails closed
+without further input. Manually starting the Tournament while the offer is
+pending is also supported and consumes the offer when the runtime observes the
+fresh Tournament boundary.
+
+The real Tournament's opening run-initialization gate maxes Enemy Health Level
+Skip and Enemy Attack Level Skip before normal observer handling; the
+disposable validation battle does not buy those upgrades or fabricate their
+completion. Automation never Surrenders the real Tournament battle.
 
 When replacing automation during a battle, select **Attach to current battle;
 run gates next battle** before starting. The new process observes and controls

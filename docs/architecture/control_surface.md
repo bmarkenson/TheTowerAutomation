@@ -88,10 +88,12 @@ agnostic.
   Tournament selected, also creates a one-use exclusive-validation receipt
   bound to that strategy request and generated-plan fingerprint. Status exposes
   its pending, owned, cleanup, or result disposition. The request authorizes
-  only the runtime's profile-declared ordinary `NEW_BATTLE` validation; the
-  control surface has no endpoint that directly starts or Surrenders a battle.
-  A replacement process reports an active receipt owned by the former runtime
-  as failed and cannot replay or clean it up.
+  only the runtime's profile-declared ordinary `NEW_BATTLE` validation. A ready
+  receipt exposes one narrow operator-confirmed Tournament-launch decision,
+  which the matching live runtime must claim before its first input. It is not
+  arbitrary tap authority and never grants Surrender authority. A replacement
+  process reports an active validation or launch receipt owned by the former
+  runtime as failed and cannot replay, continue, clean up, or Surrender it.
 - An explicit `apply_to_active_run` strategy request may instead be adopted
   after fresh `RUNNING` or Home `RESUME_BATTLE` evidence. Adoption changes
   normal strategy behavior and the strategy/profile identity used by Battle
@@ -184,6 +186,8 @@ Control request examples:
 {"action": "resume"}
 {"action": "mode", "mode": "WAIT"}
 {"action": "resolve_gate", "request_id": "...", "decision_id": "retry"}
+{"action": "resolve_tournament_launch", "request_id": "...", "decision": "start"}
+{"action": "resolve_tournament_launch", "request_id": "...", "decision": "cancel"}
 {"action": "configure_run", "skip_checks": ["bots_preset"]}
 ```
 
@@ -248,9 +252,16 @@ Process request examples:
   status reports selected, current, and pending strategies separately.
 - Durable Tournament-validation status in both clients. It distinguishes Home
   preflight pending, ordinary-battle ownership, battle-only checks, cleanup,
-  manual readiness, and a failed/cancelled result with its reason. This
-  requires server revision 6 and capability
-  `exclusive_strategy_validation_status`.
+  launch confirmation, and a failed/cancelled result with its reason. A ready
+  result automatically opens an operator prompt that reminds the operator to
+  set Target Priorities for the current Tournament Battle Conditions.
+  **Start Tournament** performs lightweight receipt, configuration, runtime,
+  and screen checks and authorizes one verified Tournament launch without
+  rerunning validation. **Cancel launch** consumes only the automatic launch
+  offer, while **Decide later** leaves it pending for the persistent review
+  button. A manual Tournament start remains supported. This requires server
+  revision 7 and capabilities `exclusive_strategy_validation_status` and
+  `tournament_launch_confirmation`.
 - Native control of a passwordless Windows OpenSSH tunnel.
 - Separate operator-directive and observed-UI state, with acknowledgement and
   stale-heartbeat indicators.

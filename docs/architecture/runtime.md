@@ -115,13 +115,38 @@ ready or the failure reason. Process replacement, owner mismatch, Tournament
 identity, a resumed/pre-existing battle, or an ambiguous transition fails
 closed without inheriting Surrender authority.
 
-After a ready result, the operator enters and starts the actual Tournament
-manually. That genuine run performs the standard run-initialization route at
+After a ready result, the control surface publishes a one-shot operator launch
+prompt tied to that exact ready receipt and configuration fingerprint. The
+prompt reminds the operator to set Target Priorities for the displayed
+Tournament Battle Conditions; Target Priority selection is not yet automated
+or included in validation. **Decide later** closes the prompt without changing
+the receipt. **Cancel launch** consumes only the automatic launch offer while
+retaining the successful validation result. **Start Tournament** is explicit
+authorization for the matching live runtime to enter and start one Tournament
+battle.
+
+Start confirmation does not repeat Home or session validation. The API first
+checks that the matching receipt and configuration are still current, the
+runtime is active and has acknowledged `RUNNING`, and a fresh observation is
+Home or the Tournament entry screen. The runtime then checks those facts
+against a fresh screenshot and atomically claims the launch before its first
+input. From Home it taps only a verified `NEW_BATTLE` control followed by the
+OCR-confirmed Tournament `OPEN` control; from a verified Tournament entry it
+continues directly. It starts the battle only through the OCR-confirmed
+Tournament `BATTLE` control. Ownership, Pause, and current-request identity are
+rechecked before every tap. Timeout, process replacement, owner mismatch,
+supersession, unexpected battle identity, or any ambiguous transition fails
+closed without further input. If the operator starts the Tournament manually
+while the offer is pending, the runtime consumes the offer as a manual start
+and continues observing normally.
+
+The genuine Tournament run performs the standard run-initialization route at
 its fresh boundary, maxing EHLS first and EALS second. It then retains the
 validation battle's session evidence and becomes passive except for game-speed
 maintenance, ad-gem collection, and terminal-result handling. An ad gem starts
 the same bounded floating-gem sweep used by normal battles; the profile does
-not run an independent or continuous floating-gem handler.
+not run an independent or continuous floating-gem handler. No Tournament
+battle gains validation-battle Surrender authority.
 
 Attachment to an already-running Tournament remains observer-only and does
 not use the exclusive validation receipt. Without Home boundary evidence, the

@@ -37,6 +37,35 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-25 confirmed Tournament launch
+
+- Added a durable, one-shot launch decision to a successful Tournament
+  validation receipt. **Start Tournament** performs lightweight freshness and
+  ownership checks without rerunning validation, claims the launch before
+  input, and uses only verified Home New Battle, Tournament Open, and
+  Tournament Battle controls.
+- Added automatic and persistent browser/native prompts with **Start
+  Tournament**, **Cancel launch**, and **Decide later**. The prompt reminds the
+  operator to set Target Priorities for the current Tournament Battle
+  Conditions; that setting remains manual.
+- Pause, restart, owner mismatch, request supersession, timeout, wrong battle,
+  and ambiguous navigation fail closed. Manual launch remains supported, a real
+  Tournament never gains Surrender authority, and its normal EHLS/EALS
+  initialization remains active.
+- Repository-wide validation passed 684 sandbox-compatible tests plus the
+  separately permitted localhost HTTP test, for 685 total. Browser JavaScript
+  syntax validation and standalone Windows-client publishing also passed. No
+  live process or device interaction was used.
+- Implemented in commit `0aea936`.
+
+### 2026-07-25 Damage Slider operator log formatting
+
+- Kept the internal Damage Slider target at `1E2` while formatting
+  operator-facing target, comparison, and completion messages as `100%`.
+- Focused validation passed 120 tests. No live process or device interaction
+  was used.
+- Implemented in commit `f4ae2b0`.
+
 ### 2026-07-25 one-shot Tournament validation
 
 - Made each explicit Tournament selection or managed Start authorize one
