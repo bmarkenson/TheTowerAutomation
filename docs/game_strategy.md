@@ -243,7 +243,7 @@ The current battle record does not capture Dissonant Boosts. Until it does,
 record the applicable Tier's four `Boost + Echo` values or retain a dated panel
 capture whenever cross-Tier CPH is being analyzed.
 
-## Tier choice is a multi-currency optimization
+## Tier choice is a multi-objective optimization
 
 The purpose of the T19 Farm experiment is not to beat T18 on coins alone. T18
 currently has the completed Utility Dissonant advantage, but T19 can accelerate
@@ -294,6 +294,27 @@ may be favored for Dice, module shards, and Cells. Choose between them according
 to the current progression bottleneck, or report all four rates without
 collapsing them into a single score.
 
+Run duration is a fifth decision axis. The representative wave-10,249 T18 run
+lasted `9h 43m 38s`, while the wave-5,217 T19 run lasted `4h 6m 7s`. Ignoring
+the short boundary transition, that is approximately:
+
+```text
+T18 natural completions per day: 24 / 9.727 ≈ 2.47
+T19 natural completions per day: 24 / 4.102 ≈ 5.85
+Experiment-cycle advantage:      5.85 / 2.47 ≈ 2.37
+```
+
+The shorter T19 run therefore supplies roughly 2.37 times as many natural Game
+Over boundaries, completed battle reports, and clean opportunities to change
+one variable for the next run. It also makes tournament timing easier because
+the account can reach Home naturally in a smaller scheduling window instead of
+abandoning a long operator-owned battle.
+
+More boundaries introduce additional setup/restart overhead and shorter runs
+have more per-run reward variance. Compare real-hour rates after that overhead,
+but retain **feedback cadence** and **tournament fit** as genuine benefits when
+choosing a Farm Tier.
+
 ## Battle-comparison checklist
 
 Before explaining a wave-count or coins-per-hour difference:
@@ -314,7 +335,9 @@ Before explaining a wave-count or coins-per-hour difference:
    rate only as a checkpoint, not the final CPH conclusion.
 8. Compare Reroll Dice/hour, total module Shards/hour, and Cells/hour before
    judging which Tier is the better Farm for the current progression goal.
-9. Separate causes from consequences. Lower wave count itself reduces perk
+9. Compare real run duration, clean experiment cycles per day, and the ability
+   to reach a natural boundary before the next Tournament.
+10. Separate causes from consequences. Lower wave count itself reduces perk
    opportunities, total coin accumulation, and exposure to later Heat.
 
 ## Sources and repository authority
