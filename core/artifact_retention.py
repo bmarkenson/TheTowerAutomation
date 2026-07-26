@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import fnmatch
 import os
 from pathlib import Path
+from pathlib import PurePosixPath
 import stat
 import time
-from typing import Iterable, Optional
+from typing import Callable, Iterable, Optional
 
 
 DEFAULT_ARTIFACT_RETENTION_DAYS = 30
@@ -17,6 +19,7 @@ SIZE_PRUNE_GRACE_SECONDS = 5 * 60
 ARTIFACT_RETENTION_DAYS_ENV = "THETOWER_ARTIFACT_RETENTION_DAYS"
 ARTIFACT_MAX_BYTES_ENV = "THETOWER_ARTIFACT_MAX_BYTES"
 RETENTION_SWEEP_INTERVAL_ENV = "THETOWER_RETENTION_SWEEP_INTERVAL_SECONDS"
+PROTECTED_ARTIFACTS_MANIFEST = Path("config") / "protected_artifacts.txt"
 
 
 @dataclass(frozen=True)
@@ -26,6 +29,8 @@ class RetentionResult:
     files_removed: int = 0
     bytes_removed: int = 0
     directories_removed: int = 0
+    files_protected: int = 0
+    bytes_protected: int = 0
     errors: tuple[str, ...] = ()
 
     def combine(self, other: "RetentionResult") -> "RetentionResult":
@@ -35,6 +40,8 @@ class RetentionResult:
             directories_removed=(
                 self.directories_removed + other.directories_removed
             ),
+            files_protected=self.files_protected + other.files_protected,
+            bytes_protected=self.bytes_protected + other.bytes_protected,
             errors=self.errors + other.errors,
         )
 
@@ -44,6 +51,112 @@ class _ArtifactFile:
     path: Path
     size: int
     modified_at: float
+    protected: bool = False
+
+
+class ProtectedArtifactManifestError(ValueError):
+    """Raised when the evidence-protection manifest is absent or unsafe."""
+
+
+@dataclass(frozen=True)
+class ProtectedArtifactMatcher:
+    """Match repository-relative files protected from generated-data cleanup."""
+
+    repository_root: Path
+    exact_paths: frozenset[str]
+    directory_prefixes: tuple[str, ...]
+    glob_patterns: tuple[str, ...]
+
+    @classmethod
+    def from_manifest(
+        cls,
+        repository_root: Path | str,
+        manifest_path: Path | str,
+    ) -> "ProtectedArtifactMatcher":
+        repository = Path(repository_root).resolve()
+        manifest = Path(manifest_path)
+        if not manifest.is_absolute():
+            manifest = repository / manifest
+        try:
+            lines = manifest.read_text(encoding="utf-8").splitlines()
+        except OSError as exc:
+            raise ProtectedArtifactManifestError(
+                f"cannot read protected-artifact manifest {manifest}: {exc}"
+            ) from exc
+
+        exact_paths: set[str] = set()
+        directory_prefixes: list[str] = []
+        glob_patterns: list[str] = []
+        for line_number, raw_line in enumerate(lines, start=1):
+            entry = raw_line.strip()
+            if not entry or entry.startswith("#"):
+                continue
+            normalized, is_directory = _validate_manifest_entry(
+                entry,
+                manifest=manifest,
+                line_number=line_number,
+            )
+            if is_directory:
+                directory_prefixes.append(normalized)
+            elif _has_glob_magic(normalized):
+                glob_patterns.append(normalized)
+            else:
+                exact_paths.add(normalized)
+
+        return cls(
+            repository_root=repository,
+            exact_paths=frozenset(exact_paths),
+            directory_prefixes=tuple(sorted(set(directory_prefixes))),
+            glob_patterns=tuple(sorted(set(glob_patterns))),
+        )
+
+    def matches(self, path: Path | str) -> bool:
+        candidate = Path(path)
+        try:
+            relative = candidate.relative_to(self.repository_root)
+        except ValueError:
+            return False
+        relative_text = relative.as_posix()
+        if relative_text in self.exact_paths:
+            return True
+        if any(
+            relative_text.startswith(prefix)
+            for prefix in self.directory_prefixes
+        ):
+            return True
+        return any(
+            fnmatch.fnmatchcase(relative_text, pattern)
+            for pattern in self.glob_patterns
+        )
+
+
+def _validate_manifest_entry(
+    entry: str,
+    *,
+    manifest: Path,
+    line_number: int,
+) -> tuple[str, bool]:
+    if "\\" in entry:
+        raise ProtectedArtifactManifestError(
+            f"{manifest}:{line_number}: use repository-relative POSIX paths"
+        )
+    is_directory = entry.endswith("/")
+    normalized = entry.rstrip("/") if is_directory else entry
+    path = PurePosixPath(normalized)
+    if (
+        not normalized
+        or path.is_absolute()
+        or any(part in {"", ".", ".."} for part in path.parts)
+    ):
+        raise ProtectedArtifactManifestError(
+            f"{manifest}:{line_number}: unsafe protected-artifact path {entry!r}"
+        )
+    normalized = path.as_posix()
+    return (f"{normalized}/" if is_directory else normalized), is_directory
+
+
+def _has_glob_magic(path: str) -> bool:
+    return any(character in path for character in "*?[")
 
 
 def prune_artifact_tree(
@@ -52,6 +165,7 @@ def prune_artifact_tree(
     max_age_days: int = DEFAULT_ARTIFACT_RETENTION_DAYS,
     max_bytes: int = DEFAULT_ARTIFACT_MAX_BYTES,
     now: Optional[float] = None,
+    is_protected: Optional[Callable[[Path], bool]] = None,
 ) -> RetentionResult:
     """Remove aged and then oldest generated files from one owned directory."""
 
@@ -88,19 +202,28 @@ def prune_artifact_tree(
                 continue
             if not stat.S_ISREG(details.st_mode):
                 continue
+            try:
+                protected = bool(is_protected and is_protected(path))
+            except Exception as exc:
+                return RetentionResult(
+                    errors=(f"artifact protection check failed for {path}: {exc}",)
+                )
             files.append(
                 _ArtifactFile(
                     path=path,
                     size=max(0, int(details.st_size)),
                     modified_at=float(details.st_mtime),
+                    protected=protected,
                 )
             )
 
     removed_files = 0
     removed_bytes = 0
+    protected_files = sum(1 for item in files if item.protected)
+    protected_bytes = sum(item.size for item in files if item.protected)
     remaining: list[_ArtifactFile] = []
     for artifact in sorted(files, key=lambda item: (item.modified_at, str(item.path))):
-        if artifact.modified_at >= cutoff:
+        if artifact.protected or artifact.modified_at >= cutoff:
             remaining.append(artifact)
             continue
         if _unlink_artifact(artifact.path, errors):
@@ -112,7 +235,11 @@ def prune_artifact_tree(
     total_bytes = sum(item.size for item in remaining)
     size_prune_cutoff = current_time - SIZE_PRUNE_GRACE_SECONDS
     for artifact in remaining:
-        if total_bytes <= byte_limit or artifact.modified_at > size_prune_cutoff:
+        if (
+            total_bytes <= byte_limit
+            or artifact.protected
+            or artifact.modified_at > size_prune_cutoff
+        ):
             continue
         if _unlink_artifact(artifact.path, errors):
             removed_files += 1
@@ -124,6 +251,8 @@ def prune_artifact_tree(
         files_removed=removed_files,
         bytes_removed=removed_bytes,
         directories_removed=removed_directories,
+        files_protected=protected_files,
+        bytes_protected=protected_bytes,
         errors=tuple(errors),
     )
 
@@ -168,11 +297,23 @@ class RuntimeArtifactRetention:
         max_age_days: int = DEFAULT_ARTIFACT_RETENTION_DAYS,
         max_bytes: int = DEFAULT_ARTIFACT_MAX_BYTES,
         interval_seconds: float = DEFAULT_RETENTION_SWEEP_INTERVAL_SECONDS,
+        repository_root: Optional[Path | str] = None,
+        protection_manifest: Optional[Path | str] = None,
     ) -> None:
         self.roots = tuple(_deduplicate_safe_roots(roots))
         self.max_age_days = max(1, int(max_age_days))
         self.max_bytes = max(1, int(max_bytes))
         self.interval_seconds = max(1.0, float(interval_seconds))
+        self.repository_root = (
+            Path(repository_root).resolve()
+            if repository_root is not None
+            else None
+        )
+        self.protection_manifest = (
+            Path(protection_manifest)
+            if protection_manifest is not None
+            else None
+        )
         self._last_sweep_monotonic: Optional[float] = None
 
     @classmethod
@@ -215,6 +356,8 @@ class RuntimeArtifactRetention:
                 RETENTION_SWEEP_INTERVAL_ENV,
                 DEFAULT_RETENTION_SWEEP_INTERVAL_SECONDS,
             ),
+            repository_root=repository,
+            protection_manifest=repository / PROTECTED_ARTIFACTS_MANIFEST,
         )
 
     def maybe_prune(
@@ -235,6 +378,15 @@ class RuntimeArtifactRetention:
         ):
             return None
         self._last_sweep_monotonic = monotonic_value
+        matcher: Optional[ProtectedArtifactMatcher] = None
+        if self.repository_root is not None and self.protection_manifest is not None:
+            try:
+                matcher = ProtectedArtifactMatcher.from_manifest(
+                    self.repository_root,
+                    self.protection_manifest,
+                )
+            except ProtectedArtifactManifestError as exc:
+                return RetentionResult(errors=(str(exc),))
         result = RetentionResult()
         for root in self.roots:
             result = result.combine(
@@ -243,6 +395,7 @@ class RuntimeArtifactRetention:
                     max_age_days=self.max_age_days,
                     max_bytes=self.max_bytes,
                     now=now,
+                    is_protected=matcher.matches if matcher is not None else None,
                 )
             )
         return result
@@ -281,7 +434,10 @@ __all__ = [
     "DEFAULT_ARTIFACT_MAX_BYTES",
     "DEFAULT_ARTIFACT_RETENTION_DAYS",
     "DEFAULT_RETENTION_SWEEP_INTERVAL_SECONDS",
+    "PROTECTED_ARTIFACTS_MANIFEST",
     "RETENTION_SWEEP_INTERVAL_ENV",
+    "ProtectedArtifactManifestError",
+    "ProtectedArtifactMatcher",
     "RetentionResult",
     "RuntimeArtifactRetention",
     "prune_artifact_tree",

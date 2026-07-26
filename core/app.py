@@ -239,7 +239,7 @@ class App:
             )
         if result.errors:
             log(
-                "[STORAGE] Artifact retention skipped files after "
+                "[STORAGE] Artifact retention encountered "
                 f"{len(result.errors)} errors; first error: {result.errors[0]}",
                 "WARN",
             )

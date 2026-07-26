@@ -683,6 +683,21 @@ positive integer environment values:
 - `THETOWER_ARTIFACT_MAX_BYTES`
 - `THETOWER_RETENTION_SWEEP_INTERVAL_SECONDS`
 
+Development evidence that must outlive these limits is listed in
+`config/protected_artifacts.txt`. Entries are repository-relative POSIX paths;
+a trailing `/` protects a directory tree, and `*`, `?`, and `[]` may protect a
+narrow file family. Protected files are never selected by either the age or
+size pass, though their bytes still count toward the tree's size. The runtime
+loads the manifest before touching any retention root and skips the complete
+sweep if the file is absent, unreadable, or contains an absolute or
+parent-traversing path.
+
+Before relying on generated evidence in durable development documentation,
+either promote it to a canonical regression fixture outside the cleanup
+boundary or add its exact path, narrow family, or observation directory to the
+protected manifest. Do not use a broad retention-root entry as a substitute
+for selecting durable evidence.
+
 `logs/actions.log` and an optional mission log rotate independently at 16 MiB
 with five numbered backups by default. Use `TOWER_ACTION_LOG_MAX_BYTES` and
 `TOWER_ACTION_LOG_BACKUP_COUNT` to change those integer limits. Rotation keeps

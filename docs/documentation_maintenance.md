@@ -43,6 +43,10 @@ when its condition applies.
 - Record a new anomaly in `docs/observed_issues.md` with date, symptom,
   evidence, safety response, and current status. Put repair work in the
   appropriate backlog rather than using the issue ledger as a second backlog.
+- When durable documentation relies on generated evidence under a runtime
+  retention root, promote it to a canonical regression fixture or add a narrow
+  repository-relative entry to `config/protected_artifacts.txt` in the same
+  change. A documentation link alone does not exempt a file from cleanup.
 - When fixed, retain the original symptom, add cause, resolution, fixing
   commit, and regression location, then move the entire entry to the archive
   for the resolution year. Add that archive to `docs/issues/README.md` when
@@ -80,9 +84,12 @@ For every documentation change:
 3. Verify every changed local Markdown link and heading anchor.
 4. Confirm that all active tasks and open issues remain represented before
    archiving or deleting material.
-5. Run `git diff --check` and any repository tests needed when documentation is
+5. Confirm that generated evidence used by changed durable documentation is
+   either outside the runtime cleanup boundary or represented narrowly in
+   `config/protected_artifacts.txt`.
+6. Run `git diff --check` and any repository tests needed when documentation is
    generated, executable, schema-defining, or coupled to behavior.
-6. Do not copy volatile runtime facts into durable documentation. Runtime state
+7. Do not copy volatile runtime facts into durable documentation. Runtime state
    belongs only in a freshly inspected handoff or current diagnostic report.
 
 Prefer one canonical statement plus links over duplicated guidance. If two

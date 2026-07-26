@@ -294,8 +294,11 @@ evidence is attached.
 - Generated failure/OCR screenshots and post-run observation pages are bounded
   independently from canonical records. The runtime prunes files older than 30
   days and then the oldest files above 1 GiB per owned evidence directory,
-  running once at startup and every six hours. Symlinked trees and canonical
-  regression fixtures are outside that ownership boundary.
+  running once at startup and every six hours. Symlinked trees, canonical
+  regression fixtures, and repository-relative development evidence named by
+  `config/protected_artifacts.txt` are outside deletion authority. Protection
+  is resolved before a sweep begins; a missing or invalid manifest fails closed
+  without touching any retention root.
 - `actions.log` is size-rotated before an atomic log group is appended. The
   default keeps a 16 MiB current log plus five numbered backups; an already
   oversized log contributes only its most recent complete lines to the first

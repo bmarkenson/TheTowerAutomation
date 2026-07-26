@@ -1,0 +1,18 @@
+# Repository-relative development evidence excluded from generated-artifact
+# retention. A trailing slash protects a directory tree; *, ?, and [] are
+# supported for file patterns. Keep entries narrow and link durable evidence
+# from the applicable issue, history, or development record.
+
+screenshots/matches/Game20260715_224503_ABORT_Close_Perks.png
+screenshots/matches/Game20260716_101413_*_OCR_EVIDENCE.png
+screenshots/matches/Game20260722_202039_*_OCR_EVIDENCE.png
+screenshots/matches/Game20260725_210917_*_OCR_EVIDENCE.png
+screenshots/matches/Game20260726_004643_*_OCR_EVIDENCE.png
+screenshots/matches/guild_chest_guardian_retained_20260717.png
+screenshots/matches/guild_chest_750_available_20260717.png
+screenshots/matches/guild_chests_claimed_20260717.png
+
+logs/battle_observations/Battle20260722T185119-0700/
+logs/battle_observations/Battle20260722T190745-0700/
+logs/battle_observations/Battle20260722T195400-0700/
+logs/battle_observations/Battle20260722T202039-0700/
