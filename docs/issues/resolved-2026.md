@@ -8,6 +8,46 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Boss presence disabled the automatically paused Distance Adjuster
+
+- **Observed:** Operator report on 2026-07-25 while Orb Distance enforcement
+  was attempting to change a live run.
+- **Symptom:** Distance Adjuster opened while a Boss was on the field. Opening
+  the panel paused combat, while the Boss's presence greyed out the distance
+  arrows, so the requested value could not change and the Boss could not clear
+  while the panel remained open.
+- **Evidence:** The operator identified both game behaviors.
+  `logs/actions.log` independently records a Tournament enforcement attempt at
+  16:58:07 with swapped values, one requested step, and
+  `reason=value_did_not_change`; a later attempt at 16:58:39 observed the
+  correct pair.
+- **Safety response:** Diagnosis and implementation used source, retained
+  fixtures, generated plans, and historical logs only. No live device input,
+  process change, battle exit, or Surrender was performed.
+- **Cause:** The handler kept the automatically pausing panel open while
+  waiting for a verified value transition. An unavailable arrow or unchanged
+  value ended that panel session, but only the outer 30-second strategy
+  cooldown could initiate another attempt; the handler did not deliberately
+  resume combat and synchronize its retry to battle progress.
+- **Resolution:** An unavailable arrow or unchanged value now closes Distance
+  Adjuster, verifies the running side menu, waits with combat active until the
+  wave advances, and retries through a bounded number of fresh panel sessions.
+  The runtime action guard is propagated into strategy execution and rechecked
+  throughout the between-session wait and before every new panel open. The
+  experimental Tier 19 Farm profile now also runs the same range-selected
+  enforcement: observed configured Ranges `30.00m` and `98.38m` select their
+  respective pairs, while any other readable Range remains preserved without
+  panel input.
+- **Regression:** `test/test_orb_distance.py` covers close, wave advance,
+  reopen, and successful fresh-evidence correction after an unchanged tap.
+  `test/test_run_initialization.py` covers Tier 19 generation, run-gate
+  ownership, and continued Target Priority preservation.
+- **Validation:** Focused Orb Distance and initialization coverage passed 90
+  tests; the broader integration set passed 152 tests. Repository-wide
+  validation passed 757 sandbox-compatible tests plus the separately permitted
+  localhost HTTP test, for 758 total.
+- **Fixed by:** `b01ebf9`.
+
 ### Tournament observer repeated session preflight after a mismatch acknowledgement
 
 - **Observed:** 2026-07-25 after the operator attached automation to a

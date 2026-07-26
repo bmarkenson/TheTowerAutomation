@@ -37,6 +37,26 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-25 Boss-safe Orb Distance enforcement
+
+- Repaired Distance Adjuster enforcement when a live Boss greys out the arrows
+  while the panel's automatic pause prevents combat from clearing it. An
+  unavailable arrow or unchanged verified tap now closes the panel, waits for
+  the running wave to advance, and retries from fresh panel evidence in a
+  bounded number of sessions.
+- Propagated the runtime action guard into strategy execution so the
+  between-session wait and every new panel open respect a newly applied
+  operator pause.
+- Changed `farm_t19_experiment` from Orb Distance `preserve` to range-selected
+  `enforce`. Both Farm tiers now apply the configured pair for observed Range
+  `30.00m` or `98.38m` and preserve any other readable experimental Range
+  without Distance Adjuster input; Tier 19 Target Priority and Damage Slider
+  remain preserved.
+- Focused coverage passed 90 tests, broader integration coverage passed 152,
+  and repository-wide validation passed 757 sandbox-compatible tests plus the
+  separately permitted localhost HTTP test, for 758 total.
+- Implemented in commit `b01ebf9`.
+
 ### 2026-07-25 nonblocking Tournament observer mismatches
 
 - Repaired the attached-Tournament session-preflight loop. A read-only
