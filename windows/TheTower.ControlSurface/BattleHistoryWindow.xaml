@@ -99,6 +99,7 @@
           <TabItem Header="Battle stats">
             <TreeView x:Name="ReportTree"
                       Background="{StaticResource PanelBrush}"
+                      Foreground="#EDF2F7"
                       BorderThickness="0"
                       Padding="4"
                       ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -107,11 +108,16 @@
               <TreeView.Resources>
                 <Style TargetType="{x:Type TreeViewItem}">
                   <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                  <Setter Property="Foreground" Value="#EDF2F7" />
                   <Setter Property="IsExpanded" Value="False" />
                 </Style>
                 <HierarchicalDataTemplate DataType="{x:Type local:ReportSection}"
                                           ItemsSource="{Binding Rows}">
-                  <Grid Margin="3,5,8,5">
+                  <Grid Margin="3,5,8,0">
+                    <Grid.RowDefinitions>
+                      <RowDefinition Height="Auto" />
+                      <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                       <ColumnDefinition Width="*" />
                       <ColumnDefinition Width="Auto" />
@@ -123,22 +129,67 @@
                                Text="{Binding Rows.Count, StringFormat={}{0} rows}"
                                Foreground="{StaticResource MutedBrush}"
                                Margin="12,0,0,0" />
+                    <Border Grid.Row="1"
+                            Grid.ColumnSpan="2"
+                            Margin="20,7,0,0"
+                            Padding="8,5"
+                            Background="#172338"
+                            BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="0,0,0,1">
+                      <Border.Style>
+                        <Style TargetType="{x:Type Border}">
+                          <Setter Property="Visibility" Value="Collapsed" />
+                          <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsExpanded, RelativeSource={RelativeSource AncestorType={x:Type TreeViewItem}}}"
+                                         Value="True">
+                              <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </Border.Style>
+                      <Grid>
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="2*" />
+                          <ColumnDefinition Width="3*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="STAT"
+                                   Foreground="{StaticResource MutedBrush}"
+                                   FontSize="10"
+                                   FontWeight="SemiBold" />
+                        <TextBlock Grid.Column="1"
+                                   Text="VALUE"
+                                   Foreground="{StaticResource MutedBrush}"
+                                   FontSize="10"
+                                   FontWeight="SemiBold"
+                                   Margin="12,0,0,0" />
+                      </Grid>
+                    </Border>
                   </Grid>
                 </HierarchicalDataTemplate>
                 <DataTemplate DataType="{x:Type local:ReportRow}">
-                  <Grid Margin="8,3,8,3">
-                    <Grid.ColumnDefinitions>
-                      <ColumnDefinition Width="*" />
-                      <ColumnDefinition Width="300" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="{Binding Name}"
-                               TextWrapping="Wrap"
-                               Margin="0,0,12,0" />
-                    <TextBlock Grid.Column="1"
-                               Text="{Binding Value}"
-                               TextWrapping="Wrap"
-                               Foreground="{StaticResource MutedBrush}" />
-                  </Grid>
+                  <Border Margin="8,0,8,0"
+                          Background="{StaticResource PanelAltBrush}"
+                          BorderBrush="{StaticResource BorderBrush}"
+                          BorderThickness="0,0,0,1">
+                    <Grid>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="2*" />
+                        <ColumnDefinition Width="3*" />
+                      </Grid.ColumnDefinitions>
+                      <TextBlock Text="{Binding Name}"
+                                 TextWrapping="Wrap"
+                                 Foreground="#EDF2F7"
+                                 Margin="8,7,12,7" />
+                      <Border Grid.Column="1"
+                              BorderBrush="{StaticResource BorderBrush}"
+                              BorderThickness="1,0,0,0"
+                              Padding="12,7">
+                        <TextBlock Text="{Binding Value}"
+                                   TextWrapping="Wrap"
+                                   Foreground="#C8D5E6" />
+                      </Border>
+                    </Grid>
+                  </Border>
                 </DataTemplate>
               </TreeView.Resources>
             </TreeView>
