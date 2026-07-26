@@ -263,7 +263,9 @@
             <DataGrid Grid.Row="2" x:Name="ActivityGrid"
                       SelectionMode="Extended" SelectionUnit="FullRow"
                       ClipboardCopyMode="ExcludeHeader"
+                      AreRowDetailsFrozen="True"
                       RowDetailsVisibilityMode="Collapsed"
+                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                       SelectionChanged="ActivityGrid_SelectionChanged"
                       MouseDoubleClick="ActivityGrid_MouseDoubleClick"
                       PreviewKeyDown="ActivityGrid_PreviewKeyDown">
