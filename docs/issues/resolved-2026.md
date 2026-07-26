@@ -13,27 +13,33 @@ and actionable work lives in
 - **Observed:** 2026-07-26 in an operator screenshot of the newly published
   collapsible Battle stats tree.
 - **Symptom:** Expanded section names rendered correctly in cyan, but their
-  child stat labels were nearly black against the dark panel and the loose
-  two-column text was difficult to scan.
+  child stat labels were nearly black against the dark panel. The first
+  table-style revision then sized each row independently, producing staggered
+  columns instead of one aligned table.
 - **Evidence:** The initial tree template explicitly colored section names and
   values but left the `TreeView`, `TreeViewItem`, and child-name foregrounds to
   WPF inheritance. The screenshot showed the resulting dark default foreground
-  on the `#111827` report background.
+  on the `#111827` report background. A follow-up screenshot showed that star
+  columns inside content-sized row templates were ratios of each individual
+  row's width.
 - **Safety response:** The correction was code-only and did not interact with
   the automation process, control state, battle, or emulator.
 - **Cause:** WPF's tree item/template boundary did not preserve the Window's
-  light foreground for the child-name `TextBlock`.
+  light foreground for the child-name `TextBlock`, and unconstrained star
+  columns did not establish a common width across separate child templates.
 - **Resolution:** The tree, item containers, and child names now declare the
   light foreground explicitly. Expanded sections also show Stat/Value headings
-  and aligned 2:3 table-style rows with a contrasting background, cell divider,
-  row separator, padding, and a higher-contrast value color.
+  and table-style rows with a contrasting background, cell divider, row
+  separator, padding, and a higher-contrast value color. Header and child grids
+  now share fixed 240/480-unit columns, so every row uses the same table edges.
 - **Regression:** The contrast and table structure are defined in
   `windows/TheTower.ControlSurface/BattleHistoryWindow.xaml` and compiled by
   the checked-in Linux publish script.
 - **Validation:** `windows/TheTower.ControlSurface/publish-linux.sh` completed
   a self-contained `win-x64` publish successfully. Visual confirmation remains
   for the Windows operator after replacing and restarting the client.
-- **Fixed by:** `f690302`.
+- **Fixed by:** `f690302`, followed by the shared-column correction in
+  `a2ac376`.
 
 ### Completed Battles omitted survival ability activation waves
 

@@ -110,8 +110,10 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   active battle. Implemented in commit `f876647`.
 - Operator screenshot review exposed WPF's near-black inherited child
   foreground. Follow-up commit `f690302` makes the foreground explicit and
-  presents expanded children as aligned, headed, bordered Stat/Value rows. The
-  refreshed self-contained `win-x64` publish also completed successfully.
+  presents expanded children as headed, bordered Stat/Value rows. A second
+  screenshot exposed content-sized star columns; commit `a2ac376` replaces
+  them with shared fixed-width columns so the header and every child row align.
+  Each refreshed self-contained `win-x64` publish completed successfully.
 
 ### 2026-07-25 Coins/min ramp plausibility confirmation
 
