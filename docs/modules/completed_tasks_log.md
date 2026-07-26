@@ -60,6 +60,21 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   `win-x64` WPF publish also completed successfully. Implemented in commit
   `efec703`.
 
+### 2026-07-26 protected development evidence
+
+- Added a tracked, repository-relative protection manifest for generated
+  screenshots and post-run observation directories used as durable development
+  evidence. The initial entries cover the retained OCR, perk-configuration,
+  guild-chest, and aborted-perk captures cited by current issue and resolution
+  records.
+- Both age and size pruning now exempt exact files, narrow wildcard families,
+  and declared directory trees. Protection is classified before deletion; an
+  absent, unreadable, or unsafe manifest fails the entire sweep closed.
+- Regression coverage verifies exact, wildcard, and directory protection plus
+  missing/invalid-manifest behavior. Validation passed 777 sandbox-compatible
+  tests plus the separately permitted authenticated loopback HTTP test, for 778
+  total. Implemented in commit `cc103d6`.
+
 ### 2026-07-26 Glass Cannon Auto Pick correction and run comparison
 
 - The operator-supplied ranking replaced the short-lived survival-first order
