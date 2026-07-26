@@ -49,6 +49,10 @@ loadout catalogs, and compact Tier profiles:
   EHLS/EALS, enforces the Range-selected Orb Distance preset, and preserves
   Target Priority without inspecting or changing it.
 
+See [`docs/game_strategy.md`](docs/game_strategy.md) for the account's
+GC-with-Hybrid-aspects model, Damage Slider economics, T18/T19 Heat differences,
+and the evidence standard for comparing battle results.
+
 For example:
 
 ```bash
