@@ -14,6 +14,7 @@ from numpy.typing import NDArray
 from utils.logger import log, log_action_intent, set_mission_log_path
 from core.watchdog import watchdog_process_check, ensure_adb_connected
 from core.adb_target_session import AdbTargetSession
+from core.artifact_retention import RuntimeArtifactRetention
 from core.ss_capture import capture_and_save_screenshot
 from core.state_detector import detect_state_and_overlays
 from core.automation_supervisor import AutomationSupervisor
@@ -154,6 +155,13 @@ class App:
             save_wave_samples=config.save_wave_samples,
             save_coin_samples=config.save_coin_samples,
         )
+        self._artifact_retention = RuntimeArtifactRetention.for_repository(
+            Path(__file__).resolve().parent.parent,
+            extra_roots=(
+                config.save_wave_samples,
+                config.save_coin_samples,
+            ),
+        )
 
         self._match_trace = config.match_trace
         self._auto_start_enabled = config.auto_start_enabled
@@ -203,6 +211,38 @@ class App:
             tracker = BattleActivationTracker()
             self._battle_activation_tracker = tracker
         return tracker
+
+    def _prune_generated_artifacts(self, *, force: bool = False) -> None:
+        """Apply the bounded retention policy without interrupting automation."""
+
+        retention = getattr(self, "_artifact_retention", None)
+        if retention is None:
+            return
+        try:
+            result = retention.maybe_prune(force=force)
+        except Exception as exc:
+            log(f"[STORAGE] Artifact retention sweep failed: {exc}", "WARN")
+            return
+        if result is None:
+            return
+        if result.files_removed:
+            removed_mib = result.bytes_removed / (1024 * 1024)
+            log(
+                "[STORAGE] Removed "
+                f"{result.files_removed} expired/old generated artifacts "
+                f"({removed_mib:.1f} MiB) under the "
+                f"{retention.max_age_days}-day / "
+                f"{retention.max_bytes / (1024 * 1024):.0f}-MiB-per-directory "
+                "retention policy",
+                "INFO",
+                console=True,
+            )
+        if result.errors:
+            log(
+                "[STORAGE] Artifact retention skipped files after "
+                f"{len(result.errors)} errors; first error: {result.errors[0]}",
+                "WARN",
+            )
 
     def _runtime_policy(self) -> Dict[str, Any]:
         strategy = self._mission_mgr.strategy
@@ -1441,6 +1481,7 @@ class App:
 
     def run(self) -> None:
         log("Starting main heartbeat loop.", level="INFO", console=True)
+        self._prune_generated_artifacts(force=True)
         if self._config.wait_on_start:
             try:
                 AUTOMATION.mode = ExecMode.WAIT
@@ -1461,6 +1502,7 @@ class App:
 
         try:
             while True:
+                self._prune_generated_artifacts()
                 # Control synchronization must not depend on a working ADB
                 # connection. This both acknowledges Pause during an outage
                 # and permits a paused live target handoff before capture.

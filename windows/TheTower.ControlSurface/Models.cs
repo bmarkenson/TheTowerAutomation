@@ -440,6 +440,24 @@ public sealed class BattleListResponse
     public int Total { get; set; }
 }
 
+public sealed class DiscardBattleResponse
+{
+    [JsonPropertyName("battle_id")]
+    public string BattleId { get; set; } = "";
+
+    [JsonPropertyName("discarded_at")]
+    public string? DiscardedAt { get; set; }
+
+    [JsonPropertyName("purge_after")]
+    public string? PurgeAfter { get; set; }
+
+    [JsonPropertyName("quarantine_path")]
+    public string? QuarantinePath { get; set; }
+
+    [JsonPropertyName("files")]
+    public List<string> Files { get; set; } = [];
+}
+
 public sealed class BattleSummary
 {
     [JsonPropertyName("battle_id")]

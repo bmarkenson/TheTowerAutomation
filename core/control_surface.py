@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import fcntl
 import json
 import math
 import os
 from pathlib import Path
 import re
+import shutil
 import threading
 import time
 from typing import Any, Mapping, Optional, Sequence
@@ -30,11 +31,12 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 7
+CONTROL_SURFACE_REVISION = 8
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
     "attached_automation_restart",
+    "completed_battle_discard",
     "exclusive_strategy_validation_status",
     "explicit_strategy_disposition",
     "selected_strategy_process_start",
@@ -42,6 +44,7 @@ CONTROL_SURFACE_CAPABILITIES = (
 )
 ATTACHED_RESTART_TIMEOUT_SECONDS = 20.0
 ATTACHED_RESTART_POLL_SECONDS = 0.25
+DEFAULT_DISCARDED_BATTLE_RETENTION_DAYS = 30
 _BATTLE_ID_RE = re.compile(r"(?:Battle|Tournament)\d{8}T\d{6}[+-]\d{4}")
 _LOG_RE = re.compile(
     r"^\[(?P<level>[A-Z_]+) (?P<timestamp>[^\]]+)] (?P<message>.*)$"
@@ -96,6 +99,10 @@ class ControlSurfaceService:
         action_log: Path | str = "logs/actions.log",
         battles_dir: Path | str = "logs/battles",
         tournaments_dir: Path | str = "logs/tournaments",
+        discarded_battles_dir: Path | str = "logs/discarded_battles",
+        discarded_battle_retention_days: int = (
+            DEFAULT_DISCARDED_BATTLE_RETENTION_DAYS
+        ),
         stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS,
         process_manager: Optional[SystemdAutomationManager] = None,
     ) -> None:
@@ -104,10 +111,16 @@ class ControlSurfaceService:
         self.action_log = self._resolve_path(action_log)
         self.battles_dir = self._resolve_path(battles_dir)
         self.tournaments_dir = self._resolve_path(tournaments_dir)
+        self.discarded_battles_dir = self._resolve_path(discarded_battles_dir)
+        self.discarded_battle_retention_days = max(
+            1,
+            int(discarded_battle_retention_days),
+        )
         self.stale_after_seconds = max(1, int(stale_after_seconds))
         self.control_store = ControlDirectiveStore(self.control_path)
         self.process_manager = process_manager
         self._process_action_lock = threading.Lock()
+        self._battle_mutation_lock = threading.RLock()
 
     def status(self, *, now: Optional[float] = None) -> dict[str, Any]:
         """Return operator intent, observed heartbeat, and process evidence."""
@@ -972,21 +985,24 @@ class ControlSurfaceService:
         """Return newest completed-battle summaries without OCR source bulk."""
 
         requested_limit = max(1, min(int(limit), 100))
-        paths = list(self.battles_dir.glob("Battle*.json"))
-        paths.extend(self.tournaments_dir.glob("Tournament*.json"))
-        items: list[dict[str, Any]] = []
-        errors: list[dict[str, str]] = []
-        for path in paths:
-            try:
-                record = self._load_completed_battle_path(path)
-                items.append(_battle_summary(record))
-            except (OSError, json.JSONDecodeError, ValueError) as exc:
-                errors.append({"file": path.name, "error": str(exc)})
+        with self._battle_mutation_lock:
+            purged = self._purge_expired_discarded_battles()
+            paths = list(self.battles_dir.glob("Battle*.json"))
+            paths.extend(self.tournaments_dir.glob("Tournament*.json"))
+            items: list[dict[str, Any]] = []
+            errors: list[dict[str, str]] = []
+            for path in paths:
+                try:
+                    record = self._load_completed_battle_path(path)
+                    items.append(_battle_summary(record))
+                except (OSError, json.JSONDecodeError, ValueError) as exc:
+                    errors.append({"file": path.name, "error": str(exc)})
         items.sort(key=_battle_sort_key, reverse=True)
         return {
             "items": items[:requested_limit],
             "total": len(paths),
             "errors": errors,
+            "discarded_purged": purged,
         }
 
     def battle(self, battle_id: str) -> dict[str, Any]:
@@ -994,24 +1010,169 @@ class ControlSurfaceService:
 
         if not _BATTLE_ID_RE.fullmatch(str(battle_id)):
             raise ControlSurfaceRequestError("Invalid battle id", status=404)
-        directory = (
+        with self._battle_mutation_lock:
+            path = self._completed_battle_directory(battle_id) / f"{battle_id}.json"
+            if not path.is_file():
+                raise ControlSurfaceRequestError("Battle not found", status=404)
+            try:
+                record = self._load_completed_battle_path(path)
+                classification = classification_for_record(record)
+                record.setdefault("battle_type", classification["type"])
+                record.setdefault("battle_type_analysis", classification)
+                return record
+            except (OSError, json.JSONDecodeError, ValueError) as exc:
+                raise ControlSurfaceRequestError(
+                    f"Battle record is unreadable: {exc}", status=500
+                ) from exc
+
+    def discard_battle(
+        self,
+        battle_id: str,
+        *,
+        now: Optional[datetime] = None,
+    ) -> dict[str, Any]:
+        """Move one exact completed-record pair into expiring quarantine."""
+
+        if not _BATTLE_ID_RE.fullmatch(str(battle_id)):
+            raise ControlSurfaceRequestError("Invalid battle id", status=404)
+        discarded_at = _utc_datetime(now)
+        purge_after = discarded_at + timedelta(
+            days=self.discarded_battle_retention_days
+        )
+        with self._battle_mutation_lock:
+            self._purge_expired_discarded_battles(now=discarded_at)
+            source_directory = self._completed_battle_directory(battle_id)
+            json_path = source_directory / f"{battle_id}.json"
+            markdown_path = source_directory / f"{battle_id}.md"
+            if not json_path.is_file():
+                raise ControlSurfaceRequestError("Battle not found", status=404)
+            try:
+                self._load_completed_battle_path(json_path)
+            except (OSError, json.JSONDecodeError, ValueError) as exc:
+                raise ControlSurfaceRequestError(
+                    f"Battle record is unreadable: {exc}",
+                    status=500,
+                ) from exc
+
+            package_name = (
+                discarded_at.strftime("%Y%m%dT%H%M%S%fZ")
+                + "__"
+                + str(battle_id)
+            )
+            package = self.discarded_battles_dir / package_name
+            try:
+                package.mkdir(parents=True, exist_ok=False)
+            except OSError as exc:
+                raise ControlSurfaceRequestError(
+                    f"Unable to create discard quarantine: {exc}",
+                    status=500,
+                ) from exc
+
+            moved: list[tuple[Path, Path]] = []
+            try:
+                for source in (json_path, markdown_path):
+                    if not source.is_file():
+                        continue
+                    destination = package / source.name
+                    os.replace(source, destination)
+                    moved.append((source, destination))
+                metadata = {
+                    "battle_id": str(battle_id),
+                    "discarded_at": discarded_at.isoformat(),
+                    "purge_after": purge_after.isoformat(),
+                    "source_directory": self._display_path(source_directory),
+                    "files": [destination.name for _, destination in moved],
+                }
+                (package / "discard.json").write_text(
+                    json.dumps(metadata, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+            except OSError as exc:
+                for source, destination in reversed(moved):
+                    try:
+                        if destination.exists() and not source.exists():
+                            os.replace(destination, source)
+                    except OSError:
+                        pass
+                try:
+                    package.rmdir()
+                except OSError:
+                    pass
+                raise ControlSurfaceRequestError(
+                    f"Unable to quarantine battle record: {exc}",
+                    status=500,
+                ) from exc
+
+            return {
+                "battle_id": str(battle_id),
+                "discarded_at": discarded_at.isoformat(),
+                "purge_after": purge_after.isoformat(),
+                "quarantine_path": self._display_path(package),
+                "files": [destination.name for _, destination in moved],
+            }
+
+    def purge_expired_discarded_battles(
+        self,
+        *,
+        now: Optional[datetime] = None,
+    ) -> int:
+        """Permanently delete quarantine packages whose deadline has passed."""
+
+        with self._battle_mutation_lock:
+            return self._purge_expired_discarded_battles(
+                now=_utc_datetime(now),
+            )
+
+    def _purge_expired_discarded_battles(
+        self,
+        *,
+        now: Optional[datetime] = None,
+    ) -> int:
+        current_time = _utc_datetime(now)
+        root = self.discarded_battles_dir
+        if not root.is_dir() or root.is_symlink():
+            return 0
+        resolved_root = root.resolve()
+        purged = 0
+        for package in root.iterdir():
+            if package.is_symlink() or not package.is_dir():
+                continue
+            try:
+                if package.resolve().parent != resolved_root:
+                    continue
+                metadata = json.loads(
+                    (package / "discard.json").read_text(encoding="utf-8")
+                )
+                battle_id = str(metadata.get("battle_id") or "")
+                if (
+                    not _BATTLE_ID_RE.fullmatch(battle_id)
+                    or not package.name.endswith(f"__{battle_id}")
+                ):
+                    continue
+                purge_after = _utc_datetime(
+                    datetime.fromisoformat(str(metadata["purge_after"]))
+                )
+                if purge_after > current_time:
+                    continue
+                shutil.rmtree(package)
+                purged += 1
+            except (
+                KeyError,
+                OSError,
+                TypeError,
+                ValueError,
+                json.JSONDecodeError,
+            ):
+                # Malformed or partially moved packages fail closed for review.
+                continue
+        return purged
+
+    def _completed_battle_directory(self, battle_id: str) -> Path:
+        return (
             self.tournaments_dir
             if str(battle_id).startswith("Tournament")
             else self.battles_dir
         )
-        path = directory / f"{battle_id}.json"
-        if not path.is_file():
-            raise ControlSurfaceRequestError("Battle not found", status=404)
-        try:
-            record = self._load_completed_battle_path(path)
-            classification = classification_for_record(record)
-            record.setdefault("battle_type", classification["type"])
-            record.setdefault("battle_type_analysis", classification)
-            return record
-        except (OSError, json.JSONDecodeError, ValueError) as exc:
-            raise ControlSurfaceRequestError(
-                f"Battle record is unreadable: {exc}", status=500
-            ) from exc
 
     def activity(
         self,
@@ -1352,6 +1513,13 @@ def _battle_sort_key(item: Mapping[str, Any]) -> float:
         return 0.0
 
 
+def _utc_datetime(value: Optional[datetime]) -> datetime:
+    current = datetime.now(timezone.utc) if value is None else value
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    return current.astimezone(timezone.utc)
+
+
 def _tail_lines(path: Path, *, max_bytes: int) -> list[str]:
     try:
         with path.open("rb") as handle:
@@ -1476,6 +1644,7 @@ __all__ = [
     "CONTROL_SURFACE_REVISION",
     "ControlSurfaceRequestError",
     "ControlSurfaceService",
+    "DEFAULT_DISCARDED_BATTLE_RETENTION_DAYS",
     "DEFAULT_STALE_AFTER_SECONDS",
     "MAX_PAUSE_MINUTES",
 ]

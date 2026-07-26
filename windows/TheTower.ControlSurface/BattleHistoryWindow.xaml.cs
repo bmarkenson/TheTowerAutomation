@@ -108,6 +108,7 @@ public partial class BattleHistoryWindow : Window
         finally
         {
             _updatingBattles = false;
+            UpdateDiscardButton();
         }
     }
 
@@ -325,6 +326,14 @@ public partial class BattleHistoryWindow : Window
         var filteredCount = _battleView.Cast<object>().Count();
         FilterCountText.Text = $"{filteredCount} of {_battles.Count}";
         ExportCsvButton.IsEnabled = filteredCount > 0;
+        UpdateDiscardButton();
+    }
+
+    private void UpdateDiscardButton()
+    {
+        DiscardBattleButton.IsEnabled =
+            !_updatingBattles
+            && BattlesGrid.SelectedItem is BattleSummary;
     }
 
     private void EnsureFilteredSelection()
@@ -341,6 +350,7 @@ public partial class BattleHistoryWindow : Window
         {
             ClearBattleReport();
         }
+        UpdateDiscardButton();
     }
 
     private void ClearBattleReport()
@@ -350,6 +360,7 @@ public partial class BattleHistoryWindow : Window
         _detailCancellation = null;
         _selectedBattleId = null;
         _loadedBattleId = null;
+        DiscardBattleButton.IsEnabled = false;
         BattleTitleText.Text = "No completed battle matches the current filters";
         ReportTypeText.Text = "-";
         ReportTierText.Text = "-";
@@ -363,6 +374,66 @@ public partial class BattleHistoryWindow : Window
         _reportRows.Clear();
         _settingsRows.Clear();
         _perks.Clear();
+    }
+
+    private async void DiscardBattle_Click(object sender, RoutedEventArgs e)
+    {
+        if (BattlesGrid.SelectedItem is not BattleSummary battle)
+        {
+            return;
+        }
+
+        var tier = battle.Tier?.ToString(CultureInfo.InvariantCulture) ?? "-";
+        var wave = battle.Wave?.ToString(CultureInfo.InvariantCulture) ?? "-";
+        var confirmation = MessageBox.Show(
+            this,
+            "Discard this completed record?\n\n"
+            + $"{battle.BattleId}\n"
+            + $"{battle.BattleTypeDisplay} | Tier {tier} | Wave {wave}\n\n"
+            + "Its JSON and Markdown files will move into Linux quarantine. "
+            + "They remain manually recoverable until the configured purge "
+            + "deadline (30 days by default), then are permanently deleted.",
+            "Discard completed battle",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        DiscardBattleButton.IsEnabled = false;
+        HistoryStatusText.Text = $"Discarding {battle.BattleId}...";
+        _detailCancellation?.Cancel();
+        try
+        {
+            using var cancellation = new CancellationTokenSource(
+                TimeSpan.FromSeconds(30));
+            var discarded = await _api.DiscardBattleAsync(
+                battle.BattleId,
+                cancellation.Token);
+            var listing = await _api.GetBattlesAsync(cancellation.Token);
+            UpdateBattles(listing);
+
+            var deadline = DateTimeOffset.TryParse(
+                discarded.PurgeAfter,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out var purgeAfter)
+                ? purgeAfter.ToLocalTime().ToString("g", CultureInfo.CurrentCulture)
+                : discarded.PurgeAfter ?? "the configured deadline";
+            HistoryStatusText.Text =
+                $"Discarded {battle.BattleId}; permanent deletion after {deadline}";
+        }
+        catch (Exception exc)
+        {
+            HistoryStatusText.Text = exc.Message;
+            ShowError(exc);
+        }
+        finally
+        {
+            UpdateDiscardButton();
+        }
     }
 
     private void ExportCsv_Click(object sender, RoutedEventArgs e)
@@ -447,6 +518,7 @@ public partial class BattleHistoryWindow : Window
 
     private async void BattlesGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        UpdateDiscardButton();
         if (_updatingBattles || BattlesGrid.SelectedItem is not BattleSummary battle)
         {
             return;

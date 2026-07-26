@@ -58,3 +58,36 @@ def test_log_action_intent_writes_one_human_readable_header(
         "] Reviewing mission rewards — visible badges may identify "
         "claimable rewards"
     )
+
+
+def test_action_log_rotation_bounds_oversized_history_and_keeps_action_pair(
+    tmp_path,
+    monkeypatch,
+):
+    isolated_log = tmp_path / "actions.log"
+    isolated_log.write_text(
+        "".join(
+            f"[INFO 2026-07-26 10:00:{index:02d}] historical event {index}\n"
+            for index in range(20)
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(isolated_log))
+    monkeypatch.setenv("TOWER_ACTION_LOG_MAX_BYTES", "240")
+    monkeypatch.setenv("TOWER_ACTION_LOG_BACKUP_COUNT", "2")
+
+    logger.log_action(
+        "Discard requested",
+        detail="battle_id=Battle20260726T100000-0700",
+        console=False,
+    )
+
+    backup = tmp_path / "actions.log.1"
+    assert backup.is_file()
+    assert backup.stat().st_size <= 240
+    current_lines = isolated_log.read_text(encoding="utf-8").splitlines()
+    assert len(current_lines) == 2
+    assert current_lines[0].endswith("] Discard requested")
+    assert current_lines[1].endswith(
+        "] battle_id=Battle20260726T100000-0700"
+    )

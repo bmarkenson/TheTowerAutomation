@@ -21,11 +21,12 @@
           <RowDefinition Height="*" />
         </Grid.RowDefinitions>
         <Grid Grid.Row="0">
-          <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
           <TextBlock Text="COMPLETED BATTLES" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4" VerticalAlignment="Center" />
           <TextBlock Grid.Column="1" x:Name="HistoryStatusText" Text="" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="8,4" />
-          <Button Grid.Column="2" x:Name="ExportCsvButton" Content="Export CSV..." Click="ExportCsv_Click" IsEnabled="False" />
-          <Button Grid.Column="3" Content="Refresh" Click="Refresh_Click" />
+          <Button Grid.Column="2" x:Name="DiscardBattleButton" Content="Discard selected..." Click="DiscardBattle_Click" IsEnabled="False" Style="{StaticResource DangerButton}" />
+          <Button Grid.Column="3" x:Name="ExportCsvButton" Content="Export CSV..." Click="ExportCsv_Click" IsEnabled="False" />
+          <Button Grid.Column="4" Content="Refresh" Click="Refresh_Click" />
         </Grid>
         <WrapPanel Grid.Row="1" Margin="0,0,0,8" VerticalAlignment="Center">
           <TextBlock Text="Type" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Margin="4" />

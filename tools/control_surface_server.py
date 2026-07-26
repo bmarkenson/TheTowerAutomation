@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import secrets
 import sys
+import threading
 from typing import Any, Optional
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -24,12 +25,17 @@ from core.automation_process import (
     DEFAULT_AUTOMATION_SERVICE,
     SystemdAutomationManager,
 )
-from core.control_surface import ControlSurfaceRequestError, ControlSurfaceService
+from core.control_surface import (
+    DEFAULT_DISCARDED_BATTLE_RETENTION_DAYS,
+    ControlSurfaceRequestError,
+    ControlSurfaceService,
+)
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "control_surface"
 DEFAULT_TOKEN_ENV = "THETOWER_CONTROL_TOKEN"
 MAX_REQUEST_BYTES = 8192
+DISCARD_PURGE_INTERVAL_SECONDS = 6 * 60 * 60
 
 
 class ControlSurfaceHTTPServer(ThreadingHTTPServer):
@@ -109,12 +115,27 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
             return
         self._send_json(HTTPStatus.OK, response)
 
+    def do_DELETE(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        parsed = urlsplit(self.path)
+        if not parsed.path.startswith("/api/v1/battles/"):
+            self._json_error(HTTPStatus.NOT_FOUND, "Endpoint not found")
+            return
+        if not self._authorized():
+            return
+        battle_id = unquote(parsed.path.removeprefix("/api/v1/battles/"))
+        try:
+            response = self.server.service.discard_battle(battle_id)
+        except ControlSurfaceRequestError as exc:
+            self._json_error(exc.status, str(exc))
+            return
+        self._send_json(HTTPStatus.OK, response)
+
     def do_OPTIONS(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         # Intentionally omit CORS headers. Same-origin GUI requests are the
         # only browser access supported by the control API.
         self.send_response(HTTPStatus.NO_CONTENT)
         self._security_headers()
-        self.send_header("Allow", "GET, POST, OPTIONS")
+        self.send_header("Allow", "GET, POST, DELETE, OPTIONS")
         self.end_headers()
 
     def _handle_api_get(self, path: str, query: dict[str, list[str]]) -> None:
@@ -247,6 +268,21 @@ def _is_loopback(bind: str) -> bool:
         return False
 
 
+def _discard_retention_loop(
+    service: ControlSurfaceService,
+    stop_event: threading.Event,
+) -> None:
+    """Purge expired quarantines even when no client is requesting history."""
+
+    while not stop_event.is_set():
+        try:
+            service.purge_expired_discarded_battles()
+        except Exception as exc:
+            print(f"Discard retention sweep failed: {exc}", file=sys.stderr)
+        if stop_event.wait(DISCARD_PURGE_INTERVAL_SECONDS):
+            return
+
+
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Serve TheTower's browser control surface"
@@ -258,6 +294,15 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--action-log", default="logs/actions.log")
     parser.add_argument("--battles-dir", default="logs/battles")
     parser.add_argument("--tournaments-dir", default="logs/tournaments")
+    parser.add_argument(
+        "--discarded-battles-dir",
+        default="logs/discarded_battles",
+    )
+    parser.add_argument(
+        "--discarded-battle-retention-days",
+        type=int,
+        default=DEFAULT_DISCARDED_BATTLE_RETENTION_DAYS,
+    )
     parser.add_argument("--stale-after-seconds", type=int, default=180)
     parser.add_argument(
         "--automation-service",
@@ -285,6 +330,8 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         parser.error("--port must be between 1 and 65535")
     if args.stale_after_seconds <= 0:
         parser.error("--stale-after-seconds must be positive")
+    if args.discarded_battle_retention_days <= 0:
+        parser.error("--discarded-battle-retention-days must be positive")
     try:
         SystemdAutomationManager(
             args.automation_service,
@@ -322,6 +369,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         action_log=args.action_log,
         battles_dir=args.battles_dir,
         tournaments_dir=args.tournaments_dir,
+        discarded_battles_dir=args.discarded_battles_dir,
+        discarded_battle_retention_days=args.discarded_battle_retention_days,
         stale_after_seconds=args.stale_after_seconds,
         process_manager=process_manager,
     )
@@ -350,11 +399,21 @@ def main(argv: Optional[list[str]] = None) -> int:
             "only on a protected network.",
             file=sys.stderr,
         )
+    retention_stop = threading.Event()
+    retention_thread = threading.Thread(
+        target=_discard_retention_loop,
+        args=(service, retention_stop),
+        daemon=True,
+        name="discard-retention",
+    )
+    retention_thread.start()
     try:
         server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:
         print("Stopping TheTower control surface.")
     finally:
+        retention_stop.set()
+        retention_thread.join(timeout=2)
         server.server_close()
     return 0
 

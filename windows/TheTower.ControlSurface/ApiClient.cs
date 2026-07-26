@@ -64,6 +64,22 @@ public sealed class ControlSurfaceApi : IDisposable
         return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
     }
 
+    public async Task<DiscardBattleResponse> DiscardBattleAsync(
+        string battleId,
+        CancellationToken cancellationToken)
+    {
+        using var request = CreateRequest(
+            HttpMethod.Delete,
+            $"/api/v1/battles/{Uri.EscapeDataString(battleId)}");
+        using var response = await _http.SendAsync(request, cancellationToken);
+        await EnsureSuccess(response, cancellationToken);
+        return await response.Content.ReadFromJsonAsync<DiscardBattleResponse>(
+            _json,
+            cancellationToken)
+            ?? throw new InvalidOperationException(
+                "The Linux service returned an empty discard response.");
+    }
+
     public Task<StatusResponse> PostControlAsync(
         object payload,
         CancellationToken cancellationToken) =>

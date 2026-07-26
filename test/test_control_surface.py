@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import fcntl
 import http.client
 import json
@@ -367,6 +367,52 @@ def test_battle_list_is_compact_and_full_record_requires_exact_id(tmp_path):
     assert exc_info.value.status == 404
 
 
+def test_completed_battle_discard_moves_pair_then_purges_after_deadline(tmp_path):
+    battle_id = "Battle20260719T101126-0700"
+    json_path = _write_battle(tmp_path, battle_id)
+    markdown_path = json_path.with_suffix(".md")
+    markdown_path.write_text(f"# {battle_id}\n", encoding="utf-8")
+    service = ControlSurfaceService(
+        repository_root=tmp_path,
+        discarded_battle_retention_days=30,
+    )
+    discarded_at = datetime(2026, 7, 26, 18, 0, tzinfo=timezone.utc)
+
+    response = service.discard_battle(battle_id, now=discarded_at)
+
+    assert response["battle_id"] == battle_id
+    assert response["files"] == [json_path.name, markdown_path.name]
+    assert not json_path.exists()
+    assert not markdown_path.exists()
+    package = tmp_path / response["quarantine_path"]
+    assert package.is_dir()
+    assert (package / json_path.name).is_file()
+    assert (package / markdown_path.name).is_file()
+    metadata = json.loads((package / "discard.json").read_text(encoding="utf-8"))
+    assert metadata["battle_id"] == battle_id
+    assert service.battles()["total"] == 0
+    assert service.purge_expired_discarded_battles(
+        now=discarded_at + timedelta(days=29)
+    ) == 0
+    assert package.exists()
+    assert service.purge_expired_discarded_battles(
+        now=discarded_at + timedelta(days=30)
+    ) == 1
+    assert not package.exists()
+
+
+def test_completed_battle_discard_rejects_nonexact_or_missing_ids(tmp_path):
+    service = _service(tmp_path)
+
+    with pytest.raises(ControlSurfaceRequestError) as invalid:
+        service.discard_battle("../automation_ctl")
+    assert invalid.value.status == 404
+
+    with pytest.raises(ControlSurfaceRequestError) as missing:
+        service.discard_battle("Battle20260719T101126-0700")
+    assert missing.value.status == 404
+
+
 def test_completed_battles_include_tournament_records_and_terminal_classification(tmp_path):
     _write_battle(tmp_path)
     tournament_id = "Tournament20260720T061923-0700"
@@ -689,6 +735,36 @@ def test_http_api_requires_token_but_static_gui_does_not(tmp_path):
         payload = json.loads(response.read())
         assert response.status == 200
         assert payload["items"][0]["wave"] == 520
+
+        connection.request(
+            "DELETE",
+            "/api/v1/battles/Battle20260719T101126-0700",
+        )
+        response = connection.getresponse()
+        response.read()
+        assert response.status == 401
+        assert (
+            tmp_path
+            / "logs"
+            / "battles"
+            / "Battle20260719T101126-0700.json"
+        ).is_file()
+
+        connection.request(
+            "DELETE",
+            "/api/v1/battles/Battle20260719T101126-0700",
+            headers={"Authorization": "Bearer test-secret"},
+        )
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+        assert response.status == 200
+        assert payload["battle_id"] == "Battle20260719T101126-0700"
+        assert (
+            tmp_path
+            / "logs"
+            / "discarded_battles"
+            / Path(payload["quarantine_path"]).name
+        ).is_dir()
 
         (tmp_path / "logs" / "actions.log").write_text(
             "[INFO 2026-07-19 17:00:00] information\n"

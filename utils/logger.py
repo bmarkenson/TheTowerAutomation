@@ -5,12 +5,17 @@ from __future__ import annotations
 
 from datetime import datetime
 import os
+import tempfile
 import threading
 from typing import Optional, Sequence
 
 
 _MISSION_LOG_PATH: Optional[str] = None
 DEFAULT_ACTION_LOG_PATH = os.path.join("logs", "actions.log")
+DEFAULT_ACTION_LOG_MAX_BYTES = 16 * 1024 * 1024
+DEFAULT_ACTION_LOG_BACKUP_COUNT = 5
+ACTION_LOG_MAX_BYTES_ENV = "TOWER_ACTION_LOG_MAX_BYTES"
+ACTION_LOG_BACKUP_COUNT_ENV = "TOWER_ACTION_LOG_BACKUP_COUNT"
 _WRITE_LOCK = threading.Lock()
 
 
@@ -54,15 +59,107 @@ def _write_entries(entries: Sequence[str], *, extra_path: Optional[str] = None) 
     if not entries:
         return
     text = "".join(f"{entry}\n" for entry in entries)
+    encoded_size = len(text.encode("utf-8"))
     primary_path = get_action_log_path()
     with _WRITE_LOCK:
         os.makedirs(os.path.dirname(primary_path) or ".", exist_ok=True)
+        _rotate_log_if_needed(primary_path, incoming_bytes=encoded_size)
         with open(primary_path, "a", encoding="utf-8") as f:
             f.write(text)
         if extra_path:
             os.makedirs(os.path.dirname(extra_path) or ".", exist_ok=True)
+            _rotate_log_if_needed(extra_path, incoming_bytes=encoded_size)
             with open(extra_path, "a", encoding="utf-8") as extra:
                 extra.write(text)
+
+
+def _rotate_log_if_needed(path: str, *, incoming_bytes: int) -> None:
+    """Bound a log and its numbered backups before appending one entry group."""
+
+    try:
+        current_size = os.path.getsize(path)
+    except FileNotFoundError:
+        return
+    max_bytes = _positive_environment_integer(
+        ACTION_LOG_MAX_BYTES_ENV,
+        DEFAULT_ACTION_LOG_MAX_BYTES,
+    )
+    if current_size <= 0 or current_size + max(0, incoming_bytes) <= max_bytes:
+        return
+
+    backup_count = _nonnegative_environment_integer(
+        ACTION_LOG_BACKUP_COUNT_ENV,
+        DEFAULT_ACTION_LOG_BACKUP_COUNT,
+    )
+    if backup_count <= 0:
+        os.unlink(path)
+        return
+
+    for index in range(backup_count, 1, -1):
+        previous = f"{path}.{index - 1}"
+        if os.path.exists(previous):
+            os.replace(previous, f"{path}.{index}")
+
+    first_backup = f"{path}.1"
+    if current_size <= max_bytes:
+        os.replace(path, first_backup)
+        return
+
+    _archive_log_tail(path, first_backup, max_bytes=max_bytes)
+    os.unlink(path)
+
+
+def _archive_log_tail(path: str, destination: str, *, max_bytes: int) -> None:
+    """Atomically retain only complete recent lines from an oversized log."""
+
+    current_size = os.path.getsize(path)
+    offset = max(0, current_size - max_bytes)
+    with open(path, "rb") as source:
+        source.seek(offset)
+        payload = source.read()
+    if offset:
+        newline = payload.find(b"\n")
+        payload = payload[newline + 1 :] if newline >= 0 else b""
+
+    directory = os.path.dirname(destination) or "."
+    with tempfile.NamedTemporaryFile(
+        mode="wb",
+        dir=directory,
+        prefix=f".{os.path.basename(destination)}.",
+        suffix=".tmp",
+        delete=False,
+    ) as temporary:
+        temporary.write(payload)
+        temporary.flush()
+        os.fsync(temporary.fileno())
+        temporary_path = temporary.name
+    try:
+        os.replace(temporary_path, destination)
+    finally:
+        if os.path.exists(temporary_path):
+            os.unlink(temporary_path)
+
+
+def _positive_environment_integer(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return int(default)
+    try:
+        parsed = int(raw)
+    except ValueError:
+        return int(default)
+    return parsed if parsed > 0 else int(default)
+
+
+def _nonnegative_environment_integer(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return int(default)
+    try:
+        parsed = int(raw)
+    except ValueError:
+        return int(default)
+    return parsed if parsed >= 0 else int(default)
 
 
 def _write_entry(entry: str, *, extra_path: Optional[str] = None) -> None:
