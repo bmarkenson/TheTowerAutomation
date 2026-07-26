@@ -37,6 +37,29 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-26 completed-record discard and bounded runtime storage
+
+- The Windows Completed Battles window now confirms and discards one exact
+  selected Battle or Tournament. Authenticated server revision 8 moves the
+  canonical JSON/Markdown pair into a metadata-backed quarantine instead of
+  unlinking it immediately.
+- Quarantined records are recoverable for 30 days by default. A six-hour
+  control-server maintenance loop and ordinary history reads permanently purge
+  only packages with valid metadata whose recorded deadline has passed;
+  malformed packages fail closed.
+- Runtime-owned `screenshots/matches`, post-run battle observations, and
+  explicitly configured repository-local sample directories now receive
+  six-hour age/size sweeps: 30 days and 1 GiB per tree by default. Canonical
+  Battle/Tournament records, regression fixtures, unrelated screenshot trees,
+  broad paths, and symlinked subtrees remain outside the cleanup boundary.
+- `actions.log` and optional mission logs now retain a 16 MiB current file and
+  five bounded backups by default, rotating before an atomic log group is
+  appended. Environment and server options can override every retention limit.
+- Validation passed 774 sandbox-compatible tests plus the separately permitted
+  authenticated loopback HTTP test, for 775 total. The self-contained
+  `win-x64` WPF publish also completed successfully. Implemented in commit
+  `efec703`.
+
 ### 2026-07-26 Glass Cannon Auto Pick correction and run comparison
 
 - The operator-supplied ranking replaced the short-lived survival-first order

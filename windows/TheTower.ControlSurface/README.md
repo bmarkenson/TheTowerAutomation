@@ -96,6 +96,10 @@ high-contrast, table-style Stat/Value rows. Separate tabs retain the captured
 perk order, resolved run settings, and observed runtime/preflight evidence.
 The battle list can export the currently filtered rows as an Excel-compatible
 UTF-8 CSV without requesting any additional Linux-side authority.
+**Discard selected...** confirms the exact record identity, then moves its JSON
+and Markdown files into Linux quarantine. The default 30-day recovery window
+and permanent purge are enforced by server revision 8; the dialog reports the
+recorded deadline after a successful discard.
 The Strategy filter is an exact-match dropdown populated from the currently
 loaded records. Periodic battle refreshes leave an unchanged list alone and
 defer genuine updates while a Type, Strategy, or Quality filter menu is open so

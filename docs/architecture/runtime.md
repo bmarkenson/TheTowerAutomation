@@ -286,6 +286,20 @@ evidence is attached.
   source frames only when capture, parsing, persistence, or validation fails or
   remains uncertain. Historical screenshots may remain as evidence, but new
   code must not require them; previous-wave lookup uses structured records.
+- Completed records remain durable until the operator explicitly discards one.
+  Discard moves the exact JSON/Markdown pair into an expiring quarantine rather
+  than unlinking it immediately. The control service permanently purges a
+  validated quarantine package after its recorded deadline; the default
+  retention period is 30 days.
+- Generated failure/OCR screenshots and post-run observation pages are bounded
+  independently from canonical records. The runtime prunes files older than 30
+  days and then the oldest files above 1 GiB per owned evidence directory,
+  running once at startup and every six hours. Symlinked trees and canonical
+  regression fixtures are outside that ownership boundary.
+- `actions.log` is size-rotated before an atomic log group is appended. The
+  default keeps a 16 MiB current log plus five numbered backups; an already
+  oversized log contributes only its most recent complete lines to the first
+  bounded backup.
 
 ## Matching and action authority
 

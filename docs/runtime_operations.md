@@ -634,6 +634,8 @@ the API, authority boundaries, and planned capabilities.
 - During-run Coins/min progression: embedded numeric samples in the applicable
   completed record (not a separate CSV or screenshot series)
 - Failure/OCR evidence: `screenshots/matches/`
+- Discarded completed records pending permanent deletion:
+  `logs/discarded_battles/<discarded-at>__<battle-id>/`
 - Canonical regression fixtures: `test/fixtures/`
 - Actionable backlog: `PENDING_DEVELOPMENT.md`
 - Open anomalies: `docs/observed_issues.md`
@@ -642,3 +644,46 @@ the API, authority boundaries, and planned capabilities.
 `logs/` and `screenshots/` are ignored runtime evidence, not substitutes for a
 tracked issue entry. When an anomaly matters beyond the current thread, record
 its date, symptom, evidence, status, and fix/test linkage in the issue ledger.
+
+## Storage retention and completed-record discard
+
+The Completed Battles window exposes **Discard selected...** only for an exact
+selected Battle or Tournament id. After confirmation, the authenticated
+control API moves the record's JSON and Markdown files into one quarantine
+package under `logs/discarded_battles/`. Its `discard.json` records the source
+directory, discard time, and permanent-purge deadline. The default deadline is
+30 days; set the control-server
+`--discarded-battle-retention-days` option to change it. A six-hour server
+maintenance loop performs permanent expiry even when no Battle History client
+is open, and normal history reads also sweep expired packages.
+
+Before the deadline, manually restore a record by moving its JSON and Markdown
+files from the quarantine package back to the `logs/battles/` or
+`logs/tournaments/` source directory recorded in `discard.json`. Verify that
+the record appears in Battle History before removing the leftover quarantine
+metadata. Malformed or partial quarantine packages fail closed and are never
+automatically purged.
+
+The automation runtime separately sweeps these generated evidence trees at
+startup and every six hours:
+
+- `screenshots/matches/`
+- `logs/battle_observations/`
+- repository-local wave/coin sample directories explicitly configured on the
+  runtime command line
+
+Each tree defaults to a 30-day age limit and a 1 GiB size limit. Age expiry runs
+first; if the remaining tree is still oversized, the oldest files more than
+five minutes old are removed until it is bounded. The sweep never follows
+symlinked subtrees and does not include `logs/battles/`, `logs/tournaments/`,
+other screenshot directories, or `test/fixtures/`. Override the defaults with
+positive integer environment values:
+
+- `THETOWER_ARTIFACT_RETENTION_DAYS`
+- `THETOWER_ARTIFACT_MAX_BYTES`
+- `THETOWER_RETENTION_SWEEP_INTERVAL_SECONDS`
+
+`logs/actions.log` and an optional mission log rotate independently at 16 MiB
+with five numbered backups by default. Use `TOWER_ACTION_LOG_MAX_BYTES` and
+`TOWER_ACTION_LOG_BACKUP_COUNT` to change those integer limits. Rotation keeps
+one operator-summary/diagnostic-detail group together.
