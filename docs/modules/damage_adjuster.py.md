@@ -7,9 +7,12 @@ in a running battle.
   panel guard and OCRs the configured percentage. Wrong-sized or majority-black
   frames cannot supply panel evidence. The reader intentionally ignores the
   absolute damage shown below it because that value changes during the run.
-- `open_damage_adjuster()` requires `RUNNING` plus `ATTACK_MENU`, taps the
-  center of the Damage label through a dedicated button entry, then polls
-  ordinary ADB screenshots for the persistent panel.
+- `open_damage_adjuster()` requires `RUNNING` plus `ATTACK_MENU`. It first
+  tries the Damage label in the retained viewport. If the label is offscreen,
+  it uses the manifest-aware upgrade traversal with a fresh Attack-menu guard
+  on every capture, then requires the exact Damage template before tapping its
+  center. A screen transition aborts the search without another input. After
+  the tap it polls ordinary ADB screenshots for the persistent panel.
 - `dismiss_damage_adjuster()` requires the panel guard before tapping the
   non-interactive dimmed backdrop, then verifies that Attack is restored.
 - `configure_damage_slider(expected, mode=...)` supports `observe` and

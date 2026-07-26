@@ -37,6 +37,21 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-25 offscreen Damage Slider localization
+
+- Reproduced a mid-Tournament failure where Attack retained a scrolled
+  viewport with Damage above the visible list. The opener had verified the
+  Attack category but searched only that one frame.
+- A failed current-frame match now falls back to the existing bounded,
+  manifest-aware upgrade traversal. Each capture must remain
+  `RUNNING/ATTACK_MENU`, the final Damage tap still requires its exact
+  template, No Strategy retains its pause-aware action guard, and upgrade
+  swipes receive operator-facing action records.
+- Focused Damage, upgrade navigation, No Strategy, Orb Distance,
+  initialization, and Tournament validation passed 169 tests. Diagnosis and
+  repair sent no device input and did not restart the active automation.
+- Implemented in commit `3abd62a`.
+
 ### 2026-07-25 Cards inventory swipe traversal
 
 - Repaired the Card-recharge preflight's inventory reset after a failure left

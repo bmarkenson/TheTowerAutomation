@@ -8,6 +8,45 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Damage Slider opener searched only the retained Attack viewport
+
+- **Observed:** 2026-07-25 after the operator attached automation to a
+  Tournament already at wave 1931.
+- **Symptom:** The Tournament session preflight repeatedly reported
+  `panel_not_verified` even though the operator had already set the Damage
+  Slider to `100%` manually. The problem was not enforcement: automation could
+  not find the Damage tile needed to open the panel and verify the value.
+- **Evidence:** `logs/actions.log` records repeated
+  `buttons.damage_adjuster:attack` failures from 16:49:26 through 16:54:26 at
+  confidence `0.86`, below the configured `0.90` guard. A read-only live frame
+  at wave 1959 authoritatively showed `RUNNING/ATTACK_MENU` with Range and
+  Damage/Meter fully visible while Damage was above the viewport. The upgrade
+  detector identified Range at Attack-left manifest index 2. Once the retained
+  menu position later exposed Damage, the unchanged runtime successfully
+  opened and verified `100%` at 16:55:09.
+- **Safety response:** Diagnosis used control/process reads, one read-only ADB
+  capture, retained fixtures, and source tracing. No tap, swipe, Damage Slider
+  change, process restart, battle exit, or Surrender was issued.
+- **Cause:** `ensure_upgrade_menu("attack")` verified only the selected
+  category and intentionally retained its scroll position.
+  `open_damage_adjuster()` then template-matched Damage only in that current
+  frame, so an inherited mid-list Attack viewport failed closed without trying
+  the existing manifest-aware upgrade traversal.
+- **Resolution:** After the current-frame label guard misses, the opener now
+  uses the bounded upgrade finder to search for Damage. Every search capture
+  must still verify `RUNNING/ATTACK_MENU`; it stops if the screen changes,
+  never attempts a purchase, and requires the exact Damage template again
+  before the panel tap. The No Strategy inventory threads its pause-aware swipe
+  guard through this path, and upgrade-list swipes now produce paired
+  operator-facing `ACTION`/`DEBUG` records.
+- **Regression:** `test/test_damage_adjuster.py` simulates Damage above the
+  current viewport, proves one upward search swipe and exact-label reacquisition,
+  and verifies failure when Attack changes during the search.
+  `test/test_upgrade_navigation.py` verifies that upgrade swipes are recorded
+  before dispatch. Damage, upgrade navigation, No Strategy, Orb Distance,
+  initialization, and Tournament-focused validation passed 169 tests.
+- **Fixed by:** `3abd62a`.
+
 ### Auto Pick repair used a row position captured during scroll settling
 
 - **Observed:** 2026-07-25 during two authorized live Tier 19 Farm Home
