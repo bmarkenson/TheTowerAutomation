@@ -91,7 +91,8 @@ using strategy plus terminal-screen evidence. It filters by type, Tier, wave
 range, strategy, and capture quality. The report banner includes Coins/hour and
 Cells/hour, followed by a collapsible per-section tree containing complete
 Stats rows, Game Stats-only and derived values, Coins/min progression, and
-approximate Demon Mode/Nuke activation waves. Separate tabs retain the captured
+approximate Demon Mode/Nuke activation waves. Expanded sections use
+high-contrast, table-style Stat/Value rows. Separate tabs retain the captured
 perk order, resolved run settings, and observed runtime/preflight evidence.
 The battle list can export the currently filtered rows as an Excel-compatible
 UTF-8 CSV without requesting any additional Linux-side authority.

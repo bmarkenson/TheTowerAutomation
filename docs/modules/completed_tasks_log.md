@@ -108,6 +108,10 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - The self-contained `win-x64` WPF publish completed successfully. Diagnosis
   and implementation did not change the automation process, control state, or
   active battle. Implemented in commit `f876647`.
+- Operator screenshot review exposed WPF's near-black inherited child
+  foreground. Follow-up commit `f690302` makes the foreground explicit and
+  presents expanded children as aligned, headed, bordered Stat/Value rows. The
+  refreshed self-contained `win-x64` publish also completed successfully.
 
 ### 2026-07-25 Coins/min ramp plausibility confirmation
 

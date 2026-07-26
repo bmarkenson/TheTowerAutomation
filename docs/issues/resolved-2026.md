@@ -8,6 +8,33 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Battle History tree children inherited an unreadable foreground
+
+- **Observed:** 2026-07-26 in an operator screenshot of the newly published
+  collapsible Battle stats tree.
+- **Symptom:** Expanded section names rendered correctly in cyan, but their
+  child stat labels were nearly black against the dark panel and the loose
+  two-column text was difficult to scan.
+- **Evidence:** The initial tree template explicitly colored section names and
+  values but left the `TreeView`, `TreeViewItem`, and child-name foregrounds to
+  WPF inheritance. The screenshot showed the resulting dark default foreground
+  on the `#111827` report background.
+- **Safety response:** The correction was code-only and did not interact with
+  the automation process, control state, battle, or emulator.
+- **Cause:** WPF's tree item/template boundary did not preserve the Window's
+  light foreground for the child-name `TextBlock`.
+- **Resolution:** The tree, item containers, and child names now declare the
+  light foreground explicitly. Expanded sections also show Stat/Value headings
+  and aligned 2:3 table-style rows with a contrasting background, cell divider,
+  row separator, padding, and a higher-contrast value color.
+- **Regression:** The contrast and table structure are defined in
+  `windows/TheTower.ControlSurface/BattleHistoryWindow.xaml` and compiled by
+  the checked-in Linux publish script.
+- **Validation:** `windows/TheTower.ControlSurface/publish-linux.sh` completed
+  a self-contained `win-x64` publish successfully. Visual confirmation remains
+  for the Windows operator after replacing and restarting the client.
+- **Fixed by:** `f690302`.
+
 ### Completed Battles omitted survival ability activation waves
 
 - **Observed:** 2026-07-26 when the operator inspected the newest Farm record
