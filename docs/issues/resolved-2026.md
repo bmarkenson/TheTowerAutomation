@@ -1985,6 +1985,49 @@ and actionable work lives in
   viewports produces the semantic key `perk_wave_requirement_75_00`.
 - **Fixed by:** `963c771`.
 
+### Stale Home Cards evidence caused an unnecessary repair Surrender
+
+- **Observed:** 2026-07-26 during the first Tier 19 Farm run after Home setup.
+- **Symptom:** Home setup reported the Farm Cards preset as passed, but session
+  preflight later classified `cards_deck` as a Home-repairable failure,
+  Surrendered the active wave-130 Farm battle, and then ran the ordinary Game
+  Over Perks/More Stats capture. The resulting
+  `Battle20260726T031635-0700.json` record was invalid repair-run evidence.
+- **Evidence:** `logs/actions.log` records the Cards pass before the 03:14
+  battle start, the wave-130 repair Surrender, and the subsequent Home repair
+  finding the Farm Cards preset already active without changing it. The
+  retained post-recharge Cards frame contained the Farm slot but not the
+  selected-preset indicator; the earlier authoritative preset frame contained
+  both.
+- **Safety response:** No Cards, Perks, Workshop, Bots, Guardians, Modules, or
+  Ultimate Weapon setting was changed by the post-Surrender repair. The
+  following Tier 19 battle completed every declared Home and in-battle check
+  with `failed_checks: []` and resumed normal handling.
+- **Cause:** The final Home configuration aggregate reused the Cards frame
+  returned after scanning recharge-mode details rather than the frame that had
+  authoritatively verified the preset. Session preflight trusted that retained
+  aggregate, interpreted its missing selected indicator as a real mismatch,
+  and acquired the profile-declared repair-Surrender authority. The Game Over
+  caller forced a Home return for repair but did not suppress ordinary terminal
+  capture.
+- **Resolution:** Home setup now retains the exact authoritative frame for each
+  persistent section and rejects contradictory aggregate evidence before
+  Battle. Ordinary setup failures receive up to three complete attempts from
+  fresh Home captures before a gate decision blocks. An automation-owned
+  repair Surrender now skips Perks/More Stats and battle-record capture while
+  preserving the guarded return-to-Home transition.
+- **Regression:** `test/test_gc_no_battle_setup.py` covers authoritative preset
+  frame retention, contradictory and waived aggregate evidence, successful
+  transient retry, three-attempt exhaustion, and fallback after exhaustion.
+  `test/test_run_initialization.py::
+  test_home_repair_game_over_skips_surrendered_battle_capture` covers terminal
+  capture suppression and forced Home routing.
+- **Validation:** Focused Home, preflight, control, Tournament, and Game Over
+  suites passed 190 tests. Repository-wide validation passed 768
+  sandbox-compatible tests plus the separately permitted localhost HTTP test,
+  for 769 total.
+- **Fixed by:** `71f7327`.
+
 ## Operational lessons
 
 ### A detached child may not survive the agent execution wrapper

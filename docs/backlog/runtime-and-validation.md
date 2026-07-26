@@ -263,6 +263,9 @@ evidence.
      newest-record page.
 9. [ ] Define and implement report disposition for short, interrupted,
    configuration-repair, surrendered, and manually aborted battles.
+   - [x] Treat an automation-owned configuration-repair Surrender as a control
+     transition rather than a completed battle: bypass Perks/More Stats and
+     battle-record capture, then take the guarded Home route.
    - Classify these outcomes first and exclude non-representative runs from the
      normal history and analytics by default without erasing evidence.
    - If operator use still requires permanent discard, expose only a confirmed,

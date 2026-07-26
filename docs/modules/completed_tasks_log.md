@@ -1223,6 +1223,22 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   localhost HTTP test, for 635 total. No live module replacement was performed
   during validation.
 
+### 2026-07-26 Home evidence and repair-Surrender boundary
+
+- Commit `71f7327` prevents a later Cards inventory/detail frame from replacing
+  the authoritative preset-selection frame in retained Home evidence.
+  Contradictory combined evidence now fails before Battle instead of acquiring
+  in-battle Home-repair authority.
+- Recoverable Home setup failures rerun the complete guarded workflow from a
+  fresh Home capture, with three attempts total before publishing a blocking
+  gate decision. Interruptions and unsupported configurations do not loop.
+- An automation-owned configuration-repair Surrender now uses Game Over only
+  as a guarded Home transition. It bypasses Perks/More Stats and battle-record
+  capture; natural endings retain the ordinary terminal pipeline.
+- Focused Home, preflight, control, Tournament, and Game Over validation passed
+  190 tests. Repository-wide validation passed 768 sandbox-compatible tests
+  plus the separately permitted localhost HTTP test, for 769 total.
+
 ---
 
 ## 📘 Documentation

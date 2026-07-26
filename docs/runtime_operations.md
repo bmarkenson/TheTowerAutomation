@@ -140,11 +140,28 @@ rearmed after Game Over. Changing the selected strategy clears staged skips so
 an exception cannot silently carry into a different configuration.
 
 When a startup check fails, the runtime publishes a decision containing the
-specific failed requirement, the expected value, and its allowed choices. It
-remains blocked until an operator retries the check or explicitly waives that
-one requirement for the current run. The native Windows app and browser
-fallback open a decision dialog automatically. Closing it with **Decide later**
-leaves the gate pending and performs no action.
+specific failed requirement, the expected value, and its allowed choices, but
+only after three complete setup attempts have failed. Each ordinary failed
+attempt returns through the guarded Home cleanup and starts again from a fresh
+Home capture. Pause/control interruption and an unsupported requirement do not
+loop. After the third failed attempt, the runtime remains blocked until an
+operator retries the check or explicitly waives that one requirement for the
+current run. The native Windows app and browser fallback open a decision dialog
+automatically. Closing it with **Decide later** leaves the gate pending and
+performs no action.
+
+Home setup retains the exact frame that authoritatively passed each Cards,
+Workshop, Bots, and Guardians check. Its final combined configuration evidence
+must agree with those individual checks before a battle may start. A
+contradiction is a failed setup attempt; it cannot be retained as completed
+evidence and later authorize an in-battle repair.
+
+When an active Farm session preflight authoritatively requires a supported
+Home-only repair, its profile-owned recovery may Surrender under the ownership
+rules in `AGENTS.md`. That repair transition is not a completed battle: at Game
+Over the runtime skips Perks/More Stats capture and battle-record persistence,
+then follows the guarded return-to-Home path. Natural Game Over and
+operator-owned battles retain their ordinary capture policy.
 
 A direct interactive `main.py` launch presents the same choices in the
 terminal. For a service or another non-interactive launch, inspect or resolve
