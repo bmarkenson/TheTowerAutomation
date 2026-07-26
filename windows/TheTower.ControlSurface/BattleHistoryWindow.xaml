@@ -1,6 +1,7 @@
 <Window x:Class="TheTower.ControlSurface.BattleHistoryWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:TheTower.ControlSurface"
         Title="TheTower Completed Battles"
         Icon="Assets/TheTower.ControlSurface.ico"
         Width="1320" Height="860" MinWidth="940" MinHeight="640"
@@ -96,13 +97,51 @@
         </StackPanel>
         <TabControl Grid.Row="1" Background="{StaticResource PanelBrush}">
           <TabItem Header="Battle stats">
-            <DataGrid x:Name="ReportRowsGrid">
-              <DataGrid.Columns>
-                <DataGridTextColumn Header="Section" Binding="{Binding Category}" Width="190" />
-                <DataGridTextColumn Header="Stat" Binding="{Binding Name}" Width="*" />
-                <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="190" />
-              </DataGrid.Columns>
-            </DataGrid>
+            <TreeView x:Name="ReportTree"
+                      Background="{StaticResource PanelBrush}"
+                      BorderThickness="0"
+                      Padding="4"
+                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                      VirtualizingStackPanel.IsVirtualizing="True"
+                      VirtualizingStackPanel.VirtualizationMode="Recycling">
+              <TreeView.Resources>
+                <Style TargetType="{x:Type TreeViewItem}">
+                  <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                  <Setter Property="IsExpanded" Value="False" />
+                </Style>
+                <HierarchicalDataTemplate DataType="{x:Type local:ReportSection}"
+                                          ItemsSource="{Binding Rows}">
+                  <Grid Margin="3,5,8,5">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{Binding Name}"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource AccentBrush}" />
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding Rows.Count, StringFormat={}{0} rows}"
+                               Foreground="{StaticResource MutedBrush}"
+                               Margin="12,0,0,0" />
+                  </Grid>
+                </HierarchicalDataTemplate>
+                <DataTemplate DataType="{x:Type local:ReportRow}">
+                  <Grid Margin="8,3,8,3">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="300" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{Binding Name}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,12,0" />
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding Value}"
+                               TextWrapping="Wrap"
+                               Foreground="{StaticResource MutedBrush}" />
+                  </Grid>
+                </DataTemplate>
+              </TreeView.Resources>
+            </TreeView>
           </TabItem>
           <TabItem Header="Selected perks">
             <DataGrid x:Name="PerksGrid">

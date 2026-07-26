@@ -535,6 +535,7 @@ public sealed class ActivityEntry
 }
 
 public sealed record ReportRow(string Category, string Name, string Value);
+public sealed record ReportSection(string Name, IReadOnlyList<ReportRow> Rows);
 public sealed record PerkRow(string Rank, string Color, string Perk, string Confidence);
 
 public sealed class ClientSettings

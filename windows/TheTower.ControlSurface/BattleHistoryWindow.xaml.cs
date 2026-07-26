@@ -16,6 +16,7 @@ public partial class BattleHistoryWindow : Window
     private readonly ControlSurfaceApi _api;
     private readonly ObservableCollection<BattleSummary> _battles = [];
     private readonly ObservableCollection<ReportRow> _reportRows = [];
+    private readonly ObservableCollection<ReportSection> _reportSections = [];
     private readonly ObservableCollection<ReportRow> _settingsRows = [];
     private readonly ObservableCollection<PerkRow> _perks = [];
     private readonly ObservableCollection<string> _strategyOptions = ["All"];
@@ -39,7 +40,7 @@ public partial class BattleHistoryWindow : Window
         _battleView = CollectionViewSource.GetDefaultView(_battles);
         _battleView.Filter = BattleMatchesFilter;
         BattlesGrid.ItemsSource = _battleView;
-        ReportRowsGrid.ItemsSource = _reportRows;
+        ReportTree.ItemsSource = _reportSections;
         SettingsGrid.ItemsSource = _settingsRows;
         PerksGrid.ItemsSource = _perks;
         StrategyFilterBox.ItemsSource = _strategyOptions;
@@ -498,6 +499,7 @@ public partial class BattleHistoryWindow : Window
     private void RenderBattleRecord(JsonElement root)
     {
         _reportRows.Clear();
+        _reportSections.Clear();
         _settingsRows.Clear();
         _perks.Clear();
 
@@ -615,6 +617,7 @@ public partial class BattleHistoryWindow : Window
             {
                 Flatten(evidence, "", "Observed evidence", _settingsRows);
             }
+            AppendSurvivalAbilityActivationRows(runtime, _reportRows);
             if (runtime.TryGetProperty("coin_rate_samples", out var rateSamples)
                 && rateSamples.ValueKind == JsonValueKind.Array)
             {
@@ -634,6 +637,82 @@ public partial class BattleHistoryWindow : Window
                 }
             }
         }
+        RebuildReportSections();
+    }
+
+    private void RebuildReportSections()
+    {
+        _reportSections.Clear();
+        foreach (var group in _reportRows.GroupBy(row => row.Category))
+        {
+            _reportSections.Add(new ReportSection(group.Key, group.ToList()));
+        }
+    }
+
+    private static void AppendSurvivalAbilityActivationRows(
+        JsonElement runtime,
+        ICollection<ReportRow> destination)
+    {
+        if (!runtime.TryGetProperty(
+                "survival_ability_activations",
+                out var activations)
+            || activations.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        if (activations.TryGetProperty(
+                "demon_mode_first_activation",
+                out var demonMode)
+            && demonMode.ValueKind == JsonValueKind.Object)
+        {
+            AppendSurvivalAbilityActivationRow(
+                demonMode,
+                "Demon Mode first activation",
+                destination);
+        }
+
+        if (!activations.TryGetProperty("nuke_activations", out var nukes)
+            || nukes.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+        var fallbackSequence = 1;
+        foreach (var nuke in nukes.EnumerateArray())
+        {
+            if (nuke.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+            var sequence = JsonValue(nuke, "sequence");
+            AppendSurvivalAbilityActivationRow(
+                nuke,
+                sequence == "-"
+                    ? $"Nuke activation {fallbackSequence}"
+                    : $"Nuke activation {sequence}",
+                destination);
+            fallbackSequence++;
+        }
+    }
+
+    private static void AppendSurvivalAbilityActivationRow(
+        JsonElement activation,
+        string label,
+        ICollection<ReportRow> destination)
+    {
+        var detectedAt = JsonValue(activation, "detected_at");
+        var wave = JsonValue(activation, "approximate_wave");
+        var waveConfidence = JsonValue(activation, "wave_confidence");
+        var name = detectedAt == "-" ? label : $"{label} at {detectedAt}";
+        var value = wave == "-" ? "Wave unknown" : $"Wave {wave}";
+        if (waveConfidence != "-")
+        {
+            value += $" ({waveConfidence}% wave OCR)";
+        }
+        destination.Add(new ReportRow(
+            "Survival ability activations",
+            name,
+            value));
     }
 
     private static void Flatten(
