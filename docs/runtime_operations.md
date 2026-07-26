@@ -174,11 +174,14 @@ and **Defense Absolute**. Its Auto Pick priority is:
 6. Death Wave Quantity
 7. Coins Bonus
 8. Free Upgrade Chance
-9. Orbs
-10. Chain Lightning Damage
-11. Inner Land Mines
-12. Spotlight Damage
-13. Damage
+9. Defense Percent
+10. Max Health
+11. Health Regen
+12. Health Regen / Max Health Trade-Off
+13. Enemy Speed / Enemy Damage Trade-Off
+14. Ranged Distance / Ranged Damage Trade-Off
+15. Orbs
+16. Damage
 
 Farm and Tournament also declare the recharge activation mode for both
 death-prevention Cards:

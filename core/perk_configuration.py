@@ -38,10 +38,13 @@ FARM_AUTO_PICK_ORDER = (
     "death_wave_quantity",
     "coins_bonus",
     "free_upgrade_chance",
+    "defense_percent",
+    "max_health",
+    "health_regen",
+    "health_regen_tradeoff",
+    "enemy_speed_tradeoff",
+    "ranged_distance_tradeoff",
     "orbs",
-    "chain_lightning_damage",
-    "inner_land_mines",
-    "spotlight_damage",
     "damage",
 )
 
@@ -59,6 +62,12 @@ PERK_CONFIGURATION_LABELS = {
     "death_wave_quantity": "Death Wave Quantity",
     "coins_bonus": "Coins Bonus",
     "free_upgrade_chance": "Free Upgrade Chance",
+    "defense_percent": "Defense Percent",
+    "max_health": "Max Health",
+    "health_regen": "Health Regen",
+    "health_regen_tradeoff": "Health Regen / Max Health Trade-Off",
+    "enemy_speed_tradeoff": "Enemy Speed / Enemy Damage Trade-Off",
+    "ranged_distance_tradeoff": "Ranged Distance / Ranged Damage Trade-Off",
     "orbs": "Orbs",
     "chain_lightning_damage": "Chain Lightning Damage",
     "inner_land_mines": "Inner Land Mines",
@@ -130,6 +139,24 @@ def classify_perk_configuration_text(text: str) -> str | None:
         return "coins_bonus"
     if "free upgrade chance" in normalized:
         return "free_upgrade_chance"
+    if normalized.startswith("defense percent"):
+        return "defense_percent"
+    if (
+        "tower health regen" in normalized
+        and "tower max health" in normalized
+    ):
+        return "health_regen_tradeoff"
+    if "enemies speed" in normalized and "enemies damage" in normalized:
+        return "enemy_speed_tradeoff"
+    if (
+        "ranged enemies attack distance reduced" in normalized
+        and "ranged enemies damage" in normalized
+    ):
+        return "ranged_distance_tradeoff"
+    if "max health" in normalized and "but" not in tokens:
+        return "max_health"
+    if "health regen" in normalized and "but" not in tokens:
+        return "health_regen"
     if normalized.startswith("orb") or normalized.startswith("orbs"):
         return "orbs"
     if "chain lightning damage" in normalized:

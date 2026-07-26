@@ -43,10 +43,13 @@ session_preflight:
     - death_wave_quantity
     - coins_bonus
     - free_upgrade_chance
+    - defense_percent
+    - max_health
+    - health_regen
+    - health_regen_tradeoff
+    - enemy_speed_tradeoff
+    - ranged_distance_tradeoff
     - orbs
-    - chain_lightning_damage
-    - inner_land_mines
-    - spotlight_damage
     - damage
     ultimate_weapons:
       Chain Lightning:
@@ -381,10 +384,13 @@ rules:
       - death_wave_quantity
       - coins_bonus
       - free_upgrade_chance
+      - defense_percent
+      - max_health
+      - health_regen
+      - health_regen_tradeoff
+      - enemy_speed_tradeoff
+      - ranged_distance_tradeoff
       - orbs
-      - chain_lightning_damage
-      - inner_land_mines
-      - spotlight_damage
       - damage
       ultimate_weapons:
         Chain Lightning:
@@ -455,10 +461,13 @@ run_configuration:
     - death_wave_quantity
     - coins_bonus
     - free_upgrade_chance
+    - defense_percent
+    - max_health
+    - health_regen
+    - health_regen_tradeoff
+    - enemy_speed_tradeoff
+    - ranged_distance_tradeoff
     - orbs
-    - chain_lightning_damage
-    - inner_land_mines
-    - spotlight_damage
     - damage
     ultimate_weapons:
       Chain Lightning:

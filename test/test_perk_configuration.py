@@ -7,6 +7,7 @@ from core.battle_perks import ocr_perk_configuration_rows
 from core.perk_configuration import (
     FARM_AUTO_PICK_ORDER,
     FARM_PERK_BANS,
+    classify_perk_configuration_text,
     evaluate_profile_perk_configuration,
     parse_perk_configuration_selection,
     semantic_perk_entry,
@@ -121,6 +122,32 @@ def test_configuration_row_scanner_includes_pale_blue_home_rows():
     )
 
 
+def test_survival_auto_pick_rows_have_value_independent_semantic_keys():
+    cases = {
+        "Defense percent +5.00%": "defense_percent",
+        "x1.25 max health": "max_health",
+        "x2.19 Health Regen": "health_regen",
+        (
+            "tower health regen x8.80, but tower max health -60%"
+        ): "health_regen_tradeoff",
+        (
+            "Enemies speed -44.0%, but enemies damage x2.5"
+        ): "enemy_speed_tradeoff",
+        (
+            "Ranged enemies attack distance reduced, "
+            "but ranged enemies damage x3"
+        ): "ranged_distance_tradeoff",
+    }
+
+    assert {
+        text: classify_perk_configuration_text(text)
+        for text in cases
+    } == cases
+    assert classify_perk_configuration_text(
+        "Enemies have -55.0% health, but tower health regen and lifesteal -90%"
+    ) is None
+
+
 def test_farm_perk_configuration_requires_coin_tradeoff_at_rank_three():
     frames = [
         np.full((4, 4, 3), marker, dtype=np.uint8)
@@ -145,6 +172,19 @@ def test_farm_perk_configuration_requires_coin_tradeoff_at_rank_three():
         "death_wave_quantity": "+1 wave on death wave",
         "coins_bonus": "x1.44 all coins bonuses",
         "free_upgrade_chance": "Free upgrade chance for all +6.25%",
+        "defense_percent": "Defense percent +5.00%",
+        "max_health": "x1.25 max health",
+        "health_regen": "x2.19 Health Regen",
+        "health_regen_tradeoff": (
+            "tower health regen x8.80, but tower max health -60%"
+        ),
+        "enemy_speed_tradeoff": (
+            "Enemies speed -44.0%, but enemies damage x2.5"
+        ),
+        "ranged_distance_tradeoff": (
+            "Ranged enemies attack distance reduced, "
+            "but ranged enemies damage x3"
+        ),
         "orbs": "Orbs +1",
         "chain_lightning_damage": "Chain lightning damage x2",
         "inner_land_mines": "Extra set of inner mines",
