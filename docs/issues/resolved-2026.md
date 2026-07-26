@@ -8,6 +8,46 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Tournament observer repeated session preflight after a mismatch acknowledgement
+
+- **Observed:** 2026-07-25 after the operator attached automation to a
+  Tournament already in progress.
+- **Symptom:** The one-shot observer pass found that the configured armor
+  Modules were assigned to the opposite Primary/Assist roles. Although the
+  mismatch was labeled non-blocking and **Continue observing** was selected,
+  automation immediately restarted the complete Cards, Ultimate Weapons,
+  Modules, Bots, Guardians, and Workshop traversal.
+- **Evidence:** `logs/actions.log` records the first configuration inventory
+  from 16:58:47 through the `modules` mismatch at 17:01:03, the consumed
+  `continue_observing` decision at 17:01:29, and a second
+  `validate_tournament_session_preflight` rule firing at the same timestamp.
+  The persisted decision was `blocking: false`, but the generic waiver path
+  cleared `gc_session_preflight_attempted`, which was the Tournament plan's
+  one-pass completion assertion.
+- **Safety response:** Diagnosis inspected the control file, stale lock owner,
+  action log, ADB target, and one current screenshot read-only. The automation
+  process was already stopped; the live Tournament was not paused, tapped,
+  exited, restarted, or Surrendered.
+- **Cause:** Observer mismatches reused the startup gate-decision and run-scoped
+  waiver machinery. A `continue_observing` waiver correctly re-armed a normal
+  required preflight so remaining checks could run, but that behavior was
+  incompatible with the Tournament observer's conclusive one-shot
+  `gc_session_preflight_attempted` contract.
+- **Resolution:** `mismatch_policy: notify` now means record-only completion.
+  Failed-check and detailed screen evidence remain available, while the
+  mismatch sets no blocked or repair state and publishes no gate decision.
+  The one-pass marker remains set, so the generated Tournament rule cannot
+  repeat. Required Farm mismatches retain the existing blocking, retry,
+  fallback, and repair semantics.
+- **Regression:** `test/test_tournament_observer.py` injects a `modules`
+  mismatch, verifies retained failure evidence and exact-match
+  `completed=False`, proves the observer is not blocked or repairable, and
+  confirms that the strategy emits no subsequent action.
+- **Validation:** Focused Tournament, initialization, and control coverage
+  passed 108 tests. Repository-wide validation passed 755 sandbox-compatible
+  tests plus the separately permitted localhost HTTP test, for 756 total.
+- **Fixed by:** `53f0719`.
+
 ### Damage Slider opener searched only the retained Attack viewport
 
 - **Observed:** 2026-07-25 after the operator attached automation to a

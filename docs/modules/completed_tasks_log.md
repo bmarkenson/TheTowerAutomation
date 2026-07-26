@@ -37,6 +37,22 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-25 nonblocking Tournament observer mismatches
+
+- Repaired the attached-Tournament session-preflight loop. A read-only
+  mismatch now retains its failed checks and detailed evidence, completes the
+  one-shot observer pass without a gate decision or waiver, and cannot re-arm
+  the inventory rule.
+- Required Farm/session gates keep their existing blocking, retry, fallback,
+  and guarded-repair behavior. Tournament exact-match status also remains
+  distinct: a mismatch records `completed=False` while allowing observation
+  and terminal capture to continue.
+- `test/test_tournament_observer.py` proves a `modules` mismatch remains
+  recorded and cannot emit a second strategy action. Focused coverage passed
+  108 tests; repository-wide validation passed 755 sandbox-compatible tests
+  plus the separately permitted localhost HTTP test, for 756 total.
+- Implemented in commit `53f0719`.
+
 ### 2026-07-25 offscreen Damage Slider localization
 
 - Reproduced a mid-Tournament failure where Attack retained a scrolled
