@@ -1931,6 +1931,33 @@ and actionable work lives in
   Home/Tournament caller validation passed 130 tests without device
   interaction.
 
+### Perk Wave Requirement OCR dropped the max-level leading digit
+
+- **Observed:** 2026-07-26 while comparing the completed Tier 19 Farm run with
+  the two runs immediately before it.
+- **Symptom:** Two historical Selected Perks records rendered `Perk wave
+  requirement -5.00%`, incorrectly suggesting that the perk had not been
+  maxed and initially distorting the run comparison.
+- **Evidence:** The retained
+  `Game20260725_210917_perks_5_OCR_EVIDENCE.png` and adjacent viewport visibly
+  show `-75.00%`. Their overlapping OCR observations were
+  `-/5.00%` at 93.5% confidence and `- 75.00%` at 89.8% confidence; the former
+  won confidence selection after generic slash removal. The completed
+  `Battle20260726T004643-0700` record independently read the same max value as
+  `-75.00%`.
+- **Safety response:** Perk Wave Requirement was excluded as a causal
+  difference once the operator challenged the value. Historical battle files
+  were not rewritten; their raw OCR remains available as provenance.
+- **Cause:** Tesseract sometimes recognizes the font's leading `7` as `/`.
+  Generic cleanup removed that slash, so `-/5.00%` became `-5.00%`.
+- **Resolution:** Perk normalization now repairs the label-specific
+  `-/5.00%` artifact to `-75.00%` before generic slash cleanup, while retaining
+  the original raw text and merging overlapping observations normally.
+- **Regression:** `test/test_battle_perks.py` covers both `-/75.00%` and the
+  dropped-leading-digit `-/5.00%` form. Reprocessing the retained failed
+  viewports produces the semantic key `perk_wave_requirement_75_00`.
+- **Fixed by:** `963c771`.
+
 ## Operational lessons
 
 ### A detached child may not survive the agent execution wrapper

@@ -37,6 +37,17 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-26 Perk Wave Requirement OCR repair
+
+- Completed Tier 19 comparison exposed that Tesseract could read the maxed
+  `-75.00%` value as `-/5.00%`; generic cleanup then rendered the false
+  `-5.00%` result.
+- Label-specific normalization now restores the dropped `7` while preserving
+  raw OCR evidence. The focused and related battle-record suites passed 36
+  tests, and retained failed viewports reprocess as
+  `perk_wave_requirement_75_00`.
+- Implemented in commit `963c771`.
+
 ### 2026-07-26 collapsible Battle History and survival activation waves
 
 - Confirmed that the selected `Battle20260725T210917-0700` record already

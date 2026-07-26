@@ -74,8 +74,16 @@ for a matching recurrence or historical investigation.
 - **Safety response:** The parser did not silently accept or repair the
   disagreement; it retained evidence and excluded the record from valid
   analytics.
+- **Recurrence:** On 2026-07-26, the natural Tier 19 Farm Game Over at wave
+  4799 visibly showed `4.23Q + 2.11Q = 6.35Q`. Whole-dialog OCR produced
+  `4.230 + 210 = 6.350`; the copied Battle Report still supplied the exact
+  `6.35Q` total, but the guarded repair could not recover the missing digit and
+  suffix in the ad component. `Battle20260726T004643-0700` remains invalid
+  with `Compact Game Stats coin magnitudes could not be recovered`, and
+  `screenshots/matches/Game20260726_004643_game_stats_OCR_EVIDENCE.png`
+  preserves the source.
 - **Status:** Open. Reproduce the decimal-loss path against the retained Game
-  Stats frame and add a regression before changing number repair. The active
+  Stats frames and add regressions before changing number repair. The active
   task is in
   [`backlog/runtime-and-validation.md`](backlog/runtime-and-validation.md#current-validation-gates).
 
