@@ -2039,6 +2039,34 @@ and actionable work lives in
   afterward. No Home/session gate or repair action replayed.
 - **Fixed by:** `71f7327`.
 
+### Expanded Recent Activity stopped refreshing across log rotation
+
+- **Observed:** Operator report on 2026-07-26 after using the native Windows
+  Recent Activity row-detail view.
+- **Symptom:** Recent Activity continued showing the pre-rotation rows after
+  `actions.log` rotated instead of following entries in the replacement file.
+- **Evidence:** The activity API already reopened `actions.log` for every
+  request, but the native client deliberately skipped every render while any
+  row remained selected. Double-clicking a row selected it to hold the expanded
+  detail, so the obsolete selection suppressed the replacement file as well as
+  ordinary appends.
+- **Safety response:** Diagnosis and validation were repository-local. No
+  automation process, device, control directive, or battle was changed.
+- **Cause:** Selection preservation had no boundary for a renamed/recreated log
+  file or for a selected entry that had left the current API tail.
+- **Resolution:** Activity responses now include the identity of the file
+  actually read. The Windows client keeps an available selection stable during
+  ordinary refreshes, but clears it and renders current activity when that file
+  identity changes. Entry matching provides the same recovery when talking to
+  an older server or when a selected entry expires from the bounded tail.
+- **Regression:** `test/test_control_surface.py::
+  test_activity_reports_replacement_log_identity_after_rotation` replaces the
+  active log and verifies both a new source identity and the replacement
+  entries.
+- **Validation:** All 23 control-surface tests and all four logger tests passed.
+  Linux cross-publishing produced the self-contained Windows executable.
+- **Fixed by:** `06bda52`.
+
 ## Operational lessons
 
 ### A detached child may not survive the agent execution wrapper
