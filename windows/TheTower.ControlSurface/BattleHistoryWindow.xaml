@@ -102,6 +102,7 @@
                       Foreground="#EDF2F7"
                       BorderThickness="0"
                       Padding="4"
+                      Grid.IsSharedSizeScope="True"
                       ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                       VirtualizingStackPanel.IsVirtualizing="True"
                       VirtualizingStackPanel.VirtualizationMode="Recycling">
@@ -149,8 +150,10 @@
                       </Border.Style>
                       <Grid>
                         <Grid.ColumnDefinitions>
-                          <ColumnDefinition Width="2*" />
-                          <ColumnDefinition Width="3*" />
+                          <ColumnDefinition Width="240"
+                                            SharedSizeGroup="ReportStatColumn" />
+                          <ColumnDefinition Width="480"
+                                            SharedSizeGroup="ReportValueColumn" />
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="STAT"
                                    Foreground="{StaticResource MutedBrush}"
@@ -173,8 +176,10 @@
                           BorderThickness="0,0,0,1">
                     <Grid>
                       <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="2*" />
-                        <ColumnDefinition Width="3*" />
+                        <ColumnDefinition Width="240"
+                                          SharedSizeGroup="ReportStatColumn" />
+                        <ColumnDefinition Width="480"
+                                          SharedSizeGroup="ReportValueColumn" />
                       </Grid.ColumnDefinitions>
                       <TextBlock Text="{Binding Name}"
                                  TextWrapping="Wrap"
