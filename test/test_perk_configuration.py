@@ -122,8 +122,20 @@ def test_configuration_row_scanner_includes_pale_blue_home_rows():
     )
 
 
-def test_survival_auto_pick_rows_have_value_independent_semantic_keys():
+def test_auto_pick_rows_have_value_independent_semantic_keys():
     cases = {
+        (
+            "Enemies have -55.0% health, "
+            "but tower health regen and lifesteal -90%"
+        ): "enemy_health_tradeoff",
+        (
+            "Boss health -73.5%, but boss speed +50%"
+        ): "boss_health_tradeoff",
+        (
+            "x1.65 tower damage, but bosses have x8 health"
+        ): "tower_damage_boss_health_tradeoff",
+        "Bounce Shot +2": "bounce_shot",
+        "4 more smart missiles": "smart_missiles",
         "Defense percent +5.00%": "defense_percent",
         "x1.25 max health": "max_health",
         "x2.19 Health Regen": "health_regen",
@@ -143,9 +155,19 @@ def test_survival_auto_pick_rows_have_value_independent_semantic_keys():
         text: classify_perk_configuration_text(text)
         for text in cases
     } == cases
-    assert classify_perk_configuration_text(
-        "Enemies have -55.0% health, but tower health regen and lifesteal -90%"
-    ) is None
+
+
+def test_farm_auto_pick_post_economy_order_is_glass_cannon_first():
+    assert FARM_AUTO_PICK_ORDER[8:] == (
+        "orbs",
+        "damage",
+        "enemy_health_tradeoff",
+        "enemy_speed_tradeoff",
+        "ranged_distance_tradeoff",
+        "boss_health_tradeoff",
+        "tower_damage_boss_health_tradeoff",
+        "chain_lightning_damage",
+    )
 
 
 def test_farm_perk_configuration_requires_coin_tradeoff_at_rank_three():
@@ -172,6 +194,16 @@ def test_farm_perk_configuration_requires_coin_tradeoff_at_rank_three():
         "death_wave_quantity": "+1 wave on death wave",
         "coins_bonus": "x1.44 all coins bonuses",
         "free_upgrade_chance": "Free upgrade chance for all +6.25%",
+        "enemy_health_tradeoff": (
+            "Enemies have -55.0% health, "
+            "but tower health regen and lifesteal -90%"
+        ),
+        "boss_health_tradeoff": (
+            "Boss health -73.5%, but boss speed +50%"
+        ),
+        "tower_damage_boss_health_tradeoff": (
+            "x1.65 tower damage, but bosses have x8 health"
+        ),
         "defense_percent": "Defense percent +5.00%",
         "max_health": "x1.25 max health",
         "health_regen": "x2.19 Health Regen",

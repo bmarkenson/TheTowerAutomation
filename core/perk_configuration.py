@@ -38,14 +38,14 @@ FARM_AUTO_PICK_ORDER = (
     "death_wave_quantity",
     "coins_bonus",
     "free_upgrade_chance",
-    "defense_percent",
-    "max_health",
-    "health_regen",
-    "health_regen_tradeoff",
-    "enemy_speed_tradeoff",
-    "ranged_distance_tradeoff",
     "orbs",
     "damage",
+    "enemy_health_tradeoff",
+    "enemy_speed_tradeoff",
+    "ranged_distance_tradeoff",
+    "boss_health_tradeoff",
+    "tower_damage_boss_health_tradeoff",
+    "chain_lightning_damage",
 )
 
 PERK_CONFIGURATION_LABELS = {
@@ -62,6 +62,13 @@ PERK_CONFIGURATION_LABELS = {
     "death_wave_quantity": "Death Wave Quantity",
     "coins_bonus": "Coins Bonus",
     "free_upgrade_chance": "Free Upgrade Chance",
+    "enemy_health_tradeoff": (
+        "Enemy Health / Tower Regen and Lifesteal Trade-Off"
+    ),
+    "boss_health_tradeoff": "Boss Health / Boss Speed Trade-Off",
+    "tower_damage_boss_health_tradeoff": (
+        "Tower Damage / Boss Health Trade-Off"
+    ),
     "defense_percent": "Defense Percent",
     "max_health": "Max Health",
     "health_regen": "Health Regen",
@@ -69,8 +76,10 @@ PERK_CONFIGURATION_LABELS = {
     "enemy_speed_tradeoff": "Enemy Speed / Enemy Damage Trade-Off",
     "ranged_distance_tradeoff": "Ranged Distance / Ranged Damage Trade-Off",
     "orbs": "Orbs",
+    "bounce_shot": "Bounce Shot",
     "chain_lightning_damage": "Chain Lightning Damage",
     "inner_land_mines": "Inner Land Mines",
+    "smart_missiles": "Smart Missiles",
     "spotlight_damage": "Spotlight Damage",
     "damage": "Damage",
 }
@@ -139,6 +148,21 @@ def classify_perk_configuration_text(text: str) -> str | None:
         return "coins_bonus"
     if "free upgrade chance" in normalized:
         return "free_upgrade_chance"
+    if (
+        "enemies have" in normalized
+        and "health" in tokens
+        and "tower health regen" in normalized
+        and "lifesteal" in tokens
+    ):
+        return "enemy_health_tradeoff"
+    if "boss health" in normalized and "boss speed" in normalized:
+        return "boss_health_tradeoff"
+    if (
+        "tower damage" in normalized
+        and "bosses have" in normalized
+        and "health" in tokens
+    ):
+        return "tower_damage_boss_health_tradeoff"
     if normalized.startswith("defense percent"):
         return "defense_percent"
     if (
@@ -159,10 +183,14 @@ def classify_perk_configuration_text(text: str) -> str | None:
         return "health_regen"
     if normalized.startswith("orb") or normalized.startswith("orbs"):
         return "orbs"
+    if normalized.startswith("bounce shot"):
+        return "bounce_shot"
     if "chain lightning damage" in normalized:
         return "chain_lightning_damage"
     if "extra set of inner mines" in normalized:
         return "inner_land_mines"
+    if "more smart missiles" in normalized:
+        return "smart_missiles"
     if "spotlight damage" in normalized:
         return "spotlight_damage"
     if "defense absolute" in normalized:

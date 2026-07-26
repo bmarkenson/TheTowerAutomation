@@ -174,14 +174,20 @@ and **Defense Absolute**. Its Auto Pick priority is:
 6. Death Wave Quantity
 7. Coins Bonus
 8. Free Upgrade Chance
-9. Defense Percent
-10. Max Health
-11. Health Regen
-12. Health Regen / Max Health Trade-Off
-13. Enemy Speed / Enemy Damage Trade-Off
-14. Ranged Distance / Ranged Damage Trade-Off
-15. Orbs
-16. Damage
+9. Orbs
+10. Damage
+11. Enemy Health / Tower Regen and Lifesteal Trade-Off
+12. Enemy Speed / Enemy Damage Trade-Off
+13. Ranged Distance / Ranged Damage Trade-Off
+14. Boss Health / Boss Speed Trade-Off
+15. Tower Damage / Boss Health Trade-Off
+16. Chain Lightning Damage
+
+The operator's planned continuation when additional ranking slots are
+available is Inner Land Mines, Spotlight Damage, Bounce Shot, Defense Percent,
+Health Regen, Max Health, Smart Missiles, then the Health Regen / Max Health
+tradeoff. These rows are recognized semantically, but they are not required by
+the current 16-slot profile.
 
 Farm and Tournament also declare the recharge activation mode for both
 death-prevention Cards:

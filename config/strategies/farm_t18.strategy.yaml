@@ -44,14 +44,14 @@ session_preflight:
     - death_wave_quantity
     - coins_bonus
     - free_upgrade_chance
-    - defense_percent
-    - max_health
-    - health_regen
-    - health_regen_tradeoff
-    - enemy_speed_tradeoff
-    - ranged_distance_tradeoff
     - orbs
     - damage
+    - enemy_health_tradeoff
+    - enemy_speed_tradeoff
+    - ranged_distance_tradeoff
+    - boss_health_tradeoff
+    - tower_damage_boss_health_tradeoff
+    - chain_lightning_damage
     ultimate_weapons:
       Chain Lightning:
         primary: 'on'
@@ -450,14 +450,14 @@ rules:
       - death_wave_quantity
       - coins_bonus
       - free_upgrade_chance
-      - defense_percent
-      - max_health
-      - health_regen
-      - health_regen_tradeoff
-      - enemy_speed_tradeoff
-      - ranged_distance_tradeoff
       - orbs
       - damage
+      - enemy_health_tradeoff
+      - enemy_speed_tradeoff
+      - ranged_distance_tradeoff
+      - boss_health_tradeoff
+      - tower_damage_boss_health_tradeoff
+      - chain_lightning_damage
       ultimate_weapons:
         Chain Lightning:
           primary: 'on'
@@ -538,14 +538,14 @@ run_configuration:
     - death_wave_quantity
     - coins_bonus
     - free_upgrade_chance
-    - defense_percent
-    - max_health
-    - health_regen
-    - health_regen_tradeoff
-    - enemy_speed_tradeoff
-    - ranged_distance_tradeoff
     - orbs
     - damage
+    - enemy_health_tradeoff
+    - enemy_speed_tradeoff
+    - ranged_distance_tradeoff
+    - boss_health_tradeoff
+    - tower_damage_boss_health_tradeoff
+    - chain_lightning_damage
     ultimate_weapons:
       Chain Lightning:
         primary: 'on'
