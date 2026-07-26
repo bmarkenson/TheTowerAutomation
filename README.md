@@ -51,7 +51,8 @@ loadout catalogs, and compact Tier profiles:
 
 See [`docs/game_strategy.md`](docs/game_strategy.md) for the account's
 GC-with-Hybrid-aspects model, Damage Slider economics, T18/T19 Heat differences,
-and the evidence standard for comparing battle results.
+Dissonant coin multipliers, Spotlight targeting economics, and the evidence
+standard for comparing battle results.
 
 For example:
 

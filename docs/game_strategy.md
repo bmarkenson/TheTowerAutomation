@@ -184,11 +184,64 @@ make it proven or canonical. Public Fleet descriptions also carry
 version-specific uncertainty, so do not infer exact targeting behavior from a
 label alone.
 
+`In Spotlight` is also an economy priority. The Spotlight Coin Bonus applies
+to enemies killed while they are in Spotlight, so directing eligible tower
+fire there can increase the share of kills receiving that multiplier. This
+account has unusually wide Spotlight coverage, however, and most enemies
+already die inside a beam without making it the first target. Moving
+`In Spotlight` from fourth on T18 to sixth on the current T19 hypothesis may
+therefore have only a small marginal CPH cost. That is a hypothesis to measure,
+not a reason to treat Spotlight as economically unimportant.
+
+Target Priority also does not control every damage source. Measure the
+incremental fraction of qualifying kills or whole-run CPH instead of assuming
+that moving `In Spotlight` by two positions changes every kill. Its best
+position remains a survival/economy tradeoff: prioritizing a beam is useful
+only while Fast, Protector, Fleet, or another immediate threat can safely wait.
+
 Evaluate a Target Priority change using repeated runs with the same Tier,
 slider policy, perk order, and major loadout. Compare death cause, dangerous
 enemy accumulation, wave count, total coins, real duration, and whole-run coins
 per hour. If several variables changed, describe the result as suggestive
 rather than causal.
+
+## Dissonant Utility is a Tier-specific coin multiplier
+
+Dissonant Runs permanently strengthen a selected category on the Tier where
+the run was completed. The four columns in the Dissonant Boosts panel are
+Attack, Defense, Utility, and Ultimate Weapons; **Utility is the third column
+from the left and its reward is a coin multiplier**.
+
+A Utility Dissonant run disables the Utility systems during that challenge,
+including ordinary Cash and Coins, Packages, Free Upgrades, and Enemy Level
+Skips. Its direct Utility boost scales nonlinearly with the best wave reached
+and caps at `x3` at wave 5,000. Dissonant Echo contributions from other Tiers
+are then added to the direct boost. The panel's `Boost + Echo` view is therefore
+the relevant total when comparing ordinary Farm CPH.
+
+The operator's 2026-07-26 screenshot shows:
+
+| Tier | Best Utility Dissonant wave | Displayed Utility `Boost + Echo` | Status |
+| --- | ---: | ---: | --- |
+| T18 | 5,000 | `x4.58` | Direct Utility boost complete |
+| T19 | 3,462 | `x3.67` | Direct Utility boost incomplete |
+
+Holding every other coin factor constant, `4.58 / 3.67 = 1.248`: T18 currently
+has about a **24.8% coin-multiplier advantage** from Utility Dissonance alone.
+This affects CPH directly and should be normalized before attributing a T18/T19
+income difference to perks, Spotlight priority, Damage Slider, or Tier
+economics.
+
+Using the documented wave curve, T19 wave 3,462 corresponds to approximately
+`x2.05` of the direct `x3` Utility boost. If its Echo contribution stays
+unchanged, reaching wave 5,000 would raise its displayed total from about
+`x3.67` to about `x4.62`, a projected **25.9% increase** over its current
+Utility multiplier. This projection is useful for planning, but the live
+`Boost + Echo` value after completion remains authoritative.
+
+The current battle record does not capture Dissonant Boosts. Until it does,
+record the applicable Tier's four `Boost + Echo` values or retain a dated panel
+capture whenever cross-Tier CPH is being analyzed.
 
 ## Battle-comparison checklist
 
@@ -198,15 +251,17 @@ Before explaining a wave-count or coins-per-hour difference:
    any Overheat boundary crossed.
 2. Identify the build's terminal survival mechanism and the actual death
    threat. Do not analyze this account as generic eHP.
-3. Compare Cards, Modules, Ultimate Weapon toggles, Orb distances, Target
-   Priority, and game speed.
-4. Compare Auto Pick capacity and order, then distinguish perk timing from
+3. Compare the Tier's Dissonant Utility `Boost + Echo` before explaining CPH;
+   it is a direct coin multiplier, not a minor configuration detail.
+4. Compare Cards, Modules, Ultimate Weapon toggles, Orb distances, Target
+   Priority, Spotlight coverage, and game speed.
+5. Compare Auto Pick capacity and order, then distinguish perk timing from
    final perk presence.
-5. Record Damage Slider values and change waves. Treat a binding late-run
+6. Record Damage Slider values and change waves. Treat a binding late-run
    reduction as a strong early-death confounder.
-6. Compare total coins divided by real elapsed hours. Use instantaneous coin
+7. Compare total coins divided by real elapsed hours. Use instantaneous coin
    rate only as a checkpoint, not the final CPH conclusion.
-7. Separate causes from consequences. Lower wave count itself reduces perk
+8. Separate causes from consequences. Lower wave count itself reduces perk
    opportunities, total coin accumulation, and exposure to later Heat.
 
 ## Sources and repository authority
@@ -218,6 +273,8 @@ current live game after a release:
 - [Tower Knowledge Hub: Battle Conditions](https://the-tower.notion.site/Battle-Conditions-1dd91383b93f80d0b7c7f8c0f88ca89b)
 - [Tower Knowledge Hub: overall build guide](https://the-tower.notion.site/Guide-to-Overall-Builds-Strategies-24791383b93f80a6a157c6367c9bb6e5)
 - [Tower Knowledge Hub: Effective Health](https://the-tower.notion.site/Effective-Health-eHP-1d291383b93f8095bef7e94b9b89cd03)
+- [The Tower Wiki: Dissonance](https://the-tower-idle-tower-defense.fandom.com/wiki/Dissonance)
+- [The Tower Wiki: Spotlight](https://the-tower-idle-tower-defense.fandom.com/wiki/Spotlight)
 - [The Tower Wiki: Fleet enemies](https://the-tower-idle-tower-defense.fandom.com/wiki/Fleet_Enemies)
 - [The Tower Wiki: version 27 history](https://the-tower-idle-tower-defense.fandom.com/wiki/Version_History/V0.27)
 

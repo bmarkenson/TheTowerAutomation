@@ -83,7 +83,8 @@ Read these only when their condition applies:
   dated history only when its evidence or decision provenance matters.
 - [`game_strategy.md`](game_strategy.md): read when interpreting battle results
   or changing a Farm Tier, build archetype, perk priority, Damage Slider,
-  Target Priority, Heat, or Overheat assumption.
+  Spotlight economy, Target Priority, Dissonant Boost, Heat, or Overheat
+  assumption.
 - [`ui_state_traversal_2026-07-14.md`](ui_state_traversal_2026-07-14.md): read
   the relevant sections when changing UI-state coverage or traversal.
 - [`../windows/TheTower.ControlSurface/README.md`](../windows/TheTower.ControlSurface/README.md):
