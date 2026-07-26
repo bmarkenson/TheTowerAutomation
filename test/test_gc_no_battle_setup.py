@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 
 from automation.strategies import get_strategy
-from core.app import App
+from core.app import HOME_SETUP_MAX_ATTEMPTS, App
 from core.battle_lifecycle import HomeBattleControl
 from core.free_upgrade_locks import FARM_FREE_UPGRADE_LOCKS
 from core.gc_no_battle_setup import (
@@ -91,6 +91,8 @@ class _NoBattleRouter:
         self.module_checks = []
         self.module_observations = []
         self.card_recharge_checks = []
+        self.card_recharge_screenshot = "cards"
+        self.configuration_screens = []
         self.bots_offscreen = bots_offscreen
         self.deny_bots_preset = deny_bots_preset
         self.swipes = []
@@ -102,7 +104,7 @@ class _NoBattleRouter:
         assert frame == self.state
         if frame == "home":
             return {"state": "HOME_SCREEN", "secondary_states": []}
-        if frame == "cards":
+        if frame in {"cards", "cards_after_recharge"}:
             return {"state": "CARDS", "secondary_states": ["CARDS_FARM_SLOT"]}
         if frame == "workshop":
             return {
@@ -196,9 +198,10 @@ class _NoBattleRouter:
         assert self.state == "cards"
         assert kwargs["cards_screenshot"] == "cards"
         self.card_recharge_checks.append(dict(requirements))
+        self.state = self.card_recharge_screenshot
         return SimpleNamespace(
             valid=True,
-            screenshot="cards",
+            screenshot=self.card_recharge_screenshot,
             as_dict=lambda: {
                 "valid": True,
                 "changed": False,
@@ -223,7 +226,18 @@ class _NoBattleRouter:
             as_dict=lambda: {"valid": True, "slots": []},
         )
 
-    def validate_configuration(self, **_kwargs):
+    def validate_configuration(self, **kwargs):
+        self.configuration_screens.append(
+            {
+                key: kwargs[key]
+                for key in (
+                    "cards_screen",
+                    "workshop_screen",
+                    "bots_screen",
+                    "guardians_screen",
+                )
+            }
+        )
         return SimpleNamespace(
             valid=True,
             as_dict=lambda: {"valid": True},
@@ -471,6 +485,73 @@ def test_no_battle_setup_enforces_card_recharge_modes_before_leaving_cards():
             "valid": True,
         },
     ]
+
+
+def test_no_battle_setup_retains_verified_preset_frame_after_card_scan():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+    router.card_recharge_screenshot = "cards_after_recharge"
+    requirements = {
+        **REQUIREMENTS,
+        "card_recharge_modes": {
+            "Demon Mode": "auto_reactivate",
+            "Nuke": "ready_after_recharge",
+        },
+    }
+
+    result = _run(router, requirements)
+
+    assert result.complete
+    assert router.configuration_screens[-1]["cards_screen"] == "cards"
+
+
+def test_no_battle_setup_blocks_contradictory_boundary_evidence():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+
+    def contradictory_configuration(**_kwargs):
+        return SimpleNamespace(
+            valid=False,
+            as_dict=lambda: {
+                "cards": {"valid": False},
+                "workshop": {"valid": True},
+                "bots": {"valid": True},
+                "guardians": {"valid": True},
+                "valid": False,
+            },
+        )
+
+    router.validate_configuration = contradictory_configuration
+
+    result = _run(router)
+
+    assert not result.complete
+    assert result.failed_check == "cards_deck"
+    assert "contradicted the completed checks: cards_deck" in result.reason
+
+
+def test_no_battle_setup_allows_waived_boundary_mismatch():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+
+    def waived_configuration(**_kwargs):
+        return SimpleNamespace(
+            valid=False,
+            as_dict=lambda: {
+                "cards": {"valid": False},
+                "workshop": {"valid": True},
+                "bots": {"valid": True},
+                "guardians": {"valid": True},
+                "valid": False,
+            },
+        )
+
+    router.validate_configuration = waived_configuration
+
+    result = _run(
+        router,
+        waivers={"cards_deck": {"label": "skip cards", "reason": "test"}},
+    )
+
+    assert result.complete
+    assert result.evidence["configuration"]["blocking_valid"] is True
 
 
 def test_no_battle_setup_blocks_inputs_during_pause_then_restores_home():
@@ -1240,6 +1321,7 @@ def test_app_blocks_battle_start_when_no_battle_setup_fails():
     app._last_wave_conf = -1.0
     app._status_reporter = Mock()
     app._supervisor = Mock()
+    app._capture_frame = Mock(return_value=frame)
     app._handle_daily_gem_if_due = Mock(return_value=False)
     app._handle_mission_rewards_if_due = Mock(return_value=False)
     setup = GcNoBattleSetupResult(GcNoBattleSetupStatus.FAILED, "mismatch")
@@ -1253,14 +1335,83 @@ def test_app_blocks_battle_start_when_no_battle_setup_fails():
                 100.0,
             ),
         ),
-        patch("core.app.run_gc_no_battle_setup", return_value=setup),
+        patch(
+            "core.app.run_gc_no_battle_setup",
+            return_value=setup,
+        ) as run_setup,
         patch("core.app.handle_home_screen") as handle_home,
     ):
         app._handle_primary_states("HOME_SCREEN", set(), frame)
 
+    assert run_setup.call_count == HOME_SETUP_MAX_ATTEMPTS
+    assert app._capture_frame.call_count == HOME_SETUP_MAX_ATTEMPTS - 1
     manager.mark_no_battle_setup_complete.assert_not_called()
     handle_home.assert_not_called()
     manager.on_home.assert_not_called()
+
+
+def test_app_retries_transient_home_setup_failure_before_starting_battle():
+    frame = object()
+    retry_frame = object()
+    manager = Mock()
+    manager.no_battle_setup_requirements.return_value = REQUIREMENTS
+    app = App.__new__(App)
+    app._auto_start_enabled = True
+    app._mission_mgr = manager
+    app._fast_game_over = False
+    app._last_wave_value = None
+    app._last_wave_conf = -1.0
+    app._status_reporter = Mock()
+    app._supervisor = Mock()
+    app._capture_frame = Mock(return_value=retry_frame)
+    app._publish_gate_decision = Mock()
+    app._handle_daily_gem_if_due = Mock(return_value=False)
+    app._handle_mission_rewards_if_due = Mock(return_value=False)
+    failed = GcNoBattleSetupResult(
+        GcNoBattleSetupStatus.FAILED,
+        "transient cards evidence mismatch",
+        failed_check="cards_deck",
+    )
+    completed = GcNoBattleSetupResult(
+        GcNoBattleSetupStatus.COMPLETE,
+        "ok",
+        {"cards_deck": "Farm"},
+    )
+
+    with (
+        patch(
+            "core.app.detect_home_battle_control",
+            return_value=HomeBattleEvidence(
+                HomeBattleControl.NEW_BATTLE,
+                "test",
+                100.0,
+            ),
+        ),
+        patch(
+            "core.app.run_gc_no_battle_setup",
+            side_effect=[failed, completed],
+        ) as run_setup,
+        patch("core.app.handle_home_screen") as handle_home,
+    ):
+        app._handle_primary_states("HOME_SCREEN", set(), frame)
+
+    assert run_setup.call_args_list == [
+        call(
+            REQUIREMENTS,
+            screenshot=frame,
+            action_guard_fn=app._runtime_action_guard,
+        ),
+        call(
+            REQUIREMENTS,
+            screenshot=retry_frame,
+            action_guard_fn=app._runtime_action_guard,
+        ),
+    ]
+    app._publish_gate_decision.assert_not_called()
+    manager.mark_no_battle_setup_complete.assert_called_once_with(
+        completed.evidence
+    )
+    handle_home.assert_called_once_with(restart_enabled=True)
 
 
 def test_app_does_not_publish_gate_or_start_after_control_interruption():
@@ -1380,7 +1531,7 @@ def test_app_configured_fallback_waives_only_failed_check_and_retries_setup():
         ),
         patch(
             "core.app.run_gc_no_battle_setup",
-            side_effect=[setup, completed],
+            side_effect=[setup, setup, setup, completed],
         ) as run_setup,
         patch("core.app.handle_home_screen") as handle_home,
     ):
@@ -1404,6 +1555,16 @@ def test_app_configured_fallback_waives_only_failed_check_and_retries_setup():
         call(
             REQUIREMENTS,
             screenshot=frame,
+            action_guard_fn=app._runtime_action_guard,
+        ),
+        call(
+            REQUIREMENTS,
+            screenshot=recovered_home,
+            action_guard_fn=app._runtime_action_guard,
+        ),
+        call(
+            REQUIREMENTS,
+            screenshot=recovered_home,
             action_guard_fn=app._runtime_action_guard,
         ),
         call(

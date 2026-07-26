@@ -43,7 +43,10 @@ from core.no_strategy_post_run import (
     restore_post_run_home,
 )
 from core.run_perk_selector import RunScopedPerkSelector
-from core.gc_no_battle_setup import run_gc_no_battle_setup
+from core.gc_no_battle_setup import (
+    GcNoBattleSetupStatus,
+    run_gc_no_battle_setup,
+)
 from core.game_speed import GameSpeedGuard
 from core.gate_decisions import (
     build_gate_decision_options,
@@ -88,6 +91,7 @@ from utils.wave_detector import detect_wave_number_from_image
 
 
 Frame = NDArray[np.uint8]
+HOME_SETUP_MAX_ATTEMPTS = 3
 
 
 class App:
@@ -1863,6 +1867,56 @@ class App:
                 return None
         return img
 
+    def _run_home_setup_attempts(
+        self,
+        requirements: Mapping[str, Any],
+        *,
+        screenshot,
+        waivers: Optional[Mapping[str, Any]] = None,
+    ):
+        """Retry a recoverable Home setup from fresh evidence before blocking."""
+
+        current = screenshot
+        for attempt in range(1, HOME_SETUP_MAX_ATTEMPTS + 1):
+            setup_kwargs: Dict[str, Any] = {
+                "screenshot": current,
+                "action_guard_fn": self._runtime_action_guard,
+            }
+            if waivers:
+                setup_kwargs["waivers"] = dict(waivers)
+            setup = run_gc_no_battle_setup(requirements, **setup_kwargs)
+            if (
+                setup.complete
+                or setup.interrupted
+                or (
+                    getattr(setup, "status", None)
+                    is not GcNoBattleSetupStatus.FAILED
+                )
+                or attempt == HOME_SETUP_MAX_ATTEMPTS
+            ):
+                return setup
+
+            check_id = setup.failed_check or "startup_setup"
+            log(
+                f"[GC_NO_BATTLE] Home setup attempt {attempt}/"
+                f"{HOME_SETUP_MAX_ATTEMPTS} failed at {check_id}: "
+                f"{setup.reason}; retrying the complete setup from fresh "
+                "Home evidence",
+                "WARN",
+                console=True,
+            )
+            current = self._capture_frame()
+            if current is None:
+                log(
+                    "[GC_NO_BATTLE] Fresh Home capture failed; automatic "
+                    "setup retry cannot continue",
+                    "ERROR",
+                    console=True,
+                )
+                return setup
+
+        raise AssertionError("Home setup retry loop did not return")
+
     def _handoff_adb_port(self, port: int) -> bool:
         """Move a paused live runtime to another localhost ADB endpoint."""
 
@@ -2435,8 +2489,18 @@ class App:
                 self._supervisor.apply_control()
                 self._observe_strategy_request()
 
+            if repair_in_progress:
+                log(
+                    "[SESSION_PREFLIGHT] Automation-owned repair Surrender "
+                    "reached Game Over; skipping battle capture and returning Home",
+                    "INFO",
+                    console=True,
+                )
             completed_record = handle_game_over(
-                capture_stats=(not self._fast_game_over or no_strategy_run),
+                capture_stats=(
+                    not repair_in_progress
+                    and (not self._fast_game_over or no_strategy_run)
+                ),
                 control_sync=sync_terminal_control,
                 before_terminal_action=finalize_run_boundary,
                 return_home_after_battle=(repair_in_progress or no_strategy_run),
@@ -2518,13 +2582,11 @@ class App:
                     ):
                         return
                 waivers = dict(getattr(self, "_startup_gate_waivers", {}))
-                setup_kwargs: Dict[str, Any] = {
-                    "screenshot": img,
-                    "action_guard_fn": self._runtime_action_guard,
-                }
-                if waivers:
-                    setup_kwargs["waivers"] = waivers
-                setup = run_gc_no_battle_setup(requirements, **setup_kwargs)
+                setup = self._run_home_setup_attempts(
+                    requirements,
+                    screenshot=img,
+                    waivers=waivers,
+                )
                 if setup.interrupted:
                     return
                 if not setup.complete:
@@ -2575,13 +2637,11 @@ class App:
                     waivers = dict(
                         getattr(self, "_startup_gate_waivers", {})
                     )
-                    retry_kwargs: Dict[str, Any] = {
-                        "screenshot": fresh,
-                        "action_guard_fn": self._runtime_action_guard,
-                    }
-                    if waivers:
-                        retry_kwargs["waivers"] = waivers
-                    setup = run_gc_no_battle_setup(requirements, **retry_kwargs)
+                    setup = self._run_home_setup_attempts(
+                        requirements,
+                        screenshot=fresh,
+                        waivers=waivers,
+                    )
                     if setup.interrupted:
                         return
                     if not setup.complete:

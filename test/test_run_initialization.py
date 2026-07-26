@@ -1548,6 +1548,44 @@ class GcFarmProfileTests(unittest.TestCase):
         self.assertEqual(reported["free_upgrade_locks"], boundary_evidence)
         manager.on_game_over.assert_called_once_with()
 
+    def test_home_repair_game_over_skips_surrendered_battle_capture(self):
+        strategy = get_strategy("farm_t18")
+        manager = MagicMock()
+        manager.strategy = strategy
+        manager.ctx = MissionContext(
+            data={
+                "mission_vars": {
+                    "gc_session_preflight_evidence": {
+                        "valid": False,
+                        "failed_checks": ["cards_deck"],
+                    }
+                }
+            }
+        )
+        manager.session_preflight_repair_in_progress.return_value = True
+        app = App.__new__(App)
+        app._mission_mgr = manager
+        app._fast_game_over = False
+        app._last_wave_value = 130
+        app._last_wave_conf = 95.0
+        app._supervisor = MagicMock()
+        app._status_reporter = MagicMock()
+        app._status_reporter.coin_rate_samples = []
+        app._pending_strategy_request = None
+        app._strategy_boundary_confirmed = False
+        app._handle_daily_gem_if_due = MagicMock(return_value=False)
+        app._handle_mission_rewards_if_due = MagicMock(return_value=False)
+        frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+        with patch("core.app.handle_game_over") as game_over:
+            app._handle_primary_states("GAME_OVER", set(), frame)
+
+        self.assertFalse(game_over.call_args.kwargs["capture_stats"])
+        self.assertTrue(
+            game_over.call_args.kwargs["return_home_after_battle"]
+        )
+        manager.on_game_over.assert_called_once_with()
+
     def test_mid_run_farm_adoption_supplies_battle_end_identity(self):
         manager = MissionManager(None, None)
         manager.start()

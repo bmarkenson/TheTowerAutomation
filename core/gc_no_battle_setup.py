@@ -324,6 +324,7 @@ def run_gc_no_battle_setup(
             )
             evidence[current_check] = requirements[current_check]
         log_check(current_check)
+        cards_configuration = cards
 
         current_check = "card_recharge_modes"
         card_recharge_requirements = requirements.get(current_check)
@@ -448,6 +449,7 @@ def run_gc_no_battle_setup(
             )
             evidence[current_check] = requirements[current_check]
         log_check(current_check)
+        workshop_configuration = workshop
         current_check = "free_upgrade_locks"
         free_upgrade_lock_requirements = requirements.get("free_upgrade_locks")
         if current_check in active_waivers:
@@ -615,6 +617,7 @@ def run_gc_no_battle_setup(
             )
             evidence[current_check] = requirements[current_check]
         log_check(current_check)
+        bots_configuration = bots
         current = _return_home(
             bots,
             capture_fn,
@@ -664,6 +667,7 @@ def run_gc_no_battle_setup(
             )
             evidence[current_check] = list(requirements[current_check])
         log_check(current_check)
+        guardians_configuration = guardians
         current = _return_home(
             guardians,
             capture_fn,
@@ -803,14 +807,36 @@ def run_gc_no_battle_setup(
             )
 
         configuration = validate_configuration_fn(
-            cards_screen=cards,
-            workshop_screen=workshop,
-            bots_screen=bots,
-            guardians_screen=guardians,
+            cards_screen=cards_configuration,
+            workshop_screen=workshop_configuration,
+            bots_screen=bots_configuration,
+            guardians_screen=guardians_configuration,
             detector=detector,
             section_specs=section_specs,
         )
-        evidence["configuration"] = configuration.as_dict()
+        configuration_payload = configuration.as_dict()
+        section_checks = (
+            ("cards", "cards_deck"),
+            ("workshop", "workshop_preset"),
+            ("bots", "bots_preset"),
+            ("guardians", "guardian_chips"),
+        )
+        configuration_failures = [
+            check_id
+            for section, check_id in section_checks
+            if check_id not in active_waivers
+            and isinstance(configuration_payload.get(section), Mapping)
+            and configuration_payload[section].get("valid") is False
+        ]
+        configuration_payload["blocking_valid"] = not configuration_failures
+        evidence["configuration"] = configuration_payload
+        if configuration_failures:
+            current_check = configuration_failures[0]
+            raise _SetupFailure(
+                "Home boundary configuration evidence contradicted the "
+                "completed checks: "
+                + ", ".join(configuration_failures)
+            )
     except _SetupControlInterrupted as exc:
         log(
             "[GC_NO_BATTLE] Home setup control interruption ended; "
