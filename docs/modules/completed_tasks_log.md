@@ -37,6 +37,22 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-25 Coins/min ramp plausibility confirmation
+
+- Commit `2c1bebd` changed the Coins/min plausibility gate from permanent
+  comparison against a frozen baseline to cross-sample confirmation. It still
+  rejects an isolated large change, but accepts a sustained ramp once the next
+  candidate corroborates it.
+- Display recovery now requires two consecutive missing `/min` observations,
+  and a post-toggle lifetime total cannot be published as Coins/min.
+- Read-only live evidence reproduced the failure after the expected zero-rate
+  opening: `362T` was frozen while correct readings rose through `4.05q`,
+  `7.52q`, `10.2q`, and later values. A fresh wave-2167 frame visibly showed
+  `22.6q/min` and the diagnostic probe parsed `22.6q`.
+- The focused Coins suite passed 8 tests, status/run-boundary integration
+  passed 75, automation control and process coverage passed 79, and
+  `git diff --check` passed. No battle or process action was performed.
+
 ### 2026-07-25 Boss-safe Orb Distance enforcement
 
 - Repaired Distance Adjuster enforcement when a live Boss greys out the arrows

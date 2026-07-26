@@ -8,6 +8,43 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Coins/min ramp remained frozen at its first nonzero reading
+
+- **Observed:** 2026-07-25 during an active Tier 19 Farm battle.
+- **Symptom:** Coins/min correctly remained zero through approximately wave
+  1800, then began rising rapidly. The runtime accepted `362T` as the first
+  nonzero rate but repeatedly reported every later real reading as an
+  implausible jump, leaving the published value frozen at `362T`.
+- **Evidence:** `logs/actions.log` records zero at waves 1490, 1600, and 1720,
+  followed by `362T` at wave 1803. It then records rejected readings of
+  `4.05q`, `7.52q`, `10.2q`, and later values through `21.8q`. A fresh
+  read-only frame at wave 2167 visibly showed `22.6q/min`; the diagnostic
+  Coins probe parsed the same frame as `22.6q` with both the suffix and
+  `/min` marker present.
+- **Safety response:** Diagnosis used read-only process, control, log, ADB, and
+  screenshot inspection. The active battle was not paused, restarted, exited,
+  or Surrendered, and no device input was sent.
+- **Cause:** The plausibility gate compared every low-confidence large change
+  only with the last accepted value. Once the first post-zero rate became the
+  baseline, a legitimate fast ramp could exceed the factor limit on every
+  sample, so the baseline never advanced and the gate could never recover.
+  A single missed `/min` marker could also trigger an immediate display toggle;
+  the post-toggle lifetime total could then be published transiently as a rate.
+- **Resolution:** The gate now holds the first implausible rate change and
+  accepts the next reading when two consecutive candidates confirm a sustained
+  change within the normal scale-independent plausibility window. A candidate
+  that returns near the trusted baseline clears the pending change. Display
+  recovery now requires two missing `/min` observations, and a post-toggle
+  reading without `/min` retains the last trusted rate.
+- **Regression:** `test/test_coin_detector.py` covers the exact
+  `0 → 362T → 4.05q → 7.52q → 10.2q` progression, an isolated jump that must
+  remain rejected, two-sample display-toggle debounce, and rejection of a
+  post-toggle lifetime total as Coins/min.
+- **Validation:** The focused Coins suite passed 8 tests; status/run-boundary
+  integration passed 75 tests; automation control and process coverage passed
+  79 tests. `git diff --check` passed.
+- **Fixed by:** `2c1bebd`.
+
 ### Boss presence disabled the automatically paused Distance Adjuster
 
 - **Observed:** Operator report on 2026-07-25 while Orb Distance enforcement
