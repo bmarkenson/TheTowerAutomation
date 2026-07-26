@@ -14,7 +14,6 @@ TOURNAMENT_RUNTIME_POLICY = {
     "game_over_mode": "wait",
     "home_preflight": True,
     "session_preflight_on_attach": True,
-    "preflight_mismatch": "notify",
     "exclusive_validation": {
         "battle_kind": "ordinary_new_battle",
         "timeout_seconds": 300,
@@ -85,7 +84,6 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
         "gc_session_preflight_last_status": "",
         "gc_session_preflight_last_reason": "",
         "gc_session_preflight_evidence": {},
-        "gc_session_preflight_advisory": False,
     }
 
     return {

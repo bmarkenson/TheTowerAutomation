@@ -1183,35 +1183,6 @@ class App:
         )
         return True
 
-    def _handle_session_preflight_advisory(self) -> None:
-        """Publish a non-blocking decision for an observer-only mismatch."""
-
-        checks = self._mission_mgr.session_preflight_failure_checks()
-        check_id = checks[0] if checks else "session_preflight"
-        directive = self._matching_gate_decision("session_preflight")
-        if directive is None:
-            requirements = self._mission_mgr.strategy.session_preflight_requirements()
-            reason = str(
-                self._mission_mgr.ctx.data.get("mission_vars", {}).get(
-                    "gc_session_preflight_last_reason",
-                    "read-only session preflight mismatch",
-                )
-            )
-            directive = self._publish_gate_decision(
-                phase="session_preflight",
-                check_id=check_id,
-                reason=(
-                    f"{reason}. Tournament result capture remains active; "
-                    "this warning does not block observation."
-                ),
-                expected=requirements.get(check_id),
-                blocking=False,
-            )
-            if directive and directive.get("status") == "pending":
-                directive = self._prompt_for_gate_decision(directive) or directive
-        if directive:
-            self._apply_gate_decision(directive, phase="session_preflight")
-
     def _handle_terminal_session_gate_decision(self) -> None:
         checks = self._mission_mgr.session_preflight_failure_checks()
         check_id = checks[0] if checks else "session_preflight"
@@ -1607,17 +1578,6 @@ class App:
                         session_preflight_pending
                         and self._mission_mgr.session_preflight_terminally_blocked()
                     )
-                advisory_pending = bool(
-                    not session_preflight_pending
-                    and not self._supervisor.is_paused
-                    and not exclusive_validation_ownership_hold
-                    and not self._exclusive_validation_in_progress()
-                    and self._runtime_policy().get("preflight_mismatch") == "notify"
-                    and self._mission_mgr.session_preflight_advisory_pending()
-                )
-                if advisory_pending:
-                    self._handle_session_preflight_advisory()
-                    is_paused = self._supervisor.is_paused
                 if initialization_pending:
                     if not self._run_initialization_gate_logged:
                         log(
@@ -1684,12 +1644,27 @@ class App:
                             self._mission_mgr.ctx
                         )
                     ):
-                        log(
-                            "[SESSION_PREFLIGHT] Validation complete; normal "
-                            "handlers may resume",
-                            "INFO",
-                            console=True,
+                        mission_vars = self._mission_mgr.ctx.data.get(
+                            "mission_vars",
+                            {},
                         )
+                        if (
+                            mission_vars.get("gc_session_preflight_last_status")
+                            == "mismatch"
+                            and not mission_vars.get(
+                                "gc_session_preflight_blocked"
+                            )
+                        ):
+                            message = (
+                                "[SESSION_PREFLIGHT] Observation complete with "
+                                "mismatches; normal handlers may resume"
+                            )
+                        else:
+                            message = (
+                                "[SESSION_PREFLIGHT] Validation complete; normal "
+                                "handlers may resume"
+                            )
+                        log(message, "INFO", console=True)
                     self._session_preflight_gate_logged = False
                     self._session_preflight_terminal_blocked_logged = False
                     self._session_preflight_repair_denial_logged = False

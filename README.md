@@ -65,10 +65,10 @@ explicit next-run startup policy:
 This attaches to the existing/resumable battle and suppresses only tagged
 new-run initialization and session-preflight rules. Normal automation remains
 active. The Tournament observer is the narrow exception: its explicitly
-read-only preflight runs on attachment so mismatches can be reported without
-repair authority. Game Over, Tournament Results, or verified Home `NEW_BATTLE`
-evidence re-arms the gates for the following battle. The default `immediate`
-policy retains normal first-battle startup gating.
+read-only preflight runs on attachment so mismatches can be recorded without
+repair authority or an operator decision. Game Over, Tournament Results, or
+verified Home `NEW_BATTLE` evidence re-arms the gates for the following battle.
+The default `immediate` policy retains normal first-battle startup gating.
 
 For a gate-free experiment, select the no-strategy mode explicitly:
 
@@ -202,17 +202,16 @@ To keep observing that Tournament after the check, start the passive profile:
 
 The Tournament profile attempts the same read-only validation once, records a
 conclusive pass or mismatch as session evidence, including when attaching to
-an already-running Tournament. An attached mismatch publishes a non-blocking
-warning with choices to pause for manual changes, retry the read-only check, or
-continue observing with only that mismatch waived. Leaving the warning pending
-does not block natural Tournament Results/Game Over capture. The profile then
-limits runtime action authority to ad gems and the natural terminal handler. It
-does not buy upgrades, repair configuration, Surrender, auto-return Home, enter
-a Tournament, or start a normal battle. Terminal records identify Tournament
-from the distinct Tournament Results screen and retain the Tier observed in
-terminal stats even when no reliable strategy identity was attached. A standard
-Game Over with no strategy remains type `unknown` when Tier is the only identity
-evidence; Tier alone is not used to invent Farm or Milestone identity. A
+an already-running Tournament. An attached mismatch is logged and retained
+without publishing a gate decision, blocking observation, or repeating the
+inventory pass. The profile then limits runtime action authority to ad gems and
+the natural terminal handler. It does not buy upgrades, repair configuration,
+Surrender, auto-return Home, enter a Tournament, or start a normal battle.
+Terminal records identify Tournament from the distinct Tournament Results
+screen and retain the Tier observed in terminal stats even when no reliable
+strategy identity was attached. A standard Game Over with no strategy remains
+type `unknown` when Tier is the only identity evidence; Tier alone is not used
+to invent Farm or Milestone identity. A
 localized Attack Dissonance sword badge is independent observed identity
 evidence, so a no-strategy Game Over carrying that evidence is classified as
 `dissonance`.

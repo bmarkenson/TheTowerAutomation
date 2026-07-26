@@ -175,10 +175,10 @@ Swamp Stun `on`; other readable Ranges remain untouched. It never selects a
 Home preset or equips a loadout and must verify that Resume returns to the same
 Tournament.
 A mismatch is retained as session evidence but cannot request Home repair or
-block result capture. It publishes
-a non-blocking operator decision to pause for manual changes, retry with fresh
-evidence, or continue observation with a run-scoped waiver. This attachment
-path never gains Surrender authority.
+block result capture. Observation-only mismatches complete the one-shot pass
+without an operator decision or run-scoped waiver; they cannot make the
+inventory traversal repeat. This attachment path never gains Surrender
+authority.
 
 In-battle side-menu destinations and Event/Guild tabs require visible template
 matches and tap the matched bounding box. Their static coordinates are not

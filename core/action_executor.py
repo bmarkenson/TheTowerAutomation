@@ -339,7 +339,6 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                 if mv is not None:
                     mv["gc_session_preflight_attempted"] = True
                     mv["gc_session_preflight_blocked"] = False
-                    mv["gc_session_preflight_advisory"] = False
                 effective_requirements = dict(requirements)
                 if mv is not None:
                     waivers = mv.get("gc_session_preflight_waivers")
@@ -399,9 +398,10 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                     mismatch_policy = str(
                         act.get("mismatch_policy") or "block"
                     ).strip().lower()
-                    advisory = mismatch_policy == "notify"
+                    observation_only = mismatch_policy == "notify"
                     repairable = bool(
-                        act.get("allow_repair", True)
+                        not observation_only
+                        and act.get("allow_repair", True)
                         and result.evidence is not None
                         and getattr(
                             result.evidence,
@@ -411,13 +411,12 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                     )
                     if mv is not None:
                         mv["gc_session_preflight_completed"] = False
-                        mv["gc_session_preflight_blocked"] = True
+                        mv["gc_session_preflight_blocked"] = not observation_only
                         mv["gc_session_preflight_failed_checks"] = list(
                             getattr(result.evidence, "failed_checks", ())
                         )
                         mv["gc_session_preflight_repair_required"] = repairable
                         mv["gc_session_preflight_repair_in_progress"] = False
-                        mv["gc_session_preflight_advisory"] = advisory
                         if repairable:
                             mv["gc_no_battle_setup_completed"] = False
                     if repairable:
@@ -427,11 +426,11 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                             + json.dumps(evidence_payload, sort_keys=True),
                             "WARN",
                         )
-                    elif advisory:
+                    elif observation_only:
                         log_mission(
-                            "[SESSION_PREFLIGHT] Read-only observer mismatch; "
-                            "terminal capture remains active while operator "
-                            "direction is requested: "
+                            "[SESSION_PREFLIGHT] Read-only observer mismatch "
+                            "recorded; observation and terminal capture continue "
+                            "without operator action: "
                             + json.dumps(evidence_payload, sort_keys=True),
                             "WARN",
                         )
@@ -448,7 +447,6 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                         mv["gc_session_preflight_attempted"] = False
                         mv["gc_session_preflight_repair_required"] = False
                         mv["gc_session_preflight_repair_in_progress"] = False
-                        mv["gc_session_preflight_advisory"] = False
                         mv["gc_session_preflight_failed_checks"] = []
                     interrupted_level = (
                         "INFO"

@@ -284,7 +284,6 @@ class MissionManager:
             mv["gc_session_preflight_last_status"] = ""
             mv["gc_session_preflight_last_reason"] = ""
             mv["gc_session_preflight_evidence"] = {}
-            mv["gc_session_preflight_advisory"] = False
             mv["gc_session_preflight_failed_checks"] = []
             mv["gc_session_preflight_waivers"] = {}
 
@@ -350,15 +349,6 @@ class MissionManager:
             and not mv.get("gc_session_preflight_repair_in_progress")
         )
 
-    def session_preflight_advisory_pending(self) -> bool:
-        """Return whether a non-blocking observer mismatch needs direction."""
-
-        mv = self.ctx.data.setdefault("mission_vars", {})
-        return bool(
-            mv.get("gc_session_preflight_advisory")
-            and mv.get("gc_session_preflight_blocked")
-        )
-
     def session_preflight_failure_checks(self) -> list[str]:
         """Return requirement ids from the last authoritative mismatch."""
 
@@ -389,7 +379,6 @@ class MissionManager:
         mv["gc_session_preflight_blocked"] = False
         mv["gc_session_preflight_repair_required"] = False
         mv["gc_session_preflight_repair_in_progress"] = False
-        mv["gc_session_preflight_advisory"] = False
         mv["gc_session_preflight_failed_checks"] = []
 
     def retry_session_preflight(self) -> None:
@@ -401,7 +390,6 @@ class MissionManager:
         mv["gc_session_preflight_blocked"] = False
         mv["gc_session_preflight_repair_required"] = False
         mv["gc_session_preflight_repair_in_progress"] = False
-        mv["gc_session_preflight_advisory"] = False
         mv["gc_session_preflight_failed_checks"] = []
 
     def begin_session_preflight_repair(self) -> bool:

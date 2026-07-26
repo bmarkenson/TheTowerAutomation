@@ -383,13 +383,14 @@ should be interpreted as since attachment. A raw `systemctl --user restart`
 also replaces `main.py`, but does not provide this Pause, attachment-policy,
 readiness, or state-restoration protocol.
 
-If attached Tournament preflight finds an authoritative mismatch, the control
-surface opens a non-blocking warning. **Pause for manual changes** persists
-Pause without ending the run; **Retry** captures fresh validation evidence; and
-**Continue observing** waives only the displayed mismatch for that run. Closing
-the warning leaves it pending while natural Tournament Results/Game Over
-capture remains active. If Pause is selected, terminal handling waits until the
-operator resumes, as it does for every paused handler action.
+If attached Tournament preflight finds an authoritative mismatch in a setting
+that the pass only observes, it logs and retains that evidence, completes the
+one-shot observer pass, and continues without publishing a gate decision.
+Mismatched Modules, Workshop and Bot presets, Guardians, Cards, and retained
+Home-only lock evidence cannot trigger a repair, block natural Tournament
+Results/Game Over capture, or restart the inventory pass. Operators may still
+Pause explicitly through the normal controls when manual intervention is
+possible and desired.
 
 The ADB port can also move without replacing a live automation process or
 rerunning its in-memory startup/session gates:

@@ -11,7 +11,6 @@ runtime_policy:
   game_over_mode: wait
   home_preflight: true
   session_preflight_on_attach: true
-  preflight_mismatch: notify
   exclusive_validation:
     battle_kind: ordinary_new_battle
     timeout_seconds: 300
@@ -119,7 +118,6 @@ vars:
   gc_session_preflight_last_status: ''
   gc_session_preflight_last_reason: ''
   gc_session_preflight_evidence: {}
-  gc_session_preflight_advisory: false
 per_run_reset:
 - exclusive_validation_battle
 - ehls_completed
@@ -328,7 +326,6 @@ run_configuration:
     game_over_mode: wait
     home_preflight: true
     session_preflight_on_attach: true
-    preflight_mismatch: notify
     exclusive_validation:
       battle_kind: ordinary_new_battle
       timeout_seconds: 300
