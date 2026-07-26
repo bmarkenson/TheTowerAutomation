@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _refreshCancellation;
     private CancellationTokenSource? _battleRefreshCancellation;
     private CancellationTokenSource? _activityRefreshCancellation;
+    private ActivityEntry? _expandedActivityEntry;
     private bool _startupGatePolicyDirty;
     private string _strategyRequestMessage = "";
     private bool _updatingStrategySelection;
@@ -819,7 +820,52 @@ public partial class MainWindow : Window
         object sender,
         SelectionChangedEventArgs e)
     {
+        if (_expandedActivityEntry is not null
+            && !ActivityGrid.SelectedItems.Contains(_expandedActivityEntry))
+        {
+            CollapseExpandedActivity();
+        }
         CopyActivityButton.IsEnabled = ActivityGrid.SelectedItems.Count > 0;
+    }
+
+    private void ActivityGrid_MouseDoubleClick(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        var row = ItemsControl.ContainerFromElement(
+            ActivityGrid,
+            e.OriginalSource as DependencyObject) as DataGridRow;
+        if (row?.Item is not ActivityEntry entry)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(_expandedActivityEntry, entry))
+        {
+            CollapseExpandedActivity();
+            ActivityGrid.UnselectAll();
+        }
+        else
+        {
+            CollapseExpandedActivity();
+            ActivityGrid.UnselectAll();
+            ActivityGrid.SelectedItem = entry;
+            row.DetailsVisibility = Visibility.Visible;
+            _expandedActivityEntry = entry;
+            row.BringIntoView();
+        }
+        e.Handled = true;
+    }
+
+    private void CollapseExpandedActivity()
+    {
+        if (_expandedActivityEntry is not null
+            && ActivityGrid.ItemContainerGenerator.ContainerFromItem(
+                _expandedActivityEntry) is DataGridRow row)
+        {
+            row.DetailsVisibility = Visibility.Collapsed;
+        }
+        _expandedActivityEntry = null;
     }
 
     private void ActivityGrid_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -1204,6 +1250,7 @@ public partial class MainWindow : Window
 
     private void RenderActivity(ActivityResponse response)
     {
+        CollapseExpandedActivity();
         _activity.Clear();
         foreach (var entry in response.Items.AsEnumerable().Reverse())
         {

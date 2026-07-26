@@ -254,17 +254,41 @@
                 <ComboBoxItem Content="Failures only" Tag="FAIL" />
               </ComboBox>
               <CheckBox x:Name="ActivityAutoFollowBox" Content="Follow newest" IsChecked="True" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Margin="14,0,0,0" />
+              <TextBlock Text="Double-click a row to show the full line"
+                         Foreground="{StaticResource MutedBrush}"
+                         FontSize="10"
+                         VerticalAlignment="Center"
+                         Margin="14,0,0,0" />
             </WrapPanel>
             <DataGrid Grid.Row="2" x:Name="ActivityGrid"
                       SelectionMode="Extended" SelectionUnit="FullRow"
                       ClipboardCopyMode="ExcludeHeader"
+                      RowDetailsVisibilityMode="Collapsed"
                       SelectionChanged="ActivityGrid_SelectionChanged"
+                      MouseDoubleClick="ActivityGrid_MouseDoubleClick"
                       PreviewKeyDown="ActivityGrid_PreviewKeyDown">
               <DataGrid.ContextMenu>
                 <ContextMenu>
                   <MenuItem Header="Copy selected" Click="CopyActivity_Click" InputGestureText="Ctrl+C" />
                 </ContextMenu>
               </DataGrid.ContextMenu>
+              <DataGrid.RowDetailsTemplate>
+                <DataTemplate>
+                  <Border Background="{StaticResource PanelAltBrush}"
+                          BorderBrush="{StaticResource AccentBrush}"
+                          BorderThickness="3,0,0,0"
+                          Padding="12,9"
+                          Margin="0,0,0,3">
+                    <ScrollViewer MaxHeight="180"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                      <TextBlock TextWrapping="Wrap">
+                        <Run Text="[" /><Run Text="{Binding Level}" /><Run Text=" " /><Run Text="{Binding Timestamp}" /><Run Text="] " /><Run Text="{Binding Message}" />
+                      </TextBlock>
+                    </ScrollViewer>
+                  </Border>
+                </DataTemplate>
+              </DataGrid.RowDetailsTemplate>
               <DataGrid.Columns>
                 <DataGridTextColumn Header="Time" Binding="{Binding Timestamp}" Width="155" />
                 <DataGridTextColumn Header="Level" Binding="{Binding Level}" Width="80" />
