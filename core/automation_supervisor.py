@@ -98,6 +98,7 @@ class AutomationSupervisor:
         self._last_coins_toggle_ts: float = 0.0
         self._coins_has_min_miss: int = 0
         self._last_coins_val: Optional[Decimal] = None
+        self._coins_pending_plausibility_val: Optional[Decimal] = None
         self._coins_ignore_plausibility_once: bool = False
 
         self._rtg_visible_since_ts: Optional[float] = None
@@ -789,11 +790,20 @@ class AutomationSupervisor:
         )
         return recovered
 
-    def _apply_plausibility(self, coins_val: Optional[Decimal], coins_conf: float) -> Optional[Decimal]:
+    def _apply_plausibility(
+        self,
+        coins_val: Optional[Decimal],
+        coins_conf: float,
+        has_min: bool,
+    ) -> Optional[Decimal]:
         coins_eff = coins_val
         try:
+            if not has_min:
+                self._coins_pending_plausibility_val = None
+                return coins_eff
             if self._coins_ignore_plausibility_once:
                 self._coins_ignore_plausibility_once = False
+                self._coins_pending_plausibility_val = None
                 return coins_eff
             if (
                 self._last_coins_val is not None
@@ -802,22 +812,62 @@ class AutomationSupervisor:
                 and coins_val > 0
             ):
                 ratio = coins_val / self._last_coins_val
+                change_kind = None
+                factor = None
                 if ratio > self.coins_max_jump_factor and coins_conf < self.coins_jump_conf_floor:
-                    log(
-                        f"[COINS] Ignoring implausible jump {format_compact_decimal(self._last_coins_val)} → {format_compact_decimal(coins_val)} "
-                        f"(×{ratio:.2f}, conf={coins_conf:.1f})",
-                        "WARN",
-                    )
-                    coins_eff = self._last_coins_val
+                    change_kind = "jump"
+                    factor = ratio
                 else:
                     drop_factor = self._last_coins_val / coins_val
                     if drop_factor > self.coins_max_jump_factor:
+                        change_kind = "drop"
+                        factor = drop_factor
+
+                if change_kind is not None and factor is not None:
+                    pending = self._coins_pending_plausibility_val
+                    if pending is not None and pending > 0:
+                        confirmation_factor = max(
+                            coins_val / pending,
+                            pending / coins_val,
+                        )
+                        if confirmation_factor <= self.coins_max_jump_factor:
+                            log(
+                                "[COINS] Accepted sustained rate change "
+                                f"{format_compact_decimal(self._last_coins_val)} → "
+                                f"{format_compact_decimal(coins_val)} after "
+                                f"consecutive {format_compact_decimal(pending)} "
+                                f"and {format_compact_decimal(coins_val)} readings "
+                                f"(factor={confirmation_factor:.2f}, "
+                                f"conf={coins_conf:.1f})",
+                                "WARN",
+                            )
+                            self._coins_pending_plausibility_val = None
+                            return coins_eff
+
+                    self._coins_pending_plausibility_val = coins_val
+                    if change_kind == "jump":
                         log(
-                            f"[COINS] Ignoring implausible drop {format_compact_decimal(self._last_coins_val)} → {format_compact_decimal(coins_val)} "
-                            f"(÷{drop_factor:.2f}, conf={coins_conf:.1f})",
+                            "[COINS] Holding implausible jump "
+                            f"{format_compact_decimal(self._last_coins_val)} → "
+                            f"{format_compact_decimal(coins_val)} pending "
+                            f"confirmation (×{factor:.2f}, "
+                            f"conf={coins_conf:.1f})",
                             "WARN",
                         )
-                        coins_eff = self._last_coins_val
+                    else:
+                        log(
+                            "[COINS] Holding implausible drop "
+                            f"{format_compact_decimal(self._last_coins_val)} → "
+                            f"{format_compact_decimal(coins_val)} pending "
+                            f"confirmation (÷{factor:.2f}, "
+                            f"conf={coins_conf:.1f})",
+                            "WARN",
+                        )
+                    coins_eff = self._last_coins_val
+                else:
+                    self._coins_pending_plausibility_val = None
+            else:
+                self._coins_pending_plausibility_val = None
         except Exception:
             pass
         return coins_eff
@@ -849,7 +899,7 @@ class AutomationSupervisor:
         )
 
         # Plausibility first
-        coins_eff = self._apply_plausibility(coins_val, coins_conf)
+        coins_eff = self._apply_plausibility(coins_val, coins_conf, has_min)
 
         if not has_min:
             # When '/min' is missing, stick with the last trusted coins/min value (if any)
@@ -879,12 +929,15 @@ class AutomationSupervisor:
 
                 should_toggle = False
                 toggle_reason = ""
-                if ratio is not None and ratio >= self.coins_max_jump_factor:
+                if self._coins_has_min_miss >= 2:
                     should_toggle = True
-                    toggle_reason = f"ratio={ratio:.2f}"
-                elif self._coins_has_min_miss >= 2:
-                    should_toggle = True
-                    toggle_reason = f"miss_count={self._coins_has_min_miss}"
+                    if ratio is not None and ratio >= self.coins_max_jump_factor:
+                        toggle_reason = (
+                            f"ratio={ratio:.2f}, "
+                            f"miss_count={self._coins_has_min_miss}"
+                        )
+                    else:
+                        toggle_reason = f"miss_count={self._coins_has_min_miss}"
 
                 if should_toggle and (now_ts - self._last_coins_toggle_ts) >= self.coins_toggle_cooldown:
                     log(f"[COINS] Auto-toggle coin display ({toggle_reason or 'missing /min'})", "INFO")
@@ -902,7 +955,13 @@ class AutomationSupervisor:
                                     coins_conf,
                                     has_min,
                                 )
-                                coins_eff = self._apply_plausibility(coins_val, coins_conf)
+                                coins_eff = self._apply_plausibility(
+                                    coins_val,
+                                    coins_conf,
+                                    has_min,
+                                )
+                                if not has_min:
+                                    coins_eff = self._last_coins_val
                             except Exception:
                                 pass
 
