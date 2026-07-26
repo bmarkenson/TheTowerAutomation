@@ -84,7 +84,8 @@ Read these only when their condition applies:
 - [`game_strategy.md`](game_strategy.md): read when interpreting battle results
   or changing a Farm Tier, build archetype, perk priority, Damage Slider,
   Spotlight economy, Target Priority, Dissonant Boost, Heat, or Overheat
-  assumption.
+  assumption; also read it before judging a Tier by coins rather than its
+  Coins/Dice/module-shard/Cells tradeoff.
 - [`ui_state_traversal_2026-07-14.md`](ui_state_traversal_2026-07-14.md): read
   the relevant sections when changing UI-state coverage or traversal.
 - [`../windows/TheTower.ControlSurface/README.md`](../windows/TheTower.ControlSurface/README.md):

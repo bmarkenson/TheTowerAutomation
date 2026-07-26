@@ -243,6 +243,57 @@ The current battle record does not capture Dissonant Boosts. Until it does,
 record the applicable Tier's four `Boost + Echo` values or retain a dated panel
 capture whenever cross-Tier CPH is being analyzed.
 
+## Tier choice is a multi-currency optimization
+
+The purpose of the T19 Farm experiment is not to beat T18 on coins alone. T18
+currently has the completed Utility Dissonant advantage, but T19 can accelerate
+other progression currencies—primarily Reroll Dice and module shards, with
+Cells as an additional benefit.
+
+Public references use both “Reroll Dice” and “reroll shards” for the reroll
+currency. This repository reports combined `Reroll Dice/hour` from earned and
+fetched rows, and reports total `Module Shards/hour` by summing Cannon, Armor,
+Generator, and Core shards.
+
+Several Tier rules explain the T19 incentive:
+
+| Reward input | T18 | T19 | T19 advantage before run-length effects |
+| --- | ---: | ---: | --- |
+| Regular Fleet schedule | Every 100 waves from wave 95 | Every 50 waves from wave 45 | Twice as many scheduled regular Fleets per wave |
+| Reroll reward per successful Fleet drop | 1,650 | 1,800 | 9.1% more per successful drop |
+| Module shards per successful Fleet drop | 9 | 10 | 11.1% more per successful drop |
+| Boss reroll reward | 75 | 80 | 6.7% more per successful drop |
+| Base Cells per Elite, average | 15 | 17 | 13.3% more per Elite |
+
+With the documented 80% Fleet reroll and 20% Fleet module-shard chances, the
+regular schedule alone implies approximately:
+
+```text
+Fleet rerolls per wave: T19 / T18
+  = (0.80 × 1,800 / 50) / (0.80 × 1,650 / 100)
+  ≈ 2.18
+
+Fleet module shards per wave: T19 / T18
+  = (0.20 × 10 / 50) / (0.20 × 9 / 100)
+  ≈ 2.22
+```
+
+Those are per-wave expectations, not guaranteed whole-run hourly gains.
+Different wave rates, final waves, Fleet survival, Elite density, fetched
+rewards, and restart overhead can change the realized result. The completed
+battle report already derives the correct comparison outputs:
+
+- Coins/hour
+- combined Reroll Dice/hour
+- total module Shards/hour
+- Cells/hour
+
+Do not label T19 “worse” merely because its CPH is lower. It is a different
+point on the resource tradeoff: T18 is currently favored for coins, while T19
+may be favored for Dice, module shards, and Cells. Choose between them according
+to the current progression bottleneck, or report all four rates without
+collapsing them into a single score.
+
 ## Battle-comparison checklist
 
 Before explaining a wave-count or coins-per-hour difference:
@@ -261,7 +312,9 @@ Before explaining a wave-count or coins-per-hour difference:
    reduction as a strong early-death confounder.
 7. Compare total coins divided by real elapsed hours. Use instantaneous coin
    rate only as a checkpoint, not the final CPH conclusion.
-8. Separate causes from consequences. Lower wave count itself reduces perk
+8. Compare Reroll Dice/hour, total module Shards/hour, and Cells/hour before
+   judging which Tier is the better Farm for the current progression goal.
+9. Separate causes from consequences. Lower wave count itself reduces perk
    opportunities, total coin accumulation, and exposure to later Heat.
 
 ## Sources and repository authority
@@ -275,6 +328,8 @@ current live game after a release:
 - [Tower Knowledge Hub: Effective Health](https://the-tower.notion.site/Effective-Health-eHP-1d291383b93f8095bef7e94b9b89cd03)
 - [The Tower Wiki: Dissonance](https://the-tower-idle-tower-defense.fandom.com/wiki/Dissonance)
 - [The Tower Wiki: Spotlight](https://the-tower-idle-tower-defense.fandom.com/wiki/Spotlight)
+- [The Tower Wiki: Modules and boss reroll rewards](https://the-tower-idle-tower-defense.fandom.com/wiki/Modules)
+- [The Tower Wiki: Elite Cells](https://the-tower-idle-tower-defense.fandom.com/wiki/Currency/Elite_Cells)
 - [The Tower Wiki: Fleet enemies](https://the-tower-idle-tower-defense.fandom.com/wiki/Fleet_Enemies)
 - [The Tower Wiki: version 27 history](https://the-tower-idle-tower-defense.fandom.com/wiki/Version_History/V0.27)
 
