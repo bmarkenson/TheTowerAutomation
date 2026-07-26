@@ -37,6 +37,26 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-26 16-slot Farm Auto Pick survival priority
+
+- A guarded read-only Home inspection confirmed that the operator's three new
+  Auto Pick Ranking levels exposed 16 priority rows. The appended rows were
+  Enemy Speed / Enemy Damage, Ranged Distance / Ranged Damage, and the
+  regen-hostile Enemy Health / Tower Regen and Lifesteal tradeoff. The panel
+  was returned to verified Home under unchanged `RUNNING / WAIT`.
+- The first eight economy and acceleration ranks remain unchanged. Ranks 9–14
+  now prioritize Defense Percent, Max Health, Health Regen, the Health Regen /
+  Max Health tradeoff, Enemy Speed / Enemy Damage, and Ranged Distance /
+  Ranged Damage. Orbs and Damage occupy ranks 15–16; the enemy-health
+  tradeoff is intentionally excluded.
+- Semantic Home OCR now recognizes all six survival families independently of
+  their current level values. The Farm profile, both compatibility sources,
+  all four generated Farm plans, and the operator runbook carry the same
+  16-item order.
+- Focused validation passed 124 tests. Repository-wide validation passed 762
+  sandbox-compatible tests plus the separately permitted loopback HTTP test,
+  for 763 total. Implemented in commit `9a831d2`.
+
 ### 2026-07-26 Perk Wave Requirement OCR repair
 
 - Completed Tier 19 comparison exposed that Tesseract could read the maxed
