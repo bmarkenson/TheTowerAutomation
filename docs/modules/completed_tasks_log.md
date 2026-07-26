@@ -37,6 +37,31 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-26 Glass Cannon Auto Pick correction and run comparison
+
+- The operator-supplied ranking replaced the short-lived survival-first order
+  with the exact 16-slot Glass Cannon order. Ranks 9–16 are Orbs, Damage,
+  Enemy Health / Tower Regen and Lifesteal, Enemy Speed / Enemy Damage,
+  Ranged Distance / Ranged Damage, Boss Health / Boss Speed, Tower Damage /
+  Boss Health, and Chain Lightning Damage. The planned next eight priorities
+  are documented but remain non-enforcing until more slots are unlocked.
+- All three compared Tier 19 records retained the prior 13-slot requirement.
+  The wave-3001 / 1.06Q CPH run lacked Enemy Speed; the wave-3441 / 1.29Q CPH
+  run lacked both Enemy Speed and Ranged Distance; and the wave-4799 /
+  1.76Q CPH run had both. All three finished with Orbs +2, Damage x2.19, the
+  global -55% enemy-health tradeoff, both boss tradeoffs, and Chain Lightning.
+  This makes the two missing control perks a plausible causal contributor to
+  the lower wave counts. Final records do not retain acquisition waves, so
+  earlier delivery of the shared damage perks remains plausible but unproven.
+- Home configuration OCR now recognizes both boss tradeoffs, the global
+  enemy-health tradeoff, Bounce Shot, and Smart Missiles independently of
+  their displayed values. The Farm profile, compatibility sources, all four
+  generated plans, and the operator runbook agree exactly.
+- Focused validation passed 125 tests. Repository-wide validation passed 763
+  sandbox-compatible tests plus the separately permitted loopback HTTP test,
+  for 764 total. Commit `dc36829` supersedes the Auto Pick order from
+  `9a831d2`.
+
 ### 2026-07-26 16-slot Farm Auto Pick survival priority
 
 - A guarded read-only Home inspection confirmed that the operator's three new
