@@ -2026,6 +2026,11 @@ and actionable work lives in
   suites passed 190 tests. Repository-wide validation passed 768
   sandbox-compatible tests plus the separately permitted localhost HTTP test,
   for 769 total.
+- **Live activation:** The guarded current-battle reload replaced PID `3793479`
+  with PID `3842234`, attached with `next_run` gate semantics, restored the
+  configured `immediate` cold-start policy and `RUNNING` control, and advanced
+  the unchanged Tier 19 battle from wave 1852 before replacement to wave 1879
+  afterward. No Home/session gate or repair action replayed.
 - **Fixed by:** `71f7327`.
 
 ## Operational lessons

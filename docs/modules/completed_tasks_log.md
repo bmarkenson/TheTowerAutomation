@@ -1238,6 +1238,10 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Focused Home, preflight, control, Tournament, and Game Over validation passed
   190 tests. Repository-wide validation passed 768 sandbox-compatible tests
   plus the separately permitted localhost HTTP test, for 769 total.
+- Guarded live activation replaced PID `3793479` with `3842234`, attached to
+  the same Tier 19 battle with `next_run` semantics, restored the configured
+  `immediate` cold-start policy and `RUNNING` intent, and advanced from wave
+  1852 to wave 1879 without replaying Home/session gates or repair.
 
 ---
 
