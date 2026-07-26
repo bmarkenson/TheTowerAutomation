@@ -33,6 +33,12 @@ work. Historical checked detail remains in the
 
 - [ ] Audit the repository for unused or obsolete code, configuration, assets,
   generated files, tests, tools, and documentation.
+  - The repository-local audit and reviewable removal proposal is recorded in
+    [`../codebase_maintenance_audit_2026-07-26.md`](../codebase_maintenance_audit_2026-07-26.md).
+    It found concentrated orchestration complexity rather than broad
+    duplication, classified the named Cards paths, separated 24 active
+    module-catalog templates from 20 asset-removal candidates, and identified
+    the compatibility decisions still required before deletion.
   - Trace imports, runtime entry points, dynamic/YAML references, strategies,
     clickmap usage, and tests before classifying anything as dead.
   - Classify findings as active, generated, tooling, archival, or removable.
