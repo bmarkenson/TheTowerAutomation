@@ -8,6 +8,7 @@ run_initialization:
   complete_when:
   - ehls_completed
   - eals_completed
+  - orb_distance_checked
 session_preflight:
   complete_when:
   - gc_session_preflight_completed
@@ -108,6 +109,8 @@ vars:
   level_skip_elapsed_s: 0.0
   level_skip_taps_sent: 0
   level_skip_last_reason: ''
+  orb_distance_checked: false
+  orb_distance_observation: {}
   gc_no_battle_setup_completed: false
   gc_no_battle_setup_evidence: {}
   gc_session_preflight_completed: false
@@ -141,6 +144,8 @@ per_run_reset:
 - level_skip_elapsed_s
 - level_skip_taps_sent
 - level_skip_last_reason
+- orb_distance_checked
+- orb_distance_observation
 rules:
 - name: reset_on_game_over
   when:
@@ -206,6 +211,12 @@ rules:
   - type: set
     var: level_skip_last_reason
     value: ''
+  - type: set
+    var: orb_distance_checked
+    value: false
+  - type: set
+    var: orb_distance_observation
+    value: {}
 - name: initialise_fast_loop
   gate_phase: run_initialization
   when:
@@ -273,6 +284,12 @@ rules:
   - type: set
     var: level_skip_last_reason
     value: ''
+  - type: set
+    var: orb_distance_checked
+    value: false
+  - type: set
+    var: orb_distance_observation
+    value: {}
 - name: disable_fast_loop
   gate_phase: run_initialization
   when:
@@ -298,6 +315,28 @@ rules:
   cooldown_sec: 0.25
   do:
   - type: level_skip_initialize
+- name: enforce_orb_distance
+  gate_phase: run_initialization
+  when:
+    state: RUNNING
+  assert:
+  - ehls_completed
+  - eals_completed
+  - '!orb_distance_checked'
+  cooldown_sec: 30.0
+  do:
+  - type: orb_distance_configure
+    mode: enforce
+    range_basis: 30.00m
+    extra: 30.00m
+    workshop: 39.00m
+    range_presets:
+    - range_basis: 30.00m
+      extra: 30.00m
+      workshop: 39.00m
+    - range_basis: 98.38m
+      extra: 87.16m
+      workshop: 80.37m
 - name: validate_gc_session_preflight
   gate_phase: session_preflight
   when:
@@ -305,6 +344,7 @@ rules:
   assert:
   - ehls_completed
   - eals_completed
+  - orb_distance_checked
   - '!gc_session_preflight_completed'
   - '!gc_session_preflight_attempted'
   cooldown_sec: 30.0
@@ -457,7 +497,19 @@ run_configuration:
     damage_slider:
       mode: preserve
     orb_distance:
-      mode: preserve
+      mode: enforce
+      preset: farm_min_range
+      resolved:
+        range_basis: 30.00m
+        extra: 30.00m
+        workshop: 39.00m
+      range_presets:
+      - range_basis: 30.00m
+        extra: 30.00m
+        workshop: 39.00m
+      - range_basis: 98.38m
+        extra: 87.16m
+        workshop: 80.37m
     target_priority:
       mode: preserve
   gate_fallbacks:

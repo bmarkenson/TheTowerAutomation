@@ -573,9 +573,13 @@ the API, authority boundaries, and planned capabilities.
   Range evidence still fails closed. For a recognized Range, both displayed
   values require authoritative OCR. Every arrow is freshly matched for one
   tap, followed by settled OCR that must move the selected row strictly closer
-  to its target. Unknown, unchanged, cycling, or non-progressing panel evidence
-  fails closed, and success requires a verified return to the running side
-  menu.
+  to its target. Because Distance Adjuster pauses combat and disables its
+  controls while a Boss is present, an unavailable arrow or unchanged value
+  closes the panel, waits for the active wave to advance with combat running,
+  and performs a bounded retry from fresh panel evidence. The wait and every
+  new panel session recheck runtime action authority. Unknown, cycling,
+  non-progressing, or exhausted retry evidence fails closed, and success
+  requires a verified return to the running side menu.
 - Safe live validation, verified taps, resumable Exit Battle → Go Home
   traversal, and process restarts are allowed only within the user's stated
   task scope.

@@ -19,11 +19,14 @@ from core.state_detector import detect_state_and_overlays
 from core.upgrade_navigation import UpgradeSearchResult, find_upgrade
 from utils.logger import log, log_action_intent
 from utils.ocr_utils import ocr_text_and_conf
+from utils.wave_detector import detect_wave_number_from_image
 
 
 Frame = np.ndarray
 CaptureFn = Callable[[], Optional[Frame]]
 SleepFn = Callable[[float], None]
+ActionGuardFn = Callable[[], bool]
+ReadWaveFn = Callable[[Frame], tuple[Optional[int], float]]
 
 EXTRA_VALUE_REGION: Final[tuple[int, int, int, int]] = (400, 1270, 285, 130)
 WORKSHOP_VALUE_REGION: Final[tuple[int, int, int, int]] = (400, 1590, 285, 130)
@@ -298,7 +301,8 @@ def open_orb_distance(
     *,
     capture_fn: CaptureFn = capture_adb_screenshot,
     tap_visible_fn: Callable[..., bool] = tap_if_visible,
-    ensure_menu_fn: Callable[[], bool] = ensure_menu_open,
+    ensure_menu_fn: Callable[..., bool] = ensure_menu_open,
+    action_guard_fn: Optional[ActionGuardFn] = None,
     sleep_fn: SleepFn = time.sleep,
     attempts: int = 6,
 ) -> Optional[OrbDistanceReading]:
@@ -308,7 +312,10 @@ def open_orb_distance(
     existing = read_orb_distance(screenshot)
     if existing.visible:
         return existing
-    if not ensure_menu_fn():
+    if not _action_allowed(action_guard_fn):
+        log("[ORB_DISTANCE] Action guard rejected panel open", "WARN")
+        return None
+    if not ensure_menu_fn(action_guard=action_guard_fn):
         log("[ORB_DISTANCE] Unable to open the in-run side menu", "WARN")
         return None
     screenshot = capture_fn()
@@ -325,6 +332,9 @@ def open_orb_distance(
             f"state={detection['state']!r} overlays={detection['overlays']!r}",
             "WARN",
         )
+        return None
+    if not _action_allowed(action_guard_fn):
+        log("[ORB_DISTANCE] Action guard changed before panel open", "WARN")
         return None
     if not tap_visible_fn(
         "navigation.distance_adjuster",
@@ -433,6 +443,64 @@ def _wait_for_changed_reading(
     return latest
 
 
+def _action_allowed(action_guard_fn: Optional[ActionGuardFn]) -> bool:
+    if action_guard_fn is None:
+        return True
+    try:
+        return bool(action_guard_fn())
+    except Exception as exc:
+        log(f"[ORB_DISTANCE] Action guard failed: {exc}", "WARN")
+        return False
+
+
+def _wait_for_running_wave_change(
+    *,
+    capture_fn: CaptureFn,
+    sleep_fn: SleepFn,
+    action_guard_fn: Optional[ActionGuardFn],
+    read_wave_fn: ReadWaveFn,
+    attempts: int,
+) -> str:
+    """Wait with Distance Adjuster closed so a disabling Boss can clear."""
+
+    if not _action_allowed(action_guard_fn):
+        return "action_guard_rejected"
+    baseline_frame = capture_fn()
+    if not is_complete_screenshot(baseline_frame):
+        return "controls_wait_frame_unavailable"
+    baseline_detection = detect_state_and_overlays(baseline_frame)
+    if baseline_detection["state"] != "RUNNING":
+        return "battle_state_changed"
+    baseline_wave, _confidence = read_wave_fn(baseline_frame)
+    if baseline_wave is None:
+        return "controls_wait_wave_not_authoritative"
+
+    log(
+        "[ORB_DISTANCE] Distance controls did not respond; panel closed to "
+        f"resume combat while waiting for wave {baseline_wave} to clear",
+        "INFO",
+    )
+    for _ in range(max(1, int(attempts))):
+        if not _action_allowed(action_guard_fn):
+            return "action_guard_rejected"
+        sleep_fn(0.25)
+        frame = capture_fn()
+        if not is_complete_screenshot(frame):
+            continue
+        detection = detect_state_and_overlays(frame)
+        if detection["state"] != "RUNNING":
+            return "battle_state_changed"
+        wave, _confidence = read_wave_fn(frame)
+        if wave is not None and wave != baseline_wave:
+            log(
+                "[ORB_DISTANCE] Running wave advanced "
+                f"{baseline_wave} -> {wave}; retrying Distance Adjuster",
+                "INFO",
+            )
+            return "wave_changed"
+    return "controls_wait_timeout"
+
+
 def configure_orb_distance(
     *,
     range_basis: Any,
@@ -443,10 +511,14 @@ def configure_orb_distance(
     capture_fn: CaptureFn = capture_adb_screenshot,
     tap_visible_fn: Callable[..., bool] = tap_if_visible,
     read_range_fn: Callable[..., RangeReading] = read_attack_range,
-    ensure_menu_fn: Callable[[], bool] = ensure_menu_open,
+    ensure_menu_fn: Callable[..., bool] = ensure_menu_open,
+    action_guard_fn: Optional[ActionGuardFn] = None,
+    read_wave_fn: ReadWaveFn = detect_wave_number_from_image,
     sleep_fn: SleepFn = time.sleep,
     max_steps_per_row: int = 160,
     settle_attempts: int = 6,
+    max_panel_sessions: int = 3,
+    controls_wait_attempts: int = 80,
 ) -> OrbDistanceResult:
     """Observe or enforce one Range-bound Orb Distance preset."""
 
@@ -569,125 +641,176 @@ def configure_orb_distance(
             "INFO",
         )
 
-    reading = open_orb_distance(
-        capture_fn=capture_fn,
-        tap_visible_fn=tap_visible_fn,
-        ensure_menu_fn=ensure_menu_fn,
-        sleep_fn=sleep_fn,
-    )
-    if reading is None:
-        result_values["reason"] = "panel_not_verified"
-        return OrbDistanceResult(
-            mode=canonical_mode,
-            range_basis=expected["range_basis"],
-            expected_extra=expected["extra"],
-            expected_workshop=expected["workshop"],
-            **result_values,
-        )
-
-    try:
-        result_values["initial_extra"] = reading.extra
-        result_values["initial_workshop"] = reading.workshop
-        result_values["final_extra"] = reading.extra
-        result_values["final_workshop"] = reading.workshop
-        if not reading.authoritative:
-            result_values["reason"] = "value_not_authoritative"
-        else:
-            result_values["observed"] = True
-            result_values["matches"] = (
-                reading.extra == expected["extra"]
-                and reading.workshop == expected["workshop"]
-            )
-            if canonical_mode == "observe":
-                result_values["reason"] = (
-                    "matched"
-                    if result_values["matches"]
-                    else "observed_mismatch"
-                )
-            else:
-                for row in ("extra", "workshop"):
-                    target = _distance_value(expected[row])
-                    current = _distance_value(getattr(reading, row))
-                    assert target is not None
-                    if current is None:
-                        result_values["reason"] = "value_not_authoritative"
-                        break
-                    seen = {current}
-                    while (
-                        current != target
-                        and result_values[f"{row}_steps"]
-                        < max(0, int(max_steps_per_row))
-                    ):
-                        direction = "decrease" if current > target else "increase"
-                        button = f"buttons.distance_adjuster:{row}:{direction}"
-                        log(
-                            f"[ORB_DISTANCE] {row.title()} {getattr(reading, row)} "
-                            f"toward {expected[row]} with one {direction} tap",
-                            "INFO",
-                        )
-                        if not tap_visible_fn(
-                            button,
-                            screenshot=reading.screenshot,
-                            retries=0,
-                        ):
-                            result_values["reason"] = "arrow_not_verified"
-                            break
-                        result_values[f"{row}_steps"] += 1
-                        updated = _wait_for_changed_reading(
-                            row,
-                            current,
-                            target,
-                            capture_fn=capture_fn,
-                            sleep_fn=sleep_fn,
-                            attempts=settle_attempts,
-                        )
-                        updated_value = (
-                            _distance_value(getattr(updated, row))
-                            if updated.authoritative
-                            else None
-                        )
-                        if updated_value is None or updated_value == current:
-                            result_values["reason"] = "value_did_not_change"
-                            break
-                        result_values["final_extra"] = updated.extra
-                        result_values["final_workshop"] = updated.workshop
-                        result_values["changed"] = True
-                        if abs(updated_value - target) >= abs(current - target):
-                            result_values["reason"] = "value_moved_away_from_target"
-                            break
-                        if updated_value in seen and updated_value != target:
-                            result_values["reason"] = "value_cycle_detected"
-                            break
-                        seen.add(updated_value)
-                        reading = updated
-                        current = updated_value
-                        result_values["reason"] = (
-                            "matched" if current == target else "adjusting"
-                        )
-                    if current != target:
-                        if result_values["reason"] in {
-                            "not_started",
-                            "matched",
-                            "adjusting",
-                        }:
-                            result_values["reason"] = "step_limit_reached"
-                        break
-
-                result_values["matches"] = (
-                    reading.authoritative
-                    and reading.extra == expected["extra"]
-                    and reading.workshop == expected["workshop"]
-                )
-                if result_values["matches"]:
-                    result_values["reason"] = "matched"
-    finally:
-        result_values["dismissed"] = dismiss_orb_distance(
+    panel_opened = False
+    for panel_session in range(max(1, int(max_panel_sessions))):
+        if not _action_allowed(action_guard_fn):
+            result_values["reason"] = "action_guard_rejected"
+            break
+        reading = open_orb_distance(
             capture_fn=capture_fn,
             tap_visible_fn=tap_visible_fn,
+            ensure_menu_fn=ensure_menu_fn,
+            action_guard_fn=action_guard_fn,
             sleep_fn=sleep_fn,
         )
+        if reading is None:
+            result_values["reason"] = "panel_not_verified"
+            break
+        panel_opened = True
 
-    if not result_values["dismissed"]:
+        retry_after_progress = False
+        try:
+            if panel_session == 0:
+                result_values["initial_extra"] = reading.extra
+                result_values["initial_workshop"] = reading.workshop
+            result_values["final_extra"] = reading.extra
+            result_values["final_workshop"] = reading.workshop
+            if not reading.authoritative:
+                result_values["reason"] = "value_not_authoritative"
+            else:
+                result_values["observed"] = True
+                result_values["matches"] = (
+                    reading.extra == expected["extra"]
+                    and reading.workshop == expected["workshop"]
+                )
+                if canonical_mode == "observe":
+                    result_values["reason"] = (
+                        "matched"
+                        if result_values["matches"]
+                        else "observed_mismatch"
+                    )
+                else:
+                    for row in ("extra", "workshop"):
+                        target = _distance_value(expected[row])
+                        current = _distance_value(getattr(reading, row))
+                        assert target is not None
+                        if current is None:
+                            result_values["reason"] = "value_not_authoritative"
+                            break
+                        seen = {current}
+                        while (
+                            current != target
+                            and result_values[f"{row}_steps"]
+                            < max(0, int(max_steps_per_row))
+                        ):
+                            direction = (
+                                "decrease" if current > target else "increase"
+                            )
+                            button = (
+                                f"buttons.distance_adjuster:{row}:{direction}"
+                            )
+                            log(
+                                f"[ORB_DISTANCE] {row.title()} "
+                                f"{getattr(reading, row)} toward "
+                                f"{expected[row]} with one {direction} tap",
+                                "INFO",
+                            )
+                            if not tap_visible_fn(
+                                button,
+                                screenshot=reading.screenshot,
+                                retries=0,
+                            ):
+                                result_values["reason"] = "arrow_not_verified"
+                                retry_after_progress = True
+                                break
+                            result_values[f"{row}_steps"] += 1
+                            updated = _wait_for_changed_reading(
+                                row,
+                                current,
+                                target,
+                                capture_fn=capture_fn,
+                                sleep_fn=sleep_fn,
+                                attempts=settle_attempts,
+                            )
+                            updated_value = (
+                                _distance_value(getattr(updated, row))
+                                if updated.authoritative
+                                else None
+                            )
+                            if (
+                                updated_value is None
+                                or updated_value == current
+                            ):
+                                result_values["reason"] = (
+                                    "value_did_not_change"
+                                )
+                                retry_after_progress = True
+                                break
+                            result_values["final_extra"] = updated.extra
+                            result_values["final_workshop"] = updated.workshop
+                            result_values["changed"] = True
+                            if abs(updated_value - target) >= abs(
+                                current - target
+                            ):
+                                result_values["reason"] = (
+                                    "value_moved_away_from_target"
+                                )
+                                break
+                            if (
+                                updated_value in seen
+                                and updated_value != target
+                            ):
+                                result_values["reason"] = (
+                                    "value_cycle_detected"
+                                )
+                                break
+                            seen.add(updated_value)
+                            reading = updated
+                            current = updated_value
+                            result_values["reason"] = (
+                                "matched"
+                                if current == target
+                                else "adjusting"
+                            )
+                        if current != target:
+                            if result_values["reason"] in {
+                                "not_started",
+                                "matched",
+                                "adjusting",
+                            }:
+                                result_values["reason"] = (
+                                    "step_limit_reached"
+                                )
+                            break
+
+                    result_values["matches"] = (
+                        reading.authoritative
+                        and reading.extra == expected["extra"]
+                        and reading.workshop == expected["workshop"]
+                    )
+                    if result_values["matches"]:
+                        result_values["reason"] = "matched"
+        finally:
+            result_values["dismissed"] = dismiss_orb_distance(
+                capture_fn=capture_fn,
+                tap_visible_fn=tap_visible_fn,
+                sleep_fn=sleep_fn,
+            )
+
+        if (
+            canonical_mode == "observe"
+            or result_values["matches"]
+            or not retry_after_progress
+            or not result_values["dismissed"]
+        ):
+            break
+        if panel_session + 1 >= max(1, int(max_panel_sessions)):
+            result_values["reason"] = (
+                f"{result_values['reason']};controls_retry_exhausted"
+            )
+            break
+        wait_result = _wait_for_running_wave_change(
+            capture_fn=capture_fn,
+            sleep_fn=sleep_fn,
+            action_guard_fn=action_guard_fn,
+            read_wave_fn=read_wave_fn,
+            attempts=controls_wait_attempts,
+        )
+        if wait_result != "wave_changed":
+            result_values["reason"] = wait_result
+            break
+
+    if panel_opened and not result_values["dismissed"]:
         result_values["reason"] = f"{result_values['reason']};dismiss_failed"
     return OrbDistanceResult(
         mode=canonical_mode,

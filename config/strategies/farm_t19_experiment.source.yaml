@@ -15,6 +15,7 @@ loadout:
   damage_slider:
     mode: preserve
   orb_distance:
-    mode: preserve
+    mode: enforce
+    preset: farm_min_range
   target_priority:
     mode: preserve

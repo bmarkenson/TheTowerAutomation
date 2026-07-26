@@ -824,6 +824,44 @@ class FarmProfileTests(unittest.TestCase):
             ["ehls_completed", "eals_completed", "!orb_distance_checked"],
         )
 
+    def test_tier_19_enforces_orb_distance_for_configured_ranges(self):
+        plan = build_strategy_yaml(self._source("farm_t19_experiment"))
+        configuration = plan["run_configuration"]
+        orb_rule = next(
+            rule for rule in plan["rules"]
+            if rule["name"] == "enforce_orb_distance"
+        )
+
+        self.assertEqual(
+            configuration["loadout"]["orb_distance"]["mode"],
+            "enforce",
+        )
+        self.assertEqual(
+            [
+                preset["range_basis"]
+                for preset in configuration["loadout"]["orb_distance"][
+                    "range_presets"
+                ]
+            ],
+            ["30.00m", "98.38m"],
+        )
+        self.assertIn(
+            "orb_distance_checked",
+            plan["run_initialization"]["complete_when"],
+        )
+        self.assertEqual(
+            orb_rule["assert"],
+            ["ehls_completed", "eals_completed", "!orb_distance_checked"],
+        )
+        self.assertEqual(
+            orb_rule["do"][0]["type"],
+            "orb_distance_configure",
+        )
+        self.assertEqual(
+            orb_rule["do"][0]["mode"],
+            "enforce",
+        )
+
     def test_damage_slider_gate_and_evidence_reset_for_every_run(self):
         strategy = get_strategy("farm")
         ctx = MissionContext()
@@ -1157,7 +1195,7 @@ class GcFarmProfileTests(unittest.TestCase):
         self.assertTrue(mv["ehls_completed"])
         self.assertTrue(mv["eals_completed"])
 
-    def test_preserve_profile_runs_level_skips_without_target_priority_action(self):
+    def test_t19_runs_orb_distance_without_target_priority_action(self):
         strategy = get_strategy("gc_farm_t19_experiment")
         self.assertIsInstance(strategy, YamlStrategy)
         manager = MissionManager(None, strategy)
@@ -1174,6 +1212,18 @@ class GcFarmProfileTests(unittest.TestCase):
         with patch("automation.strategies.yaml_strategy.log_mission"):
             actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
 
+        orb_action = next(
+            rule["do"][0]
+            for rule in strategy.rules
+            if rule["name"] == "enforce_orb_distance"
+        )
+        self.assertEqual(actions, [orb_action])
+        self.assertTrue(manager.run_initialization_pending())
+        self.assertFalse(manager.session_preflight_pending())
+
+        mv["orb_distance_checked"] = True
+        with patch("automation.strategies.yaml_strategy.log_mission"):
+            actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
         self.assertEqual(
             actions,
             [
@@ -1373,6 +1423,8 @@ class GcFarmProfileTests(unittest.TestCase):
         self.assertFalse(manager.session_preflight_pending())
 
         mv.update(ehls_completed=True, eals_completed=True)
+        self.assertTrue(manager.run_initialization_pending())
+        mv["orb_distance_checked"] = True
         self.assertFalse(manager.run_initialization_pending())
         self.assertTrue(manager.session_preflight_pending())
 
@@ -1384,7 +1436,11 @@ class GcFarmProfileTests(unittest.TestCase):
 
         manager.maybe_run_start({"state": "GAME_OVER"})
         manager.maybe_run_start({"state": "RUNNING"})
-        mv.update(ehls_completed=True, eals_completed=True)
+        mv.update(
+            ehls_completed=True,
+            eals_completed=True,
+            orb_distance_checked=True,
+        )
         self.assertTrue(mv["gc_session_preflight_completed"])
         self.assertFalse(manager.session_preflight_pending())
 

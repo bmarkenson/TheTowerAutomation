@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import copy
-from typing import Any, Dict, Iterable, List, Mapping, Optional
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional
 
 from utils.logger import log, log_mission
 from automation.missions.base import BaseMission, MissionContext
@@ -20,6 +20,7 @@ class MissionManager:
         strategy: Optional[BaseStrategy],
         *,
         defer_startup_gates_until_next_run: bool = False,
+        action_guard_fn: Optional[Callable[[], bool]] = None,
     ):
         self.mission = mission
         self.strategy = strategy
@@ -28,6 +29,7 @@ class MissionManager:
         self._last_state = None
         self._mission_was_complete = False
         self._startup_gates_deferred = bool(defer_startup_gates_until_next_run)
+        self._action_guard_fn = action_guard_fn
         self._new_battle_home_observed = False
         self._exclusive_validation_prepared_request_id: Optional[str] = None
         self._battle_lifecycle = BattleLifecycle(
@@ -535,7 +537,12 @@ class MissionManager:
 
         if mission_actions or strategy_actions:
             try:
-                execute_actions(screen, mission_actions + strategy_actions, self.ctx)
+                execute_actions(
+                    screen,
+                    mission_actions + strategy_actions,
+                    self.ctx,
+                    action_guard_fn=self._action_guard_fn,
+                )
             except Exception as exc:
                 log(f"[EXEC] error: {exc}", "ERROR")
 

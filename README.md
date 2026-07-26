@@ -46,8 +46,8 @@ loadout catalogs, and compact Tier profiles:
 - `farm` and `farm_t18` select the Tier 18 profile. Its configured Orb Distance
   and Target Priority presets are verified and enforced after EHLS/EALS.
 - `farm_t19_experiment` selects the experimental Tier 19 profile. It runs
-  EHLS/EALS but preserves the current Orb Distance and Target Priority settings
-  without inspecting them or including them in the startup completion gate.
+  EHLS/EALS, enforces the Range-selected Orb Distance preset, and preserves
+  Target Priority without inspecting or changing it.
 
 For example:
 
@@ -145,11 +145,13 @@ an explicit safe repair path; `observe` records evidence without blocking or
 changing it; `preserve` neither inspects nor changes it. Modules, Orb Distance,
 and Target Priority resolve named presets at build time. Orb Distance presets
 bind an Extra/Workshop pair to an expected Attack Range; automation refuses to
-apply the pair unless fresh Range OCR matches that basis. Tier 18 Farm binds
-Range `30.00m` to Extra `30.00m` and Workshop `39.00m`. Damage Slider profiles
-use an explicit percentage; Tier 18 enforces `1E-22%` during every new-run
-initialization after EHLS/EALS. The fully resolved configuration is embedded
-in the generated plan and copied into each battle's JSON record.
+apply the pair unless fresh Range OCR matches that basis. Tier 18 and the
+experimental Tier 19 profile both select the configured pair for observed
+Range `30.00m` or `98.38m` and preserve any other readable experimental
+Range. Damage Slider profiles use an explicit percentage; Tier 18 enforces
+`1E-22%` during every new-run initialization after EHLS/EALS. The fully
+resolved configuration is embedded in the generated plan and copied into each
+battle's JSON record.
 
 When an enforced module repair replaces an occupied Primary or Assist module,
 automation always accepts the presented level transfer and requires the dialog

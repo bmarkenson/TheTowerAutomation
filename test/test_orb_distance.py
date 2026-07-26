@@ -212,7 +212,7 @@ def test_open_orb_distance_uses_verified_side_menu_control():
         tap_visible_fn=lambda name, **kwargs: taps.append(
             (name, kwargs)
         ) or True,
-        ensure_menu_fn=lambda: True,
+        ensure_menu_fn=lambda **_kwargs: True,
         sleep_fn=lambda _seconds: None,
     )
 
@@ -304,6 +304,63 @@ def test_orb_distance_enforces_each_row_with_single_step_feedback():
         "buttons.distance_adjuster:extra:increase",
         "buttons.distance_adjuster:workshop:increase",
     ]
+
+
+def test_orb_distance_retries_after_closed_panel_allows_wave_to_advance():
+    menu = _load(TOURNAMENT_RANGE_FIXTURE)
+    panel_reads = iter(
+        (
+            _reading("30.00m", "39.00m"),
+            _reading("30.00m", "39.00m"),
+        )
+    )
+    changed_reads = iter(
+        (
+            _reading("30.00m", "39.00m"),
+            _reading("31.00m", "39.00m"),
+        )
+    )
+    waves = iter(((100, 98.0), (101, 98.0)))
+    taps = []
+
+    with (
+        patch(
+            "core.orb_distance.open_orb_distance",
+            side_effect=lambda **_kwargs: next(panel_reads),
+        ) as open_panel,
+        patch(
+            "core.orb_distance.read_orb_distance",
+            side_effect=lambda _frame: next(changed_reads),
+        ),
+        patch(
+            "core.orb_distance.dismiss_orb_distance",
+            return_value=True,
+        ) as dismiss_panel,
+    ):
+        result = configure_orb_distance(
+            range_basis="30m",
+            extra="31m",
+            workshop="39m",
+            capture_fn=lambda: menu,
+            read_range_fn=lambda **_kwargs: _range("30.00m"),
+            read_wave_fn=lambda _frame: next(waves),
+            tap_visible_fn=lambda name, **_kwargs: taps.append(name) or True,
+            sleep_fn=lambda _seconds: None,
+            settle_attempts=1,
+            controls_wait_attempts=1,
+        )
+
+    assert result.success
+    assert result.changed
+    assert result.initial_extra == "30.00m"
+    assert result.final_extra == "31.00m"
+    assert result.extra_steps == 2
+    assert taps == [
+        "buttons.distance_adjuster:extra:increase",
+        "buttons.distance_adjuster:extra:increase",
+    ]
+    assert open_panel.call_count == 2
+    assert dismiss_panel.call_count == 2
 
 
 def test_range_basis_mismatch_blocks_before_opening_or_tapping():
@@ -444,6 +501,9 @@ def test_action_executor_records_successful_orb_distance_enforcement():
         "_strategy": True,
     }
 
+    def action_guard():
+        return True
+
     with (
         patch(
             "core.action_executor.configure_orb_distance",
@@ -451,7 +511,12 @@ def test_action_executor_records_successful_orb_distance_enforcement():
         ) as configure,
         patch("core.action_executor.log_mission") as mission_log,
     ):
-        execute_actions(object(), [action], ctx)
+        execute_actions(
+            object(),
+            [action],
+            ctx,
+            action_guard_fn=action_guard,
+        )
 
     configure.assert_called_once_with(
         range_basis="30.00m",
@@ -459,6 +524,7 @@ def test_action_executor_records_successful_orb_distance_enforcement():
         workshop="39.00m",
         mode="enforce",
         range_presets=range_presets,
+        action_guard_fn=action_guard,
     )
     assert ctx.data["mission_vars"]["orb_distance_checked"]
     assert ctx.data["mission_vars"]["orb_distance_observation"] == payload

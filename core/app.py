@@ -124,6 +124,7 @@ class App:
             defer_startup_gates_until_next_run=(
                 config.startup_gate_policy == "next_run"
             ),
+            action_guard_fn=self._runtime_action_guard,
         )
         self._mission_mgr.start()
         self._gate_decision_prompt = gate_decision_prompt

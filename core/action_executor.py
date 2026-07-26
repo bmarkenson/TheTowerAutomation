@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from typing import Any, Dict, Iterable, Mapping, Optional
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional
 
 from utils.logger import log, log_mission
 from core.input import tap_if_visible
@@ -59,7 +59,13 @@ from handlers.ad_gem_handler import (
 Action = Dict[str, Any]
 
 
-def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionContext] = None) -> None:
+def execute_actions(
+    screen,
+    actions: Iterable[Action],
+    ctx: Optional[MissionContext] = None,
+    *,
+    action_guard_fn: Optional[Callable[[], bool]] = None,
+) -> None:
     mv = None
     if ctx is not None:
         mv = ctx.data.setdefault("mission_vars", {})
@@ -258,6 +264,8 @@ def execute_actions(screen, actions: Iterable[Action], ctx: Optional[MissionCont
                     orb_distance_kwargs["range_presets"] = act.get(
                         "range_presets"
                     )
+                if action_guard_fn is not None:
+                    orb_distance_kwargs["action_guard_fn"] = action_guard_fn
                 result = configure_orb_distance(
                     **orb_distance_kwargs,
                 )

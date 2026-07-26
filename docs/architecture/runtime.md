@@ -66,13 +66,18 @@ action carries the complete configured preset set. The authoritative observed
 Attack Range selects its matching Extra/Workshop pair; a readable Range
 outside that set is preserved as an operator experiment without opening
 Distance Adjuster. Unreadable Range evidence still blocks. Tier 18 Farm binds
-Range `30.00m` to Extra `30.00m` and Workshop `39.00m`. Damage Slider
-`observe` and `enforce` policies resolve an explicit percentage; Tier 18
-enforces `1E-22%` during every new-run initialization after the time-sensitive
-EHLS/EALS setup. `YamlStrategy` exposes the plan's resolved
-`run_configuration` generically, and Game Over records copy that snapshot into
-the versioned battle JSON. Runtime code does not inherit configuration or
-branch on a Farm strategy name.
+Range `30.00m` to Extra `30.00m` and Workshop `39.00m`; Tier 18 and
+experimental Tier 19 both enforce the observed configured Range pair. If a
+freshly matched arrow is unavailable or one verified tap leaves its value
+unchanged, the runtime closes Distance Adjuster so its automatic pause no
+longer freezes combat, waits for the running wave to advance, and retries from
+fresh panel evidence. The wait and every new panel session recheck runtime
+action authority. Damage Slider `observe` and `enforce` policies resolve an
+explicit percentage; Tier 18 enforces `1E-22%` during every new-run
+initialization after the time-sensitive EHLS/EALS setup. `YamlStrategy`
+exposes the plan's resolved `run_configuration` generically, and Game Over
+records copy that snapshot into the versioned battle JSON. Runtime code does
+not inherit configuration or branch on a Farm strategy name.
 
 Game speed is a global battle-only invariant. A periodic guard requires
 authoritative `RUNNING` evidence, reads the localized speed value and visible
@@ -347,8 +352,11 @@ evidence is attached.
   matches each direction arrow immediately before one tap. Every step
   reacquires the panel, requires the selected row to move strictly closer to
   its target, and stops on unknown, unchanged, cycling, or non-progressing
-  evidence. Success requires both exact values and verified return to the
-  running side menu.
+  evidence. An unavailable arrow or unchanged value closes the automatically
+  pausing panel, waits with combat running until the wave advances, and
+  retries in a bounded number of fresh panel sessions; runtime action
+  authority is rechecked throughout the between-session wait. Success requires
+  both exact values and verified return to the running side menu.
 - Complete no-battle setup owns every supported profile check available from
   verified Home `NEW_BATTLE`: Cards and the declared Demon Mode/Nuke recharge
   activation modes, Workshop and its Free Upgrade locks, strategy-declared
