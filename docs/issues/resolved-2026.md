@@ -8,6 +8,39 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Completed Battles omitted survival ability activation waves
+
+- **Observed:** 2026-07-26 when the operator inspected the newest Farm record
+  in the native Windows Completed Battles window.
+- **Symptom:** The Battle stats tab ended with Coins/min progression and showed
+  no Demon Mode or Nuke activation waves, leading to concern that automation
+  had not been restarted after the tracker was added.
+- **Evidence:** The selected `Battle20260725T210917-0700` Markdown report
+  contained its **Survival ability activations** section, and its JSON retained
+  the complete `runtime.survival_ability_activations` object. The live
+  automation owner had started after the tracking commits and the action log
+  contained matching runtime events. Static client inspection found explicit
+  handling for `coin_rate_samples` but no read of the adjacent survival
+  activation object.
+- **Safety response:** Diagnosis was read-only. The automation process,
+  persistent control, ADB target, active battle, and emulator were not changed.
+- **Cause:** `BattleHistoryWindow` constructed its Battle stats rows directly
+  from selected JSON fields and never added survival activation events. The
+  same flat grid also repeated the section name for every row, making long
+  sections difficult to navigate.
+- **Resolution:** The client now creates explicit Demon Mode and sequenced Nuke
+  rows with approximate wave, detection time, and wave confidence. Battle
+  stats are grouped into collapsed tree parents with row counts and expandable
+  stat/value children.
+- **Regression:** The parser contract is implemented in
+  `windows/TheTower.ControlSurface/BattleHistoryWindow.xaml.cs`, and its
+  corresponding hierarchical templates are compiled from
+  `BattleHistoryWindow.xaml` by the checked-in Linux publish script.
+- **Validation:** `windows/TheTower.ControlSurface/publish-linux.sh` completed
+  a self-contained `win-x64` publish successfully. WPF visual confirmation
+  remains for the Windows operator after copying the new executable.
+- **Fixed by:** `f876647`.
+
 ### Coins/min ramp remained frozen at its first nonzero reading
 
 - **Observed:** 2026-07-25 during an active Tier 19 Farm battle.

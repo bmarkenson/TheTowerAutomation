@@ -37,6 +37,22 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-26 collapsible Battle History and survival activation waves
+
+- Confirmed that the selected `Battle20260725T210917-0700` record already
+  retained Demon Mode at approximate wave 1973 and Nuke at waves 2683, 3027,
+  and 3366, while the Windows Completed Battles parser displayed only the
+  adjacent Coins/min runtime samples.
+- The Battle stats tab now presents every report category as a collapsed tree
+  node with a row count. Expanding a node reveals its stat/value children
+  without repeating the section label on every row.
+- `runtime.survival_ability_activations` now produces one Demon Mode
+  first-activation child and every sequenced Nuke activation, including wave,
+  detection time, and wave-OCR confidence.
+- The self-contained `win-x64` WPF publish completed successfully. Diagnosis
+  and implementation did not change the automation process, control state, or
+  active battle. Implemented in commit `f876647`.
+
 ### 2026-07-25 Coins/min ramp plausibility confirmation
 
 - Commit `2c1bebd` changed the Coins/min plausibility gate from permanent
