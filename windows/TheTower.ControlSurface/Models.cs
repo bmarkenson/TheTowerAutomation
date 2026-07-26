@@ -538,6 +538,9 @@ public sealed class ActivityResponse
 
     [JsonPropertyName("available_levels")]
     public List<string> AvailableLevels { get; set; } = [];
+
+    [JsonPropertyName("source_file_id")]
+    public string? SourceFileId { get; set; }
 }
 
 public sealed class ActivityEntry

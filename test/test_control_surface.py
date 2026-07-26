@@ -697,6 +697,29 @@ def test_activity_filters_levels_before_applying_limit(tmp_path):
     ]
 
 
+def test_activity_reports_replacement_log_identity_after_rotation(tmp_path):
+    log_path = tmp_path / "logs" / "actions.log"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text(
+        "[INFO 2026-07-19 17:00:00] before rotation\n",
+        encoding="utf-8",
+    )
+    service = _service(tmp_path)
+
+    before = service.activity()
+    os.replace(log_path, log_path.with_name("actions.log.1"))
+    log_path.write_text(
+        "[ACTION 2026-07-19 17:00:01] after rotation\n",
+        encoding="utf-8",
+    )
+    after = service.activity()
+
+    assert before["source_file_id"]
+    assert after["source_file_id"]
+    assert after["source_file_id"] != before["source_file_id"]
+    assert [entry["message"] for entry in after["items"]] == ["after rotation"]
+
+
 def test_activity_rejects_invalid_level(tmp_path):
     with pytest.raises(ControlSurfaceRequestError):
         _service(tmp_path).activity(levels=["ERROR;DROP"])

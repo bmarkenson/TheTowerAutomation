@@ -25,6 +25,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _battleRefreshCancellation;
     private CancellationTokenSource? _activityRefreshCancellation;
     private ActivityEntry? _expandedActivityEntry;
+    private string? _activitySourceFileId;
     private bool _startupGatePolicyDirty;
     private string _strategyRequestMessage = "";
     private bool _updatingStrategySelection;
@@ -782,15 +783,38 @@ public partial class MainWindow : Window
             var response = await _api.GetActivityAsync(
                 SelectedActivityLevels(),
                 _activityRefreshCancellation.Token);
-            if (ActivityGrid.SelectedItems.Count > 0)
+            var selected = ActivityGrid.SelectedItems
+                .OfType<ActivityEntry>()
+                .ToList();
+            var sourceChanged = _activitySourceFileId is not null
+                && response.SourceFileId is not null
+                && !string.Equals(
+                    _activitySourceFileId,
+                    response.SourceFileId,
+                    StringComparison.Ordinal);
+            var selectionStillAvailable = SelectedActivityStillAvailable(
+                selected,
+                response.Items);
+            if (selected.Count > 0 && !sourceChanged && selectionStillAvailable)
             {
                 ActivityStatusText.Text =
-                    $"Selection held ({ActivityGrid.SelectedItems.Count}); copy or clear it to resume";
+                    $"Selection held ({selected.Count}); copy or clear it to resume";
                 return;
             }
+            var selectionResetMessage = selected.Count == 0
+                ? null
+                : sourceChanged
+                    ? "Activity log rotated; selection cleared"
+                    : "Selected activity left the current log tail; selection cleared";
+            if (selected.Count > 0)
+            {
+                CollapseExpandedActivity();
+                ActivityGrid.UnselectAll();
+            }
             RenderActivity(response);
-            ActivityStatusText.Text =
-                $"Updated {DateTime.Now:T} | {_activity.Count} shown";
+            ActivityStatusText.Text = selectionResetMessage is null
+                ? $"Updated {DateTime.Now:T} | {_activity.Count} shown"
+                : $"{selectionResetMessage} | {_activity.Count} shown";
         }
         catch (OperationCanceledException)
         {
@@ -866,6 +890,35 @@ public partial class MainWindow : Window
             row.DetailsVisibility = Visibility.Collapsed;
         }
         _expandedActivityEntry = null;
+    }
+
+    private static bool SelectedActivityStillAvailable(
+        IReadOnlyCollection<ActivityEntry> selected,
+        IReadOnlyCollection<ActivityEntry> available)
+    {
+        var unmatched = available.ToList();
+        foreach (var selectedEntry in selected)
+        {
+            var matchIndex = unmatched.FindIndex(entry =>
+                string.Equals(
+                    entry.Timestamp,
+                    selectedEntry.Timestamp,
+                    StringComparison.Ordinal)
+                && string.Equals(
+                    entry.Level,
+                    selectedEntry.Level,
+                    StringComparison.Ordinal)
+                && string.Equals(
+                    entry.Message,
+                    selectedEntry.Message,
+                    StringComparison.Ordinal));
+            if (matchIndex < 0)
+            {
+                return false;
+            }
+            unmatched.RemoveAt(matchIndex);
+        }
+        return true;
     }
 
     private void ActivityGrid_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -1251,6 +1304,7 @@ public partial class MainWindow : Window
     private void RenderActivity(ActivityResponse response)
     {
         CollapseExpandedActivity();
+        _activitySourceFileId = response.SourceFileId;
         _activity.Clear();
         foreach (var entry in response.Items.AsEnumerable().Reverse())
         {

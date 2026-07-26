@@ -1183,9 +1183,13 @@ class ControlSurfaceService:
         """Return recent structured log lines for diagnostics."""
 
         requested_limit = max(1, min(int(limit), 250))
+        lines, source_file_id = _tail_lines_with_source(
+            self.action_log,
+            max_bytes=262_144,
+        )
         parsed = [
             entry
-            for line in _tail_lines(self.action_log, max_bytes=262_144)
+            for line in lines
             if (entry := _parse_log_line(line)) is not None
         ]
         available_levels = sorted({entry["level"] for entry in parsed})
@@ -1204,6 +1208,7 @@ class ControlSurfaceService:
         return {
             "items": parsed[-requested_limit:],
             "available_levels": available_levels,
+            "source_file_id": source_file_id,
         }
 
     def _resolve_path(self, path: Path | str) -> Path:
@@ -1521,19 +1526,29 @@ def _utc_datetime(value: Optional[datetime]) -> datetime:
 
 
 def _tail_lines(path: Path, *, max_bytes: int) -> list[str]:
+    lines, _ = _tail_lines_with_source(path, max_bytes=max_bytes)
+    return lines
+
+
+def _tail_lines_with_source(
+    path: Path,
+    *,
+    max_bytes: int,
+) -> tuple[list[str], Optional[str]]:
     try:
         with path.open("rb") as handle:
+            source = os.fstat(handle.fileno())
             handle.seek(0, os.SEEK_END)
             size = handle.tell()
             handle.seek(max(0, size - max_bytes))
             data = handle.read()
     except OSError:
-        return []
+        return [], None
     text = data.decode("utf-8", errors="replace")
     lines = text.splitlines()
     if size > max_bytes and lines:
         lines = lines[1:]
-    return lines
+    return lines, f"{source.st_dev}:{source.st_ino}"
 
 
 def _file_size(path: Path) -> int:
