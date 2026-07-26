@@ -440,6 +440,12 @@ def _ocr_perk_text(crop: Frame) -> tuple[str, float]:
 def _normalize_perk_ocr(text: str) -> str:
     normalized = " ".join((text or "").split())
     normalized = re.sub(r"(?<=\+)\](?=\s|$)", "1", normalized)
+    normalized = re.sub(
+        r"(\bperk wave requirement\s+-)/(?=5\.00%)",
+        r"\g<1>7",
+        normalized,
+        flags=re.IGNORECASE,
+    )
     normalized = re.sub(r"(?<=-)/(?=\d)", "", normalized)
     normalized = re.sub(r"([+-])\s+(?=\d)", r"\1", normalized)
     normalized = re.sub(r"\bspeec\b", "speed", normalized, flags=re.IGNORECASE)

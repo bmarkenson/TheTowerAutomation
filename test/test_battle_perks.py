@@ -67,10 +67,11 @@ def test_known_font_artifacts_are_normalized_without_losing_raw_ocr():
         [
             ("+] wave on death wave", 95.0),
             ("Perk wave requirement -/75.00%", 87.0),
+            ("Perk wave requirement -/5.00%", 93.5),
         ]
     )
     perks = ocr_selected_perks(
-        [_frame(["green", "blue"])],
+        [_frame(["green", "blue", "blue"])],
         source_complete=True,
         source_reason="edge_reached",
         text_fn=lambda _crop: next(recognized),
@@ -81,6 +82,8 @@ def test_known_font_artifacts_are_normalized_without_losing_raw_ocr():
         "Perk wave requirement -75.00%",
     ]
     assert perks["selected"][0]["text_raw"] == "+] wave on death wave"
+    assert perks["selected"][1]["text_raw"] == "Perk wave requirement -/5.00%"
+    assert len(perks["selected"][1]["observations"]) == 2
 
 
 def test_incomplete_or_low_confidence_perks_require_source_evidence():
