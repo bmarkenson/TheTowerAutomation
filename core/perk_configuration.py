@@ -6,6 +6,7 @@ from difflib import SequenceMatcher
 import re
 from typing import Any, Callable, Mapping, Optional, Sequence
 
+import cv2
 import numpy as np
 
 from core.battle_perks import ocr_perk_configuration_rows, ocr_perk_rows
@@ -13,6 +14,7 @@ from core.battle_perks import ocr_perk_configuration_rows, ocr_perk_rows
 
 Frame = np.ndarray
 RowTextFn = Callable[[Frame], tuple[str, float]]
+RankingBoundaryFn = Callable[[Frame], int | None]
 
 # In the configuration panel selected tiles use the same hue as available
 # tiles but a deliberately darker fill.  The retained First Perk fixture reads
@@ -20,6 +22,13 @@ RowTextFn = Callable[[Frame], tuple[str, float]]
 MAX_SELECTED_BACKGROUND_VALUE = 110.0
 DEFAULT_CONFIDENCE_THRESHOLD = 70.0
 PERK_BAN_CAPACITY = 6
+AUTO_PICK_DIVIDER_SCAN_TOP = 400
+AUTO_PICK_DIVIDER_SCAN_BOTTOM = 1700
+AUTO_PICK_DIVIDER_LEFT_X1 = 120
+AUTO_PICK_DIVIDER_LEFT_X2 = 310
+AUTO_PICK_DIVIDER_RIGHT_X1 = 770
+AUTO_PICK_DIVIDER_RIGHT_X2 = 960
+AUTO_PICK_DIVIDER_MIN_WHITE_PIXELS = 130
 
 FARM_PERK_BANS = (
     "cash_tradeoff",
@@ -262,6 +271,9 @@ def extract_ranked_auto_pick_order(
     row_fn: Callable[[Frame], list[dict[str, Any]]] = (
         ocr_perk_configuration_rows
     ),
+    ranking_boundary_fn: RankingBoundaryFn = (
+        lambda frame: detect_auto_pick_ranking_boundary(frame)
+    ),
 ) -> dict[str, Any]:
     """Read the first profile-declared number of Auto Pick priority rows."""
 
@@ -269,10 +281,27 @@ def extract_ranked_auto_pick_order(
         raise ValueError("ranking_count must be positive")
     ordered: list[dict[str, Any]] = []
     raw_pages = []
+    ranking_boundary_seen = False
     for page, frame in enumerate(frames, start=1):
         rows = list(row_fn(frame))
-        raw_pages.append({"page": page, "rows": rows})
-        for row in rows:
+        ranking_boundary_y = ranking_boundary_fn(frame)
+        if ranking_boundary_y is not None:
+            ranking_boundary_seen = True
+            ranked_rows = [
+                row
+                for row in rows
+                if int(row.get("bottom") or 0) < ranking_boundary_y
+            ]
+        else:
+            ranked_rows = rows
+        raw_pages.append(
+            {
+                "page": page,
+                "rows": rows,
+                "ranking_boundary_y": ranking_boundary_y,
+            }
+        )
+        for row in ranked_rows:
             entry = _semantic_entry(row)
             if any(
                 perk_entries_match(existing, entry)
@@ -284,7 +313,7 @@ def extract_ranked_auto_pick_order(
             ordered.append(entry)
             if len(ordered) >= ranking_count:
                 break
-        if len(ordered) >= ranking_count:
+        if len(ordered) >= ranking_count or ranking_boundary_seen:
             break
 
     selected = ordered[:ranking_count]
@@ -295,8 +324,14 @@ def extract_ranked_auto_pick_order(
     ]
     warnings = []
     if len(selected) != ranking_count:
+        suffix = (
+            " before the ranking boundary"
+            if ranking_boundary_seen
+            else ""
+        )
         warnings.append(
-            f"Auto Pick exposed {len(selected)} of {ranking_count} ranked perks"
+            f"Auto Pick exposed {len(selected)} of {ranking_count} ranked "
+            f"perks{suffix}"
         )
     if low_confidence:
         warnings.append(
@@ -309,11 +344,56 @@ def extract_ranked_auto_pick_order(
             "valid": not warnings,
             "selected_count": len(selected),
             "ranking_count": ranking_count,
+            "ranking_boundary_seen": ranking_boundary_seen,
             "low_confidence": low_confidence,
             "warnings": warnings,
         },
         "raw_pages": raw_pages,
     }
+
+
+def detect_auto_pick_ranking_boundary(frame: Frame) -> int | None:
+    """Locate the paired white rules surrounding ``Rankings Unlocked``."""
+
+    if (
+        not isinstance(frame, np.ndarray)
+        or frame.ndim != 3
+        or frame.shape[0] < AUTO_PICK_DIVIDER_SCAN_BOTTOM
+        or frame.shape[1] < AUTO_PICK_DIVIDER_RIGHT_X2
+    ):
+        return None
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    white = (hsv[:, :, 1] < 60) & (hsv[:, :, 2] >= 180)
+    left_counts = white[
+        AUTO_PICK_DIVIDER_SCAN_TOP:AUTO_PICK_DIVIDER_SCAN_BOTTOM,
+        AUTO_PICK_DIVIDER_LEFT_X1:AUTO_PICK_DIVIDER_LEFT_X2,
+    ].sum(axis=1)
+    right_counts = white[
+        AUTO_PICK_DIVIDER_SCAN_TOP:AUTO_PICK_DIVIDER_SCAN_BOTTOM,
+        AUTO_PICK_DIVIDER_RIGHT_X1:AUTO_PICK_DIVIDER_RIGHT_X2,
+    ].sum(axis=1)
+    paired_counts = np.minimum(left_counts, right_counts)
+    candidates = np.flatnonzero(
+        paired_counts >= AUTO_PICK_DIVIDER_MIN_WHITE_PIXELS
+    )
+    if candidates.size == 0:
+        return None
+
+    groups = np.split(
+        candidates,
+        np.flatnonzero(np.diff(candidates) > 1) + 1,
+    )
+    strongest = max(
+        groups,
+        key=lambda group: (
+            int(paired_counts[group].max()),
+            int(group.size),
+        ),
+    )
+    return int(
+        AUTO_PICK_DIVIDER_SCAN_TOP
+        + round(float(np.median(strongest)))
+    )
 
 
 def evaluate_profile_perk_configuration(
@@ -630,6 +710,7 @@ __all__ = [
     "PERK_BAN_CAPACITY",
     "PERK_CONFIGURATION_LABELS",
     "classify_perk_configuration_text",
+    "detect_auto_pick_ranking_boundary",
     "evaluate_profile_perk_configuration",
     "extract_configured_perk_bans",
     "extract_ranked_auto_pick_order",

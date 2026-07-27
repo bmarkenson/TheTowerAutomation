@@ -70,7 +70,7 @@ def test_auto_pick_repair_inserts_missing_coin_tradeoff_at_strategy_rank():
         patch(
             "core.home_perk_configuration._scroll_configuration_top",
             side_effect=lambda current, **_kwargs: current,
-        ),
+        ) as scroll_top,
         patch(
             "core.home_perk_configuration._tap_configuration_row",
             side_effect=move_up,
@@ -90,6 +90,11 @@ def test_auto_pick_repair_inserts_missing_coin_tradeoff_at_strategy_rank():
             swipe_fn=lambda _key: True,
             row_fn=rows,
             row_near_fn=lambda *_args, **_kwargs: None,
+            observed_keys=[
+                "perk_wave_requirement",
+                "game_speed",
+                "golden_tower_bonus",
+            ],
             sleep_fn=lambda _seconds: None,
         )
 
@@ -100,6 +105,7 @@ def test_auto_pick_repair_inserts_missing_coin_tradeoff_at_strategy_rank():
     ]
     assert tap.call_count == 1
     assert tap.call_args.kwargs["action"] == "auto_pick_move_up:coin_tradeoff"
+    assert scroll_top.call_count == 3
 
 
 def test_auto_pick_repair_rechecks_rank_after_viewport_reflow():
@@ -376,6 +382,104 @@ def test_home_perk_repair_finishes_bans_before_opening_auto_pick():
         "repair:perk_bans",
         "select:perk_auto_pick_order",
     ]
+
+
+def test_home_perk_does_not_repair_an_incomplete_auto_pick_capture():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    selected_bans = [
+        {
+            **_row(key, index),
+            "key": key,
+        }
+        for index, key in enumerate(FARM_PERK_BANS)
+    ]
+    evidence = {
+        "boundary": "NEW_BATTLE",
+        "checked": True,
+        "valid": False,
+        "failed_checks": ["perk_auto_pick_order"],
+        "perk_bans": {
+            "valid": True,
+            "expected": list(FARM_PERK_BANS),
+            "observed": list(FARM_PERK_BANS),
+            "capture": {"quality": {"valid": True}},
+        },
+        "perk_auto_pick_order": {
+            "valid": False,
+            "expected": [
+                "perk_wave_requirement",
+                "game_speed",
+                "coin_tradeoff",
+            ],
+            "observed": [
+                "perk_wave_requirement",
+                "game_speed",
+            ],
+            "reason": (
+                "Auto Pick exposed 2 of 3 ranked perks before the "
+                "ranking boundary"
+            ),
+            "capture": {
+                "quality": {
+                    "valid": False,
+                    "ranking_boundary_seen": True,
+                    "warnings": [
+                        "Auto Pick exposed 2 of 3 ranked perks before the "
+                        "ranking boundary"
+                    ],
+                }
+            },
+        },
+    }
+
+    with (
+        patch("core.home_perk_configuration._require_new_battle_home"),
+        patch(
+            "core.home_perk_configuration._open_configuration",
+            return_value=frame,
+        ),
+        patch(
+            "core.home_perk_configuration._select_and_scroll_top",
+            side_effect=lambda current, **_kwargs: current,
+        ),
+        patch(
+            "core.home_perk_configuration.extract_configured_perk_bans",
+            return_value={
+                "quality": {"valid": True},
+                "selected": selected_bans,
+            },
+        ),
+        patch(
+            "core.home_perk_configuration._capture_ranked_frames",
+            return_value=([frame], frame),
+        ),
+        patch(
+            "core.home_perk_configuration.evaluate_profile_perk_configuration",
+            return_value=evidence,
+        ),
+        patch(
+            "core.home_perk_configuration._repair_auto_pick_order",
+        ) as repair,
+        patch(
+            "core.home_perk_configuration._close_to_home",
+            return_value=frame,
+        ),
+    ):
+        result = ensure_home_perk_configuration(
+            {
+                "perk_bans": list(FARM_PERK_BANS),
+                "perk_auto_pick_order": [
+                    "perk_wave_requirement",
+                    "game_speed",
+                    "coin_tradeoff",
+                ],
+            },
+            home_screenshot=frame,
+        )
+
+    assert result.valid is False
+    assert result.failed_check == "perk_auto_pick_order"
+    repair.assert_not_called()
 
 
 def test_auto_pick_move_requires_fresh_identity_and_visual_change():

@@ -8,7 +8,9 @@ from core.perk_configuration import (
     FARM_AUTO_PICK_ORDER,
     FARM_PERK_BANS,
     classify_perk_configuration_text,
+    detect_auto_pick_ranking_boundary,
     evaluate_profile_perk_configuration,
+    extract_ranked_auto_pick_order,
     parse_perk_configuration_selection,
     semantic_perk_entry,
 )
@@ -78,6 +80,64 @@ def test_auto_pick_order_keeps_dark_selected_rows_and_deduplicates_pages():
     ]
     assert [item["rank"] for item in result["selected"]] == [1, 2]
     assert all(len(item["observations"]) == 2 for item in result["selected"])
+
+
+def test_auto_pick_ranking_boundary_requires_paired_horizontal_rules():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    frame[1246:1261, 125:297] = 255
+    assert detect_auto_pick_ranking_boundary(frame) is None
+
+    frame[1246:1261, 784:956] = 255
+    assert detect_auto_pick_ranking_boundary(frame) == 1253
+
+
+def test_ranked_auto_pick_capture_does_not_fill_a_missed_rank_from_below_boundary():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    frame[1246:1261, 125:297] = 255
+    frame[1246:1261, 784:956] = 255
+    rows = [
+        {
+            "top": 500,
+            "bottom": 657,
+            "display_text": "Perk wave requirement -25.00%",
+            "text_raw": "Perk wave requirement -25.00%",
+            "confidence": 95.0,
+            "background_value_median": 100.0,
+        },
+        {
+            "top": 700,
+            "bottom": 857,
+            "display_text": "Increase max game speed by +1.25",
+            "text_raw": "Increase max game speed by +1.25",
+            "confidence": 95.0,
+            "background_value_median": 100.0,
+        },
+        {
+            "top": 1300,
+            "bottom": 1457,
+            "display_text": "Extra set of inner mines",
+            "text_raw": "Extra set of inner mines",
+            "confidence": 95.0,
+            "background_value_median": 79.0,
+        },
+    ]
+
+    result = extract_ranked_auto_pick_order(
+        [frame],
+        ranking_count=3,
+        row_fn=lambda _frame: rows,
+    )
+
+    assert [item["key"] for item in result["selected"]] == [
+        "perk_wave_requirement",
+        "game_speed",
+    ]
+    assert result["quality"]["valid"] is False
+    assert result["quality"]["ranking_boundary_seen"] is True
+    assert result["raw_pages"][0]["ranking_boundary_y"] == 1253
+    assert result["quality"]["warnings"] == [
+        "Auto Pick exposed 2 of 3 ranked perks before the ranking boundary"
+    ]
 
 
 def test_empty_ban_list_is_a_valid_observed_configuration():

@@ -214,7 +214,7 @@ def ensure_home_perk_configuration(
     if (
         evidence["perk_auto_pick_order"]["valid"] is not True
         and "perk_auto_pick_order" not in waived
-        and _field_values_differ(
+        and _field_values_authoritatively_differ(
             evidence["perk_auto_pick_order"],
             ordered=True,
         )
@@ -237,6 +237,7 @@ def ensure_home_perk_configuration(
             swipe_fn=swipe_fn,
             row_fn=row_fn,
             row_near_fn=row_near_fn,
+            observed_keys=evidence["perk_auto_pick_order"].get("observed"),
             sleep_fn=sleep_fn,
         )
         changed_fields.add("perk_auto_pick_order")
@@ -525,11 +526,27 @@ def _repair_auto_pick_order(
     swipe_fn: Callable[[str], bool],
     row_fn: RowsFn,
     row_near_fn: Callable[..., Optional[dict[str, Any]]],
+    observed_keys: Sequence[str | None] | None = None,
     sleep_fn: Callable[[float], None],
 ) -> Frame:
     current = top
     total_taps = 0
+    first_mismatch = 1
+    if observed_keys is not None and len(observed_keys) == len(expected_keys):
+        first_mismatch = next(
+            (
+                rank
+                for rank, (observed, expected) in enumerate(
+                    zip(observed_keys, expected_keys),
+                    start=1,
+                )
+                if observed != expected
+            ),
+            len(expected_keys) + 1,
+        )
     for desired_rank, key in enumerate(expected_keys, start=1):
+        if desired_rank < first_mismatch:
+            continue
         rank, current, row = _locate_auto_pick_key(
             current,
             key,
@@ -584,19 +601,10 @@ def _repair_auto_pick_order(
             rank = observed_rank
             remaining = rank - desired_rank
 
-        verified_rank, current, _row = _locate_auto_pick_key(
-            current,
-            key,
-            capture_fn=capture_fn,
-            visible_fn=visible_fn,
-            swipe_fn=swipe_fn,
-            row_fn=row_fn,
-            sleep_fn=sleep_fn,
-        )
-        if verified_rank != desired_rank:
+        if rank != desired_rank:
             raise HomePerkConfigurationError(
                 f"{perk_configuration_label(key)} reached rank "
-                f"{verified_rank}, expected {desired_rank}"
+                f"{rank}, expected {desired_rank}"
             )
 
     final_top = _scroll_configuration_top(
@@ -902,6 +910,8 @@ def _capture_ranked_frames(
         )
         if len(captured["selected"]) >= ranking_count:
             return frames, current
+        if captured["quality"].get("ranking_boundary_seen") is True:
+            return frames, current
         next_frame = _swipe_configuration(
             current,
             "gesture_targets.goto_next:perks",
@@ -1047,16 +1057,29 @@ def _ban_capture_matches(
     )
 
 
-def _field_values_differ(
+def _field_values_authoritatively_differ(
     evidence: Mapping[str, Any],
     *,
     ordered: bool,
 ) -> bool:
     expected = list(evidence.get("expected") or ())
     observed = list(evidence.get("observed") or ())
+    capture = evidence.get("capture")
+    quality = (
+        capture.get("quality")
+        if isinstance(capture, Mapping)
+        else None
+    )
+    if (
+        not isinstance(quality, Mapping)
+        or quality.get("valid") is not True
+        or len(observed) != len(expected)
+        or any(key is None for key in observed)
+    ):
+        return False
     if ordered:
         return observed != expected
-    return len(observed) != len(expected) or set(observed) != set(expected)
+    return set(observed) != set(expected)
 
 
 def _region_difference(
