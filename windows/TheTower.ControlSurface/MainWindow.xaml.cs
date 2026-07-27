@@ -129,10 +129,11 @@ public partial class MainWindow : Window
         }
         if (MessageBox.Show(
                 this,
-                "Restart the fixed thetower-control-surface.service on Linux?\n\n"
+                "Restart the fixed Linux API service "
+                + "(thetower-control-surface.service)?\n\n"
                 + "This briefly interrupts the control API. It does not restart "
                 + "the main automation process or alter the active battle.",
-                "Restart Linux control service",
+                "Restart Linux API service",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Question) != MessageBoxResult.Yes)
         {
@@ -1487,13 +1488,19 @@ public partial class MainWindow : Window
         var destinationValid = SshTunnelManager.IsValidDestination(
             SshDestinationBox.Text);
         var incompatibility =
-            "Linux control service is older than or incompatible with this Windows client ("
+            "Start paused and Start running are disabled because the Linux control "
+            + "API is older than or incompatible with this Windows client ("
             + DescribeCompatibilityProblems(_serverCompatibility)
-            + "). Update or restart the Linux control service.";
+            + "). Restart the Linux API service to reload the current Linux code.";
         LinuxServiceCompatibilityText.Text = destinationValid
             ? incompatibility
+                + " Click Restart Linux API service below."
             : incompatibility
-                + " Enter an SSH destination to enable the fixed-service restart.";
+                + " Enter the Linux SSH destination above to enable "
+                + "Restart Linux API service, or run "
+                + "'systemctl --user restart thetower-control-surface.service' "
+                + "on Linux. If this warning remains, update the Linux checkout "
+                + "and restart the service again.";
         LinuxServiceCompatibilityText.Foreground =
             new SolidColorBrush(Color.FromRgb(241, 191, 91));
         RestartControlSurfaceButton.Visibility = Visibility.Visible;

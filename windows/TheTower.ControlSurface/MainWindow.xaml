@@ -89,7 +89,7 @@
               </UniformGrid>
               <TextBlock x:Name="TunnelStatusText" Text="Stopped" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="6,5,6,2" />
               <TextBlock x:Name="LinuxServiceCompatibilityText" Text="Waiting for Linux API compatibility status." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,3,6,0" />
-              <Button x:Name="RestartControlSurfaceButton" Content="Restart Linux control service" Click="RestartControlSurface_Click" Style="{StaticResource PrimaryButton}" IsEnabled="False" Visibility="Collapsed" Margin="4,3,4,2" />
+              <Button x:Name="RestartControlSurfaceButton" Content="Restart Linux API service" Click="RestartControlSurface_Click" Style="{StaticResource PrimaryButton}" IsEnabled="False" Visibility="Collapsed" Margin="4,3,4,2" />
               <TextBlock Text="Destination and ports are saved after a successful start. The tunnel does not auto-start." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,2" />
             </StackPanel>
           </ScrollViewer>
