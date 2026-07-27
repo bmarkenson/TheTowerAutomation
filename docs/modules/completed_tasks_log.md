@@ -1283,6 +1283,22 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   `immediate` cold-start policy and `RUNNING` intent, and advanced from wave
   1852 to wave 1879 without replaying Home/session gates or repair.
 
+### 2026-07-26 Auto Pick boundary and repair authority
+
+- Commit `e13e498` makes the visible `Rankings Unlocked` divider an
+  authoritative end to Home Auto Pick rank capture. An OCR omission above that
+  boundary now yields incomplete evidence instead of borrowing an unranked row
+  and fabricating a complete mismatch.
+- Only a complete, recognized capture can authorize an Auto Pick reorder.
+  Real mismatches skip their already-verified prefix and no longer repeat a
+  second full-list lookup for an already-confirmed rank; guarded row
+  reacquisition, exact one-rank progress, and final full-list verification
+  remain required.
+- Home Perks, no-battle setup, and run initialization validation passed 131
+  tests. The divider detector also matched the retained incident frame and all
+  four protected historical Auto Pick capture sets without device
+  interaction.
+
 ---
 
 ## 📘 Documentation

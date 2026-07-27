@@ -2067,6 +2067,50 @@ and actionable work lives in
   Linux cross-publishing produced the self-contained Windows executable.
 - **Fixed by:** `06bda52`.
 
+### Incomplete Auto Pick OCR triggered a long no-op Home repair scan
+
+- **Observed:** 2026-07-26 after a natural Tier 19 Farm Game Over followed the
+  operator-selected Home route.
+- **Symptom:** The completed battle's terminal capture succeeded, but the
+  following Home preflight reported an Auto Pick order mismatch and repeatedly
+  scrolled from the top of the Perks list. It remained in that scan until the
+  runtime was paused.
+- **Evidence:** `logs/actions.log` records 28 ordered perks captured at
+  17:50:52, the 144-row battle record saved at 17:50:59, and verified Home
+  `NEW_BATTLE` at 17:51:11. The later repair intent began at 17:52:33 and
+  issued 70 top/forward swipes without one
+  `home_preflight:auto_pick_move_up` tap before Pause was acknowledged at
+  17:57:53. A fresh paused frame showed the expected ranks 13–16 immediately
+  above the visible `16 Rankings Unlocked` divider.
+- **Safety response:** Control was set to `PAUSED` and the runtime acknowledged
+  that Home setup input was blocked. No Perk arrow was tapped, no battle was
+  started or Surrendered, and later troubleshooting used only the retained
+  frame, logs, source, tests, and existing protected captures.
+- **Cause:** Ranked-order extraction stopped once it had accumulated the
+  configured number of unique OCR rows but did not recognize the visual
+  `Rankings Unlocked` boundary. A missed ranked row could therefore be replaced
+  by the first recognized unranked row below the divider and look like a
+  complete mismatch. Home enforcement also treated a value difference from an
+  incomplete capture as repair authority. Once repair began, it redundantly
+  rescanned the correct prefix and repeated a full rank lookup after every
+  already-satisfied row.
+- **Resolution:** Auto Pick extraction now recognizes the paired divider rules,
+  excludes rows below them, and stops an incomplete capture at that boundary.
+  Incomplete or unrecognized evidence cannot authorize a repair. A real,
+  authoritative mismatch skips its already-verified prefix and removes the
+  redundant second lookup while retaining fresh row reacquisition, exact
+  one-rank progress checks, and final full-list verification.
+- **Regression:** `test/test_perk_configuration.py` covers paired-divider
+  recognition and proves that a missed ranked row is not filled from below the
+  boundary. `test/test_home_perk_configuration.py` covers fail-closed
+  incomplete evidence and the bounded scan count for a real mismatch.
+- **Validation:** The Home Perks, complete no-battle setup, and run
+  initialization suites passed 131 tests. Offline checks recognized the
+  divider in the retained live frame and in all four protected historical
+  Auto Pick capture sets. No post-fix device interaction or runtime activation
+  was performed.
+- **Fixed by:** `e13e498`.
+
 ## Operational lessons
 
 ### A detached child may not survive the agent execution wrapper
