@@ -30,11 +30,12 @@ session_preflight:
     - Scout
     auto_pick_perks: true
     perk_bans:
-    - cash_tradeoff
-    - enemies_damage_tradeoff
     - lifesteal_knockback_tradeoff
-    - interest
+    - enemies_damage_tradeoff
     - defense_absolute
+    - interest
+    - land_mine_damage
+    - cash_bonus
     perk_auto_pick_order:
     - perk_wave_requirement
     - game_speed
@@ -47,9 +48,9 @@ session_preflight:
     - orbs
     - damage
     - enemy_health_tradeoff
+    - boss_health_tradeoff
     - enemy_speed_tradeoff
     - ranged_distance_tradeoff
-    - boss_health_tradeoff
     - tower_damage_boss_health_tradeoff
     - chain_lightning_damage
     ultimate_weapons:
@@ -436,11 +437,12 @@ rules:
       - Scout
       auto_pick_perks: true
       perk_bans:
-      - cash_tradeoff
-      - enemies_damage_tradeoff
       - lifesteal_knockback_tradeoff
-      - interest
+      - enemies_damage_tradeoff
       - defense_absolute
+      - interest
+      - land_mine_damage
+      - cash_bonus
       perk_auto_pick_order:
       - perk_wave_requirement
       - game_speed
@@ -453,9 +455,9 @@ rules:
       - orbs
       - damage
       - enemy_health_tradeoff
+      - boss_health_tradeoff
       - enemy_speed_tradeoff
       - ranged_distance_tradeoff
-      - boss_health_tradeoff
       - tower_damage_boss_health_tradeoff
       - chain_lightning_damage
       ultimate_weapons:
@@ -524,11 +526,12 @@ run_configuration:
     - Scout
     auto_pick_perks: true
     perk_bans:
-    - cash_tradeoff
-    - enemies_damage_tradeoff
     - lifesteal_knockback_tradeoff
-    - interest
+    - enemies_damage_tradeoff
     - defense_absolute
+    - interest
+    - land_mine_damage
+    - cash_bonus
     perk_auto_pick_order:
     - perk_wave_requirement
     - game_speed
@@ -541,9 +544,9 @@ run_configuration:
     - orbs
     - damage
     - enemy_health_tradeoff
+    - boss_health_tradeoff
     - enemy_speed_tradeoff
     - ranged_distance_tradeoff
-    - boss_health_tradeoff
     - tower_damage_boss_health_tradeoff
     - chain_lightning_damage
     ultimate_weapons:

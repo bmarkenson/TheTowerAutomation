@@ -31,11 +31,12 @@ AUTO_PICK_DIVIDER_RIGHT_X2 = 960
 AUTO_PICK_DIVIDER_MIN_WHITE_PIXELS = 130
 
 FARM_PERK_BANS = (
-    "cash_tradeoff",
-    "enemies_damage_tradeoff",
     "lifesteal_knockback_tradeoff",
-    "interest",
+    "enemies_damage_tradeoff",
     "defense_absolute",
+    "interest",
+    "land_mine_damage",
+    "cash_bonus",
 )
 
 FARM_AUTO_PICK_ORDER = (
@@ -50,9 +51,9 @@ FARM_AUTO_PICK_ORDER = (
     "orbs",
     "damage",
     "enemy_health_tradeoff",
+    "boss_health_tradeoff",
     "enemy_speed_tradeoff",
     "ranged_distance_tradeoff",
-    "boss_health_tradeoff",
     "tower_damage_boss_health_tradeoff",
     "chain_lightning_damage",
 )
@@ -63,6 +64,8 @@ PERK_CONFIGURATION_LABELS = {
     "lifesteal_knockback_tradeoff": "Lifesteal / Knockback Trade-Off",
     "interest": "Interest",
     "defense_absolute": "Defense Absolute",
+    "land_mine_damage": "Land Mine Damage",
+    "cash_bonus": "Cash Bonus",
     "perk_wave_requirement": "Perk Wave Requirement",
     "game_speed": "Game Speed",
     "coin_tradeoff": "Coin Trade-Off",
@@ -157,6 +160,8 @@ def classify_perk_configuration_text(text: str) -> str | None:
         return "coins_bonus"
     if "free upgrade chance" in normalized:
         return "free_upgrade_chance"
+    if "cash bonus" in normalized:
+        return "cash_bonus"
     if (
         "enemies have" in normalized
         and "health" in tokens
@@ -202,6 +207,8 @@ def classify_perk_configuration_text(text: str) -> str | None:
         return "smart_missiles"
     if "spotlight damage" in normalized:
         return "spotlight_damage"
+    if "land mine damage" in normalized:
+        return "land_mine_damage"
     if "defense absolute" in normalized:
         return "defense_absolute"
     if normalized.startswith("interest"):
@@ -235,7 +242,10 @@ def extract_configured_perk_bans(
     low_confidence = [
         str(entry["display_text"])
         for entry in selected
-        if float(entry["confidence"]) < float(confidence_threshold)
+        if _semantic_entry_is_low_confidence(
+            entry,
+            confidence_threshold=confidence_threshold,
+        )
     ]
     warnings = []
     if len(rows) < capacity:
@@ -320,7 +330,10 @@ def extract_ranked_auto_pick_order(
     low_confidence = [
         str(entry["display_text"])
         for entry in selected
-        if float(entry["confidence"]) < float(confidence_threshold)
+        if _semantic_entry_is_low_confidence(
+            entry,
+            confidence_threshold=confidence_threshold,
+        )
     ]
     warnings = []
     if len(selected) != ranking_count:
@@ -587,11 +600,12 @@ def _normalize_perk_key_list(raw: Any, *, field: str) -> list[str]:
 
 def _semantic_entry(row: Mapping[str, Any]) -> dict[str, Any]:
     raw_candidates = row.get("text_candidates")
-    candidates = (
+    source_candidates = (
         [dict(item) for item in raw_candidates if isinstance(item, Mapping)]
         if isinstance(raw_candidates, Sequence)
         else []
     )
+    candidates = list(source_candidates)
     candidates.append(
         {
             "display_text": str(
@@ -629,17 +643,38 @@ def _semantic_entry(row: Mapping[str, Any]) -> dict[str, Any]:
     display_text = str(
         best.get("display_text") or best.get("text_raw") or ""
     ).strip()
+    semantic_agreement = sum(
+        1
+        for item in source_candidates
+        if classify_perk_configuration_text(
+            str(item.get("display_text") or item.get("text_raw") or "")
+        )
+        == semantic_key
+    )
+    if not source_candidates and semantic_key is not None:
+        semantic_agreement = 1
     return {
         "key": semantic_key,
         "display_text": display_text,
         "text_raw": str(best.get("text_raw") or display_text),
         "confidence": float(best.get("confidence") or -1.0),
+        "semantic_agreement": semantic_agreement,
         "top": int(row.get("top") or 0),
         "bottom": int(row.get("bottom") or 0),
         "background_value_median": float(
             row.get("background_value_median") or 0.0
         ),
     }
+
+
+def _semantic_entry_is_low_confidence(
+    entry: Mapping[str, Any],
+    *,
+    confidence_threshold: float,
+) -> bool:
+    if float(entry.get("confidence") or -1.0) >= float(confidence_threshold):
+        return False
+    return int(entry.get("semantic_agreement") or 0) < 2
 
 
 def _compare_configuration_field(

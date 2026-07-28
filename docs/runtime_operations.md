@@ -191,9 +191,10 @@ for `gate bypass_once`; it cannot create an exception before a real failure and
 it no longer skips the complete preflight.
 
 Farm strategies declare their Home Perks configuration as semantic profile
-data. The current Farm baseline bans **Cash Trade-Off**, **Enemies Damage /
-Tower Damage Trade-Off**, **Lifesteal / Knockback Trade-Off**, **Interest**,
-and **Defense Absolute**. Its Auto Pick priority is:
+data. The current Farm baseline bans **Lifesteal / Knockback Trade-Off**,
+**Enemies Damage / Tower Damage Trade-Off**, **Defense Absolute**,
+**Interest**, **Land Mine Damage**, and **Cash Bonus**. Its Auto Pick priority
+is:
 
 1. Perk Wave Requirement
 2. Game Speed
@@ -206,9 +207,9 @@ and **Defense Absolute**. Its Auto Pick priority is:
 9. Orbs
 10. Damage
 11. Enemy Health / Tower Regen and Lifesteal Trade-Off
-12. Enemy Speed / Enemy Damage Trade-Off
-13. Ranged Distance / Ranged Damage Trade-Off
-14. Boss Health / Boss Speed Trade-Off
+12. Boss Health / Boss Speed Trade-Off
+13. Enemy Speed / Enemy Damage Trade-Off
+14. Ranged Distance / Ranged Damage Trade-Off
 15. Tower Damage / Boss Health Trade-Off
 16. Chain Lightning Damage
 

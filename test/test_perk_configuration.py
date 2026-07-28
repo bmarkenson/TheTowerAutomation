@@ -10,6 +10,7 @@ from core.perk_configuration import (
     classify_perk_configuration_text,
     detect_auto_pick_ranking_boundary,
     evaluate_profile_perk_configuration,
+    extract_configured_perk_bans,
     extract_ranked_auto_pick_order,
     parse_perk_configuration_selection,
     semantic_perk_entry,
@@ -140,6 +141,56 @@ def test_ranked_auto_pick_capture_does_not_fill_a_missed_rank_from_below_boundar
     ]
 
 
+def test_ban_capture_accepts_two_low_confidence_candidates_with_same_semantics():
+    rows = [
+        {
+            "top": 430 + index * 172,
+            "bottom": 587 + index * 172,
+            "display_text": text,
+            "text_raw": text,
+            "confidence": confidence,
+            "background_value_median": 83.0,
+            "text_candidates": [
+                {
+                    "display_text": text,
+                    "text_raw": text,
+                    "confidence": confidence,
+                    "text_x1": text_x1,
+                }
+                for text_x1 in (270, 400)
+            ],
+        }
+        for index, (text, confidence) in enumerate(
+            (
+                ("Lifesteal x2.75, but knockback force -70%", 90.0),
+                ("Enemies damage -55.0%, but tower damage -50%", 90.0),
+                ("x1.44 Defense Absolute", 90.0),
+                ("Interest x1.88", 90.0),
+                ("Land Mine Damage x4.38", 90.0),
+                ("1.44 Cash Bonus", 63.3),
+            )
+        )
+    ]
+
+    result = extract_configured_perk_bans(
+        np.zeros((1920, 1080, 3), dtype=np.uint8),
+        row_fn=lambda _frame: rows,
+    )
+
+    assert result["quality"]["valid"] is True
+    assert result["quality"]["low_confidence"] == []
+    assert result["selected"][-1]["key"] == "cash_bonus"
+    assert result["selected"][-1]["semantic_agreement"] == 2
+
+    rows[-1]["text_candidates"] = rows[-1]["text_candidates"][:1]
+    unconfirmed = extract_configured_perk_bans(
+        np.zeros((1920, 1080, 3), dtype=np.uint8),
+        row_fn=lambda _frame: rows,
+    )
+    assert unconfirmed["quality"]["valid"] is False
+    assert unconfirmed["quality"]["low_confidence"] == ["1.44 Cash Bonus"]
+
+
 def test_empty_ban_list_is_a_valid_observed_configuration():
     result = parse_perk_configuration_selection(
         [np.zeros((1920, 1080, 3), dtype=np.uint8)],
@@ -209,6 +260,8 @@ def test_auto_pick_rows_have_value_independent_semantic_keys():
             "Ranged enemies attack distance reduced, "
             "but ranged enemies damage x3"
         ): "ranged_distance_tradeoff",
+        "Land Mine Damage x4.38": "land_mine_damage",
+        "x1.44 Cash Bonus": "cash_bonus",
     }
 
     assert {
@@ -222,11 +275,22 @@ def test_farm_auto_pick_post_economy_order_is_glass_cannon_first():
         "orbs",
         "damage",
         "enemy_health_tradeoff",
+        "boss_health_tradeoff",
         "enemy_speed_tradeoff",
         "ranged_distance_tradeoff",
-        "boss_health_tradeoff",
         "tower_damage_boss_health_tradeoff",
         "chain_lightning_damage",
+    )
+
+
+def test_farm_bans_use_all_six_slots_for_nonessential_farm_perks():
+    assert FARM_PERK_BANS == (
+        "lifesteal_knockback_tradeoff",
+        "enemies_damage_tradeoff",
+        "defense_absolute",
+        "interest",
+        "land_mine_damage",
+        "cash_bonus",
     )
 
 
@@ -245,6 +309,8 @@ def test_farm_perk_configuration_requires_coin_tradeoff_at_rank_three():
         ),
         "interest": "Interest x1.88",
         "defense_absolute": "x1.44 Defense Absolute",
+        "land_mine_damage": "Land Mine Damage x4.38",
+        "cash_bonus": "x1.44 Cash Bonus",
         "empty_slot": "Empty Slot",
         "perk_wave_requirement": "Perk wave requirement -25.00%",
         "game_speed": "Increase max game speed by +1.25",

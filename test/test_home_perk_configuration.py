@@ -27,6 +27,8 @@ LABELS = {
     ),
     "interest": "Interest x1.88",
     "defense_absolute": "x1.44 Defense Absolute",
+    "land_mine_damage": "Land Mine Damage x4.38",
+    "cash_bonus": "x1.44 Cash Bonus",
     "perk_wave_requirement": "Perk wave requirement -25.00%",
     "game_speed": "Increase max game speed by +1.25",
     "coin_tradeoff": "x1.98 coins, but tower max health -70.0%",
@@ -238,7 +240,7 @@ def test_ban_repair_toggles_only_the_strategy_set():
             keys = [*selected]
             keys.extend(["empty_slot"] * (6 - len(keys)))
         else:
-            keys = ["coin_tradeoff", "cash_tradeoff"]
+            keys = ["coin_tradeoff", "land_mine_damage", "cash_bonus"]
         return [_row(key, index) for index, key in enumerate(keys)]
 
     def swipe(_current, _key, **_kwargs):
@@ -286,7 +288,7 @@ def test_ban_repair_toggles_only_the_strategy_set():
         )
 
     assert set(selected) == set(FARM_PERK_BANS)
-    assert tap.call_count == 2
+    assert tap.call_count == 3
     assert tap.call_args_list[0].kwargs["x"] == BAN_SELECTED_TOGGLE_X
     assert (
         tap.call_args_list[0].kwargs["action"]
@@ -294,7 +296,11 @@ def test_ban_repair_toggles_only_the_strategy_set():
     )
     assert (
         tap.call_args_list[1].kwargs["action"]
-        == "perk_ban_toggle:cash_tradeoff"
+        == "perk_ban_toggle:land_mine_damage"
+    )
+    assert (
+        tap.call_args_list[2].kwargs["action"]
+        == "perk_ban_toggle:cash_bonus"
     )
 
 
