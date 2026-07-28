@@ -1025,7 +1025,7 @@ def ensure_ultimate_state(
                     action = "Enable" if desired_state == "on" else "Disable"
                     log_mission(
                         f"[ULTIMATE] {action} '{toggle_name}' for '{label}'",
-                        "ACTION",
+                        "DEBUG",
                     )
                     changed_descriptions.append(f"{toggle_name}={desired_state}")
                     if not _tap_ultimate_toggle(

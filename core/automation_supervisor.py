@@ -33,7 +33,7 @@ from numpy.typing import NDArray
 
 from core.app_setup import CONFIGURABLE_STRATEGIES
 from core.control_directives import ControlDirectiveError, ControlDirectiveStore
-from utils.logger import log
+from utils.logger import log, log_action_intent, log_result
 from core.run_state import AUTOMATION
 from core.input import tap_if_visible
 from core.label_tapper import is_visible
@@ -1016,12 +1016,42 @@ class AutomationSupervisor:
                     )
                 elif (time.time() - self._rtg_visible_since_ts) >= self.auto_return_secs > 0:
                     elapsed = int(time.time() - self._rtg_visible_since_ts)
-                    log(
-                        f"[AUTO] Return-to-Game visible for {elapsed}s — tapping now.",
-                        "ACTION",
-                        console=True,
+                    log_action_intent(
+                        "Returning to the active battle",
+                        reason=(
+                            "the Return to Game control remained visible for "
+                            f"{elapsed}s"
+                        ),
+                        detail=(
+                            f"[AUTO_RETURN] elapsed_s={elapsed} "
+                            f"threshold_s={self.auto_return_secs}"
+                        ),
                     )
-                    tap_if_visible("buttons.return_to_game", retries=1)
+                    try:
+                        returned = tap_if_visible(
+                            "buttons.return_to_game",
+                            retries=1,
+                        )
+                    except Exception as exc:
+                        returned = False
+                        log(
+                            f"Automatic Return to Game input failed: {exc!r}",
+                            "ERROR",
+                        )
+                    log_result(
+                        (
+                            "Automatic Return to Game complete — battle resumed"
+                            if returned
+                            else (
+                                "Automatic Return to Game failed — the verified "
+                                "control could not be tapped"
+                            )
+                        ),
+                        detail=(
+                            f"[AUTO_RETURN] result={'completed' if returned else 'failed'} "
+                            f"elapsed_s={elapsed}"
+                        ),
+                    )
                     self._rtg_visible_since_ts = None
             else:
                 if self._rtg_visible_since_ts is not None:

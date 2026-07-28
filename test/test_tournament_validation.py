@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from automation.missions.manager import MissionManager
 from automation.strategies import get_strategy
@@ -473,11 +473,14 @@ def test_validation_lifecycle_taps_one_new_battle_surrenders_and_returns_home(
     tmp_path,
 ):
     app, store, manager = _app_for_pending_validation(tmp_path)
+    action_log = Mock()
+    result_log = Mock()
 
     with (
         patch("core.app.tap_verified_new_battle", return_value=True) as start,
         patch("core.app.log"),
-        patch("core.app.log_action_intent"),
+        patch("core.app.log_action_intent", new=action_log),
+        patch("core.app.log_result", new=result_log),
     ):
         assert app._maybe_start_exclusive_validation(
             home_control=HomeBattleControl.NEW_BATTLE
@@ -511,7 +514,8 @@ def test_validation_lifecycle_taps_one_new_battle_surrenders_and_returns_home(
     with (
         patch("core.app.surrender_run", return_value=True) as surrender,
         patch("core.app.log"),
-        patch("core.app.log_action_intent"),
+        patch("core.app.log_action_intent", new=action_log),
+        patch("core.app.log_result", new=result_log),
     ):
         assert app._advance_exclusive_validation(detection)
     assert surrender.call_count == 1
@@ -521,6 +525,7 @@ def test_validation_lifecycle_taps_one_new_battle_surrenders_and_returns_home(
     with (
         patch("core.app.return_home_from_game_over", return_value=True) as go_home,
         patch("core.app.log"),
+        patch("core.app.log_result", new=result_log),
     ):
         assert app._handle_exclusive_validation_game_over()
     go_home.assert_called_once()
@@ -528,6 +533,14 @@ def test_validation_lifecycle_taps_one_new_battle_surrenders_and_returns_home(
     assert result["status"] == "result"
     assert result["outcome"] == "ready"
     assert "Spotlight Missiles" in result["reason"]
+    action_log.assert_called_once()
+    assert action_log.call_args.args[0] == (
+        "Starting the one-shot Tournament validation battle"
+    )
+    result_log.assert_called_once()
+    assert result_log.call_args.args[0].startswith(
+        "Tournament validation complete — "
+    )
 
 
 def test_home_preflight_failure_consumes_request_without_waiver_or_battle(
@@ -773,6 +786,8 @@ def test_confirmed_launch_starts_once_then_runs_level_skip_initialization(
     tmp_path,
 ):
     app, store, manager, ready, _definition = _app_for_ready_launch(tmp_path)
+    action_log = Mock()
+    result_log = Mock()
     store.resolve_exclusive_validation_launch(
         ready["request_id"],
         "start",
@@ -791,7 +806,8 @@ def test_confirmed_launch_starts_once_then_runs_level_skip_initialization(
             ),
         ) as dispatch,
         patch("core.app.log"),
-        patch("core.app.log_action_intent"),
+        patch("core.app.log_action_intent", new=action_log),
+        patch("core.app.log_result", new=result_log),
     ):
         assert app._advance_exclusive_validation_launch(
             frame,
@@ -805,7 +821,10 @@ def test_confirmed_launch_starts_once_then_runs_level_skip_initialization(
     tournament = {"state": "RUNNING", "secondary_states": ["TOURNAMENT"]}
     battle_started = manager.maybe_run_start(tournament)
     assert battle_started
-    with patch("core.app.log"):
+    with (
+        patch("core.app.log"),
+        patch("core.app.log_result", new=result_log),
+    ):
         assert not app._advance_exclusive_validation_launch(
             frame,
             tournament,
@@ -821,6 +840,19 @@ def test_confirmed_launch_starts_once_then_runs_level_skip_initialization(
     assert manager.strategy.tick(manager.ctx, frame, tournament) == [
         {"type": "level_skip_initialize"}
     ]
+    action_log.assert_called_once()
+    assert action_log.call_args.args[0] == (
+        "Starting the operator-confirmed Tournament"
+    )
+    result_log.assert_called_once_with(
+        "Tournament launch complete — battle started",
+        detail=(
+            f"[TOURNAMENT_LAUNCH] result=started "
+            f"request_id={ready['request_id']} "
+            "reason=Tournament battle started from the operator-confirmed "
+            "launch; EHLS/EALS initialization is active"
+        ),
+    )
 
 
 def test_manual_tournament_start_consumes_unclaimed_prompt(tmp_path):

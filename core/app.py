@@ -12,7 +12,12 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
-from utils.logger import log, log_action_intent, set_mission_log_path
+from utils.logger import (
+    log,
+    log_action_intent,
+    log_result,
+    set_mission_log_path,
+)
 from core.watchdog import watchdog_process_check, ensure_adb_connected
 from core.adb_target_session import AdbTargetSession
 from core.artifact_retention import RuntimeArtifactRetention
@@ -503,13 +508,13 @@ class App:
                 "battle-only Tournament settings, then Surrender only this "
                 "automation-owned battle"
             ),
+            detail=f"[TOURNAMENT_VALIDATION] request_id={request_id}",
         )
         if tap_verified_new_battle():
             log(
                 "[TOURNAMENT_VALIDATION] Ordinary NEW_BATTLE dispatched after "
                 f"durable ownership claim {request_id}",
-                "INFO",
-                console=True,
+                "DEBUG",
             )
             return True
         self._finish_exclusive_validation_without_cleanup(
@@ -583,8 +588,7 @@ class App:
         log(
             "[TOURNAMENT_VALIDATION] Owned ordinary battle reached RUNNING; "
             "Damage Slider and Ultimate Weapon validation is active",
-            "INFO",
-            console=True,
+            "DEBUG",
         )
 
     def _exclusive_validation_disposition(
@@ -674,12 +678,10 @@ class App:
         )
         if cleanup is None:
             return False
-        log_action_intent(
-            "Cleaning up the owned Tournament validation battle",
-            reason=(
-                f"validation reached {outcome}; return the disposable ordinary "
-                "battle to Home without touching any Tournament entry"
-            ),
+        log(
+            "[TOURNAMENT_VALIDATION] Cleaning up the owned ordinary battle "
+            f"after validation reached {outcome}",
+            "DEBUG",
         )
         surrendered = surrender_run(
             timeout_s=12.0,
@@ -692,8 +694,7 @@ class App:
         if surrendered:
             log(
                 "[TOURNAMENT_VALIDATION] Owned validation battle reached Game Over",
-                "INFO",
-                console=True,
+                "DEBUG",
             )
             return True
         self._finish_exclusive_validation_without_cleanup(
@@ -750,10 +751,12 @@ class App:
         outcome = str(receipt.get("outcome") or "")
         reason = str(receipt.get("reason") or "reason unavailable")
         if outcome == "ready" and definition is not None:
-            log(
-                f"[TOURNAMENT_READY] {definition.ready_message}",
-                "INFO",
-                console=True,
+            log_result(
+                f"Tournament validation complete — {definition.ready_message}",
+                detail=(
+                    f"[TOURNAMENT_VALIDATION] result=ready "
+                    f"request_id={receipt.get('request_id')} reason={reason}"
+                ),
             )
             return
         prefix = (
@@ -765,6 +768,13 @@ class App:
             f"[TOURNAMENT_VALIDATION_FAILED] {prefix}: {reason}",
             "ERROR",
             console=True,
+        )
+        log_result(
+            f"{prefix} — {reason}",
+            detail=(
+                f"[TOURNAMENT_VALIDATION] result=failed "
+                f"request_id={receipt.get('request_id')} reason={reason}"
+            ),
         )
 
     def _reconcile_exclusive_validation_launch(
@@ -838,16 +848,25 @@ class App:
         status = str(launch.get("status") or "")
         reason = str(launch.get("reason") or "reason unavailable")
         if status == "started":
-            log(
-                f"[TOURNAMENT_LAUNCH] {reason}",
-                "INFO",
-                console=True,
+            log_result(
+                "Tournament launch complete — battle started",
+                detail=(
+                    f"[TOURNAMENT_LAUNCH] result=started "
+                    f"request_id={receipt.get('request_id')} reason={reason}"
+                ),
             )
         elif status in {"failed", "cancelled"}:
             log(
                 f"[TOURNAMENT_LAUNCH_{status.upper()}] {reason}",
                 "WARN" if status == "cancelled" else "ERROR",
                 console=True,
+            )
+            log_result(
+                f"Tournament launch {status} — {reason}",
+                detail=(
+                    f"[TOURNAMENT_LAUNCH] result={status} "
+                    f"request_id={receipt.get('request_id')} reason={reason}"
+                ),
             )
 
     def _advance_exclusive_validation_launch(
@@ -930,6 +949,7 @@ class App:
                     "start exactly one Tournament battle; validation is not "
                     "being repeated"
                 ),
+                detail=f"[TOURNAMENT_LAUNCH] request_id={request_id}",
             )
             dispatched = dispatch_tournament_launch(
                 screenshot,
@@ -943,8 +963,7 @@ class App:
                 log(
                     "[TOURNAMENT_LAUNCH] Verified Tournament BATTLE dispatched "
                     f"under durable launch claim {request_id}",
-                    "INFO",
-                    console=True,
+                    "DEBUG",
                 )
                 return True
             failed = self._supervisor.finish_exclusive_validation_launch(

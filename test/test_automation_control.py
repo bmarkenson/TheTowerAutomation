@@ -57,6 +57,40 @@ def test_pause_remains_authoritative_until_explicit_resume(tmp_path):
     assert AUTOMATION.state.value == "RUNNING"
 
 
+def test_auto_return_pairs_intent_and_terminal_result(tmp_path):
+    supervisor = AutomationSupervisor(
+        control_file=str(tmp_path / "automation_ctl.json"),
+        auto_return_secs=5,
+    )
+    supervisor._rtg_visible_since_ts = 0.0
+
+    with (
+        patch("core.automation_supervisor.time.time", return_value=6.0),
+        patch("core.automation_supervisor.is_visible", return_value=True),
+        patch(
+            "core.automation_supervisor.tap_if_visible",
+            return_value=True,
+        ) as tap,
+        patch(
+            "core.automation_supervisor.log_action_intent",
+        ) as action_log,
+        patch("core.automation_supervisor.log_result") as result_log,
+    ):
+        supervisor.auto_return_check(object(), "HOME_SCREEN")
+
+    tap.assert_called_once_with("buttons.return_to_game", retries=1)
+    action_log.assert_called_once_with(
+        "Returning to the active battle",
+        reason="the Return to Game control remained visible for 6s",
+        detail="[AUTO_RETURN] elapsed_s=6 threshold_s=5",
+    )
+    result_log.assert_called_once_with(
+        "Automatic Return to Game complete — battle resumed",
+        detail="[AUTO_RETURN] result=completed elapsed_s=6",
+    )
+    assert supervisor._rtg_visible_since_ts is None
+
+
 def test_repeated_state_directive_is_acknowledged_and_requests_fresh_status(
     tmp_path,
 ):
