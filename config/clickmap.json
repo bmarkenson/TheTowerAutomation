@@ -41,6 +41,28 @@
         "_shared_match_region"
       ]
     },
+    "second_wind_left_wing": {
+      "match_region": {
+        "x": 470,
+        "y": 440,
+        "w": 60,
+        "h": 90
+      },
+      "roles": [
+        "_shared_match_region"
+      ]
+    },
+    "second_wind_right_wing": {
+      "match_region": {
+        "x": 550,
+        "y": 440,
+        "w": 60,
+        "h": 90
+      },
+      "roles": [
+        "_shared_match_region"
+      ]
+    },
     "claim_daily_gems": {
       "match_region": {
         "x": 19,
@@ -347,6 +369,24 @@
     }
   },
   "indicators": {
+    "second_wind_left_wing": {
+      "match_template": "indicators/second_wind_left_wing.png",
+      "match_threshold": 0.55,
+      "match_padding": 0,
+      "roles": [
+        "indicator"
+      ],
+      "region_ref": "second_wind_left_wing"
+    },
+    "second_wind_right_wing": {
+      "match_template": "indicators/second_wind_right_wing.png",
+      "match_threshold": 0.6,
+      "match_padding": 0,
+      "roles": [
+        "indicator"
+      ],
+      "region_ref": "second_wind_right_wing"
+    },
     "poison_swamp_stun_off": {
       "match_template": "indicators/poison_swamp_stun_off.png",
       "match_region": {

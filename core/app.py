@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Callable, Dict, Any, Mapping, Set, Tuple
 
+import cv2
 import numpy as np
 from numpy.typing import NDArray
 
@@ -211,6 +212,63 @@ class App:
             tracker = BattleActivationTracker()
             self._battle_activation_tracker = tracker
         return tracker
+
+    def _retain_activation_evidence(
+        self,
+        capture: Mapping[str, Any],
+    ) -> Optional[str]:
+        """Save a confirmed activation's first transition frame."""
+
+        frame = capture.get("frame")
+        if not isinstance(frame, np.ndarray) or frame.ndim < 2:
+            log("[BATTLE_EVENT] Activation evidence frame was invalid", "WARN")
+            return None
+
+        ability = "".join(
+            character
+            for character in str(capture.get("ability") or "unknown")
+            if character.isalnum() or character in {"_", "-"}
+        )
+        sequence = max(0, int(capture.get("sequence") or 0))
+        detected_at = str(capture.get("detected_at") or "")
+        try:
+            detected = datetime.fromisoformat(detected_at)
+        except ValueError:
+            detected = datetime.now().astimezone()
+        stamp = detected.strftime("%Y%m%dT%H%M%S%z")
+
+        repository = Path(__file__).resolve().parent.parent
+        evidence_dir = repository / "screenshots" / "matches"
+        try:
+            evidence_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            log(
+                f"[BATTLE_EVENT] Could not create activation evidence directory: {exc}",
+                "WARN",
+            )
+            return None
+
+        stem = f"SurvivalActivation{stamp}_{ability}_{sequence:02d}_first_absent"
+        path = evidence_dir / f"{stem}.png"
+        collision = 2
+        while path.exists():
+            path = evidence_dir / f"{stem}_{collision}.png"
+            collision += 1
+        try:
+            saved = bool(cv2.imwrite(str(path), frame))
+        except Exception as exc:
+            log(
+                f"[BATTLE_EVENT] Could not save activation evidence: {exc}",
+                "WARN",
+            )
+            return None
+        if not saved:
+            log(
+                f"[BATTLE_EVENT] Could not save activation evidence to {path}",
+                "WARN",
+            )
+            return None
+        return path.relative_to(repository).as_posix()
 
     def _prune_generated_artifacts(self, *, force: bool = False) -> None:
         """Apply the bounded retention policy without interrupting automation."""
@@ -1795,18 +1853,49 @@ class App:
                     if self._last_wave_ts > 0
                     else None
                 )
-                activation_events = self._activation_tracker().observe(
+                activation_tracker = self._activation_tracker()
+                activation_events = activation_tracker.observe(
                     img,
                     ui_state=str(detection.get("state") or "UNKNOWN"),
                     wave=wave_val,
                     wave_confidence=wave_conf,
                     wave_observed_at=wave_observed_at,
                 )
+                for capture in activation_tracker.drain_evidence_captures():
+                    evidence_path = self._retain_activation_evidence(capture)
+                    if evidence_path is None:
+                        continue
+                    ability = str(capture.get("ability") or "")
+                    sequence = int(capture.get("sequence") or 0)
+                    activation_tracker.record_evidence_image(
+                        ability,
+                        sequence,
+                        evidence_path,
+                    )
+                    for event in activation_events:
+                        if (
+                            event.get("ability") == ability
+                            and int(event.get("sequence") or 0) == sequence
+                        ):
+                            event["evidence_image"] = evidence_path
+                    display_name = {
+                        "second_wind": "Second Wind",
+                        "demon_mode": "Demon Mode",
+                        "nuke": "Nuke",
+                    }.get(ability, ability or "unknown ability")
+                    log(
+                        "[BATTLE_EVENT] Preserved first transition frame for "
+                        f"{display_name} activation #{sequence}: {evidence_path}",
+                        "INFO",
+                    )
                 for event in activation_events:
-                    name = (
-                        "Demon Mode"
-                        if event.get("ability") == "demon_mode"
-                        else "Nuke"
+                    name = {
+                        "second_wind": "Second Wind",
+                        "demon_mode": "Demon Mode",
+                        "nuke": "Nuke",
+                    }.get(
+                        str(event.get("ability") or ""),
+                        str(event.get("ability") or "Unknown ability"),
                     )
                     wave_text = event.get("approximate_wave")
                     log(

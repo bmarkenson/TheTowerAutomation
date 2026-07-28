@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 
 from core.battle_activation_tracker import BattleActivationTracker
-from core.matcher import MatchResult
+from core.matcher import MatchResult, get_match_result
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -32,6 +32,8 @@ def test_tracker_records_first_demon_mode_and_every_rearmed_nuke():
 
     def match_button(dot_path, *, screenshot):
         del screenshot
+        if dot_path.startswith("indicators.second_wind_"):
+            return _match(visible=False)
         name = dot_path.rsplit(".", 1)[-1]
         return _match(visible=visible[name])
 
@@ -79,9 +81,13 @@ def test_tracker_records_first_demon_mode_and_every_rearmed_nuke():
     assert second_nuke[0]["sequence"] == 2
     snapshot = tracker.snapshot()
     assert snapshot["demon_mode_first_activation"]["approximate_wave"] == 3211
+    assert snapshot["second_wind_activations"] == []
     assert [
         event["approximate_wave"] for event in snapshot["nuke_activations"]
     ] == [3211, 3601]
+    assert [
+        capture["ability"] for capture in tracker.drain_evidence_captures()
+    ] == ["demon_mode", "nuke", "nuke"]
 
     snapshot["nuke_activations"].clear()
     assert len(tracker.snapshot()["nuke_activations"]) == 2
@@ -94,7 +100,9 @@ def test_nonrunning_and_match_failures_cannot_confirm_disappearance():
     failure_reason = None
 
     def match_button(dot_path, *, screenshot):
-        del dot_path, screenshot
+        del screenshot
+        if dot_path.startswith("indicators.second_wind_"):
+            return _match(visible=False)
         return _match(visible=visible, failure_reason=failure_reason)
 
     def observe(state="RUNNING"):
@@ -135,7 +143,9 @@ def test_reset_clears_prior_battle_events_and_arming():
     visible = True
 
     def match_button(dot_path, *, screenshot):
-        del dot_path, screenshot
+        del screenshot
+        if dot_path.startswith("indicators.second_wind_"):
+            return _match(visible=False)
         return _match(visible=visible)
 
     with patch(
@@ -162,6 +172,7 @@ def test_reset_clears_prior_battle_events_and_arming():
 
     tracker.reset()
     assert tracker.snapshot()["demon_mode_first_activation"] is None
+    assert tracker.snapshot()["second_wind_activations"] == []
     assert tracker.snapshot()["nuke_activations"] == []
 
 
@@ -212,4 +223,174 @@ def test_intro_sprint_disabled_buttons_register_as_present():
     assert [event["ability"] for event in events] == ["demon_mode", "nuke"]
     assert events[0]["presence_confidence"] >= 0.8
     assert events[1]["presence_confidence"] >= 0.9
-    assert tracker.snapshot()["schema_version"] == 2
+    assert tracker.snapshot()["schema_version"] == 3
+
+
+def test_tracker_records_every_confirmed_second_wind_wings_disappearance():
+    wings_present = cv2.imread(
+        str(FIXTURES / "running_menu_reward_badges_20260715.png")
+    )
+    wings_absent = cv2.imread(
+        str(FIXTURES / "running_menu_no_reward_badges_20260715.png")
+    )
+    assert wings_present is not None
+    assert wings_absent is not None
+    tracker = BattleActivationTracker(
+        second_wind_absence_confirmation_frames=2,
+    )
+    observed_at = datetime(2026, 7, 26, 12, 0, tzinfo=timezone.utc)
+
+    def match_visual(dot_path, *, screenshot):
+        if dot_path.startswith("indicators.second_wind_"):
+            return get_match_result(dot_path, screenshot=screenshot)
+        return _match(visible=True)
+
+    def observe(frame, wave, second):
+        return tracker.observe(
+            frame,
+            ui_state="RUNNING",
+            wave=wave,
+            wave_confidence=97.5,
+            wave_observed_at=observed_at,
+            observed_at=observed_at.replace(second=second),
+        )
+
+    with patch(
+        "core.battle_activation_tracker.get_match_result",
+        side_effect=match_visual,
+    ):
+        assert observe(wings_present, 4000, 0) == []
+        assert observe(wings_present, 4001, 1) == []
+        assert observe(wings_absent, 4010, 2) == []
+        first = observe(wings_absent, 4015, 3)
+        assert [event["ability"] for event in first] == ["second_wind"]
+        assert first[0]["approximate_wave"] == 4010
+        assert first[0]["detected_at"] == "2026-07-26T12:00:02+00:00"
+        assert first[0]["confirmed_at"] == "2026-07-26T12:00:03+00:00"
+        assert first[0]["detection_source"] == "tower_wings_disappearance"
+
+        assert observe(wings_present, 4400, 4) == []
+        assert observe(wings_present, 4401, 5) == []
+        assert observe(wings_absent, 4410, 6) == []
+        second = observe(wings_absent, 4415, 7)
+
+    assert [event["sequence"] for event in second] == [2]
+    snapshot = tracker.snapshot()
+    assert [
+        event["approximate_wave"]
+        for event in snapshot["second_wind_activations"]
+    ] == [4010, 4410]
+
+
+def test_current_live_second_wind_wings_match_calibrated_regions():
+    crop = cv2.imread(
+        str(FIXTURES / "second_wind_wings_live_20260727.png")
+    )
+    assert crop is not None
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    frame[430:530, 470:610] = crop
+
+    left = get_match_result(
+        "indicators.second_wind_left_wing",
+        screenshot=frame,
+    )
+    right = get_match_result(
+        "indicators.second_wind_right_wing",
+        screenshot=frame,
+    )
+
+    assert left.matched
+    assert right.matched
+    assert left.confidence >= 0.65
+    assert right.confidence >= 0.85
+
+
+def test_confirmed_activation_preserves_first_absent_frame_as_evidence():
+    tracker = BattleActivationTracker(
+        presence_confirmation_frames=1,
+        absence_confirmation_frames=1,
+        second_wind_absence_confirmation_frames=2,
+    )
+    wings_visible = True
+
+    def match_visual(dot_path, *, screenshot):
+        del screenshot
+        if dot_path.startswith("indicators.second_wind_"):
+            return _match(visible=wings_visible)
+        return _match(visible=True)
+
+    with patch(
+        "core.battle_activation_tracker.get_match_result",
+        side_effect=match_visual,
+    ):
+        tracker.observe(
+            np.zeros((20, 20, 3), dtype=np.uint8),
+            ui_state="RUNNING",
+            wave=5000,
+            wave_confidence=99.0,
+            wave_observed_at=None,
+        )
+        wings_visible = False
+        first_absent = np.full((20, 20, 3), 17, dtype=np.uint8)
+        assert tracker.observe(
+            first_absent,
+            ui_state="RUNNING",
+            wave=5010,
+            wave_confidence=98.0,
+            wave_observed_at=None,
+        ) == []
+        events = tracker.observe(
+            np.full((20, 20, 3), 99, dtype=np.uint8),
+            ui_state="RUNNING",
+            wave=5011,
+            wave_confidence=97.0,
+            wave_observed_at=None,
+        )
+
+    assert [event["ability"] for event in events] == ["second_wind"]
+    captures = tracker.drain_evidence_captures()
+    assert len(captures) == 1
+    assert captures[0]["ability"] == "second_wind"
+    assert np.array_equal(captures[0]["frame"], first_absent)
+    assert tracker.drain_evidence_captures() == []
+    assert tracker.record_evidence_image(
+        "second_wind",
+        1,
+        "screenshots/matches/second_wind.png",
+    )
+    assert (
+        tracker.snapshot()["second_wind_activations"][0]["evidence_image"]
+        == "screenshots/matches/second_wind.png"
+    )
+
+
+def test_second_wind_cannot_activate_without_first_observing_wings():
+    wings_absent = cv2.imread(
+        str(FIXTURES / "running_menu_no_reward_badges_20260715.png")
+    )
+    assert wings_absent is not None
+    tracker = BattleActivationTracker(
+        presence_confirmation_frames=1,
+        second_wind_absence_confirmation_frames=1,
+    )
+
+    def match_visual(dot_path, *, screenshot):
+        if dot_path.startswith("indicators.second_wind_"):
+            return get_match_result(dot_path, screenshot=screenshot)
+        return _match(visible=True)
+
+    with patch(
+        "core.battle_activation_tracker.get_match_result",
+        side_effect=match_visual,
+    ):
+        for wave in range(5000, 5005):
+            events = tracker.observe(
+                wings_absent,
+                ui_state="RUNNING",
+                wave=wave,
+                wave_confidence=96.0,
+                wave_observed_at=None,
+            )
+            assert events == []
+
+    assert tracker.snapshot()["second_wind_activations"] == []

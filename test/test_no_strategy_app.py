@@ -46,6 +46,28 @@ def _app_without_strategy():
     return app
 
 
+def test_activation_evidence_uses_timestamped_bounded_runtime_path():
+    app = App.__new__(App)
+    frame = np.full((20, 30, 3), 17, dtype=np.uint8)
+
+    with patch("core.app.cv2.imwrite", return_value=True) as imwrite:
+        path = app._retain_activation_evidence(
+            {
+                "ability": "second_wind",
+                "sequence": 1,
+                "detected_at": "2099-07-27T19:45:12-07:00",
+                "frame": frame,
+            }
+        )
+
+    assert path == (
+        "screenshots/matches/"
+        "SurvivalActivation20990727T194512-0700_second_wind_01_first_absent.png"
+    )
+    assert imwrite.call_args.args[0].endswith(path)
+    assert imwrite.call_args.args[1] is frame
+
+
 def test_no_strategy_game_over_forces_full_capture_and_home_inventory():
     app = _app_without_strategy()
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
@@ -62,8 +84,9 @@ def test_no_strategy_game_over_forces_full_capture_and_home_inventory():
         "fields": {"run_identity": {"status": "observed"}}
     }
     assert kwargs["battle_context"]["survival_ability_activations"] == {
-        "schema_version": 2,
-        "source": "button_disappearance",
+        "schema_version": 3,
+        "source": "visual_transition_detection",
+        "second_wind_activations": [],
         "demon_mode_first_activation": None,
         "nuke_activations": [],
     }

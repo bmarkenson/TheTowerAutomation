@@ -37,6 +37,35 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-27 Second Wind activation waves and transition evidence
+
+- The run-scoped survival observer now records every confirmed Second Wind
+  activation alongside the first Demon Mode activation and every Nuke
+  activation.
+- Second Wind arms only after both small tower wings are observed. Four
+  consecutive frames without the paired wings confirm an activation, and the
+  retained event uses the wave and timestamp from the first absent frame rather
+  than the later confirmation frame. The observer re-arms when both wings
+  return after recharge.
+- Paired clickmap templates were calibrated against retained quiet, busy,
+  wings-present, and wings-absent 1080x1920 frames, then corrected against five
+  fresh read-only live frames with the smaller tower rendering. A run that
+  starts without visible wings, or does not equip Second Wind, cannot arm this
+  detector.
+- Each confirmed Second Wind, Demon Mode, or Nuke transition preserves the
+  first absent frame under `screenshots/matches/`. The event retains that
+  evidence path, and the existing 30-day/size-limited runtime artifact policy
+  bounds storage. Buffering the first frame while waiting for confirmation
+  maximizes the chance of retaining a short-lived active-status icon without
+  saving transient false candidates.
+- Completed Battle and Tournament Markdown and the Windows Completed Battles
+  view now render every sequenced Second Wind wave. Older activation schema
+  records remain readable and do not falsely claim that Second Wind was
+  observed.
+- Validation passed 794 sandbox-compatible tests plus the separately permitted
+  loopback HTTP test, for 795 total. Recursive clickmap/template integrity
+  passed, and the self-contained `win-x64` WPF publish completed successfully.
+
 ### 2026-07-26 completed-record discard and bounded runtime storage
 
 - The Windows Completed Battles window now confirms and discards one exact

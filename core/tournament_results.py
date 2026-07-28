@@ -19,6 +19,7 @@ from core.battle_stats import (
     parse_more_stats_clipboard,
     parse_tower_number,
     render_coin_rate_samples_markdown,
+    render_survival_ability_activations_markdown,
 )
 from utils.ocr_utils import ocr_text_and_conf
 
@@ -334,6 +335,14 @@ def render_tournament_markdown(record: Mapping[str, Any]) -> str:
     lines.extend(
         render_coin_rate_samples_markdown(
             record.get("runtime", {}).get("coin_rate_samples", [])
+        )
+    )
+    lines.extend(
+        render_survival_ability_activations_markdown(
+            record.get("runtime", {}).get(
+                "survival_ability_activations",
+                {},
+            )
         )
     )
 

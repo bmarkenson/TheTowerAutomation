@@ -15,6 +15,7 @@ from core.battle_stats import (
     parse_tower_number,
     persist_battle_record,
     render_battle_markdown,
+    render_survival_ability_activations_markdown,
 )
 from utils.previous_wave import get_previous_run_wave
 
@@ -232,8 +233,22 @@ def _record(*, source_complete=True, source_reason="edge_reached"):
                 }
             ],
             "survival_ability_activations": {
-                "schema_version": 2,
-                "source": "button_disappearance",
+                "schema_version": 3,
+                "source": "visual_transition_detection",
+                "second_wind_activations": [
+                    {
+                        "ability": "second_wind",
+                        "sequence": 1,
+                        "approximate_wave": 4190,
+                        "detected_at": "2026-07-15T11:29:30-07:00",
+                    },
+                    {
+                        "ability": "second_wind",
+                        "sequence": 2,
+                        "approximate_wave": 4590,
+                        "detected_at": "2026-07-15T11:39:30-07:00",
+                    },
+                ],
                 "demon_mode_first_activation": {
                     "ability": "demon_mode",
                     "sequence": 1,
@@ -298,9 +313,34 @@ def test_battle_record_retains_resolved_run_configuration():
     assert "## Coins/min progression" in markdown
     assert "| 2026-07-15T11:00:00-07:00 | 1000 | 1.25T | 98.5% |" in markdown
     assert "## Survival ability activations" in markdown
+    assert "| 1 | 4190 | 2026-07-15T11:29:30-07:00 |" in markdown
+    assert "| 2 | 4590 | 2026-07-15T11:39:30-07:00 |" in markdown
     assert "Demon Mode first activation: approximately wave 4210" in markdown
     assert "| 1 | 4211 | 2026-07-15T11:30:02-07:00 |" in markdown
     assert "| 2 | 4611 | 2026-07-15T11:40:02-07:00 |" in markdown
+
+
+def test_survival_activation_markdown_distinguishes_legacy_and_observed_none():
+    legacy = render_survival_ability_activations_markdown(
+        {
+            "schema_version": 2,
+            "demon_mode_first_activation": {
+                "approximate_wave": 3000,
+            },
+            "nuke_activations": [],
+        }
+    )
+    observed_none = render_survival_ability_activations_markdown(
+        {
+            "schema_version": 3,
+            "second_wind_activations": [],
+            "demon_mode_first_activation": None,
+            "nuke_activations": [],
+        }
+    )
+
+    assert not any("Second Wind" in line for line in legacy)
+    assert "- Second Wind activations: none observed" in observed_none
 
 
 def test_no_strategy_record_retains_terminal_tier_without_guessing_type():

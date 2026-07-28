@@ -19,6 +19,10 @@ _BUTTON_PATHS = {
     "demon_mode": "floating_buttons.demon_mode",
     "nuke": "floating_buttons.nuke",
 }
+_SECOND_WIND_WING_PATHS = (
+    "indicators.second_wind_left_wing",
+    "indicators.second_wind_right_wing",
+)
 _PRESENCE_THRESHOLDS = {
     # The disabled Intro Sprint Demon Mode icon scored 0.856-0.875 against
     # the existing enabled template in retained live frames. Its next-best
@@ -26,7 +30,9 @@ _PRESENCE_THRESHOLDS = {
     "demon_mode": 0.8,
     "nuke": 0.9,
 }
-_DETECTION_SOURCE = "button_disappearance"
+_DETECTION_SOURCE = "visual_transition_detection"
+_BUTTON_DETECTION_SOURCE = "button_disappearance"
+_SECOND_WIND_DETECTION_SOURCE = "tower_wings_disappearance"
 
 
 @dataclass
@@ -36,19 +42,44 @@ class _ButtonObservation:
     armed: bool = False
     last_presence_confidence: float = 0.0
     last_absence_confidence: float = 0.0
+    absence_started_frame: Optional[Frame] = None
 
     def reset_streaks(self) -> None:
         self.visible_streak = 0
         self.absent_streak = 0
+        self.absence_started_frame = None
+
+
+@dataclass
+class _SecondWindObservation(_ButtonObservation):
+    absence_started_wave: Optional[int] = None
+    absence_started_wave_confidence: float = -1.0
+    absence_started_wave_observed_at: Optional[datetime] = None
+    absence_started_at: Optional[datetime] = None
+
+    def clear_pending_absence(self) -> None:
+        self.absent_streak = 0
+        self.last_absence_confidence = 0.0
+        self.absence_started_wave = None
+        self.absence_started_wave_confidence = -1.0
+        self.absence_started_wave_observed_at = None
+        self.absence_started_at = None
+        self.absence_started_frame = None
+
+    def reset_streaks(self) -> None:
+        self.visible_streak = 0
+        self.clear_pending_absence()
 
 
 class BattleActivationTracker:
-    """Infer activations from confirmed floating-button disappearance.
+    """Infer survival activations from confirmed visual transitions.
 
     Demon Mode and Nuke remain visible while disabled during Intro Sprint as
     well as when enabled. With automatic activation configured, disappearance
-    is the useful transition. Requiring consecutive present and absent frames
-    avoids depending on a brief animation.
+    is the useful transition. Second Wind is armed while the small wings beside
+    the tower are visible and activates when both wings disappear. Requiring
+    consecutive present and absent frames avoids depending on a brief animation
+    or treating a transient battle effect as an activation.
     """
 
     def __init__(
@@ -56,18 +87,29 @@ class BattleActivationTracker:
         *,
         presence_confirmation_frames: int = 2,
         absence_confirmation_frames: int = 2,
+        second_wind_absence_confirmation_frames: int = 4,
     ) -> None:
-        if presence_confirmation_frames < 1 or absence_confirmation_frames < 1:
+        if (
+            presence_confirmation_frames < 1
+            or absence_confirmation_frames < 1
+            or second_wind_absence_confirmation_frames < 1
+        ):
             raise ValueError("confirmation frame counts must be positive")
         self._presence_confirmation_frames = int(
             presence_confirmation_frames
         )
         self._absence_confirmation_frames = int(absence_confirmation_frames)
+        self._second_wind_absence_confirmation_frames = int(
+            second_wind_absence_confirmation_frames
+        )
         self._buttons = {
             name: _ButtonObservation() for name in _BUTTON_PATHS
         }
+        self._second_wind = _SecondWindObservation()
         self._demon_mode_first_activation: Optional[dict[str, Any]] = None
+        self._second_wind_activations: list[dict[str, Any]] = []
         self._nuke_activations: list[dict[str, Any]] = []
+        self._pending_evidence_captures: list[dict[str, Any]] = []
         self._reported_match_errors: set[str] = set()
 
     def reset(self) -> None:
@@ -76,8 +118,11 @@ class BattleActivationTracker:
         self._buttons = {
             name: _ButtonObservation() for name in _BUTTON_PATHS
         }
+        self._second_wind = _SecondWindObservation()
         self._demon_mode_first_activation = None
+        self._second_wind_activations = []
         self._nuke_activations = []
+        self._pending_evidence_captures = []
         self._reported_match_errors.clear()
 
     def observe(
@@ -95,6 +140,7 @@ class BattleActivationTracker:
         if str(ui_state or "").upper() != "RUNNING":
             for state in self._buttons.values():
                 state.reset_streaks()
+            self._second_wind.reset_streaks()
             return []
 
         matches: dict[str, MatchResult] = {}
@@ -114,10 +160,36 @@ class BattleActivationTracker:
 
         when = observed_at or datetime.now().astimezone()
         events: list[dict[str, Any]] = []
+        wing_matches: list[MatchResult] = []
+        try:
+            wing_matches = [
+                get_match_result(dot_path, screenshot=frame)
+                for dot_path in _SECOND_WIND_WING_PATHS
+            ]
+        except Exception as exc:
+            self._second_wind.reset_streaks()
+            if "second_wind" not in self._reported_match_errors:
+                log(
+                    f"[BATTLE_EVENT] Could not observe Second Wind wings: {exc}",
+                    "WARN",
+                )
+                self._reported_match_errors.add("second_wind")
+        if len(wing_matches) == len(_SECOND_WIND_WING_PATHS):
+            second_wind_event = self._observe_second_wind(
+                wing_matches,
+                frame=frame,
+                wave=wave,
+                wave_confidence=wave_confidence,
+                wave_observed_at=wave_observed_at,
+                observed_at=when,
+            )
+            if second_wind_event is not None:
+                events.append(copy.deepcopy(second_wind_event))
         for name, match in matches.items():
             event = self._observe_button(
                 name,
                 match,
+                frame=frame,
                 wave=wave,
                 wave_confidence=wave_confidence,
                 wave_observed_at=wave_observed_at,
@@ -131,19 +203,56 @@ class BattleActivationTracker:
         """Return serializable completed-run evidence."""
 
         return {
-            "schema_version": 2,
+            "schema_version": 3,
             "source": _DETECTION_SOURCE,
+            "second_wind_activations": copy.deepcopy(
+                self._second_wind_activations
+            ),
             "demon_mode_first_activation": copy.deepcopy(
                 self._demon_mode_first_activation
             ),
             "nuke_activations": copy.deepcopy(self._nuke_activations),
         }
 
+    def drain_evidence_captures(self) -> list[dict[str, Any]]:
+        """Return and clear confirmed-event frames awaiting durable storage."""
+
+        captures = self._pending_evidence_captures
+        self._pending_evidence_captures = []
+        return captures
+
+    def record_evidence_image(
+        self,
+        ability: str,
+        sequence: int,
+        path: str,
+    ) -> bool:
+        """Attach a saved evidence path to the matching completed-run event."""
+
+        if ability == "second_wind":
+            events = self._second_wind_activations
+        elif ability == "nuke":
+            events = self._nuke_activations
+        elif ability == "demon_mode":
+            events = (
+                [self._demon_mode_first_activation]
+                if self._demon_mode_first_activation is not None
+                else []
+            )
+        else:
+            return False
+        for event in events:
+            if int(event.get("sequence") or 0) == int(sequence):
+                event["evidence_image"] = str(path)
+                return True
+        return False
+
     def _observe_button(
         self,
         name: str,
         match: MatchResult,
         *,
+        frame: Frame,
         wave: Optional[int],
         wave_confidence: float,
         wave_observed_at: Optional[datetime],
@@ -157,6 +266,7 @@ class BattleActivationTracker:
         if present:
             state.visible_streak += 1
             state.absent_streak = 0
+            state.absence_started_frame = None
             state.last_presence_confidence = float(match.confidence)
             if state.visible_streak >= self._presence_confirmation_frames:
                 state.armed = True
@@ -165,6 +275,8 @@ class BattleActivationTracker:
         state.visible_streak = 0
         if not state.armed:
             return None
+        if state.absent_streak == 0:
+            state.absence_started_frame = frame.copy()
         state.absent_streak += 1
         state.last_absence_confidence = float(match.confidence)
         if state.absent_streak < self._absence_confirmation_frames:
@@ -185,7 +297,7 @@ class BattleActivationTracker:
                 else None
             ),
             "detected_at": observed_at.isoformat(timespec="seconds"),
-            "detection_source": _DETECTION_SOURCE,
+            "detection_source": _BUTTON_DETECTION_SOURCE,
             "presence_confidence": round(
                 state.last_presence_confidence,
                 3,
@@ -200,7 +312,115 @@ class BattleActivationTracker:
             self._demon_mode_first_activation = event
         else:
             self._nuke_activations.append(event)
+        self._queue_evidence_capture(event, state.absence_started_frame)
+        state.absence_started_frame = None
         return event
+
+    def _observe_second_wind(
+        self,
+        matches: list[MatchResult],
+        *,
+        frame: Frame,
+        wave: Optional[int],
+        wave_confidence: float,
+        wave_observed_at: Optional[datetime],
+        observed_at: datetime,
+    ) -> Optional[dict[str, Any]]:
+        state = self._second_wind
+        if any(match.failure_reason is not None for match in matches):
+            state.reset_streaks()
+            return None
+
+        present = all(match.matched for match in matches)
+        if present:
+            state.visible_streak += 1
+            state.last_presence_confidence = min(
+                float(match.confidence) for match in matches
+            )
+            state.clear_pending_absence()
+            if state.visible_streak >= self._presence_confirmation_frames:
+                state.armed = True
+            return None
+
+        state.visible_streak = 0
+        if not state.armed:
+            state.clear_pending_absence()
+            return None
+
+        if state.absent_streak == 0:
+            state.absence_started_wave = (
+                int(wave) if wave is not None else None
+            )
+            state.absence_started_wave_confidence = float(wave_confidence)
+            state.absence_started_wave_observed_at = wave_observed_at
+            state.absence_started_at = observed_at
+            state.absence_started_frame = frame.copy()
+        state.absent_streak += 1
+        state.last_absence_confidence = max(
+            state.last_absence_confidence,
+            *(float(match.confidence) for match in matches),
+        )
+        if (
+            state.absent_streak
+            < self._second_wind_absence_confirmation_frames
+        ):
+            return None
+
+        event = {
+            "ability": "second_wind",
+            "sequence": len(self._second_wind_activations) + 1,
+            "approximate_wave": state.absence_started_wave,
+            "wave_confidence": round(
+                state.absence_started_wave_confidence,
+                1,
+            ),
+            "wave_observed_at": (
+                state.absence_started_wave_observed_at.isoformat(
+                    timespec="seconds"
+                )
+                if state.absence_started_wave_observed_at is not None
+                else None
+            ),
+            "detected_at": (
+                state.absence_started_at.isoformat(timespec="seconds")
+                if state.absence_started_at is not None
+                else observed_at.isoformat(timespec="seconds")
+            ),
+            "confirmed_at": observed_at.isoformat(timespec="seconds"),
+            "detection_source": _SECOND_WIND_DETECTION_SOURCE,
+            "presence_confidence": round(
+                state.last_presence_confidence,
+                3,
+            ),
+            "absence_confidence": round(
+                state.last_absence_confidence,
+                3,
+            ),
+            "confirmation_frames": (
+                self._second_wind_absence_confirmation_frames
+            ),
+        }
+        state.armed = False
+        self._queue_evidence_capture(event, state.absence_started_frame)
+        state.clear_pending_absence()
+        self._second_wind_activations.append(event)
+        return event
+
+    def _queue_evidence_capture(
+        self,
+        event: Mapping[str, Any],
+        frame: Optional[Frame],
+    ) -> None:
+        if frame is None:
+            return
+        self._pending_evidence_captures.append(
+            {
+                "ability": str(event.get("ability") or "unknown"),
+                "sequence": int(event.get("sequence") or 0),
+                "detected_at": str(event.get("detected_at") or ""),
+                "frame": frame,
+            }
+        )
 
 
 __all__ = ["BattleActivationTracker"]

@@ -1225,10 +1225,18 @@ def render_coin_rate_samples_markdown(samples: Any) -> list[str]:
 def render_survival_ability_activations_markdown(
     observations: Any,
 ) -> list[str]:
-    """Render approximate Demon Mode and Nuke activation waves."""
+    """Render approximate Second Wind, Demon Mode, and Nuke activation waves."""
 
     if not isinstance(observations, Mapping):
         return []
+    has_second_wind_observer = "second_wind_activations" in observations
+    raw_second_winds = observations.get("second_wind_activations")
+    second_winds = (
+        [event for event in raw_second_winds if isinstance(event, Mapping)]
+        if isinstance(raw_second_winds, Sequence)
+        and not isinstance(raw_second_winds, (str, bytes))
+        else []
+    )
     demon = observations.get("demon_mode_first_activation")
     raw_nukes = observations.get("nuke_activations")
     nukes = (
@@ -1237,10 +1245,33 @@ def render_survival_ability_activations_markdown(
         and not isinstance(raw_nukes, (str, bytes))
         else []
     )
-    if not isinstance(demon, Mapping) and not nukes:
+    if (
+        not has_second_wind_observer
+        and not isinstance(demon, Mapping)
+        and not nukes
+    ):
         return []
 
     lines = ["", "## Survival ability activations", ""]
+    if has_second_wind_observer:
+        if second_winds:
+            lines.extend(
+                [
+                    "| Second Wind activation | Approximate wave | Detected |",
+                    "| ---: | ---: | --- |",
+                ]
+            )
+            for index, event in enumerate(second_winds, start=1):
+                sequence = event.get("sequence", index)
+                wave = event.get("approximate_wave")
+                lines.append(
+                    f"| {sequence} | "
+                    f"{wave if wave is not None else 'unknown'} | "
+                    f"{event.get('detected_at', '')} |"
+                )
+            lines.append("")
+        else:
+            lines.extend(["- Second Wind activations: none observed", ""])
     if isinstance(demon, Mapping):
         lines.append(
             "- Demon Mode first activation: "

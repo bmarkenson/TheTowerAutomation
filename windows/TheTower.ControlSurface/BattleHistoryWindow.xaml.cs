@@ -734,6 +734,29 @@ public partial class BattleHistoryWindow : Window
         }
 
         if (activations.TryGetProperty(
+                "second_wind_activations",
+                out var secondWinds)
+            && secondWinds.ValueKind == JsonValueKind.Array)
+        {
+            var fallbackSecondWindSequence = 1;
+            foreach (var secondWind in secondWinds.EnumerateArray())
+            {
+                if (secondWind.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+                var sequence = JsonValue(secondWind, "sequence");
+                AppendSurvivalAbilityActivationRow(
+                    secondWind,
+                    sequence == "-"
+                        ? $"Second Wind activation {fallbackSecondWindSequence}"
+                        : $"Second Wind activation {sequence}",
+                    destination);
+                fallbackSecondWindSequence++;
+            }
+        }
+
+        if (activations.TryGetProperty(
                 "demon_mode_first_activation",
                 out var demonMode)
             && demonMode.ValueKind == JsonValueKind.Object)
