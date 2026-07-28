@@ -332,6 +332,40 @@ def test_status_reads_concise_heartbeat_with_paired_diagnostic_detail(tmp_path):
     ]
 
 
+def test_runtime_evidence_exposes_clean_release_metadata(tmp_path):
+    released_at = datetime.now().astimezone().replace(microsecond=0).isoformat()
+    lock_path = tmp_path / "logs" / "automation-localhost_5555.lock"
+    lock_path.parent.mkdir(parents=True)
+    lock_path.write_text(
+        json.dumps(
+            {
+                "pid": None,
+                "released_at": released_at,
+                "state": "released",
+                "target": "localhost:5555",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    runtime = _service(tmp_path)._runtime_evidence()
+
+    assert not runtime["active"]
+    assert runtime["instances"] == [
+        {
+            "active": False,
+            "file": "automation-localhost_5555.lock",
+            "lock_held": False,
+            "metadata_state": "released",
+            "pid": None,
+            "pid_alive": None,
+            "released_at": released_at,
+            "started_at": None,
+            "target": "localhost:5555",
+        }
+    ]
+
+
 def test_battle_list_is_compact_and_full_record_requires_exact_id(tmp_path):
     _write_battle(tmp_path)
     service = _service(tmp_path)

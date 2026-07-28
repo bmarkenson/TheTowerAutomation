@@ -24,16 +24,25 @@ timeout 10s adb -s localhost:5555 exec-out screencap -p > /tmp/thetower_current.
 ```
 
 The expected connection response is `device`. The trusted project's
-`.codex/config.toml` enables network access in the normal `workspace-write`
-sandbox so it can reach the established host ADB server. Start new Codex
-sessions after changing that configuration so the project layer is reloaded.
+`.codex/config.toml` selects a workspace permission profile that explicitly
+allows `localhost` and `127.0.0.1`, so a session that loads the project layer
+can reach the established host ADB server. Start a new Codex session after
+changing that configuration so the project layer is reloaded.
 
-Run the bounded ADB check once through the normal workspace sandbox; do not
-preflight it with a separate known-failing invocation. If a Codex surface does
-not load the project configuration, its isolated command may try to start a
-second ADB server and fail with an error such as `could not install
-*smartsocket* listener: Operation not permitted`. Retry that command through
-the approved host execution path. The isolated failure describes the
+Choose the execution path from the permissions declared for the current
+session:
+
+- When command network access is enabled, run one bounded ADB check through
+  the normal workspace sandbox.
+- When the session explicitly declares command network restricted, skip the
+  isolated ADB probe and run the check once through approved host execution.
+- When command network capability is not stated, try one bounded sandbox
+  command. On an environment-level failure such as `could not install
+  *smartsocket* listener: Operation not permitted`, retry immediately through
+  approved host execution.
+
+Do not preflight ADB with an extra known-failing invocation, and do not pause
+the workflow merely to narrate the fallback. An isolated failure describes the
 invocation environment; it does **not** prove that the established host ADB
 server or emulator target is unavailable.
 
@@ -68,9 +77,12 @@ timeout 8s adb -s localhost:5555 get-state
 ```
 
 - The control file is persistent operator intent.
-- The lock records the last owner PID and target, but may be stale after a
-  crash. Confirm its PID against the host process table before treating it as a
-  live owner.
+- An active lock record names its owner PID and target. A clean release rewrites
+  the record as `state: released`, clears `pid`, and records `released_at`;
+  that record is historical and needs no stale-process confirmation. A crash
+  can leave `state: held` metadata after the OS lock has been released, so
+  confirm a remaining PID and OS-lock evidence before treating it as a live
+  owner.
 - `actions.log` records what the automation intended, observed, and dispatched.
   Guarded and multi-step workflows begin with a concise `ACTION` header that
   explains their purpose before the individual input records. The log retains

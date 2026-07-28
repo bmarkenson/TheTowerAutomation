@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import datetime
 
 import pytest
 
@@ -29,9 +30,25 @@ def test_lock_can_be_reacquired_after_release(tmp_path):
         metadata = json.loads(lock_path.read_text(encoding="utf-8"))
         assert metadata["target"] == "localhost:5555"
         assert isinstance(metadata["pid"], int)
+        assert metadata["state"] == "held"
 
     with second:
         pass
+
+
+def test_clean_release_clears_owner_and_records_release(tmp_path):
+    lock_path = tmp_path / "runtime.lock"
+    lock = SingleInstanceLock("localhost:5555", lock_path)
+
+    lock.acquire()
+    lock.release()
+
+    metadata = json.loads(lock_path.read_text(encoding="utf-8"))
+    assert metadata["target"] == "localhost:5555"
+    assert metadata["state"] == "released"
+    assert metadata["pid"] is None
+    assert datetime.fromisoformat(metadata["released_at"]).tzinfo is not None
+    assert "started_at" not in metadata
 
 
 def test_adb_target_session_handoff_acquires_new_lock_before_releasing_old(

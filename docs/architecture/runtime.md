@@ -421,9 +421,11 @@ evidence is attached.
 ## Process and control ownership
 
 - The persistent control file is authoritative operator intent.
-- A non-blocking lock keyed by ADB target prevents competing runtimes from
-  acting on the same device. A lock is evidence of a former owner, not proof
-  that its PID is still alive.
+- A non-blocking OS lock keyed by ADB target prevents competing runtimes from
+  acting on the same device. Its metadata is `held` with an owner PID while
+  acquired and is rewritten to `released` with no PID on a clean release. A
+  crash can leave `held` metadata after the OS lock disappears, so metadata
+  alone is not proof that its PID is still alive.
 - Pause blocks every strategy and handler action while allowing observation and
   status reporting.
 - Control synchronization precedes capture, so an ADB outage cannot prevent a

@@ -1,3 +1,15 @@
-# TheTower talks to the host ADB server for emulator inspection and control.
-[sandbox_workspace_write]
-network_access = true
+#:schema https://developers.openai.com/codex/config-schema.json
+
+# TheTower talks to the established host ADB server over loopback.
+default_permissions = "thetower"
+
+[permissions.thetower]
+description = "TheTower workspace access with localhost ADB connectivity."
+extends = ":workspace"
+
+[permissions.thetower.network]
+enabled = true
+
+[permissions.thetower.network.domains]
+"localhost" = "allow"
+"127.0.0.1" = "allow"

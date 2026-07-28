@@ -19,11 +19,16 @@ current process and device.
 ## Non-negotiable rules
 
 - Run project Python through `.venv/bin/python`, including tests.
-- The trusted project configuration enables sandbox network access for the
-  established host ADB server. Run bounded ADB commands through the normal
-  workspace sandbox first; use approved host execution only if the current
-  environment does not load that configuration. Treat an isolated invocation
-  failure as an environment failure, not proof that the device is unavailable.
+- The trusted project permission profile enables loopback access to the
+  established host ADB server. Choose the ADB execution path from the current
+  session's declared permissions: use the normal workspace sandbox when
+  network is enabled; when the session explicitly declares network restricted,
+  skip the known-failing isolated probe and use approved host execution. If the
+  capability is not stated, try one bounded sandbox command and retry it
+  immediately through approved host execution on an environment-level network
+  failure. Treat that failure as an invocation-environment failure, not proof
+  that the device is unavailable, and do not interrupt the workflow merely to
+  narrate the fallback.
 - Never Surrender a pre-existing or operator-owned battle merely to create a
   development test boundary. A battle deliberately started by the agent for a
   bounded test may be Surrendered only when the task author explicitly

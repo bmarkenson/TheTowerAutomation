@@ -51,6 +51,7 @@ class SingleInstanceLock:
 
         metadata = {
             "pid": os.getpid(),
+            "state": "held",
             "target": self.target,
             "started_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -67,9 +68,22 @@ class SingleInstanceLock:
             return
         self._handle = None
         try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            metadata = {
+                "pid": None,
+                "released_at": datetime.now(timezone.utc).isoformat(),
+                "state": "released",
+                "target": self.target,
+            }
+            handle.seek(0)
+            handle.truncate()
+            json.dump(metadata, handle, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
         finally:
-            handle.close()
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            finally:
+                handle.close()
 
     def __enter__(self) -> "SingleInstanceLock":
         self.acquire()
