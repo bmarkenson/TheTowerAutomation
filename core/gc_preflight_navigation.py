@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from functools import wraps
 import time
 from typing import Any, Callable, Mapping, Optional
 
@@ -31,7 +32,7 @@ from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
 from core.upgrade_box_detector import detect_visible_boxes
 from core.upgrade_navigation import swipe_upgrade_menu
-from utils.logger import log, log_action_intent
+from utils.logger import log, log_action_intent, log_result
 
 
 Frame = np.ndarray
@@ -60,6 +61,68 @@ class GcLivePreflightResult:
             and self.evidence is not None
             and self.evidence.valid
         )
+
+
+def _log_gc_preflight_workflow(func):
+    """Pair the complete preflight route, including its cleanup, with a result."""
+
+    @wraps(func)
+    def wrapped(requirements: Mapping[str, Any], *args, **kwargs):
+        log_action_intent(
+            "Checking session configuration",
+            reason=(
+                "confirm active loadouts and combat settings match the selected "
+                "run profile before automation continues"
+            ),
+            detail=(
+                f"[GC_PREFLIGHT] requirements={sorted(requirements)} "
+                f"uses_home_evidence={kwargs.get('no_battle_setup_evidence') is not None}"
+            ),
+        )
+        try:
+            result = func(requirements, *args, **kwargs)
+        except Exception as exc:
+            log_result(
+                f"Session configuration check failed — {exc}",
+                detail=(
+                    "[GC_PREFLIGHT] result=failed "
+                    f"unhandled_exception={exc!r}"
+                ),
+            )
+            raise
+
+        if result.status is GcPreflightNavigationStatus.COMPLETE:
+            if result.reason.endswith("boundary checks deferred"):
+                summary = (
+                    "Session configuration check complete — active requirements "
+                    "verified; boundary checks deferred"
+                )
+            else:
+                summary = (
+                    "Session configuration check complete — all requirements "
+                    "verified"
+                )
+        elif result.status is GcPreflightNavigationStatus.MISMATCH:
+            summary = "Session configuration check complete — mismatch found"
+        elif result.status is GcPreflightNavigationStatus.BATTLE_ENDED:
+            summary = (
+                "Session configuration check interrupted — the battle ended "
+                "during inspection"
+            )
+        else:
+            summary = f"Session configuration check failed — {result.reason}"
+        evidence = result.evidence
+        log_result(
+            summary,
+            detail=(
+                f"[GC_PREFLIGHT] result={result.status.value} "
+                f"reason={result.reason} valid={result.valid} "
+                f"deferred_checks={list(getattr(evidence, 'deferred_checks', ()))}"
+            ),
+        )
+        return result
+
+    return wrapped
 
 
 class _NavigationFailure(RuntimeError):
@@ -558,6 +621,7 @@ def _ultimate_observations_complete(
     return True
 
 
+@_log_gc_preflight_workflow
 def run_read_only_gc_preflight(
     requirements: Mapping[str, Any],
     *,
@@ -585,13 +649,6 @@ def run_read_only_gc_preflight(
 ) -> GcLivePreflightResult:
     """Verify GC requirements, apply safe in-run corrections, and return."""
 
-    log_action_intent(
-        "Checking session configuration",
-        reason=(
-            "confirm active loadouts and combat settings match the selected "
-            "run profile before automation continues"
-        ),
-    )
     route_completed = False
     try:
         ultimate_requirements = requirements.get("ultimate_weapons")

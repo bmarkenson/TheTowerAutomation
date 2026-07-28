@@ -612,6 +612,7 @@ def test_no_battle_setup_applies_strategy_owned_perk_configuration():
     assert result.complete
     ensure.assert_called_once()
     assert ensure.call_args.kwargs["home_screenshot"] == "home"
+    assert ensure.call_args.kwargs["operator_workflow"] is False
     assert result.evidence["perk_bans"]["changed"] is True
     assert result.evidence["perk_auto_pick_order"]["changed"] is True
 
@@ -661,7 +662,11 @@ def test_invalid_strategy_perk_configuration_blocks_before_workshop():
 def test_home_preflight_logs_concise_check_results_for_operator_activity():
     router = _NoBattleRouter(selected=True, correct_guardians=True)
 
-    with patch("core.gc_no_battle_setup.log") as emit:
+    with (
+        patch("core.gc_no_battle_setup.log") as emit,
+        patch("core.gc_no_battle_setup.log_action_intent") as action_log,
+        patch("core.gc_no_battle_setup.log_result") as result_log,
+    ):
         result = _run(router)
 
     assert result.complete
@@ -681,6 +686,14 @@ def test_home_preflight_logs_concise_check_results_for_operator_activity():
         "expected=10 configured priorities; "
         "observed=in-battle control pending" in message
         for message in messages
+    )
+    action_log.assert_called_once()
+    assert action_log.call_args.args[0] == (
+        "Repairing Home-only run configuration"
+    )
+    result_log.assert_called_once()
+    assert result_log.call_args.args[0] == (
+        "Home-only run configuration complete — supported requirements verified"
     )
 
 

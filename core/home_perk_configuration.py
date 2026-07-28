@@ -153,6 +153,7 @@ def ensure_home_perk_configuration(
     measure_selection_fn: Callable[..., Any] = measure_preset_slot_selection,
     waived_fields: Sequence[str] = (),
     sleep_fn: Callable[[float], None] = time.sleep,
+    operator_workflow: bool = True,
 ) -> HomePerkConfigurationResult:
     """Verify and restore the strategy's Ban and Auto Pick lists at Home."""
 
@@ -169,18 +170,19 @@ def ensure_home_perk_configuration(
         detector,
         detect_home_control_fn,
     )
-    log_action_intent(
-        "Checking Home Perk configuration",
-        reason=(
-            "verify the strategy-owned Ban and Auto Pick settings before the "
-            "new battle and repair only authoritative mismatches"
-        ),
-        detail=(
-            f"[HOME_PERKS] required_bans={len(required_bans)} "
-            f"required_auto_pick={len(required_auto_pick)} "
-            f"waived={sorted(waived)}"
-        ),
-    )
+    if operator_workflow:
+        log_action_intent(
+            "Checking Home Perk configuration",
+            reason=(
+                "verify the strategy-owned Ban and Auto Pick settings before "
+                "the new battle and repair only authoritative mismatches"
+            ),
+            detail=(
+                f"[HOME_PERKS] required_bans={len(required_bans)} "
+                f"required_auto_pick={len(required_auto_pick)} "
+                f"waived={sorted(waived)}"
+            ),
+        )
     perks = _open_configuration(
         home_screenshot,
         capture_fn=capture_fn,
@@ -331,16 +333,15 @@ def ensure_home_perk_configuration(
         if failed_check and isinstance(evidence.get(failed_check), Mapping)
         else "strategy Perk configuration remained invalid"
     )
-    return _finish_home_perk_configuration(
-        HomePerkConfigurationResult(
-            valid=not failed_checks,
-            changed=bool(changed_fields),
-            reason=reason,
-            failed_check=failed_check,
-            evidence=evidence,
-            home_screenshot=home,
-        )
+    result = HomePerkConfigurationResult(
+        valid=not failed_checks,
+        changed=bool(changed_fields),
+        reason=reason,
+        failed_check=failed_check,
+        evidence=evidence,
+        home_screenshot=home,
     )
+    return _finish_home_perk_configuration(result) if operator_workflow else result
 
 
 def _repair_bans(

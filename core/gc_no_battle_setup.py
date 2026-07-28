@@ -59,7 +59,7 @@ from core.workshop_preset import (
     TOURNEY_PRESET_SLOT,
     measure_preset_slot_selection,
 )
-from utils.logger import log, log_action_intent
+from utils.logger import log, log_action_intent, log_result
 from utils.ocr_utils import ocr_text_and_conf
 
 
@@ -155,6 +155,34 @@ class GcNoBattleSetupResult:
         return self.status is GcNoBattleSetupStatus.INTERRUPTED
 
 
+def _finish_gc_no_battle_setup(
+    result: GcNoBattleSetupResult,
+) -> GcNoBattleSetupResult:
+    """Emit the terminal result for one Home-only GC setup workflow."""
+
+    if result.status is GcNoBattleSetupStatus.COMPLETE:
+        summary = (
+            "Home-only run configuration complete — supported requirements "
+            "verified"
+        )
+    elif result.status is GcNoBattleSetupStatus.INTERRUPTED:
+        summary = (
+            "Home-only run configuration interrupted — control changed during "
+            f"{_HOME_PREFLIGHT_LABELS.get(result.failed_check or '', result.failed_check)}"
+        )
+    else:
+        summary = f"Home-only run configuration failed — {result.reason}"
+    log_result(
+        summary,
+        detail=(
+            f"[GC_NO_BATTLE] result={result.status.value} "
+            f"failed_check={result.failed_check} reason={result.reason} "
+            f"evidence_keys={sorted(result.evidence)}"
+        ),
+    )
+    return result
+
+
 class _SetupFailure(RuntimeError):
     pass
 
@@ -212,6 +240,10 @@ def run_gc_no_battle_setup(
         reason=(
             "preflight found persistent settings that must be corrected "
             "outside battle before restart"
+        ),
+        detail=(
+            f"[GC_NO_BATTLE] requirements={sorted(requirements)} "
+            f"waivers={sorted((waivers or {}).keys())}"
         ),
     )
 
@@ -387,6 +419,7 @@ def run_gc_no_battle_setup(
                     if check_id in active_waivers
                 ),
                 sleep_fn=sleep_fn,
+                operator_workflow=False,
             )
             for check_id in ("perk_bans", "perk_auto_pick_order"):
                 if check_id in active_waivers:
@@ -852,11 +885,13 @@ def run_gc_no_battle_setup(
             tap_visible_fn,
             sleep_fn,
         )
-        return GcNoBattleSetupResult(
-            GcNoBattleSetupStatus.INTERRUPTED,
-            str(exc),
-            evidence,
-            current_check,
+        return _finish_gc_no_battle_setup(
+            GcNoBattleSetupResult(
+                GcNoBattleSetupStatus.INTERRUPTED,
+                str(exc),
+                evidence,
+                current_check,
+            )
         )
     except Exception as exc:
         _log_home_preflight_failure(
@@ -873,21 +908,25 @@ def run_gc_no_battle_setup(
             sleep_fn,
         )
         log(f"[GC_NO_BATTLE] Setup failed: {exc}", "ERROR")
-        return GcNoBattleSetupResult(
-            GcNoBattleSetupStatus.FAILED,
-            str(exc),
-            evidence,
-            current_check,
+        return _finish_gc_no_battle_setup(
+            GcNoBattleSetupResult(
+                GcNoBattleSetupStatus.FAILED,
+                str(exc),
+                evidence,
+                current_check,
+            )
         )
 
     log(
         "[GC_NO_BATTLE] Profile Home settings verified/corrected before Battle",
-        "INFO",
+        "DEBUG",
     )
-    return GcNoBattleSetupResult(
-        GcNoBattleSetupStatus.COMPLETE,
-        "supported no-battle requirements verified",
-        evidence,
+    return _finish_gc_no_battle_setup(
+        GcNoBattleSetupResult(
+            GcNoBattleSetupStatus.COMPLETE,
+            "supported no-battle requirements verified",
+            evidence,
+        )
     )
 
 

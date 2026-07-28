@@ -21,7 +21,7 @@ from core.module_icon_index import (
 )
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
-from utils.logger import log, log_action_intent
+from utils.logger import log
 from utils.ocr_utils import ocr_text_and_conf
 
 
@@ -345,12 +345,10 @@ def ensure_gc_module_loadout(
             )
 
         if not announced:
-            log_action_intent(
-                "Restoring the strategy Module loadout",
-                reason=(
-                    "replace occupied slots through verified level transfer and "
-                    "use a level-1 intermediate for Primary/Assist swaps"
-                ),
+            log(
+                "[MODULE_LOADOUT] Restoring the strategy loadout through "
+                "verified level transfer and level-1 swap intermediates",
+                "DEBUG",
             )
             announced = True
 
@@ -378,7 +376,7 @@ def ensure_gc_module_loadout(
             "[MODULE_LOADOUT] "
             f"{cycle.family} Primary/Assist reassignment requires a level-1 "
             f"intermediate before moving {cycle.actual}",
-            "INFO",
+            "DEBUG",
         )
         current = temporary_action(cycle, excluded_names)
         changed = True

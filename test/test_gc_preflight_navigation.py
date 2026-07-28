@@ -155,22 +155,32 @@ def test_game_over_observation_aborts_without_sending_input():
     swipes = []
     go_home_calls = []
 
-    result = run_read_only_gc_preflight(
-        PREFLIGHT_REQUIREMENTS,
-        capture_fn=lambda: frame,
-        detector=lambda _frame: {"state": "GAME_OVER"},
-        safe_tap_fn=lambda *args, **kwargs: static_taps.append((args, kwargs)),
-        tap_visible_fn=lambda *args, **kwargs: visible_taps.append((args, kwargs)),
-        go_home_fn=lambda: go_home_calls.append(True),
-        swipe_fn=lambda *args: swipes.append(args),
-        sleep_fn=lambda _seconds: None,
-    )
+    with (
+        patch("core.gc_preflight_navigation.log_action_intent") as action_log,
+        patch("core.gc_preflight_navigation.log_result") as result_log,
+    ):
+        result = run_read_only_gc_preflight(
+            PREFLIGHT_REQUIREMENTS,
+            capture_fn=lambda: frame,
+            detector=lambda _frame: {"state": "GAME_OVER"},
+            safe_tap_fn=lambda *args, **kwargs: static_taps.append((args, kwargs)),
+            tap_visible_fn=lambda *args, **kwargs: visible_taps.append((args, kwargs)),
+            go_home_fn=lambda: go_home_calls.append(True),
+            swipe_fn=lambda *args: swipes.append(args),
+            sleep_fn=lambda _seconds: None,
+        )
 
     assert result.status is GcPreflightNavigationStatus.BATTLE_ENDED
     assert static_taps == []
     assert visible_taps == []
     assert swipes == []
     assert go_home_calls == []
+    action_log.assert_called_once()
+    assert action_log.call_args.args[0] == "Checking session configuration"
+    result_log.assert_called_once()
+    assert result_log.call_args.args[0] == (
+        "Session configuration check interrupted — the battle ended during inspection"
+    )
 
 
 def test_enabled_auto_pick_perks_does_not_send_a_toggle():
