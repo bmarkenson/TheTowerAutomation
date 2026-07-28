@@ -112,10 +112,11 @@ narrative without discarding input or diagnostic evidence.
 The target default Operational activity levels are `ACTION`, `RESULT`, `WARN`,
 `ERROR`, and `FAIL`. Diagnostics includes `INPUT`, `DEBUG`, `MATCH`, and
 `STATE`; `All levels` preserves the complete ordering. The current GUI and
-legacy input call sites are being migrated in stages under
+legacy workflow call sites are being migrated in stages under
 [`runtime-and-validation.md`](backlog/runtime-and-validation.md); until that
-work completes, some individual inputs may still appear as `ACTION`, and the
-current Operational preset still includes `STATUS` and `INFO`.
+work completes, some workflows may not yet have a terminal `RESULT`, and the
+current Operational preset still includes `STATUS` and `INFO`. Centralized
+runtime input emitters already record taps, swipes, and presses as `INPUT`.
 
 Low-level helpers should return structured reasons and keep ordinary outcomes
 diagnostic. The workflow owner decides whether a result is a no-op, a failed

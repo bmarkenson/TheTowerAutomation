@@ -30,7 +30,7 @@ from core.upgrade_buy_quantity import (
     get_buy_quantity_regions,
 )
 from handlers.dismiss_uw_detail import handle_upgrade_detail_popup
-from utils.logger import log, log_action, log_mission
+from utils.logger import log, log_input, log_mission
 
 # Default timing constants
 _SCROLL_SETTLE_SEC = 0.45
@@ -186,7 +186,7 @@ def _perform_swipe(direction: str, span: SwipeSpan = "short") -> None:
         if direction == "towards_top"
         else "toward the bottom"
     )
-    log_action(
+    log_input(
         f"Swipe requested: Upgrade menu {direction_label}",
         detail=(
             f"UPGRADE_SCROLL direction={direction} span={span} "

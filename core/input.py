@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 import time
 from typing import Any, Callable, Dict, Literal, Optional, Tuple, Sequence, Union
 
-from utils.logger import log, log_action
+from utils.logger import log, log_input
 from core.adb_utils import input_swipe, input_tap
 from core.tap_dispatcher import tap as enqueue_tap
 from core.clickmap_access import get_click, get_explicit_tap, get_swipe, resolve_dot_path
@@ -138,7 +138,7 @@ def safe_tap(
                 offset = _compute_offset(entry)
                 tap_x = x + (offset[0] if offset else width // 2)
                 tap_y = y + (offset[1] if offset else height // 2)
-                log_action(
+                log_input(
                     _tap_summary(str(label), dispatch),
                     detail=(
                         f"TAP_SAFE now={dispatch=='now'} label={label} "
@@ -199,7 +199,7 @@ def safe_tap(
         )
         return False
 
-    log_action(
+    log_input(
         _tap_summary(str(summary_label), dispatch),
         detail=(
             f"TAP_SAFE now={dispatch=='now'} label={label} "
@@ -275,7 +275,7 @@ def safe_long_press(
             offset = _compute_offset(entry)
             press_x = x + (offset[0] if offset else width // 2)
             press_y = y + (offset[1] if offset else height // 2)
-            log_action(
+            log_input(
                 f"Long press requested: {_operator_label(str(label))}",
                 detail=(
                     f"LONG_PRESS_SAFE label={label} at ({press_x},{press_y}) "
@@ -310,11 +310,11 @@ def tap_unchecked_for_tooling(name: str, *, reason: str) -> bool:
     if not coords:
         log(f"[INPUT] tooling tap: missing coords for '{name}'", "ERROR")
         return False
-    _dispatch_tap(coords[0], coords[1], label=name, dispatch="now")
-    log_action(
+    log_input(
         f"Unchecked tooling tap requested: {_operator_label(name)}",
         detail=f"TAP_TOOLING: {name} at {coords} reason={reason}",
     )
+    _dispatch_tap(coords[0], coords[1], label=name, dispatch="now")
     return True
 
 
@@ -330,11 +330,11 @@ def swipe_now(name: str) -> bool:
     except Exception:
         log(f"[INPUT] swipe_now: invalid swipe data for '{name}'", "ERROR")
         return False
-    _dispatch_swipe(x1, y1, x2, y2, duration)
-    log_action(
+    log_input(
         f"Swipe requested: {_operator_label(name)}",
         detail=f"SWIPE_NOW: {name} ({x1},{y1})→({x2},{y2}) in {duration}ms",
     )
+    _dispatch_swipe(x1, y1, x2, y2, duration)
     return True
 
 

@@ -1,5 +1,5 @@
 from threading import Event
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
@@ -10,12 +10,13 @@ from core.level_skip_initializer import (
     EALS,
     EHLS,
     LevelSkipInitializationResult,
+    _default_scroll_to_bottom,
     _purchase_point,
     _tap_and_capture,
     initialize_level_skips,
 )
 from core.upgrade_box_detector import UpgradeBox
-from utils.logger import log_action
+from utils.logger import log_input
 
 
 def _frame(value: int):
@@ -31,6 +32,41 @@ def _box(label: str, status: str) -> UpgradeBox:
 def test_level_skip_purchase_points_are_centered_in_lower_buttons():
     assert _purchase_point(_box(EHLS, "affordable")) == (424, 1744)
     assert _purchase_point(_box(EALS, "affordable")) == (943, 1542)
+
+
+def test_default_scroll_to_bottom_records_input_before_dispatch():
+    events = []
+
+    with (
+        patch(
+            "core.level_skip_initializer.resolve_dot_path",
+            return_value={
+                "match_region": {"x": 31, "y": 100, "w": 1000, "h": 1500}
+            },
+        ),
+        patch(
+            "core.level_skip_initializer.log_input",
+            side_effect=lambda *args, **kwargs: events.append(
+                ("input", args, kwargs)
+            ),
+        ),
+        patch(
+            "core.level_skip_initializer.input_swipe",
+            side_effect=lambda *args, **kwargs: (
+                events.append(("swipe", args, kwargs)),
+                Mock(returncode=0),
+            )[-1],
+        ),
+    ):
+        assert _default_scroll_to_bottom()
+
+    assert [kind for kind, _args, _kwargs in events] == ["input", "swipe"]
+    assert events[0][1] == (
+        "Swipe requested: Utility upgrade menu toward the bottom",
+    )
+    assert "RUN_INIT_SCROLL_TO_BOTTOM" in events[0][2]["detail"]
+    assert events[1][1] == (531, 1330, 531, 430, 220)
+    assert events[1][2] == {"check": False}
 
 
 def test_fallback_initializer_taps_ehls_before_eals():
@@ -122,7 +158,7 @@ def test_initializer_logs_why_before_its_tap_sequence(tmp_path, monkeypatch):
 
     def logged_tap(_point, *, label, verification):
         assert verification is not None
-        log_action(f"Synthetic tap: {label}", console=False)
+        log_input(f"Synthetic tap: {label}", console=False)
         return True
 
     def gold_box(frame, rect):
@@ -173,10 +209,16 @@ def test_initializer_logs_why_before_its_tap_sequence(tmp_path, monkeypatch):
         "] Initializing level skips — maximize Enemy Health and Attack Level "
         "Skip before wave 40 so normal strategy actions can continue"
     )
-    assert action_lines[1].endswith(
+    assert len(action_lines) == 1
+    input_lines = [
+        line
+        for line in action_log.read_text(encoding="utf-8").splitlines()
+        if line.startswith("[INPUT ")
+    ]
+    assert input_lines[0].endswith(
         f"] Synthetic tap: level_skip:{EHLS}"
     )
-    assert action_lines[2].endswith(
+    assert input_lines[1].endswith(
         f"] Synthetic tap: level_skip:{EALS}"
     )
 

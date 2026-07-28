@@ -201,7 +201,7 @@ evidence.
        status as a separate snapshot stream, reserve warnings for persistent
        operator-relevant degradation, and add the logger primitives and
        regression coverage.
-     - [ ] Migrate centralized tap, swipe, and press emitters from `ACTION` to
+     - [x] Migrate centralized tap, swipe, and press emitters from `ACTION` to
        `INPUT` while retaining paired `DEBUG` evidence.
      - [ ] Pair operator-meaningful workflows with exactly one `ACTION` and one
        terminal `RESULT`; downgrade nested implementation notices.

@@ -13,14 +13,14 @@ defaults:
   queue_semantics: FIFO ordering preserved per process
   worker: A daemon thread is started on import and processes TAP_QUEUE
   tap_path: Uses core.adb_utils.input_tap to map canonical points to device pixels
-  logging: Per-tap logging goes through utils.logger.log when log_it=True
+  logging: Per-tap logging goes through utils.logger.log_input when log_it=True
 """
 
 import threading
 import queue
 import time
 import random
-from utils.logger import log, log_action
+from utils.logger import log, log_input
 from core.adb_utils import input_tap
 
 TAP_QUEUE = queue.Queue()
@@ -42,9 +42,9 @@ def log_tap(x, y, label):
       r: null
       s: [log]
       notes:
-        - Emits a concise ACTION line plus DEBUG coordinate detail.
+        - Emits a concise INPUT line plus DEBUG coordinate detail.
     """
-    log_action(
+    log_input(
         f"Tap dispatched: {label or 'unlabeled target'}",
         detail=f"TAP {label or ''} at ({x},{y})",
     )

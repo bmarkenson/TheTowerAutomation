@@ -3,7 +3,14 @@ from unittest.mock import patch
 import numpy as np
 
 from core.clickmap_access import get_click, get_explicit_tap, resolve_dot_path
-from core.input import TapVerification, safe_long_press, safe_tap
+from core.input import (
+    TapVerification,
+    safe_long_press,
+    safe_tap,
+    swipe_now,
+    tap_unchecked_for_tooling,
+)
+from core.label_tapper import swipe_relative_in_region
 
 
 def test_legacy_get_click_preserves_direct_match_region_center():
@@ -31,7 +38,7 @@ def test_runtime_static_tap_requires_target_verification():
     dispatch.assert_not_called()
 
 
-def test_safe_tap_separates_operator_summary_from_coordinate_detail(
+def test_safe_tap_records_input_summary_and_coordinate_detail(
     tmp_path,
     monkeypatch,
 ):
@@ -54,6 +61,7 @@ def test_safe_tap_separates_operator_summary_from_coordinate_detail(
 
     dispatch.assert_called_once_with(10, 20, label="test_target", dispatch="queue")
     lines = action_log.read_text(encoding="utf-8").splitlines()
+    assert lines[0].startswith("[INPUT ")
     assert lines[0].endswith("] Tap queued: Test target")
     assert lines[1].endswith(
         "] TAP_SAFE now=False label=test_target at (10,20) "
@@ -110,6 +118,7 @@ def test_safe_long_press_uses_fresh_template_geometry_and_configured_offset():
             return_value=(300, 1200, 230, 43),
         ) as match,
         patch("core.input._dispatch_swipe") as dispatch,
+        patch("core.input.log_input") as input_log,
     ):
         assert safe_long_press(
             "buttons.card_inventory:demon_mode",
@@ -122,6 +131,95 @@ def test_safe_long_press_uses_fresh_template_geometry_and_configured_offset():
         screenshot=screenshot,
     )
     dispatch.assert_called_once_with(415, 1280, 415, 1280, 800)
+    input_log.assert_called_once()
+    assert input_log.call_args.args == (
+        "Long press requested: Card inventory (demon mode)",
+    )
+    assert "duration_ms=800" in input_log.call_args.kwargs["detail"]
+
+
+def test_named_swipe_records_input_before_dispatch():
+    events = []
+    swipe = {
+        "x1": 900,
+        "y1": 390,
+        "x2": 650,
+        "y2": 390,
+        "duration_ms": 250,
+    }
+
+    with (
+        patch("core.input.get_swipe", return_value=swipe),
+        patch(
+            "core.input.log_input",
+            side_effect=lambda *args, **kwargs: events.append(
+                ("input", args, kwargs)
+            ),
+        ),
+        patch(
+            "core.input._dispatch_swipe",
+            side_effect=lambda *args, **kwargs: events.append(
+                ("swipe", args, kwargs)
+            ),
+        ),
+    ):
+        assert swipe_now("gesture_targets.goto_next:weekly_mission_chests")
+
+    assert [kind for kind, _args, _kwargs in events] == ["input", "swipe"]
+    assert events[0][1] == ("Swipe requested: Go to next (weekly mission chests)",)
+    assert "SWIPE_NOW" in events[0][2]["detail"]
+
+
+def test_unchecked_tooling_tap_records_input_before_dispatch():
+    events = []
+
+    with (
+        patch("core.input.get_click", return_value=(136, 1864)),
+        patch(
+            "core.input.log_input",
+            side_effect=lambda *args, **kwargs: events.append(
+                ("input", args, kwargs)
+            ),
+        ),
+        patch(
+            "core.input._dispatch_tap",
+            side_effect=lambda *args, **kwargs: events.append(
+                ("tap", args, kwargs)
+            ),
+        ),
+    ):
+        assert tap_unchecked_for_tooling(
+            "navigation.goto_attack",
+            reason="explicit test",
+        )
+
+    assert [kind for kind, _args, _kwargs in events] == ["input", "tap"]
+    assert events[0][1] == ("Unchecked tooling tap requested: Go to attack",)
+    assert "reason=explicit test" in events[0][2]["detail"]
+
+
+def test_relative_swipe_records_input_before_dispatch():
+    events = []
+
+    with (
+        patch(
+            "core.label_tapper.log_input",
+            side_effect=lambda *args, **kwargs: events.append(
+                ("input", args, kwargs)
+            ),
+        ),
+        patch(
+            "core.label_tapper.input_swipe",
+            side_effect=lambda *args, **kwargs: events.append(
+                ("swipe", args, kwargs)
+            ),
+        ),
+    ):
+        swipe_relative_in_region((0, 0, 1000, 1000))
+
+    assert [kind for kind, _args, _kwargs in events] == ["input", "swipe"]
+    assert events[0][1] == ("Swipe requested within detected region",)
+    assert "SWIPE_REL" in events[0][2]["detail"]
 
 
 def test_safe_long_press_rejects_static_targets():

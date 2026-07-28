@@ -3,14 +3,14 @@ from unittest.mock import patch
 from core.upgrade_navigation import swipe_upgrade_menu
 
 
-def test_upgrade_swipe_records_action_before_dispatch():
+def test_upgrade_swipe_records_input_before_dispatch():
     events = []
 
     with (
         patch(
-            "core.upgrade_navigation.log_action",
+            "core.upgrade_navigation.log_input",
             side_effect=lambda *args, **kwargs: events.append(
-                ("action", args, kwargs)
+                ("input", args, kwargs)
             ),
         ),
         patch(
@@ -22,7 +22,7 @@ def test_upgrade_swipe_records_action_before_dispatch():
     ):
         swipe_upgrade_menu("towards_top", "short")
 
-    assert [kind for kind, _args, _kwargs in events] == ["action", "swipe"]
+    assert [kind for kind, _args, _kwargs in events] == ["input", "swipe"]
     assert events[0][1] == ("Swipe requested: Upgrade menu toward the top",)
     assert "direction=towards_top span=short" in events[0][2]["detail"]
     assert events[1][1] == (531, 1433, 531, 1538, 350)

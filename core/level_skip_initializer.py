@@ -22,7 +22,7 @@ from core.upgrade_box_detector import (
     evaluate_upgrade_box_gold_box,
 )
 from core.upgrade_buy_quantity import detect_current_buy_quantity, ensure_buy_quantity
-from utils.logger import log, log_action_intent, log_mission
+from utils.logger import log, log_action_intent, log_input, log_mission
 from utils.wave_detector import detect_wave_number_from_image
 
 
@@ -76,11 +76,20 @@ def _default_scroll_to_bottom() -> bool:
     x = int(region["x"]) + int(region["w"]) // 2
     y = int(region["y"])
     h = int(region["h"])
+    start_y = y + int(h * 0.82)
+    end_y = y + int(h * 0.22)
+    log_input(
+        "Swipe requested: Utility upgrade menu toward the bottom",
+        detail=(
+            f"RUN_INIT_SCROLL_TO_BOTTOM: ({x},{start_y})→({x},{end_y}) "
+            "in 220ms"
+        ),
+    )
     result = input_swipe(
         x,
-        y + int(h * 0.82),
+        start_y,
         x,
-        y + int(h * 0.22),
+        end_y,
         220,
         check=False,
     )

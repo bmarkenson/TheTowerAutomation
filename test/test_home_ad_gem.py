@@ -110,3 +110,30 @@ def test_home_ad_gem_disappearance_before_action_fails_closed():
 
     tap.assert_not_called()
     start.assert_not_called()
+
+
+def test_blind_floating_gem_taps_retain_input_logging():
+    times = iter((0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0))
+    original_state = ad_gems.AUTOMATION.state
+    ad_gems.AUTOMATION.state = ad_gems.RunState.RUNNING
+    try:
+        with (
+            patch.object(ad_gems, "get_click", return_value=(250, 1200)),
+            patch.object(ad_gems.time, "time", side_effect=lambda: next(times)),
+            patch.object(ad_gems.time, "sleep"),
+            patch.object(ad_gems, "tap") as tap,
+        ):
+            ad_gems._blind_floating_gem_tapper(
+                duration=1,
+                interval=1,
+                stop_event=ad_gems.threading.Event(),
+            )
+    finally:
+        ad_gems.AUTOMATION.state = original_state
+
+    tap.assert_called_once_with(
+        250,
+        1200,
+        label="floating_gem_blind_tap",
+        log_it=True,
+    )

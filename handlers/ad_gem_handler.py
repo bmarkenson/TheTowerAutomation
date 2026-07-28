@@ -30,7 +30,7 @@ def _blind_floating_gem_tapper(duration=20, interval=1, stop_event=None):
 
     Side effects:
         [tap] Sends tap events to the device.
-        [log] Emits warnings and action logs.
+        [log] Emits workflow, input, and diagnostic logs.
         [loop] Runs until duration expires or interrupted.
 
     Notes:
@@ -95,8 +95,7 @@ def _blind_floating_gem_tapper(duration=20, interval=1, stop_event=None):
                 continue
 
             try:
-                # Quiet path: suppress per-tap logging at the dispatcher
-                tap(x, y, label=label, log_it=False)
+                tap(x, y, label=label, log_it=True)
                 taps += 1
             except Exception as e:
                 log(f"[ERROR] Blind gem tapper tap() failed: {e!r}", "ERROR")

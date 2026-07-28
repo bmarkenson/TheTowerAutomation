@@ -12,7 +12,7 @@ def test_log_honors_primary_path_override(tmp_path, monkeypatch):
     assert contents.endswith("] synthetic test event\n")
 
 
-def test_log_action_pairs_operator_summary_with_diagnostic_detail(
+def test_log_action_pairs_workflow_summary_with_diagnostic_detail(
     tmp_path,
     monkeypatch,
 ):
@@ -20,18 +20,21 @@ def test_log_action_pairs_operator_summary_with_diagnostic_detail(
     monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(isolated_log))
 
     logger.log_action(
-        "Tap requested: buttons.return_to_game",
-        detail="TAP_SAFE now=True label=buttons.return_to_game at (10,20) vis=True",
+        "Reviewing mission rewards — reward badges may indicate claimable rewards",
+        detail="source=RUNNING daily=True event=False guild=False",
         console=False,
     )
 
     lines = isolated_log.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2
     assert lines[0].startswith("[ACTION ")
-    assert lines[0].endswith("] Tap requested: buttons.return_to_game")
+    assert lines[0].endswith(
+        "] Reviewing mission rewards — reward badges may indicate "
+        "claimable rewards"
+    )
     assert lines[1].startswith("[DEBUG ")
     assert lines[1].endswith(
-        "] TAP_SAFE now=True label=buttons.return_to_game at (10,20) vis=True"
+        "] source=RUNNING daily=True event=False guild=False"
     )
     summary_timestamp = lines[0].split("]", 1)[0].removeprefix("[ACTION ")
     detail_timestamp = lines[1].split("]", 1)[0].removeprefix("[DEBUG ")
