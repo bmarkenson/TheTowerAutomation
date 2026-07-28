@@ -195,7 +195,7 @@ evidence.
      only the individual actions it performs. Commit `8bbd3eb` adds the shared
      intent-header helper and adopts it across the primary session, setup,
      reward, and terminal workflows.
-   - [ ] Complete the next logging-taxonomy migration.
+   - [x] Complete the next logging-taxonomy migration.
      - [x] Define `ACTION` as one What/Why workflow notice, `RESULT` as its
        terminal outcome, and `INPUT` as an individual device action. Preserve
        status as a separate snapshot stream, reserve warnings for persistent
@@ -220,9 +220,12 @@ evidence.
        game-speed OCR misses, ADB retry detail, and Coins/min suffix repair out
        of the warning stream while preserving persistent, rate-limited ADB and
        game-speed degradation notices plus recovery records.
-     - [ ] Verify that Operational reads as What/Why followed by Result,
+     - [x] Verify that Operational reads as What/Why followed by Result,
        Diagnostics preserves input and decision evidence, and All Levels
-       preserves complete ordering.
+       preserves complete ordering. Commit `0b18f20` adds the mixed-stream
+       audience regression. The final validation passed 817 sandbox-compatible
+       tests plus the host-loopback transport test, and the native Windows
+       publish completed successfully.
    - [ ] Give every startup, session-preflight, and recovery check a concise
      human-readable result that includes the requirement, expected and observed
      state, and final disposition such as passed, failed, waived, or fallback.
