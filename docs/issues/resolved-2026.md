@@ -2141,5 +2141,34 @@ and actionable work lives in
   captured the current screen.
 - **Lesson:** Report the failed invocation precisely. Test the known host path
   with a bounded command before diagnosing ADB or the emulator as unavailable.
+- **Prevention:** The project now selects a workspace permission profile with
+  explicit loopback access. Startup instructions branch on the current
+  session's declared network capability: network-restricted sessions skip the
+  known-failing isolated probe, while sessions with unknown capability retry
+  an environment-level failure immediately through approved host execution
+  without pausing merely to narrate the fallback.
+- **Validation:** `codex --strict-config doctor --summary --no-color` loaded the
+  project configuration and reported restricted filesystem access with network
+  enabled.
+- **Hardened by:** `394451e`.
 - **Runbook:** See
   [`../runtime_operations.md`](../runtime_operations.md#adb-access).
+
+### A clean lock release must not retain active-looking owner metadata
+
+- **Observed:** 2026-07-27 while reviewing the normal stop-and-inspect path.
+- **Symptom:** The OS lock had been released cleanly, but the persistent lock
+  file still named the former PID. A following thread therefore had to treat
+  an ordinary clean stop as a possibly stale process until it performed
+  additional confirmation.
+- **Cause:** `SingleInstanceLock.release()` unlocked and closed the file
+  without rewriting the acquisition metadata.
+- **Resolution:** A held lock now records `state: held`. Before releasing the
+  OS lock, a clean shutdown rewrites the same file as `state: released`, clears
+  `pid`, and records `released_at`. The control-surface runtime evidence
+  exposes both metadata state and release time. The file remains in place so
+  lock ownership never races across different inodes.
+- **Regression:** `test/test_single_instance.py` covers the clean-release
+  marker and subsequent reacquisition; `test/test_control_surface.py` covers
+  released metadata in runtime evidence. The full suite passed 788 tests.
+- **Fixed by:** `394451e`.
