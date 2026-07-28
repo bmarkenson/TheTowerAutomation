@@ -28,17 +28,24 @@ and actionable work lives in
   also treated either single-wing template miss as an absent frame. Four
   observations with one side obscured could therefore confirm a false
   activation.
-- **Resolution:** Both wings remain required for initial arming. Once armed,
-  either matched wing now disproves activation and clears the pending absence;
-  only frames where neither wing matches advance confirmation.
+- **Resolution:** Commit `58beb38` first kept both wings as the arming
+  requirement while making either visible wing cancel a pending disappearance.
+  Commit `143e803` then removed wing disappearance as an activation signal
+  entirely. The wings now establish availability and re-arm state; only the
+  fixed Second Wind active-status glyph above Nuke records an activation.
 - **Regression:** `test/test_battle_activation_tracker.py` repeats the retained
-  one-wing-obscured frame across the complete confirmation window and verifies
-  that it produces neither an activation nor an evidence capture. Existing
-  true-disappearance and re-arming coverage remains passing.
-- **Validation:** The focused tracker suite passed 9 tests. The repository
-  suite passed 796 sandbox-compatible tests plus the separately permitted
-  loopback HTTP test, for 797 total. `git diff --check` passed.
-- **Fixed by:** `58beb38`.
+  one-wing-obscured frame and verifies that it produces neither an activation
+  nor an evidence capture. Promoted active-icon fixtures cover early, late, and
+  battle-obscured countdown appearances plus a known absent-icon false frame.
+  The tracker tests also prove that missing wings without the active glyph do
+  not emit an event, a persistent glyph emits once, and returning wings permit
+  a later activation.
+- **Validation:** The focused visual, tracker, report, no-strategy, and
+  clickmap suites passed 52 tests. The repository suite passed 797
+  sandbox-compatible tests plus the separately permitted loopback HTTP test,
+  for 798 total. Recursive clickmap/template integrity, `git diff --check`, and
+  the self-contained `win-x64` WPF publish passed.
+- **Fixed by:** `58beb38`, superseded and hardened by `143e803`.
 
 ### Battle History tree children inherited an unreadable foreground
 

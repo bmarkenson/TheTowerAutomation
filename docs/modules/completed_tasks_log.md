@@ -37,37 +37,39 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
-### 2026-07-27 Second Wind activation waves and transition evidence
+### 2026-07-27–28 Second Wind activation waves and transition evidence
 
 - The run-scoped survival observer now records every confirmed Second Wind
   activation alongside the first Demon Mode activation and every Nuke
   activation.
-- Second Wind arms only after both small tower wings are observed. Four
-  consecutive frames without the paired wings confirm an activation, and the
-  retained event uses the wave and timestamp from the first absent frame rather
-  than the later confirmation frame. The observer re-arms when both wings
-  return after recharge.
+- Second Wind arms only after both small tower wings are observed, but wing
+  disappearance is no longer an activation trigger. The fixed white
+  active-status glyph above Nuke is authoritative, while returning tower wings
+  re-arm the observer after recharge.
 - Paired clickmap templates were calibrated against retained quiet, busy,
   wings-present, and wings-absent 1080x1920 frames, then corrected against five
   fresh read-only live frames with the smaller tower rendering. A run that
   starts without visible wings, or does not equip Second Wind, cannot arm this
   detector.
-- Each confirmed Second Wind, Demon Mode, or Nuke transition preserves the
-  first absent frame under `screenshots/matches/`. The event retains that
+- Each confirmed Second Wind, Demon Mode, or Nuke transition preserves an
+  evidence frame under `screenshots/matches/`. Second Wind now retains the
+  frame containing its short-lived active glyph. The event retains that
   evidence path, and the existing 30-day/size-limited runtime artifact policy
-  bounds storage. Buffering the first frame while waiting for confirmation
-  maximizes the chance of retaining a short-lived active-status icon without
-  saving transient false candidates.
+  bounds storage.
 - Completed Battle and Tournament Markdown and the Windows Completed Battles
-  view now render every sequenced Second Wind wave. Older activation schema
-  records remain readable and do not falsely claim that Second Wind was
-  observed.
+  view render every sequenced Second Wind wave. Schema 4 also records and
+  displays the approximate re-arm wave as the sampled activation wave plus
+  400; both values remain explicitly approximate because observation cadence
+  may lag the actual trigger.
 - Follow-up commit `58beb38` corrects a live-observed false positive: both
   wings are still required to arm the observer, while either visible wing now
   cancels pending activation confirmation. The exact one-wing-obscured frame
   is retained as a regression fixture.
-- Validation passed 796 sandbox-compatible tests plus the separately permitted
-  loopback HTTP test, for 797 total. Recursive clickmap/template integrity
+- Follow-up commit `143e803` makes the active glyph authoritative. Promoted
+  fixtures cover early, late, and heavily obscured countdown states and a
+  known absent-icon false frame; missing wings alone cannot emit an event.
+- Validation passed 797 sandbox-compatible tests plus the separately permitted
+  loopback HTTP test, for 798 total. Recursive clickmap/template integrity
   passed, and the self-contained `win-x64` WPF publish completed successfully.
 
 ### 2026-07-26 completed-record discard and bounded runtime storage
