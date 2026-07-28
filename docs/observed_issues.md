@@ -242,6 +242,26 @@ for a matching recurrence or historical investigation.
   sandbox tests plus that one localhost test. Both self-contained Linux
   publishes succeeded. Keep this issue open until the generic warning, fixed
   restart, and reconnect verification are exercised from Windows.
+- **Recurrence:** On 2026-07-28, the new Windows client required server
+  revision 10 and `current_run_activity_scope`, but the independent Linux API
+  process had remained active since 2026-07-27 20:06 and still served revision
+  9. Start was correctly disabled, but its detailed incompatibility message and
+  restart control were below the visible portion of the scrollable SSH panel,
+  so the disabled buttons appeared unexplained. Fresh inspection confirmed
+  automation `inactive/dead`, control `STOPPED`, both ADB locks released,
+  `localhost:5555` connected, and authoritative Home `NEW_BATTLE`.
+- **Follow-up:** Commit `516e7ca` adds a full-width incompatibility banner with
+  the actual revision/capability failure, a prominent fixed-service restart
+  action, the safe mitigation sequence, and tooltips on disabled Start buttons.
+  Regression coverage is
+  `test/test_control_surface.py::test_native_incompatible_api_has_prominent_start_mitigation`;
+  32 focused control-surface tests and the separately permitted
+  loopback HTTP test passed, and the self-contained Windows publish succeeded.
+  The Linux-only mitigation was exercised safely: restarting only
+  `thetower-control-surface.service` returned revision 10 with the required
+  capability while automation remained inactive and control remained
+  `STOPPED`. Keep the issue open until the operator verifies the prominent
+  banner and restart/reconnect flow in the rebuilt Windows client.
 
 ### Native top bar retained a running directive after automation stopped
 
