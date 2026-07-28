@@ -751,7 +751,8 @@ public partial class BattleHistoryWindow : Window
                     sequence == "-"
                         ? $"Second Wind activation {fallbackSecondWindSequence}"
                         : $"Second Wind activation {sequence}",
-                    destination);
+                    destination,
+                    includeEstimatedRearm: true);
                 fallbackSecondWindSequence++;
             }
         }
@@ -793,13 +794,24 @@ public partial class BattleHistoryWindow : Window
     private static void AppendSurvivalAbilityActivationRow(
         JsonElement activation,
         string label,
-        ICollection<ReportRow> destination)
+        ICollection<ReportRow> destination,
+        bool includeEstimatedRearm = false)
     {
         var detectedAt = JsonValue(activation, "detected_at");
         var wave = JsonValue(activation, "approximate_wave");
         var waveConfidence = JsonValue(activation, "wave_confidence");
         var name = detectedAt == "-" ? label : $"{label} at {detectedAt}";
-        var value = wave == "-" ? "Wave unknown" : $"Wave {wave}";
+        var value = wave == "-" ? "Approx. wave unknown" : $"Approx. wave {wave}";
+        if (includeEstimatedRearm)
+        {
+            var estimatedRearm = JsonValue(
+                activation,
+                "estimated_rearm_wave");
+            if (estimatedRearm != "-")
+            {
+                value += $"; estimated re-arm wave {estimatedRearm}";
+            }
+        }
         if (waveConfidence != "-")
         {
             value += $" ({waveConfidence}% wave OCR)";

@@ -1257,16 +1257,19 @@ def render_survival_ability_activations_markdown(
         if second_winds:
             lines.extend(
                 [
-                    "| Second Wind activation | Approximate wave | Detected |",
-                    "| ---: | ---: | --- |",
+                    "| Second Wind activation | Approximate wave | "
+                    "Estimated re-arm wave | Detected |",
+                    "| ---: | ---: | ---: | --- |",
                 ]
             )
             for index, event in enumerate(second_winds, start=1):
                 sequence = event.get("sequence", index)
                 wave = event.get("approximate_wave")
+                estimated_rearm = event.get("estimated_rearm_wave")
                 lines.append(
                     f"| {sequence} | "
                     f"{wave if wave is not None else 'unknown'} | "
+                    f"{estimated_rearm if estimated_rearm is not None else 'unknown'} | "
                     f"{event.get('detected_at', '')} |"
                 )
             lines.append("")

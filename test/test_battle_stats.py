@@ -233,19 +233,21 @@ def _record(*, source_complete=True, source_reason="edge_reached"):
                 }
             ],
             "survival_ability_activations": {
-                "schema_version": 3,
+                "schema_version": 4,
                 "source": "visual_transition_detection",
                 "second_wind_activations": [
                     {
                         "ability": "second_wind",
                         "sequence": 1,
                         "approximate_wave": 4190,
+                        "estimated_rearm_wave": 4590,
                         "detected_at": "2026-07-15T11:29:30-07:00",
                     },
                     {
                         "ability": "second_wind",
                         "sequence": 2,
                         "approximate_wave": 4590,
+                        "estimated_rearm_wave": 4990,
                         "detected_at": "2026-07-15T11:39:30-07:00",
                     },
                 ],
@@ -313,8 +315,8 @@ def test_battle_record_retains_resolved_run_configuration():
     assert "## Coins/min progression" in markdown
     assert "| 2026-07-15T11:00:00-07:00 | 1000 | 1.25T | 98.5% |" in markdown
     assert "## Survival ability activations" in markdown
-    assert "| 1 | 4190 | 2026-07-15T11:29:30-07:00 |" in markdown
-    assert "| 2 | 4590 | 2026-07-15T11:39:30-07:00 |" in markdown
+    assert "| 1 | 4190 | 4590 | 2026-07-15T11:29:30-07:00 |" in markdown
+    assert "| 2 | 4590 | 4990 | 2026-07-15T11:39:30-07:00 |" in markdown
     assert "Demon Mode first activation: approximately wave 4210" in markdown
     assert "| 1 | 4211 | 2026-07-15T11:30:02-07:00 |" in markdown
     assert "| 2 | 4611 | 2026-07-15T11:40:02-07:00 |" in markdown
@@ -332,7 +334,7 @@ def test_survival_activation_markdown_distinguishes_legacy_and_observed_none():
     )
     observed_none = render_survival_ability_activations_markdown(
         {
-            "schema_version": 3,
+            "schema_version": 4,
             "second_wind_activations": [],
             "demon_mode_first_activation": None,
             "nuke_activations": [],

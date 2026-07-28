@@ -23,6 +23,8 @@ _SECOND_WIND_WING_PATHS = (
     "indicators.second_wind_left_wing",
     "indicators.second_wind_right_wing",
 )
+_SECOND_WIND_ACTIVE_PATH = "indicators.second_wind_active"
+_SECOND_WIND_REARM_WAVES = 400
 _PRESENCE_THRESHOLDS = {
     # The disabled Intro Sprint Demon Mode icon scored 0.856-0.875 against
     # the existing enabled template in retained live frames. Its next-best
@@ -32,7 +34,7 @@ _PRESENCE_THRESHOLDS = {
 }
 _DETECTION_SOURCE = "visual_transition_detection"
 _BUTTON_DETECTION_SOURCE = "button_disappearance"
-_SECOND_WIND_DETECTION_SOURCE = "tower_wings_disappearance"
+_SECOND_WIND_DETECTION_SOURCE = "active_status_icon"
 
 
 @dataclass
@@ -52,23 +54,26 @@ class _ButtonObservation:
 
 @dataclass
 class _SecondWindObservation(_ButtonObservation):
-    absence_started_wave: Optional[int] = None
-    absence_started_wave_confidence: float = -1.0
-    absence_started_wave_observed_at: Optional[datetime] = None
-    absence_started_at: Optional[datetime] = None
+    active_streak: int = 0
+    active_started_wave: Optional[int] = None
+    active_started_wave_confidence: float = -1.0
+    active_started_wave_observed_at: Optional[datetime] = None
+    active_started_at: Optional[datetime] = None
+    last_active_confidence: float = 0.0
 
-    def clear_pending_absence(self) -> None:
-        self.absent_streak = 0
+    def clear_pending_activation(self) -> None:
         self.last_absence_confidence = 0.0
-        self.absence_started_wave = None
-        self.absence_started_wave_confidence = -1.0
-        self.absence_started_wave_observed_at = None
-        self.absence_started_at = None
+        self.active_streak = 0
+        self.last_active_confidence = 0.0
+        self.active_started_wave = None
+        self.active_started_wave_confidence = -1.0
+        self.active_started_wave_observed_at = None
+        self.active_started_at = None
         self.absence_started_frame = None
 
     def reset_streaks(self) -> None:
         self.visible_streak = 0
-        self.clear_pending_absence()
+        self.clear_pending_activation()
 
 
 class BattleActivationTracker:
@@ -76,10 +81,10 @@ class BattleActivationTracker:
 
     Demon Mode and Nuke remain visible while disabled during Intro Sprint as
     well as when enabled. With automatic activation configured, disappearance
-    is the useful transition. Second Wind is armed while the small wings beside
-    the tower are visible and activates when both wings disappear. Requiring
-    consecutive present and absent frames avoids depending on a brief animation
-    or treating a transient battle effect as an activation.
+    is the useful transition. The small wings beside the tower establish that
+    Second Wind is available; its fixed active-status glyph above Nuke is the
+    authoritative activation signal. This avoids treating transiently obscured
+    tower wings as activations.
     """
 
     def __init__(
@@ -87,20 +92,20 @@ class BattleActivationTracker:
         *,
         presence_confirmation_frames: int = 2,
         absence_confirmation_frames: int = 2,
-        second_wind_absence_confirmation_frames: int = 4,
+        second_wind_active_confirmation_frames: int = 1,
     ) -> None:
         if (
             presence_confirmation_frames < 1
             or absence_confirmation_frames < 1
-            or second_wind_absence_confirmation_frames < 1
+            or second_wind_active_confirmation_frames < 1
         ):
             raise ValueError("confirmation frame counts must be positive")
         self._presence_confirmation_frames = int(
             presence_confirmation_frames
         )
         self._absence_confirmation_frames = int(absence_confirmation_frames)
-        self._second_wind_absence_confirmation_frames = int(
-            second_wind_absence_confirmation_frames
+        self._second_wind_active_confirmation_frames = int(
+            second_wind_active_confirmation_frames
         )
         self._buttons = {
             name: _ButtonObservation() for name in _BUTTON_PATHS
@@ -161,11 +166,16 @@ class BattleActivationTracker:
         when = observed_at or datetime.now().astimezone()
         events: list[dict[str, Any]] = []
         wing_matches: list[MatchResult] = []
+        active_match: Optional[MatchResult] = None
         try:
             wing_matches = [
                 get_match_result(dot_path, screenshot=frame)
                 for dot_path in _SECOND_WIND_WING_PATHS
             ]
+            active_match = get_match_result(
+                _SECOND_WIND_ACTIVE_PATH,
+                screenshot=frame,
+            )
         except Exception as exc:
             self._second_wind.reset_streaks()
             if "second_wind" not in self._reported_match_errors:
@@ -174,9 +184,13 @@ class BattleActivationTracker:
                     "WARN",
                 )
                 self._reported_match_errors.add("second_wind")
-        if len(wing_matches) == len(_SECOND_WIND_WING_PATHS):
+        if (
+            len(wing_matches) == len(_SECOND_WIND_WING_PATHS)
+            and active_match is not None
+        ):
             second_wind_event = self._observe_second_wind(
                 wing_matches,
+                active_match,
                 frame=frame,
                 wave=wave,
                 wave_confidence=wave_confidence,
@@ -203,7 +217,7 @@ class BattleActivationTracker:
         """Return serializable completed-run evidence."""
 
         return {
-            "schema_version": 3,
+            "schema_version": 4,
             "source": _DETECTION_SOURCE,
             "second_wind_activations": copy.deepcopy(
                 self._second_wind_activations
@@ -319,6 +333,7 @@ class BattleActivationTracker:
     def _observe_second_wind(
         self,
         matches: list[MatchResult],
+        active_match: MatchResult,
         *,
         frame: Frame,
         wave: Optional[int],
@@ -327,7 +342,10 @@ class BattleActivationTracker:
         observed_at: datetime,
     ) -> Optional[dict[str, Any]]:
         state = self._second_wind
-        if any(match.failure_reason is not None for match in matches):
+        if (
+            any(match.failure_reason is not None for match in matches)
+            or active_match.failure_reason is not None
+        ):
             state.reset_streaks()
             return None
 
@@ -337,7 +355,7 @@ class BattleActivationTracker:
             state.last_presence_confidence = min(
                 float(match.confidence) for match in matches
             )
-            state.clear_pending_absence()
+            state.clear_pending_activation()
             if state.visible_streak >= self._presence_confirmation_frames:
                 state.armed = True
             return None
@@ -347,49 +365,64 @@ class BattleActivationTracker:
             # Both wings establish that Second Wind is equipped and available,
             # but either surviving wing disproves activation. Battle effects
             # frequently obscure one side without hiding the other.
-            state.clear_pending_absence()
+            state.clear_pending_activation()
             return None
         if not state.armed:
-            state.clear_pending_absence()
+            state.clear_pending_activation()
             return None
 
-        if state.absent_streak == 0:
-            state.absence_started_wave = (
+        state.last_absence_confidence = max(
+            float(match.confidence) for match in matches
+        )
+        if not active_match.matched:
+            state.clear_pending_activation()
+            return None
+
+        if state.active_streak == 0:
+            state.active_started_wave = (
                 int(wave) if wave is not None else None
             )
-            state.absence_started_wave_confidence = float(wave_confidence)
-            state.absence_started_wave_observed_at = wave_observed_at
-            state.absence_started_at = observed_at
+            state.active_started_wave_confidence = float(wave_confidence)
+            state.active_started_wave_observed_at = wave_observed_at
+            state.active_started_at = observed_at
             state.absence_started_frame = frame.copy()
-        state.absent_streak += 1
-        state.last_absence_confidence = max(
-            state.last_absence_confidence,
-            *(float(match.confidence) for match in matches),
+        state.active_streak += 1
+        state.last_active_confidence = max(
+            state.last_active_confidence,
+            float(active_match.confidence),
         )
         if (
-            state.absent_streak
-            < self._second_wind_absence_confirmation_frames
+            state.active_streak
+            < self._second_wind_active_confirmation_frames
         ):
             return None
 
+        approximate_wave = state.active_started_wave
         event = {
             "ability": "second_wind",
             "sequence": len(self._second_wind_activations) + 1,
-            "approximate_wave": state.absence_started_wave,
+            "approximate_wave": approximate_wave,
+            "estimated_rearm_wave": (
+                approximate_wave + _SECOND_WIND_REARM_WAVES
+                if approximate_wave is not None
+                else None
+            ),
+            "rearm_wave_offset": _SECOND_WIND_REARM_WAVES,
+            "rearm_estimate_is_approximate": True,
             "wave_confidence": round(
-                state.absence_started_wave_confidence,
+                state.active_started_wave_confidence,
                 1,
             ),
             "wave_observed_at": (
-                state.absence_started_wave_observed_at.isoformat(
+                state.active_started_wave_observed_at.isoformat(
                     timespec="seconds"
                 )
-                if state.absence_started_wave_observed_at is not None
+                if state.active_started_wave_observed_at is not None
                 else None
             ),
             "detected_at": (
-                state.absence_started_at.isoformat(timespec="seconds")
-                if state.absence_started_at is not None
+                state.active_started_at.isoformat(timespec="seconds")
+                if state.active_started_at is not None
                 else observed_at.isoformat(timespec="seconds")
             ),
             "confirmed_at": observed_at.isoformat(timespec="seconds"),
@@ -402,13 +435,17 @@ class BattleActivationTracker:
                 state.last_absence_confidence,
                 3,
             ),
+            "active_icon_confidence": round(
+                state.last_active_confidence,
+                3,
+            ),
             "confirmation_frames": (
-                self._second_wind_absence_confirmation_frames
+                self._second_wind_active_confirmation_frames
             ),
         }
         state.armed = False
         self._queue_evidence_capture(event, state.absence_started_frame)
-        state.clear_pending_absence()
+        state.clear_pending_activation()
         self._second_wind_activations.append(event)
         return event
 

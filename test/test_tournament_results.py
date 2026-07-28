@@ -80,13 +80,14 @@ def test_tournament_result_persists_summary_and_exact_detailed_report(tmp_path):
                 }
             ],
             "survival_ability_activations": {
-                "schema_version": 3,
+                "schema_version": 4,
                 "source": "visual_transition_detection",
                 "second_wind_activations": [
                     {
                         "ability": "second_wind",
                         "sequence": 1,
                         "approximate_wave": 2100,
+                        "estimated_rearm_wave": 2500,
                         "detected_at": "2026-07-18T05:30:00-07:00",
                     }
                 ],
@@ -125,7 +126,7 @@ def test_tournament_result_persists_summary_and_exact_detailed_report(tmp_path):
     assert "## Coins/min progression" in markdown
     assert "| 2026-07-18T05:00:00-07:00 | 1500 | 2.50T | 97.0% |" in markdown
     assert "## Survival ability activations" in markdown
-    assert "| 1 | 2100 | 2026-07-18T05:30:00-07:00 |" in markdown
+    assert "| 1 | 2100 | 2500 | 2026-07-18T05:30:00-07:00 |" in markdown
     assert "Demon Mode first activation: approximately wave 2120" in markdown
 
     matched = find_recent_tournament_result(
