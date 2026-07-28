@@ -17,4 +17,5 @@ loadout:
     mode: enforce
     preset: farm_min_range
   target_priority:
-    mode: preserve
+    mode: enforce
+    preset: farm_t19

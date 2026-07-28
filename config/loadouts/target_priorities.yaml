@@ -11,3 +11,14 @@ presets:
     - Protector
     - Fast
     - Basic
+  farm_t19:
+    - Fast
+    - Protector
+    - Fleets
+    - Boss
+    - Elites
+    - In Spotlight
+    - Tank
+    - Closest (Default)
+    - Ranged
+    - Basic

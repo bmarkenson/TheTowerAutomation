@@ -171,7 +171,7 @@ class DefaultStrategyTests(unittest.TestCase):
         strategy = get_strategy("gc_manual_target_priority")
         self.assertIsInstance(strategy, YamlStrategy)
         self.assertEqual(strategy.name, "farm_t19")
-        self.assertNotIn("target_priority_checked", strategy.vars)
+        self.assertFalse(strategy.vars["target_priority_checked"])
 
     def test_retired_t19_experiment_name_resolves_to_t19_farm(self):
         strategy = get_strategy("farm_t19_experiment")
@@ -867,6 +867,47 @@ class FarmProfileTests(unittest.TestCase):
             "enforce",
         )
 
+    def test_tier_19_enforces_hypothesis_target_priority_order(self):
+        plan = build_strategy_yaml(self._source("farm_t19"))
+        configuration = plan["run_configuration"]
+        expected_order = [
+            "Fast",
+            "Protector",
+            "Fleets",
+            "Boss",
+            "Elites",
+            "In Spotlight",
+            "Tank",
+            "Closest (Default)",
+            "Ranged",
+            "Basic",
+        ]
+        target_rule = next(
+            rule for rule in plan["rules"]
+            if rule["name"] == "ensure_target_priority"
+        )
+
+        self.assertEqual(
+            configuration["loadout"]["target_priority"],
+            {
+                "mode": "enforce",
+                "preset": "farm_t19",
+                "resolved": expected_order,
+            },
+        )
+        self.assertEqual(
+            plan["session_preflight"]["requirements"]["target_priority"],
+            expected_order,
+        )
+        self.assertIn(
+            "target_priority_checked",
+            plan["run_initialization"]["complete_when"],
+        )
+        self.assertEqual(
+            target_rule["do"],
+            [{"type": "target_priority_ensure", "order": expected_order}],
+        )
+
     def test_damage_slider_gate_and_evidence_reset_for_every_run(self):
         strategy = get_strategy("farm")
         ctx = MissionContext()
@@ -1200,7 +1241,7 @@ class GcFarmProfileTests(unittest.TestCase):
         self.assertTrue(mv["ehls_completed"])
         self.assertTrue(mv["eals_completed"])
 
-    def test_t19_runs_orb_distance_without_target_priority_action(self):
+    def test_t19_runs_orb_distance_then_enforces_target_priority(self):
         strategy = get_strategy("gc_farm_t19_experiment")
         self.assertIsInstance(strategy, YamlStrategy)
         manager = MissionManager(None, strategy)
@@ -1212,7 +1253,7 @@ class GcFarmProfileTests(unittest.TestCase):
         self.assertEqual(actions, [{"type": "level_skip_initialize"}])
 
         mv = manager.ctx.data["mission_vars"]
-        self.assertNotIn("target_priority_checked", mv)
+        self.assertFalse(mv["target_priority_checked"])
         mv.update(ehls_completed=True, eals_completed=True)
         with patch("automation.strategies.yaml_strategy.log_mission"):
             actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
@@ -1229,6 +1270,18 @@ class GcFarmProfileTests(unittest.TestCase):
         mv["orb_distance_checked"] = True
         with patch("automation.strategies.yaml_strategy.log_mission"):
             actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
+        target_action = next(
+            rule["do"][0]
+            for rule in strategy.rules
+            if rule["name"] == "ensure_target_priority"
+        )
+        self.assertEqual(actions, [target_action])
+        self.assertTrue(manager.run_initialization_pending())
+        self.assertFalse(manager.session_preflight_pending())
+
+        mv["target_priority_checked"] = True
+        with patch("automation.strategies.yaml_strategy.log_mission"):
+            actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
         self.assertEqual(
             actions,
             [
@@ -1242,13 +1295,6 @@ class GcFarmProfileTests(unittest.TestCase):
         )
         self.assertFalse(manager.run_initialization_pending())
         self.assertTrue(manager.session_preflight_pending())
-        self.assertFalse(
-            any(
-                action.get("type") == "target_priority_ensure"
-                for rule in strategy.rules
-                for action in rule.get("do", [])
-            )
-        )
 
     def test_target_priority_check_persists_across_run_boundaries(self):
         mv = self.ctx.data["mission_vars"]
@@ -1430,6 +1476,8 @@ class GcFarmProfileTests(unittest.TestCase):
         mv.update(ehls_completed=True, eals_completed=True)
         self.assertTrue(manager.run_initialization_pending())
         mv["orb_distance_checked"] = True
+        self.assertTrue(manager.run_initialization_pending())
+        mv["target_priority_checked"] = True
         self.assertFalse(manager.run_initialization_pending())
         self.assertTrue(manager.session_preflight_pending())
 
@@ -1445,6 +1493,7 @@ class GcFarmProfileTests(unittest.TestCase):
             ehls_completed=True,
             eals_completed=True,
             orb_distance_checked=True,
+            target_priority_checked=True,
         )
         self.assertTrue(mv["gc_session_preflight_completed"])
         self.assertFalse(manager.session_preflight_pending())

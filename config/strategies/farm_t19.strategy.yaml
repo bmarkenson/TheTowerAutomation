@@ -7,6 +7,7 @@ run_initialization:
   complete_when:
   - ehls_completed
   - eals_completed
+  - target_priority_checked
   - orb_distance_checked
 session_preflight:
   complete_when:
@@ -74,7 +75,7 @@ session_preflight:
         missiles: 'on'
     loadout_policies:
       modules: enforce
-      target_priority: preserve
+      target_priority: enforce
     modules:
       cannon_assist: Being Annihilator
       cannon_primary: Amplifying Strike
@@ -84,6 +85,17 @@ session_preflight:
       armor_primary: Orbital Augment
       core_primary: Multiverse Nexus
       core_assist: Dimension Core
+    target_priority:
+    - Fast
+    - Protector
+    - Fleets
+    - Boss
+    - Elites
+    - In Spotlight
+    - Tank
+    - Closest (Default)
+    - Ranged
+    - Basic
   fallbacks:
     bots_preset:
     - id: flame
@@ -112,6 +124,7 @@ vars:
   level_skip_elapsed_s: 0.0
   level_skip_taps_sent: 0
   level_skip_last_reason: ''
+  target_priority_checked: false
   orb_distance_checked: false
   orb_distance_observation: {}
   gc_no_battle_setup_completed: false
@@ -340,6 +353,28 @@ rules:
     - range_basis: 98.38m
       extra: 87.16m
       workshop: 80.37m
+- name: ensure_target_priority
+  gate_phase: run_initialization
+  when:
+    state: RUNNING
+  assert:
+  - ehls_completed
+  - eals_completed
+  - '!target_priority_checked'
+  cooldown_sec: 30.0
+  do:
+  - type: target_priority_ensure
+    order:
+    - Fast
+    - Protector
+    - Fleets
+    - Boss
+    - Elites
+    - In Spotlight
+    - Tank
+    - Closest (Default)
+    - Ranged
+    - Basic
 - name: validate_gc_session_preflight
   gate_phase: session_preflight
   when:
@@ -347,6 +382,7 @@ rules:
   assert:
   - ehls_completed
   - eals_completed
+  - target_priority_checked
   - orb_distance_checked
   - '!gc_session_preflight_completed'
   - '!gc_session_preflight_attempted'
@@ -416,7 +452,7 @@ rules:
           missiles: 'on'
       loadout_policies:
         modules: enforce
-        target_priority: preserve
+        target_priority: enforce
       modules:
         cannon_assist: Being Annihilator
         cannon_primary: Amplifying Strike
@@ -426,6 +462,17 @@ rules:
         armor_primary: Orbital Augment
         core_primary: Multiverse Nexus
         core_assist: Dimension Core
+      target_priority:
+      - Fast
+      - Protector
+      - Fleets
+      - Boss
+      - Elites
+      - In Spotlight
+      - Tank
+      - Closest (Default)
+      - Ranged
+      - Basic
 run_configuration:
   schema_version: 2
   profile: farm
@@ -522,7 +569,19 @@ run_configuration:
         extra: 87.16m
         workshop: 80.37m
     target_priority:
-      mode: preserve
+      mode: enforce
+      preset: farm_t19
+      resolved:
+      - Fast
+      - Protector
+      - Fleets
+      - Boss
+      - Elites
+      - In Spotlight
+      - Tank
+      - Closest (Default)
+      - Ranged
+      - Basic
   gate_fallbacks:
     bots_preset:
     - id: flame

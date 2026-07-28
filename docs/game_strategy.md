@@ -163,8 +163,8 @@ The repository currently enforces this T18 order:
 9. Fast
 10. Basic
 
-The T19 profile deliberately uses `preserve`, not `enforce`. The order observed
-live on 2026-07-26 is the operator's **working hypothesis**:
+The T19 profile now enforces the order observed live on 2026-07-26 as the
+operator's **working hypothesis**:
 
 1. Fast
 2. Protector
@@ -176,6 +176,9 @@ live on 2026-07-26 is the operator's **working hypothesis**:
 8. Closest (Default)
 9. Ranged
 10. Basic
+
+Enforcement holds this variable constant across T19 trials; it does not make
+the order a proven or canonical optimum.
 
 There is a coherent rationale for testing this order: T19 adds Fast Ultimate,
 its Protector Ultimate creates important immunity windows, and regular Fleets
