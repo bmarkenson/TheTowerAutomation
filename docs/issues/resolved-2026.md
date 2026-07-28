@@ -8,6 +8,38 @@ and actionable work lives in
 
 ## Resolved issues
 
+### One obscured tower wing produced false Second Wind activations
+
+- **Observed:** 2026-07-28 after the operator reported one false Second Wind
+  activation during the active Tier 19 Farm run.
+- **Symptom:** Automation recorded Second Wind at approximately wave 2219 even
+  though the tower wings remained visibly available and no activation had
+  occurred.
+- **Evidence:** The automatically retained first-transition frame showed both
+  wings still rendered. The left template scored `0.908` and matched; a battle
+  effect reduced the right template to `0.515`, below its `0.600` threshold.
+  The durable regression crop is
+  `test/fixtures/second_wind_one_wing_occluded_20260728.png`.
+- **Safety response:** Diagnosis used the control file, current lock, action
+  log, and saved runtime evidence read-only. The active battle, automation
+  process, control directive, and emulator were not changed or restarted.
+- **Cause:** The tracker used `all(matches)` as its complete definition of
+  wings present. It correctly required both wings to arm, but after arming it
+  also treated either single-wing template miss as an absent frame. Four
+  observations with one side obscured could therefore confirm a false
+  activation.
+- **Resolution:** Both wings remain required for initial arming. Once armed,
+  either matched wing now disproves activation and clears the pending absence;
+  only frames where neither wing matches advance confirmation.
+- **Regression:** `test/test_battle_activation_tracker.py` repeats the retained
+  one-wing-obscured frame across the complete confirmation window and verifies
+  that it produces neither an activation nor an evidence capture. Existing
+  true-disappearance and re-arming coverage remains passing.
+- **Validation:** The focused tracker suite passed 9 tests. The repository
+  suite passed 796 sandbox-compatible tests plus the separately permitted
+  loopback HTTP test, for 797 total. `git diff --check` passed.
+- **Fixed by:** `58beb38`.
+
 ### Battle History tree children inherited an unreadable foreground
 
 - **Observed:** 2026-07-26 in an operator screenshot of the newly published

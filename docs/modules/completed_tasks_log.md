@@ -62,8 +62,12 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   view now render every sequenced Second Wind wave. Older activation schema
   records remain readable and do not falsely claim that Second Wind was
   observed.
-- Validation passed 794 sandbox-compatible tests plus the separately permitted
-  loopback HTTP test, for 795 total. Recursive clickmap/template integrity
+- Follow-up commit `58beb38` corrects a live-observed false positive: both
+  wings are still required to arm the observer, while either visible wing now
+  cancels pending activation confirmation. The exact one-wing-obscured frame
+  is retained as a regression fixture.
+- Validation passed 796 sandbox-compatible tests plus the separately permitted
+  loopback HTTP test, for 797 total. Recursive clickmap/template integrity
   passed, and the self-contained `win-x64` WPF publish completed successfully.
 
 ### 2026-07-26 completed-record discard and bounded runtime storage
