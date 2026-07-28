@@ -147,7 +147,10 @@ def test_home_mode_taps_game_stats_home_instead_of_retry():
     AUTOMATION.mode = ExecMode.HOME
     try:
         with (
+            patch("handlers.game_over_handler._make_session_id", return_value="test"),
             patch("handlers.game_over_handler.tap_if_visible", return_value=True) as tap,
+            patch("handlers.game_over_handler.log_action_intent") as action_log,
+            patch("handlers.game_over_handler.log_result") as result_log,
             patch("handlers.game_over_handler.time.sleep"),
         ):
             handle_game_over(capture_stats=False)
@@ -155,6 +158,68 @@ def test_home_mode_taps_game_stats_home_instead_of_retry():
         AUTOMATION.mode = original_mode
 
     tap.assert_called_once_with("buttons.home:game_over", retries=1)
+    action_log.assert_called_once_with(
+        "Completing the finished battle",
+        reason="follow the configured post-run route without stats capture",
+        detail="[GAME_OVER] session=test capture_stats=False",
+    )
+    result_log.assert_called_once_with(
+        "Finished-battle handling complete — stats capture skipped; returned Home",
+        detail=(
+            "[GAME_OVER] result=completed session=test route=home stats=skipped"
+        ),
+    )
+
+
+def test_game_over_abort_emits_failed_terminal_result():
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.HOME
+    try:
+        with (
+            patch("handlers.game_over_handler._make_session_id", return_value="test"),
+            patch("handlers.game_over_handler.tap_if_visible", return_value=False),
+            patch("handlers.game_over_handler.capture_adb_screenshot"),
+            patch("handlers.game_over_handler.save_image"),
+            patch("handlers.game_over_handler.log_result") as result_log,
+            patch("handlers.game_over_handler.time.sleep"),
+        ):
+            handle_game_over(capture_stats=False)
+    finally:
+        AUTOMATION.mode = original_mode
+
+    result_log.assert_called_once_with(
+        "Finished-battle handling failed — Go Home from Game Stats did not complete",
+        detail=(
+            "[GAME_OVER] result=failed session=test "
+            "failed_step=Go Home from Game Stats next_mode=WAIT"
+        ),
+    )
+
+
+def test_game_over_stop_emits_interrupted_terminal_result():
+    original_state = AUTOMATION.state
+    AUTOMATION.state = RunState.STOPPED
+    try:
+        with (
+            patch("handlers.game_over_handler._make_session_id", return_value="test"),
+            patch("handlers.game_over_handler.tap_if_visible") as tap,
+            patch("handlers.game_over_handler.log_result") as result_log,
+        ):
+            handle_game_over(capture_stats=False)
+    finally:
+        AUTOMATION.state = original_state
+
+    tap.assert_not_called()
+    result_log.assert_called_once_with(
+        (
+            "Finished-battle handling interrupted — automation stopped "
+            "before post-run navigation"
+        ),
+        detail=(
+            "[GAME_OVER] result=interrupted session=test capture_stats=False "
+            "stats_saved=False"
+        ),
+    )
 
 
 def test_guarded_preflight_repair_forces_home_after_control_allows_actions():

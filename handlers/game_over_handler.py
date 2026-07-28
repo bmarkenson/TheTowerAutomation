@@ -7,7 +7,7 @@ from typing import Any, Callable, Mapping, Optional
 
 import cv2
 
-from utils.logger import log, log_action_intent
+from utils.logger import log, log_action_intent, log_result
 from core.android_clipboard import read_battle_report_clipboard
 from core.ss_capture import capture_adb_screenshot
 from core.run_state import AUTOMATION, ExecMode, RunState
@@ -98,8 +98,8 @@ def handle_game_over(
             if capture_stats
             else "follow the configured post-run route without stats capture"
         ),
+        detail=f"[GAME_OVER] session={session_id} capture_stats={capture_stats}",
     )
-    log(f"Handling GAME OVER — Session: {session_id}", "INFO", console=True)
 
     if capture_stats:
         # Keep source frames in memory. Routine successful captures persist only
@@ -190,7 +190,7 @@ def handle_game_over(
 
         time.sleep(1.2)
     else:
-        log("[GAME_OVER] Fast mode enabled — skipping More Stats capture.", "INFO")
+        log("[GAME_OVER] Fast mode enabled — skipping More Stats capture", "DEBUG")
 
     # Decide the terminal action while continuing to consume the same control
     # file used by the main loop. PAUSED blocks every action; STOPPED exits.
@@ -202,7 +202,17 @@ def handle_game_over(
         wait_mode_blocks=not return_home_after_battle,
     )
     if mode is None:
-        log("Automation stopped while waiting on Game Over.", "INFO", console=True)
+        log_result(
+            (
+                "Finished-battle handling interrupted — automation stopped "
+                "before post-run navigation"
+            ),
+            detail=(
+                f"[GAME_OVER] result=interrupted session={session_id} "
+                f"capture_stats={capture_stats} "
+                f"stats_saved={completed_record is not None}"
+            ),
+        )
         return
     if before_terminal_action is not None:
         before_terminal_action()
@@ -211,12 +221,32 @@ def handle_game_over(
     if mode == ExecMode.HOME:
         if not tap_if_visible("buttons.home:game_over", retries=1):
             return _abort_handler("Go Home from Game Stats", session_id)
-        log("Mode = HOME — returned from Game Stats", "INFO", console=True)
+        route = "home"
+        route_summary = "returned Home"
+        log("[GAME_OVER] Mode HOME selected after Game Stats", "DEBUG")
     else:
         if not tap_if_visible("buttons.retry:game_over", retries=1):
             return _abort_handler("Retry Game", session_id)
+        route = "retry"
+        route_summary = "selected Retry"
 
     time.sleep(2)
+    if completed_record is not None:
+        stats_status = "saved"
+        stats_summary = "stats saved"
+    elif capture_stats:
+        stats_status = "unavailable"
+        stats_summary = "stats unavailable"
+    else:
+        stats_status = "skipped"
+        stats_summary = "stats capture skipped"
+    log_result(
+        f"Finished-battle handling complete — {stats_summary}; {route_summary}",
+        detail=(
+            f"[GAME_OVER] result=completed session={session_id} route={route} "
+            f"stats={stats_status}"
+        ),
+    )
     return completed_record
 
 
@@ -334,8 +364,7 @@ def _capture_game_over_perks():
         )
         log(
             f"[BATTLE_PERKS] Captured {perks['quality']['perk_count']} ordered perk(s)",
-            "INFO",
-            console=True,
+            "DEBUG",
         )
     except Exception as exc:
         log(f"[BATTLE_PERKS] OCR failed: {exc}", "ERROR", console=True)
@@ -359,7 +388,7 @@ def _capture_game_over_perks():
         log(
             "[BATTLE_PERKS] Perks remained open after close; retrying the "
             f"verified close ({attempt + 2}/2)",
-            "WARN",
+            "DEBUG",
         )
     return perks, frames, restored
 
@@ -587,7 +616,7 @@ def save_image(img, tag):
     path = os.path.join("screenshots", "matches", f"{tag}.png")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     cv2.imwrite(path, img)
-    log(f"[CAPTURE] Saved screenshot: {path}", "INFO")
+    log(f"[CAPTURE] Saved screenshot: {path}", "DEBUG")
 
 
 def _abort_handler(step, session_id):
@@ -612,4 +641,11 @@ def _abort_handler(step, session_id):
     debug_img = capture_adb_screenshot()
     save_image(debug_img, f"{session_id}_ABORT_{step.replace(' ', '_')}")
     AUTOMATION.mode = ExecMode.WAIT
+    log_result(
+        f"Finished-battle handling failed — {step} did not complete",
+        detail=(
+            f"[GAME_OVER] result=failed session={session_id} "
+            f"failed_step={step} next_mode=WAIT"
+        ),
+    )
     return
