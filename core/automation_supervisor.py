@@ -786,7 +786,7 @@ class AutomationSupervisor:
             f"{format_compact_decimal(recovered)} using prior "
             f"{format_compact_decimal(reference)} "
             f"(factor={factor:.2f}, conf={coins_conf:.1f})",
-            "WARN",
+            "DEBUG",
         )
         return recovered
 

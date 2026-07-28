@@ -46,6 +46,7 @@ def test_supervisor_recovers_missing_suffix_from_recent_rate(tmp_path):
         call.args
         and "Recovered missing magnitude suffix 37.19 → 37.19q"
         in call.args[0]
+        and call.args[1] == "DEBUG"
         for call in runtime_log.call_args_list
     )
 
