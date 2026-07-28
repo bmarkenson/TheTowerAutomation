@@ -19,7 +19,7 @@ from core.target_priority_config import (
     validate_target_priority_order,
 )
 from utils.ocr_utils import ocr_text_and_conf
-from utils.logger import log, log_action_intent
+from utils.logger import log, log_action_intent, log_result
 
 
 TARGETS = TARGET_PRIORITY_TARGETS
@@ -44,6 +44,56 @@ class TargetPriorityObservation:
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+def _finish_target_priority_observation(
+    observation: TargetPriorityObservation,
+) -> TargetPriorityObservation:
+    """Emit the terminal result for one read-only Target Priority check."""
+
+    if not observation.observed:
+        summary = (
+            "Target Priority check failed — "
+            f"{observation.reason.replace('_', ' ')}"
+        )
+    elif observation.matches:
+        summary = "Target Priority check complete — order matches the strategy"
+    else:
+        summary = "Target Priority check complete — order differs from the strategy"
+    log_result(
+        summary,
+        detail=(
+            f"[TARGET_PRIORITY] result={observation.reason} "
+            f"observed={observation.observed} matches={observation.matches} "
+            f"expected={list(observation.expected)} "
+            f"actual={list(observation.actual)}"
+        ),
+    )
+    return observation
+
+
+def _finish_target_priority_enforcement(
+    success: bool,
+    *,
+    expected: Sequence[str],
+    actual: Sequence[str],
+    reason: str,
+) -> bool:
+    """Emit the terminal result for one Target Priority enforcement."""
+
+    summary = (
+        "Target Priority setup complete — order verified"
+        if success
+        else f"Target Priority setup failed — {reason.replace('_', ' ')}"
+    )
+    log_result(
+        summary,
+        detail=(
+            f"[TARGET_PRIORITY] result={'completed' if success else reason} "
+            f"expected={list(expected)} actual={list(actual)}"
+        ),
+    )
+    return success
 
 
 def _normalise(text: str) -> str:
@@ -141,8 +191,10 @@ def observe_target_priority_order(
             "compare the current order with the selected strategy without "
             "changing it"
         ),
+        detail=f"[TARGET_PRIORITY] mode=observe expected={expected_list}",
     )
     opened_here = panel_open
+    observation: TargetPriorityObservation
     try:
         if not panel_open:
             if not ensure_menu_fn():
@@ -155,9 +207,9 @@ def observe_target_priority_order(
         matches = target_priority_matches(actual, expected_list)
         log(
             f"[TARGET_PRIORITY] Observed order matches_expected={matches}: {actual}",
-            "INFO",
+            "DEBUG",
         )
-        return TargetPriorityObservation(
+        observation = TargetPriorityObservation(
             expected=tuple(expected_list),
             actual=tuple(actual),
             observed=True,
@@ -166,7 +218,7 @@ def observe_target_priority_order(
         )
     except Exception as exc:
         log(f"[TARGET_PRIORITY] Observation failed: {exc}", "WARN")
-        return TargetPriorityObservation(
+        observation = TargetPriorityObservation(
             expected=tuple(expected_list),
             actual=(),
             observed=False,
@@ -177,6 +229,7 @@ def observe_target_priority_order(
         if opened_here:
             tap_fn(_CLOSE_TARGET)
             sleep_fn(0.2)
+    return _finish_target_priority_observation(observation)
 
 
 def ensure_target_priority_order(
@@ -196,20 +249,35 @@ def ensure_target_priority_order(
             "the selected strategy requires a specific target order before "
             "normal run actions continue"
         ),
+        detail=f"[TARGET_PRIORITY] mode=enforce expected={expected_list}",
     )
     opened_here = panel_open
     if not panel_open:
         if not ensure_menu_fn():
             log("[TARGET_PRIORITY] Unable to open the game menu", "WARN")
-            return False
+            return _finish_target_priority_enforcement(
+                False,
+                expected=expected_list,
+                actual=(),
+                reason="game_menu_not_verified",
+            )
         if not tap_fn(_SCOPE_TARGET):
             log("[TARGET_PRIORITY] Unable to open Target Priority", "WARN")
-            return False
+            return _finish_target_priority_enforcement(
+                False,
+                expected=expected_list,
+                actual=(),
+                reason="panel_not_verified",
+            )
         opened_here = True
         sleep_fn(0.6)
+    actual: list[str] = []
+    verified: list[str] = []
+    success = False
+    reason = "not_started"
     try:
         actual = read_target_priority_order(capture_fn)
-        log(f"[TARGET_PRIORITY] Current order: {actual}", "INFO")
+        log(f"[TARGET_PRIORITY] Current order: {actual}", "DEBUG")
         working = list(actual)
         for desired_index, target in enumerate(expected_list):
             current_index = working.index(target)
@@ -246,17 +314,29 @@ def ensure_target_priority_order(
                 sleep_fn(0.15)
         verified = read_target_priority_order(capture_fn)
         if not target_priority_matches(verified, expected_list):
-            log(f"[TARGET_PRIORITY] Verification failed: expected={expected_list}, actual={verified}", "WARN")
-            return False
-        log("[TARGET_PRIORITY] Order verified", "INFO")
-        return True
+            log(
+                f"[TARGET_PRIORITY] Verification failed: "
+                f"expected={expected_list}, actual={verified}",
+                "WARN",
+            )
+            reason = "verification_mismatch"
+        else:
+            success = True
+            reason = "verified"
+            log("[TARGET_PRIORITY] Order verified", "DEBUG")
     except Exception as exc:
         log(f"[TARGET_PRIORITY] Enforcement failed: {exc}", "ERROR")
-        return False
+        reason = str(exc)
     finally:
         if opened_here:
             tap_fn(_CLOSE_TARGET)
             sleep_fn(0.2)
+    return _finish_target_priority_enforcement(
+        success,
+        expected=expected_list,
+        actual=verified or actual,
+        reason=reason,
+    )
 
 
 __all__ = [

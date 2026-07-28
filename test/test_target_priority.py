@@ -24,6 +24,7 @@ def test_enforcer_moves_rows_up_and_verifies():
     with (
         patch("core.target_priority.read_target_priority_order", side_effect=reads),
         patch("core.target_priority.log"),
+        patch("core.target_priority.log_result") as result_log,
     ):
         assert ensure_target_priority_order(
             capture_fn=lambda: np.full((1920, 1080, 3), 32, dtype=np.uint8),
@@ -33,6 +34,10 @@ def test_enforcer_moves_rows_up_and_verifies():
         )
     assert taps[0] == (910, 380)
     assert taps[-1] == (950, 100)
+    result_log.assert_called_once()
+    assert result_log.call_args.args[0] == (
+        "Target Priority setup complete — order verified"
+    )
 
 
 def test_running_boundary_can_supply_an_already_open_priority_panel():
@@ -68,6 +73,7 @@ def test_observer_reads_and_closes_without_reordering():
     with (
         patch("core.target_priority.read_target_priority_order", return_value=actual),
         patch("core.target_priority.log"),
+        patch("core.target_priority.log_result") as result_log,
     ):
         observation = observe_target_priority_order(
             tap_fn=lambda point, **_kwargs: taps.append(point) or True,
@@ -79,3 +85,7 @@ def test_observer_reads_and_closes_without_reordering():
     assert observation.matches is False
     assert observation.actual == tuple(actual)
     assert taps == [(910, 380), (950, 100)]
+    result_log.assert_called_once()
+    assert result_log.call_args.args[0] == (
+        "Target Priority check complete — order differs from the strategy"
+    )

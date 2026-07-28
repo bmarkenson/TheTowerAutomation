@@ -308,6 +308,7 @@ def test_damage_slider_observation_reports_mismatch_without_changing_value():
     with (
         patch("core.damage_adjuster.open_damage_adjuster", return_value=_reading("1E-20%")),
         patch("core.damage_adjuster.dismiss_damage_adjuster", return_value=True),
+        patch("core.damage_adjuster.log_result") as result_log,
     ):
         result = configure_damage_slider(
             "1E-22%",
@@ -323,6 +324,10 @@ def test_damage_slider_observation_reports_mismatch_without_changing_value():
     assert not result.success
     assert result.reason == "observed_mismatch"
     assert taps == []
+    result_log.assert_called_once()
+    assert result_log.call_args.args[0] == (
+        "Damage Slider check complete — observed 1E-20%, expected 1E-22%"
+    )
 
 
 def test_damage_slider_enforcement_fails_closed_when_feedback_moves_away():

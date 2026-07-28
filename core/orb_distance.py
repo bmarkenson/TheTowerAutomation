@@ -17,7 +17,7 @@ from core.run_controls import ensure_menu_open
 from core.ss_capture import capture_adb_screenshot, is_complete_screenshot
 from core.state_detector import detect_state_and_overlays
 from core.upgrade_navigation import UpgradeSearchResult, find_upgrade
-from utils.logger import log, log_action_intent
+from utils.logger import log, log_action_intent, log_result
 from utils.ocr_utils import ocr_text_and_conf
 from utils.wave_detector import detect_wave_number_from_image
 
@@ -101,6 +101,57 @@ class OrbDistanceResult:
         payload = asdict(self)
         payload["success"] = self.success
         return payload
+
+
+def _finish_orb_distance(result: OrbDistanceResult) -> OrbDistanceResult:
+    """Emit the terminal operator result for one Orb Distance workflow."""
+
+    if result.preserved:
+        summary = (
+            "Orb Distance check complete — preserved unconfigured Attack Range "
+            f"{result.range_observed}"
+        )
+    elif result.mode == "observe" and result.observed and result.dismissed:
+        if result.matches:
+            summary = (
+                "Orb Distance check complete — "
+                f"matched the preset for Range {result.range_observed}"
+            )
+        else:
+            summary = (
+                "Orb Distance check complete — "
+                f"observed Extra {result.final_extra or 'unknown'} and "
+                f"Workshop {result.final_workshop or 'unknown'}"
+            )
+    elif result.success:
+        summary = (
+            "Orb Distance setup complete — "
+            f"Extra {result.final_extra} and Workshop {result.final_workshop} "
+            f"verified for Range {result.range_observed}"
+        )
+    else:
+        workflow = "check" if result.mode == "observe" else "setup"
+        summary = (
+            f"Orb Distance {workflow} failed — "
+            f"{result.reason.replace('_', ' ')}"
+        )
+    log_result(
+        summary,
+        detail=(
+            f"[ORB_DISTANCE] result={'completed' if result.success else result.reason} "
+            f"mode={result.mode} range_expected={result.range_basis} "
+            f"range_observed={result.range_observed} "
+            f"expected_extra={result.expected_extra} "
+            f"expected_workshop={result.expected_workshop} "
+            f"initial_extra={result.initial_extra} "
+            f"initial_workshop={result.initial_workshop} "
+            f"final_extra={result.final_extra} final_workshop={result.final_workshop} "
+            f"changed={result.changed} extra_steps={result.extra_steps} "
+            f"workshop_steps={result.workshop_steps} dismissed={result.dismissed} "
+            f"preserved={result.preserved}"
+        ),
+    )
+    return result
 
 
 def normalize_distance(value: Any) -> str:
@@ -478,7 +529,7 @@ def _wait_for_running_wave_change(
     log(
         "[ORB_DISTANCE] Distance controls did not respond; panel closed to "
         f"resume combat while waiting for wave {baseline_wave} to clear",
-        "INFO",
+        "DEBUG",
     )
     for _ in range(max(1, int(attempts))):
         if not _action_allowed(action_guard_fn):
@@ -495,7 +546,7 @@ def _wait_for_running_wave_change(
             log(
                 "[ORB_DISTANCE] Running wave advanced "
                 f"{baseline_wave} -> {wave}; retrying Distance Adjuster",
-                "INFO",
+                "DEBUG",
             )
             return "wave_changed"
     return "controls_wait_timeout"
@@ -544,6 +595,12 @@ def configure_orb_distance(
                 "select a matching configured Range preset when one exists "
                 "and preserve unconfigured experimental Ranges"
             ),
+            detail=(
+                f"[ORB_DISTANCE] mode={canonical_mode} "
+                f"requested_range={expected['range_basis']} "
+                f"requested_extra={expected['extra']} "
+                f"requested_workshop={expected['workshop']}"
+            ),
         )
     else:
         log_action_intent(
@@ -552,6 +609,12 @@ def configure_orb_distance(
                 "read Attack Range, select its matching preset, and preserve "
                 "unconfigured experimental Ranges without Distance Adjuster "
                 "input"
+            ),
+            detail=(
+                f"[ORB_DISTANCE] mode={canonical_mode} "
+                f"requested_range={expected['range_basis']} "
+                f"requested_extra={expected['extra']} "
+                f"requested_workshop={expected['workshop']}"
             ),
         )
 
@@ -578,12 +641,14 @@ def configure_orb_distance(
     result_values["range_observed"] = range_reading.distance
     if not range_reading.authoritative:
         result_values["reason"] = "range_not_authoritative"
-        return OrbDistanceResult(
-            mode=canonical_mode,
-            range_basis=expected["range_basis"],
-            expected_extra=expected["extra"],
-            expected_workshop=expected["workshop"],
-            **result_values,
+        return _finish_orb_distance(
+            OrbDistanceResult(
+                mode=canonical_mode,
+                range_basis=expected["range_basis"],
+                expected_extra=expected["extra"],
+                expected_workshop=expected["workshop"],
+                **result_values,
+            )
         )
     if configured_presets is not None:
         matching_preset = next(
@@ -605,24 +670,28 @@ def configure_orb_distance(
                 "[ORB_DISTANCE] Preserving unconfigured Attack Range "
                 f"{range_reading.distance}; no Distance Adjuster input is "
                 "authorized",
-                "INFO",
+                "DEBUG",
             )
-            return OrbDistanceResult(
+            return _finish_orb_distance(
+                OrbDistanceResult(
+                    mode=canonical_mode,
+                    range_basis=expected["range_basis"],
+                    expected_extra=expected["extra"],
+                    expected_workshop=expected["workshop"],
+                    **result_values,
+                )
+            )
+        expected = matching_preset
+    elif range_reading.distance != expected["range_basis"]:
+        result_values["reason"] = "range_basis_mismatch"
+        return _finish_orb_distance(
+            OrbDistanceResult(
                 mode=canonical_mode,
                 range_basis=expected["range_basis"],
                 expected_extra=expected["extra"],
                 expected_workshop=expected["workshop"],
                 **result_values,
             )
-        expected = matching_preset
-    elif range_reading.distance != expected["range_basis"]:
-        result_values["reason"] = "range_basis_mismatch"
-        return OrbDistanceResult(
-            mode=canonical_mode,
-            range_basis=expected["range_basis"],
-            expected_extra=expected["extra"],
-            expected_workshop=expected["workshop"],
-            **result_values,
         )
 
     if canonical_mode == "observe":
@@ -631,14 +700,14 @@ def configure_orb_distance(
             f"{range_reading.distance} selected preset "
             f"Extra {expected['extra']} / Workshop {expected['workshop']} "
             "for read-only comparison",
-            "INFO",
+            "DEBUG",
         )
     else:
         log(
             "[ORB_DISTANCE] Observed Attack Range "
             f"{range_reading.distance} selected preset "
             f"Extra {expected['extra']} / Workshop {expected['workshop']}",
-            "INFO",
+            "DEBUG",
         )
 
     panel_opened = False
@@ -703,7 +772,7 @@ def configure_orb_distance(
                                 f"[ORB_DISTANCE] {row.title()} "
                                 f"{getattr(reading, row)} toward "
                                 f"{expected[row]} with one {direction} tap",
-                                "INFO",
+                                "DEBUG",
                             )
                             if not tap_visible_fn(
                                 button,
@@ -812,12 +881,14 @@ def configure_orb_distance(
 
     if panel_opened and not result_values["dismissed"]:
         result_values["reason"] = f"{result_values['reason']};dismiss_failed"
-    return OrbDistanceResult(
-        mode=canonical_mode,
-        range_basis=expected["range_basis"],
-        expected_extra=expected["extra"],
-        expected_workshop=expected["workshop"],
-        **result_values,
+    return _finish_orb_distance(
+        OrbDistanceResult(
+            mode=canonical_mode,
+            range_basis=expected["range_basis"],
+            expected_extra=expected["extra"],
+            expected_workshop=expected["workshop"],
+            **result_values,
+        )
     )
 
 

@@ -16,7 +16,7 @@ from core.matcher import get_match
 from core.ss_capture import capture_adb_screenshot, is_complete_screenshot
 from core.state_detector import detect_state_and_overlays
 from core.upgrade_navigation import ensure_upgrade_menu, find_upgrade
-from utils.logger import log, log_action_intent
+from utils.logger import log, log_action_intent, log_result
 from utils.ocr_utils import ocr_text_and_conf
 
 
@@ -60,6 +60,40 @@ class DamageSliderResult:
         payload = asdict(self)
         payload["success"] = self.success
         return payload
+
+
+def _finish_damage_slider(result: DamageSliderResult) -> DamageSliderResult:
+    """Emit the terminal operator result for one Damage Slider workflow."""
+
+    expected = format_damage_percentage(result.expected)
+    final = format_damage_percentage(result.final)
+    if result.mode == "observe" and result.observed and result.dismissed:
+        if result.matches:
+            summary = f"Damage Slider check complete — matched {expected}"
+        else:
+            summary = (
+                "Damage Slider check complete — "
+                f"observed {final or 'unknown'}, expected {expected}"
+            )
+    elif result.success:
+        summary = f"Damage Slider setup complete — {final or expected} verified"
+    else:
+        workflow = "check" if result.mode == "observe" else "setup"
+        summary = (
+            f"Damage Slider {workflow} failed — "
+            f"{result.reason.replace('_', ' ')}"
+        )
+    log_result(
+        summary,
+        detail=(
+            f"[DAMAGE_ADJUSTER] result={'completed' if result.success else result.reason} "
+            f"mode={result.mode} expected={result.expected} initial={result.initial} "
+            f"final={result.final} observed={result.observed} matches={result.matches} "
+            f"changed={result.changed} steps={result.steps} "
+            f"dismissed={result.dismissed}"
+        ),
+    )
+    return result
 
 
 def normalize_damage_percentage(value: Any) -> str:
@@ -193,12 +227,10 @@ def open_damage_adjuster(
         retries=1,
     )
     if not opened:
-        log_action_intent(
-            "Locating the Damage Slider",
-            reason=(
-                "the Damage label is outside or did not match in the current "
-                "Attack upgrade viewport"
-            ),
+        log(
+            "[DAMAGE_ADJUSTER] Locating the Damage Slider because its label "
+            "is outside or did not match in the current Attack viewport",
+            "DEBUG",
         )
 
         def capture_verified_attack() -> Optional[Frame]:
@@ -334,6 +366,10 @@ def configure_damage_slider(
                 f"record whether its current value matches "
                 f"{display_expected} without changing it"
             ),
+            detail=(
+                f"[DAMAGE_ADJUSTER] mode={canonical_mode} "
+                f"expected={canonical_expected}"
+            ),
         )
     else:
         log_action_intent(
@@ -341,6 +377,10 @@ def configure_damage_slider(
             reason=(
                 "the selected strategy requires that starting value before "
                 "normal run actions continue"
+            ),
+            detail=(
+                f"[DAMAGE_ADJUSTER] mode={canonical_mode} "
+                f"expected={canonical_expected}"
             ),
         )
 
@@ -355,17 +395,19 @@ def configure_damage_slider(
 
     attack = ensure_menu_fn("attack", capture_fn=capture_fn)
     if attack is None:
-        return DamageSliderResult(
-            canonical_mode,
-            canonical_expected,
-            initial,
-            final,
-            observed,
-            matches,
-            changed,
-            steps,
-            dismissed,
-            "attack_menu_not_verified",
+        return _finish_damage_slider(
+            DamageSliderResult(
+                canonical_mode,
+                canonical_expected,
+                initial,
+                final,
+                observed,
+                matches,
+                changed,
+                steps,
+                dismissed,
+                "attack_menu_not_verified",
+            )
         )
 
     reading = open_damage_adjuster(
@@ -374,17 +416,19 @@ def configure_damage_slider(
         sleep_fn=sleep_fn,
     )
     if reading is None:
-        return DamageSliderResult(
-            canonical_mode,
-            canonical_expected,
-            initial,
-            final,
-            observed,
-            matches,
-            changed,
-            steps,
-            dismissed,
-            "panel_not_verified",
+        return _finish_damage_slider(
+            DamageSliderResult(
+                canonical_mode,
+                canonical_expected,
+                initial,
+                final,
+                observed,
+                matches,
+                changed,
+                steps,
+                dismissed,
+                "panel_not_verified",
+            )
         )
 
     try:
@@ -419,7 +463,7 @@ def configure_damage_slider(
                         f"{batch_steps} {button.rsplit(':', 1)[-1]} tap(s) "
                         f"from {format_damage_percentage(final)} "
                         f"toward {display_expected}",
-                        "INFO",
+                        "DEBUG",
                     )
 
                     arrow_authority = _damage_arrow_batch_authority(
@@ -491,17 +535,19 @@ def configure_damage_slider(
 
     if not dismissed:
         reason = f"{reason};dismiss_failed"
-    return DamageSliderResult(
-        canonical_mode,
-        canonical_expected,
-        initial,
-        final,
-        observed,
-        matches,
-        changed,
-        steps,
-        dismissed,
-        reason,
+    return _finish_damage_slider(
+        DamageSliderResult(
+            canonical_mode,
+            canonical_expected,
+            initial,
+            final,
+            observed,
+            matches,
+            changed,
+            steps,
+            dismissed,
+            reason,
+        )
     )
 
 

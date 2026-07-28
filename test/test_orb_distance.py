@@ -434,7 +434,10 @@ def test_unconfigured_range_is_preserved_without_opening_or_tapping():
             "workshop": "80.37m",
         },
     ]
-    with patch("core.orb_distance.open_orb_distance") as open_panel:
+    with (
+        patch("core.orb_distance.open_orb_distance") as open_panel,
+        patch("core.orb_distance.log_result") as result_log,
+    ):
         result = configure_orb_distance(
             range_basis="98.38m",
             extra="87.16m",
@@ -452,6 +455,10 @@ def test_unconfigured_range_is_preserved_without_opening_or_tapping():
     assert result.range_observed == "45.00m"
     assert result.reason == "unconfigured_range_preserved"
     open_panel.assert_not_called()
+    result_log.assert_called_once()
+    assert result_log.call_args.args[0] == (
+        "Orb Distance check complete — preserved unconfigured Attack Range 45.00m"
+    )
 
 
 def test_action_executor_records_successful_orb_distance_enforcement():
