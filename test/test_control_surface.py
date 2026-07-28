@@ -819,6 +819,60 @@ def test_activity_preserves_result_and_input_levels(tmp_path):
     ]
 
 
+def test_activity_audience_filters_preserve_roles_and_complete_order(tmp_path):
+    log_path = tmp_path / "logs" / "actions.log"
+    log_path.parent.mkdir(parents=True)
+    entries = [
+        ("INFO", "Runtime lifecycle detail"),
+        ("STATUS", "State=RUNNING | Wave=42 | Coins/min=1.2T"),
+        ("ACTION", "Reviewing mission rewards — reward badge is visible"),
+        ("DEBUG", "[MISSION_REWARDS] badge_source=RUNNING"),
+        ("INPUT", "Tap Daily Missions"),
+        ("MATCH", "Daily Missions matched at confidence 0.98"),
+        ("STATE", "Menu changed to DAILY_MISSIONS"),
+        ("RESULT", "Mission reward review complete — claimed 1 reward"),
+        ("WARN", "ADB target remains unavailable; retries continue"),
+        ("ERROR", "A requested operation could not complete"),
+        ("FAIL", "Runtime boundary failed"),
+    ]
+    log_path.write_text(
+        "".join(
+            f"[{level} 2026-07-19 17:00:{index:02d}] {message}\n"
+            for index, (level, message) in enumerate(entries)
+        ),
+        encoding="utf-8",
+    )
+    service = _service(tmp_path)
+
+    operational = service.activity(
+        levels=["ACTION", "RESULT", "WARN", "ERROR", "FAIL"],
+    )
+    diagnostics = service.activity(
+        levels=["INPUT", "DEBUG", "MATCH", "STATE"],
+    )
+    status_only = service.activity(levels=["STATUS"])
+    all_levels = service.activity()
+    operational_roles = {"ACTION", "RESULT", "WARN", "ERROR", "FAIL"}
+    diagnostic_roles = {"INPUT", "DEBUG", "MATCH", "STATE"}
+
+    assert [
+        (entry["level"], entry["message"])
+        for entry in operational["items"]
+    ] == [entry for entry in entries if entry[0] in operational_roles]
+    assert [
+        (entry["level"], entry["message"])
+        for entry in diagnostics["items"]
+    ] == [entry for entry in entries if entry[0] in diagnostic_roles]
+    assert [
+        (entry["level"], entry["message"])
+        for entry in status_only["items"]
+    ] == [("STATUS", "State=RUNNING | Wave=42 | Coins/min=1.2T")]
+    assert [
+        (entry["level"], entry["message"])
+        for entry in all_levels["items"]
+    ] == entries
+
+
 def test_activity_reports_replacement_log_identity_after_rotation(tmp_path):
     log_path = tmp_path / "logs" / "actions.log"
     log_path.parent.mkdir(parents=True)
