@@ -212,6 +212,138 @@ def test_fallback_reuses_verified_tap_authority_during_capture():
     assert concurrent_tap_seen.is_set()
 
 
+def test_fallback_caps_ehls_burst_before_waiting_for_capture_feedback():
+    initial = _frame(1)
+    after_ehls = _frame(2)
+    complete = _frame(3)
+    capture_calls = 0
+    taps = []
+
+    def capture():
+        nonlocal capture_calls
+        capture_calls += 1
+        if capture_calls == 1:
+            Event().wait(timeout=0.25)
+            return after_ehls
+        return complete
+
+    def gold_box(frame, rect):
+        value = int(frame[0, 0, 0])
+        is_ehls = rect[0] < 500
+        return value >= (2 if is_ehls else 3), {}
+
+    with (
+        patch(
+            "core.level_skip_initializer.detect_state_and_overlays",
+            return_value={"state": "RUNNING", "menu": "UTILITY_MENU"},
+        ),
+        patch("core.level_skip_initializer.detect_current_buy_quantity", return_value="max"),
+        patch(
+            "core.level_skip_initializer._target_boxes",
+            return_value={
+                EHLS: _box(EHLS, "affordable"),
+                EALS: _box(EALS, "affordable"),
+            },
+        ),
+        patch(
+            "core.level_skip_initializer.evaluate_upgrade_box_gold_box",
+            side_effect=gold_box,
+        ),
+        patch(
+            "core.level_skip_initializer.detect_wave_number_from_image",
+            return_value=(20, 99.0),
+        ),
+    ):
+        result = initialize_level_skips(
+            screenshot=initial,
+            capture_fn=capture,
+            tap_fn=lambda point, *, label, verification: (
+                taps.append((label, point)) or True
+            ),
+            sleep_fn=lambda _seconds: None,
+            frame_stream_factory=None,
+        )
+
+    assert result.success
+    assert [label for label, _point in taps].count(
+        f"level_skip:{EHLS}"
+    ) == 4
+    assert [label for label, _point in taps].count(
+        f"level_skip:{EALS}"
+    ) >= 1
+
+
+def test_ehls_warmup_burst_forces_feedback_before_a_fifth_tap():
+    initial = _frame(1)
+    after_ehls = _frame(2)
+    complete = _frame(3)
+    captures = iter((after_ehls, complete))
+    taps = []
+
+    class WarmingStream:
+        is_live = False
+        failed = False
+        age_s = 0.0
+
+        def __init__(self):
+            self.stopped = False
+
+        def start(self):
+            pass
+
+        def stop(self):
+            self.stopped = True
+
+    stream = WarmingStream()
+
+    def gold_box(frame, rect):
+        value = int(frame[0, 0, 0])
+        is_ehls = rect[0] < 500
+        return value >= (2 if is_ehls else 3), {}
+
+    with (
+        patch(
+            "core.level_skip_initializer.detect_state_and_overlays",
+            return_value={"state": "RUNNING", "menu": "UTILITY_MENU"},
+        ),
+        patch("core.level_skip_initializer.detect_current_buy_quantity", return_value="max"),
+        patch(
+            "core.level_skip_initializer._target_boxes",
+            return_value={
+                EHLS: _box(EHLS, "affordable"),
+                EALS: _box(EALS, "affordable"),
+            },
+        ),
+        patch(
+            "core.level_skip_initializer.evaluate_upgrade_box_gold_box",
+            side_effect=gold_box,
+        ),
+        patch(
+            "core.level_skip_initializer.detect_wave_number_from_image",
+            return_value=(20, 99.0),
+        ),
+    ):
+        result = initialize_level_skips(
+            screenshot=initial,
+            capture_fn=lambda: next(captures),
+            tap_fn=lambda point, *, label, verification: (
+                taps.append((label, stream.stopped)) or True
+            ),
+            sleep_fn=lambda _seconds: None,
+            frame_stream_factory=lambda: stream,
+        )
+
+    assert result.success
+    assert taps == [
+        (f"level_skip:{EHLS}", False),
+        (f"level_skip:{EHLS}", False),
+        (f"level_skip:{EHLS}", False),
+        (f"level_skip:{EHLS}", False),
+        (f"level_skip:{EALS}", True),
+    ]
+    assert stream.stopped
+
+
 def test_initializer_finishes_without_taps_when_both_skips_start_gold_boxed():
     taps = []
 

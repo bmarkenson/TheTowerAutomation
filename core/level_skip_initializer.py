@@ -37,6 +37,7 @@ TARGET_TEMPLATE = {
 }
 PURCHASE_X_FRACTION = 0.78
 PURCHASE_Y_FRACTION = 0.77
+EHLS_TAPS_PER_BURST = 4
 
 
 @dataclass(frozen=True)
@@ -144,12 +145,14 @@ def _tap_and_capture(
     capture_fn: Callable[[], Optional[Frame]],
     tap_fn: Callable[..., bool],
     verification: TapVerification,
+    max_taps: Optional[int] = None,
 ) -> Tuple[Optional[Frame], int, bool]:
-    """Keep dispatching under one verified lease during a blocking capture."""
+    """Dispatch a bounded or continuous burst during a blocking capture."""
 
     if not tap_fn(point, label=label, verification=verification):
         return None, 0, False
     taps_sent = 1
+    tap_limit = None if max_taps is None else max(1, int(max_taps))
 
     captured: Dict[str, Optional[Frame]] = {"frame": None}
 
@@ -159,7 +162,9 @@ def _tap_and_capture(
     capture_thread = threading.Thread(target=capture, daemon=True)
     capture_thread.start()
     dispatch_ok = True
-    while capture_thread.is_alive():
+    while capture_thread.is_alive() and (
+        tap_limit is None or taps_sent < tap_limit
+    ):
         capture_thread.join(timeout=0.04)
         if not capture_thread.is_alive():
             break
@@ -206,6 +211,7 @@ def initialize_level_skips(
         ScreenrecordFrameStream
     ),
     stream_ready_timeout_s: float = 8.0,
+    ehls_taps_per_burst: int = EHLS_TAPS_PER_BURST,
 ) -> LevelSkipInitializationResult:
     """Gold-box EHLS then EALS with minimum capture and navigation overhead."""
 
@@ -314,6 +320,8 @@ def initialize_level_skips(
         return finish("level_skip_boxes_missing")
 
     target_boxes = boxes
+    ehls_burst_limit = max(1, int(ehls_taps_per_burst))
+    ehls_unobserved_taps = 0
     last_stream_sequence = -1
     last_stream_state_check = monotonic_fn()
     stream_ready_logged = False
@@ -322,7 +330,23 @@ def initialize_level_skips(
         while monotonic_fn() < deadline:
             using_live_stream = False
             if frame_stream is not None:
-                if frame_stream.failed or (
+                if (
+                    target == EHLS
+                    and not frame_stream.is_live
+                    and ehls_unobserved_taps >= ehls_burst_limit
+                ):
+                    log(
+                        f"[RUN_INIT] EHLS warm-up burst reached "
+                        f"{ehls_burst_limit} taps; acquiring guarded screenshot "
+                        "feedback",
+                        "DEBUG",
+                    )
+                    frame_stream.stop()
+                    frame_stream = None
+                    frame = capture_fn()
+                    if frame is None:
+                        return finish("capture_after_ehls_burst_failed")
+                elif frame_stream.failed or (
                     not frame_stream.is_live
                     and frame_stream.age_s >= max(1.0, float(stream_ready_timeout_s))
                 ):
@@ -433,6 +457,8 @@ def initialize_level_skips(
                 ):
                     return finish("tap_dispatch_failed")
                 taps_sent += 1
+                if target == EHLS and not frame_stream.is_live:
+                    ehls_unobserved_taps += 1
                 sleep_fn(0.04)
             else:
                 frame, burst_taps, dispatch_ok = _tap_and_capture(
@@ -441,6 +467,7 @@ def initialize_level_skips(
                     capture_fn=capture_fn,
                     tap_fn=tap_fn,
                     verification=verification,
+                    max_taps=ehls_burst_limit if target == EHLS else None,
                 )
                 taps_sent += burst_taps
                 if not dispatch_ok:
