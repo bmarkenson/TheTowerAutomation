@@ -21,7 +21,7 @@ from core.menu_reward_badges import (
 from core.scrolling import ScrollResult, scroll_to_edge, scroll_until_visible
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
-from utils.logger import log, log_action_intent
+from utils.logger import log, log_action_intent, log_result
 from utils.ocr_utils import ocr_text_and_conf
 
 
@@ -78,6 +78,39 @@ class DailyMissionCapacity:
         )
 
 
+def _finish_mission_reward_review(
+    result: MissionRewardResult,
+    *,
+    summary: MissionRewardSummary,
+    source_state: str,
+    reason: str,
+) -> MissionRewardResult:
+    """Emit the terminal operator result for one mission-reward review."""
+
+    if result == MissionRewardResult.CLAIMED:
+        reward_word = "reward" if summary.total == 1 else "rewards"
+        result_summary = (
+            "Mission reward review complete — "
+            f"claimed {summary.total} {reward_word}"
+        )
+    elif result == MissionRewardResult.NOTHING_AVAILABLE:
+        result_summary = (
+            "Mission reward review complete — no claimable rewards found"
+        )
+    else:
+        result_summary = f"Mission reward review failed — {reason}"
+
+    log_result(
+        result_summary,
+        detail=(
+            f"[MISSION_REWARDS] result={result.value} source={source_state} "
+            f"daily={summary.daily} event={summary.event} guild={summary.guild} "
+            f"reason={reason}"
+        ),
+    )
+    return result
+
+
 def handle_mission_rewards(
     screenshot=None,
     *,
@@ -99,7 +132,12 @@ def handle_mission_rewards(
     source_state = _reward_source_state(initial)
     reward_hub = _ensure_reward_hub(initial, source_state=source_state)
     if reward_hub is None:
-        return MissionRewardResult.FAILED
+        return _finish_mission_reward_review(
+            MissionRewardResult.FAILED,
+            summary=MissionRewardSummary(),
+            source_state=source_state,
+            reason="the reward hub could not be verified",
+        )
 
     badges = (
         measure_menu_reward_badges(reward_hub)
@@ -110,7 +148,7 @@ def handle_mission_rewards(
         f"[MISSION_REWARDS] Badges source={source_state}: "
         f"daily={badges.daily_missions} event={badges.event_missions} "
         f"guild={badges.guild_chests}",
-        "INFO",
+        "DEBUG",
     )
 
     navigation = (
@@ -204,16 +242,26 @@ def handle_mission_rewards(
     ):
         success = False
 
-    log(
-        "[MISSION_REWARDS] Claim summary: "
-        f"daily={summary.daily} event={summary.event} guild={summary.guild}",
-        "INFO",
-    )
     if not success:
-        return MissionRewardResult.FAILED
+        return _finish_mission_reward_review(
+            MissionRewardResult.FAILED,
+            summary=summary,
+            source_state=source_state,
+            reason="a reward section or cleanup step did not complete",
+        )
     if summary.total:
-        return MissionRewardResult.CLAIMED
-    return MissionRewardResult.NOTHING_AVAILABLE
+        return _finish_mission_reward_review(
+            MissionRewardResult.CLAIMED,
+            summary=summary,
+            source_state=source_state,
+            reason="all enabled reward sections completed",
+        )
+    return _finish_mission_reward_review(
+        MissionRewardResult.NOTHING_AVAILABLE,
+        summary=summary,
+        source_state=source_state,
+        reason="all enabled reward sections completed without a claim",
+    )
 
 
 def _claim_daily_rewards(
@@ -241,7 +289,7 @@ def _claim_daily_rewards(
                 "[MISSION_REWARDS] Sunday Daily Mission capacity "
                 f"{capacity_text} verified (OCR confidence={capacity.confidence:.1f}); "
                 f"releasing {ordinary_claim_limit} ordinary claims",
-                "INFO",
+                "DEBUG",
             )
         else:
             ordinary_claim_limit = 0
@@ -249,7 +297,7 @@ def _claim_daily_rewards(
                 "[MISSION_REWARDS] Holding ordinary Daily Mission claims "
                 f"until the weekly reset (capacity={capacity_text}, "
                 f"OCR confidence={capacity.confidence:.1f})",
-                "INFO",
+                "DEBUG",
             )
 
     for _ in range(MAX_DAILY_REWARDS):
@@ -305,7 +353,7 @@ def _claim_daily_rewards(
                 log(
                     "[MISSION_REWARDS] Sunday capacity relief complete: "
                     f"claimed {ordinary_claimed} ordinary Daily Mission rewards",
-                    "INFO",
+                    "DEBUG",
                 )
             break
         if is_visible(DAILY_MISSION_CLAIM, screenshot=current):
@@ -330,7 +378,7 @@ def _claim_daily_rewards(
         "[MISSION_REWARDS] Weekly chest review complete: "
         f"checks={weekly_checks} chests_claimed={weekly_chests_claimed} "
         f"post_claim_rechecks={max(0, weekly_checks - 1)}",
-        "INFO",
+        "DEBUG",
     )
     return True, claimed
 
@@ -489,7 +537,7 @@ def _record_event_inventory(
             f"event={inventory.event_name or 'unknown'!r} "
             f"rows={len(inventory.missions)} incomplete={incomplete} "
             f"complete={inventory.complete} accepted={accepted is not False}",
-            "INFO" if inventory.complete else "WARN",
+            "DEBUG" if inventory.complete else "WARN",
         )
     except Exception as exc:
         # Reminders are advisory and must not turn an otherwise successful

@@ -129,6 +129,7 @@ def test_visible_claim_at_store_entry_skips_all_scrolling():
             "handlers.daily_gem_handler._return_from_store",
             return_value=True,
         ) as return_from_store,
+        patch("handlers.daily_gem_handler.log_result") as result_log,
         patch("handlers.daily_gem_handler.save_image"),
         patch("handlers.daily_gem_handler.time.sleep"),
     ):
@@ -142,6 +143,13 @@ def test_visible_claim_at_store_entry_skips_all_scrolling():
         "buttons.skip_reward_reveal",
     ]
     return_from_store.assert_called_once_with("test", "RUNNING")
+    result_log.assert_called_once_with(
+        "Daily Gem check complete — reward claimed",
+        detail=(
+            "[DAILY_GEM] result=claimed session=test "
+            "reason=the reward was claimed and the source screen was restored"
+        ),
+    )
 
 
 def test_cooldown_at_store_entry_skips_all_scrolling():
@@ -169,6 +177,7 @@ def test_cooldown_at_store_entry_skips_all_scrolling():
             "handlers.daily_gem_handler._return_from_store",
             return_value=True,
         ) as return_from_store,
+        patch("handlers.daily_gem_handler.log_result") as result_log,
         patch("handlers.daily_gem_handler.save_image"),
         patch("handlers.daily_gem_handler.time.sleep"),
     ):
@@ -178,6 +187,13 @@ def test_cooldown_at_store_entry_skips_all_scrolling():
     scroll_to_edge.assert_not_called()
     scroll_until_visible.assert_not_called()
     return_from_store.assert_called_once_with("test", "RUNNING")
+    result_log.assert_called_once_with(
+        "Daily Gem check complete — reward not ready",
+        detail=(
+            "[DAILY_GEM] result=not_ready session=test "
+            "reason=a cooldown was visible at Store entry"
+        ),
+    )
 
 
 def test_confirmed_cooldown_returns_not_ready_result():
@@ -207,6 +223,7 @@ def test_confirmed_cooldown_returns_not_ready_result():
             "handlers.daily_gem_handler._return_from_store",
             return_value=True,
         ) as return_from_store,
+        patch("handlers.daily_gem_handler.log_result") as result_log,
         patch("handlers.daily_gem_handler.save_image"),
         patch("handlers.daily_gem_handler.time.sleep"),
     ):
@@ -214,6 +231,13 @@ def test_confirmed_cooldown_returns_not_ready_result():
 
     assert result == DailyGemResult.NOT_READY
     return_from_store.assert_called_once_with("test", "RUNNING")
+    result_log.assert_called_once_with(
+        "Daily Gem check complete — reward not ready",
+        detail=(
+            "[DAILY_GEM] result=not_ready session=test "
+            "reason=a cooldown was found while searching the Store"
+        ),
+    )
 
 
 def test_confirmed_cooldown_fails_when_store_return_is_unavailable():
@@ -243,6 +267,7 @@ def test_confirmed_cooldown_fails_when_store_return_is_unavailable():
             "handlers.daily_gem_handler._return_from_store",
             return_value=False,
         ) as return_from_store,
+        patch("handlers.daily_gem_handler.log_result") as result_log,
         patch("handlers.daily_gem_handler.save_image"),
         patch("handlers.daily_gem_handler.time.sleep"),
     ):
@@ -250,6 +275,13 @@ def test_confirmed_cooldown_fails_when_store_return_is_unavailable():
 
     assert result == DailyGemResult.FAILED
     return_from_store.assert_called_once_with("test", "RUNNING")
+    result_log.assert_called_once_with(
+        "Daily Gem check failed — the automation could not return to RUNNING",
+        detail=(
+            "[DAILY_GEM] result=failed session=test "
+            "reason=the automation could not return to RUNNING"
+        ),
+    )
 
 
 def test_home_origin_returns_through_bottom_navigation_and_verifies_home():

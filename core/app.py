@@ -2859,7 +2859,7 @@ class App:
 
         log(
             f"[MISSION_REWARDS] Starting reward probe from {new_state}",
-            "INFO",
+            "DEBUG",
         )
         if stop_blind_gem_tapper():
             self._blind_tapper_suspended = True
@@ -2910,7 +2910,7 @@ class App:
         reason = "badge" if badge_visible else "UTC rollover"
         log(
             f"[DAILY_GEM] Starting {reason} Store probe from state={new_state}",
-            "INFO",
+            "DEBUG",
         )
         if stop_blind_gem_tapper():
             self._blind_tapper_suspended = True

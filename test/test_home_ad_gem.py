@@ -64,6 +64,8 @@ def test_home_ad_gem_claim_revalidates_and_never_starts_blind_tapper():
         patch.object(ad_gems, "safe_tap", return_value=True) as tap,
         patch.object(ad_gems, "start_blind_gem_tapper") as start,
         patch.object(ad_gems, "stop_blind_gem_tapper") as stop,
+        patch.object(ad_gems, "log_action_intent") as action_log,
+        patch.object(ad_gems, "log_result") as result_log,
         patch.object(ad_gems.time, "sleep"),
     ):
         assert ad_gems.handle_home_ad_gem()
@@ -75,6 +77,18 @@ def test_home_ad_gem_claim_revalidates_and_never_starts_blind_tapper():
         retries=1,
         retry_delay=0.4,
         dispatch="now",
+    )
+    action_log.assert_called_once_with(
+        "Collecting the Home ad gem",
+        reason="the Home overlay indicates that a five-gem reward is available",
+        detail="[AD_GEM] source=home label=buttons.claim_ad_gem:home",
+    )
+    result_log.assert_called_once_with(
+        "Home ad-gem collection complete — reward collected",
+        detail=(
+            "[AD_GEM] result=collected source=home "
+            "label=buttons.claim_ad_gem:home"
+        ),
     )
 
 
@@ -105,11 +119,19 @@ def test_home_ad_gem_disappearance_before_action_fails_closed():
         patch.object(ad_gems, "safe_tap") as tap,
         patch.object(ad_gems, "start_blind_gem_tapper") as start,
         patch.object(ad_gems, "stop_blind_gem_tapper"),
+        patch.object(ad_gems, "log_result") as result_log,
     ):
         assert not ad_gems.handle_home_ad_gem()
 
     tap.assert_not_called()
     start.assert_not_called()
+    result_log.assert_called_once_with(
+        "Home ad-gem collection complete — no reward was collected",
+        detail=(
+            "[AD_GEM] result=no_op source=home "
+            "label=buttons.claim_ad_gem:home"
+        ),
+    )
 
 
 def test_blind_floating_gem_taps_retain_input_logging():
@@ -122,11 +144,13 @@ def test_blind_floating_gem_taps_retain_input_logging():
             patch.object(ad_gems.time, "time", side_effect=lambda: next(times)),
             patch.object(ad_gems.time, "sleep"),
             patch.object(ad_gems, "tap") as tap,
+            patch.object(ad_gems, "log_action_intent") as action_log,
+            patch.object(ad_gems, "log_result") as result_log,
         ):
-            ad_gems._blind_floating_gem_tapper(
+            ad_gems.start_blind_gem_tapper(
                 duration=1,
                 interval=1,
-                stop_event=ad_gems.threading.Event(),
+                blocking=True,
             )
     finally:
         ad_gems.AUTOMATION.state = original_state
@@ -136,4 +160,42 @@ def test_blind_floating_gem_taps_retain_input_logging():
         1200,
         label="floating_gem_blind_tap",
         log_it=True,
+    )
+    action_log.assert_called_once_with(
+        "Scanning for floating gems",
+        reason="an in-battle ad-gem overlay can coincide with a moving gem",
+        detail="[AD_GEM] duration_s=1 interval_s=1",
+    )
+    result_log.assert_called_once_with(
+        "Floating-gem scan complete — dispatched 1 tap",
+        detail=(
+            "[AD_GEM] result=completed taps=1 elapsed_s=1 "
+            "stop_requested=False failure=None"
+        ),
+    )
+
+
+def test_in_battle_ad_gem_has_one_intent_and_terminal_result():
+    with (
+        patch.object(ad_gems, "start_blind_gem_tapper") as start,
+        patch.object(ad_gems, "_collect_visible_ad_gem", return_value=True),
+        patch.object(ad_gems, "log_action_intent") as action_log,
+        patch.object(ad_gems, "log_result") as result_log,
+        patch.object(ad_gems.time, "sleep"),
+    ):
+        assert ad_gems.handle_ad_gem()
+
+    start.assert_called_once_with(duration=20, interval=1, blocking=False)
+    action_log.assert_called_once_with(
+        "Collecting the in-battle ad gem",
+        reason=(
+            "the current battle frame indicates that an ad-gem reward is available"
+        ),
+        detail="[AD_GEM] source=battle label=overlays.ad_gem",
+    )
+    result_log.assert_called_once_with(
+        "In-battle ad-gem collection complete — reward collected",
+        detail=(
+            "[AD_GEM] result=collected source=battle label=overlays.ad_gem"
+        ),
     )

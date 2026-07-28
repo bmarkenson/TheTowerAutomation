@@ -7,7 +7,7 @@ from core.clickmap_access import get_click
 from core.input import safe_tap
 from core.label_tapper import is_visible
 from core.run_state import AUTOMATION, RunState
-from utils.logger import log
+from utils.logger import log, log_action_intent, log_result
 
 _blind_tapper_active = threading.Event()
 _blind_tapper_stop = threading.Event()  # cooperative cancel
@@ -42,25 +42,38 @@ def _blind_floating_gem_tapper(duration=20, interval=1, stop_event=None):
         stop_event = _blind_tapper_stop
 
     if duration <= 0:
-        log("[WARN] Blind floating gem tapper called with non-positive duration; skipping", "WARN")
+        log(
+            "Blind floating gem tapper called with non-positive duration; skipping",
+            "WARN",
+        )
         _blind_tapper_active.clear()
         return
     if interval <= 0:
-        log("[WARN] Interval <= 0; clamping to 0.1s", "WARN")
+        log("Blind floating gem interval <= 0; clamping to 0.1s", "WARN")
         interval = 0.1
 
     coords = get_click("gesture_targets.floating_gem_blind_tap")
     if not coords:
-        log("[WARN] No blind tap location defined for floating gem", "WARN")
+        log("No blind tap location defined for floating gem", "WARN")
         _blind_tapper_active.clear()
         return
 
     x, y = coords
     label = "floating_gem_blind_tap"
 
+    log_action_intent(
+        "Scanning for floating gems",
+        reason="an in-battle ad-gem overlay can coincide with a moving gem",
+        detail=f"[AD_GEM] duration_s={duration} interval_s={interval}",
+    )
     start_ts = time.time()
     taps = 0
-    log(f"Floating gem tapping initiated (duration={duration}s, interval={interval}s)", "ACTION")
+    failure_reason = None
+    log(
+        f"[AD_GEM] Floating-gem scan started "
+        f"(duration={duration}s, interval={interval}s)",
+        "DEBUG",
+    )
 
     end_time = time.time() + duration
     next_tap_time = time.time()
@@ -74,7 +87,7 @@ def _blind_floating_gem_tapper(duration=20, interval=1, stop_event=None):
 
             if AUTOMATION.state != RunState.RUNNING:
                 if not pause_logged:
-                    log("[AD_GEM] Blind tapper paused (automation not RUNNING)", "INFO")
+                    log("[AD_GEM] Blind tapper paused (automation not RUNNING)", "DEBUG")
                     pause_logged = True
                 if pause_started is None:
                     pause_started = now
@@ -87,7 +100,7 @@ def _blind_floating_gem_tapper(duration=20, interval=1, stop_event=None):
                 next_tap_time += paused_duration
                 pause_started = None
             if pause_logged:
-                log("[AD_GEM] Blind tapper resumed", "INFO")
+                log("[AD_GEM] Blind tapper resumed", "DEBUG")
                 pause_logged = False
 
             if now < next_tap_time:
@@ -98,12 +111,39 @@ def _blind_floating_gem_tapper(duration=20, interval=1, stop_event=None):
                 tap(x, y, label=label, log_it=True)
                 taps += 1
             except Exception as e:
-                log(f"[ERROR] Blind gem tapper tap() failed: {e!r}", "ERROR")
+                failure_reason = repr(e)
+                log(f"Blind gem tapper tap() failed: {e!r}", "ERROR")
                 break
             next_tap_time = time.time() + interval
+    except Exception as exc:
+        failure_reason = repr(exc)
+        log(f"Blind gem tapper failed: {exc!r}", "ERROR")
     finally:
         elapsed = int(time.time() - start_ts)
-        log(f"Floating gem tapping finished (taps={taps}, elapsed≈{elapsed}s)", "ACTION")
+        was_stopped = stop_event.is_set()
+        tap_word = "tap" if taps == 1 else "taps"
+        if failure_reason is not None:
+            result_summary = (
+                "Floating-gem scan failed — input dispatch stopped unexpectedly"
+            )
+            disposition = "failed"
+        elif was_stopped:
+            result_summary = (
+                f"Floating-gem scan interrupted — dispatched {taps} {tap_word}"
+            )
+            disposition = "interrupted"
+        else:
+            result_summary = (
+                f"Floating-gem scan complete — dispatched {taps} {tap_word}"
+            )
+            disposition = "completed"
+        log_result(
+            result_summary,
+            detail=(
+                f"[AD_GEM] result={disposition} taps={taps} elapsed_s={elapsed} "
+                f"stop_requested={was_stopped} failure={failure_reason}"
+            ),
+        )
         _blind_tapper_active.clear()
         stop_event.clear()
 
@@ -134,37 +174,45 @@ def start_blind_gem_tapper(duration=20, interval=1, blocking=False):
         - The active state is tracked via `_blind_tapper_active`.
     """
     if duration <= 0:
-        log("[WARN] duration must be > 0; aborting request", "WARN")
+        log("Blind floating gem duration must be > 0; request ignored", "WARN")
         return
     if interval <= 0:
-        log("[WARN] interval must be > 0; aborting request", "WARN")
+        log("Blind floating gem interval must be > 0; request ignored", "WARN")
         return
 
     if _blind_tapper_active.is_set():
-        log("[INFO] Blind tapper already active; not starting another", "INFO")
+        log("[AD_GEM] Blind tapper already active; not starting another", "DEBUG")
         return
 
     coords = get_click("gesture_targets.floating_gem_blind_tap")
     if not coords:
-        log("[WARN] No blind tap location defined for floating gem; not starting", "WARN")
+        log("No blind tap location defined for floating gem; scan not started", "WARN")
         return
 
     _blind_tapper_stop.clear()
     _blind_tapper_active.set()
 
     if blocking:
-        log(f"[ACTION] Starting blind gem tapper (blocking) for {duration}s @ {interval}s", "ACTION")
-        try:
-            _blind_floating_gem_tapper(duration=duration, interval=interval, stop_event=_blind_tapper_stop)
-        finally:
-            pass
+        _blind_floating_gem_tapper(
+            duration=duration,
+            interval=interval,
+            stop_event=_blind_tapper_stop,
+        )
     else:
-        log(f"[ACTION] Starting blind gem tapper (background) for {duration}s @ {interval}s", "ACTION")
-        threading.Thread(
+        worker = threading.Thread(
             target=_blind_floating_gem_tapper,
-            kwargs={"duration": duration, "interval": interval, "stop_event": _blind_tapper_stop},
-            daemon=False  # keep alive inside the process
-        ).start()
+            kwargs={
+                "duration": duration,
+                "interval": interval,
+                "stop_event": _blind_tapper_stop,
+            },
+            daemon=False,  # keep alive inside the process
+        )
+        try:
+            worker.start()
+        except Exception as exc:
+            _blind_tapper_active.clear()
+            log(f"Could not start blind gem tapper: {exc!r}", "ERROR")
 
 
 def stop_blind_gem_tapper():
@@ -194,7 +242,7 @@ def _collect_visible_ad_gem(label: str) -> bool:
         # input could have changed the screen.
         if not is_visible(label):
             if not tapped_once:
-                log(f"[AD_GEM] {label} not visible; skipping tap", "INFO")
+                log(f"[AD_GEM] {label} not visible; skipping tap", "DEBUG")
             return tapped_once
 
         tapped = safe_tap(
@@ -204,7 +252,7 @@ def _collect_visible_ad_gem(label: str) -> bool:
             dispatch="now",
         )
         if not tapped:
-            log(f"[AD_GEM] Failed to tap {label} (match missing)", "WARN")
+            log(f"[AD_GEM] Failed to tap {label} (match missing)", "DEBUG")
             return False
         tapped_once = True
 
@@ -212,7 +260,7 @@ def _collect_visible_ad_gem(label: str) -> bool:
         if not is_visible(label):
             return True
 
-        log(f"[AD_GEM] {label} still visible after tap — retrying", "WARN")
+        log(f"[AD_GEM] {label} still visible after tap — retrying", "DEBUG")
         time.sleep(0.4)
 
     log(f"[AD_GEM] {label} persisted after multiple tap attempts", "ERROR")
@@ -222,11 +270,28 @@ def _collect_visible_ad_gem(label: str) -> bool:
 def handle_home_ad_gem() -> bool:
     """Collect the visible five-gem control from an actionable Home screen."""
 
-    log("Handling HOME_AD_GEMS_AVAILABLE overlay", "ACTION")
+    label = "buttons.claim_ad_gem:home"
+    log_action_intent(
+        "Collecting the Home ad gem",
+        reason="the Home overlay indicates that a five-gem reward is available",
+        detail=f"[AD_GEM] source=home label={label}",
+    )
     # Home cannot host the in-battle floating gem.  Ensure a prior bounded
     # tapper is winding down and never start a new one from this path.
     stop_blind_gem_tapper()
-    return _collect_visible_ad_gem("buttons.claim_ad_gem:home")
+    collected = _collect_visible_ad_gem(label)
+    log_result(
+        (
+            "Home ad-gem collection complete — reward collected"
+            if collected
+            else "Home ad-gem collection complete — no reward was collected"
+        ),
+        detail=(
+            f"[AD_GEM] result={'collected' if collected else 'no_op'} "
+            f"source=home label={label}"
+        ),
+    )
+    return collected
 
 
 def handle_ad_gem() -> bool:
@@ -251,9 +316,25 @@ def handle_ad_gem() -> bool:
         - Uses non-reentrant guard to prevent multiple simultaneous tappers.
         - Home uses ``handle_home_ad_gem`` and never starts this tapper.
     """
-    log("Handling AD_GEMS_AVAILABLE overlay", "ACTION")
+    label = "overlays.ad_gem"
+    log_action_intent(
+        "Collecting the in-battle ad gem",
+        reason="the current battle frame indicates that an ad-gem reward is available",
+        detail=f"[AD_GEM] source=battle label={label}",
+    )
     start_blind_gem_tapper(duration=20, interval=1, blocking=False)
 
-    collected = _collect_visible_ad_gem("overlays.ad_gem")
+    collected = _collect_visible_ad_gem(label)
     time.sleep(1)
+    log_result(
+        (
+            "In-battle ad-gem collection complete — reward collected"
+            if collected
+            else "In-battle ad-gem collection complete — no reward was collected"
+        ),
+        detail=(
+            f"[AD_GEM] result={'collected' if collected else 'no_op'} "
+            f"source=battle label={label}"
+        ),
+    )
     return collected

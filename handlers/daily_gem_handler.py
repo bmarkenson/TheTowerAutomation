@@ -10,7 +10,7 @@ from core.label_tapper import is_visible
 from core.scrolling import scroll_to_edge, scroll_until_visible
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
-from utils.logger import log, log_action_intent
+from utils.logger import log, log_action_intent, log_result
 from utils.ocr_utils import ocr_text_and_conf
 
 STORE_MENU_INDICATOR = "indicators.menu_store"
@@ -24,6 +24,30 @@ class DailyGemResult(str, Enum):
     CLAIMED = "claimed"
     NOT_READY = "not_ready"
     FAILED = "failed"
+
+
+def _finish_daily_gem_check(
+    result: DailyGemResult,
+    *,
+    session_id: str,
+    reason: str,
+) -> DailyGemResult:
+    """Emit the terminal operator result for one Daily Gem check."""
+
+    if result == DailyGemResult.CLAIMED:
+        summary = "Daily Gem check complete — reward claimed"
+    elif result == DailyGemResult.NOT_READY:
+        summary = "Daily Gem check complete — reward not ready"
+    else:
+        summary = f"Daily Gem check failed — {reason}"
+    log_result(
+        summary,
+        detail=(
+            f"[DAILY_GEM] result={result.value} session={session_id} "
+            f"reason={reason}"
+        ),
+    )
+    return result
 
 
 def _wait_for_label(label: str, *, timeout: float = 5.0, poll: float = 0.3) -> bool:
@@ -59,7 +83,7 @@ def _daily_gem_unavailable(screenshot) -> str | None:
         log(
             f"[DAILY_GEM] Free-gem cooldown detected "
             f"(OCR confidence={confidence:.1f})",
-            "INFO",
+            "DEBUG",
         )
         return DAILY_GEM_NOT_READY
     return None
@@ -71,7 +95,7 @@ def _open_store_for_current_screen() -> str | None:
     screenshot = capture_adb_screenshot()
     if screenshot is None:
         log("[DAILY_GEM] Cannot identify source screen before opening Store", "WARN")
-        return False
+        return None
     detection = detect_state_and_overlays(screenshot)
     state = detection.get("state")
     if state == "HOME_SCREEN":
@@ -94,26 +118,46 @@ def handle_daily_gem() -> DailyGemResult:
     log_action_intent(
         "Checking Daily Gem availability",
         reason="the daily Store reward may be claimable after rollover",
+        detail=f"[DAILY_GEM] session={session_id}",
     )
-    log(f"Handling DAILY AD GEM — Session: {session_id}", "INFO")
 
     # Tap into Store
     source_state = _open_store_for_current_screen()
     if source_state is None:
-        return _abort_handler("Goto Store", session_id)
+        return _finish_daily_gem_check(
+            _abort_handler("Goto Store", session_id),
+            session_id=session_id,
+            reason="the Store could not be opened from a verified source screen",
+        )
     time.sleep(1.2)
     if not _wait_for_label(STORE_MENU_INDICATOR, timeout=4.0):
-        return _abort_handler("Store indicator not detected", session_id)
+        return _finish_daily_gem_check(
+            _abort_handler("Store indicator not detected", session_id),
+            session_id=session_id,
+            reason="the Store indicator was not detected",
+        )
 
     store_entry = capture_adb_screenshot()
     if store_entry is None or not is_visible(STORE_MENU_INDICATOR, screenshot=store_entry):
-        return _abort_handler("Store entry capture not verified", session_id)
+        return _finish_daily_gem_check(
+            _abort_handler("Store entry capture not verified", session_id),
+            session_id=session_id,
+            reason="the Store entry could not be verified",
+        )
 
     if _daily_gem_unavailable(store_entry) == DAILY_GEM_NOT_READY:
         log("[DAILY_GEM] Cooldown visible at Store entry; skipping scroll", "DEBUG")
         if not _return_from_store(session_id, source_state):
-            return DailyGemResult.FAILED
-        return DailyGemResult.NOT_READY
+            return _finish_daily_gem_check(
+                DailyGemResult.FAILED,
+                session_id=session_id,
+                reason=f"the automation could not return to {source_state}",
+            )
+        return _finish_daily_gem_check(
+            DailyGemResult.NOT_READY,
+            session_id=session_id,
+            reason="a cooldown was visible at Store entry",
+        )
     if is_visible(DAILY_GEM_BUTTON, screenshot=store_entry):
         log("[DAILY_GEM] Claim is already visible at Store entry; skipping scroll", "DEBUG")
         claim_screenshot = store_entry
@@ -129,7 +173,11 @@ def handle_daily_gem() -> DailyGemResult:
             settle_s=1.0,
         )
         if not top.success or top.screenshot is None:
-            return _abort_handler(f"Goto top of Store ({top.reason})", session_id)
+            return _finish_daily_gem_check(
+                _abort_handler(f"Goto top of Store ({top.reason})", session_id),
+                session_id=session_id,
+                reason=f"the Store top could not be reached ({top.reason})",
+            )
 
         save_image(top.screenshot, f"{session_id}_store_top")
 
@@ -146,29 +194,60 @@ def handle_daily_gem() -> DailyGemResult:
             stop_fn=_daily_gem_unavailable,
         )
         if claim.reason == DAILY_GEM_NOT_READY:
-            log("[DAILY_GEM] No claim available; leaving Store.", "INFO")
+            log("[DAILY_GEM] No claim available; leaving Store", "DEBUG")
             if not _return_from_store(session_id, source_state):
-                return DailyGemResult.FAILED
-            return DailyGemResult.NOT_READY
+                return _finish_daily_gem_check(
+                    DailyGemResult.FAILED,
+                    session_id=session_id,
+                    reason=f"the automation could not return to {source_state}",
+                )
+            return _finish_daily_gem_check(
+                DailyGemResult.NOT_READY,
+                session_id=session_id,
+                reason="a cooldown was found while searching the Store",
+            )
         if not claim.success or claim.screenshot is None:
-            return _abort_handler(f"Find Claim Daily Gems ({claim.reason})", session_id)
+            return _finish_daily_gem_check(
+                _abort_handler(
+                    f"Find Claim Daily Gems ({claim.reason})",
+                    session_id,
+                ),
+                session_id=session_id,
+                reason=f"the Daily Gem card could not be found ({claim.reason})",
+            )
         claim_screenshot = claim.screenshot
 
     save_image(claim_screenshot, f"{session_id}_claim_daily_gems")
 
     # Claim Daily Gem
     if not tap_if_visible(DAILY_GEM_BUTTON, retries=1):
-        return _abort_handler("Claim_daily_gems", session_id)
+        return _finish_daily_gem_check(
+            _abort_handler("Claim_daily_gems", session_id),
+            session_id=session_id,
+            reason="the verified Daily Gem control could not be tapped",
+        )
     time.sleep(1.2)
 
     # Skip
     if not tap_if_visible("buttons.skip_reward_reveal", retries=1):
-        return _abort_handler("Skip Claim_daily_gems", session_id)
+        return _finish_daily_gem_check(
+            _abort_handler("Skip Claim_daily_gems", session_id),
+            session_id=session_id,
+            reason="the reward reveal could not be dismissed",
+        )
     time.sleep(1.2)
 
     if not _return_from_store(session_id, source_state):
-        return DailyGemResult.FAILED
-    return DailyGemResult.CLAIMED
+        return _finish_daily_gem_check(
+            DailyGemResult.FAILED,
+            session_id=session_id,
+            reason=f"the automation could not return to {source_state}",
+        )
+    return _finish_daily_gem_check(
+        DailyGemResult.CLAIMED,
+        session_id=session_id,
+        reason="the reward was claimed and the source screen was restored",
+    )
 
 
 def _make_session_id():
@@ -182,7 +261,7 @@ def save_image(img, tag):
     path = os.path.join("screenshots", "matches", f"{tag}.png")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     cv2.imwrite(path, img)
-    log(f"[CAPTURE] Saved screenshot: {path}", "INFO")
+    log(f"[CAPTURE] Saved screenshot: {path}", "DEBUG")
 
 
 def _return_from_store(session_id: str, source_state: str) -> bool:

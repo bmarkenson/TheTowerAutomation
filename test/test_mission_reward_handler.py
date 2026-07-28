@@ -460,22 +460,17 @@ def test_daily_claim_loop_revalidates_before_mission_and_chest_actions():
         for entry in reward_log.call_args_list
         if entry.args[1] == "DEBUG"
     ]
-    assert len(debug_messages) == 6
+    assert len(debug_messages) == 7
     assert "initial Daily Missions review" in debug_messages[0]
     assert "previous Daily Mission reward was claimed" in debug_messages[2]
     assert "previous Weekly Mission chest was claimed" in debug_messages[4]
+    assert "Weekly chest review complete" in debug_messages[6]
     operational_messages = [
         entry.args
         for entry in reward_log.call_args_list
         if entry.args[1] != "DEBUG"
     ]
-    assert operational_messages == [
-        (
-            "[MISSION_REWARDS] Weekly chest review complete: "
-            "checks=3 chests_claimed=1 post_claim_rechecks=2",
-            "INFO",
-        )
-    ]
+    assert operational_messages == []
 
 
 def test_sunday_hold_still_claims_glowing_weekly_chest():
@@ -787,15 +782,16 @@ def test_home_reward_handler_uses_direct_navigation_and_does_not_close_menu():
         patch.object(rewards, "measure_home_reward_badges", return_value=badges),
         patch.object(rewards, "tap_if_visible", return_value=True) as tap,
         patch.object(rewards, "_wait_for_state", side_effect=[daily, event]),
-        patch.object(rewards, "_claim_daily_rewards", return_value=(True, 0)),
+        patch.object(rewards, "_claim_daily_rewards", return_value=(True, 1)),
         patch.object(rewards, "_claim_event_rewards", return_value=(True, 0)),
         patch.object(rewards, "_return_to_reward_hub", return_value=home),
         patch.object(rewards, "_close_menu") as close_menu,
         patch.object(rewards, "log_action_intent") as action_intent,
+        patch.object(rewards, "log_result") as result_log,
     ):
         result = rewards.handle_mission_rewards(home)
 
-    assert result == MissionRewardResult.NOTHING_AVAILABLE
+    assert result == MissionRewardResult.CLAIMED
     action_intent.assert_called_once_with(
         "Reviewing mission rewards",
         reason=(
@@ -808,6 +804,14 @@ def test_home_reward_handler_uses_direct_navigation_and_does_not_close_menu():
         "navigation.home_event",
     ]
     close_menu.assert_not_called()
+    result_log.assert_called_once_with(
+        "Mission reward review complete — claimed 1 reward",
+        detail=(
+            "[MISSION_REWARDS] result=claimed source=HOME_SCREEN "
+            "daily=1 event=0 guild=0 "
+            "reason=all enabled reward sections completed"
+        ),
+    )
 
 
 def test_running_reward_handler_preserves_side_menu_navigation_and_cleanup():
@@ -826,6 +830,7 @@ def test_running_reward_handler_preserves_side_menu_navigation_and_cleanup():
         patch.object(rewards, "_claim_event_rewards", return_value=(True, 0)),
         patch.object(rewards, "_return_to_reward_hub", return_value=menu),
         patch.object(rewards, "_close_menu", return_value=True) as close_menu,
+        patch.object(rewards, "log_result") as result_log,
     ):
         result = rewards.handle_mission_rewards(menu)
 
@@ -835,6 +840,35 @@ def test_running_reward_handler_preserves_side_menu_navigation_and_cleanup():
         "navigation.menu_event",
     ]
     close_menu.assert_called_once_with(menu)
+    result_log.assert_called_once_with(
+        "Mission reward review complete — no claimable rewards found",
+        detail=(
+            "[MISSION_REWARDS] result=nothing_available source=RUNNING "
+            "daily=0 event=0 guild=0 "
+            "reason=all enabled reward sections completed without a claim"
+        ),
+    )
+
+
+def test_reward_handler_emits_failed_result_when_hub_cannot_be_verified():
+    screenshot = np.zeros((2, 2, 3), dtype=np.uint8)
+
+    with (
+        patch.object(rewards, "_reward_source_state", return_value="RUNNING"),
+        patch.object(rewards, "_ensure_reward_hub", return_value=None),
+        patch.object(rewards, "log_result") as result_log,
+    ):
+        result = rewards.handle_mission_rewards(screenshot)
+
+    assert result == MissionRewardResult.FAILED
+    result_log.assert_called_once_with(
+        "Mission reward review failed — the reward hub could not be verified",
+        detail=(
+            "[MISSION_REWARDS] result=failed source=RUNNING "
+            "daily=0 event=0 guild=0 "
+            "reason=the reward hub could not be verified"
+        ),
+    )
 
 
 def test_event_inventory_piggybacks_on_badge_triggered_claim_pass():
