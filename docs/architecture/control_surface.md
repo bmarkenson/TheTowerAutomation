@@ -164,19 +164,21 @@ memory only. The API deliberately sends no CORS permission.
 
 ## Activity log audiences
 
-The complete `logs/actions.log` remains the durable diagnostic stream. Normal
-operator activity uses `STATUS`, `ACTION`, `INFO`, `WARN`, `ERROR`, and `FAIL`;
-coordinate, match, retry, detector, and raw input evidence uses `DEBUG`,
-`MATCH`, and `STATE`. An operation may therefore write a concise operator line
-and an adjacent diagnostic line with the same timestamp instead of forcing one
-message to serve both audiences.
+The complete `logs/actions.log` remains the durable chronological stream. The
+canonical level semantics are defined by the
+[runtime action-log contract](../runtime_operations.md#action-log-contract).
+The target Operational view contains `ACTION`, `RESULT`, `WARN`, `ERROR`, and
+`FAIL`; individual device actions and their evidence remain available through
+`INPUT`, `DEBUG`, `MATCH`, and `STATE`.
 
 The periodic operator heartbeat contains state, wave, and Coins/min. Its paired
 `[STATUS_DETAIL]` diagnostic retains menu, secondary-state, and overlay
 evidence. Until the planned atomic runtime snapshot replaces log-derived live
 status, the Linux adapter accepts both this paired format and the earlier
 all-in-one `STATUS` format so existing log tails remain usable across an
-upgrade.
+upgrade. The target GUI presents only the latest status and a prior meaningful
+transition outside the Operational activity list while retaining complete
+status history in `Status only` and `All levels`.
 
 Control request examples:
 

@@ -731,6 +731,27 @@ def test_activity_filters_levels_before_applying_limit(tmp_path):
     ]
 
 
+def test_activity_preserves_result_and_input_levels(tmp_path):
+    log_path = tmp_path / "logs" / "actions.log"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text(
+        "[ACTION 2026-07-19 17:00:00] Reviewing mission rewards\n"
+        "[INPUT 2026-07-19 17:00:01] Open Daily Missions\n"
+        "[RESULT 2026-07-19 17:00:02] Mission reward review complete\n",
+        encoding="utf-8",
+    )
+
+    response = _service(tmp_path).activity(
+        levels=["input", "RESULT"],
+    )
+
+    assert response["available_levels"] == ["ACTION", "INPUT", "RESULT"]
+    assert [(entry["level"], entry["message"]) for entry in response["items"]] == [
+        ("INPUT", "Open Daily Missions"),
+        ("RESULT", "Mission reward review complete"),
+    ]
+
+
 def test_activity_reports_replacement_log_identity_after_rotation(tmp_path):
     log_path = tmp_path / "logs" / "actions.log"
     log_path.parent.mkdir(parents=True)

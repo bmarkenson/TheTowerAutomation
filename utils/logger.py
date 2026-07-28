@@ -234,6 +234,28 @@ def log_mission(msg: str, level: str = "INFO") -> None:
     log(msg, level, extra_path=_MISSION_LOG_PATH)
 
 
+def _log_summary(
+    summary: str,
+    level: str,
+    *,
+    detail: Optional[str],
+    extra_path: Optional[str],
+    console: Optional[bool],
+) -> None:
+    """Write one semantic summary with optional paired diagnostic evidence."""
+
+    if detail is None:
+        log(summary, level, extra_path=extra_path, console=console)
+        return
+    _paired_log(
+        summary,
+        level,
+        detail,
+        extra_path=extra_path,
+        console=console,
+    )
+
+
 def log_action(
     summary: str,
     *,
@@ -241,15 +263,48 @@ def log_action(
     extra_path: Optional[str] = None,
     console: Optional[bool] = None,
 ) -> None:
-    """Log an operator-facing action with optional paired diagnostic detail."""
+    """Log one operator-facing workflow action with optional diagnostic detail."""
 
-    if detail is None:
-        log(summary, "ACTION", extra_path=extra_path, console=console)
-        return
-    _paired_log(
+    _log_summary(
         summary,
         "ACTION",
-        detail,
+        detail=detail,
+        extra_path=extra_path,
+        console=console,
+    )
+
+
+def log_result(
+    summary: str,
+    *,
+    detail: Optional[str] = None,
+    extra_path: Optional[str] = None,
+    console: Optional[bool] = None,
+) -> None:
+    """Log one terminal workflow outcome with optional diagnostic detail."""
+
+    _log_summary(
+        summary,
+        "RESULT",
+        detail=detail,
+        extra_path=extra_path,
+        console=console,
+    )
+
+
+def log_input(
+    summary: str,
+    *,
+    detail: Optional[str] = None,
+    extra_path: Optional[str] = None,
+    console: Optional[bool] = None,
+) -> None:
+    """Log one device input with optional paired dispatch evidence."""
+
+    _log_summary(
+        summary,
+        "INPUT",
+        detail=detail,
         extra_path=extra_path,
         console=console,
     )

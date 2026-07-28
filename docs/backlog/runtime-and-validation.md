@@ -184,20 +184,36 @@ evidence.
      outcomes from the estimate.
 4. [ ] Separate concise operational activity from diagnostic detail without
    discarding either record.
-   - [x] Emit operator-facing `ACTION` and `STATUS` summaries for intent and
-     outcome, with paired `DEBUG` detail where coordinates, matches, retries,
-     or `TAP_SAFE` evidence remains useful.
+   - [x] The original split emitted operator-facing `ACTION` and `STATUS`
+     summaries for intent and outcome, with paired `DEBUG` detail where
+     coordinates, matches, retries, or `TAP_SAFE` evidence remained useful.
    - [x] Retain both forms in the complete log, default Recent Activity to the
      operational view, and keep diagnostics available through filters.
      Commit `372cff3` implements the paired operator/diagnostic log stream.
-   - [ ] On Windows, verify that the default view remains concise during normal
-     automation, `Diagnostics` exposes the paired status/input evidence, and
-     `All levels` preserves the complete ordering.
    - [x] Before a guarded or multi-step operation, log a human-readable intent
      summary describing what automation is trying to accomplish and why, not
      only the individual actions it performs. Commit `8bbd3eb` adds the shared
      intent-header helper and adopts it across the primary session, setup,
      reward, and terminal workflows.
+   - [ ] Complete the next logging-taxonomy migration.
+     - [x] Define `ACTION` as one What/Why workflow notice, `RESULT` as its
+       terminal outcome, and `INPUT` as an individual device action. Preserve
+       status as a separate snapshot stream, reserve warnings for persistent
+       operator-relevant degradation, and add the logger primitives and
+       regression coverage.
+     - [ ] Migrate centralized tap, swipe, and press emitters from `ACTION` to
+       `INPUT` while retaining paired `DEBUG` evidence.
+     - [ ] Pair operator-meaningful workflows with exactly one `ACTION` and one
+       terminal `RESULT`; downgrade nested implementation notices.
+     - [ ] Remove `STATUS` and general `INFO` from the default Operational
+       activity levels. Present the latest status and prior meaningful
+       transition separately while retaining complete status history.
+     - [ ] Audit recurring warnings in focused domain batches. Low-level
+       helpers should return structured outcomes; workflow owners decide when
+       persistent impact warrants a transition-based, rate-limited warning.
+     - [ ] Verify that Operational reads as What/Why followed by Result,
+       Diagnostics preserves input and decision evidence, and All Levels
+       preserves complete ordering.
    - [ ] Give every startup, session-preflight, and recovery check a concise
      human-readable result that includes the requirement, expected and observed
      state, and final disposition such as passed, failed, waived, or fallback.

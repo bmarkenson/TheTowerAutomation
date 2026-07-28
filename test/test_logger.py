@@ -60,6 +60,61 @@ def test_log_action_intent_writes_one_human_readable_header(
     )
 
 
+def test_log_result_pairs_terminal_summary_with_diagnostic_detail(
+    tmp_path,
+    monkeypatch,
+):
+    isolated_log = tmp_path / "actions.log"
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(isolated_log))
+
+    logger.log_result(
+        "Mission reward review complete — no rewards available",
+        detail="daily=0 weekly=0 event=0 guild=0 disposition=noop",
+        console=False,
+    )
+
+    lines = isolated_log.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2
+    assert lines[0].startswith("[RESULT ")
+    assert lines[0].endswith(
+        "] Mission reward review complete — no rewards available"
+    )
+    assert lines[1].startswith("[DEBUG ")
+    assert lines[1].endswith(
+        "] daily=0 weekly=0 event=0 guild=0 disposition=noop"
+    )
+    result_timestamp = lines[0].split("]", 1)[0].removeprefix("[RESULT ")
+    detail_timestamp = lines[1].split("]", 1)[0].removeprefix("[DEBUG ")
+    assert result_timestamp == detail_timestamp
+
+
+def test_log_input_pairs_human_summary_with_dispatch_detail(
+    tmp_path,
+    monkeypatch,
+):
+    isolated_log = tmp_path / "actions.log"
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(isolated_log))
+
+    logger.log_input(
+        "Swipe requested: Weekly Mission chests",
+        detail="SWIPE_NOW: weekly_mission_chests (900,390)→(650,390) in 250ms",
+        console=False,
+    )
+
+    lines = isolated_log.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2
+    assert lines[0].startswith("[INPUT ")
+    assert lines[0].endswith("] Swipe requested: Weekly Mission chests")
+    assert lines[1].startswith("[DEBUG ")
+    assert lines[1].endswith(
+        "] SWIPE_NOW: weekly_mission_chests "
+        "(900,390)→(650,390) in 250ms"
+    )
+    input_timestamp = lines[0].split("]", 1)[0].removeprefix("[INPUT ")
+    detail_timestamp = lines[1].split("]", 1)[0].removeprefix("[DEBUG ")
+    assert input_timestamp == detail_timestamp
+
+
 def test_action_log_rotation_bounds_oversized_history_and_keeps_action_pair(
     tmp_path,
     monkeypatch,

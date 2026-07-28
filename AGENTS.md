@@ -72,10 +72,15 @@ current process and device.
   boundary.
 - Write operator-facing logs for comprehension, not just internal mechanics:
   state what automation is doing and why. Before a guarded or multi-step input
-  workflow, emit one `log_action_intent(...)` header before its first input,
-  retain the individual tap/swipe `ACTION` records, and keep coordinates,
-  matches, and retries in paired `DEBUG` detail. Follow the action-log contract
-  in [`docs/runtime_operations.md`](docs/runtime_operations.md).
+  workflow, emit one `ACTION` through `log_action_intent(...)` before its first
+  input and one terminal `RESULT`. Record individual taps and swipes as `INPUT`
+  with coordinates, matches, and retries in paired `DEBUG` detail. Reserve
+  `WARN` for persistent, operator-relevant degradation rather than expected
+  negative searches or ordinary retries. During the staged logging migration,
+  untouched legacy workflows and input emitters may not yet conform; new or
+  modified logging must follow the target contract rather than extending the
+  legacy pattern. Follow the action-log contract in
+  [`docs/runtime_operations.md`](docs/runtime_operations.md#action-log-contract).
 - Keep `YamlStrategy` and the runtime evaluator generic. Prefer compact source
   configuration plus explicit generated plans over strategy-name conditionals
   or duplicated expanded YAML.

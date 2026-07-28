@@ -84,16 +84,42 @@ timeout 8s adb -s localhost:5555 get-state
   confirm a remaining PID and OS-lock evidence before treating it as a live
   owner.
 - `actions.log` records what the automation intended, observed, and dispatched.
-  Guarded and multi-step workflows begin with a concise `ACTION` header that
-  explains their purpose before the individual input records. The log retains
-  both concise operator entries and paired diagnostic evidence; control-surface
-  Recent Activity defaults to the operational levels, while `Diagnostics` or
-  `All levels` exposes coordinates, detector state, retries, and other
-  low-level detail.
+  Guarded and multi-step workflows follow the
+  [action-log contract](#action-log-contract). The complete log retains both
+  concise operator entries and paired diagnostic evidence.
 - A fresh screenshot is authoritative for the visible UI and can disprove a
   stale wave/status hint.
 - Never infer `RUNNING`, `PAUSED`, Game Over, or Home solely from a dated
   handoff.
+
+## Action-log contract
+
+The complete `actions.log` is the durable chronological record. Log levels
+describe the role of an entry so a display can show a concise operational
+narrative without discarding input or diagnostic evidence.
+
+| Level | Contract |
+| --- | --- |
+| `ACTION` | One human-readable What/Why notice before an operator-meaningful workflow sends its first input. Nested implementation steps are not separate actions unless they are independently meaningful. |
+| `RESULT` | One terminal outcome for each `ACTION`, with a disposition such as completed, no-op, deferred, interrupted, or failed and the most useful counts or observed values. A warning or error may supplement but does not replace the result. |
+| `INPUT` | One individual device input such as a tap, swipe, or press. Pair coordinates, verification, dispatch mode, and retry mechanics at `DEBUG`. |
+| `STATUS` | A periodic current-state snapshot. Status is retained in the log but belongs in a dedicated current-status presentation rather than the operational activity narrative. |
+| `WARN` | An unexpected, persistent degradation with operator-relevant impact while automation can continue. Emit on the transition into degradation, rate-limit reminders, and record recovery. Expected negative searches and transient failures within their retry budget are not warnings. |
+| `ERROR` / `FAIL` | A requested operation or runtime boundary could not complete safely. Preserve the existing distinction between a contained component error and a broader runtime failure. |
+| `INFO` | General lifecycle or narrative detail that remains available outside the concise operational view. |
+| `DEBUG` / `MATCH` / `STATE` | Internal decisions, coordinates, retries, detector evidence, and raw state transitions. |
+
+The target default Operational activity levels are `ACTION`, `RESULT`, `WARN`,
+`ERROR`, and `FAIL`. Diagnostics includes `INPUT`, `DEBUG`, `MATCH`, and
+`STATE`; `All levels` preserves the complete ordering. The current GUI and
+legacy input call sites are being migrated in stages under
+[`runtime-and-validation.md`](backlog/runtime-and-validation.md); until that
+work completes, some individual inputs may still appear as `ACTION`, and the
+current Operational preset still includes `STATUS` and `INFO`.
+
+Low-level helpers should return structured reasons and keep ordinary outcomes
+diagnostic. The workflow owner decides whether a result is a no-op, a failed
+operation, or a persistent degradation worth surfacing to the operator.
 
 ## Pause, resume, and process replacement
 
