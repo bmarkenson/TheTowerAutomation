@@ -150,7 +150,27 @@ public sealed class ControlSurfaceApi : IDisposable
         {
             // Keep the HTTP status when the error body is not JSON.
         }
-        throw new InvalidOperationException(message);
+        throw new InvalidOperationException(AddControlServerRestartHint(message));
+    }
+
+    internal static string AddControlServerRestartHint(string message)
+    {
+        var strategySchemaMismatch =
+            message.Contains("THETOWER_STRATEGY", StringComparison.OrdinalIgnoreCase)
+            && message.Contains("must be one of", StringComparison.OrdinalIgnoreCase);
+        strategySchemaMismatch |= message.Contains(
+            "Strategy must be one of:",
+            StringComparison.OrdinalIgnoreCase);
+        if (!strategySchemaMismatch)
+        {
+            return message;
+        }
+        return message
+            + "\n\nThe Linux control server may still be running older code. "
+            + "Click 'Restart Linux API service' in the control surface (or run "
+            + "'systemctl --user restart thetower-control-surface.service' on "
+            + "Linux), then retry. Restarting the control server does not restart "
+            + "automation or alter the active battle.";
     }
 
     public void Dispose() => _http.Dispose();
