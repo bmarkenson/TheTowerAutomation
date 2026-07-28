@@ -305,6 +305,66 @@ def test_current_live_second_wind_wings_match_calibrated_regions():
     assert right.confidence >= 0.85
 
 
+def test_one_visible_wing_disproves_second_wind_activation():
+    armed_crop = cv2.imread(
+        str(FIXTURES / "second_wind_wings_live_20260727.png")
+    )
+    occluded_crop = cv2.imread(
+        str(FIXTURES / "second_wind_one_wing_occluded_20260728.png")
+    )
+    assert armed_crop is not None
+    assert occluded_crop is not None
+
+    armed_frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    armed_frame[430:530, 470:610] = armed_crop
+    occluded_frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    occluded_frame[430:530, 470:610] = occluded_crop
+
+    left = get_match_result(
+        "indicators.second_wind_left_wing",
+        screenshot=occluded_frame,
+    )
+    right = get_match_result(
+        "indicators.second_wind_right_wing",
+        screenshot=occluded_frame,
+    )
+    assert left.matched
+    assert not right.matched
+
+    tracker = BattleActivationTracker(
+        presence_confirmation_frames=1,
+        second_wind_absence_confirmation_frames=4,
+    )
+
+    def match_visual(dot_path, *, screenshot):
+        if dot_path.startswith("indicators.second_wind_"):
+            return get_match_result(dot_path, screenshot=screenshot)
+        return _match(visible=True)
+
+    with patch(
+        "core.battle_activation_tracker.get_match_result",
+        side_effect=match_visual,
+    ):
+        assert tracker.observe(
+            armed_frame,
+            ui_state="RUNNING",
+            wave=2200,
+            wave_confidence=98.0,
+            wave_observed_at=None,
+        ) == []
+        for wave in range(2219, 2223):
+            assert tracker.observe(
+                occluded_frame,
+                ui_state="RUNNING",
+                wave=wave,
+                wave_confidence=98.0,
+                wave_observed_at=None,
+            ) == []
+
+    assert tracker.snapshot()["second_wind_activations"] == []
+    assert tracker.drain_evidence_captures() == []
+
+
 def test_confirmed_activation_preserves_first_absent_frame_as_evidence():
     tracker = BattleActivationTracker(
         presence_confirmation_frames=1,

@@ -331,8 +331,8 @@ class BattleActivationTracker:
             state.reset_streaks()
             return None
 
-        present = all(match.matched for match in matches)
-        if present:
+        matched = tuple(match.matched for match in matches)
+        if all(matched):
             state.visible_streak += 1
             state.last_presence_confidence = min(
                 float(match.confidence) for match in matches
@@ -343,6 +343,12 @@ class BattleActivationTracker:
             return None
 
         state.visible_streak = 0
+        if state.armed and any(matched):
+            # Both wings establish that Second Wind is equipped and available,
+            # but either surviving wing disproves activation. Battle effects
+            # frequently obscure one side without hiding the other.
+            state.clear_pending_absence()
+            return None
         if not state.armed:
             state.clear_pending_absence()
             return None
