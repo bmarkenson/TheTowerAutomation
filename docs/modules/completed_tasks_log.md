@@ -37,6 +37,41 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-28 wave-addressed Perk selection timeline
+
+- Automatic-Perk runs now read the compact top-bar
+  `current wave / next Perk wave` control and require two stable observations
+  before arming or reacting to a schedule change.
+- Before Perk Wave Requirement reaches `-75%`, each changed schedule opens the
+  guarded Perks panel, captures the complete selected list, and records its
+  before/after diff as one simultaneous unordered batch at the original
+  scheduled wave. The batch that reaches `-75%` still uses this complete path.
+- Once a complete snapshot proves PWR is maxed, later schedule changes use the
+  newest complete top row and record exactly one selection. Mid-battle process
+  attachment first establishes a complete baseline and does not invent
+  historical selection waves.
+- Every panel open, close, and swipe rechecks persistent action authority.
+  Pause may leave only the observer-owned panel route open; Resume continues or
+  restores it, including the edge where capture completed immediately before
+  Pause.
+- Battle and Tournament runtime records retain the timeline, and Markdown
+  renders scheduled wave, observed wave, level transitions, and the explicit
+  within-batch ordering semantics. Successful action-log results name the
+  selected perk or batch.
+- Focused tracker, OCR, route-guard, pause-recovery, and rendering validation
+  passed 47 tests. The complete suite passed 831 sandbox-compatible tests; its
+  sole loopback-socket denial passed separately on the approved host path, for
+  832 total.
+- The explicitly owned Tier 19 live test observed the first top-bar transition
+  scheduled for wave 191, completed its full panel capture at observed wave
+  210, and logged the batch as recorded. User-authorized guarded cleanup
+  Surrendered only that test battle and restored the stopped system to verified
+  `HOME_SCREEN / NEW_BATTLE`.
+- Implemented in commit `8685a79`. The same live pass exposed two unrelated
+  pre-existing anomalies—repeated Demon Mode inventory misses and Stop waiting
+  inside an in-progress Home setup—which remain recorded in
+  [`../observed_issues.md`](../observed_issues.md).
+
 ### 2026-07-27–28 Second Wind activation waves and transition evidence
 
 - The run-scoped survival observer now records every confirmed Second Wind
