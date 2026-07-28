@@ -7,6 +7,7 @@ import pytest
 import core.card_recharge_modes as recharge
 from core.card_recharge_modes import (
     CardRechargeMode,
+    CardRechargeModeError,
     ensure_card_recharge_modes,
     measure_card_recharge_mode,
     normalize_card_recharge_modes,
@@ -193,6 +194,39 @@ class _CardRouter:
         return True
 
 
+class _NukeFirstEdgeRouter(_CardRouter):
+    """Model the live failure: Nuke first, then the true top edge."""
+
+    def __init__(self):
+        super().__init__(mismatched=False, start="nuke")
+
+    def swipe(self, target):
+        self.swipes.append(target)
+        if target == "gesture_targets.goto_top:cards_inventory":
+            self.current = self.top
+            return True
+        assert target == "gesture_targets.goto_next:cards_inventory"
+        if self.current is self.top:
+            self.current = self.demon_inventory
+        elif self.current is self.demon_inventory:
+            self.current = self.nuke_inventory
+        return True
+
+
+class _MissingDemonRouter(_CardRouter):
+    def __init__(self):
+        super().__init__(mismatched=False, start="nuke")
+
+    def swipe(self, target):
+        self.swipes.append(target)
+        if target == "gesture_targets.goto_top:cards_inventory":
+            self.current = self.top
+            return True
+        assert target == "gesture_targets.goto_next:cards_inventory"
+        self.current = self.nuke_inventory
+        return True
+
+
 def _ensure(router: _CardRouter):
     return ensure_card_recharge_modes(
         REQUIRED,
@@ -258,6 +292,46 @@ def test_visible_cards_are_verified_in_any_order_and_stop_upward_search_early():
     assert router.close_taps == ["Nuke", "Demon Mode"]
     assert router.swipes == ["gesture_targets.goto_top:cards_inventory"]
     assert [mode.label for mode in result.modes] == ["Demon Mode", "Nuke"]
+
+
+def test_nuke_first_scan_reaches_top_edge_then_overlaps_to_demon():
+    router = _NukeFirstEdgeRouter()
+
+    result = _ensure(router)
+
+    assert result.valid
+    assert router.long_presses == [
+        "buttons.card_inventory:nuke",
+        "buttons.card_inventory:demon_mode",
+    ]
+    assert router.swipes == [
+        "gesture_targets.goto_top:cards_inventory",
+        "gesture_targets.goto_top:cards_inventory",
+        "gesture_targets.goto_next:cards_inventory",
+    ]
+
+
+def test_missing_card_retains_each_inspected_viewport(tmp_path, monkeypatch):
+    router = _MissingDemonRouter()
+    monkeypatch.setattr(recharge, "_FAILURE_EVIDENCE_DIR", tmp_path)
+
+    with pytest.raises(
+        CardRechargeModeError,
+        match="Demon Mode Card was not found",
+    ):
+        _ensure(router)
+
+    evidence_dirs = list(tmp_path.glob("CardRecharge*"))
+    assert len(evidence_dirs) == 1
+    evidence_files = sorted(evidence_dirs[0].glob("*.png"))
+    assert [path.name for path in evidence_files] == [
+        "01_initial.png",
+        "02_towards_top.png",
+        "03_towards_top.png",
+        "04_search.png",
+        "05_search.png",
+    ]
+    assert all(cv2.imread(str(path)) is not None for path in evidence_files)
 
 
 def test_mismatched_card_recharge_modes_are_toggled_and_reverified():

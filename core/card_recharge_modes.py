@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from enum import Enum
+from pathlib import Path
 import time
-from typing import Any, Callable, Iterator, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional
 
 import cv2
 import numpy as np
 
 from core.input import TapVerification, safe_long_press, safe_tap, swipe_now
 from core.matcher import get_match_result
+from core.scrolling import guarded_swipe
 from core.ss_capture import capture_adb_screenshot, is_complete_screenshot
 from core.state_detector import detect_state_and_overlays
 from utils.logger import log
@@ -38,8 +41,14 @@ _CHECKBOX_POINT = (895, 1490)
 _MIN_CHECKBOX_OUTLINE_PIXELS = 350
 _MIN_CHECKMARK_PIXELS = 100
 _MAX_EMPTY_CHECKMARK_PIXELS = 30
-_TOP_SWIPES = 3
-_SEARCH_SWIPES = 6
+_MAX_TOP_SWIPES = 8
+_MAX_SEARCH_SWIPES = 16
+_SCROLL_SETTLE_SECONDS = 0.8
+_SCROLL_STABLE_THRESHOLD = 1.0
+_INVENTORY_PROGRESS_REGION = (0, 988, 1080, 714)
+_FAILURE_EVIDENCE_DIR = (
+    Path(__file__).resolve().parents[1] / "screenshots" / "matches"
+)
 
 
 class CardRechargeMode(str, Enum):
@@ -97,6 +106,14 @@ class CardRechargeModesResult:
 
 class CardRechargeModeError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class _InventoryViewportEvidence:
+    phase: str
+    index: int
+    screenshot: Frame
+    confidences: Mapping[str, float]
 
 
 def normalize_card_recharge_modes(raw: Any) -> dict[str, CardRechargeMode]:
@@ -218,24 +235,59 @@ def ensure_card_recharge_modes(
 
     evidence_by_label: dict[str, CardRechargeModeEvidence] = {}
     changed_labels: set[str] = set()
-    for current in _inventory_search_frames(
-        current,
-        capture_fn=capture_fn,
-        detector=detector,
-        swipe_fn=swipe_fn,
-        sleep_fn=sleep_fn,
-    ):
+    viewport_evidence: list[_InventoryViewportEvidence] = []
+    viewport_index = 0
+
+    def inspect_viewport(frame: Frame, phase: str) -> Frame:
+        nonlocal viewport_index
+        viewport_index += 1
+        matches = {
+            label: get_match_result(
+                _CARD_TEMPLATE_KEYS[label],
+                screenshot=frame,
+            )
+            for label in CARD_RECHARGE_LABELS
+        }
+        confidences = {
+            label: float(match.confidence)
+            for label, match in matches.items()
+        }
+        viewport_evidence.append(
+            _InventoryViewportEvidence(
+                phase=phase,
+                index=viewport_index,
+                screenshot=frame.copy(),
+                confidences=confidences,
+            )
+        )
+        log(
+            f"[CARD_RECHARGE] viewport={viewport_index} phase={phase} "
+            + " ".join(
+                f"{label.replace(' ', '_').lower()}="
+                f"{matches[label].confidence:.3f}/"
+                f"{matches[label].threshold:.3f}"
+                for label in CARD_RECHARGE_LABELS
+            ),
+            "DEBUG",
+        )
+
+        current_frame = frame
         for label in CARD_RECHARGE_LABELS:
             if label in evidence_by_label:
                 continue
-            if not get_match_result(
-                _CARD_TEMPLATE_KEYS[label],
-                screenshot=current,
-            ).matched:
+            match = (
+                matches[label]
+                if current_frame is frame
+                else get_match_result(
+                    _CARD_TEMPLATE_KEYS[label],
+                    screenshot=current_frame,
+                )
+            )
+            if not match.matched:
                 continue
-            current, observed, changed = _ensure_inventory_card_mode(
+            current_frame, observed, changed = _ensure_inventory_card_mode(
                 label,
-                current,
+                current_frame,
                 required=required[label],
                 capture_fn=capture_fn,
                 detector=detector,
@@ -246,8 +298,43 @@ def ensure_card_recharge_modes(
             evidence_by_label[label] = observed
             if changed:
                 changed_labels.add(label)
-        if len(evidence_by_label) == len(CARD_RECHARGE_LABELS):
-            break
+        return current_frame
+
+    try:
+        current = inspect_viewport(current, "initial")
+        if len(evidence_by_label) < len(CARD_RECHARGE_LABELS):
+            current = _traverse_inventory(
+                current,
+                phase="towards_top",
+                swipe_key="gesture_targets.goto_top:cards_inventory",
+                max_swipes=_MAX_TOP_SWIPES,
+                observe_fn=inspect_viewport,
+                complete_fn=lambda: (
+                    len(evidence_by_label) == len(CARD_RECHARGE_LABELS)
+                ),
+                capture_fn=capture_fn,
+                detector=detector,
+                swipe_fn=swipe_fn,
+                sleep_fn=sleep_fn,
+            )
+        if len(evidence_by_label) < len(CARD_RECHARGE_LABELS):
+            current = _traverse_inventory(
+                current,
+                phase="search",
+                swipe_key="gesture_targets.goto_next:cards_inventory",
+                max_swipes=_MAX_SEARCH_SWIPES,
+                observe_fn=inspect_viewport,
+                complete_fn=lambda: (
+                    len(evidence_by_label) == len(CARD_RECHARGE_LABELS)
+                ),
+                capture_fn=capture_fn,
+                detector=detector,
+                swipe_fn=swipe_fn,
+                sleep_fn=sleep_fn,
+            )
+    except Exception as exc:
+        _retain_inventory_failure(viewport_evidence, reason=str(exc))
+        raise
 
     missing = [
         label
@@ -255,6 +342,10 @@ def ensure_card_recharge_modes(
         if label not in evidence_by_label
     ]
     if missing:
+        _retain_inventory_failure(
+            viewport_evidence,
+            reason=f"missing={','.join(missing)}",
+        )
         if len(missing) == 1:
             raise CardRechargeModeError(
                 f"{missing[0]} Card was not found in inventory"
@@ -282,34 +373,118 @@ def ensure_card_recharge_modes(
     return result
 
 
-def _inventory_search_frames(
+def _traverse_inventory(
     current: Frame,
     *,
+    phase: str,
+    swipe_key: str,
+    max_swipes: int,
+    observe_fn: Callable[[Frame, str], Frame],
+    complete_fn: Callable[[], bool],
     capture_fn: Capture,
     detector: Detector,
     swipe_fn: Callable[[str], bool],
     sleep_fn: Callable[[float], None],
-) -> Iterator[Frame]:
+) -> Frame:
     _require_cards_inventory(current, detector)
-    yield current
-    for _ in range(_TOP_SWIPES):
-        fresh = _capture_complete(capture_fn, sleep_fn)
-        _require_cards_inventory(fresh, detector)
-        if not swipe_fn("gesture_targets.goto_top:cards_inventory"):
-            raise CardRechargeModeError("Cards inventory top swipe failed")
-        sleep_fn(0.35)
-        current = _capture_complete(capture_fn, sleep_fn)
-        _require_cards_inventory(current, detector)
-        yield current
-    for _ in range(_SEARCH_SWIPES):
-        fresh = _capture_complete(capture_fn, sleep_fn)
-        _require_cards_inventory(fresh, detector)
-        if not swipe_fn("gesture_targets.goto_next:cards_inventory"):
-            raise CardRechargeModeError("Cards inventory search swipe failed")
-        sleep_fn(0.35)
-        current = _capture_complete(capture_fn, sleep_fn)
-        _require_cards_inventory(current, detector)
-        yield current
+    for swipe_index in range(1, max(1, int(max_swipes)) + 1):
+        before = _capture_complete(capture_fn, sleep_fn)
+        _require_cards_inventory(before, detector)
+        step = guarded_swipe(
+            swipe_key,
+            source_label="cards_inventory",
+            screenshot=before,
+            settle_s=_SCROLL_SETTLE_SECONDS,
+            capture_fn=capture_fn,
+            visible_fn=lambda _label, *, screenshot=None: (
+                _is_cards_inventory(screenshot, detector)
+            ),
+            swipe_fn=swipe_fn,
+            sleep_fn=sleep_fn,
+        )
+        if not step.success or step.screenshot is None:
+            raise CardRechargeModeError(
+                f"Cards inventory {phase} swipe failed ({step.reason})"
+            )
+        difference = _inventory_difference(before, step.screenshot)
+        current = observe_fn(step.screenshot, phase)
+        if complete_fn():
+            return current
+        if difference <= _SCROLL_STABLE_THRESHOLD:
+            log(
+                f"[CARD_RECHARGE] {phase} edge reached after "
+                f"{swipe_index} swipe(s) (difference={difference:.2f})",
+                "DEBUG",
+            )
+            return current
+    raise CardRechargeModeError(
+        f"Cards inventory {phase} edge was not reached within "
+        f"{max_swipes} swipes"
+    )
+
+
+def _inventory_difference(before: Frame, after: Frame) -> float:
+    if before.shape != after.shape:
+        return float("inf")
+    x, y, width, height = _INVENTORY_PROGRESS_REGION
+    before_crop = before[y : y + height, x : x + width]
+    after_crop = after[y : y + height, x : x + width]
+    if (
+        before_crop.size == 0
+        or after_crop.size == 0
+        or before_crop.shape != after_crop.shape
+    ):
+        return float("inf")
+    delta = np.abs(
+        before_crop.astype(np.int16) - after_crop.astype(np.int16)
+    )
+    return float(delta.mean())
+
+
+def _retain_inventory_failure(
+    viewports: list[_InventoryViewportEvidence],
+    *,
+    reason: str,
+) -> tuple[Path, ...]:
+    if not viewports:
+        return ()
+    stamp = datetime.now().astimezone().strftime("%Y%m%dT%H%M%S%f%z")
+    directory = _FAILURE_EVIDENCE_DIR / f"CardRecharge{stamp}"
+    try:
+        directory.mkdir(parents=True, exist_ok=False)
+    except OSError as exc:
+        log(
+            f"[CARD_RECHARGE] Could not create failure evidence directory: {exc}",
+            "DEBUG",
+        )
+        return ()
+
+    paths: list[Path] = []
+    for viewport in viewports:
+        path = directory / (
+            f"{viewport.index:02d}_{viewport.phase.replace(' ', '_')}.png"
+        )
+        if cv2.imwrite(str(path), viewport.screenshot):
+            paths.append(path)
+    log(
+        f"[CARD_RECHARGE] Retained {len(paths)}/{len(viewports)} failure "
+        f"viewport(s) under {directory}; reason={reason}; confidences="
+        + repr(
+            [
+                {
+                    "viewport": viewport.index,
+                    "phase": viewport.phase,
+                    **{
+                        label: round(confidence, 3)
+                        for label, confidence in viewport.confidences.items()
+                    },
+                }
+                for viewport in viewports
+            ]
+        ),
+        "DEBUG",
+    )
+    return tuple(paths)
 
 
 def _ensure_inventory_card_mode(
