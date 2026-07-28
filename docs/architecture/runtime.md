@@ -66,8 +66,8 @@ action carries the complete configured preset set. The authoritative observed
 Attack Range selects its matching Extra/Workshop pair; a readable Range
 outside that set is preserved as an operator experiment without opening
 Distance Adjuster. Unreadable Range evidence still blocks. Tier 18 Farm binds
-Range `30.00m` to Extra `30.00m` and Workshop `39.00m`; Tier 18 and
-experimental Tier 19 both enforce the observed configured Range pair. If a
+Range `30.00m` to Extra `30.00m` and Workshop `39.00m`; Tier 18 and Tier 19
+Farm both enforce the observed configured Range pair. If a
 freshly matched arrow is unavailable or one verified tap leaves its value
 unchanged, the runtime closes Distance Adjuster so its automatic pause no
 longer freezes combat, waits for the running wave to advance, and retries from

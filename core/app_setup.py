@@ -22,7 +22,7 @@ STARTUP_GATE_POLICY_ENVIRONMENT_VARIABLE = "THETOWER_STARTUP_GATES"
 STARTUP_GATE_POLICIES = ("immediate", "next_run")
 CONFIGURABLE_STRATEGIES = (
     "farm_t18",
-    "farm_t19_experiment",
+    "farm_t19",
     "tournament",
     "none",
 )
@@ -111,8 +111,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=os.getenv(STRATEGY_ENVIRONMENT_VARIABLE, DEFAULT_STRATEGY),
         help=(
             "Runtime strategy: farm (Tier 18 default), farm_t18, "
-            "farm_t19_experiment, tournament observer, or none. "
-            "Legacy gc names remain aliases. "
+            "farm_t19, tournament observer, or none. "
+            "Legacy experiment and gc names remain aliases. "
             "Use none for the regular "
             "handler loop with no strategy actions or startup gates; "
             "--strategy-config overrides this option"

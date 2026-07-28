@@ -69,7 +69,7 @@ class FakeManager:
             )
         if strategy not in {
             "farm_t18",
-            "farm_t19_experiment",
+            "farm_t19",
             "tournament",
             "none",
         }:
@@ -81,7 +81,7 @@ class FakeManager:
         self.calls.append(f"persist_strategy:{strategy}")
         if strategy not in {
             "farm_t18",
-            "farm_t19_experiment",
+            "farm_t19",
             "tournament",
             "none",
         }:
@@ -526,9 +526,9 @@ def test_start_persists_selected_strategy_before_process_reaches_home(tmp_path):
     service = _service(tmp_path, manager)
 
     def assert_selected_strategy_is_authoritative():
-        assert manager.strategy == "farm_t19_experiment"
+        assert manager.strategy == "farm_t19"
         control = service.control_store.read()
-        assert control["strategy"] == "farm_t19_experiment"
+        assert control["strategy"] == "farm_t19"
         assert control["strategy_apply_mode"] == "next_boundary"
         assert control["state"] == "PAUSED"
 
@@ -538,21 +538,21 @@ def test_start_persists_selected_strategy_before_process_reaches_home(tmp_path):
             "action": "start",
             "run_state": "RUNNING",
             "startup_gate_policy": "immediate",
-            "strategy": "farm_t19_experiment",
+            "strategy": "farm_t19",
         }
     )
 
     assert manager.calls == [
         "set_startup_gate_policy:immediate",
-        "set_strategy:farm_t19_experiment",
+        "set_strategy:farm_t19",
         "start",
     ]
-    assert response["process_service"]["strategy"] == "farm_t19_experiment"
+    assert response["process_service"]["strategy"] == "farm_t19"
     assert response["request"] == {
         "accepted": True,
         "action": "start",
         "startup_gate_policy": "immediate",
-        "strategy": "farm_t19_experiment",
+        "strategy": "farm_t19",
     }
 
 
@@ -619,7 +619,7 @@ def test_start_rejects_selected_strategy_when_process_is_already_active(tmp_path
             {
                 "action": "start",
                 "run_state": "RUNNING",
-                "strategy": "farm_t19_experiment",
+                "strategy": "farm_t19",
             }
         )
 
@@ -960,19 +960,19 @@ def test_control_surface_saves_or_queues_strategy_by_process_state(tmp_path):
     response = service.apply_process_action(
         {
             "action": "set_strategy",
-            "strategy": "farm_t19_experiment",
+            "strategy": "farm_t19",
             "apply_to_active_run": True,
         }
     )
 
-    assert manager.calls[-1] == "persist_strategy:farm_t19_experiment"
+    assert manager.calls[-1] == "persist_strategy:farm_t19"
     control = service.control_store.status()
-    assert control["strategy"] == "farm_t19_experiment"
+    assert control["strategy"] == "farm_t19"
     assert control["strategy_apply_mode"] == "active_battle"
     assert response["request"] == {
         "accepted": True,
         "action": "set_strategy",
-        "strategy": "farm_t19_experiment",
+        "strategy": "farm_t19",
         "disposition": "active_battle_requested",
     }
 

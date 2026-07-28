@@ -1,8 +1,7 @@
 meta:
-  name: farm_t19_experiment
+  name: farm_t19
   family: farm
   tier: 19
-  experimental: true
   version: 1
 run_initialization:
   complete_when:

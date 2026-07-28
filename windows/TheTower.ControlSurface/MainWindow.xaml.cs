@@ -1538,7 +1538,8 @@ public partial class MainWindow : Window
         {
             "farm" => "farm_t18",
             "farm_t18" => "farm_t18",
-            "farm_t19_experiment" => "farm_t19_experiment",
+            "farm_t19" => "farm_t19",
+            "farm_t19_experiment" => "farm_t19",
             "tournament" => "tournament",
             "none" => "none",
             _ => strategy,
@@ -1627,7 +1628,7 @@ public partial class MainWindow : Window
         NormalizeStrategy(strategy) switch
         {
             "farm_t18" => "Farm T18",
-            "farm_t19_experiment" => "Farm T19 experiment",
+            "farm_t19" => "Farm T19",
             "tournament" => "Tournament",
             "none" => "No strategy",
             null => "none",

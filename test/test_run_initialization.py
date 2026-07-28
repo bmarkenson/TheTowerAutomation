@@ -31,7 +31,7 @@ from tools.strategy_builders.lib import build_strategy_yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILE_NAMES = ("gc_farm_t18", "gc_farm_t19_experiment")
-FARM_PROFILE_NAMES = ("farm_t18", "farm_t19_experiment")
+FARM_PROFILE_NAMES = ("farm_t18", "farm_t19")
 SOURCE_PATHS = {
     name: ROOT / "config" / "strategies" / f"{name}.source.yaml"
     for name in PROFILE_NAMES
@@ -170,8 +170,13 @@ class DefaultStrategyTests(unittest.TestCase):
     def test_tactical_alias_resolves_to_profile_without_seeded_completion(self):
         strategy = get_strategy("gc_manual_target_priority")
         self.assertIsInstance(strategy, YamlStrategy)
-        self.assertEqual(strategy.name, "farm_t19_experiment")
+        self.assertEqual(strategy.name, "farm_t19")
         self.assertNotIn("target_priority_checked", strategy.vars)
+
+    def test_retired_t19_experiment_name_resolves_to_t19_farm(self):
+        strategy = get_strategy("farm_t19_experiment")
+        self.assertIsInstance(strategy, YamlStrategy)
+        self.assertEqual(strategy.name, "farm_t19")
 
 
 class RunBoundaryTests(unittest.TestCase):
@@ -825,7 +830,7 @@ class FarmProfileTests(unittest.TestCase):
         )
 
     def test_tier_19_enforces_orb_distance_for_configured_ranges(self):
-        plan = build_strategy_yaml(self._source("farm_t19_experiment"))
+        plan = build_strategy_yaml(self._source("farm_t19"))
         configuration = plan["run_configuration"]
         orb_rule = next(
             rule for rule in plan["rules"]
@@ -1465,7 +1470,7 @@ class GcFarmProfileTests(unittest.TestCase):
         self.assertFalse(manager.session_preflight_terminally_blocked())
 
     def test_session_preflight_action_records_one_continuous_session_completion(self):
-        strategy = get_strategy("farm_t19_experiment")
+        strategy = get_strategy("farm_t19")
         ctx = MissionContext()
         strategy.on_start(ctx)
         mv = ctx.data["mission_vars"]

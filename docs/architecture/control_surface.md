@@ -241,7 +241,7 @@ Process request examples:
   while the runtime has acknowledged `PAUSED`. The API accepts only an integer
   TCP port; the runtime keeps Pause and its former target if new-target
   connection or screenshot validation fails.
-- Validated strategy selection (`farm_t18`, `farm_t19_experiment`,
+- Validated strategy selection (`farm_t18`, `farm_t19`,
   `tournament`, or `none`). A stopped selection is saved for the next start;
   an active selection is queued for a confirmed run boundary by default. The
   native GUI separates a strategy dropdown from explicit **Queue for next

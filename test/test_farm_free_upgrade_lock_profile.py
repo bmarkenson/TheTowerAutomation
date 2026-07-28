@@ -19,7 +19,7 @@ def _build(name: str):
 
 
 def test_every_farm_profile_inherits_free_upgrade_lock_gate():
-    for name in ("farm_t18", "farm_t19_experiment"):
+    for name in ("farm_t18", "farm_t19"):
         plan = _build(name)
         requirements = plan["session_preflight"]["requirements"]
         configuration = plan["run_configuration"]

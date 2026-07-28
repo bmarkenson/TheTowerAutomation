@@ -45,9 +45,9 @@ loadout catalogs, and compact Tier profiles:
 
 - `farm` and `farm_t18` select the Tier 18 profile. Its configured Orb Distance
   and Target Priority presets are verified and enforced after EHLS/EALS.
-- `farm_t19_experiment` selects the experimental Tier 19 profile. It runs
-  EHLS/EALS, enforces the Range-selected Orb Distance preset, and preserves
-  Target Priority without inspecting or changing it.
+- `farm_t19` selects the Tier 19 Farm profile. It uses the shared Farm perk
+  profile, runs EHLS/EALS, enforces the Range-selected Orb Distance preset,
+  and preserves Target Priority without inspecting or changing it.
 
 See [`docs/game_strategy.md`](docs/game_strategy.md) for the account's
 GC-with-Hybrid-aspects model, Damage Slider economics, T18/T19 Heat differences,
@@ -58,7 +58,7 @@ results.
 For example:
 
 ```bash
-.venv/bin/python main.py --adb-port 5555 --strategy farm_t19_experiment
+.venv/bin/python main.py --adb-port 5555 --strategy farm_t19
 ```
 
 To replace automation while retaining the battle already in progress, use the
@@ -122,7 +122,7 @@ with:
 
 ```bash
 .venv/bin/python tools/strategy/build_strategy.py \
-  config/strategies/farm_t19_experiment.source.yaml
+  config/strategies/farm_t19.source.yaml
 ```
 
 Every Farm profile inherits the same `Farm` Cards, Workshop, and Bots presets;
@@ -152,7 +152,7 @@ changing it; `preserve` neither inspects nor changes it. Modules, Orb Distance,
 and Target Priority resolve named presets at build time. Orb Distance presets
 bind an Extra/Workshop pair to an expected Attack Range; automation refuses to
 apply the pair unless fresh Range OCR matches that basis. Tier 18 and the
-experimental Tier 19 profile both select the configured pair for observed
+Tier 19 Farm profile both select the configured pair for observed
 Range `30.00m` or `98.38m` and preserve any other readable experimental
 Range. Damage Slider profiles use an explicit percentage; Tier 18 enforces
 `1E-22%` during every new-run initialization after EHLS/EALS. The fully

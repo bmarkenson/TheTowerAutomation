@@ -450,7 +450,7 @@ Bundled strategy selection also works without replacing an active process.
 The GUI reports whether the request was accepted and shows current and pending
 strategies independently:
 
-1. Select `farm_t18`, `farm_t19_experiment`, `tournament`, or `none`.
+1. Select `farm_t18`, `farm_t19`, `tournament`, or `none`.
 2. During a battle, the request is queued for the next authoritative boundary;
    selecting another strategy replaces it. Select the displayed current
    strategy to cancel a different pending selection.

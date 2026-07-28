@@ -70,7 +70,7 @@ kill, it can reduce crowd control, allow an enemy mechanic to resolve, or end
 the battle early. More coins per minute just before an early death do not prove
 that the lower value improved whole-run coins per hour.
 
-### Current experiment context
+### Current T19 slider context
 
 - During the short T19 experiment ending near wave 3,500, the operator changed
   the slider around wave 3,400 to `1E-20%`. It was the first tested value that
@@ -79,8 +79,8 @@ that the lower value improved whole-run coins per hour.
   cannot by itself establish that perks or Target Priority were worse.
 - The next comparison value is `1E-19%`. This is a control choice, not a
   permanent optimum.
-- The T18 Farm profile currently enforces `1E-22%`; the experimental T19
-  profile preserves the live value. Those policies are repository facts, not
+- The T18 Farm profile currently enforces `1E-22%`; the T19 Farm profile
+  preserves the live value. Those policies are repository facts, not
   evidence that the same number is optimal on both Tiers.
 
 For a useful comparison, record the initial slider value, every changed value
@@ -245,7 +245,7 @@ capture whenever cross-Tier CPH is being analyzed.
 
 ## Tier choice is a multi-objective optimization
 
-The purpose of the T19 Farm experiment is not to beat T18 on coins alone. T18
+The purpose of the T19 Farm profile is not to beat T18 on coins alone. T18
 currently has the completed Utility Dissonant advantage, but T19 can accelerate
 other progression currencies—primarily Reroll Dice and module shards, with
 Cells as an additional benefit.
@@ -359,7 +359,7 @@ current live game after a release:
 Current repository behavior is authoritative in:
 
 - [`../config/strategies/farm_t18.source.yaml`](../config/strategies/farm_t18.source.yaml)
-- [`../config/strategies/farm_t19_experiment.source.yaml`](../config/strategies/farm_t19_experiment.source.yaml)
+- [`../config/strategies/farm_t19.source.yaml`](../config/strategies/farm_t19.source.yaml)
 - [`../config/run_profiles/farm.yaml`](../config/run_profiles/farm.yaml)
 - [`../config/loadouts/target_priorities.yaml`](../config/loadouts/target_priorities.yaml)
 - [`ui_state_traversal_2026-07-14.md`](ui_state_traversal_2026-07-14.md)
