@@ -74,6 +74,12 @@ function formatRemaining(seconds) {
   return `${secs}s remaining`;
 }
 
+function formatPriorTransition(observation) {
+  if (!observation) return "No earlier state transition in the current log tail";
+  const wave = observation.wave == null ? "" : ` · wave ${observation.wave}`;
+  return `${observation.state_label || dash}${wave} · ${formatDate(observation.observed_at)}`;
+}
+
 function renderStatus(payload) {
   state.lastStatus = payload;
   const control = payload.control || {};
@@ -100,10 +106,11 @@ function renderStatus(payload) {
     setText("observedMenu", observation.menu);
     setText("observedSecondary", observation.secondary?.join(", ") || dash);
     setText("observedOverlays", observation.overlays?.join(", ") || dash);
+    setText("priorTransition", formatPriorTransition(payload.prior_transition));
     setBadge(byId("heartbeatBadge"), observation.stale ? "Stale" : "Fresh", observation.stale ? "warn" : "good");
     byId("staleWarning").hidden = !observation.stale;
   } else {
-    ["observedState", "observedWave", "observedCoins", "lastObserved", "observedMenu", "observedSecondary", "observedOverlays"].forEach((id) => setText(id, dash));
+    ["observedState", "observedWave", "observedCoins", "lastObserved", "observedMenu", "observedSecondary", "observedOverlays", "priorTransition"].forEach((id) => setText(id, dash));
     setBadge(byId("heartbeatBadge"), "No heartbeat", "bad");
     byId("staleWarning").hidden = false;
   }
@@ -427,7 +434,7 @@ async function refresh() {
     const [status, battles, activity] = await Promise.all([
       api("/api/v1/status"),
       api("/api/v1/battles?limit=30"),
-      api("/api/v1/activity?limit=70&levels=STATUS,ACTION,INFO,WARN,ERROR,FAIL"),
+      api("/api/v1/activity?limit=70&levels=ACTION,RESULT,WARN,ERROR,FAIL"),
     ]);
     renderStatus(status);
     renderBattles(battles);

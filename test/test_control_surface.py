@@ -322,6 +322,7 @@ def test_status_reads_concise_heartbeat_with_paired_diagnostic_detail(tmp_path):
         "age_seconds": 0,
         "stale": False,
     }
+    assert status["prior_transition"] is None
     operational = service.activity(
         levels=["STATUS", "ACTION", "INFO", "WARN", "ERROR", "FAIL"],
     )
@@ -330,6 +331,46 @@ def test_status_reads_concise_heartbeat_with_paired_diagnostic_detail(tmp_path):
         "STATUS",
         "DEBUG",
     ]
+
+
+def test_status_exposes_prior_meaningful_state_transition(tmp_path):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    home_timestamp = (now - timedelta(seconds=120)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+    earlier_running_timestamp = (now - timedelta(seconds=60)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+    timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+    log_path = tmp_path / "logs" / "actions.log"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text(
+        f"[STATUS {home_timestamp}] State=HOME_SCREEN | Wave=— | Coins/min=—\n"
+        f"[STATUS {earlier_running_timestamp}] State=RUNNING | Wave=10 | "
+        "Coins/min=1.0T\n"
+        f"[STATUS {timestamp}] State=RUNNING | Wave=20 | Coins/min=1.2T\n",
+        encoding="utf-8",
+    )
+
+    status = _service(tmp_path).status(now=now.timestamp())
+
+    assert status["observation"]["state_label"] == "RUNNING"
+    assert status["observation"]["wave"] == 20
+    assert status["prior_transition"] == {
+        "state": "HOME_SCREEN",
+        "paused": False,
+        "state_label": "HOME_SCREEN",
+        "wave": None,
+        "coins_per_minute": None,
+        "menu": None,
+        "secondary": [],
+        "overlays": [],
+        "observed_at": (
+            now - timedelta(seconds=120)
+        ).isoformat(timespec="seconds"),
+        "age_seconds": 120,
+        "stale": False,
+    }
 
 
 def test_runtime_evidence_exposes_clean_release_metadata(tmp_path):
@@ -661,6 +702,32 @@ def test_browser_client_exposes_tournament_start_cancel_and_reminder():
     assert 'action: "resolve_tournament_launch"' in script
     assert 'resolveTournamentLaunch("start")' in script
     assert 'resolveTournamentLaunch("cancel")' in script
+
+
+def test_browser_activity_defaults_to_operational_narrative_levels():
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    native_xaml = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+        / "MainWindow.xaml"
+    ).read_text(encoding="utf-8")
+
+    assert 'id="priorTransition"' in html
+    assert (
+        "/api/v1/activity?limit=70&levels=ACTION,RESULT,WARN,ERROR,FAIL"
+        in script
+    )
+    assert "levels=STATUS,ACTION,INFO" not in script
+    assert (
+        'Content="Operational" Tag="ACTION,RESULT,WARN,ERROR,FAIL"'
+        in native_xaml
+    )
+    assert (
+        'Content="Diagnostics" Tag="INPUT,DEBUG,MATCH,STATE"'
+        in native_xaml
+    )
 
 
 def test_control_surface_configures_run_from_selected_strategy_checks(tmp_path):

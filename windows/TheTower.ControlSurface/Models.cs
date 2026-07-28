@@ -25,6 +25,9 @@ public sealed class StatusResponse
     [JsonPropertyName("observation")]
     public ObservationStatus? Observation { get; set; }
 
+    [JsonPropertyName("prior_transition")]
+    public ObservationStatus? PriorTransition { get; set; }
+
     [JsonPropertyName("runtime")]
     public RuntimeStatus Runtime { get; set; } = new();
 

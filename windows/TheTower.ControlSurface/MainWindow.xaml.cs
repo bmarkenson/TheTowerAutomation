@@ -987,6 +987,9 @@ public partial class MainWindow : Window
             : status.Observation.Stale
                 ? $"Stale ({FormatAge(status.Observation.AgeSeconds)})"
                 : $"Fresh ({FormatAge(status.Observation.AgeSeconds)})";
+        PriorTransitionText.Text = status.PriorTransition is null
+            ? "PRIOR TRANSITION  No earlier state transition in the current log tail"
+            : $"PRIOR TRANSITION  {FormatObservation(status.PriorTransition)}";
 
         var runtime = status.Runtime.Instances.FirstOrDefault(instance => instance.Active)
             ?? status.Runtime.Instances.FirstOrDefault();
@@ -1653,6 +1656,19 @@ public partial class MainWindow : Window
             : seconds < 3600
                 ? $"{seconds / 60}m"
                 : $"{seconds / 3600}h {seconds % 3600 / 60}m";
+    }
+
+    private static string FormatObservation(ObservationStatus observation)
+    {
+        var wave = observation.Wave is null
+            ? ""
+            : $" · wave {observation.Wave.Value.ToString(CultureInfo.InvariantCulture)}";
+        var observedAt = DateTimeOffset.TryParse(
+            observation.ObservedAt,
+            out var parsed)
+            ? parsed.LocalDateTime.ToString("g", CultureInfo.CurrentCulture)
+            : observation.ObservedAt ?? "-";
+        return $"{observation.StateLabel}{wave} · {observedAt}";
     }
 
     private static int ParsePort(string value, string label)

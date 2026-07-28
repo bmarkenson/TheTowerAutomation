@@ -158,7 +158,18 @@ class ControlSurfaceService:
             control["error"] = control_error
 
         lines = _tail_lines(self.action_log, max_bytes=262_144)
-        observation = self._latest_observation(lines, now=current_time)
+        observations = self._status_observations(lines, now=current_time)
+        observation = observations[0] if observations else None
+        prior_transition = None
+        if observation is not None:
+            prior_transition = next(
+                (
+                    candidate
+                    for candidate in observations[1:]
+                    if candidate["state_label"] != observation["state_label"]
+                ),
+                None,
+            )
         acknowledgements = self._latest_acknowledgements(lines, control)
         runtime = self._runtime_evidence()
         process_service = (
@@ -181,6 +192,7 @@ class ControlSurfaceService:
             "control": control,
             "acknowledgements": acknowledgements,
             "observation": observation,
+            "prior_transition": prior_transition,
             "runtime": runtime,
             "process_service": process_service,
         }
@@ -1240,12 +1252,12 @@ class ControlSurfaceService:
             raise ValueError("Battle id does not match its filename")
         return record
 
-    def _latest_observation(
+    def _status_observations(
         self,
         lines: Sequence[str],
         *,
         now: float,
-    ) -> Optional[dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         details_by_timestamp: dict[str, re.Match[str]] = {}
         for line in lines:
             entry = _parse_log_line(line)
@@ -1261,6 +1273,7 @@ class ControlSurfaceService:
             if detail_match:
                 details_by_timestamp[entry["timestamp"]] = detail_match
 
+        observations: list[dict[str, Any]] = []
         for line in reversed(lines):
             entry = _parse_log_line(line)
             if not entry or entry["level"] != "STATUS":
@@ -1278,29 +1291,35 @@ class ControlSurfaceService:
                 age_seconds = max(0, round(now - observed_at.timestamp()))
             wave_text = match.group("wave").strip()
             state_label = match.group("state").strip()
-            return {
-                "state": state_label.split("/", 1)[0],
-                "paused": state_label.endswith("/PAUSED"),
-                "state_label": state_label,
-                "wave": int(wave_text) if wave_text.isdigit() else None,
-                "coins_per_minute": _none_if_dash(match.group("coins")),
-                "menu": _none_if_dash(detail_match.group("menu"))
-                if detail_match
-                else None,
-                "secondary": _split_status_list(detail_match.group("secondary"))
-                if detail_match
-                else [],
-                "overlays": _split_status_list(detail_match.group("overlays"))
-                if detail_match
-                else [],
-                "observed_at": observed_at.isoformat(timespec="seconds")
-                if observed_at
-                else entry["timestamp"],
-                "age_seconds": age_seconds,
-                "stale": age_seconds is None
-                or age_seconds > self.stale_after_seconds,
-            }
-        return None
+            observations.append(
+                {
+                    "state": state_label.split("/", 1)[0],
+                    "paused": state_label.endswith("/PAUSED"),
+                    "state_label": state_label,
+                    "wave": int(wave_text) if wave_text.isdigit() else None,
+                    "coins_per_minute": _none_if_dash(match.group("coins")),
+                    "menu": _none_if_dash(detail_match.group("menu"))
+                    if detail_match
+                    else None,
+                    "secondary": _split_status_list(
+                        detail_match.group("secondary")
+                    )
+                    if detail_match
+                    else [],
+                    "overlays": _split_status_list(
+                        detail_match.group("overlays")
+                    )
+                    if detail_match
+                    else [],
+                    "observed_at": observed_at.isoformat(timespec="seconds")
+                    if observed_at
+                    else entry["timestamp"],
+                    "age_seconds": age_seconds,
+                    "stale": age_seconds is None
+                    or age_seconds > self.stale_after_seconds,
+                }
+            )
+        return observations
 
     def _latest_acknowledgements(
         self,

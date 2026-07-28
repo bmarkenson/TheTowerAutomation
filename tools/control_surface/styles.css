@@ -183,7 +183,9 @@ tbody tr[data-battle-id]:hover { background: rgba(98, 213, 255, .045); }
 .activity-list { margin: 0; padding: 0; list-style: none; max-height: 23rem; overflow: auto; }
 .activity-list li { display: grid; grid-template-columns: 9.5rem 5.5rem 1fr; gap: .75rem; padding: .62rem .25rem; border-bottom: 1px solid rgba(38, 51, 73, .65); font-family: "Cascadia Code", Consolas, monospace; font-size: .7rem; line-height: 1.45; }
 .activity-time, .activity-level { color: var(--muted); }
-.activity-level.ACTION, .activity-level.ERROR { color: var(--danger); }
+.activity-level.ACTION { color: var(--warning); }
+.activity-level.RESULT { color: var(--success); }
+.activity-level.ERROR, .activity-level.FAIL { color: var(--danger); }
 .activity-level.STATUS, .activity-level.STATE { color: var(--accent); }
 
 dialog {
