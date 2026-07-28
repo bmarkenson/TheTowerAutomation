@@ -91,8 +91,8 @@ def handle_mission_rewards(
     log_action_intent(
         "Reviewing mission rewards",
         reason=(
-            "reward badges may indicate claimable Daily, Event, or Guild "
-            "rewards"
+            "reward badges may indicate claimable Daily Missions, Weekly "
+            "Mission chests, Event Missions, or Guild chests"
         ),
     )
     initial = screenshot if screenshot is not None else capture_adb_screenshot()
@@ -224,6 +224,9 @@ def _claim_daily_rewards(
     current = screenshot
     claimed = 0
     ordinary_claimed = 0
+    weekly_checks = 0
+    weekly_chests_claimed = 0
+    weekly_check_reason = "initial Daily Missions review"
     ordinary_claim_limit: Optional[int] = None
     if not claim_missions:
         capacity = _read_daily_mission_capacity(current)
@@ -253,7 +256,20 @@ def _claim_daily_rewards(
         if not _is_state(current, "DAILY_MISSIONS"):
             return False, claimed
 
+        weekly_checks += 1
+        log(
+            f"[MISSION_REWARDS] Weekly chest check {weekly_checks} starting: "
+            f"{weekly_check_reason} (claimed={claimed}, "
+            f"ordinary_claimed={ordinary_claimed})",
+            "DEBUG",
+        )
         weekly_chest = _find_weekly_mission_chest(current)
+        log(
+            f"[MISSION_REWARDS] Weekly chest check {weekly_checks} result: "
+            f"found={weekly_chest.success} swipes={weekly_chest.swipes} "
+            f"reason={weekly_chest.reason}",
+            "DEBUG",
+        )
         if weekly_chest.success:
             current = weekly_chest.screenshot
             if current is None or not tap_if_visible(
@@ -265,6 +281,11 @@ def _claim_daily_rewards(
             if current is None:
                 return False, claimed
             claimed += 1
+            weekly_chests_claimed += 1
+            weekly_check_reason = (
+                "the previous Weekly Mission chest was claimed; checking for "
+                "another completed milestone"
+            )
             continue
         if weekly_chest.reason not in WEEKLY_MISSION_SEARCH_COMPLETE:
             log(
@@ -286,7 +307,7 @@ def _claim_daily_rewards(
                     f"claimed {ordinary_claimed} ordinary Daily Mission rewards",
                     "INFO",
                 )
-            return True, claimed
+            break
         if is_visible(DAILY_MISSION_CLAIM, screenshot=current):
             if not tap_if_visible(DAILY_MISSION_CLAIM, screenshot=current):
                 return False, claimed
@@ -295,11 +316,23 @@ def _claim_daily_rewards(
                 return False, claimed
             claimed += 1
             ordinary_claimed += 1
+            weekly_check_reason = (
+                "the previous Daily Mission reward was claimed; checking "
+                "whether it unlocked a milestone chest"
+            )
             continue
-        return True, claimed
+        break
+    else:
+        log("[MISSION_REWARDS] Daily reward claim bound reached", "WARN")
+        return False, claimed
 
-    log("[MISSION_REWARDS] Daily reward claim bound reached", "WARN")
-    return False, claimed
+    log(
+        "[MISSION_REWARDS] Weekly chest review complete: "
+        f"checks={weekly_checks} chests_claimed={weekly_chests_claimed} "
+        f"post_claim_rechecks={max(0, weekly_checks - 1)}",
+        "INFO",
+    )
+    return True, claimed
 
 
 def _find_weekly_mission_chest(screenshot) -> ScrollResult:

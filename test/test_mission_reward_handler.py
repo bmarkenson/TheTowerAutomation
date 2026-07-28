@@ -445,6 +445,7 @@ def test_daily_claim_loop_revalidates_before_mission_and_chest_actions():
         patch.object(rewards, "tap_if_visible", return_value=True) as tap,
         patch.object(rewards, "_wait_for_state", return_value=after_mission),
         patch.object(rewards, "_dismiss_reward_reveal", return_value=after_chest),
+        patch.object(rewards, "log") as reward_log,
     ):
         success, claimed = rewards._claim_daily_rewards(initial)
 
@@ -453,6 +454,27 @@ def test_daily_claim_loop_revalidates_before_mission_and_chest_actions():
     assert [call.args[0] for call in tap.call_args_list] == [
         rewards.DAILY_MISSION_CLAIM,
         rewards.WEEKLY_MISSION_CHEST,
+    ]
+    debug_messages = [
+        entry.args[0]
+        for entry in reward_log.call_args_list
+        if entry.args[1] == "DEBUG"
+    ]
+    assert len(debug_messages) == 6
+    assert "initial Daily Missions review" in debug_messages[0]
+    assert "previous Daily Mission reward was claimed" in debug_messages[2]
+    assert "previous Weekly Mission chest was claimed" in debug_messages[4]
+    operational_messages = [
+        entry.args
+        for entry in reward_log.call_args_list
+        if entry.args[1] != "DEBUG"
+    ]
+    assert operational_messages == [
+        (
+            "[MISSION_REWARDS] Weekly chest review complete: "
+            "checks=3 chests_claimed=1 post_claim_rechecks=2",
+            "INFO",
+        )
     ]
 
 
@@ -769,10 +791,18 @@ def test_home_reward_handler_uses_direct_navigation_and_does_not_close_menu():
         patch.object(rewards, "_claim_event_rewards", return_value=(True, 0)),
         patch.object(rewards, "_return_to_reward_hub", return_value=home),
         patch.object(rewards, "_close_menu") as close_menu,
+        patch.object(rewards, "log_action_intent") as action_intent,
     ):
         result = rewards.handle_mission_rewards(home)
 
     assert result == MissionRewardResult.NOTHING_AVAILABLE
+    action_intent.assert_called_once_with(
+        "Reviewing mission rewards",
+        reason=(
+            "reward badges may indicate claimable Daily Missions, Weekly "
+            "Mission chests, Event Missions, or Guild chests"
+        ),
+    )
     assert [call.args[0] for call in tap.call_args_list] == [
         "navigation.home_daily_missions",
         "navigation.home_event",
