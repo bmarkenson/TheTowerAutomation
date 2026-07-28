@@ -146,8 +146,6 @@ public partial class MainWindow : Window
 
         _controlSurfaceRestartInFlight = true;
         UpdateControlSurfaceCompatibility();
-        LinuxServiceCompatibilityText.Text =
-            "Restarting the fixed Linux control service over SSH...";
         try
         {
             using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(35));
@@ -156,6 +154,9 @@ public partial class MainWindow : Window
                 cancellation.Token);
             LinuxServiceCompatibilityText.Text =
                 "Linux service restarted; waiting for a compatible API...";
+            CompatibilityBannerText.Text =
+                "Linux API service restarted; waiting for revision and capability "
+                + "verification before enabling automation Start.";
             var status = await WaitForCompatibleServerAsync(cancellation.Token);
             RenderStatus(status);
             ConnectionText.Text = "Linux service connected";
@@ -1097,6 +1098,11 @@ public partial class MainWindow : Window
         StartRunningButton.IsEnabled = lifecycleAvailable
             && !processActive
             && _serverCompatibility.IsCompatible;
+        var startBlocker = StartBlockerDescription(
+            lifecycleAvailable,
+            processActive);
+        StartPausedButton.ToolTip = startBlocker;
+        StartRunningButton.ToolTip = startBlocker;
         AttachCurrentBattleBox.IsEnabled = lifecycleAvailable && !processActive;
         CompleteStopButton.IsEnabled = lifecycleAvailable && service?.Active == true;
         ReloadAutomationButton.IsEnabled = lifecycleAvailable
@@ -1561,6 +1567,9 @@ public partial class MainWindow : Window
                 (Brush)FindResource("MutedBrush");
             RestartControlSurfaceButton.Visibility = Visibility.Collapsed;
             RestartControlSurfaceButton.IsEnabled = false;
+            CompatibilityBanner.Visibility = Visibility.Collapsed;
+            RestartControlSurfaceBannerButton.IsEnabled = false;
+            RestartControlSurfaceBannerButton.ToolTip = null;
             return;
         }
         if (_serverCompatibility.IsCompatible)
@@ -1572,15 +1581,40 @@ public partial class MainWindow : Window
                 new SolidColorBrush(Color.FromRgb(73, 214, 157));
             RestartControlSurfaceButton.Visibility = Visibility.Collapsed;
             RestartControlSurfaceButton.IsEnabled = false;
+            CompatibilityBanner.Visibility = Visibility.Collapsed;
+            RestartControlSurfaceBannerButton.IsEnabled = false;
+            RestartControlSurfaceBannerButton.ToolTip = null;
             return;
         }
 
         var destinationValid = SshTunnelManager.IsValidDestination(
             SshDestinationBox.Text);
+        CompatibilityBanner.Visibility = Visibility.Visible;
+        CompatibilityBannerTitle.Text = _controlSurfaceRestartInFlight
+            ? "RESTARTING LINUX API — AUTOMATION START REMAINS DISABLED"
+            : "LINUX API UPDATE REQUIRED — AUTOMATION START IS DISABLED";
+        if (_controlSurfaceRestartInFlight)
+        {
+            const string progress =
+                "Restarting the fixed Linux control API service over SSH. "
+                + "Automation is not being started or restarted.";
+            CompatibilityBannerText.Text = progress;
+            LinuxServiceCompatibilityText.Text = progress;
+            LinuxServiceCompatibilityText.Foreground =
+                new SolidColorBrush(Color.FromRgb(241, 191, 91));
+            RestartControlSurfaceButton.Visibility = Visibility.Visible;
+            RestartControlSurfaceButton.IsEnabled = false;
+            RestartControlSurfaceBannerButton.IsEnabled = false;
+            RestartControlSurfaceBannerButton.ToolTip =
+                "The Linux API restart is already in progress.";
+            return;
+        }
+
+        var problems = DescribeCompatibilityProblems(_serverCompatibility);
         var incompatibility =
             "Start paused and Start running are disabled because the Linux control "
             + "API is older than or incompatible with this Windows client ("
-            + DescribeCompatibilityProblems(_serverCompatibility)
+            + problems
             + "). Restart the Linux API service to reload the current Linux code.";
         LinuxServiceCompatibilityText.Text = destinationValid
             ? incompatibility
@@ -1591,11 +1625,52 @@ public partial class MainWindow : Window
                 + "'systemctl --user restart thetower-control-surface.service' "
                 + "on Linux. If this warning remains, update the Linux checkout "
                 + "and restart the service again.";
+        CompatibilityBannerText.Text = destinationValid
+            ? $"Connected Linux API is incompatible ({problems}). Select Restart "
+                + "Linux API service, wait for this banner to disappear, then use "
+                + "Start paused or Start running. This restarts only the control "
+                + "API; it does not start automation or alter the game."
+            : $"Connected Linux API is incompatible ({problems}). Enter a valid "
+                + "Linux SSH destination to enable the restart button, or run "
+                + "'systemctl --user restart "
+                + "thetower-control-surface.service' on Linux. Wait for this "
+                + "banner to disappear, then retry Start. If it remains, update "
+                + "the Linux checkout and restart the API again.";
         LinuxServiceCompatibilityText.Foreground =
             new SolidColorBrush(Color.FromRgb(241, 191, 91));
         RestartControlSurfaceButton.Visibility = Visibility.Visible;
         RestartControlSurfaceButton.IsEnabled =
             destinationValid && !_controlSurfaceRestartInFlight;
+        RestartControlSurfaceBannerButton.IsEnabled =
+            destinationValid && !_controlSurfaceRestartInFlight;
+        RestartControlSurfaceBannerButton.ToolTip = destinationValid
+            ? "Restart only the fixed Linux control API, verify compatibility, "
+                + "and leave game automation stopped."
+            : "Enter a valid Linux SSH destination in the SSH Tunnel panel to "
+                + "enable this mitigation.";
+    }
+
+    private string? StartBlockerDescription(
+        bool lifecycleAvailable,
+        bool processActive)
+    {
+        if (!lifecycleAvailable)
+        {
+            return "Start is disabled because the managed Linux automation "
+                + "service is unavailable. Review Runtime Evidence.";
+        }
+        if (processActive)
+        {
+            return "Start is disabled because automation is already active.";
+        }
+        if (_serverCompatibility is { IsCompatible: false } compatibility)
+        {
+            return "Start is disabled because the connected Linux API is "
+                + $"incompatible ({DescribeCompatibilityProblems(compatibility)}). "
+                + "Use the prominent Restart Linux API service banner above, "
+                + "wait for it to disappear, then retry Start.";
+        }
+        return null;
     }
 
     private static string DescribeCompatibilityProblems(

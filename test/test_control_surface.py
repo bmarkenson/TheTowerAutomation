@@ -743,6 +743,32 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert '"current_run_activity_scope"' in native_compatibility
 
 
+def test_native_incompatible_api_has_prominent_start_mitigation():
+    native_root = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+    )
+    native_xaml = (native_root / "MainWindow.xaml").read_text(
+        encoding="utf-8"
+    )
+    native_code = (native_root / "MainWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'x:Name="CompatibilityBanner"' in native_xaml
+    assert (
+        'Text="LINUX API UPDATE REQUIRED — AUTOMATION START IS DISABLED"'
+        in native_xaml
+    )
+    assert 'x:Name="RestartControlSurfaceBannerButton"' in native_xaml
+    assert native_xaml.count('ToolTipService.ShowOnDisabled="True"') >= 3
+    assert "Connected Linux API is incompatible" in native_code
+    assert "wait for this banner to disappear" in native_code
+    assert "it does not start automation or alter the game" in native_code
+    assert "StartBlockerDescription" in native_code
+
+
 def test_control_surface_configures_run_from_selected_strategy_checks(tmp_path):
     service = _service(tmp_path)
     initial = service.status()["control"]

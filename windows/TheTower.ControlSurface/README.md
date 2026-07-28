@@ -243,19 +243,25 @@ fails, the app labels the API unavailable and keeps **Stop tunnel** enabled.
 The status endpoint advertises its API version, monotonic server revision, and
 supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
-generic client/server compatibility warning and disables dependent actions;
-the decision is not tied to the strategy feature that first exposed the stale
-service problem. A future Windows feature that depends on new Linux behavior
-must advance the server revision and the client's minimum revision together.
+prominent full-width **Linux API update required** banner, disables dependent
+actions, and gives disabled Start buttons the same blocker in a tooltip. The
+banner reports the actual revision/capability mismatch and the exact recovery
+sequence instead of relying on the smaller compatibility detail in the
+scrollable SSH panel. The decision is not tied to the strategy feature that
+first exposed the stale service problem. A future Windows feature that depends
+on new Linux behavior must advance the server revision and the client's
+minimum revision together.
 
 Opening or connecting the Windows app never restarts Linux automatically. For
-an incompatible service, the app displays **Restart Linux control service**.
-After confirmation, that button runs only the fixed
+an incompatible service, the full-width banner displays **Restart Linux API
+service**. After confirmation, that button runs only the fixed
 `systemctl --user restart thetower-control-surface.service` command against the
 validated SSH destination, waits for the API to return, and verifies the full
 compatibility contract before reporting success. It reloads the installed code
 but does not install an update, choose another command or service, restart main
-automation, or alter the active battle.
+automation, or alter the active battle. Wait for the banner to disappear, then
+retry **Start paused** or **Start running**. If the banner remains, update the
+Linux checkout and restart the API service again.
 
 The Linux API and fixed systemd user units must be installed first; see
 [`../../deploy/systemd/README.md`](../../deploy/systemd/README.md).
