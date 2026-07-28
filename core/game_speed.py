@@ -31,6 +31,8 @@ GAME_SPEED_PLUS_REGION = (875, 895, 70, 80)
 GAME_SPEED_PLUS_POINT = (910, 935)
 GAME_SPEED_CHECK_INTERVAL_S = 30.0
 GAME_SPEED_RETRY_INTERVAL_S = 5.0
+GAME_SPEED_WARNING_AFTER_FAILURES = 3
+GAME_SPEED_WARNING_REPEAT_S = 5 * 60.0
 MAX_GAME_SPEED_TAPS = 24
 NORMAL_MAX_GAME_SPEED = 5.0
 
@@ -333,11 +335,18 @@ class GameSpeedGuard:
         clock: Callable[[], float] = time.monotonic,
         check_interval_s: float = GAME_SPEED_CHECK_INTERVAL_S,
         retry_interval_s: float = GAME_SPEED_RETRY_INTERVAL_S,
+        warning_after_failures: int = GAME_SPEED_WARNING_AFTER_FAILURES,
+        warning_repeat_s: float = GAME_SPEED_WARNING_REPEAT_S,
     ) -> None:
         self._clock = clock
         self._check_interval_s = float(check_interval_s)
         self._retry_interval_s = float(retry_interval_s)
+        self._warning_after_failures = max(1, int(warning_after_failures))
+        self._warning_repeat_s = max(0.0, float(warning_repeat_s))
         self._next_check_at = 0.0
+        self._consecutive_failures = 0
+        self._warning_active = False
+        self._last_warning_at: Optional[float] = None
         self.last_result: Optional[GameSpeedResult] = None
 
     def handle(
@@ -358,6 +367,9 @@ class GameSpeedGuard:
             "TOURNAMENT_RESULTS",
         }:
             self._next_check_at = 0.0
+            self._consecutive_failures = 0
+            self._warning_active = False
+            self._last_warning_at = None
             self.last_result = None
             return False
         if state != "RUNNING":
@@ -375,9 +387,43 @@ class GameSpeedGuard:
         self._next_check_at = now + (
             self._check_interval_s if result.success else self._retry_interval_s
         )
+        warning_was_active = self._warning_active
+        failed_checks = self._consecutive_failures
+        if result.success:
+            self._consecutive_failures = 0
+            self._warning_active = False
+            self._last_warning_at = None
+            if warning_was_active:
+                log(
+                    "[GAME_SPEED] Verification recovered after "
+                    f"{failed_checks} consecutive failed checks "
+                    f"(final={result.final} reason={result.reason})",
+                    "INFO",
+                )
+        else:
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= self._warning_after_failures:
+                warning_due = (
+                    not self._warning_active
+                    or self._last_warning_at is None
+                    or now - self._last_warning_at >= self._warning_repeat_s
+                )
+                self._warning_active = True
+                if warning_due:
+                    qualifier = (
+                        "Still unable"
+                        if self._last_warning_at is not None
+                        else "Unable"
+                    )
+                    log(
+                        f"[GAME_SPEED] {qualifier} to verify normal battle speed "
+                        f"after {self._consecutive_failures} consecutive checks; "
+                        f"automation will retry (reason={result.reason})",
+                        "WARN",
+                    )
+                    self._last_warning_at = now
         should_log = (
-            not result.success
-            or result.taps_sent > 0
+            result.taps_sent > 0
             or previous_result is None
             or previous_result.success != result.success
             or previous_result.final != result.final
@@ -389,7 +435,7 @@ class GameSpeedGuard:
                 f"initial={result.initial} final={result.final} "
                 f"taps={result.taps_sent} increases={result.increases} "
                 f"success={result.success} reason={result.reason}",
-                "INFO" if result.success else "WARN",
+                "INFO" if result.success else "DEBUG",
             )
         return result.taps_sent > 0
 

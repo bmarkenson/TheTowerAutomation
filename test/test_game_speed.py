@@ -237,6 +237,116 @@ def test_guard_does_not_repeat_stable_noop_log_entries():
     log.assert_called_once()
 
 
+def test_guard_warns_only_after_persistent_failures_and_rate_limits_reminders():
+    now = {"value": 100.0}
+    guard = GameSpeedGuard(
+        clock=lambda: now["value"],
+        retry_interval_s=5.0,
+        warning_after_failures=3,
+        warning_repeat_s=300.0,
+    )
+    frame = _complete_frame()
+    failed = GameSpeedResult(
+        False,
+        None,
+        None,
+        0,
+        0,
+        "speed_ocr_failed",
+    )
+
+    with patch("core.game_speed.log") as log:
+        for timestamp in (100.0, 106.0):
+            now["value"] = timestamp
+            guard.handle(
+                frame,
+                {"state": "RUNNING"},
+                action_guard_fn=lambda: True,
+                maximize_fn=lambda **_kwargs: failed,
+            )
+
+        assert [
+            call for call in log.call_args_list if call.args[1] == "WARN"
+        ] == []
+
+        now["value"] = 112.0
+        guard.handle(
+            frame,
+            {"state": "RUNNING"},
+            action_guard_fn=lambda: True,
+            maximize_fn=lambda **_kwargs: failed,
+        )
+        now["value"] = 118.0
+        guard.handle(
+            frame,
+            {"state": "RUNNING"},
+            action_guard_fn=lambda: True,
+            maximize_fn=lambda **_kwargs: failed,
+        )
+        now["value"] = 413.0
+        guard.handle(
+            frame,
+            {"state": "RUNNING"},
+            action_guard_fn=lambda: True,
+            maximize_fn=lambda **_kwargs: failed,
+        )
+
+    warnings = [
+        call.args[0] for call in log.call_args_list if call.args[1] == "WARN"
+    ]
+    assert warnings == [
+        "[GAME_SPEED] Unable to verify normal battle speed after 3 "
+        "consecutive checks; automation will retry (reason=speed_ocr_failed)",
+        "[GAME_SPEED] Still unable to verify normal battle speed after 5 "
+        "consecutive checks; automation will retry (reason=speed_ocr_failed)",
+    ]
+
+
+def test_guard_records_recovery_after_persistent_speed_failures():
+    now = {"value": 100.0}
+    guard = GameSpeedGuard(
+        clock=lambda: now["value"],
+        retry_interval_s=0.0,
+        warning_after_failures=2,
+    )
+    frame = _complete_frame()
+    failed = GameSpeedResult(
+        False,
+        None,
+        None,
+        0,
+        0,
+        "speed_ocr_failed",
+    )
+    recovered = GameSpeedResult(
+        True,
+        5.0,
+        5.0,
+        0,
+        0,
+        "target_satisfied",
+    )
+
+    with patch("core.game_speed.log") as log:
+        for result in (failed, failed, recovered):
+            guard.handle(
+                frame,
+                {"state": "RUNNING"},
+                action_guard_fn=lambda: True,
+                maximize_fn=lambda **_kwargs: result,
+            )
+
+    assert any(
+        call.args
+        == (
+            "[GAME_SPEED] Verification recovered after 2 consecutive failed "
+            "checks (final=5.0 reason=target_satisfied)",
+            "INFO",
+        )
+        for call in log.call_args_list
+    )
+
+
 def test_farm_level_skips_remain_ahead_of_game_speed():
     app = App.__new__(App)
     mission_vars = {

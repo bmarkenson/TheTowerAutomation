@@ -58,11 +58,11 @@ def guarded_swipe(
     if not visible_fn(source_label, screenshot=before):
         log(
             f"[SCROLL] Refusing '{swipe_key}': source '{source_label}' is not visible",
-            "WARN",
+            "DEBUG",
         )
         return ScrollResult(False, before, 0, "wrong_source_screen")
     if not swipe_fn(swipe_key):
-        log(f"[SCROLL] Swipe dispatch failed: {swipe_key}", "WARN")
+        log(f"[SCROLL] Swipe dispatch failed: {swipe_key}", "DEBUG")
         return ScrollResult(False, before, 0, "swipe_dispatch_failed")
 
     sleep_fn(max(0.0, settle_s))
@@ -72,7 +72,7 @@ def guarded_swipe(
     if not visible_fn(source_label, screenshot=after):
         log(
             f"[SCROLL] Source '{source_label}' disappeared after '{swipe_key}'",
-            "WARN",
+            "DEBUG",
         )
         return ScrollResult(False, after, 1, "source_screen_lost")
     return ScrollResult(True, after, 1, "swiped")
@@ -100,7 +100,7 @@ def scroll_to_edge(
     if not visible_fn(source_label, screenshot=current):
         log(
             f"[SCROLL] Refusing edge scroll: source '{source_label}' is not visible",
-            "WARN",
+            "DEBUG",
         )
         return ScrollResult(False, current, 0, "wrong_source_screen")
 
@@ -132,7 +132,7 @@ def scroll_to_edge(
 
     log(
         f"[SCROLL] Edge not reached with '{swipe_key}' after {total_swipes} swipe(s)",
-        "WARN",
+        "DEBUG",
     )
     return ScrollResult(False, current, total_swipes, "max_swipes_exceeded")
 
@@ -164,7 +164,7 @@ def capture_scroll_to_edge(
     if not visible_fn(source_label, screenshot=current):
         log(
             f"[SCROLL] Refusing capture scroll: source '{source_label}' is not visible",
-            "WARN",
+            "DEBUG",
         )
         return ScrollCaptureResult(False, (current,), 0, "wrong_source_screen")
 
@@ -211,7 +211,7 @@ def capture_scroll_to_edge(
     log(
         f"[SCROLL] Capture edge not reached with '{swipe_key}' after "
         f"{total_swipes} swipe(s)",
-        "WARN",
+        "DEBUG",
     )
     return ScrollCaptureResult(
         False,
@@ -251,7 +251,7 @@ def scroll_until_visible(
     if not visible_fn(source_label, screenshot=current):
         log(
             f"[SCROLL] Refusing target scroll: source '{source_label}' is not visible",
-            "WARN",
+            "DEBUG",
         )
         return ScrollResult(False, current, 0, "wrong_source_screen")
     if visible_fn(target_label, screenshot=current):
@@ -286,13 +286,13 @@ def scroll_until_visible(
         if difference <= max(0.0, stable_threshold):
             log(
                 f"[SCROLL] Reached an edge before finding '{target_label}'",
-                "WARN",
+                "DEBUG",
             )
             return ScrollResult(False, current, total_swipes, "edge_before_target")
 
     log(
         f"[SCROLL] Target '{target_label}' not found after {total_swipes} swipe(s)",
-        "WARN",
+        "DEBUG",
     )
     return ScrollResult(False, current, total_swipes, "max_swipes_exceeded")
 

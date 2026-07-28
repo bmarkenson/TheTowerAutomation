@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import numpy as np
 
 from core.scrolling import (
@@ -114,3 +116,29 @@ def test_scroll_until_visible_honors_non_actionable_stop_condition():
     assert not result.success
     assert result.reason == "not_ready"
     assert result.swipes == 1
+
+
+def test_scroll_until_visible_records_edge_as_structured_debug_detail():
+    with patch("core.scrolling.log") as log:
+        result = scroll_until_visible(
+            "gesture.find",
+            source_label="indicators.expected",
+            target_label="buttons.claim_weekly_mission_chest",
+            screenshot=_frame(1),
+            max_swipes=3,
+            stable_threshold=0.0,
+            capture_fn=lambda: _frame(1),
+            visible_fn=lambda label, **_kwargs: (
+                label == "indicators.expected"
+            ),
+            swipe_fn=lambda _key: True,
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert not result.success
+    assert result.reason == "edge_before_target"
+    log.assert_called_once_with(
+        "[SCROLL] Reached an edge before finding "
+        "'buttons.claim_weekly_mission_chest'",
+        "DEBUG",
+    )
