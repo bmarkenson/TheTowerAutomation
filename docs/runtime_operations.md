@@ -109,14 +109,12 @@ narrative without discarding input or diagnostic evidence.
 | `INFO` | General lifecycle or narrative detail that remains available outside the concise operational view. |
 | `DEBUG` / `MATCH` / `STATE` | Internal decisions, coordinates, retries, detector evidence, and raw state transitions. |
 
-The target default Operational activity levels are `ACTION`, `RESULT`, `WARN`,
+The default Operational activity levels are `ACTION`, `RESULT`, `WARN`,
 `ERROR`, and `FAIL`. Diagnostics includes `INPUT`, `DEBUG`, `MATCH`, and
-`STATE`; `All levels` preserves the complete ordering. The current GUI and
-legacy workflow call sites are being migrated in stages under
-[`runtime-and-validation.md`](backlog/runtime-and-validation.md); until that
-work completes, some workflows may not yet have a terminal `RESULT`, and the
-current Operational preset still includes `STATUS` and `INFO`. Centralized
-runtime input emitters already record taps, swipes, and presses as `INPUT`.
+`STATE`; `All levels` preserves the complete ordering. The GUI presents the
+latest status and prior meaningful state transition separately while retaining
+complete status history in `Status only` and `All levels`. Centralized runtime
+input emitters record taps, swipes, and presses as `INPUT`.
 
 Low-level helpers should return structured reasons and keep ordinary outcomes
 diagnostic. The workflow owner decides whether a result is a no-op, a failed

@@ -175,12 +175,17 @@ run. **Decide later** leaves the warning pending while Tournament result
 observation continues.
 
 Recent Activity refreshes independently once per second, follows the newest
-entry, and defaults to the concise **Operational** levels. Use **Diagnostics**
-for detector/input detail or **All levels** for the complete interleaved log;
-warning/error and individual-level filters remain available. Browser fallback
-activity also defaults to the operational levels. Battle/status loading
-therefore cannot delay the log display; live status and completed-battle
-refreshes are also isolated from one another. Select one or more rows and use
+entry, and defaults to the concise `ACTION`, `RESULT`, `WARN`, `ERROR`, and
+`FAIL` **Operational** levels. Periodic `STATUS` and general `INFO` entries stay
+out of that narrative. The live banner shows the latest status and the most
+recent earlier state transition. Use **Status only** for complete heartbeat
+history, **Diagnostics** for detector/input detail, or **All levels** for the
+complete interleaved log; warning/error and individual-level filters remain
+available. Browser fallback activity also defaults to the Operational levels
+and shows the prior state transition in its Current Battle panel. Battle/status
+loading therefore cannot delay the log display; live status and
+completed-battle refreshes are also isolated from one another. Select one or
+more rows and use
 **Copy selected**, right-click **Copy selected**, or press **Ctrl+C** to copy
 log-formatted lines. Automatic rendering holds the visible rows while a
 selection exists and those entries remain in the current log tail. Copying or

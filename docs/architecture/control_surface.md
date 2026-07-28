@@ -167,7 +167,7 @@ memory only. The API deliberately sends no CORS permission.
 The complete `logs/actions.log` remains the durable chronological stream. The
 canonical level semantics are defined by the
 [runtime action-log contract](../runtime_operations.md#action-log-contract).
-The target Operational view contains `ACTION`, `RESULT`, `WARN`, `ERROR`, and
+The Operational view contains `ACTION`, `RESULT`, `WARN`, `ERROR`, and
 `FAIL`; individual device actions and their evidence remain available through
 `INPUT`, `DEBUG`, `MATCH`, and `STATE`.
 
@@ -176,7 +176,7 @@ The periodic operator heartbeat contains state, wave, and Coins/min. Its paired
 evidence. Until the planned atomic runtime snapshot replaces log-derived live
 status, the Linux adapter accepts both this paired format and the earlier
 all-in-one `STATUS` format so existing log tails remain usable across an
-upgrade. The target GUI presents only the latest status and a prior meaningful
+upgrade. The GUI presents only the latest status and a prior meaningful
 transition outside the Operational activity list while retaining complete
 status history in `Status only` and `All levels`.
 

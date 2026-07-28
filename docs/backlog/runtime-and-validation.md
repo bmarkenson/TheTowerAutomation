@@ -208,9 +208,11 @@ evidence.
        `5f7ef32`, `0620101`, `c975fa8`, `d35b8db`, `6b515d2`, and `110cd61`
        migrate reward, terminal, in-battle setting, startup configuration,
        Golden Combo, Tournament, auto-return, and nested Ultimate workflows.
-     - [ ] Remove `STATUS` and general `INFO` from the default Operational
+     - [x] Remove `STATUS` and general `INFO` from the default Operational
        activity levels. Present the latest status and prior meaningful
-       transition separately while retaining complete status history.
+       transition separately while retaining complete status history. Commit
+       `bd7dd23` updates the Linux status adapter plus the browser and native
+       clients.
      - [ ] Audit recurring warnings in focused domain batches. Low-level
        helpers should return structured outcomes; workflow owners decide when
        persistent impact warrants a transition-based, rate-limited warning.
