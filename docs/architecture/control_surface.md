@@ -16,6 +16,7 @@ Linux loopback HTTP server
       ├── write ──► ~/.config/thetower/automation-adb.env ──► next-start config
       ├── manage ► fixed thetower-automation.service
       ├── read  ──► logs/actions.log
+      ├── read  ──► logs/activity_scope.json
       ├── read  ──► logs/automation-*.lock
       ├── read  ──► logs/battles/Battle*.json
       └── read  ──► logs/tournaments/Tournament*.json
@@ -160,7 +161,7 @@ memory only. The API deliberately sends no CORS permission.
 | `POST` | `/api/v1/process` | Start/stop or guarded-reload the fixed systemd automation unit, select its startup-gate policy, save/queue/adopt a bundled strategy, or configure/safely hand off its ADB port |
 | `GET` | `/api/v1/battles?limit=N` | Newest Battle and Tournament summaries |
 | `GET` | `/api/v1/battles/{battle_id}` | One full structured battle record |
-| `GET` | `/api/v1/activity?limit=N&levels=ERROR,WARN` | Recent structured action-log entries, optionally filtered by level |
+| `GET` | `/api/v1/activity?limit=N&levels=ERROR,WARN&scope=current_run&after=CURSOR` | Recent structured action-log entries, optionally filtered by level, explicit run scope, and opaque clear-view cursor |
 
 ## Activity log audiences
 
@@ -179,6 +180,14 @@ all-in-one `STATUS` format so existing log tails remain usable across an
 upgrade. The GUI presents only the latest status and a prior meaningful
 transition outside the Operational activity list while retaining complete
 status history in `Status only` and `All levels`.
+
+The native client's default `Current run` scope uses the atomic
+`logs/activity_scope.json` ledger written at automation startup and verified
+Home `NEW_BATTLE` preflight. It does not infer a run from human-readable log
+messages. Activity responses include an opaque end cursor; the client's
+non-destructive `Clear view` sends that cursor back as `after` and can restore
+the complete selected scope at any time. Server revision 10 advertises this as
+the `current_run_activity_scope` capability.
 
 Control request examples:
 
@@ -290,7 +299,8 @@ Process request examples:
 - A per-Windows-session instance guard. A repeated launch restores and activates
   the existing operational window rather than creating competing clients.
 - Independently refreshed recent activity that defaults to concise operational
-  entries, with newest-entry following and server-side diagnostic/all-level
+  entries in the explicit current-run scope, with newest-entry following,
+  non-destructive local clear/restore, and server-side diagnostic/all-level
   filters, without granting general log-file access.
 - A responsive browser fallback served by the Linux adapter.
 

@@ -26,6 +26,9 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _activityRefreshCancellation;
     private ActivityEntry? _expandedActivityEntry;
     private string? _activitySourceFileId;
+    private string? _activityEndCursor;
+    private string? _activityClearCursor;
+    private string? _activityScopeId;
     private bool _startupGatePolicyDirty;
     private string _strategyRequestMessage = "";
     private bool _updatingStrategySelection;
@@ -70,6 +73,7 @@ public partial class MainWindow : Window
             RefreshBattlesAsync());
         _activityTimer.Tick += async (_, _) => await RefreshActivityAsync();
         ActivityLevelFilter.SelectionChanged += ActivityLevelFilter_SelectionChanged;
+        ActivityScopeFilter.SelectionChanged += ActivityScopeFilter_SelectionChanged;
         Loaded += async (_, _) =>
         {
             _timer.Start();
@@ -783,6 +787,8 @@ public partial class MainWindow : Window
         {
             var response = await _api.GetActivityAsync(
                 SelectedActivityLevels(),
+                SelectedActivityScope(),
+                _activityClearCursor,
                 _activityRefreshCancellation.Token);
             var selected = ActivityGrid.SelectedItems
                 .OfType<ActivityEntry>()
@@ -793,6 +799,20 @@ public partial class MainWindow : Window
                     _activitySourceFileId,
                     response.SourceFileId,
                     StringComparison.Ordinal);
+            var scopeChanged = _activityScopeId is not null
+                && response.ScopeId is not null
+                && !string.Equals(
+                    _activityScopeId,
+                    response.ScopeId,
+                    StringComparison.Ordinal);
+            var clearResetMessage = default(string);
+            if (_activityClearCursor is not null && (sourceChanged || scopeChanged))
+            {
+                ResetActivityClear();
+                clearResetMessage = scopeChanged
+                    ? "New run started; cleared-history cutoff reset"
+                    : "Activity log rotated; cleared-history cutoff reset";
+            }
             var selectionStillAvailable = SelectedActivityStillAvailable(
                 selected,
                 response.Items);
@@ -813,9 +833,11 @@ public partial class MainWindow : Window
                 ActivityGrid.UnselectAll();
             }
             RenderActivity(response);
-            ActivityStatusText.Text = selectionResetMessage is null
-                ? $"Updated {DateTime.Now:T} | {_activity.Count} shown"
-                : $"{selectionResetMessage} | {_activity.Count} shown";
+            var refreshSummary = ActivityRefreshSummary(response);
+            ActivityStatusText.Text = clearResetMessage
+                ?? (selectionResetMessage is null
+                    ? refreshSummary
+                    : $"{selectionResetMessage} | {refreshSummary}");
         }
         catch (OperationCanceledException)
         {
@@ -838,8 +860,40 @@ public partial class MainWindow : Window
         object sender,
         SelectionChangedEventArgs e) => await RefreshActivityAsync(force: true);
 
+    private async void ActivityScopeFilter_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        ResetActivityClear();
+        await RefreshActivityAsync(force: true);
+    }
+
     private async void RefreshActivity_Click(object sender, RoutedEventArgs e) =>
         await RefreshActivityAsync(force: true);
+
+    private async void ClearActivity_Click(object sender, RoutedEventArgs e)
+    {
+        if (_activityClearCursor is null)
+        {
+            if (string.IsNullOrWhiteSpace(_activityEndCursor))
+            {
+                return;
+            }
+            _activityClearCursor = _activityEndCursor;
+            CollapseExpandedActivity();
+            ActivityGrid.UnselectAll();
+            _activity.Clear();
+            ClearActivityButton.Content = "Show cleared";
+            ActivityStatusText.Text =
+                "View cleared; new activity will continue to appear";
+        }
+        else
+        {
+            ResetActivityClear();
+            ActivityStatusText.Text = "Restoring cleared activity...";
+        }
+        await RefreshActivityAsync(force: true);
+    }
 
     private void ActivityGrid_SelectionChanged(
         object sender,
@@ -973,6 +1027,36 @@ public partial class MainWindow : Window
                 StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 
+    private string SelectedActivityScope() =>
+        (ActivityScopeFilter.SelectedItem as ComboBoxItem)?.Tag?.ToString()
+        ?? "current_run";
+
+    private void ResetActivityClear()
+    {
+        _activityClearCursor = null;
+        ClearActivityButton.Content = "Clear view";
+    }
+
+    private string ActivityRefreshSummary(ActivityResponse response)
+    {
+        var scopeSummary = string.Equals(
+            response.Scope,
+            "current_run",
+            StringComparison.Ordinal)
+            ? response.ScopeAvailable
+                ? $"Current run since {FormatActivityScopeStart(response.ScopeStartedAt)}"
+                : "No current-run boundary yet; showing all recent"
+            : "All recent";
+        var clearedSummary = _activityClearCursor is null ? "" : " | cleared view";
+        return $"{scopeSummary} | Updated {DateTime.Now:T} | "
+            + $"{_activity.Count} shown{clearedSummary}";
+    }
+
+    private static string FormatActivityScopeStart(string? value) =>
+        DateTimeOffset.TryParse(value, out var parsed)
+            ? parsed.LocalDateTime.ToString("t")
+            : "unknown";
+
     private void RenderStatus(StatusResponse status)
     {
         _serverCompatibility = ControlSurfaceCompatibility.Evaluate(status);
@@ -988,8 +1072,8 @@ public partial class MainWindow : Window
                 ? $"Stale ({FormatAge(status.Observation.AgeSeconds)})"
                 : $"Fresh ({FormatAge(status.Observation.AgeSeconds)})";
         PriorTransitionText.Text = status.PriorTransition is null
-            ? "PRIOR TRANSITION  No earlier state transition in the current log tail"
-            : $"PRIOR TRANSITION  {FormatObservation(status.PriorTransition)}";
+            ? "No earlier state transition in the current log tail"
+            : FormatObservation(status.PriorTransition);
 
         var runtime = status.Runtime.Instances.FirstOrDefault(instance => instance.Active)
             ?? status.Runtime.Instances.FirstOrDefault();
@@ -1309,6 +1393,9 @@ public partial class MainWindow : Window
     {
         CollapseExpandedActivity();
         _activitySourceFileId = response.SourceFileId;
+        _activityEndCursor = response.EndCursor;
+        _activityScopeId = response.ScopeId;
+        ClearActivityButton.IsEnabled = !string.IsNullOrWhiteSpace(_activityEndCursor);
         _activity.Clear();
         foreach (var entry in response.Items.AsEnumerable().Reverse())
         {

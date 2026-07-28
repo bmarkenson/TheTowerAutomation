@@ -25,18 +25,20 @@ from core.gate_decisions import startup_gate_context_for_strategy
 from core.exclusive_validation import (
     exclusive_validation_definition_for_strategy,
 )
+from utils.logger import DEFAULT_ACTIVITY_SCOPE_FILENAME
 
 
 MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 9
+CONTROL_SURFACE_REVISION = 10
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
     "attached_automation_restart",
     "completed_battle_discard",
+    "current_run_activity_scope",
     "exclusive_strategy_validation_status",
     "explicit_strategy_disposition",
     "selected_strategy_process_start",
@@ -50,6 +52,7 @@ _LOG_RE = re.compile(
     r"^\[(?P<level>[A-Z_]+) (?P<timestamp>[^\]]+)] (?P<message>.*)$"
 )
 _LOG_LEVEL_RE = re.compile(r"[A-Z_]+")
+_ACTIVITY_CURSOR_RE = re.compile(r"(?P<source>\d+:\d+)@(?P<offset>\d+)")
 _STATUS_RE = re.compile(
     r"^State=(?P<state>[^|]+?)\s*\|\s*"
     r"Wave=(?P<wave>[^|]+?)\s*\|\s*"
@@ -103,12 +106,18 @@ class ControlSurfaceService:
         discarded_battle_retention_days: int = (
             DEFAULT_DISCARDED_BATTLE_RETENTION_DAYS
         ),
+        activity_scope_file: Path | str | None = None,
         stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS,
         process_manager: Optional[SystemdAutomationManager] = None,
     ) -> None:
         self.repository_root = Path(repository_root).resolve()
         self.control_path = self._resolve_path(control_file)
         self.action_log = self._resolve_path(action_log)
+        self.activity_scope_path = (
+            self.action_log.with_name(DEFAULT_ACTIVITY_SCOPE_FILENAME)
+            if activity_scope_file is None
+            else self._resolve_path(activity_scope_file)
+        )
         self.battles_dir = self._resolve_path(battles_dir)
         self.tournaments_dir = self._resolve_path(tournaments_dir)
         self.discarded_battles_dir = self._resolve_path(discarded_battles_dir)
@@ -1191,19 +1200,72 @@ class ControlSurfaceService:
         *,
         limit: int = 80,
         levels: Optional[Sequence[str]] = None,
+        scope: str = "all",
+        after: Optional[str] = None,
     ) -> dict[str, Any]:
         """Return recent structured log lines for diagnostics."""
 
         requested_limit = max(1, min(int(limit), 250))
-        lines, source_file_id = _tail_lines_with_source(
-            self.action_log,
-            max_bytes=262_144,
+        line_records, source_file_id, source_end_offset = (
+            _tail_line_records_with_source(
+                self.action_log,
+                max_bytes=262_144,
+            )
         )
-        parsed = [
-            entry
-            for line in lines
+        parsed_records = [
+            (entry, offset)
+            for line, offset in line_records
             if (entry := _parse_log_line(line)) is not None
         ]
+
+        normalized_scope = str(scope or "all").strip().lower()
+        if normalized_scope not in {"all", "current_run"}:
+            raise ControlSurfaceRequestError(
+                f"Invalid activity scope: {scope!r}"
+            )
+        scope_metadata = (
+            self._load_activity_scope()
+            if normalized_scope == "current_run"
+            else None
+        )
+        if scope_metadata is not None:
+            scope_source = scope_metadata["source_file_id"]
+            if source_file_id is not None and scope_source == source_file_id:
+                start_offset = int(scope_metadata["start_offset"])
+                parsed_records = [
+                    (entry, offset)
+                    for entry, offset in parsed_records
+                    if offset >= start_offset
+                ]
+            else:
+                started_at = _parse_timestamp(scope_metadata["started_at"])
+                if started_at is not None:
+                    started_at = started_at.replace(microsecond=0)
+                    parsed_records = [
+                        (entry, offset)
+                        for entry, offset in parsed_records
+                        if (
+                            (entry_time := _parse_timestamp(entry["timestamp"]))
+                            is not None
+                            and entry_time >= started_at
+                        )
+                    ]
+
+        if after:
+            cursor_match = _ACTIVITY_CURSOR_RE.fullmatch(str(after).strip())
+            if cursor_match is None:
+                raise ControlSurfaceRequestError(
+                    f"Invalid activity cursor: {after!r}"
+                )
+            if cursor_match.group("source") == source_file_id:
+                after_offset = int(cursor_match.group("offset"))
+                parsed_records = [
+                    (entry, offset)
+                    for entry, offset in parsed_records
+                    if offset >= after_offset
+                ]
+
+        parsed = [entry for entry, _ in parsed_records]
         available_levels = sorted({entry["level"] for entry in parsed})
         selected_levels: set[str] = set()
         for level in levels or ():
@@ -1221,6 +1283,59 @@ class ControlSurfaceService:
             "items": parsed[-requested_limit:],
             "available_levels": available_levels,
             "source_file_id": source_file_id,
+            "end_cursor": (
+                f"{source_file_id}@{source_end_offset}"
+                if source_file_id is not None
+                else None
+            ),
+            "scope": normalized_scope,
+            "scope_available": (
+                normalized_scope != "current_run"
+                or scope_metadata is not None
+            ),
+            "scope_id": (
+                scope_metadata["run_id"]
+                if scope_metadata is not None
+                else None
+            ),
+            "scope_started_at": (
+                scope_metadata["started_at"]
+                if scope_metadata is not None
+                else None
+            ),
+        }
+
+    def _load_activity_scope(self) -> Optional[dict[str, Any]]:
+        try:
+            with self.activity_scope_path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(payload, Mapping):
+            return None
+        if payload.get("schema_version") != 1:
+            return None
+        if payload.get("scope") != "current_run":
+            return None
+        run_id = str(payload.get("run_id") or "").strip()
+        started_at = str(payload.get("started_at") or "").strip()
+        source_file_id = str(payload.get("source_file_id") or "").strip()
+        try:
+            start_offset = int(payload.get("start_offset"))
+        except (TypeError, ValueError):
+            return None
+        if (
+            not run_id
+            or _parse_timestamp(started_at) is None
+            or not re.fullmatch(r"\d+:\d+", source_file_id)
+            or start_offset < 0
+        ):
+            return None
+        return {
+            "run_id": run_id,
+            "started_at": started_at,
+            "source_file_id": source_file_id,
+            "start_offset": start_offset,
         }
 
     def _resolve_path(self, path: Path | str) -> Path:
@@ -1556,20 +1671,45 @@ def _tail_lines_with_source(
     *,
     max_bytes: int,
 ) -> tuple[list[str], Optional[str]]:
+    records, source_file_id, _ = _tail_line_records_with_source(
+        path,
+        max_bytes=max_bytes,
+    )
+    return [line for line, _ in records], source_file_id
+
+
+def _tail_line_records_with_source(
+    path: Path,
+    *,
+    max_bytes: int,
+) -> tuple[list[tuple[str, int]], Optional[str], int]:
     try:
         with path.open("rb") as handle:
             source = os.fstat(handle.fileno())
             handle.seek(0, os.SEEK_END)
             size = handle.tell()
-            handle.seek(max(0, size - max_bytes))
+            start_offset = max(0, size - max_bytes)
+            handle.seek(start_offset)
             data = handle.read()
     except OSError:
-        return [], None
-    text = data.decode("utf-8", errors="replace")
-    lines = text.splitlines()
-    if size > max_bytes and lines:
-        lines = lines[1:]
-    return lines, f"{source.st_dev}:{source.st_ino}"
+        return [], None, 0
+    if start_offset:
+        newline = data.find(b"\n")
+        if newline < 0:
+            return [], f"{source.st_dev}:{source.st_ino}", size
+        start_offset += newline + 1
+        data = data[newline + 1 :]
+    records: list[tuple[str, int]] = []
+    cursor = start_offset
+    for raw_line in data.splitlines(keepends=True):
+        records.append(
+            (
+                raw_line.rstrip(b"\r\n").decode("utf-8", errors="replace"),
+                cursor,
+            )
+        )
+        cursor += len(raw_line)
+    return records, f"{source.st_dev}:{source.st_ino}", size
 
 
 def _file_size(path: Path) -> int:

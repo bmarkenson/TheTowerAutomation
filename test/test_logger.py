@@ -1,3 +1,5 @@
+import json
+
 from utils import logger
 
 
@@ -61,6 +63,25 @@ def test_log_action_intent_writes_one_human_readable_header(
         "] Reviewing mission rewards — visible badges may identify "
         "claimable rewards"
     )
+
+
+def test_start_activity_scope_records_exact_log_boundary(tmp_path, monkeypatch):
+    isolated_log = tmp_path / "logs" / "actions.log"
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(isolated_log))
+    logger.log("older activity", "INFO", console=False)
+
+    scope = logger.start_activity_scope(reason="new battle preflight")
+
+    assert scope is not None
+    assert scope["reason"] == "new_battle_preflight"
+    assert scope["start_offset"] > 0
+    saved = json.loads(
+        (tmp_path / "logs" / "activity_scope.json").read_text(encoding="utf-8")
+    )
+    assert saved == scope
+    contents = isolated_log.read_text(encoding="utf-8")
+    assert contents[int(scope["start_offset"]) :].startswith("[INFO ")
+    assert "[RUN_SCOPE] Current run activity started" in contents
 
 
 def test_log_result_pairs_terminal_summary_with_diagnostic_detail(

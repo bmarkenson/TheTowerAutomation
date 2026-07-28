@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional
 
-from utils.logger import log, log_mission
+from utils.logger import log, log_mission, start_activity_scope
 from automation.missions.base import BaseMission, MissionContext
 from automation.strategies.base import BaseStrategy
 from core.battle_lifecycle import BattleLifecycle, HomeBattleControl
@@ -67,12 +67,17 @@ class MissionManager:
             normalized_state in {"HOME", "HOME_SCREEN"}
             and parsed_control is HomeBattleControl.NEW_BATTLE
         )
+        starting_preflight_scope = bool(
+            new_battle_home and not self._new_battle_home_observed
+        )
+        if starting_preflight_scope:
+            start_activity_scope(reason="new_battle_preflight")
         if self._startup_gates_deferred and (
             normalized_state in {"GAME_OVER", "TOURNAMENT_RESULTS"}
             or new_battle_home
         ):
             self._arm_startup_gates()
-        if new_battle_home and not self._new_battle_home_observed:
+        if starting_preflight_scope:
             self._rearm_free_upgrade_lock_gate()
             self._new_battle_home_observed = True
         elif normalized_state == "RUNNING":

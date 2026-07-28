@@ -36,6 +36,8 @@ public sealed class ControlSurfaceApi : IDisposable
 
     public Task<ActivityResponse> GetActivityAsync(
         IEnumerable<string> levels,
+        string scope,
+        string? after,
         CancellationToken cancellationToken)
     {
         var selectedLevels = levels
@@ -47,6 +49,11 @@ public sealed class ControlSurfaceApi : IDisposable
         if (selectedLevels.Length > 0)
         {
             path += "&levels=" + Uri.EscapeDataString(string.Join(",", selectedLevels));
+        }
+        path += "&scope=" + Uri.EscapeDataString(scope);
+        if (!string.IsNullOrWhiteSpace(after))
+        {
+            path += "&after=" + Uri.EscapeDataString(after);
         }
         return GetAsync<ActivityResponse>(path, cancellationToken);
     }

@@ -17,6 +17,7 @@ from utils.logger import (
     log_action_intent,
     log_result,
     set_mission_log_path,
+    start_activity_scope,
 )
 from core.watchdog import watchdog_process_check, ensure_adb_connected
 from core.adb_target_session import AdbTargetSession
@@ -149,6 +150,7 @@ class App:
         self._exclusive_validation_terminal_hold: Optional[str] = None
         self._exclusive_validation_ownership_hold = False
         self._observe_strategy_request()
+        start_activity_scope(reason="automation_started")
         log(
             f"[RUN_INIT] Startup gate policy={config.startup_gate_policy}",
             "INFO",

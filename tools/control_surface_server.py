@@ -153,6 +153,8 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
                 payload = self.server.service.activity(
                     limit=_query_limit(query, default=80),
                     levels=_query_levels(query),
+                    scope=_query_value(query, "scope") or "all",
+                    after=_query_value(query, "after"),
                 )
             else:
                 self._json_error(HTTPStatus.NOT_FOUND, "Endpoint not found")
@@ -256,6 +258,11 @@ def _query_levels(query: dict[str, list[str]]) -> Optional[list[str]]:
         if level.strip()
     ]
     return values or None
+
+
+def _query_value(query: dict[str, list[str]], name: str) -> Optional[str]:
+    values = query.get(name)
+    return None if not values else values[-1]
 
 
 def _is_loopback(bind: str) -> bool:

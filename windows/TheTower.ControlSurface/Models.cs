@@ -544,6 +544,21 @@ public sealed class ActivityResponse
 
     [JsonPropertyName("source_file_id")]
     public string? SourceFileId { get; set; }
+
+    [JsonPropertyName("end_cursor")]
+    public string? EndCursor { get; set; }
+
+    [JsonPropertyName("scope")]
+    public string Scope { get; set; } = "all";
+
+    [JsonPropertyName("scope_available")]
+    public bool ScopeAvailable { get; set; }
+
+    [JsonPropertyName("scope_id")]
+    public string? ScopeId { get; set; }
+
+    [JsonPropertyName("scope_started_at")]
+    public string? ScopeStartedAt { get; set; }
 }
 
 public sealed class ActivityEntry

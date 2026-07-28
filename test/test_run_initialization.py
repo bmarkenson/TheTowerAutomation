@@ -407,13 +407,22 @@ class RunBoundaryTests(unittest.TestCase):
         manager = MissionManager(None, strategy)
         manager.start()
 
-        manager.maybe_run_start({"state": "RUNNING"})
-        manager.maybe_run_start(
-            {"state": "HOME_SCREEN", "home_battle_control": "NEW_BATTLE"}
-        )
-        manager.maybe_run_start({"state": "RUNNING"})
+        with patch(
+            "automation.missions.manager.start_activity_scope"
+        ) as start_activity_scope:
+            manager.maybe_run_start({"state": "RUNNING"})
+            manager.maybe_run_start(
+                {"state": "HOME_SCREEN", "home_battle_control": "NEW_BATTLE"}
+            )
+            manager.maybe_run_start(
+                {"state": "HOME_SCREEN", "home_battle_control": "NEW_BATTLE"}
+            )
+            manager.maybe_run_start({"state": "RUNNING"})
 
         self.assertEqual(strategy.run_starts, 2)
+        start_activity_scope.assert_called_once_with(
+            reason="new_battle_preflight"
+        )
 
     def test_unknown_home_control_does_not_invent_a_run_boundary(self):
         strategy = _RunCountingStrategy()

@@ -713,6 +713,12 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
         / "TheTower.ControlSurface"
         / "MainWindow.xaml"
     ).read_text(encoding="utf-8")
+    native_compatibility = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+        / "ControlSurfaceCompatibility.cs"
+    ).read_text(encoding="utf-8")
 
     assert 'id="priorTransition"' in html
     assert (
@@ -728,6 +734,13 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
         'Content="Diagnostics" Tag="INPUT,DEBUG,MATCH,STATE"'
         in native_xaml
     )
+    assert 'Content="Current run" Tag="current_run"' in native_xaml
+    assert 'Content="All recent" Tag="all"' in native_xaml
+    assert 'Content="Clear view"' in native_xaml
+    assert 'Text="CURRENT STATUS"' in native_xaml
+    assert 'Text="PREVIOUS DISTINCT STATE"' in native_xaml
+    assert "MinimumServerRevision = 10" in native_compatibility
+    assert '"current_run_activity_scope"' in native_compatibility
 
 
 def test_control_surface_configures_run_from_selected_strategy_checks(tmp_path):
@@ -817,6 +830,71 @@ def test_activity_preserves_result_and_input_levels(tmp_path):
         ("INPUT", "Open Daily Missions"),
         ("RESULT", "Mission reward review complete"),
     ]
+
+
+def test_activity_current_run_scope_uses_explicit_boundary(tmp_path, monkeypatch):
+    from utils import logger
+
+    log_path = tmp_path / "logs" / "actions.log"
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(log_path))
+    logger.log_action("Older run action", console=False)
+    scope = logger.start_activity_scope(reason="new_battle_preflight")
+    logger.log_action("Current preflight action", console=False)
+    service = _service(tmp_path)
+
+    response = service.activity(
+        scope="current_run",
+        levels=["ACTION"],
+    )
+
+    assert scope is not None
+    assert response["scope_available"] is True
+    assert response["scope_id"] == scope["run_id"]
+    assert [entry["message"] for entry in response["items"]] == [
+        "Current preflight action"
+    ]
+
+
+def test_activity_current_run_scope_reports_missing_boundary_fallback(tmp_path):
+    log_path = tmp_path / "logs" / "actions.log"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text(
+        "[ACTION 2026-07-19 17:00:00] Existing activity\n",
+        encoding="utf-8",
+    )
+
+    response = _service(tmp_path).activity(scope="current_run")
+
+    assert response["scope"] == "current_run"
+    assert response["scope_available"] is False
+    assert [entry["message"] for entry in response["items"]] == [
+        "Existing activity"
+    ]
+
+
+def test_activity_cursor_returns_only_entries_written_after_clear(tmp_path):
+    log_path = tmp_path / "logs" / "actions.log"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text(
+        "[ACTION 2026-07-19 17:00:00] Before clear\n",
+        encoding="utf-8",
+    )
+    service = _service(tmp_path)
+    before = service.activity()
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write("[RESULT 2026-07-19 17:00:01] After clear\n")
+
+    after = service.activity(after=before["end_cursor"])
+
+    assert [entry["message"] for entry in after["items"]] == ["After clear"]
+
+
+def test_activity_rejects_invalid_scope_and_cursor(tmp_path):
+    service = _service(tmp_path)
+    with pytest.raises(ControlSurfaceRequestError, match="scope"):
+        service.activity(scope="battle;drop")
+    with pytest.raises(ControlSurfaceRequestError, match="cursor"):
+        service.activity(after="not-a-cursor")
 
 
 def test_activity_audience_filters_preserve_roles_and_complete_order(tmp_path):
@@ -979,6 +1057,26 @@ def test_http_api_requires_token_but_static_gui_does_not(tmp_path):
         payload = json.loads(response.read())
         assert response.status == 200
         assert [entry["level"] for entry in payload["items"]] == ["ERROR"]
+        activity_cursor = payload["end_cursor"]
+        with (tmp_path / "logs" / "actions.log").open(
+            "a",
+            encoding="utf-8",
+        ) as handle:
+            handle.write(
+                "[RESULT 2026-07-19 17:00:02] after clear cursor\n"
+            )
+        connection.request(
+            "GET",
+            "/api/v1/activity?limit=10&levels=RESULT"
+            f"&scope=all&after={activity_cursor}",
+            headers={"Authorization": "Bearer test-secret"},
+        )
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+        assert response.status == 200
+        assert [entry["message"] for entry in payload["items"]] == [
+            "after clear cursor"
+        ]
 
         connection.request(
             "GET",

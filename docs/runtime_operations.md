@@ -116,6 +116,13 @@ latest status and prior meaningful state transition separately while retaining
 complete status history in `Status only` and `All levels`. Centralized runtime
 input emitters record taps, swipes, and presses as `INPUT`.
 
+The native GUI's default `Current run` activity scope is anchored by the
+atomic `logs/activity_scope.json` ledger rather than inferred from status text.
+Automation starts a scope when its process begins and replaces it when verified
+Home `NEW_BATTLE` evidence begins the next preflight, keeping that setup and
+the battle it launches together. `Clear view` is a client-side cursor only: it
+does not edit `actions.log`, and a new scope or log rotation resets it.
+
 Low-level helpers should return structured reasons and keep ordinary outcomes
 diagnostic. The workflow owner decides whether a result is a no-op, a failed
 operation, or a persistent degradation worth surfacing to the operator.

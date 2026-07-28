@@ -4,14 +4,17 @@ from __future__ import annotations
 """Minimal logging helpers shared across the automation runtime."""
 
 from datetime import datetime
+import json
 import os
 import tempfile
 import threading
 from typing import Optional, Sequence
+import uuid
 
 
 _MISSION_LOG_PATH: Optional[str] = None
 DEFAULT_ACTION_LOG_PATH = os.path.join("logs", "actions.log")
+DEFAULT_ACTIVITY_SCOPE_FILENAME = "activity_scope.json"
 DEFAULT_ACTION_LOG_MAX_BYTES = 16 * 1024 * 1024
 DEFAULT_ACTION_LOG_BACKUP_COUNT = 5
 ACTION_LOG_MAX_BYTES_ENV = "TOWER_ACTION_LOG_MAX_BYTES"
@@ -23,6 +26,86 @@ def get_action_log_path() -> str:
     """Return the primary log path, honoring test/tool isolation overrides."""
 
     return os.getenv("TOWER_ACTION_LOG_PATH") or DEFAULT_ACTION_LOG_PATH
+
+
+def get_activity_scope_path() -> str:
+    """Return the run-scope ledger stored beside the primary action log."""
+
+    return os.path.join(
+        os.path.dirname(get_action_log_path()) or ".",
+        DEFAULT_ACTIVITY_SCOPE_FILENAME,
+    )
+
+
+def start_activity_scope(*, reason: str) -> Optional[dict[str, object]]:
+    """Start one explicit current-run activity scope without risking runtime work."""
+
+    normalized_reason = "_".join(str(reason or "").strip().lower().split())
+    if not normalized_reason:
+        raise ValueError("Activity scope reason must not be empty")
+
+    primary_path = get_action_log_path()
+    scope_path = get_activity_scope_path()
+    started_at = datetime.now().astimezone()
+    payload: dict[str, object] = {
+        "schema_version": 1,
+        "scope": "current_run",
+        "run_id": uuid.uuid4().hex,
+        "started_at": started_at.isoformat(timespec="microseconds"),
+        "reason": normalized_reason,
+        "source_file_id": None,
+        "start_offset": 0,
+    }
+    write_error: Optional[OSError] = None
+    with _WRITE_LOCK:
+        try:
+            os.makedirs(os.path.dirname(primary_path) or ".", exist_ok=True)
+            with open(primary_path, "ab"):
+                pass
+            source = os.stat(primary_path)
+            payload["source_file_id"] = f"{source.st_dev}:{source.st_ino}"
+            payload["start_offset"] = int(source.st_size)
+            _write_json_atomic(scope_path, payload)
+        except OSError as exc:
+            write_error = exc
+
+    if write_error is not None:
+        log(
+            "[RUN_SCOPE] Unable to persist the current-run activity boundary: "
+            f"{write_error}",
+            "WARN",
+        )
+        return None
+
+    log(
+        "[RUN_SCOPE] Current run activity started "
+        f"reason={normalized_reason} id={payload['run_id']}",
+        "INFO",
+    )
+    return payload
+
+
+def _write_json_atomic(path: str, payload: dict[str, object]) -> None:
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=directory,
+        prefix=f".{os.path.basename(path)}.",
+        suffix=".tmp",
+        delete=False,
+    ) as temporary:
+        json.dump(payload, temporary, indent=2, sort_keys=True)
+        temporary.write("\n")
+        temporary.flush()
+        os.fsync(temporary.fileno())
+        temporary_path = temporary.name
+    try:
+        os.replace(temporary_path, path)
+    finally:
+        if os.path.exists(temporary_path):
+            os.unlink(temporary_path)
 
 
 def _parse_console_levels() -> set[str]:

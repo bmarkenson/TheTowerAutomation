@@ -177,13 +177,20 @@ observation continues.
 Recent Activity refreshes independently once per second, follows the newest
 entry, and defaults to the concise `ACTION`, `RESULT`, `WARN`, `ERROR`, and
 `FAIL` **Operational** levels. Periodic `STATUS` and general `INFO` entries stay
-out of that narrative. The live banner shows the latest status and the most
-recent earlier state transition. Use **Status only** for complete heartbeat
-history, **Diagnostics** for detector/input detail, or **All levels** for the
-complete interleaved log; warning/error and individual-level filters remain
-available. Browser fallback activity also defaults to the Operational levels
-and shows the prior state transition in its Current Battle panel. Battle/status
-loading therefore cannot delay the log display; live status and
+out of that narrative. **Current run** is the default activity scope and starts
+at automation startup or the verified Home `NEW_BATTLE` preflight boundary, so
+the Home setup and its battle remain together. **All recent** restores the
+rolling log tail. **Clear view** records a local cursor and hides only entries
+already displayed; it never deletes or truncates Linux logs, and **Show
+cleared** restores them. A new run or log rotation resets that local cutoff.
+
+The live banner labels the latest status explicitly and gives the most recent
+earlier distinct state its own visible row. Use **Status only** for complete
+heartbeat history, **Diagnostics** for detector/input detail, or **All levels**
+for the complete interleaved log; warning/error and individual-level filters
+remain available. Browser fallback activity also defaults to the Operational
+levels and shows the prior state transition in its Current Battle panel.
+Battle/status loading therefore cannot delay the log display; live status and
 completed-battle refreshes are also isolated from one another. Select one or
 more rows and use
 **Copy selected**, right-click **Copy selected**, or press **Ctrl+C** to copy

@@ -38,6 +38,11 @@
 
     <Border Grid.Row="1" Background="{StaticResource PanelAltBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="14" Margin="0,0,0,10">
       <StackPanel>
+        <TextBlock Text="CURRENT STATUS"
+                   Foreground="#62D5FF"
+                   FontSize="10"
+                   FontWeight="Bold"
+                   Margin="0,0,0,7" />
         <UniformGrid Columns="8">
           <StackPanel><TextBlock Text="DIRECTIVE" Foreground="{StaticResource MutedBrush}" FontSize="10" /><TextBlock x:Name="DirectiveText" Text="-" FontSize="17" FontWeight="Bold" /></StackPanel>
           <StackPanel><TextBlock Text="OBSERVED UI" Foreground="{StaticResource MutedBrush}" FontSize="10" /><TextBlock x:Name="ObservedStateText" Text="-" FontSize="17" FontWeight="Bold" /></StackPanel>
@@ -48,11 +53,29 @@
           <StackPanel><TextBlock Text="PROCESS PID" Foreground="{StaticResource MutedBrush}" FontSize="10" /><TextBlock x:Name="ProcessPidText" Text="-" FontSize="17" FontWeight="Bold" /></StackPanel>
           <StackPanel><TextBlock Text="HEARTBEAT" Foreground="{StaticResource MutedBrush}" FontSize="10" /><TextBlock x:Name="HeartbeatText" Text="-" FontSize="17" FontWeight="Bold" /></StackPanel>
         </UniformGrid>
-        <TextBlock x:Name="PriorTransitionText"
-                   Text="PRIOR TRANSITION  —"
-                   Foreground="{StaticResource MutedBrush}"
-                   FontSize="10"
-                   Margin="0,10,0,0" />
+        <Border Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="0,1,0,0"
+                Padding="9,6"
+                Margin="0,10,0,0">
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="PREVIOUS DISTINCT STATE"
+                       Foreground="{StaticResource MutedBrush}"
+                       FontSize="10"
+                       FontWeight="Bold"
+                       Margin="0,0,12,0" />
+            <TextBlock Grid.Column="1"
+                       x:Name="PriorTransitionText"
+                       Text="—"
+                       Foreground="#C8D5E6"
+                       FontSize="10"
+                       FontWeight="SemiBold" />
+          </Grid>
+        </Border>
       </StackPanel>
     </Border>
 
@@ -236,11 +259,12 @@
               <RowDefinition Height="*" />
             </Grid.RowDefinitions>
             <Grid Grid.Row="0" Margin="4,0,4,6">
-              <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
               <TextBlock Text="RECENT ACTIVITY" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" VerticalAlignment="Center" />
               <TextBlock Grid.Column="1" x:Name="ActivityStatusText" Text="Not updated" Foreground="{StaticResource MutedBrush}" FontSize="10" VerticalAlignment="Center" Margin="8,0" />
               <Button Grid.Column="2" x:Name="CopyActivityButton" Content="Copy selected" Click="CopyActivity_Click" Padding="10,5" Margin="0,0,6,0" IsEnabled="False" />
-              <Button Grid.Column="3" Content="Refresh now" Click="RefreshActivity_Click" Padding="10,5" />
+              <Button Grid.Column="3" x:Name="ClearActivityButton" Content="Clear view" Click="ClearActivity_Click" Padding="10,5" Margin="0,0,6,0" IsEnabled="False" />
+              <Button Grid.Column="4" Content="Refresh now" Click="RefreshActivity_Click" Padding="10,5" />
             </Grid>
             <WrapPanel Grid.Row="1" Margin="4,0,4,6" VerticalAlignment="Center">
               <TextBlock Text="Show" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,6,0" />
@@ -261,6 +285,11 @@
                 <ComboBoxItem Content="Matches only" Tag="MATCH" />
                 <ComboBoxItem Content="State only" Tag="STATE" />
                 <ComboBoxItem Content="Failures only" Tag="FAIL" />
+              </ComboBox>
+              <TextBlock Text="Scope" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="14,0,6,0" />
+              <ComboBox x:Name="ActivityScopeFilter" Width="135" SelectedIndex="0">
+                <ComboBoxItem Content="Current run" Tag="current_run" />
+                <ComboBoxItem Content="All recent" Tag="all" />
               </ComboBox>
               <CheckBox x:Name="ActivityAutoFollowBox" Content="Follow newest" IsChecked="True" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Margin="14,0,0,0" />
               <TextBlock Text="Double-click a row to show the full line"
