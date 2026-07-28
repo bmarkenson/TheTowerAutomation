@@ -213,9 +213,13 @@ evidence.
        transition separately while retaining complete status history. Commit
        `bd7dd23` updates the Linux status adapter plus the browser and native
        clients.
-     - [ ] Audit recurring warnings in focused domain batches. Low-level
+     - [x] Audit recurring warnings in focused domain batches. Low-level
        helpers should return structured outcomes; workflow owners decide when
        persistent impact warrants a transition-based, rate-limited warning.
+       Commits `d98d67a` and `28b4a8a` move ordinary scrolling, transient
+       game-speed OCR misses, ADB retry detail, and Coins/min suffix repair out
+       of the warning stream while preserving persistent, rate-limited ADB and
+       game-speed degradation notices plus recovery records.
      - [ ] Verify that Operational reads as What/Why followed by Result,
        Diagnostics preserves input and decision evidence, and All Levels
        preserves complete ordering.

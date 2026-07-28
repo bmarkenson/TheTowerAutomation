@@ -119,6 +119,10 @@ input emitters record taps, swipes, and presses as `INPUT`.
 Low-level helpers should return structured reasons and keep ordinary outcomes
 diagnostic. The workflow owner decides whether a result is a no-op, a failed
 operation, or a persistent degradation worth surfacing to the operator.
+Scrolling outcomes and ordinary OCR repair remain diagnostic. Repeated
+game-speed verification and ADB connection failures become warnings only after
+three consecutive failures, reminders are limited to once every five minutes,
+and recovery is recorded.
 
 ## Pause, resume, and process replacement
 
