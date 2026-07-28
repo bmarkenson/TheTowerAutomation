@@ -8,6 +8,12 @@ checked-item detail remains in the
 
 ## Current validation gates
 
+- [ ] Diagnose the repeated Demon Mode miss in the Home card-recharge scan
+  recorded in
+  [`../observed_issues.md`](../observed_issues.md#home-card-recharge-scan-repeatedly-missed-demon-mode-while-finding-nuke).
+  On recurrence, retain each traversed viewport and its Demon Mode match
+  confidence so missing scroll coverage can be distinguished from a
+  card-template/localization failure before changing the scan bound.
 - [ ] Diagnose the transient Home Poison Swamp Stun verification timeout
   recorded in
   [`../observed_issues.md`](../observed_issues.md#home-poison-swamp-stun-verification-transiently-timed-out-after-its-source-tap).
@@ -84,6 +90,11 @@ checked-item detail remains in the
 
 ## Runtime control
 
+- [ ] Make `STOPPED` interrupt an in-progress Home setup without another device
+  input, as recorded in
+  [`../observed_issues.md`](../observed_issues.md#stopped-control-could-not-interrupt-an-in-progress-home-setup-guard).
+  Preserve the current Pause behavior, but let Stop unwind the guarded route
+  and release the runtime lock without requiring `KeyboardInterrupt`.
 - [ ] Finish the operator-control lifecycle.
   - [x] Provide convenient CLI, browser, and native Windows pause/resume
     interfaces over the authoritative control file so stopping the process

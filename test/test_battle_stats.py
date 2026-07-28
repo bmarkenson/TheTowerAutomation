@@ -15,6 +15,7 @@ from core.battle_stats import (
     parse_tower_number,
     persist_battle_record,
     render_battle_markdown,
+    render_perk_selection_timeline_markdown,
     render_survival_ability_activations_markdown,
 )
 from utils.previous_wave import get_previous_run_wave
@@ -343,6 +344,52 @@ def test_survival_activation_markdown_distinguishes_legacy_and_observed_none():
 
     assert not any("Second Wind" in line for line in legacy)
     assert "- Second Wind activations: none observed" in observed_none
+
+
+def test_render_perk_selection_timeline_preserves_atomic_batches():
+    lines = render_perk_selection_timeline_markdown(
+        {
+            "baseline_status": "new_battle_empty",
+            "pwr_maxed_observed": True,
+            "batches": [
+                {
+                    "sequence": 1,
+                    "scheduled_wave": 100,
+                    "observed_wave": 101,
+                    "selections": [
+                        {
+                            "display_text": "Perk wave requirement -25.00%",
+                        },
+                        {
+                            "display_text": "Increase max game speed by +0.50",
+                        },
+                    ],
+                },
+                {
+                    "sequence": 2,
+                    "scheduled_wave": 142,
+                    "observed_wave": 143,
+                    "selections": [
+                        {
+                            "before_display_text": "Defense percent +5.00%",
+                            "display_text": "Defense percent +10.00%",
+                        }
+                    ],
+                },
+            ],
+            "warnings": [],
+            "pending_scheduled_wave": None,
+        }
+    )
+
+    rendered = "\n".join(lines)
+    assert "same row were observed as one simultaneous batch" in rendered
+    assert (
+        "Perk wave requirement -25.00%; Increase max game speed by +0.50"
+        in rendered
+    )
+    assert "Defense percent +5.00% → Defense percent +10.00%" in rendered
+    assert "Perk Wave Requirement −75% observed: yes" in rendered
 
 
 def test_no_strategy_record_retains_terminal_tier_without_guessing_type():

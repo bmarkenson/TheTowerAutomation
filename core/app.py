@@ -34,6 +34,7 @@ from core.battle_stats import (
     persist_battle_record,
 )
 from core.battle_activation_tracker import BattleActivationTracker
+from core.perk_timeline import PerkTimelineObserver
 from core.no_strategy_inventory import (
     NoStrategyInventoryStatus,
     RECOVERABLE_INVENTORY_STATES,
@@ -183,6 +184,7 @@ class App:
         self._last_wave_conf: float = -1.0
         self._last_wave_ts: float = 0.0
         self._battle_activation_tracker = BattleActivationTracker()
+        self._perk_timeline_observer = PerkTimelineObserver()
         self._blind_tapper_suspended = False
         self._tournament_results_captured = False
         self._no_strategy_observer = NoStrategyRunObserver()
@@ -219,6 +221,30 @@ class App:
             tracker = BattleActivationTracker()
             self._battle_activation_tracker = tracker
         return tracker
+
+    def _perk_timeline(self) -> PerkTimelineObserver:
+        """Return the run-scoped perk observer, including in partial test apps."""
+
+        observer = getattr(self, "_perk_timeline_observer", None)
+        if observer is None:
+            observer = PerkTimelineObserver()
+            self._perk_timeline_observer = observer
+        return observer
+
+    def _perk_timeline_enabled(self) -> bool:
+        """Track runs whose declared configuration enables automatic Perks."""
+
+        strategy = self._mission_mgr.strategy
+        if strategy is None:
+            return False
+        configuration = strategy.run_configuration()
+        if not isinstance(configuration, Mapping):
+            return False
+        settings = configuration.get("settings")
+        return bool(
+            isinstance(settings, Mapping)
+            and settings.get("auto_pick_perks") is True
+        )
 
     def _retain_activation_evidence(
         self,
@@ -1618,6 +1644,7 @@ class App:
                 battle_started = self._mission_mgr.maybe_run_start(detection)
                 if battle_started is True:
                     self._activation_tracker().reset()
+                    self._perk_timeline().reset(fresh_battle=True)
                 self._observe_exclusive_validation_battle_start(
                     detection,
                     battle_started=battle_started is True,
@@ -1874,6 +1901,19 @@ class App:
                     if self._last_wave_ts > 0
                     else None
                 )
+                if (
+                    self._perk_timeline_enabled()
+                    and self._perk_timeline().handle(
+                        img,
+                        detection,
+                        wave=wave_val,
+                        actions_allowed=not actions_blocked,
+                        action_guard_fn=self._runtime_action_guard,
+                    )
+                ):
+                    # The observer owns its Perks modal route. Re-enter through
+                    # capture before any consumer uses the pre-route frame.
+                    continue
                 activation_tracker = self._activation_tracker()
                 activation_events = activation_tracker.observe(
                     img,
@@ -2575,6 +2615,7 @@ class App:
                     "survival_ability_activations": (
                         self._activation_tracker().snapshot()
                     ),
+                    "perk_selection_timeline": self._perk_timeline().snapshot(),
                     "session_preflight_evidence": dict(
                         self._mission_mgr.ctx.data.get("mission_vars", {}).get(
                             "gc_session_preflight_evidence",
@@ -2668,6 +2709,7 @@ class App:
                     "survival_ability_activations": (
                         self._activation_tracker().snapshot()
                     ),
+                    "perk_selection_timeline": self._perk_timeline().snapshot(),
                     "observed_run_configuration": observed_run_configuration,
                     "session_preflight_evidence": dict(
                         self._mission_mgr.ctx.data.get("mission_vars", {}).get(

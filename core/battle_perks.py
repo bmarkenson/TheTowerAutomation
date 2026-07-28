@@ -68,6 +68,52 @@ def ocr_perk_rows(
     return rows
 
 
+def ocr_latest_selected_perk(
+    frame: Frame,
+    *,
+    text_fn: Optional[PerkTextFn] = None,
+) -> Optional[dict[str, Any]]:
+    """OCR the top complete Selected Perks row.
+
+    The in-game list is ordered newest selection first.  Once Perk Wave
+    Requirement is already maxed, the game selects exactly one perk at each
+    scheduled wave, so this bounded read is sufficient for the timeline.
+    """
+
+    regions = _perk_row_regions(frame)
+    if not regions:
+        return None
+    top, bottom = regions[0]
+    recognize = text_fn or _ocr_perk_text
+    raw_text, confidence = recognize(
+        frame[top : bottom + 1, PERK_TEXT_X1:PERK_TEXT_X2]
+    )
+    raw_text = " ".join(str(raw_text or "").split())
+    if not raw_text:
+        return None
+    display_text = _normalize_perk_ocr(raw_text)
+    color = _perk_color(frame, top, bottom)
+    return {
+        "display_text": display_text,
+        "text_raw": raw_text,
+        "key": _slug(display_text),
+        "color": color,
+        "instance_model": (
+            "leveled" if color == "blue" else "single_instance"
+        ),
+        "confidence": round(float(confidence), 1),
+        "latest_selection_rank": 1,
+        "observations": [
+            {
+                "viewport": 1,
+                "top": top,
+                "text_raw": raw_text,
+                "confidence": round(float(confidence), 1),
+            }
+        ],
+    }
+
+
 def ocr_perk_configuration_rows(
     frame: Frame,
     *,
@@ -477,6 +523,7 @@ def _slug(text: str) -> str:
 
 __all__ = [
     "DEFAULT_CONFIDENCE_THRESHOLD",
+    "ocr_latest_selected_perk",
     "ocr_perk_configuration_row_near",
     "ocr_perk_configuration_rows",
     "ocr_perk_rows",

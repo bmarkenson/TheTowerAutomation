@@ -1135,6 +1135,11 @@ def render_battle_markdown(record: Mapping[str, Any]) -> str:
             record.get("runtime", {}).get("survival_ability_activations", {})
         )
     )
+    lines.extend(
+        render_perk_selection_timeline_markdown(
+            record.get("runtime", {}).get("perk_selection_timeline", {})
+        )
+    )
 
     game_fields = record.get("game_stats", {}).get("fields", {})
     lines.extend(["", "## Game Stats-only fields", "", "| Stat | Value |", "| --- | ---: |"])
@@ -1299,6 +1304,84 @@ def render_survival_ability_activations_markdown(
             )
     else:
         lines.append("- Nuke activations: none observed")
+    return lines
+
+
+def render_perk_selection_timeline_markdown(timeline: Any) -> list[str]:
+    """Render wave-addressed atomic perk-selection batches."""
+
+    if not isinstance(timeline, Mapping) or "batches" not in timeline:
+        return []
+    raw_batches = timeline.get("batches")
+    batches = (
+        [batch for batch in raw_batches if isinstance(batch, Mapping)]
+        if isinstance(raw_batches, Sequence)
+        and not isinstance(raw_batches, (str, bytes))
+        else []
+    )
+    lines = [
+        "",
+        "## Perk selection timeline",
+        "",
+        (
+            "Selections on the same row were observed as one simultaneous batch; "
+            "their internal order is intentionally unspecified."
+        ),
+        "",
+    ]
+    if batches:
+        lines.extend(
+            [
+                "| Batch | Scheduled wave | Observed wave | Selected perk(s) |",
+                "| ---: | ---: | ---: | --- |",
+            ]
+        )
+        for index, batch in enumerate(batches, start=1):
+            selections = batch.get("selections")
+            entries = (
+                [
+                    selection
+                    for selection in selections
+                    if isinstance(selection, Mapping)
+                ]
+                if isinstance(selections, Sequence)
+                and not isinstance(selections, (str, bytes))
+                else []
+            )
+            displayed = []
+            for selection in entries:
+                after = str(selection.get("display_text") or "unknown")
+                before = selection.get("before_display_text")
+                displayed.append(
+                    f"{before} → {after}" if before else after
+                )
+            lines.append(
+                f"| {batch.get('sequence', index)} | "
+                f"{batch.get('scheduled_wave') or 'unknown'} | "
+                f"{batch.get('observed_wave') or 'unknown'} | "
+                f"{'; '.join(displayed) or 'unreadable'} |"
+            )
+    else:
+        lines.append("- No completed perk-selection batches were observed.")
+
+    baseline = str(timeline.get("baseline_status") or "unknown").replace("_", " ")
+    lines.extend(
+        [
+            "",
+            f"- Baseline: {baseline}",
+            (
+                "- Perk Wave Requirement −75% observed: "
+                + ("yes" if timeline.get("pwr_maxed_observed") else "no")
+            ),
+        ]
+    )
+    pending = timeline.get("pending_scheduled_wave")
+    if pending is not None:
+        lines.append(f"- Pending panel observation for scheduled wave {pending}")
+    warnings = timeline.get("warnings")
+    if isinstance(warnings, Sequence) and not isinstance(warnings, (str, bytes)):
+        for warning in warnings:
+            lines.append(f"- Warning: {warning}")
     return lines
 
 
@@ -2062,5 +2145,6 @@ __all__ = [
     "persist_battle_record",
     "render_battle_markdown",
     "render_coin_rate_samples_markdown",
+    "render_perk_selection_timeline_markdown",
     "render_survival_ability_activations_markdown",
 ]
