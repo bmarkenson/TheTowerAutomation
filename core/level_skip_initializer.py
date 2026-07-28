@@ -22,7 +22,13 @@ from core.upgrade_box_detector import (
     evaluate_upgrade_box_gold_box,
 )
 from core.upgrade_buy_quantity import detect_current_buy_quantity, ensure_buy_quantity
-from utils.logger import log, log_action_intent, log_input, log_mission
+from utils.logger import (
+    log,
+    log_action_intent,
+    log_input,
+    log_mission,
+    log_result,
+)
 from utils.wave_detector import detect_wave_number_from_image
 
 
@@ -230,6 +236,10 @@ def initialize_level_skips(
             f"maximize Enemy Health and Attack Level Skip before wave "
             f"{target_wave} so normal strategy actions can continue"
         ),
+        detail=(
+            f"[RUN_INIT] target_wave={target_wave} timeout_s={timeout_s} "
+            f"ehls_taps_per_burst={ehls_taps_per_burst}"
+        ),
     )
     started = monotonic_fn()
     deadline = started + max(5.0, float(timeout_s))
@@ -256,6 +266,27 @@ def initialize_level_skips(
         )
         if frame_stream is not None:
             frame_stream.stop()
+        if result.success:
+            summary = (
+                "Level-skip initialization complete — EHLS and EALS maxed "
+                f"in {result.elapsed_s:.2f}s"
+            )
+        else:
+            summary = (
+                "Level-skip initialization failed — "
+                f"{result.reason.replace('_', ' ')}"
+            )
+        log_result(
+            summary,
+            detail=(
+                f"[RUN_INIT] result={'completed' if result.success else result.reason} "
+                f"ehls_maxed={result.ehls_maxed} eals_maxed={result.eals_maxed} "
+                f"elapsed_s={result.elapsed_s:.3f} ehls_wave={result.ehls_wave} "
+                f"eals_wave={result.eals_wave} taps_sent={result.taps_sent} "
+                f"eals_first_tap_wave={result.eals_first_tap_wave} "
+                f"eals_first_tap_elapsed_s={result.eals_first_tap_elapsed_s}"
+            ),
+        )
         return result
 
     frame = screenshot if screenshot is not None else capture_fn()
@@ -271,7 +302,7 @@ def initialize_level_skips(
             frame_stream = frame_stream_factory()
             frame_stream.start()
         except Exception as exc:
-            log(f"[RUN_INIT] Live frame stream failed to start: {exc}", "WARN")
+            log(f"[RUN_INIT] Live frame stream failed to start: {exc}", "DEBUG")
             if frame_stream is not None:
                 frame_stream.stop()
             frame_stream = None
@@ -294,7 +325,7 @@ def initialize_level_skips(
     if quantity != "max":
         log_mission(
             f"[RUN_INIT] Utility buy quantity is {quantity!r}; setting Max before level skips",
-            "INFO",
+            "DEBUG",
         )
         try:
             frame = ensure_buy_quantity(
@@ -362,7 +393,7 @@ def initialize_level_skips(
                     log(
                         "[RUN_INIT] Live frame stream unavailable; using guarded "
                         "screenshot fallback",
-                        "WARN",
+                        "DEBUG",
                     )
                     frame_stream.stop()
                     frame_stream = None
@@ -506,14 +537,14 @@ def initialize_level_skips(
         log_mission(
             f"[RUN_INIT] EALS first tap dispatched immediately after EHLS "
             f"at {eals_first_tap_elapsed_s:.2f}s wave={eals_first_tap_wave}",
-            "INFO",
+            "DEBUG",
         )
     for target in (EHLS, EALS):
         elapsed = completion_elapsed[target]
         log_mission(
             f"[RUN_INIT] {target} gold boxed in {elapsed:.2f}s "
             f"at wave={completion_waves[target]}",
-            "INFO",
+            "DEBUG",
         )
         if completion_waves[target] is not None and completion_waves[target] > target_wave:
             log(

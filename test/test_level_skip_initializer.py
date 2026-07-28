@@ -221,6 +221,15 @@ def test_initializer_logs_why_before_its_tap_sequence(tmp_path, monkeypatch):
     assert input_lines[1].endswith(
         f"] Synthetic tap: level_skip:{EALS}"
     )
+    result_lines = [
+        line
+        for line in action_log.read_text(encoding="utf-8").splitlines()
+        if line.startswith("[RESULT ")
+    ]
+    assert len(result_lines) == 1
+    assert "Level-skip initialization complete — EHLS and EALS maxed" in (
+        result_lines[0]
+    )
 
 
 def test_fallback_reuses_verified_tap_authority_during_capture():
@@ -667,9 +676,12 @@ def test_live_stream_reuses_initial_verified_frame_until_new_frame_arrives():
 
 def test_fast_initializer_refuses_non_running_screen_without_taps():
     taps = []
-    with patch(
-        "core.level_skip_initializer.detect_state_and_overlays",
-        return_value={"state": "HOME_SCREEN", "menu": None},
+    with (
+        patch(
+            "core.level_skip_initializer.detect_state_and_overlays",
+            return_value={"state": "HOME_SCREEN", "menu": None},
+        ),
+        patch("core.level_skip_initializer.log_result") as result_log,
     ):
         result = initialize_level_skips(
             screenshot=_frame(1),
@@ -681,6 +693,10 @@ def test_fast_initializer_refuses_non_running_screen_without_taps():
     assert not result.success
     assert result.reason == "not_running"
     assert taps == []
+    result_log.assert_called_once()
+    assert result_log.call_args.args[0] == (
+        "Level-skip initialization failed — not running"
+    )
 
 
 def test_executor_records_fast_initializer_metrics():

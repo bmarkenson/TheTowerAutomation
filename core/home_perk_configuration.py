@@ -30,7 +30,7 @@ from core.scrolling import guarded_swipe, scroll_to_edge
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
 from core.workshop_preset import measure_preset_slot_selection
-from utils.logger import log_action_intent
+from utils.logger import log, log_action_intent, log_result
 
 
 Frame = np.ndarray
@@ -68,6 +68,42 @@ class HomePerkConfigurationResult:
 
 class HomePerkConfigurationError(RuntimeError):
     pass
+
+
+def _finish_home_perk_configuration(
+    result: HomePerkConfigurationResult,
+) -> HomePerkConfigurationResult:
+    """Emit the terminal result for one Home Perk configuration pass."""
+
+    changed_fields = [
+        check_id
+        for check_id in ("perk_bans", "perk_auto_pick_order")
+        if isinstance(result.evidence.get(check_id), Mapping)
+        and result.evidence[check_id].get("changed") is True
+    ]
+    changed_labels = {
+        "perk_bans": "Ban Perks",
+        "perk_auto_pick_order": "Auto Pick order",
+    }
+    if result.valid and changed_fields:
+        summary = (
+            "Home Perk configuration complete — repaired and verified "
+            f"{', '.join(changed_labels[field] for field in changed_fields)}"
+        )
+    elif result.valid:
+        summary = "Home Perk configuration complete — verified without changes"
+    else:
+        summary = f"Home Perk configuration failed — {result.reason}"
+    log_result(
+        summary,
+        detail=(
+            f"[HOME_PERKS] result={'completed' if result.valid else 'failed'} "
+            f"valid={result.valid} changed={result.changed} "
+            f"changed_fields={changed_fields} failed_check={result.failed_check} "
+            f"reason={result.reason}"
+        ),
+    )
+    return result
 
 
 def detect_home_perks_configuration_control(
@@ -133,6 +169,18 @@ def ensure_home_perk_configuration(
         detector,
         detect_home_control_fn,
     )
+    log_action_intent(
+        "Checking Home Perk configuration",
+        reason=(
+            "verify the strategy-owned Ban and Auto Pick settings before the "
+            "new battle and repair only authoritative mismatches"
+        ),
+        detail=(
+            f"[HOME_PERKS] required_bans={len(required_bans)} "
+            f"required_auto_pick={len(required_auto_pick)} "
+            f"waived={sorted(waived)}"
+        ),
+    )
     perks = _open_configuration(
         home_screenshot,
         capture_fn=capture_fn,
@@ -158,19 +206,15 @@ def ensure_home_perk_configuration(
         bans_top,
         row_fn=row_fn,
     )
-    repair_intent_logged = False
     if (
         "perk_bans" not in waived
         and not _ban_capture_matches(required_bans, captured_bans)
     ):
-        log_action_intent(
-            "Restoring strategy-owned Perk configuration",
-            reason=(
-                "the verified Home Ban Perks did not match the selected "
-                "run strategy"
-            ),
+        log(
+            "[HOME_PERKS] Verified Ban Perks differ from the strategy; "
+            "starting guarded repair",
+            "DEBUG",
         )
-        repair_intent_logged = True
         bans_top = _repair_bans(
             bans_top,
             required_bans,
@@ -219,14 +263,11 @@ def ensure_home_perk_configuration(
             ordered=True,
         )
     ):
-        if not repair_intent_logged:
-            log_action_intent(
-                "Restoring strategy-owned Perk configuration",
-                reason=(
-                    "the verified Home Auto Pick order did not match the "
-                    "selected run strategy"
-                ),
-            )
+        log(
+            "[HOME_PERKS] Verified Auto Pick order differs from the "
+            "strategy; starting guarded repair",
+            "DEBUG",
+        )
         current = _repair_auto_pick_order(
             auto_top,
             required_auto_pick,
@@ -290,13 +331,15 @@ def ensure_home_perk_configuration(
         if failed_check and isinstance(evidence.get(failed_check), Mapping)
         else "strategy Perk configuration remained invalid"
     )
-    return HomePerkConfigurationResult(
-        valid=not failed_checks,
-        changed=bool(changed_fields),
-        reason=reason,
-        failed_check=failed_check,
-        evidence=evidence,
-        home_screenshot=home,
+    return _finish_home_perk_configuration(
+        HomePerkConfigurationResult(
+            valid=not failed_checks,
+            changed=bool(changed_fields),
+            reason=reason,
+            failed_check=failed_check,
+            evidence=evidence,
+            home_screenshot=home,
+        )
     )
 
 

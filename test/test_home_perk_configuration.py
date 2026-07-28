@@ -373,6 +373,10 @@ def test_home_perk_repair_finishes_bans_before_opening_auto_pick():
             "core.home_perk_configuration._close_to_home",
             return_value=frame,
         ),
+        patch(
+            "core.home_perk_configuration.log_action_intent",
+        ) as action_log,
+        patch("core.home_perk_configuration.log_result") as result_log,
     ):
         result = ensure_home_perk_configuration(
             {
@@ -388,6 +392,12 @@ def test_home_perk_repair_finishes_bans_before_opening_auto_pick():
         "repair:perk_bans",
         "select:perk_auto_pick_order",
     ]
+    action_log.assert_called_once()
+    assert action_log.call_args.args[0] == "Checking Home Perk configuration"
+    result_log.assert_called_once()
+    assert result_log.call_args.args[0] == (
+        "Home Perk configuration complete — repaired and verified Ban Perks"
+    )
 
 
 def test_home_perk_does_not_repair_an_incomplete_auto_pick_capture():
@@ -470,6 +480,7 @@ def test_home_perk_does_not_repair_an_incomplete_auto_pick_capture():
             "core.home_perk_configuration._close_to_home",
             return_value=frame,
         ),
+        patch("core.home_perk_configuration.log_result") as result_log,
     ):
         result = ensure_home_perk_configuration(
             {
@@ -486,6 +497,11 @@ def test_home_perk_does_not_repair_an_incomplete_auto_pick_capture():
     assert result.valid is False
     assert result.failed_check == "perk_auto_pick_order"
     repair.assert_not_called()
+    result_log.assert_called_once()
+    assert result_log.call_args.args[0] == (
+        "Home Perk configuration failed — "
+        "Auto Pick exposed 2 of 3 ranked perks before the ranking boundary"
+    )
 
 
 def test_auto_pick_move_requires_fresh_identity_and_visual_change():
