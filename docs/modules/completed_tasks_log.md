@@ -37,6 +37,28 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-29 Perk timeline restart and modal recovery
+
+- Commit `ce862cb` fixes the transferred-runtime incident in which a
+  mid-battle Perk baseline crossed its scheduled wave during full-list capture,
+  re-armed from stale progress, and later abandoned an open Perks panel after
+  dispatching an unverified close.
+- Full-list capture now refreshes the schedule from fresh panel frames and
+  repeats once across a boundary. Panel restoration requires a freshly
+  detected battle or terminal destination; failed transitions retain observer
+  ownership and retry safely.
+- Both incident paths have focused regressions. All 13 Perk timeline tests and
+  236 surrounding integration tests passed. The repository suite passed 845
+  sandbox-compatible tests plus its separately permitted loopback HTTP test,
+  for 846 total.
+- Guarded live recovery verified that the ADB transfer itself was healthy on
+  `localhost:5565`, restored the naturally finished wave-3372 battle without
+  exiting or Surrendering it, loaded the fixed runtime as PID 3210165, saved
+  144 exact Stats rows and 27 selected Perks, and started the next Tier 19 run.
+  Its first two timeline batches, scheduled for waves 191 and 429, both
+  verified `close_state=RUNNING`; normal automation continued through wave
+  470.
+
 ### 2026-07-28 restart-stable activity scope
 
 - Commit `d8a1cda` makes automation startup reuse a valid Current run ledger

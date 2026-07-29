@@ -8,6 +8,58 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Perk timeline restart catch-up lost panel ownership and stalled the battle
+
+- **Observed:** 2026-07-28 through 2026-07-29 after the emulator and managed
+  runtime moved from the previous ADB endpoint to `localhost:5565`.
+- **Symptom:** The replacement runtime attached near wave 2425, repeatedly
+  recorded automatic Perk selections against the preceding scheduled wave,
+  and eventually remained on the Perks screen from 22:19 until manual recovery
+  after 01:31. The game ended at wave 3372 behind that screen, but the runtime
+  continued to report `PERKS` and could not enter its Game Over pipeline.
+- **Evidence:** The managed environment, persistent control, runtime lock, and
+  device all agreed on `localhost:5565`; the old 5555 lock was released, so
+  the ADB transfer was not the failure. `logs/actions.log` shows a mid-battle
+  baseline crossing scheduled wave 2430 and re-arming from stale progress. At
+  22:19:57 it dispatched the Perks close for scheduled wave 3280 and reported
+  `x4.06 Health Regen` recorded, while the next and every later state remained
+  `PERKS`. A fresh retained-screen inspection showed wave 3372/3450 behind the
+  panel. Closing the verified panel under Pause revealed the authoritative
+  wave-3372 Game Over screen.
+- **Safety response:** The active target, control file, PID/lock, current
+  screen, and recent action log were inspected before input. Automation was
+  indefinitely paused and its acknowledgement was verified. One
+  template-authorized close restored the terminal screen; the battle was
+  neither exited nor Surrendered. The old process was then replaced while
+  paused at Game Over.
+- **Cause:** Baseline capture armed the tracker from the schedule token seen
+  before a multi-frame full-list scan, even when the scheduled wave passed
+  during that scan. Separately, dispatching a close tap was treated as route
+  restoration without observing a destination state. The tracker cleared its
+  ownership flag, leaving the still-open Perks panel with no handler authorized
+  to close it.
+- **Resolution:** Baseline and full-list captures refresh the top-bar schedule
+  from fresh panel frames and repeat once when a boundary crosses during the
+  capture, producing a temporally consistent snapshot and current re-arm
+  point. Perks close now succeeds only after a fresh frame proves `RUNNING`,
+  `GAME_OVER`, or `TOURNAMENT_RESULTS`; otherwise the observer retains route
+  ownership and retries the guarded restoration on its next pass.
+- **Regression:** `test/test_perk_timeline.py::
+  test_mid_battle_baseline_repeats_after_crossing_scheduled_wave` proves the
+  baseline catch-up and current re-arm behavior.
+  `test_observer_retains_route_ownership_until_close_transition_is_verified`
+  proves that an unconfirmed close cannot orphan the modal.
+- **Validation:** All 13 Perk timeline tests and 236 focused tracker, battle,
+  control, initialization, no-strategy, and Tournament tests passed. The
+  complete repository suite passed 845 sandbox-compatible tests plus its
+  separately permitted loopback HTTP test, for 846 total. The replacement
+  runtime acquired the `localhost:5565` lock as PID 3210165, processed the
+  preserved Game Over screen, saved 144 exact Stats rows and 27 selected
+  Perks, and started a new Tier 19 run. Its first two timeline captures
+  recorded the selections scheduled for waves 191 and 429; both verified
+  `close_state=RUNNING`, and normal automation continued through wave 470.
+- **Fixed by:** `ce862cb`.
+
 ### Automation restart cleared the native Current run activity view
 
 - **Observed:** 2026-07-28 in the native Windows control surface after stopping
