@@ -11,28 +11,6 @@ for a matching recurrence or historical investigation.
 
 ## Open
 
-### Home card-recharge scan repeatedly missed Demon Mode while finding Nuke
-
-- **Observed:** 2026-07-28 during the authorized Tier 19 perk-timeline live
-  validation.
-- **Symptom:** Three complete Home setup attempts found Nuke, opened its detail,
-  and verified `ready_after_recharge`, but each bounded inventory traversal
-  ended with `Demon Mode Card was not found in inventory`.
-- **Evidence:** `logs/actions.log` records the three failures at 15:08:27,
-  15:09:23, and 15:10:18. Each attempt returned to Home before retrying. The
-  third pass includes six guarded `goto_next:cards_inventory` swipes after its
-  top-edge traversal, while the Nuke detail evidence remained authoritative.
-- **Safety response:** No battle started on failed evidence. For the disposable
-  test only, the built-in gate decision recorded a one-run
-  `card_recharge_modes` waiver at 15:10:58; all unrelated Home and in-battle
-  requirements still passed before the explicitly owned battle began.
-- **Status:** Open. The repeated bounded failure establishes a persistent miss
-  for that layout during this run, but does not distinguish missing scroll
-  coverage from a Demon Mode template/localization failure. Retain the
-  traversed viewport sequence and per-viewport Demon Mode match evidence on
-  recurrence before changing the scan bound. The active investigation is in
-  [`backlog/runtime-and-validation.md`](backlog/runtime-and-validation.md#current-validation-gates).
-
 ### Stopped control could not interrupt an in-progress Home setup guard
 
 - **Observed:** 2026-07-28 while cleaning up the authorized Tier 19

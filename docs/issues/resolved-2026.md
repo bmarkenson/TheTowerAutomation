@@ -8,6 +8,102 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Paused perk tracking attributed an interval of selections to stale waves
+
+- **Observed:** 2026-07-28 during the user-authorized Cards scrolling
+  validation in an ongoing Tier 19 Farm battle.
+- **Symptom:** Automation acknowledged `PAUSED` at wave 670 and correctly sent
+  no handler input while the battle continued to wave 880. The Perk timeline
+  observer retained its first pending transition without advancing that
+  request as later stable top-bar tokens arrived. On Resume, it assigned an
+  11-change full-list diff to scheduled wave 665, then assigned the latest row
+  to stale scheduled wave 760 while the battle was already near wave 950.
+- **Evidence:** `logs/actions.log` records `RUNNING/PAUSED` at waves 670, 780,
+  and 880; the guarded Cards route between 16:51:41 and 16:52:17; the Resume
+  acknowledgement at 16:52:22; the 11-selection wave-665 batch at 16:52:43;
+  and the next wave-760 singleton at observed wave 950. This is direct live
+  evidence that a pause can span more than one automatic Perk selection.
+- **Safety response:** The diagnostic route checked the persistent Pause
+  request before every input, returned through the verified in-battle control,
+  and rechecked ownership before Resume. It never exited or Surrendered the
+  battle. Normal runtime input remained blocked throughout the acknowledged
+  pause.
+- **Cause:** `PerkTimelineTracker.observe()` returned the existing pending
+  request after token confirmation without updating its `progress_after`.
+  Later selection boundaries were therefore neither represented in the batch
+  nor used to re-arm the tracker after its deferred panel capture. A
+  post-PWR request could also retain `latest` mode even though multiple
+  selections had accumulated.
+- **Resolution:** Pending requests now advance on every newer stable progress
+  token, retain each observed scheduled boundary, and re-arm from the newest
+  token after capture. Crossing more than one boundary forces a full selected
+  list and records the diff as an explicit `interval_aggregate`, because
+  individual changes cannot be assigned honestly to one scheduled wave. The
+  battle Markdown renderer exposes the aggregate boundaries and observed-wave
+  span instead of presenting the changes as simultaneous.
+- **Regression:** `test/test_perk_timeline.py::
+  test_paused_observer_coalesces_boundaries_and_arms_latest_progress` covers
+  multiple transitions while actions are blocked and proves that the next
+  request uses the newest armed wave.
+  `test_deferred_post_pwr_singleton_falls_back_to_full_interval_snapshot`
+  covers the post-PWR `latest` fallback.
+  `test/test_battle_stats.py::
+  test_render_perk_selection_timeline_marks_pause_interval_aggregates` covers
+  durable report semantics.
+- **Validation:** The focused tracker/report suites passed 31 tests. The
+  repository suite passed 838 sandbox-compatible tests; its sole loopback HTTP
+  test passed separately on the approved host path, for 839 total. The active
+  runtime was not restarted onto this change during the battle.
+- **Fixed by:** `20b042d`.
+
+### Home card-recharge scan repeatedly missed Demon Mode while finding Nuke
+
+- **Observed:** 2026-07-28 during the authorized Tier 19 perk-timeline live
+  validation.
+- **Symptom:** Three complete Home setup attempts found Nuke, opened its detail,
+  and verified `ready_after_recharge`, but each bounded inventory traversal
+  ended with `Demon Mode Card was not found in inventory`.
+- **Evidence:** `logs/actions.log` records the three failures at 15:08:27,
+  15:09:23, and 15:10:18. Each attempt returned to Home before retrying. The
+  third pass includes six guarded `goto_next:cards_inventory` swipes after its
+  top-edge traversal, while the Nuke detail evidence remained authoritative.
+  Exact replay of that traversal began Nuke-first (`0.9999`) with only a
+  clipped Demon match (`0.701`), reached the true top, jumped past the Demon
+  row on its first forward swipe (`0.574`), and reached the bottom on its
+  second. A separate intermediate viewport matched the unchanged Demon
+  template at `0.978`, excluding a template/localization failure.
+- **Safety response:** No battle started on failed evidence. For the disposable
+  test only, the built-in gate decision recorded a one-run
+  `card_recharge_modes` waiver at 15:10:58; all unrelated Home and in-battle
+  requirements still passed before the explicitly owned battle began. The
+  later scrolling validation used an agent-owned Pause, returned through the
+  verified in-battle control, resumed only while that Pause was still owned,
+  and never exited or Surrendered the battle.
+- **Cause:** The forward Cards gesture moved 550 pixels in 300 ms. From the
+  true top it could pass completely over the Demon row before the next
+  screenshot, while the fixed swipe counts kept repeating at the bottom.
+  Failure output retained neither the traversed frames nor per-card match
+  confidence, leaving the miss ambiguous.
+- **Resolution:** The forward gesture now moves 300 pixels over 600 ms so
+  adjacent screenshots overlap. Traversal first reaches the actual top and
+  then searches to the actual bottom using settled-frame edge detection
+  instead of fixed blind phases. Every viewport logs Demon/Nuke confidence,
+  and a failed scan retains all inspected frames under one timestamped evidence
+  directory.
+- **Regression:** `test/test_card_recharge_modes.py::
+  test_nuke_first_scan_reaches_top_edge_then_overlaps_to_demon` reproduces the
+  failing Nuke-first entry position.
+  `test_missing_card_retains_each_inspected_viewport` covers diagnostic
+  retention, and `test/test_card_swipe_geometry.py` locks the overlapping
+  gesture.
+- **Validation:** The focused Cards suites passed 19 tests. Offline replay
+  distinguished the missed viewport from the healthy template. During the
+  active-battle guarded validation, Cards matched Demon Mode at `0.996` and
+  Nuke at `0.987`, reached the true top in three swipes, and returned to
+  `RUNNING`. The repository suite passed 838 sandbox-compatible tests plus the
+  separately permitted loopback HTTP test, for 839 total.
+- **Fixed by:** `8c955d4`.
+
 ### One obscured tower wing produced false Second Wind activations
 
 - **Observed:** 2026-07-28 after the operator reported one false Second Wind

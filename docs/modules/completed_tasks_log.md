@@ -37,6 +37,30 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-28 Cards traversal and pause-safe Perk tracking
+
+- Commit `8c955d4` replaces the Cards inventory's fast 550-pixel forward jump
+  with a slower overlapping 300-pixel gesture. Card recharge verification now
+  detects the true top and bottom from settled screenshots, inspects every
+  viewport, logs Demon/Nuke confidence, and retains the complete viewport set
+  on failure.
+- Exact replay of the reported Nuke-first sequence proved that the former
+  gesture skipped the Demon row while its unchanged template still matched an
+  intermediate viewport at `0.978`. The guarded active-battle check matched
+  Demon at `0.996` and Nuke at `0.987`, reached the true top, returned through
+  the verified in-battle route, and restored the agent-owned Pause to
+  `RUNNING`.
+- That live Pause crossed multiple automatic Perk selections and exposed a
+  separate attribution defect. Commit `20b042d` now advances a deferred
+  timeline request through newer stable progress tokens, forces a full
+  snapshot after multiple boundaries, records the result as an interval
+  aggregate without false per-wave attribution, and arms the next request from
+  the newest observed token.
+- The Cards suites passed 19 tests and the Perk tracker/report suites passed
+  31. The repository suite passed 838 sandbox-compatible tests; the sole
+  loopback HTTP test passed separately with host socket permission, for 839
+  total.
+
 ### 2026-07-28 wave-addressed Perk selection timeline
 
 - Automatic-Perk runs now read the compact top-bar
@@ -69,8 +93,10 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   `HOME_SCREEN / NEW_BATTLE`.
 - Implemented in commit `8685a79`. The same live pass exposed two unrelated
   pre-existing anomalies—repeated Demon Mode inventory misses and Stop waiting
-  inside an in-progress Home setup—which remain recorded in
-  [`../observed_issues.md`](../observed_issues.md).
+  inside an in-progress Home setup. The
+  [Demon Mode miss](../issues/resolved-2026.md#home-card-recharge-scan-repeatedly-missed-demon-mode-while-finding-nuke)
+  is resolved; the Stop interruption defect remains in
+  [`../observed_issues.md`](../observed_issues.md#stopped-control-could-not-interrupt-an-in-progress-home-setup-guard).
 
 ### 2026-07-27–28 Second Wind activation waves and transition evidence
 

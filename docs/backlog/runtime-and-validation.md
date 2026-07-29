@@ -8,12 +8,6 @@ checked-item detail remains in the
 
 ## Current validation gates
 
-- [ ] Diagnose the repeated Demon Mode miss in the Home card-recharge scan
-  recorded in
-  [`../observed_issues.md`](../observed_issues.md#home-card-recharge-scan-repeatedly-missed-demon-mode-while-finding-nuke).
-  On recurrence, retain each traversed viewport and its Demon Mode match
-  confidence so missing scroll coverage can be distinguished from a
-  card-template/localization failure before changing the scan bound.
 - [ ] Diagnose the transient Home Poison Swamp Stun verification timeout
   recorded in
   [`../observed_issues.md`](../observed_issues.md#home-poison-swamp-stun-verification-transiently-timed-out-after-its-source-tap).
