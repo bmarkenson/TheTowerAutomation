@@ -175,6 +175,42 @@ and actionable work lives in
   required because the client behavior and wire contract did not change.
 - **Fixed by:** `d8a1cda`.
 
+### A manually started battle could inherit the preceding Current run scope
+
+- **Observed:** 2026-07-29 during design review of mid-battle process
+  attachment.
+- **Symptom:** Reusing the activity ledger across process restarts correctly
+  preserved a same-battle attachment, but it could not distinguish that case
+  from a later battle started manually while automation was stopped. The
+  native Current run view could therefore retain the preceding battle's
+  boundary.
+- **Evidence:** Repository inspection showed that the ledger contained only a
+  process-independent log boundary. The game already exposed an authoritative
+  latest-completed-battle report through Battle History's Copy control, but no
+  runtime path persisted or compared it.
+- **Safety response:** Implementation and validation used retained screenshots,
+  a retained copied report, and fake guarded input dispatch. No live process,
+  control directive, ADB target, or battle was changed.
+- **Cause:** Process continuity had a durable scope identifier but no durable
+  game-history identity capable of proving whether a battle completed during
+  the automation gap.
+- **Resolution:** Home `NEW_BATTLE` scope creation now records a fingerprint of
+  the latest copied Battle History report before launch. Attachment compares
+  that baseline: equality preserves the scope, a changed report starts the new
+  scope at the continuity action, and an unreadable result after safe
+  restoration starts conservatively. The exclusive route is Pause-aware,
+  blocks competing inputs, restores its source, and resumes safely if process
+  replacement lands on Battle History itself.
+- **Regression:** `test/test_battle_history.py` covers clipboard parsing,
+  retained navigation/detail evidence, Home/running restoration, Pause, and
+  interrupted-route recovery. `test/test_activity_continuity.py` covers
+  unchanged, changed, unavailable, Home-baseline, and persisted-scope outcomes.
+  `test/test_logger.py` covers compare-and-set identity writes and scope
+  boundaries that include the continuity `ACTION`.
+- **Validation:** The complete repository suite passed 869 tests. The client
+  and activity API contract were unchanged, so no native publish was required.
+- **Fixed by:** `2c4342d`.
+
 ### Daily Gem claim drift escaped its match region and left battle in Store
 
 - **Observed:** 2026-07-28 during the active Tier 19 Farm battle's rollover

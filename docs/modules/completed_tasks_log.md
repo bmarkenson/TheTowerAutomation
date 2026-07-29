@@ -37,6 +37,27 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-29 Battle History-backed activity continuity
+
+- Commit `2c4342d` fingerprints the newest copied in-game Battle History report
+  before a Home launch and compares it whenever automation attaches to a
+  running or resumable battle.
+- An unchanged report preserves the existing Current run log scope. A changed
+  report proves that a battle completed while automation was stopped and starts
+  the new scope at the continuity `ACTION`, covering battles begun manually
+  without automation. Unreadable identity after safe restoration fails toward
+  a conservative new scope; unverified restoration blocks other inputs and
+  retries.
+- The guarded route is Pause-aware, restores Home or the running battle, and
+  can recover when process replacement lands on its History list or detail.
+  Its individual taps remain diagnostic beneath one operational `ACTION` and
+  `RESULT`.
+- Retained UI fixtures verify both navigation templates, latest-row/detail
+  evidence, clipboard parsing, Home/running restoration, interrupted-route
+  recovery, and persisted scope comparison. The complete repository suite
+  passed 869 tests. The API and native client were unchanged, so no Windows
+  publish was required.
+
 ### 2026-07-29 Bounded session-preflight repair retries
 
 - Commit `fbdcd48` makes the Home-repair threshold explicit in the compact Farm

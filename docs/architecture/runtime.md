@@ -472,6 +472,22 @@ evidence is attached.
   or Home `NEW_BATTLE` arms the gates, and the next `RUNNING` observation emits
   the normal run-start hooks. Home `RESUME_BATTLE` and transient Unknown states
   preserve the attachment.
+- Current-run activity continuity is verified independently of process and
+  strategy attachment. Each Home `NEW_BATTLE` scope records a fingerprint of
+  the newest copied in-game Battle History report before launch. A replacement
+  process compares that persisted baseline at `RUNNING`, Home
+  `RESUME_BATTLE`, or a Battle History screen left open by an interrupted
+  inspection. Equality preserves the scope; a changed report creates a new
+  scope whose log boundary includes the continuity action. A readable identity
+  is persisted with a run-ID compare-and-set so a stale inspection cannot
+  overwrite a newer lifecycle boundary.
+- Battle History continuity inspection has exclusive input authority while
+  pending. Pause is checked before each input, all initialization, preflight,
+  handler, and blind-tapper paths remain blocked, and restoration to the source
+  battle or Home screen is required. If identity cannot be read after safe
+  restoration, attachment fails toward a conservative new scope; if
+  restoration itself is unverified, the route retries without releasing other
+  inputs.
 - Explicit mid-run strategy adoption uses the same attachment boundary. Fresh
   `RUNNING` or Home `RESUME_BATTLE` evidence may replace normal strategy
   behavior and report identity without a restart, but run initialization,

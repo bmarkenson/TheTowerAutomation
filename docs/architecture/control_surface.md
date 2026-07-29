@@ -185,7 +185,13 @@ The native client's default `Current run` scope uses the atomic
 `logs/activity_scope.json` ledger. Automation startup creates it only when no
 valid scope exists and otherwise reuses it, while verified Home `NEW_BATTLE`
 preflight replaces it at the game-run boundary. It does not infer a run from
-human-readable log messages. Activity responses include an opaque end cursor;
+human-readable log messages. The runtime records the newest copied in-game
+Battle History report as that scope's baseline and compares it after process
+attachment. An unchanged report keeps the same Current run; a later report
+starts a new scope at the visible continuity `ACTION`, including when the
+battle was begun while automation was stopped. This is runtime-owned metadata
+and does not change the activity API or native-client compatibility revision.
+Activity responses include an opaque end cursor;
 the client's non-destructive `Clear view` sends that cursor back as `after` and
 can restore the complete selected scope at any time. Server revision 10
 advertises this as the `current_run_activity_scope` capability.

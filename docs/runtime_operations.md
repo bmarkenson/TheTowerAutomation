@@ -122,8 +122,31 @@ Automation startup creates the ledger only when no valid scope exists, so
 stopping and restarting the process during a battle reattaches to the same
 activity view. Verified Home `NEW_BATTLE` evidence deliberately replaces the
 scope when the next preflight begins, keeping that setup and the battle it
-launches together. `Clear view` is a client-side cursor only: it does not edit
-`actions.log`, and a new scope or log rotation resets it.
+launches together.
+
+The ledger also stores an identity for the latest completed in-game Battle
+History entry. Before the first launch from Home `NEW_BATTLE`, automation opens
+Battle History, copies the newest report, and records its fingerprint as the
+new run's baseline. On a later process attachment at `RUNNING`, Home
+`RESUME_BATTLE`, or an interrupted Battle History inspection, it repeats that
+guarded read:
+
+- an unchanged fingerprint preserves the existing Current run scope;
+- a changed fingerprint proves that a battle completed while automation was
+  absent and starts a new scope at the continuity `ACTION`;
+- an unreadable report after the source screen is safely restored starts a new
+  attachment scope conservatively;
+- a source screen that cannot be restored keeps normal inputs blocked and
+  retries instead of guessing.
+
+Only the fingerprint, Battle Date, Tier, Wave, and capture time are retained in
+the scope ledger; the copied report remains clipboard input. The complete
+inspection has one operator-facing `ACTION` and one `RESULT`. Its menu, row,
+Copy, close, and return taps are `INPUT`/`DEBUG` detail. Pause can interrupt the
+route without authorizing cleanup input, and Resume continues it.
+
+`Clear view` is a client-side cursor only: it does not edit `actions.log`, and
+a new scope or log rotation resets it.
 
 Low-level helpers should return structured reasons and keep ordinary outcomes
 diagnostic. The workflow owner decides whether a result is a no-op, a failed
