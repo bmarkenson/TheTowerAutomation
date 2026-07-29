@@ -22,6 +22,7 @@ from utils.logger import (
 from core.watchdog import watchdog_process_check, ensure_adb_connected
 from core.adb_target_session import AdbTargetSession
 from core.artifact_retention import RuntimeArtifactRetention
+from core.activity_continuity import ActivityContinuityCoordinator
 from core.ss_capture import capture_and_save_screenshot
 from core.state_detector import detect_state_and_overlays
 from core.automation_supervisor import AutomationSupervisor
@@ -152,6 +153,7 @@ class App:
         self._exclusive_validation_ownership_hold = False
         self._observe_strategy_request()
         ensure_activity_scope(reason="automation_started")
+        self._activity_continuity = ActivityContinuityCoordinator()
         log(
             f"[RUN_INIT] Startup gate policy={config.startup_gate_policy}",
             "INFO",
@@ -1645,14 +1647,41 @@ class App:
                 if battle_started is True:
                     self._activation_tracker().reset()
                     self._perk_timeline().reset(fresh_battle=True)
+                continuity_pending = False
+                activity_continuity = getattr(
+                    self,
+                    "_activity_continuity",
+                    None,
+                )
+                if activity_continuity is not None:
+                    continuity_needed = activity_continuity.needs_check(
+                        detection
+                    )
+                    if (
+                        not is_paused
+                        and continuity_needed
+                        and stop_blind_gem_tapper()
+                    ):
+                        self._blind_tapper_suspended = True
+                    continuity = activity_continuity.handle(
+                        detection,
+                        actions_allowed=not is_paused,
+                        action_guard_fn=self._runtime_action_guard,
+                    )
+                    continuity_pending = continuity.pending
+                    if continuity.recapture:
+                        continue
                 self._observe_exclusive_validation_battle_start(
                     detection,
                     battle_started=battle_started is True,
                 )
-                if self._advance_exclusive_validation_launch(
-                    img,
-                    detection,
-                    battle_started=battle_started is True,
+                if (
+                    not continuity_pending
+                    and self._advance_exclusive_validation_launch(
+                        img,
+                        detection,
+                        battle_started=battle_started is True,
+                    )
                 ):
                     continue
                 exclusive_validation_ownership_hold = bool(
@@ -1697,6 +1726,7 @@ class App:
                 if game_speed_guard is not None:
                     game_speed_allowed = bool(
                         not is_paused
+                        and not continuity_pending
                         and not exclusive_validation_ownership_hold
                         and not self._exclusive_validation_in_progress()
                         and self._handler_enabled("game_speed")
@@ -1715,7 +1745,10 @@ class App:
                         # walking the speed control. Re-enter through capture
                         # before any other consumer sees the stale frame.
                         continue
-                if self._advance_exclusive_validation(detection):
+                if (
+                    not continuity_pending
+                    and self._advance_exclusive_validation(detection)
+                ):
                     continue
                 session_preflight_terminally_blocked = bool(
                     session_preflight_pending
@@ -1741,7 +1774,7 @@ class App:
                         self._run_initialization_gate_logged = True
                     if stop_blind_gem_tapper():
                         self._blind_tapper_suspended = True
-                    if not is_paused:
+                    if not is_paused and not continuity_pending:
                         self._mission_mgr.tick(img, detection, strategy_only=True)
                 elif self._run_initialization_gate_logged:
                     strategy = self._mission_mgr.strategy
@@ -1779,7 +1812,7 @@ class App:
                             self._session_preflight_gate_logged = True
                         if stop_blind_gem_tapper():
                             self._blind_tapper_suspended = True
-                        if not is_paused:
+                        if not is_paused and not continuity_pending:
                             if self._mission_mgr.session_preflight_repair_required():
                                 self._attempt_session_preflight_repair(detection)
                             else:
@@ -1822,17 +1855,22 @@ class App:
                     self._session_preflight_terminal_blocked_logged = False
                     self._session_preflight_repair_denial_logged = False
 
-                if self._advance_exclusive_validation(detection):
+                if (
+                    not continuity_pending
+                    and self._advance_exclusive_validation(detection)
+                ):
                     continue
 
                 actions_blocked = (
                     is_paused
+                    or continuity_pending
                     or exclusive_validation_ownership_hold
                     or initialization_pending
                     or session_preflight_pending
                 )
                 safe_runtime_actions_blocked = (
                     is_paused
+                    or continuity_pending
                     or exclusive_validation_ownership_hold
                     or initialization_pending
                     or (

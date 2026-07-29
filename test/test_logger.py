@@ -118,6 +118,64 @@ def test_ensure_activity_scope_creates_missing_boundary(tmp_path, monkeypatch):
     ) == scope
 
 
+def test_start_activity_scope_can_reuse_an_earlier_log_boundary(
+    tmp_path,
+    monkeypatch,
+):
+    isolated_log = tmp_path / "logs" / "actions.log"
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(isolated_log))
+    logger.log("activity before continuity check", "INFO", console=False)
+    boundary = logger.capture_activity_boundary()
+    logger.log_action_intent(
+        "Checking battle continuity",
+        reason="determine whether the attached battle changed",
+        console=False,
+    )
+
+    scope = logger.start_activity_scope(
+        reason="battle_history_changed_on_attachment",
+        boundary=boundary,
+    )
+
+    assert scope is not None
+    assert boundary is not None
+    assert scope["started_at"] == boundary["started_at"]
+    assert scope["source_file_id"] == boundary["source_file_id"]
+    assert scope["start_offset"] == boundary["start_offset"]
+    contents = isolated_log.read_text(encoding="utf-8")
+    assert contents[int(scope["start_offset"]) :].startswith("[ACTION ")
+
+
+def test_battle_history_identity_updates_only_the_matching_scope(
+    tmp_path,
+    monkeypatch,
+):
+    isolated_log = tmp_path / "logs" / "actions.log"
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(isolated_log))
+    scope = logger.start_activity_scope(reason="new_battle_preflight")
+    assert scope is not None
+    identity = {
+        "fingerprint": "abc123",
+        "battle_date": "Jul 15, 2026 01:41",
+        "tier": "18",
+        "wave": "9112",
+    }
+
+    rejected = logger.record_activity_scope_battle_history(
+        run_id="different-run",
+        latest_completed_battle=identity,
+    )
+    updated = logger.record_activity_scope_battle_history(
+        run_id=str(scope["run_id"]),
+        latest_completed_battle=identity,
+    )
+
+    assert rejected is None
+    assert updated is not None
+    assert updated["latest_completed_battle"] == identity
+    assert logger.get_activity_scope() == updated
+
+
 def test_log_result_pairs_terminal_summary_with_diagnostic_detail(
     tmp_path,
     monkeypatch,

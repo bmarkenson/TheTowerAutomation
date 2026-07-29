@@ -1,0 +1,13 @@
+Battle Report
+Battle Date	Jul 15, 2026 01:41
+Game Time	1d 18h 4m 47s
+Real Time	8h 30m 50s
+Tier	18
+Wave	9112
+Killed By	Boss
+Coins Earned	12.79Q
+Coins Per Hour	1.50Q
+Cells Earned	2.12M
+Cells Per Hour	248.59K
+Records
+Highest Coins / Minute	609.27q

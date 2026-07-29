@@ -8,7 +8,7 @@ import json
 import os
 import tempfile
 import threading
-from typing import Optional, Sequence
+from typing import Mapping, Optional, Sequence
 import uuid
 
 
@@ -47,22 +47,65 @@ def ensure_activity_scope(*, reason: str) -> Optional[dict[str, object]]:
     return start_activity_scope(reason=normalized_reason)
 
 
-def start_activity_scope(*, reason: str) -> Optional[dict[str, object]]:
+def get_activity_scope() -> Optional[dict[str, object]]:
+    """Return a validated copy of the persisted current-run scope."""
+
+    return _load_activity_scope()
+
+
+def capture_activity_boundary() -> Optional[dict[str, object]]:
+    """Capture the current action-log position for a possible later scope."""
+
+    primary_path = get_action_log_path()
+    captured_at = datetime.now().astimezone()
+    with _WRITE_LOCK:
+        try:
+            os.makedirs(os.path.dirname(primary_path) or ".", exist_ok=True)
+            with open(primary_path, "ab"):
+                pass
+            source = os.stat(primary_path)
+        except OSError:
+            return None
+    return {
+        "started_at": captured_at.isoformat(timespec="microseconds"),
+        "source_file_id": f"{source.st_dev}:{source.st_ino}",
+        "start_offset": int(source.st_size),
+    }
+
+
+def start_activity_scope(
+    *,
+    reason: str,
+    boundary: Optional[Mapping[str, object]] = None,
+) -> Optional[dict[str, object]]:
     """Start one explicit current-run activity scope without risking runtime work."""
 
     normalized_reason = _normalize_activity_scope_reason(reason)
 
     primary_path = get_action_log_path()
     scope_path = get_activity_scope_path()
+    captured_boundary = _validated_activity_boundary(boundary)
     started_at = datetime.now().astimezone()
     payload: dict[str, object] = {
         "schema_version": 1,
         "scope": "current_run",
         "run_id": uuid.uuid4().hex,
-        "started_at": started_at.isoformat(timespec="microseconds"),
+        "started_at": (
+            str(captured_boundary["started_at"])
+            if captured_boundary is not None
+            else started_at.isoformat(timespec="microseconds")
+        ),
         "reason": normalized_reason,
-        "source_file_id": None,
-        "start_offset": 0,
+        "source_file_id": (
+            str(captured_boundary["source_file_id"])
+            if captured_boundary is not None
+            else None
+        ),
+        "start_offset": (
+            int(captured_boundary["start_offset"])
+            if captured_boundary is not None
+            else 0
+        ),
     }
     write_error: Optional[OSError] = None
     with _WRITE_LOCK:
@@ -70,9 +113,10 @@ def start_activity_scope(*, reason: str) -> Optional[dict[str, object]]:
             os.makedirs(os.path.dirname(primary_path) or ".", exist_ok=True)
             with open(primary_path, "ab"):
                 pass
-            source = os.stat(primary_path)
-            payload["source_file_id"] = f"{source.st_dev}:{source.st_ino}"
-            payload["start_offset"] = int(source.st_size)
+            if captured_boundary is None:
+                source = os.stat(primary_path)
+                payload["source_file_id"] = f"{source.st_dev}:{source.st_ino}"
+                payload["start_offset"] = int(source.st_size)
             _write_json_atomic(scope_path, payload)
         except OSError as exc:
             write_error = exc
@@ -93,11 +137,69 @@ def start_activity_scope(*, reason: str) -> Optional[dict[str, object]]:
     return payload
 
 
+def record_activity_scope_battle_history(
+    *,
+    run_id: str,
+    latest_completed_battle: Mapping[str, object],
+) -> Optional[dict[str, object]]:
+    """Attach one copied Battle History identity to the matching run scope."""
+
+    expected_run_id = str(run_id or "").strip()
+    fingerprint = str(
+        latest_completed_battle.get("fingerprint") or ""
+    ).strip()
+    if not expected_run_id:
+        raise ValueError("Activity scope run ID must not be empty")
+    if not fingerprint:
+        raise ValueError("Battle History fingerprint must not be empty")
+
+    scope_path = get_activity_scope_path()
+    with _WRITE_LOCK:
+        payload = _load_activity_scope()
+        if (
+            payload is None
+            or str(payload.get("run_id") or "") != expected_run_id
+        ):
+            return None
+        payload["latest_completed_battle"] = dict(latest_completed_battle)
+        try:
+            _write_json_atomic(scope_path, payload)
+        except OSError:
+            return None
+    return dict(payload)
+
+
 def _normalize_activity_scope_reason(reason: str) -> str:
     normalized_reason = "_".join(str(reason or "").strip().lower().split())
     if not normalized_reason:
         raise ValueError("Activity scope reason must not be empty")
     return normalized_reason
+
+
+def _validated_activity_boundary(
+    boundary: Optional[Mapping[str, object]],
+) -> Optional[dict[str, object]]:
+    if boundary is None:
+        return None
+    started_at = str(boundary.get("started_at") or "").strip()
+    source_file_id = str(boundary.get("source_file_id") or "").strip()
+    source_parts = source_file_id.split(":")
+    try:
+        datetime.fromisoformat(started_at)
+        start_offset = int(boundary.get("start_offset"))
+    except (TypeError, ValueError):
+        raise ValueError("Invalid activity scope boundary") from None
+    if (
+        len(source_parts) != 2
+        or not all(part.isdigit() for part in source_parts)
+        or start_offset < 0
+    ):
+        raise ValueError("Invalid activity scope boundary")
+    return {
+        "started_at": started_at,
+        "source_file_id": source_file_id,
+        "start_offset": start_offset,
+    }
 
 
 def _load_activity_scope() -> Optional[dict[str, object]]:

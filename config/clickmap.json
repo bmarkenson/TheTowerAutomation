@@ -2071,6 +2071,32 @@
         "navigation"
       ]
     },
+    "battle_history_home": {
+      "match_template": "navigation/battle_history_home.png",
+      "match_region": {
+        "x": 950,
+        "y": 740,
+        "w": 130,
+        "h": 150
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "navigation"
+      ]
+    },
+    "battle_history_running": {
+      "match_template": "navigation/battle_history_running.png",
+      "match_region": {
+        "x": 950,
+        "y": 620,
+        "w": 130,
+        "h": 150
+      },
+      "match_threshold": 0.9,
+      "roles": [
+        "navigation"
+      ]
+    },
     "target_priority": {
       "roles": [
         "navigation"
@@ -2763,6 +2789,16 @@
         "h": 76
       },
       "match_threshold": 0.9,
+      "roles": [
+        "button"
+      ]
+    },
+    "battle_history_latest": {
+      "tap": {
+        "type": "tap",
+        "x": 540,
+        "y": 370
+      },
       "roles": [
         "button"
       ]
