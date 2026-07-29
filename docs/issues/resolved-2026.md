@@ -8,6 +8,54 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Daily Gem claim drift escaped its match region and left battle in Store
+
+- **Observed:** 2026-07-28 during the active Tier 19 Farm battle's rollover
+  Daily Gem check.
+- **Symptom:** The handler scrolled until the free reward was visibly
+  claimable, but its subsequent verified tap rejected the same button at
+  `0.40` against the `0.90` threshold. The handler reported failure without
+  leaving Store, so the battle remained behind the Store view until the
+  independent 15-minute Return-to-Game timer fired.
+- **Evidence:** The retained pre-tap frame matched
+  `buttons.claim_daily_gems` at `0.996` with the template top at y=1139.
+  Store inertia moved the button to y=1112 before the fresh tap capture, while
+  the tap match region began at y=1131 and used no padding. The clipped
+  candidate scored `0.400`. `logs/actions.log` records the failure at
+  17:01:24, automatic Return to Game after 903 seconds at 17:16:35, the
+  immediate retry, and a successful claim plus verified battle restoration at
+  17:17:11. The failed frame is promoted as
+  `test/fixtures/store_daily_gem_claim_drifted_20260728.png`.
+- **Safety response:** Inspection of the active process, persistent control,
+  ADB target, logs, and Store screen was read-only. No diagnostic input was
+  sent. The existing supervisor used the visible, template-verified
+  Return-to-Game control; the retry then used the normal Daily Gem workflow.
+  The battle was never exited or Surrendered.
+- **Cause:** `scroll_until_visible()` returned authoritative claim evidence,
+  but the handler discarded it when tapping and captured the still-moving
+  Store again. The narrow vertical region excluded the button after a 27-pixel
+  kinetic shift. Separately, Store-open failure branches emitted their terminal
+  failure immediately instead of attempting the already-supported verified
+  route back to their source state.
+- **Resolution:** The claim region now covers the observed kinetic range, and
+  the tap consumes the screenshot that authorized the claim while retaining a
+  fresh retry. Every failure after Store navigation now retains its evidence,
+  attempts the verified source-specific return, and only then emits the
+  terminal result; a failed cleanup is explicit in that result.
+- **Regression:** `test/test_daily_gem_handler.py::
+  test_drifted_live_claim_stays_inside_authoritative_match_region` exercises
+  the promoted live failure.
+  `test_failed_claim_restores_running_source_before_terminal_result` proves
+  that successful cleanup precedes the result, and
+  `test_failed_claim_reports_failed_source_cleanup` preserves an explicit
+  fail-closed outcome.
+- **Validation:** All 16 Daily Gem handler tests passed. The broader Daily Gem
+  scheduler, Home/no-strategy/run-initialization/Tournament integrations passed
+  164 tests, and the clickmap, matcher, and tap-safety suites passed 48 tests.
+  The active runtime recovered and claimed the reward before this repair was
+  loaded; it was not restarted onto the commit during the battle.
+- **Fixed by:** `5cb852a`.
+
 ### Paused perk tracking attributed an interval of selections to stale waves
 
 - **Observed:** 2026-07-28 during the user-authorized Cards scrolling

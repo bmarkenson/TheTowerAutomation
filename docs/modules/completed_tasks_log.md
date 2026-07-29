@@ -37,6 +37,22 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-28 Daily Gem failure cleanup
+
+- Commit `5cb852a` fixes the rollover Daily Gem incident in which Store inertia
+  moved an already-matched claim button outside the tap verifier's vertical
+  region. The failed live frame is now a canonical fixture; its button matches
+  at greater than `0.99` in the corrected region.
+- Claim dispatch consumes the screenshot that authorized the button and keeps
+  its ordinary fresh retry. Any failure after Store navigation now retains
+  evidence and attempts the verified route back to the originating battle or
+  Home screen before publishing the terminal result, rather than relying on
+  the generic 15-minute Return-to-Game timer.
+- The old active runtime returned after 903 seconds, immediately retried the
+  normal workflow, claimed the reward, and restored the Tier 19 battle. The
+  repair passed 164 Daily Gem and surrounding integration tests plus 48
+  clickmap/matcher/tap-safety tests.
+
 ### 2026-07-28 Cards traversal and pause-safe Perk tracking
 
 - Commit `8c955d4` replaces the Cards inventory's fast 550-pixel forward jump
