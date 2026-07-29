@@ -1308,7 +1308,7 @@ def render_survival_ability_activations_markdown(
 
 
 def render_perk_selection_timeline_markdown(timeline: Any) -> list[str]:
-    """Render wave-addressed atomic perk-selection batches."""
+    """Render wave-addressed perk-selection batches and interval aggregates."""
 
     if not isinstance(timeline, Mapping) or "batches" not in timeline:
         return []
@@ -1326,6 +1326,10 @@ def render_perk_selection_timeline_markdown(timeline: Any) -> list[str]:
         (
             "Selections on the same row were observed as one simultaneous batch; "
             "their internal order is intentionally unspecified."
+        ),
+        (
+            "Pause-spanning interval aggregates retain all observed scheduled "
+            "boundaries, but do not assign individual changes to a boundary."
         ),
         "",
     ]
@@ -1355,10 +1359,31 @@ def render_perk_selection_timeline_markdown(timeline: Any) -> list[str]:
                 displayed.append(
                     f"{before} → {after}" if before else after
                 )
+            scheduled_waves = batch.get("scheduled_waves")
+            if (
+                batch.get("selection_model") == "interval_aggregate"
+                and isinstance(scheduled_waves, Sequence)
+                and not isinstance(scheduled_waves, (str, bytes))
+            ):
+                scheduled = (
+                    ", ".join(str(value) for value in scheduled_waves)
+                    + " (interval aggregate)"
+                )
+            else:
+                scheduled = str(batch.get("scheduled_wave") or "unknown")
+            observed_start = batch.get("observed_wave")
+            observed_end = batch.get("observed_wave_end")
+            observed = str(observed_start or "unknown")
+            if (
+                batch.get("selection_model") == "interval_aggregate"
+                and observed_end is not None
+                and observed_end != observed_start
+            ):
+                observed = f"{observed}–{observed_end}"
             lines.append(
                 f"| {batch.get('sequence', index)} | "
-                f"{batch.get('scheduled_wave') or 'unknown'} | "
-                f"{batch.get('observed_wave') or 'unknown'} | "
+                f"{scheduled} | "
+                f"{observed} | "
                 f"{'; '.join(displayed) or 'unreadable'} |"
             )
     else:
@@ -1377,7 +1402,20 @@ def render_perk_selection_timeline_markdown(timeline: Any) -> list[str]:
     )
     pending = timeline.get("pending_scheduled_wave")
     if pending is not None:
-        lines.append(f"- Pending panel observation for scheduled wave {pending}")
+        pending_waves = timeline.get("pending_scheduled_waves")
+        if (
+            isinstance(pending_waves, Sequence)
+            and not isinstance(pending_waves, (str, bytes))
+            and len(pending_waves) > 1
+        ):
+            lines.append(
+                "- Pending panel observation spans scheduled waves "
+                + ", ".join(str(value) for value in pending_waves)
+            )
+        else:
+            lines.append(
+                f"- Pending panel observation for scheduled wave {pending}"
+            )
     warnings = timeline.get("warnings")
     if isinstance(warnings, Sequence) and not isinstance(warnings, (str, bytes)):
         for warning in warnings:

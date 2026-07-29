@@ -392,6 +392,36 @@ def test_render_perk_selection_timeline_preserves_atomic_batches():
     assert "Perk Wave Requirement −75% observed: yes" in rendered
 
 
+def test_render_perk_selection_timeline_marks_pause_interval_aggregates():
+    lines = render_perk_selection_timeline_markdown(
+        {
+            "baseline_status": "new_battle_empty",
+            "pwr_maxed_observed": False,
+            "batches": [
+                {
+                    "sequence": 1,
+                    "scheduled_wave": 665,
+                    "scheduled_waves": [665, 760, 855],
+                    "observed_wave": 690,
+                    "observed_wave_end": 880,
+                    "selection_model": "interval_aggregate",
+                    "selections": [
+                        {"display_text": "x1.44 all coins bonuses"},
+                        {"display_text": "Orbs +2"},
+                    ],
+                }
+            ],
+            "warnings": [],
+            "pending_scheduled_wave": None,
+        }
+    )
+
+    rendered = "\n".join(lines)
+    assert "665, 760, 855 (interval aggregate)" in rendered
+    assert "| 690–880 |" in rendered
+    assert "do not assign individual changes to a boundary" in rendered
+
+
 def test_no_strategy_record_retains_terminal_tier_without_guessing_type():
     record = build_battle_record(
         _frame(9),

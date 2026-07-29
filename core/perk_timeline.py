@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 import re
 import time
@@ -67,6 +67,8 @@ class PerkCaptureRequest:
     observed_wave: Optional[int]
     progress_after: PerkProgress
     snapshot_mode: str
+    scheduled_waves: tuple[int, ...] = ()
+    observed_wave_end: Optional[int] = None
 
 
 class PerkTimelineTracker:
@@ -128,6 +130,7 @@ class PerkTimelineTracker:
         if self._candidate_count < self._confirmation_frames:
             return self._pending
         if self._pending is not None:
+            self._refresh_pending(progress, wave=wave)
             return self._pending
 
         if not self._snapshot_known:
@@ -137,6 +140,7 @@ class PerkTimelineTracker:
                 observed_wave=wave,
                 progress_after=progress,
                 snapshot_mode="full",
+                observed_wave_end=wave,
             )
             return self._pending
 
@@ -161,6 +165,8 @@ class PerkTimelineTracker:
             observed_wave=wave,
             progress_after=progress,
             snapshot_mode="latest" if self._pwr_maxed else "full",
+            scheduled_waves=(self._armed_next_wave,),
+            observed_wave_end=wave,
         )
         return self._pending
 
@@ -267,6 +273,11 @@ class PerkTimelineTracker:
             "pending_scheduled_wave": (
                 self._pending.scheduled_wave if self._pending else None
             ),
+            "pending_scheduled_waves": (
+                list(self._pending.scheduled_waves)
+                if self._pending is not None
+                else []
+            ),
         }
 
     def _append_batch(
@@ -277,16 +288,23 @@ class PerkTimelineTracker:
         observed_at: Optional[datetime],
     ) -> None:
         when = observed_at or datetime.now().astimezone()
+        interval_aggregate = len(request.scheduled_waves) > 1
         self._batches.append(
             {
                 "sequence": len(self._batches) + 1,
                 "scheduled_wave": request.scheduled_wave,
+                "scheduled_waves": list(request.scheduled_waves),
                 "observed_wave": request.observed_wave,
+                "observed_wave_end": request.observed_wave_end,
                 "observed_at": when.isoformat(),
                 "selection_model": (
-                    "singleton_after_pwr_max"
-                    if request.snapshot_mode == "latest"
-                    else "simultaneous_batch"
+                    "interval_aggregate"
+                    if interval_aggregate
+                    else (
+                        "singleton_after_pwr_max"
+                        if request.snapshot_mode == "latest"
+                        else "simultaneous_batch"
+                    )
                 ),
                 "snapshot_mode": request.snapshot_mode,
                 "selections": [copy.deepcopy(dict(change)) for change in changes],
@@ -299,6 +317,55 @@ class PerkTimelineTracker:
         else:
             self._armed_next_wave = None
         self._pending = None
+
+    def _refresh_pending(
+        self,
+        progress: PerkProgress,
+        *,
+        wave: Optional[int],
+    ) -> None:
+        """Advance deferred capture authority to the newest stable token."""
+
+        request = self._pending
+        if request is None or progress.token == request.progress_after.token:
+            return
+        previous_next = request.progress_after.next_wave
+        advanced = (
+            progress.status == "complete"
+            or (
+                progress.next_wave is not None
+                and previous_next is not None
+                and progress.next_wave > previous_next
+            )
+        )
+        if not advanced:
+            return
+
+        if request.kind == "baseline":
+            self._pending = replace(
+                request,
+                progress_after=progress,
+                observed_wave_end=wave,
+            )
+            return
+
+        scheduled_waves = list(request.scheduled_waves)
+        if previous_next is not None and previous_next not in scheduled_waves:
+            scheduled_waves.append(previous_next)
+        aggregate = len(scheduled_waves) > 1
+        self._pending = replace(
+            request,
+            progress_after=progress,
+            snapshot_mode="full" if aggregate else request.snapshot_mode,
+            scheduled_waves=tuple(scheduled_waves),
+            observed_wave_end=wave,
+        )
+        if aggregate:
+            self._warn_once(
+                "Perk panel capture was deferred across multiple selection "
+                "boundaries; changes are recorded as an interval aggregate "
+                "without per-wave attribution"
+            )
 
     def _warn_once(self, message: str) -> None:
         if message not in self._warnings:
@@ -398,8 +465,13 @@ class PerkTimelineObserver:
             "establish a mid-battle selected-Perks baseline"
             if request.kind == "baseline"
             else (
-                f"record the perk selection scheduled for wave "
-                f"{request.scheduled_wave}"
+                "record perk selections deferred across scheduled waves "
+                + ", ".join(str(value) for value in request.scheduled_waves)
+                if len(request.scheduled_waves) > 1
+                else (
+                    f"record the perk selection scheduled for wave "
+                    f"{request.scheduled_wave}"
+                )
             )
         )
         log_action_intent(
@@ -481,6 +553,7 @@ class PerkTimelineObserver:
                     f"[PERK_TIMELINE] result="
                     f"{'recorded' if capture_ok else 'retry'} "
                     f"scheduled_wave={request.scheduled_wave} "
+                    f"scheduled_waves={list(request.scheduled_waves)} "
                     f"selection_count={len(selection_labels)}"
                 ),
             )
