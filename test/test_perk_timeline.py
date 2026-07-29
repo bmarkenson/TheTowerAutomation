@@ -250,6 +250,76 @@ def test_mid_battle_attachment_establishes_baseline_without_inventing_waves():
     assert snapshot["pwr_maxed_observed"] is True
 
 
+def test_mid_battle_baseline_repeats_after_crossing_scheduled_wave():
+    tracker = PerkTimelineTracker()
+    initial = _progress(500, 540)
+    advanced = _progress(545, 580)
+    request = _stabilize(tracker, initial, wave=500)
+    assert request is not None
+    observer = PerkTimelineObserver(tracker)
+    running = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    panel = np.ones((1920, 1080, 3), dtype=np.uint8)
+    screen = {"state": "RUNNING"}
+    progress = {"value": initial}
+    capture_rounds = []
+
+    def capture():
+        return panel if screen["state"] == "PERKS" else running
+
+    def open_panel(key, **kwargs):
+        screen["state"] = "PERKS"
+        return True
+
+    def close_panel(key, **kwargs):
+        screen["state"] = "RUNNING"
+        return True
+
+    def fake_scroll_to_edge(*args, **kwargs):
+        return ScrollResult(True, panel, 1, "edge_reached")
+
+    def fake_capture_scroll(*args, **kwargs):
+        capture_rounds.append(len(capture_rounds) + 1)
+        if len(capture_rounds) == 1:
+            progress["value"] = advanced
+        return ScrollCaptureResult(True, (panel,), 1, "edge_reached")
+
+    with (
+        patch(
+            "core.perk_timeline.scroll_to_edge",
+            side_effect=fake_scroll_to_edge,
+        ),
+        patch(
+            "core.perk_timeline.capture_scroll_to_edge",
+            side_effect=fake_capture_scroll,
+        ),
+    ):
+        assert observer.handle(
+            running,
+            {"state": "RUNNING"},
+            wave=500,
+            actions_allowed=True,
+            action_guard_fn=lambda: True,
+            progress_fn=lambda frame: progress["value"],
+            capture_fn=capture,
+            detector=lambda frame: {"state": screen["state"]},
+            safe_tap_fn=open_panel,
+            tap_visible_fn=close_panel,
+            swipe_fn=lambda key: True,
+            full_ocr_fn=lambda *args, **kwargs: _full(
+                _perk("Perk wave requirement -75.00%")
+            ),
+            sleep_fn=lambda seconds: None,
+        )
+
+    assert capture_rounds == [1, 2]
+    assert tracker.pending is None
+    assert tracker.snapshot()["baseline_status"] == "observed_mid_battle"
+    assert _stabilize(tracker, advanced, wave=545) is None
+    next_request = _stabilize(tracker, _progress(581, 625), wave=581)
+    assert next_request is not None
+    assert next_request.scheduled_wave == 580
+
+
 def test_latest_perk_reader_uses_top_complete_row_and_color():
     frame = cv2.imread(
         str(
@@ -290,9 +360,23 @@ def test_observer_guards_each_panel_input_and_records_complete_batch():
     panel = np.ones((1920, 1080, 3), dtype=np.uint8)
     guards = []
     taps = []
+    screen = {"state": "RUNNING"}
 
     def guard():
         guards.append("guard")
+        return True
+
+    def capture():
+        return panel if screen["state"] == "PERKS" else running
+
+    def open_panel(key, **kwargs):
+        taps.append(key)
+        screen["state"] = "PERKS"
+        return True
+
+    def close_panel(key, **kwargs):
+        taps.append(key)
+        screen["state"] = "RUNNING"
         return True
 
     def fake_scroll_to_edge(*args, **kwargs):
@@ -320,10 +404,10 @@ def test_observer_guards_each_panel_input_and_records_complete_batch():
             actions_allowed=True,
             action_guard_fn=guard,
             progress_fn=lambda frame: _progress(100, 142),
-            capture_fn=lambda: panel,
-            detector=lambda frame: {"state": "PERKS"},
-            safe_tap_fn=lambda key, **kwargs: taps.append(key) or True,
-            tap_visible_fn=lambda key, **kwargs: taps.append(key) or True,
+            capture_fn=capture,
+            detector=lambda frame: {"state": screen["state"]},
+            safe_tap_fn=open_panel,
+            tap_visible_fn=close_panel,
             swipe_fn=lambda key: taps.append(key) or True,
             full_ocr_fn=lambda *args, **kwargs: _full(
                 _perk("Perk wave requirement -25.00%")
@@ -394,6 +478,19 @@ def test_observer_restores_panel_after_capture_completed_during_pause():
     panel = np.ones((1920, 1080, 3), dtype=np.uint8)
     guard_results = iter((True, True, True, False))
     closed = []
+    screen = {"state": "RUNNING"}
+
+    def capture():
+        return panel if screen["state"] == "PERKS" else running
+
+    def open_panel(key, **kwargs):
+        screen["state"] = "PERKS"
+        return True
+
+    def close_panel(key, **kwargs):
+        closed.append(key)
+        screen["state"] = "RUNNING"
+        return True
 
     def fake_scroll_to_edge(*args, **kwargs):
         assert kwargs["swipe_fn"]("gesture_targets.goto_top:perks")
@@ -420,10 +517,10 @@ def test_observer_restores_panel_after_capture_completed_during_pause():
             actions_allowed=True,
             action_guard_fn=lambda: next(guard_results),
             progress_fn=lambda frame: _progress(100, 142),
-            capture_fn=lambda: panel,
-            detector=lambda frame: {"state": "PERKS"},
-            safe_tap_fn=lambda key, **kwargs: True,
-            tap_visible_fn=lambda key, **kwargs: closed.append(key) or True,
+            capture_fn=capture,
+            detector=lambda frame: {"state": screen["state"]},
+            safe_tap_fn=open_panel,
+            tap_visible_fn=close_panel,
             swipe_fn=lambda key: True,
             full_ocr_fn=lambda *args, **kwargs: _full(
                 _perk("Perk wave requirement -25.00%")
@@ -439,6 +536,88 @@ def test_observer_restores_panel_after_capture_completed_during_pause():
         wave=101,
         actions_allowed=True,
         action_guard_fn=lambda: True,
-        tap_visible_fn=lambda key, **kwargs: closed.append(key) or True,
+        capture_fn=capture,
+        detector=lambda frame: {"state": screen["state"]},
+        tap_visible_fn=close_panel,
+        sleep_fn=lambda seconds: None,
     )
     assert closed == ["buttons.close:perks"]
+
+
+def test_observer_retains_route_ownership_until_close_transition_is_verified():
+    tracker = PerkTimelineTracker()
+    tracker.reset(fresh_battle=True)
+    _stabilize(tracker, _progress(80, 100), wave=80)
+    _stabilize(tracker, _progress(100, 142), wave=101)
+    observer = PerkTimelineObserver(tracker)
+    running = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    panel = np.ones((1920, 1080, 3), dtype=np.uint8)
+    screen = {"state": "RUNNING"}
+    close_attempts = []
+
+    def capture():
+        return panel if screen["state"] == "PERKS" else running
+
+    def open_panel(key, **kwargs):
+        screen["state"] = "PERKS"
+        return True
+
+    def close_panel(key, **kwargs):
+        close_attempts.append(key)
+        if len(close_attempts) == 2:
+            screen["state"] = "RUNNING"
+        return True
+
+    def fake_scroll_to_edge(*args, **kwargs):
+        return ScrollResult(True, panel, 1, "edge_reached")
+
+    def fake_capture_scroll(*args, **kwargs):
+        return ScrollCaptureResult(True, (panel,), 1, "edge_reached")
+
+    with (
+        patch(
+            "core.perk_timeline.scroll_to_edge",
+            side_effect=fake_scroll_to_edge,
+        ),
+        patch(
+            "core.perk_timeline.capture_scroll_to_edge",
+            side_effect=fake_capture_scroll,
+        ),
+    ):
+        assert observer.handle(
+            running,
+            {"state": "RUNNING"},
+            wave=101,
+            actions_allowed=True,
+            action_guard_fn=lambda: True,
+            progress_fn=lambda frame: _progress(100, 142),
+            capture_fn=capture,
+            detector=lambda frame: {"state": screen["state"]},
+            safe_tap_fn=open_panel,
+            tap_visible_fn=close_panel,
+            swipe_fn=lambda key: True,
+            full_ocr_fn=lambda *args, **kwargs: _full(
+                _perk("Perk wave requirement -50.00%")
+            ),
+            sleep_fn=lambda seconds: None,
+        )
+        assert tracker.pending is None
+        assert screen["state"] == "PERKS"
+
+        assert observer.handle(
+            panel,
+            {"state": "PERKS"},
+            wave=101,
+            actions_allowed=True,
+            action_guard_fn=lambda: True,
+            capture_fn=capture,
+            detector=lambda frame: {"state": screen["state"]},
+            tap_visible_fn=close_panel,
+            sleep_fn=lambda seconds: None,
+        )
+
+    assert close_attempts == [
+        "buttons.close:perks",
+        "buttons.close:perks",
+    ]
+    assert screen["state"] == "RUNNING"

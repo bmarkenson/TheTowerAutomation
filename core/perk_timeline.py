@@ -33,6 +33,11 @@ PERKS_INDICATOR = "indicators.perks_panel"
 PERKS_CONTENT_REGION = (100, 414, 880, 1340)
 PERK_PROGRESS_TEXT_REGION = (400, 25, 340, 71)
 PWR_FAMILY = "perk_wave_requirement"
+PERKS_CLOSE_DESTINATIONS = {
+    "RUNNING",
+    "GAME_OVER",
+    "TOURNAMENT_RESULTS",
+}
 PWR_MAX_PATTERN = re.compile(
     r"perk wave requirement.*-\s*75(?:\.0+)?\s*%",
     re.IGNORECASE,
@@ -69,6 +74,15 @@ class PerkCaptureRequest:
     snapshot_mode: str
     scheduled_waves: tuple[int, ...] = ()
     observed_wave_end: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class _PanelCloseResult:
+    """Outcome of one verified attempt to leave the owned Perks panel."""
+
+    dispatched: bool
+    closed: bool
+    observed_state: str
 
 
 class PerkTimelineTracker:
@@ -438,20 +452,30 @@ class PerkTimelineObserver:
                     detail="[PERK_TIMELINE] route_restore=interrupted",
                 )
                 return False
-            if not tap_visible_fn(
-                "buttons.close:perks",
+            close_result = _close_perks_panel(
                 screenshot=screenshot,
-                retries=1,
-            ):
+                capture_fn=capture_fn,
+                detector=detector,
+                tap_visible_fn=tap_visible_fn,
+                sleep_fn=sleep_fn,
+            )
+            if not close_result.closed:
                 log_result(
                     "Perk timeline panel restore failed",
-                    detail="[PERK_TIMELINE] route_restore=failed",
+                    detail=(
+                        "[PERK_TIMELINE] route_restore=failed "
+                        f"dispatched={close_result.dispatched} "
+                        f"observed_state={close_result.observed_state}"
+                    ),
                 )
-                return False
+                return close_result.dispatched
             self._route_open = False
             log_result(
                 "Battle view restored after perk timeline capture",
-                detail="[PERK_TIMELINE] route_restore=complete",
+                detail=(
+                    "[PERK_TIMELINE] route_restore=complete "
+                    f"observed_state={close_result.observed_state}"
+                ),
             )
             return True
         if not actions_allowed:
@@ -504,10 +528,10 @@ class PerkTimelineObserver:
                     sleep_fn=sleep_fn,
                 )
 
-            capture_ok = self._capture_pending(
-                request,
+            capture_ok, completed_request = self._capture_pending(
                 current,
                 action_guard_fn=action_guard_fn,
+                progress_fn=progress_fn,
                 capture_fn=capture_fn,
                 visible_fn=visible_fn,
                 swipe_fn=swipe_fn,
@@ -520,12 +544,19 @@ class PerkTimelineObserver:
                 current = refreshed
             if not action_guard_fn():
                 raise _RouteInterrupted("control changed before panel restore")
-            if not tap_visible_fn(
-                "buttons.close:perks",
+            close_result = _close_perks_panel(
                 screenshot=current,
-                retries=1,
-            ):
+                capture_fn=capture_fn,
+                detector=detector,
+                tap_visible_fn=tap_visible_fn,
+                sleep_fn=sleep_fn,
+            )
+            if not close_result.dispatched:
                 raise _RouteFailed("verified Perks close control was unavailable")
+            if not close_result.closed:
+                raise _RouteFailed(
+                    "Perks panel remained visible after the verified close input"
+                )
             self._route_open = False
             latest_batch = self.tracker.latest_batch if capture_ok else None
             selections = (
@@ -538,7 +569,7 @@ class PerkTimelineObserver:
                 for selection in selections
                 if isinstance(selection, Mapping)
             ]
-            if capture_ok and request.kind == "baseline":
+            if capture_ok and completed_request.kind == "baseline":
                 summary = "Perk timeline baseline recorded"
             elif capture_ok:
                 summary = (
@@ -552,9 +583,11 @@ class PerkTimelineObserver:
                 detail=(
                     f"[PERK_TIMELINE] result="
                     f"{'recorded' if capture_ok else 'retry'} "
-                    f"scheduled_wave={request.scheduled_wave} "
-                    f"scheduled_waves={list(request.scheduled_waves)} "
-                    f"selection_count={len(selection_labels)}"
+                    f"scheduled_wave={completed_request.scheduled_wave} "
+                    f"scheduled_waves="
+                    f"{list(completed_request.scheduled_waves)} "
+                    f"selection_count={len(selection_labels)} "
+                    f"close_state={close_result.observed_state}"
                 ),
             )
             return True
@@ -583,17 +616,17 @@ class PerkTimelineObserver:
 
     def _capture_pending(
         self,
-        request: PerkCaptureRequest,
         screenshot: Frame,
         *,
         action_guard_fn: Callable[[], bool],
+        progress_fn: Callable[[Optional[Frame]], PerkProgress],
         capture_fn: Capture,
         visible_fn: Callable[..., bool],
         swipe_fn: Callable[[str], bool],
         full_ocr_fn: Callable[..., Mapping[str, Any]],
         latest_ocr_fn: Callable[[Frame], Optional[Mapping[str, Any]]],
         sleep_fn: Callable[[float], None],
-    ) -> bool:
+    ) -> tuple[bool, PerkCaptureRequest]:
         def guarded_swipe_fn(key: str) -> bool:
             if not action_guard_fn():
                 raise _RouteInterrupted("control changed before panel swipe")
@@ -614,28 +647,125 @@ class PerkTimelineObserver:
         if top.screenshot is None or not top.success:
             raise _RouteFailed(f"could not reach Perks top ({top.reason})")
 
-        if request.snapshot_mode == "latest":
-            latest = latest_ocr_fn(top.screenshot)
-            return bool(self.tracker.record_latest(latest or {}))
-
-        capture = capture_scroll_to_edge(
-            "gesture_targets.goto_next:perks",
-            source_label=PERKS_INDICATOR,
-            screenshot=top.screenshot,
-            progress_region=PERKS_CONTENT_REGION,
-            max_swipes=20,
-            settle_s=0.8,
+        top_frame = self._refresh_progress_from_panel(
+            top.screenshot,
+            progress_fn=progress_fn,
             capture_fn=capture_fn,
-            visible_fn=visible_fn,
-            swipe_fn=guarded_swipe_fn,
             sleep_fn=sleep_fn,
         )
-        full = full_ocr_fn(
-            list(capture.screenshots),
-            source_complete=capture.success,
-            source_reason=capture.reason,
+        request = self.tracker.pending
+        if request is None:
+            raise _RouteFailed("Perk timeline request disappeared during capture")
+
+        if request.snapshot_mode == "latest":
+            latest = latest_ocr_fn(top_frame)
+            return bool(self.tracker.record_latest(latest or {})), request
+
+        for capture_attempt in range(2):
+            request_before = self.tracker.pending
+            if request_before is None:
+                raise _RouteFailed(
+                    "Perk timeline request disappeared during full capture"
+                )
+            capture = capture_scroll_to_edge(
+                "gesture_targets.goto_next:perks",
+                source_label=PERKS_INDICATOR,
+                screenshot=top_frame,
+                progress_region=PERKS_CONTENT_REGION,
+                max_swipes=20,
+                settle_s=0.8,
+                capture_fn=capture_fn,
+                visible_fn=visible_fn,
+                swipe_fn=guarded_swipe_fn,
+                sleep_fn=sleep_fn,
+            )
+            progress_frame = (
+                capture.screenshots[-1]
+                if capture.screenshots
+                else top_frame
+            )
+            settled_frame = self._refresh_progress_from_panel(
+                progress_frame,
+                progress_fn=progress_fn,
+                capture_fn=capture_fn,
+                sleep_fn=sleep_fn,
+            )
+            request_after = self.tracker.pending
+            if request_after is None:
+                raise _RouteFailed(
+                    "Perk timeline request disappeared after full capture"
+                )
+            if (
+                request_after.progress_after.token
+                != request_before.progress_after.token
+            ):
+                if capture_attempt == 1:
+                    return False, request_after
+                top = scroll_to_edge(
+                    "gesture_targets.goto_top:perks",
+                    source_label=PERKS_INDICATOR,
+                    screenshot=settled_frame,
+                    progress_region=PERKS_CONTENT_REGION,
+                    max_swipes=8,
+                    settle_s=0.8,
+                    capture_fn=capture_fn,
+                    visible_fn=visible_fn,
+                    swipe_fn=guarded_swipe_fn,
+                    sleep_fn=sleep_fn,
+                )
+                if top.screenshot is None or not top.success:
+                    raise _RouteFailed(
+                        "could not repeat Perks capture after the schedule "
+                        f"advanced ({top.reason})"
+                    )
+                top_frame = self._refresh_progress_from_panel(
+                    top.screenshot,
+                    progress_fn=progress_fn,
+                    capture_fn=capture_fn,
+                    sleep_fn=sleep_fn,
+                )
+                continue
+
+            full = full_ocr_fn(
+                list(capture.screenshots),
+                source_complete=capture.success,
+                source_reason=capture.reason,
+            )
+            return (
+                bool(self.tracker.record_full_snapshot(full)),
+                request_after,
+            )
+
+        raise _RouteFailed("Perk timeline full capture retry was exhausted")
+
+    def _refresh_progress_from_panel(
+        self,
+        screenshot: Frame,
+        *,
+        progress_fn: Callable[[Optional[Frame]], PerkProgress],
+        capture_fn: Capture,
+        sleep_fn: Callable[[float], None],
+    ) -> Frame:
+        """Refresh pending schedule evidence while the modal route owns input."""
+
+        current = screenshot
+        progress = progress_fn(current)
+        self.tracker.observe(
+            progress,
+            wave=progress.current_wave,
         )
-        return bool(self.tracker.record_full_snapshot(full))
+        for _ in range(2):
+            sleep_fn(0.25)
+            refreshed = capture_fn()
+            if refreshed is None:
+                continue
+            current = refreshed
+            progress = progress_fn(current)
+            self.tracker.observe(
+                progress,
+                wave=progress.current_wave,
+            )
+        return current
 
 
 def measure_perk_progress(
@@ -807,6 +937,48 @@ def _wait_for_perks(
         if frame is not None and detector(frame).get("state") == "PERKS":
             return frame
     raise _RouteFailed("Perks panel did not become visible")
+
+
+def _close_perks_panel(
+    screenshot: Frame,
+    *,
+    capture_fn: Capture,
+    detector: Detector,
+    tap_visible_fn: Callable[..., bool],
+    sleep_fn: Callable[[float], None],
+    attempts: int = 8,
+) -> _PanelCloseResult:
+    """Dispatch one verified close and require an authoritative destination."""
+
+    if not tap_visible_fn(
+        "buttons.close:perks",
+        screenshot=screenshot,
+        retries=1,
+    ):
+        return _PanelCloseResult(
+            dispatched=False,
+            closed=False,
+            observed_state="PERKS",
+        )
+
+    observed_state = "UNKNOWN"
+    for _ in range(max(1, attempts)):
+        sleep_fn(0.4)
+        frame = capture_fn()
+        if frame is None:
+            continue
+        observed_state = str(detector(frame).get("state") or "UNKNOWN")
+        if observed_state in PERKS_CLOSE_DESTINATIONS:
+            return _PanelCloseResult(
+                dispatched=True,
+                closed=True,
+                observed_state=observed_state,
+            )
+    return _PanelCloseResult(
+        dispatched=True,
+        closed=False,
+        observed_state=observed_state,
+    )
 
 
 class _RouteFailed(RuntimeError):
