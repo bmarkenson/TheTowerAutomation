@@ -50,6 +50,35 @@ def _finish_daily_gem_check(
     return result
 
 
+def _finish_store_failure(
+    step: str,
+    session_id: str,
+    source_state: str,
+    *,
+    reason: str,
+) -> DailyGemResult:
+    """Retain failure evidence and restore the verified source when possible."""
+
+    _abort_handler(step, session_id)
+    returned = _return_from_store(session_id, source_state)
+    log(
+        f"[DAILY_GEM] Failure cleanup "
+        f"{'returned to' if returned else 'could not return to'} "
+        f"{source_state}",
+        "DEBUG",
+    )
+    final_reason = reason
+    if not returned:
+        final_reason = (
+            f"{reason}; failure cleanup could not return to {source_state}"
+        )
+    return _finish_daily_gem_check(
+        DailyGemResult.FAILED,
+        session_id=session_id,
+        reason=final_reason,
+    )
+
+
 def _wait_for_label(label: str, *, timeout: float = 5.0, poll: float = 0.3) -> bool:
     deadline = time.time() + max(0.0, timeout)
     while time.time() < deadline:
@@ -131,17 +160,19 @@ def handle_daily_gem() -> DailyGemResult:
         )
     time.sleep(1.2)
     if not _wait_for_label(STORE_MENU_INDICATOR, timeout=4.0):
-        return _finish_daily_gem_check(
-            _abort_handler("Store indicator not detected", session_id),
-            session_id=session_id,
+        return _finish_store_failure(
+            "Store indicator not detected",
+            session_id,
+            source_state,
             reason="the Store indicator was not detected",
         )
 
     store_entry = capture_adb_screenshot()
     if store_entry is None or not is_visible(STORE_MENU_INDICATOR, screenshot=store_entry):
-        return _finish_daily_gem_check(
-            _abort_handler("Store entry capture not verified", session_id),
-            session_id=session_id,
+        return _finish_store_failure(
+            "Store entry capture not verified",
+            session_id,
+            source_state,
             reason="the Store entry could not be verified",
         )
 
@@ -173,9 +204,10 @@ def handle_daily_gem() -> DailyGemResult:
             settle_s=1.0,
         )
         if not top.success or top.screenshot is None:
-            return _finish_daily_gem_check(
-                _abort_handler(f"Goto top of Store ({top.reason})", session_id),
-                session_id=session_id,
+            return _finish_store_failure(
+                f"Goto top of Store ({top.reason})",
+                session_id,
+                source_state,
                 reason=f"the Store top could not be reached ({top.reason})",
             )
 
@@ -207,12 +239,10 @@ def handle_daily_gem() -> DailyGemResult:
                 reason="a cooldown was found while searching the Store",
             )
         if not claim.success or claim.screenshot is None:
-            return _finish_daily_gem_check(
-                _abort_handler(
-                    f"Find Claim Daily Gems ({claim.reason})",
-                    session_id,
-                ),
-                session_id=session_id,
+            return _finish_store_failure(
+                f"Find Claim Daily Gems ({claim.reason})",
+                session_id,
+                source_state,
                 reason=f"the Daily Gem card could not be found ({claim.reason})",
             )
         claim_screenshot = claim.screenshot
@@ -220,19 +250,25 @@ def handle_daily_gem() -> DailyGemResult:
     save_image(claim_screenshot, f"{session_id}_claim_daily_gems")
 
     # Claim Daily Gem
-    if not tap_if_visible(DAILY_GEM_BUTTON, retries=1):
-        return _finish_daily_gem_check(
-            _abort_handler("Claim_daily_gems", session_id),
-            session_id=session_id,
+    if not tap_if_visible(
+        DAILY_GEM_BUTTON,
+        screenshot=claim_screenshot,
+        retries=1,
+    ):
+        return _finish_store_failure(
+            "Claim_daily_gems",
+            session_id,
+            source_state,
             reason="the verified Daily Gem control could not be tapped",
         )
     time.sleep(1.2)
 
     # Skip
     if not tap_if_visible("buttons.skip_reward_reveal", retries=1):
-        return _finish_daily_gem_check(
-            _abort_handler("Skip Claim_daily_gems", session_id),
-            session_id=session_id,
+        return _finish_store_failure(
+            "Skip Claim_daily_gems",
+            session_id,
+            source_state,
             reason="the reward reveal could not be dismissed",
         )
     time.sleep(1.2)

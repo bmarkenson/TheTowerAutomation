@@ -1,7 +1,10 @@
+from pathlib import Path
 from unittest.mock import patch
 
+import cv2
 import numpy as np
 
+from core.label_tapper import get_label_match
 from core.scrolling import ScrollResult
 from handlers.daily_gem_handler import (
     DAILY_GEM_BUTTON,
@@ -13,6 +16,9 @@ from handlers.daily_gem_handler import (
     _return_from_store,
     handle_daily_gem,
 )
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _screenshot():
@@ -83,6 +89,22 @@ def test_free_card_ocr_is_a_normal_not_ready_state():
         assert _daily_gem_unavailable(_screenshot()) == DAILY_GEM_NOT_READY
 
 
+def test_drifted_live_claim_stays_inside_authoritative_match_region():
+    screenshot = cv2.imread(
+        str(FIXTURES / "store_daily_gem_claim_drifted_20260728.png")
+    )
+    assert screenshot is not None
+
+    match = get_label_match(
+        DAILY_GEM_BUTTON,
+        screenshot=screenshot,
+        return_meta=True,
+    )
+
+    assert match["y"] == 1112
+    assert match["match_score"] >= 0.99
+
+
 def test_free_price_without_countdown_keeps_scrolling_for_claim():
     with patch(
         "handlers.daily_gem_handler.ocr_text_and_conf",
@@ -148,6 +170,98 @@ def test_visible_claim_at_store_entry_skips_all_scrolling():
         detail=(
             "[DAILY_GEM] result=claimed session=test "
             "reason=the reward was claimed and the source screen was restored"
+        ),
+    )
+
+
+def test_failed_claim_restores_running_source_before_terminal_result():
+    screenshot = _screenshot()
+
+    def visible(label, *, screenshot=None):
+        return label in {STORE_MENU_INDICATOR, DAILY_GEM_BUTTON}
+
+    with (
+        patch("handlers.daily_gem_handler._make_session_id", return_value="test"),
+        patch(
+            "handlers.daily_gem_handler._open_store_for_current_screen",
+            return_value="RUNNING",
+        ),
+        patch("handlers.daily_gem_handler._wait_for_label", return_value=True),
+        patch(
+            "handlers.daily_gem_handler.capture_adb_screenshot",
+            return_value=screenshot,
+        ),
+        patch("handlers.daily_gem_handler.is_visible", side_effect=visible),
+        patch(
+            "handlers.daily_gem_handler.tap_if_visible",
+            return_value=False,
+        ) as tap,
+        patch(
+            "handlers.daily_gem_handler._return_from_store",
+            return_value=True,
+        ) as return_from_store,
+        patch("handlers.daily_gem_handler.log_result") as result_log,
+        patch("handlers.daily_gem_handler.save_image"),
+        patch("handlers.daily_gem_handler.time.sleep"),
+    ):
+        result = handle_daily_gem()
+
+    assert result == DailyGemResult.FAILED
+    tap.assert_called_once_with(
+        DAILY_GEM_BUTTON,
+        screenshot=screenshot,
+        retries=1,
+    )
+    return_from_store.assert_called_once_with("test", "RUNNING")
+    result_log.assert_called_once_with(
+        "Daily Gem check failed — the verified Daily Gem control could not be tapped",
+        detail=(
+            "[DAILY_GEM] result=failed session=test "
+            "reason=the verified Daily Gem control could not be tapped"
+        ),
+    )
+
+
+def test_failed_claim_reports_failed_source_cleanup():
+    screenshot = _screenshot()
+
+    def visible(label, *, screenshot=None):
+        return label in {STORE_MENU_INDICATOR, DAILY_GEM_BUTTON}
+
+    with (
+        patch("handlers.daily_gem_handler._make_session_id", return_value="test"),
+        patch(
+            "handlers.daily_gem_handler._open_store_for_current_screen",
+            return_value="RUNNING",
+        ),
+        patch("handlers.daily_gem_handler._wait_for_label", return_value=True),
+        patch(
+            "handlers.daily_gem_handler.capture_adb_screenshot",
+            return_value=screenshot,
+        ),
+        patch("handlers.daily_gem_handler.is_visible", side_effect=visible),
+        patch(
+            "handlers.daily_gem_handler.tap_if_visible",
+            return_value=False,
+        ),
+        patch(
+            "handlers.daily_gem_handler._return_from_store",
+            return_value=False,
+        ),
+        patch("handlers.daily_gem_handler.log_result") as result_log,
+        patch("handlers.daily_gem_handler.save_image"),
+        patch("handlers.daily_gem_handler.time.sleep"),
+    ):
+        result = handle_daily_gem()
+
+    assert result == DailyGemResult.FAILED
+    result_log.assert_called_once_with(
+        "Daily Gem check failed — the verified Daily Gem control could not be tapped; "
+        "failure cleanup could not return to RUNNING",
+        detail=(
+            "[DAILY_GEM] result=failed session=test "
+            "reason=the verified Daily Gem control could not be tapped; "
+            "failure cleanup could not return to RUNNING"
         ),
     )
 

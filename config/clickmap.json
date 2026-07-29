@@ -77,9 +77,9 @@
     "claim_daily_gems": {
       "match_region": {
         "x": 19,
-        "y": 1131,
-        "w": 380,
-        "h": 605
+        "y": 1050,
+        "w": 500,
+        "h": 686
       }
     },
     "ad_gem_region": {
