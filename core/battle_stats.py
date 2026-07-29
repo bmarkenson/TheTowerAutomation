@@ -1328,8 +1328,10 @@ def render_perk_selection_timeline_markdown(timeline: Any) -> list[str]:
             "their internal order is intentionally unspecified."
         ),
         (
-            "Pause-spanning interval aggregates retain all observed scheduled "
-            "boundaries, but do not assign individual changes to a boundary."
+            "Pause-spanning post-PWR snapshots use the selected list's "
+            "newest-first order to reconstruct one distinct change per "
+            "scheduled boundary. Ambiguous diffs remain interval aggregates "
+            "without per-wave attribution."
         ),
         "",
     ]
@@ -1375,7 +1377,11 @@ def render_perk_selection_timeline_markdown(timeline: Any) -> list[str]:
             observed_end = batch.get("observed_wave_end")
             observed = str(observed_start or "unknown")
             if (
-                batch.get("selection_model") == "interval_aggregate"
+                batch.get("selection_model")
+                in {
+                    "interval_aggregate",
+                    "singleton_after_pwr_max_reconstructed",
+                }
                 and observed_end is not None
                 and observed_end != observed_start
             ):

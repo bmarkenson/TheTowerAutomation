@@ -419,7 +419,51 @@ def test_render_perk_selection_timeline_marks_pause_interval_aggregates():
     rendered = "\n".join(lines)
     assert "665, 760, 855 (interval aggregate)" in rendered
     assert "| 690–880 |" in rendered
-    assert "do not assign individual changes to a boundary" in rendered
+    assert "Ambiguous diffs remain interval aggregates" in rendered
+
+
+def test_render_perk_selection_timeline_marks_reconstructed_post_pwr_rows():
+    lines = render_perk_selection_timeline_markdown(
+        {
+            "baseline_status": "new_battle_empty",
+            "pwr_maxed_observed": True,
+            "batches": [
+                {
+                    "sequence": 1,
+                    "scheduled_wave": 760,
+                    "scheduled_waves": [760],
+                    "observed_wave": 780,
+                    "observed_wave_end": 880,
+                    "selection_model": (
+                        "singleton_after_pwr_max_reconstructed"
+                    ),
+                    "selections": [
+                        {"display_text": "Orbs +2"},
+                    ],
+                },
+                {
+                    "sequence": 2,
+                    "scheduled_wave": 855,
+                    "scheduled_waves": [855],
+                    "observed_wave": 780,
+                    "observed_wave_end": 880,
+                    "selection_model": (
+                        "singleton_after_pwr_max_reconstructed"
+                    ),
+                    "selections": [
+                        {"display_text": "x1.44 all coins bonuses"},
+                    ],
+                },
+            ],
+            "warnings": [],
+            "pending_scheduled_wave": None,
+        }
+    )
+
+    rendered = "\n".join(lines)
+    assert "| 1 | 760 | 780–880 | Orbs +2 |" in rendered
+    assert "| 2 | 855 | 780–880 | x1.44 all coins bonuses |" in rendered
+    assert "newest-first order to reconstruct" in rendered
 
 
 def test_no_strategy_record_retains_terminal_tier_without_guessing_type():

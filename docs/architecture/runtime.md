@@ -89,6 +89,27 @@ EHLS/EALS purchase remains incomplete; attachment and non-Farm profiles may
 correct speed as soon as their runtime policy grants the handler action
 authority. Pause is rechecked before every speed tap.
 
+Automatic-Perk profiles maintain a run-scoped selection timeline from the
+compact `current wave / next Perk wave` control. A scheduled pair is usable
+only when the next wave is later than the current wave and no more than 250
+waves ahead; a boundary transition also requires the displayed current wave to
+have reached the previously armed wave. Implausible OCR is ignored and retried
+without panel input. Three consecutive invalid pairs produce one persistent
+warning, while the next valid pair records recovery. A previously armed value
+that is now implausibly far ahead is discarded and re-armed from stable valid
+evidence instead of holding the observer indefinitely.
+
+Before Perk Wave Requirement reaches `-75%`, a transition captures a complete
+selected list and treats its diff as one simultaneous unordered cascade. After
+`-75%`, one normal boundary reads only the newest complete row. If Pause or
+manual work spans multiple post-PWR boundaries, the observer captures the
+complete list and uses its authoritative newest-first order to reconstruct
+chronological singleton batches when there is exactly one distinct change per
+boundary. A repeated leveled family or any other count mismatch remains an
+explicit interval aggregate without invented per-wave attribution. Pause
+continues to block every panel input while stable top-bar observations update
+the pending boundary set.
+
 ## Tournament exclusive validation and observer profile
 
 `Tournament` owns a one-shot exclusive validation before it becomes a passive

@@ -32,6 +32,10 @@ Detector = Callable[[Frame], Mapping[str, Any]]
 PERKS_INDICATOR = "indicators.perks_panel"
 PERKS_CONTENT_REGION = (100, 414, 880, 1340)
 PERK_PROGRESS_TEXT_REGION = (400, 25, 340, 71)
+# The largest retained real lead is 191 waves. Keep margin for future profiles
+# while rejecting separator artifacts such as ``705`` becoming ``7705``.
+MAX_PERK_SCHEDULE_LEAD_WAVES = 250
+INVALID_PROGRESS_WARNING_FRAMES = 3
 PWR_FAMILY = "perk_wave_requirement"
 PERKS_CLOSE_DESTINATIONS = {
     "RUNNING",
@@ -56,7 +60,13 @@ class PerkProgress:
 
     @property
     def token(self) -> Optional[tuple[str, Optional[int]]]:
-        if self.status == "scheduled" and self.next_wave is not None:
+        if (
+            self.status == "scheduled"
+            and _scheduled_progress_is_plausible(
+                self.current_wave,
+                self.next_wave,
+            )
+        ):
             return ("scheduled", self.next_wave)
         if self.status == "complete":
             return ("complete", None)
@@ -163,10 +173,27 @@ class PerkTimelineTracker:
                 self._armed_next_wave = progress.next_wave
             return None
 
+        if (
+            progress.status == "scheduled"
+            and progress.current_wave is not None
+            and self._armed_next_wave
+            > progress.current_wave + MAX_PERK_SCHEDULE_LEAD_WAVES
+        ):
+            poisoned_wave = self._armed_next_wave
+            self._armed_next_wave = progress.next_wave
+            self._warn_once(
+                "An implausible armed Perk wave "
+                f"({poisoned_wave}) was discarded and the timeline "
+                f"resynchronized at {progress.next_wave}"
+            )
+            return None
+
         transitioned = (
             progress.status == "complete"
             or (
-                progress.next_wave is not None
+                progress.current_wave is not None
+                and progress.next_wave is not None
+                and progress.current_wave >= self._armed_next_wave
                 and progress.next_wave > self._armed_next_wave
             )
         )
@@ -225,11 +252,34 @@ class PerkTimelineTracker:
                 "the pending timeline event will be retried"
             )
             return False
-        self._append_batch(
-            request,
-            changes,
-            observed_at=observed_at,
-        )
+        if (
+            self._pwr_maxed
+            and len(request.scheduled_waves) > 1
+            and len(changes) == len(request.scheduled_waves)
+        ):
+            self._append_ordered_post_pwr_batches(
+                request,
+                changes,
+                observed_at=observed_at,
+            )
+        else:
+            self._append_batch(
+                request,
+                changes,
+                observed_at=observed_at,
+            )
+            if len(request.scheduled_waves) > 1:
+                detail = (
+                    "because the number of distinct changes did not match "
+                    "the number of scheduled boundaries"
+                    if self._pwr_maxed
+                    else "because the interval includes pre-max PWR cascades"
+                )
+                self._warn_once(
+                    "Perk panel capture was deferred across multiple selection "
+                    "boundaries; changes are recorded as an interval aggregate "
+                    f"without per-wave attribution {detail}"
+                )
         self._selected_by_family = after
         if _snapshot_has_max_pwr(after):
             self._pwr_maxed = True
@@ -276,10 +326,14 @@ class PerkTimelineTracker:
         """Return a detached battle-record payload."""
 
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "source": "top_bar_schedule_and_selected_perks_panel",
             "batch_order_semantics": "selection_wave_order",
             "within_batch_order_semantics": "simultaneous_unordered",
+            "deferred_post_pwr_order_semantics": (
+                "latest_selected_first_reconstructed_when_one_distinct_"
+                "change_matches_each_scheduled_boundary"
+            ),
             "baseline_status": self._baseline_status,
             "pwr_maxed_observed": self._pwr_maxed,
             "batches": copy.deepcopy(self._batches),
@@ -300,6 +354,7 @@ class PerkTimelineTracker:
         changes: Sequence[Mapping[str, Any]],
         *,
         observed_at: Optional[datetime],
+        selection_model: Optional[str] = None,
     ) -> None:
         when = observed_at or datetime.now().astimezone()
         interval_aggregate = len(request.scheduled_waves) > 1
@@ -312,18 +367,53 @@ class PerkTimelineTracker:
                 "observed_wave_end": request.observed_wave_end,
                 "observed_at": when.isoformat(),
                 "selection_model": (
-                    "interval_aggregate"
-                    if interval_aggregate
-                    else (
-                        "singleton_after_pwr_max"
-                        if request.snapshot_mode == "latest"
-                        else "simultaneous_batch"
+                    selection_model
+                    or (
+                        "interval_aggregate"
+                        if interval_aggregate
+                        else (
+                            "singleton_after_pwr_max"
+                            if request.snapshot_mode == "latest"
+                            else "simultaneous_batch"
+                        )
                     )
                 ),
                 "snapshot_mode": request.snapshot_mode,
                 "selections": [copy.deepcopy(dict(change)) for change in changes],
             }
         )
+
+    def _append_ordered_post_pwr_batches(
+        self,
+        request: PerkCaptureRequest,
+        changes_newest_first: Sequence[Mapping[str, Any]],
+        *,
+        observed_at: Optional[datetime],
+    ) -> None:
+        """Reconstruct deferred post-PWR singletons from newest-first rows."""
+
+        source_waves = list(request.scheduled_waves)
+        for scheduled_wave, change in zip(
+            source_waves,
+            reversed(changes_newest_first),
+        ):
+            reconstructed = replace(
+                request,
+                scheduled_wave=scheduled_wave,
+                scheduled_waves=(scheduled_wave,),
+            )
+            self._append_batch(
+                reconstructed,
+                [change],
+                observed_at=observed_at,
+                selection_model="singleton_after_pwr_max_reconstructed",
+            )
+            self._batches[-1]["reconstructed_from_scheduled_waves"] = (
+                source_waves
+            )
+            self._batches[-1]["source_order_semantics"] = (
+                "latest_selected_first"
+            )
 
     def _advance_after_capture(self, request: PerkCaptureRequest) -> None:
         if request.progress_after.status == "scheduled":
@@ -347,8 +437,10 @@ class PerkTimelineTracker:
         advanced = (
             progress.status == "complete"
             or (
-                progress.next_wave is not None
+                progress.current_wave is not None
+                and progress.next_wave is not None
                 and previous_next is not None
+                and progress.current_wave >= previous_next
                 and progress.next_wave > previous_next
             )
         )
@@ -374,13 +466,6 @@ class PerkTimelineTracker:
             scheduled_waves=tuple(scheduled_waves),
             observed_wave_end=wave,
         )
-        if aggregate:
-            self._warn_once(
-                "Perk panel capture was deferred across multiple selection "
-                "boundaries; changes are recorded as an interval aggregate "
-                "without per-wave attribution"
-            )
-
     def _warn_once(self, message: str) -> None:
         if message not in self._warnings:
             self._warnings.append(message)
@@ -392,10 +477,14 @@ class PerkTimelineObserver:
     def __init__(self, tracker: Optional[PerkTimelineTracker] = None) -> None:
         self.tracker = tracker or PerkTimelineTracker()
         self._route_open = False
+        self._invalid_progress_count = 0
+        self._invalid_progress_warned = False
 
     def reset(self, *, fresh_battle: bool = True) -> None:
         self.tracker.reset(fresh_battle=fresh_battle)
         self._route_open = False
+        self._invalid_progress_count = 0
+        self._invalid_progress_warned = False
 
     def snapshot(self) -> dict[str, Any]:
         return self.tracker.snapshot()
@@ -431,7 +520,9 @@ class PerkTimelineObserver:
 
         state = str(detection.get("state") or "UNKNOWN")
         if state == "RUNNING":
-            self.tracker.observe(progress_fn(screenshot), wave=wave)
+            progress = progress_fn(screenshot)
+            self._record_progress_health(progress)
+            self.tracker.observe(progress, wave=wave)
         request = self.tracker.pending
         if request is None:
             if not self._route_open:
@@ -613,6 +704,40 @@ class PerkTimelineObserver:
                 detail=f"[PERK_TIMELINE] result=failed error={exc}",
             )
             return navigated
+
+    def _record_progress_health(self, progress: PerkProgress) -> None:
+        """Report persistent invalid OCR while continuing read-only retries."""
+
+        if progress.status != "invalid_schedule":
+            if self._invalid_progress_warned:
+                log(
+                    "[PERK_TIMELINE] Top-bar schedule recovered after "
+                    f"{self._invalid_progress_count} invalid observation(s)",
+                    "INFO",
+                )
+            self._invalid_progress_count = 0
+            self._invalid_progress_warned = False
+            return
+
+        self._invalid_progress_count += 1
+        log(
+            "[PERK_TIMELINE] Ignoring implausible top-bar schedule "
+            f"current={progress.current_wave} next={progress.next_wave} "
+            f"raw={progress.text_raw!r} "
+            f"attempt={self._invalid_progress_count}",
+            "DEBUG",
+        )
+        if (
+            self._invalid_progress_count >= INVALID_PROGRESS_WARNING_FRAMES
+            and not self._invalid_progress_warned
+        ):
+            self._invalid_progress_warned = True
+            log(
+                "[PERK_TIMELINE] Top-bar schedule remained implausible for "
+                f"{self._invalid_progress_count} observations; timeline "
+                "capture is retrying without device input",
+                "WARN",
+            )
 
     def _capture_pending(
         self,
@@ -808,10 +933,17 @@ def measure_perk_progress(
         for value in re.findall(r"(?<!\d)(\d{1,6})(?!\d)", normalized)
     ]
     if len(numbers) >= 2:
+        current_wave = numbers[0]
+        next_wave = numbers[-1]
+        status = (
+            "scheduled"
+            if _scheduled_progress_is_plausible(current_wave, next_wave)
+            else "invalid_schedule"
+        )
         return PerkProgress(
-            "scheduled",
-            numbers[0],
-            numbers[-1],
+            status,
+            current_wave,
+            next_wave,
             normalized,
             float(confidence),
         )
@@ -822,6 +954,15 @@ def measure_perk_progress(
         normalized,
         float(confidence),
     )
+
+
+def _scheduled_progress_is_plausible(
+    current_wave: Optional[int],
+    next_wave: Optional[int],
+) -> bool:
+    if current_wave is None or next_wave is None:
+        return False
+    return 0 < next_wave - current_wave <= MAX_PERK_SCHEDULE_LEAD_WAVES
 
 
 def timeline_perk_family(text: Any) -> str:

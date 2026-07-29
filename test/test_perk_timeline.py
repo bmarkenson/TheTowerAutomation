@@ -95,6 +95,82 @@ def test_measure_perk_progress_tolerates_ocr_artifacts_and_terminal_label():
     assert complete.status == "complete"
 
 
+def test_measure_perk_progress_rejects_implausible_concatenated_wave():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+    progress = measure_perk_progress(
+        frame,
+        text_fn=lambda crop: ("690 / 7705", 89.0),
+    )
+
+    assert progress.status == "invalid_schedule"
+    assert progress.current_wave == 690
+    assert progress.next_wave == 7705
+    assert progress.token is None
+
+
+def test_tracker_requires_the_armed_wave_before_accepting_a_transition():
+    tracker = PerkTimelineTracker()
+    tracker.reset(fresh_battle=True)
+    _stabilize(tracker, _progress(690, 705), wave=690)
+
+    assert _stabilize(tracker, _progress(690, 752), wave=690) is None
+
+    request = _stabilize(tracker, _progress(705, 752), wave=705)
+    assert request is not None
+    assert request.scheduled_wave == 705
+
+
+def test_tracker_resynchronizes_an_implausibly_distant_armed_wave():
+    tracker = PerkTimelineTracker()
+    tracker.reset(fresh_battle=True)
+    _stabilize(tracker, _progress(690, 705), wave=690)
+    tracker._armed_next_wave = 7705
+
+    assert _stabilize(tracker, _progress(720, 752), wave=720) is None
+    snapshot = tracker.snapshot()
+    assert "resynchronized at 752" in snapshot["warnings"][0]
+
+    request = _stabilize(tracker, _progress(752, 799), wave=752)
+    assert request is not None
+    assert request.scheduled_wave == 752
+
+
+def test_observer_retries_persistent_invalid_progress_without_navigation():
+    tracker = PerkTimelineTracker()
+    tracker.reset(fresh_battle=True)
+    observer = PerkTimelineObserver(tracker)
+    running = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    invalid = PerkProgress(
+        "invalid_schedule",
+        690,
+        7705,
+        "690 / 7705",
+        89.0,
+    )
+    taps = []
+
+    with patch("core.perk_timeline.log") as log_mock:
+        for _ in range(3):
+            assert observer.handle(
+                running,
+                {"state": "RUNNING"},
+                wave=690,
+                actions_allowed=True,
+                action_guard_fn=lambda: True,
+                progress_fn=lambda frame: invalid,
+                safe_tap_fn=lambda *args, **kwargs: taps.append(args) or True,
+            ) is False
+
+    assert taps == []
+    assert tracker.pending is None
+    assert any(
+        call.args[1] == "WARN"
+        and "retrying without device input" in call.args[0]
+        for call in log_mock.call_args_list
+    )
+
+
 def test_tracker_records_pwr_cascades_as_atomic_batches_then_singletons():
     tracker = PerkTimelineTracker()
     tracker.reset(fresh_battle=True)
@@ -205,7 +281,7 @@ def test_paused_observer_coalesces_boundaries_and_arms_latest_progress():
     assert next_request.scheduled_wave == 226
 
 
-def test_deferred_post_pwr_singleton_falls_back_to_full_interval_snapshot():
+def test_deferred_post_pwr_snapshot_reconstructs_newest_first_singletons():
     tracker = PerkTimelineTracker()
     tracker.reset(fresh_battle=True)
     _stabilize(tracker, _progress(80, 100), wave=80)
@@ -225,12 +301,48 @@ def test_deferred_post_pwr_singleton_falls_back_to_full_interval_snapshot():
     assert request.snapshot_mode == "full"
     assert tracker.record_full_snapshot(
         _full(
-            _perk("Perk wave requirement -75.00%"),
-            _perk("Defense percent +5.00%"),
             _perk("x1.15 all coins bonuses"),
+            _perk("Defense percent +5.00%"),
+            _perk("Perk wave requirement -75.00%"),
         )
     )
+    batches = tracker.snapshot()["batches"]
+    assert [batch["scheduled_wave"] for batch in batches] == [100, 142, 184]
+    assert [batch["selections"][0]["family"] for batch in batches[-2:]] == [
+        "defense_percent",
+        "all_coins_bonuses",
+    ]
+    assert all(
+        batch["selection_model"]
+        == "singleton_after_pwr_max_reconstructed"
+        for batch in batches[-2:]
+    )
+    assert tracker.snapshot()["warnings"] == []
+
+
+def test_deferred_post_pwr_repeated_family_remains_interval_aggregate():
+    tracker = PerkTimelineTracker()
+    tracker.reset(fresh_battle=True)
+    _stabilize(tracker, _progress(80, 100), wave=80)
+    _stabilize(tracker, _progress(100, 142), wave=101)
+    assert tracker.record_full_snapshot(
+        _full(
+            _perk("Defense percent +5.00%"),
+            _perk("Perk wave requirement -75.00%"),
+        )
+    )
+
+    _stabilize(tracker, _progress(142, 184), wave=143)
+    _stabilize(tracker, _progress(184, 226), wave=185)
+    assert tracker.record_full_snapshot(
+        _full(
+            _perk("Defense percent +15.00%"),
+            _perk("Perk wave requirement -75.00%"),
+        )
+    )
+
     assert tracker.latest_batch["selection_model"] == "interval_aggregate"
+    assert "distinct changes did not match" in tracker.snapshot()["warnings"][0]
 
 
 def test_mid_battle_attachment_establishes_baseline_without_inventing_waves():
