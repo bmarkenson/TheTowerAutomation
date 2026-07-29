@@ -725,6 +725,20 @@ class FarmProfileTests(unittest.TestCase):
             plan["session_preflight"]["fallbacks"],
         )
         self.assertEqual(
+            plan["session_preflight"]["recovery"],
+            {"repair_mismatch_attempts": 3},
+        )
+        preflight_action = next(
+            rule
+            for rule in plan["rules"]
+            if rule["name"] == "validate_gc_session_preflight"
+        )["do"][0]
+        self.assertEqual(preflight_action["repair_mismatch_attempts"], 3)
+        self.assertEqual(
+            configuration["session_preflight_recovery"],
+            {"repair_mismatch_attempts": 3},
+        )
+        self.assertEqual(
             configuration["settings"]["guardian_chips"],
             ["Fetch", "Summon", "Scout"],
         )
@@ -1293,14 +1307,7 @@ class GcFarmProfileTests(unittest.TestCase):
             actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
         self.assertEqual(
             actions,
-            [
-                {
-                    "type": "gc_session_preflight",
-                    "requirements": strategy.config["rules"][-1]["do"][0][
-                        "requirements"
-                    ],
-                }
-            ],
+            [strategy.config["rules"][-1]["do"][0]],
         )
         self.assertFalse(manager.run_initialization_pending())
         self.assertTrue(manager.session_preflight_pending())
@@ -1721,8 +1728,13 @@ class GcFarmProfileTests(unittest.TestCase):
             if rule["name"] == "validate_gc_session_preflight"
         )["do"][0]
         evidence = SimpleNamespace(
-            as_dict=lambda: {"valid": False, "modules": {"valid": False}},
+            as_dict=lambda: {
+                "valid": False,
+                "failed_checks": ["modules"],
+                "modules": {"valid": False},
+            },
             requires_no_battle_repair=True,
+            failed_checks=("modules",),
         )
         result = GcLivePreflightResult(
             GcPreflightNavigationStatus.MISMATCH,
@@ -1734,11 +1746,32 @@ class GcFarmProfileTests(unittest.TestCase):
             "core.action_executor.run_read_only_gc_preflight",
             return_value=result,
         ):
-            execute_actions(
-                object(),
-                [{**action, "_strategy": True}],
-                ctx,
-            )
+            for attempt in range(1, 4):
+                execute_actions(
+                    object(),
+                    [{**action, "_strategy": True}],
+                    ctx,
+                )
+                self.assertEqual(
+                    mv["gc_session_preflight_repair_attempts"],
+                    attempt,
+                )
+                self.assertEqual(
+                    mv["gc_session_preflight_repair_required"],
+                    attempt == 3,
+                )
+                self.assertEqual(
+                    mv["gc_session_preflight_attempted"],
+                    attempt == 3,
+                )
+                self.assertEqual(
+                    mv["gc_session_preflight_blocked"],
+                    attempt == 3,
+                )
+                self.assertEqual(
+                    mv["gc_no_battle_setup_completed"],
+                    attempt < 3,
+                )
 
         self.assertTrue(mv["gc_session_preflight_attempted"])
         self.assertFalse(mv["gc_session_preflight_completed"])
@@ -1746,6 +1779,108 @@ class GcFarmProfileTests(unittest.TestCase):
         self.assertTrue(mv["gc_session_preflight_repair_required"])
         self.assertFalse(mv["gc_session_preflight_repair_in_progress"])
         self.assertFalse(mv["gc_no_battle_setup_completed"])
+
+    def test_transient_repairable_mismatch_recovers_without_home_repair(self):
+        strategy = get_strategy("farm_t19")
+        ctx = MissionContext()
+        strategy.on_start(ctx)
+        mv = ctx.data["mission_vars"]
+        mv["last_detection_state"] = "RUNNING"
+        mv["gc_no_battle_setup_completed"] = True
+        action = next(
+            rule
+            for rule in strategy.rules
+            if rule["name"] == "validate_gc_session_preflight"
+        )["do"][0]
+        mismatch_evidence = SimpleNamespace(
+            as_dict=lambda: {
+                "valid": False,
+                "failed_checks": ["perk_configuration"],
+            },
+            requires_no_battle_repair=True,
+            failed_checks=("perk_configuration",),
+        )
+        complete_evidence = SimpleNamespace(
+            as_dict=lambda: {"valid": True},
+        )
+        results = [
+            GcLivePreflightResult(
+                GcPreflightNavigationStatus.MISMATCH,
+                "configuration mismatch",
+                mismatch_evidence,
+            ),
+            GcLivePreflightResult(
+                GcPreflightNavigationStatus.COMPLETE,
+                "all requirements verified",
+                complete_evidence,
+            ),
+        ]
+
+        with patch(
+            "core.action_executor.run_read_only_gc_preflight",
+            side_effect=results,
+        ):
+            execute_actions(object(), [{**action, "_strategy": True}], ctx)
+            self.assertFalse(mv["gc_session_preflight_attempted"])
+            self.assertFalse(mv["gc_session_preflight_repair_required"])
+            self.assertTrue(mv["gc_no_battle_setup_completed"])
+            execute_actions(object(), [{**action, "_strategy": True}], ctx)
+
+        self.assertTrue(mv["gc_session_preflight_completed"])
+        self.assertFalse(mv["gc_session_preflight_blocked"])
+        self.assertFalse(mv["gc_session_preflight_repair_required"])
+        self.assertEqual(mv["gc_session_preflight_repair_attempts"], 0)
+        self.assertEqual(mv["gc_session_preflight_repair_failure_key"], "")
+        self.assertTrue(mv["gc_no_battle_setup_completed"])
+
+    def test_different_repairable_mismatch_restarts_consecutive_count(self):
+        strategy = get_strategy("farm_t19")
+        ctx = MissionContext()
+        strategy.on_start(ctx)
+        mv = ctx.data["mission_vars"]
+        mv["last_detection_state"] = "RUNNING"
+        mv["gc_no_battle_setup_completed"] = True
+        action = next(
+            rule
+            for rule in strategy.rules
+            if rule["name"] == "validate_gc_session_preflight"
+        )["do"][0]
+
+        def mismatch(check_id):
+            evidence = SimpleNamespace(
+                as_dict=lambda: {
+                    "valid": False,
+                    "failed_checks": [check_id],
+                },
+                requires_no_battle_repair=True,
+                failed_checks=(check_id,),
+            )
+            return GcLivePreflightResult(
+                GcPreflightNavigationStatus.MISMATCH,
+                "configuration mismatch",
+                evidence,
+            )
+
+        with patch(
+            "core.action_executor.run_read_only_gc_preflight",
+            side_effect=[
+                mismatch("modules"),
+                mismatch("modules"),
+                mismatch("perk_configuration"),
+            ],
+        ):
+            for _ in range(3):
+                execute_actions(
+                    object(),
+                    [{**action, "_strategy": True}],
+                    ctx,
+                )
+
+        self.assertEqual(mv["gc_session_preflight_repair_attempts"], 1)
+        self.assertFalse(mv["gc_session_preflight_attempted"])
+        self.assertFalse(mv["gc_session_preflight_blocked"])
+        self.assertFalse(mv["gc_session_preflight_repair_required"])
+        self.assertTrue(mv["gc_no_battle_setup_completed"])
 
     def test_completed_home_repair_requires_fresh_preflight_on_next_run(self):
         strategy = get_strategy("gc_farm_t19_experiment")
@@ -1768,6 +1903,8 @@ class GcFarmProfileTests(unittest.TestCase):
         self.assertFalse(mv["gc_session_preflight_blocked"])
         self.assertFalse(mv["gc_session_preflight_repair_required"])
         self.assertFalse(mv["gc_session_preflight_repair_in_progress"])
+        self.assertEqual(mv["gc_session_preflight_repair_attempts"], 0)
+        self.assertEqual(mv["gc_session_preflight_repair_failure_key"], "")
 
     def test_app_surrenders_once_for_claimed_gc_home_repair(self):
         manager = MagicMock()

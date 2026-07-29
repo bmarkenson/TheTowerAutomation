@@ -90,6 +90,13 @@ def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
         profile.get("gate_fallbacks"),
         supported_checks=set(requirements) | {"modules", "target_priority"},
     )
+    session_recovery = copy.deepcopy(
+        profile.get("session_preflight_recovery")
+    )
+    if not isinstance(session_recovery, dict):
+        raise ValueError(
+            "Farm run profile session_preflight_recovery must be a mapping"
+        )
     requirements["loadout_policies"] = {
         "modules": module_policy["mode"],
         "target_priority": target_policy["mode"],
@@ -132,6 +139,7 @@ def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
             "target_priority": target_policy,
         },
         "gate_fallbacks": copy.deepcopy(gate_fallbacks),
+        "session_preflight_recovery": copy.deepcopy(session_recovery),
     }
 
     return {
@@ -143,6 +151,7 @@ def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
             "target_priority": target_priority,
         },
         "session_preflight": requirements,
+        "session_preflight_recovery": session_recovery,
         "gate_fallbacks": gate_fallbacks,
         "run_configuration": run_configuration,
     }

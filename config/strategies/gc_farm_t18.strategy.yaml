@@ -81,6 +81,8 @@ session_preflight:
       modules: enforce
       target_priority: preserve
   fallbacks: {}
+  recovery:
+    repair_mismatch_attempts: 3
 vars:
   run_initialised: false
   fast_loop_active: false
@@ -115,6 +117,8 @@ vars:
   gc_session_preflight_evidence: {}
   gc_session_preflight_failed_checks: []
   gc_session_preflight_waivers: {}
+  gc_session_preflight_repair_attempts: 0
+  gc_session_preflight_repair_failure_key: ''
 per_run_reset:
 - run_initialised
 - fast_loop_active
@@ -397,3 +401,4 @@ rules:
       loadout_policies:
         modules: enforce
         target_priority: preserve
+    repair_mismatch_attempts: 3

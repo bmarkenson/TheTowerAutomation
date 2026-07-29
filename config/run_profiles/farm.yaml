@@ -69,3 +69,6 @@ gate_fallbacks:
       label: Continue with Flame for this run
       value: Flame
       description: Keep the currently selected Flame Bot preset and waive only the Farm Bot preset check.
+
+session_preflight_recovery:
+  repair_mismatch_attempts: 3

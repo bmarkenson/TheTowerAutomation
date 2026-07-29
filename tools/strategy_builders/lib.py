@@ -205,6 +205,9 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
     session_requirements = _normalize_gc_session_preflight(
         source.get("session_preflight")
     )
+    session_recovery = _normalize_gc_session_preflight_recovery(
+        source.get("session_preflight_recovery")
+    )
     gate_fallbacks = copy.deepcopy(source.get("gate_fallbacks") or {})
     if not isinstance(gate_fallbacks, dict):
         raise ValueError("gc_farm gate_fallbacks must be a mapping")
@@ -265,6 +268,8 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
         gc_session_preflight_evidence={},
         gc_session_preflight_failed_checks=[],
         gc_session_preflight_waivers={},
+        gc_session_preflight_repair_attempts=0,
+        gc_session_preflight_repair_failure_key="",
     )
 
     per_run_reset = [
@@ -512,6 +517,9 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
                 {
                     "type": "gc_session_preflight",
                     "requirements": copy.deepcopy(session_requirements),
+                    "repair_mismatch_attempts": session_recovery[
+                        "repair_mismatch_attempts"
+                    ],
                 }
             ],
         }
@@ -524,6 +532,7 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
             "complete_when": ["gc_session_preflight_completed"],
             "requirements": copy.deepcopy(session_requirements),
             "fallbacks": gate_fallbacks,
+            "recovery": copy.deepcopy(session_recovery),
         },
         "vars": vars_block,
         "per_run_reset": per_run_reset,
@@ -543,6 +552,34 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
                     )
         plan["run_configuration"] = resolved_configuration
     return plan
+
+
+def _normalize_gc_session_preflight_recovery(raw: Any) -> Dict[str, int]:
+    """Validate profile-owned authority for retrying before Home repair."""
+
+    if not isinstance(raw, dict):
+        raise ValueError(
+            "gc_farm session_preflight_recovery must be a mapping"
+        )
+    unknown = sorted(set(raw) - {"repair_mismatch_attempts"})
+    if unknown:
+        raise ValueError(
+            "gc_farm session_preflight_recovery has unsupported settings: "
+            + ", ".join(str(key) for key in unknown)
+        )
+    try:
+        attempts = int(raw.get("repair_mismatch_attempts"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "gc_farm session_preflight_recovery.repair_mismatch_attempts "
+            "must be an integer"
+        ) from exc
+    if attempts < 1:
+        raise ValueError(
+            "gc_farm session_preflight_recovery.repair_mismatch_attempts "
+            "must be positive"
+        )
+    return {"repair_mismatch_attempts": attempts}
 
 
 def _normalize_gc_session_preflight(raw: Any) -> Dict[str, Any]:

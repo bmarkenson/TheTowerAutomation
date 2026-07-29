@@ -212,6 +212,7 @@ class MissionManager:
             mv["gc_session_preflight_last_status"] = ""
             mv["gc_session_preflight_last_reason"] = ""
             mv["gc_session_preflight_evidence"] = {}
+            self._reset_session_preflight_repair_attempts()
         mv["gc_session_preflight_waivers"] = {}
         mv["gc_session_preflight_failed_checks"] = []
         self.set_exclusive_validation_battle(False)
@@ -293,6 +294,7 @@ class MissionManager:
             mv["gc_session_preflight_evidence"] = {}
             mv["gc_session_preflight_failed_checks"] = []
             mv["gc_session_preflight_waivers"] = {}
+            self._reset_session_preflight_repair_attempts()
 
     def prepare_exclusive_validation_request(self, request_id: str) -> bool:
         """Re-arm Home evidence exactly once for one durable request."""
@@ -308,6 +310,7 @@ class MissionManager:
         mv["gc_no_battle_setup_completed"] = False
         mv["gc_no_battle_setup_evidence"] = {}
         mv["gc_session_preflight_waivers"] = {}
+        self._reset_session_preflight_repair_attempts()
         return True
 
     def session_preflight_pending(self) -> bool:
@@ -387,6 +390,7 @@ class MissionManager:
         mv["gc_session_preflight_repair_required"] = False
         mv["gc_session_preflight_repair_in_progress"] = False
         mv["gc_session_preflight_failed_checks"] = []
+        self._reset_session_preflight_repair_attempts()
 
     def retry_session_preflight(self) -> None:
         """Re-arm an unchanged session preflight after operator direction."""
@@ -398,6 +402,14 @@ class MissionManager:
         mv["gc_session_preflight_repair_required"] = False
         mv["gc_session_preflight_repair_in_progress"] = False
         mv["gc_session_preflight_failed_checks"] = []
+        self._reset_session_preflight_repair_attempts()
+
+    def _reset_session_preflight_repair_attempts(self) -> None:
+        """Discard consecutive mismatch evidence after a policy boundary."""
+
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        mv["gc_session_preflight_repair_attempts"] = 0
+        mv["gc_session_preflight_repair_failure_key"] = ""
 
     def begin_session_preflight_repair(self) -> bool:
         """Claim the one guarded surrender transition for a repair request."""
@@ -494,6 +506,7 @@ class MissionManager:
             mv["gc_session_preflight_attempted"] = False
             mv["gc_session_preflight_completed"] = False
             mv["gc_session_preflight_blocked"] = False
+            self._reset_session_preflight_repair_attempts()
 
     def tick(self, screen, detection: Detection, *, strategy_only: bool = False) -> None:
         state = detection.get("state")

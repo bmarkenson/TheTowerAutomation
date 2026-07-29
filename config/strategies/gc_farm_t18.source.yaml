@@ -6,6 +6,9 @@ meta:
 
 builder: gc_farm
 
+session_preflight_recovery:
+  repair_mismatch_attempts: 3
+
 initialization:
   target_priority:
     mode: enforce
