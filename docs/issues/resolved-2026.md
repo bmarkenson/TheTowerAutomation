@@ -85,6 +85,13 @@ and actionable work lives in
   reconstructed and aggregate Markdown semantics.
 - **Validation:** All 39 focused Perk timeline and battle-report tests passed.
   The complete repository suite passed 852 tests.
+- **Live rollout:** A guarded attached reload replaced PID `16016` with
+  `73436` at wave 1902 without running startup/session gates. The replacement
+  established a five-page mid-battle baseline, rejected animated OCR frames
+  that read the real scheduled wave `1972` as `72`, and then recorded
+  `Chrono Field Duration +5s` against scheduled wave `1972` at observed wave
+  1975. It restored `RUNNING`, armed a plausible next schedule, and emitted no
+  Exit, Surrender, repair, or terminal event.
 - **Fixed by:** `1eb3cd0`.
 
 ### Perk timeline restart catch-up lost panel ownership and stalled the battle

@@ -67,6 +67,9 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   cases remain explicit interval aggregates.
 - The focused tracker and report suites passed 39 tests. The complete
   repository suite passed 852 tests.
+- Live guarded attachment at wave 1902 established a full baseline, ignored
+  transient `1972` → `72` OCR frames, and correctly recorded the next
+  singleton selection at scheduled wave 1972 before restoring `RUNNING`.
 
 ### 2026-07-29 Perk timeline restart and modal recovery
 
