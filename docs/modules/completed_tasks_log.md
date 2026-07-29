@@ -37,6 +37,22 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-29 Perk schedule plausibility and ordered pause recovery
+
+- Commit `1eb3cd0` prevents stable top-bar OCR artifacts such as `705` becoming
+  `7705` from poisoning the Perk timeline. Scheduled pairs have a bounded lead,
+  transitions require the armed boundary to be reached, and an implausibly
+  distant armed value resynchronizes from stable valid evidence.
+- Invalid schedule reads retry without panel input. Three consecutive invalid
+  observations produce one persistent warning, and the next valid observation
+  reports recovery without stopping the battle.
+- A deferred post-PWR full snapshot now reverses the selected list's
+  newest-first diff into chronological singleton batches when one distinct
+  change matches each scheduled boundary. Repeated-family and count-mismatch
+  cases remain explicit interval aggregates.
+- The focused tracker and report suites passed 39 tests. The complete
+  repository suite passed 852 tests.
+
 ### 2026-07-29 Perk timeline restart and modal recovery
 
 - Commit `ce862cb` fixes the transferred-runtime incident in which a

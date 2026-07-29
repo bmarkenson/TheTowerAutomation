@@ -8,6 +8,50 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Implausible Perk schedule OCR poisoned the armed wave and stalled the timeline
+
+- **Observed:** 2026-07-29 during an active Tier 19 Farm battle.
+- **Symptom:** The timeline recorded the Perk scheduled for wave `705` while
+  the independent battle-wave observation was still `690`, then stopped
+  reacting to normal later boundaries. It eventually resumed only when another
+  OCR outlier exceeded the poisoned value and recorded a selection against
+  impossible scheduled wave `7705` at observed wave `1530`.
+- **Evidence:** `logs/actions.log` records the wave-705 action at 05:44:39 with
+  `observed_wave=690`, no Perk actions while ordinary status advanced through
+  waves 720–1490, and the fake wave-7705 action at 05:53:04. The natural Game
+  Over record `Battle20260729T055447-0700` preserves both invalid batches.
+  Static inspection found that `measure_perk_progress()` accepted the first
+  and last one-to-six-digit OCR groups without checking their relationship,
+  while `PerkTimelineTracker` accepted any larger next-wave token and armed
+  directly from it.
+- **Safety response:** Diagnosis used read-only process, control, ADB, log, and
+  screenshot inspection. No diagnostic Pause, restart, panel input, Exit, or
+  Surrender was sent. The battle ended naturally, completed its ordinary
+  terminal capture, and started a distinct new run.
+- **Cause:** A separator artifact could be concatenated with the real scheduled
+  wave, turning a value such as `705` into `7705`. Two confirmation frames did
+  not protect against a stable OCR artifact. The tracker had no maximum
+  schedule lead, did not require the displayed current wave to reach the armed
+  boundary, and had no way to discard an already-poisoned armed value.
+- **Resolution:** Scheduled pairs are now usable only when the next wave is
+  later and no more than 250 waves ahead. A transition also requires the
+  displayed current wave to have reached the armed boundary. Invalid pairs
+  remain read-only retries, emit a persistent warning after three consecutive
+  observations, and log recovery on the next valid pair. An implausibly distant
+  armed value is discarded and re-armed from stable valid evidence.
+  Pause-spanning post-PWR full snapshots now also use the selected list's
+  authoritative newest-first order to reconstruct chronological singleton
+  batches when one distinct change matches each boundary; ambiguous repeated
+  families remain interval aggregates.
+- **Regression:** `test/test_perk_timeline.py` covers the `690 / 7705` OCR
+  rejection, boundary-crossing requirement, poisoned-state resynchronization,
+  no-input persistent retry, exact newest-first post-PWR reconstruction, and
+  repeated-family fallback. `test/test_battle_stats.py` covers both
+  reconstructed and aggregate Markdown semantics.
+- **Validation:** All 39 focused Perk timeline and battle-report tests passed.
+  The complete repository suite passed 852 tests.
+- **Fixed by:** `1eb3cd0`.
+
 ### Perk timeline restart catch-up lost panel ownership and stalled the battle
 
 - **Observed:** 2026-07-28 through 2026-07-29 after the emulator and managed
