@@ -206,12 +206,16 @@ must agree with those individual checks before a battle may start. A
 contradiction is a failed setup attempt; it cannot be retained as completed
 evidence and later authorize an in-battle repair.
 
-When an active Farm session preflight authoritatively requires a supported
-Home-only repair, its profile-owned recovery may Surrender under the ownership
-rules in `AGENTS.md`. That repair transition is not a completed battle: at Game
-Over the runtime skips Perks/More Stats capture and battle-record persistence,
-then follows the guarded return-to-Home path. Natural Game Over and
-operator-owned battles retain their ordinary capture policy.
+When an active Farm session preflight authoritatively appears to require a
+supported Home-only repair, the runtime retries the same read-only validation
+after its 30-second cooldown. Farm profiles require three consecutive
+mismatches with the same failed-check set; success clears the count, and a
+different set restarts it. Only an exhausted series may invoke the
+profile-owned Surrender recovery under the ownership rules in `AGENTS.md`.
+That repair transition is not a completed battle: at Game Over the runtime
+skips Perks/More Stats capture and battle-record persistence, then follows the
+guarded return-to-Home path. Natural Game Over and operator-owned battles
+retain their ordinary capture policy.
 
 A direct interactive `main.py` launch presents the same choices in the
 terminal. For a service or another non-interactive launch, inspect or resolve

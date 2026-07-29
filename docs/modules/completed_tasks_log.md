@@ -37,6 +37,21 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-29 Bounded session-preflight repair retries
+
+- Commit `fbdcd48` makes the Home-repair threshold explicit in the compact Farm
+  profile and every generated Farm strategy: three matching authoritative
+  session-preflight mismatches are required.
+- Attempts one and two remain read-only, preserve the verified Home boundary,
+  and retry after the existing cooldown. Success clears the count; a different
+  failed-check set starts a new consecutive series.
+- Only the exhausted third attempt can acquire the existing guarded
+  Surrender/Home-repair authority. Automation-owned repair Game Over continues
+  to bypass Perks/More Stats and battle-record persistence.
+- The focused Farm/preflight selection passed 45 tests. The broad suite passed
+  861 tests with four unrelated activity-continuity fixtures deselected while
+  their concurrent implementation remained in progress.
+
 ### 2026-07-29 Perk schedule plausibility and ordered pause recovery
 
 - Commit `1eb3cd0` prevents stable top-bar OCR artifacts such as `705` becoming

@@ -430,8 +430,12 @@ evidence is attached.
   Home repair, or Surrender request; Poison Swamp Stun falls back to its guarded
   in-battle detail check; Home `RESUME_BATTLE` preserves the attachment, and
   the Home-owned gates rearm at the next genuine `NEW_BATTLE` boundary.
-- Confident mismatches on Home-only configuration may request one app-owned
-  stop/repair/restart sequence; ambiguous or unknown module identity and other
+- A confident Home-only mismatch does not immediately authorize repair. The
+  generated Farm plan declares a three-attempt threshold; the read-only
+  session preflight retries after its existing cooldown while the failed-check
+  identity is unchanged. Success clears the series, and changed failure
+  identity restarts it. Only an exhausted series may request one app-owned
+  stop/repair/restart sequence. Ambiguous or unknown module identity and other
   non-Home repair classes remain blocked. The matcher reports evidence but
   never directly authorizes an equipment action.
 - A guarded configuration repair must reach verified Home `NEW_BATTLE`, use

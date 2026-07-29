@@ -8,6 +8,41 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Session preflight requested Home repair after one transient mismatch
+
+- **Observed:** 2026-07-29 while reviewing the operator-reported Farm
+  configuration-repair Surrender.
+- **Symptom:** One authoritative-looking session-preflight mismatch could
+  immediately request the profile-owned Surrender/Home-repair sequence. A
+  transient read therefore had no opportunity to recover before the active
+  battle was ended.
+- **Evidence:** Static inspection found that the mismatch branch in
+  `core/action_executor.py` copied `repairable` directly into
+  `gc_session_preflight_repair_required` and immediately cleared the retained
+  no-battle setup completion. The main loop then claimed the repair and called
+  the guarded Surrender path. The earlier 2026-07-26 incident preserved in
+  this archive demonstrates that transition at wave 130.
+- **Safety response:** The currently observed battle was not used to reproduce
+  the destructive boundary. No diagnostic Exit or Surrender was sent.
+- **Cause:** Complete Home setup had a three-attempt policy, but in-battle
+  session preflight had no corresponding retry state or profile-declared
+  threshold.
+- **Resolution:** Every Farm profile now declares three matching repairable
+  mismatch attempts. Attempts one and two retain the Home proof, keep repair
+  authority false, and re-arm the read-only validation action after its
+  existing 30-second cooldown. A successful result clears the count, and a
+  different failed-check set restarts it at one. Only attempt three can request
+  the existing guarded Home repair. The already-implemented repair terminal
+  policy remains unchanged: an automation-owned repair Surrender skips
+  Perks/More Stats and battle-record persistence, then returns Home.
+- **Regression:** `test/test_run_initialization.py` covers retry state,
+  transient recovery, changed-failure reset, three-attempt exhaustion, the
+  single owned Surrender claim, and repair Game Over capture suppression.
+- **Validation:** 45 focused Farm/preflight tests passed. A broad repository
+  run passed 861 tests with four unrelated in-progress activity-continuity
+  fixtures deselected.
+- **Fixed by:** `fbdcd48`.
+
 ### Implausible Perk schedule OCR poisoned the armed wave and stalled the timeline
 
 - **Observed:** 2026-07-29 during an active Tier 19 Farm battle.
