@@ -84,6 +84,40 @@ def test_start_activity_scope_records_exact_log_boundary(tmp_path, monkeypatch):
     assert "[RUN_SCOPE] Current run activity started" in contents
 
 
+def test_ensure_activity_scope_preserves_existing_boundary(
+    tmp_path,
+    monkeypatch,
+):
+    isolated_log = tmp_path / "logs" / "actions.log"
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(isolated_log))
+    original = logger.start_activity_scope(reason="new_battle_preflight")
+    logger.log("activity from the current battle", "INFO", console=False)
+
+    attached = logger.ensure_activity_scope(reason="automation_started")
+
+    assert attached == original
+    saved = json.loads(
+        (tmp_path / "logs" / "activity_scope.json").read_text(encoding="utf-8")
+    )
+    assert saved == original
+    contents = isolated_log.read_text(encoding="utf-8")
+    assert contents.count("[RUN_SCOPE] Current run activity started") == 1
+    assert "activity from the current battle" in contents
+
+
+def test_ensure_activity_scope_creates_missing_boundary(tmp_path, monkeypatch):
+    isolated_log = tmp_path / "logs" / "actions.log"
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(isolated_log))
+
+    scope = logger.ensure_activity_scope(reason="automation started")
+
+    assert scope is not None
+    assert scope["reason"] == "automation_started"
+    assert json.loads(
+        (tmp_path / "logs" / "activity_scope.json").read_text(encoding="utf-8")
+    ) == scope
+
+
 def test_log_result_pairs_terminal_summary_with_diagnostic_detail(
     tmp_path,
     monkeypatch,

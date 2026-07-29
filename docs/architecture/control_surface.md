@@ -182,12 +182,13 @@ transition outside the Operational activity list while retaining complete
 status history in `Status only` and `All levels`.
 
 The native client's default `Current run` scope uses the atomic
-`logs/activity_scope.json` ledger written at automation startup and verified
-Home `NEW_BATTLE` preflight. It does not infer a run from human-readable log
-messages. Activity responses include an opaque end cursor; the client's
-non-destructive `Clear view` sends that cursor back as `after` and can restore
-the complete selected scope at any time. Server revision 10 advertises this as
-the `current_run_activity_scope` capability.
+`logs/activity_scope.json` ledger. Automation startup creates it only when no
+valid scope exists and otherwise reuses it, while verified Home `NEW_BATTLE`
+preflight replaces it at the game-run boundary. It does not infer a run from
+human-readable log messages. Activity responses include an opaque end cursor;
+the client's non-destructive `Clear view` sends that cursor back as `after` and
+can restore the complete selected scope at any time. Server revision 10
+advertises this as the `current_run_activity_scope` capability.
 
 Control request examples:
 

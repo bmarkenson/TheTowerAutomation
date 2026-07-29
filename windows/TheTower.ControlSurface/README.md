@@ -177,11 +177,12 @@ observation continues.
 Recent Activity refreshes independently once per second, follows the newest
 entry, and defaults to the concise `ACTION`, `RESULT`, `WARN`, `ERROR`, and
 `FAIL` **Operational** levels. Periodic `STATUS` and general `INFO` entries stay
-out of that narrative. **Current run** is the default activity scope and starts
-at automation startup or the verified Home `NEW_BATTLE` preflight boundary, so
-the Home setup and its battle remain together. **All recent** restores the
-rolling log tail. **Clear view** records a local cursor and hides only entries
-already displayed; it never deletes or truncates Linux logs, and **Show
+out of that narrative. **Current run** is the default activity scope. It
+survives an automation stop/restart, and verified Home `NEW_BATTLE` preflight
+replaces it so the Home setup and its battle remain together. **All recent**
+restores the rolling log tail. **Clear view** records a local cursor and hides
+only entries already displayed; it never deletes or truncates Linux logs, and
+**Show
 cleared** restores them. A new run or log rotation resets that local cutoff.
 
 The live banner labels the latest status explicitly and gives the most recent

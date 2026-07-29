@@ -37,12 +37,20 @@ def get_activity_scope_path() -> str:
     )
 
 
+def ensure_activity_scope(*, reason: str) -> Optional[dict[str, object]]:
+    """Return the current activity scope, creating it only when absent."""
+
+    normalized_reason = _normalize_activity_scope_reason(reason)
+    existing_scope = _load_activity_scope()
+    if existing_scope is not None:
+        return existing_scope
+    return start_activity_scope(reason=normalized_reason)
+
+
 def start_activity_scope(*, reason: str) -> Optional[dict[str, object]]:
     """Start one explicit current-run activity scope without risking runtime work."""
 
-    normalized_reason = "_".join(str(reason or "").strip().lower().split())
-    if not normalized_reason:
-        raise ValueError("Activity scope reason must not be empty")
+    normalized_reason = _normalize_activity_scope_reason(reason)
 
     primary_path = get_action_log_path()
     scope_path = get_activity_scope_path()
@@ -83,6 +91,45 @@ def start_activity_scope(*, reason: str) -> Optional[dict[str, object]]:
         "INFO",
     )
     return payload
+
+
+def _normalize_activity_scope_reason(reason: str) -> str:
+    normalized_reason = "_".join(str(reason or "").strip().lower().split())
+    if not normalized_reason:
+        raise ValueError("Activity scope reason must not be empty")
+    return normalized_reason
+
+
+def _load_activity_scope() -> Optional[dict[str, object]]:
+    try:
+        with open(get_activity_scope_path(), "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("schema_version") != 1:
+        return None
+    if payload.get("scope") != "current_run":
+        return None
+
+    run_id = str(payload.get("run_id") or "").strip()
+    started_at = str(payload.get("started_at") or "").strip()
+    source_file_id = str(payload.get("source_file_id") or "").strip()
+    source_parts = source_file_id.split(":")
+    try:
+        datetime.fromisoformat(started_at)
+        start_offset = int(payload.get("start_offset"))
+    except (TypeError, ValueError):
+        return None
+    if (
+        not run_id
+        or len(source_parts) != 2
+        or not all(part.isdigit() for part in source_parts)
+        or start_offset < 0
+    ):
+        return None
+    return dict(payload)
 
 
 def _write_json_atomic(path: str, payload: dict[str, object]) -> None:
