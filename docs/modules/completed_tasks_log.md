@@ -37,6 +37,18 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-28 restart-stable activity scope
+
+- Commit `d8a1cda` makes automation startup reuse a valid Current run ledger
+  instead of replacing it on every Python process start. A mid-battle
+  stop/restart therefore retains the earlier activity from that same game run,
+  while verified Home `NEW_BATTLE` preflight still starts the next scope.
+- Regression coverage preserves the exact scope identity and log offset across
+  attachment and verifies bootstrap behavior when no ledger exists. All 87
+  logger and run-initialization tests and the two focused control-surface scope
+  tests passed. The native client and API contract were unchanged, so no
+  Windows publish was required.
+
 ### 2026-07-28 Daily Gem failure cleanup
 
 - Commit `5cb852a` fixes the rollover Daily Gem incident in which Store inertia

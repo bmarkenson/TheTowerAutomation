@@ -8,6 +8,35 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Automation restart cleared the native Current run activity view
+
+- **Observed:** 2026-07-28 in the native Windows control surface after stopping
+  and restarting automation during an existing game run.
+- **Symptom:** Recent Activity was scoped to entries written after the restart,
+  hiding the earlier activity from the same battle as though a new game run
+  had begun.
+- **Evidence:** Static inspection found that `App.__init__()` unconditionally
+  called `start_activity_scope(reason="automation_started")`. That replaced
+  `logs/activity_scope.json` on every Python process start even though the
+  game-run boundary had not changed.
+- **Safety response:** Diagnosis and validation were repository-local. No
+  automation process, control directive, ADB target, or game state was changed.
+- **Cause:** Scope ownership was incorrectly shared by the Python process
+  lifecycle and the game lifecycle. The native client correctly followed the
+  ledger it received; the runtime had moved that ledger's boundary.
+- **Resolution:** Automation startup now ensures that a valid activity scope
+  exists and reuses one already present. Verified Home `NEW_BATTLE` preflight
+  remains the deliberate replacement boundary, so its Home setup and launched
+  battle stay together.
+- **Regression:** `test/test_logger.py::
+  test_ensure_activity_scope_preserves_existing_boundary` proves that restart
+  attachment retains the exact run ID, timestamp, source-file identity, and
+  byte offset without adding another scope marker.
+- **Validation:** All 87 logger and run-initialization tests passed, followed
+  by the two focused current-run control-surface tests. No native rebuild was
+  required because the client behavior and wire contract did not change.
+- **Fixed by:** `d8a1cda`.
+
 ### Daily Gem claim drift escaped its match region and left battle in Store
 
 - **Observed:** 2026-07-28 during the active Tier 19 Farm battle's rollover
