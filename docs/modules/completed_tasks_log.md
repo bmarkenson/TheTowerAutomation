@@ -37,6 +37,20 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-29 Home Battle History right-rail drift
+
+- Commit `dba88f1` expands the Home Battle History template search from one
+  fixed list position to the complete bounded right rail. The unchanged
+  template and threshold now cover both seven- and eight-control Home layouts
+  while retaining a template-derived tap center.
+- The exact stopped Home frame is canonicalized as
+  `test/fixtures/home_screen_eight_nav_controls_20260729.png`, and
+  `test/test_battle_history.py` proves that the shifted icon remains
+  authoritative.
+- All 24 focused Battle History, matcher, clickmap-access, and
+  clickmap-integrity checks passed, followed by all 870 repository tests. No
+  live input or automation restart was required.
+
 ### 2026-07-29 Battle History-backed activity continuity
 
 - Commit `2c4342d` fingerprints the newest copied in-game Battle History report

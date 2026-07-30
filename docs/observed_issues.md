@@ -11,28 +11,6 @@ for a matching recurrence or historical investigation.
 
 ## Open
 
-### Extra Home right-rail control shifted Battle History outside its match region
-
-- **Observed:** 2026-07-29 while starting a Tier 19 Farm run from verified
-  `NEW_BATTLE` Home.
-- **Symptom:** The new continuity workflow twice rejected the visible Battle
-  History control at confidence `0.26`, reported that its baseline could not be
-  recorded, and continued into Home setup.
-- **Evidence:** `logs/actions.log` records both
-  `navigation.battle_history_home` match failures from 18:11:37 through
-  18:11:40. The read-only source frame is retained as
-  `test/fixtures/home_screen_eight_nav_controls_20260729.png`: a new eighth
-  right-rail control moved Battle History from the older fixture's `y=770` to
-  `y=867`, while the configured search band ended at `y=890`. Searching the
-  complete Home right rail matches the unchanged template at confidence
-  `0.99`.
-- **Safety response:** The failed read restored the unchanged Home source and
-  sent no unguarded input. The operator stopped automation before setup acted;
-  diagnosis used the stopped screen and read-only captures.
-- **Status:** Cause confirmed. The repair expands only the Home right-rail
-  search region and adds the retained shifted-control regression. Archive this
-  entry with its fixing commit after validation.
-
 ### Stopped control could not interrupt an in-progress Home setup guard
 
 - **Observed:** 2026-07-28 while cleaning up the authorized Tier 19

@@ -211,6 +211,34 @@ and actionable work lives in
   and activity API contract were unchanged, so no native publish was required.
 - **Fixed by:** `2c4342d`.
 
+### Extra Home right-rail control shifted Battle History outside its match region
+
+- **Observed:** 2026-07-29 while starting a Tier 19 Farm run from verified
+  `NEW_BATTLE` Home.
+- **Symptom:** The new continuity workflow twice rejected the visible Battle
+  History control at confidence `0.26`, reported that its baseline could not be
+  recorded, and continued into Home setup.
+- **Evidence:** `logs/actions.log` records both
+  `navigation.battle_history_home` match failures from 18:11:37 through
+  18:11:40. The read-only source frame is retained as
+  `test/fixtures/home_screen_eight_nav_controls_20260729.png`: Battle History
+  appears at `y=867`, below the older fixture's `y=770` position.
+- **Safety response:** The failed read restored the unchanged Home source and
+  sent no unguarded input. The operator stopped automation before setup acted;
+  diagnosis used the stopped screen and read-only captures.
+- **Cause:** A new eighth Home right-rail control shifted Battle History down
+  97 pixels. Its fixed `y=740..890` search band no longer contained the
+  complete 84-pixel template, so the best in-band candidate was only `0.26`.
+- **Resolution:** The unchanged template and `0.90` threshold now search the
+  complete bounded Home right rail. That region matches the shifted live icon
+  at confidence `0.99` and still matches the older seven-control fixture.
+- **Regression:** `test/test_battle_history.py::
+  test_home_history_navigation_allows_an_extra_right_rail_control` verifies
+  the retained eight-control Home frame and its dynamic tap center.
+- **Validation:** All 24 focused Battle History, matcher, clickmap-access, and
+  clickmap-integrity checks passed, followed by all 870 repository tests.
+- **Fixed by:** `dba88f1`.
+
 ### Daily Gem claim drift escaped its match region and left battle in Store
 
 - **Observed:** 2026-07-28 during the active Tier 19 Farm battle's rollover
