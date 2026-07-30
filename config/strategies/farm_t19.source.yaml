@@ -12,7 +12,8 @@ loadout:
     mode: enforce
     preset: farm_standard
   damage_slider:
-    mode: preserve
+    mode: enforce
+    value: "1e-19"
   orb_distance:
     mode: enforce
     preset: farm_min_range

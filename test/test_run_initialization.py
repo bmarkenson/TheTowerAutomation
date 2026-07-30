@@ -912,6 +912,37 @@ class FarmProfileTests(unittest.TestCase):
             "enforce",
         )
 
+    def test_tier_19_enforces_damage_slider_control_value(self):
+        plan = build_strategy_yaml(self._source("farm_t19"))
+        configuration = plan["run_configuration"]
+        damage_rule = next(
+            rule for rule in plan["rules"]
+            if rule["name"] == "enforce_damage_slider"
+        )
+
+        self.assertEqual(
+            configuration["loadout"]["damage_slider"],
+            {"mode": "enforce", "value": "1E-19%"},
+        )
+        self.assertIn(
+            "damage_slider_checked",
+            plan["run_initialization"]["complete_when"],
+        )
+        self.assertEqual(
+            damage_rule["assert"],
+            ["ehls_completed", "eals_completed", "!damage_slider_checked"],
+        )
+        self.assertEqual(
+            damage_rule["do"],
+            [
+                {
+                    "type": "damage_slider_configure",
+                    "mode": "enforce",
+                    "value": "1E-19%",
+                }
+            ],
+        )
+
     def test_tier_19_enforces_hypothesis_target_priority_order(self):
         plan = build_strategy_yaml(self._source("farm_t19"))
         configuration = plan["run_configuration"]
@@ -1286,7 +1317,7 @@ class GcFarmProfileTests(unittest.TestCase):
         self.assertTrue(mv["ehls_completed"])
         self.assertTrue(mv["eals_completed"])
 
-    def test_t19_runs_orb_distance_then_enforces_target_priority(self):
+    def test_t19_runs_damage_slider_then_orb_distance_then_target_priority(self):
         strategy = get_strategy("gc_farm_t19_experiment")
         self.assertIsInstance(strategy, YamlStrategy)
         manager = MissionManager(None, strategy)
@@ -1303,6 +1334,18 @@ class GcFarmProfileTests(unittest.TestCase):
         with patch("automation.strategies.yaml_strategy.log_mission"):
             actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
 
+        damage_action = next(
+            rule["do"][0]
+            for rule in strategy.rules
+            if rule["name"] == "enforce_damage_slider"
+        )
+        self.assertEqual(actions, [damage_action])
+        self.assertTrue(manager.run_initialization_pending())
+        self.assertFalse(manager.session_preflight_pending())
+
+        mv["damage_slider_checked"] = True
+        with patch("automation.strategies.yaml_strategy.log_mission"):
+            actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
         orb_action = next(
             rule["do"][0]
             for rule in strategy.rules
@@ -1513,6 +1556,8 @@ class GcFarmProfileTests(unittest.TestCase):
 
         mv.update(ehls_completed=True, eals_completed=True)
         self.assertTrue(manager.run_initialization_pending())
+        mv["damage_slider_checked"] = True
+        self.assertTrue(manager.run_initialization_pending())
         mv["orb_distance_checked"] = True
         self.assertTrue(manager.run_initialization_pending())
         mv["target_priority_checked"] = True
@@ -1530,6 +1575,7 @@ class GcFarmProfileTests(unittest.TestCase):
         mv.update(
             ehls_completed=True,
             eals_completed=True,
+            damage_slider_checked=True,
             orb_distance_checked=True,
             target_priority_checked=True,
         )

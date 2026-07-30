@@ -79,9 +79,9 @@ that the lower value improved whole-run coins per hour.
   cannot by itself establish that perks or Target Priority were worse.
 - The next comparison value is `1E-19%`. This is a control choice, not a
   permanent optimum.
-- The T18 Farm profile currently enforces `1E-22%`; the T19 Farm profile
-  preserves the live value. Those policies are repository facts, not
-  evidence that the same number is optimal on both Tiers.
+- The T18 Farm profile currently enforces `1E-22%`; the T19 Farm profile now
+  enforces the `1E-19%` comparison value. Those policies are repository facts,
+  not evidence that either number is permanently optimal.
 
 For a useful comparison, record the initial slider value, every changed value
 and wave, whether damage visibly changed, and the final value. A run with a

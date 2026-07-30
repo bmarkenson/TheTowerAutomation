@@ -8,6 +8,7 @@ run_initialization:
   - ehls_completed
   - eals_completed
   - target_priority_checked
+  - damage_slider_checked
   - orb_distance_checked
 session_preflight:
   complete_when:
@@ -128,6 +129,8 @@ vars:
   level_skip_taps_sent: 0
   level_skip_last_reason: ''
   target_priority_checked: false
+  damage_slider_checked: false
+  damage_slider_observation: {}
   orb_distance_checked: false
   orb_distance_observation: {}
   gc_no_battle_setup_completed: false
@@ -165,6 +168,8 @@ per_run_reset:
 - level_skip_elapsed_s
 - level_skip_taps_sent
 - level_skip_last_reason
+- damage_slider_checked
+- damage_slider_observation
 - orb_distance_checked
 - orb_distance_observation
 rules:
@@ -232,6 +237,12 @@ rules:
   - type: set
     var: level_skip_last_reason
     value: ''
+  - type: set
+    var: damage_slider_checked
+    value: false
+  - type: set
+    var: damage_slider_observation
+    value: {}
   - type: set
     var: orb_distance_checked
     value: false
@@ -306,6 +317,12 @@ rules:
     var: level_skip_last_reason
     value: ''
   - type: set
+    var: damage_slider_checked
+    value: false
+  - type: set
+    var: damage_slider_observation
+    value: {}
+  - type: set
     var: orb_distance_checked
     value: false
   - type: set
@@ -336,6 +353,19 @@ rules:
   cooldown_sec: 0.25
   do:
   - type: level_skip_initialize
+- name: enforce_damage_slider
+  gate_phase: run_initialization
+  when:
+    state: RUNNING
+  assert:
+  - ehls_completed
+  - eals_completed
+  - '!damage_slider_checked'
+  cooldown_sec: 30.0
+  do:
+  - type: damage_slider_configure
+    mode: enforce
+    value: 1E-19%
 - name: enforce_orb_distance
   gate_phase: run_initialization
   when:
@@ -388,6 +418,7 @@ rules:
   - ehls_completed
   - eals_completed
   - target_priority_checked
+  - damage_slider_checked
   - orb_distance_checked
   - '!gc_session_preflight_completed'
   - '!gc_session_preflight_attempted'
@@ -561,7 +592,8 @@ run_configuration:
         core_primary: Multiverse Nexus
         core_assist: Dimension Core
     damage_slider:
-      mode: preserve
+      mode: enforce
+      value: 1E-19%
     orb_distance:
       mode: enforce
       preset: farm_min_range
