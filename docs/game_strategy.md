@@ -43,6 +43,79 @@ also have mechanics that make Fleet handling more complicated than merely
 adding health. Do not downgrade damage or enemy-health perks on the assumption
 that this is a conventional balanced Hybrid build.
 
+## Defensive layers and survival-chain interpretation
+
+Do not compare the top-bar enemy Attack value directly with tower Health and
+conclude that every contact must be fatal. The account has several defensive
+layers, and completed battle reports record evidence from more than one of
+them. The following groups are an analysis model, not a claim about the game's
+exact internal damage-resolution order:
+
+| Layer | Current strategic role | Battle-report evidence |
+| --- | --- | --- |
+| Avoidance and control | Damage, target priority, slows, stuns, knockback, and other control kill or delay a threat before it resolves an attack. This is the GC build's primary defense. | Damage by source, enemies hit by source, enemies destroyed by source, and terminal enemy counts |
+| Defense and damage reduction | Defense Percent can grow to prevent 98% of incoming damage. Chrono Field, Chain Thunder, modules, bots, and other applicable effects can provide additional mitigation. Do not assume that separately displayed reductions stack additively or in a particular order without current evidence. | Damage Blocked rows such as Defense %, Chrono Field, Chain Thunder, Flame Bot, Primordial Collapse, and Negative Mass Projector |
+| Wall interception | The Wall can receive damage before the tower and can rebuild, creating another boundary between an enemy attack and tower death. Wall state and rebuild timing can matter more than its final cumulative damage. | Tower Damage Taken and Wall Damage Taken are separate rows; a retained activation frame may show the current Wall/rebuild state |
+| Energy Shield | This account has three simultaneous Energy Shield charges. Charges can recharge, so `Hits Absorbed By Energy Shield` can exceed three over a complete run. | Hits Absorbed By Energy Shield |
+| Death Defy | Death Defy is a probabilistic lethal-event escape, not a stable amount of effective health. A run with poor rolls can end much earlier under otherwise similar pressure. | Death Defy count |
+| Recovery | Health regeneration, Wall regeneration, lifesteal, and Recovery Packages matter when a hit is survivable and there is time to recover before the next one. They do not make an arbitrarily large hit tankable. | Health Regenerated, Health Recovered by Packages, and Recovery Packages |
+| Rechargeable or limited survival controls | Second Wind, Demon Mode, and Nuke can interrupt or survive a failure sequence. Their activation waves reveal when pressure crossed a threshold, but not which enemy created that pressure. | Second Wind, Demon Mode, and Nuke counts plus the runtime activation timeline |
+
+At 98% Defense, the Defense layer alone reduces an applicable hit to 2% of its
+pre-Defense value, a 50-fold reduction:
+
+```text
+post-Defense damage = incoming damage × (1 - 0.98)
+                    = incoming damage × 0.02
+```
+
+That still is not a complete effective-damage formula. Other reductions may
+apply, the Wall or an Energy Shield may intercept the event, Death Defy may
+prevent a lethal result, and a survivable hit may be recovered afterward.
+Conversely, some enemy mechanics may interact with those defenses differently.
+Use live mechanics and the battle report instead of inventing one universal
+multiplier.
+
+These layers change how an early death should be read:
+
+- `Killed By` identifies the final damaging enemy. It does not identify every
+  enemy that consumed Wall uptime, Energy Shields, Death Defies, Second Wind,
+  Demon Mode, or Nuke earlier in the survival chain.
+- High Death Defy or Energy Shield counts indicate repeated lethal exposure;
+  they do not prove that the underlying build was durable. Low Death Defy counts
+  can make the same pressure end a run much sooner.
+- A health-reducing perk is important only when it changes the outcome of a hit
+  that remains tankable after the applicable defensive layers. It is not
+  automatically the cause of a GC failure.
+- Damage and enemy-health perks remain survival perks. Faster clearing prevents
+  finite defensive charges and probabilistic escapes from being consumed.
+
+### Overcharge as the selective-Hybrid example
+
+Overcharge is a good example of why this account is GC with selective Hybrid
+aspects. Under the version 28.3 mechanics, an Overcharge starts from the Tier's
+wave-1 damage, has a strongly reduced early attack rate that rises through wave
+4,000, and multiplies its damage by `1.4` after each successful hit. It can also
+fire a Parting Shot when killed after entering tower range. These rules are
+documented in the
+[official version 28.3 patch notes](https://www.techtreegames.com/post/v28-3-patch-notes).
+
+An early Overcharge hit can therefore remain tankable after Defense and the
+other applicable layers even when an ordinary current-wave attack cannot.
+Health may buy additional Overcharge hits, but damage and control determine how
+many opportunities it gets to stack the multiplier. When an early survival
+ability activates, distinguish these hypotheses:
+
+1. an Overcharge survived long enough to stack otherwise-tankable hits;
+2. generic GC damage was insufficient and several dangerous enemies
+   accumulated;
+3. the build created repeated lethal exposure and an unusually poor Death Defy
+   sequence shortened the run.
+
+The completed report gives the number of Overcharges encountered and the final
+killer, but not incoming damage by enemy type. A preserved activation frame can
+support an Overcharge hypothesis; the aggregate count alone cannot prove one.
+
 ## Damage Slider economics
 
 The Damage Cap Slider limits damage to a displayed percentage of the current
@@ -143,10 +216,12 @@ from the public base table. The retained 2026-07-14 T18 traversal confirms the
 wave-10,750 boundary. Re-read the live panels after an account reduction
 upgrade or game update rather than copying an old effect percentage forward.
 
-Fleet documentation is explicitly provisional for version 27. It nevertheless
-establishes why Fleet frequency matters to a GC-with-Hybrid-aspects build:
-Fleets resist or ignore several instant-kill and control mechanics, while their
-special effects and unusual attack values differ from ordinary enemies.
+Fleet mechanics are version-sensitive. Version 28.3 made Fleets targetable,
+changed their pathing and attack behavior, and reworked Overcharge damage.
+Recheck the current game and release notes after an update instead of carrying
+version 27 assumptions forward. Their special effects and unusual attack
+values still explain why Fleet frequency matters to a
+GC-with-selective-Hybrid-aspects build.
 
 ## Target Priority is Tier-specific
 
@@ -326,21 +401,24 @@ Before explaining a wave-count or coins-per-hour difference:
    any Overheat boundary crossed.
 2. Identify the build's terminal survival mechanism and the actual death
    threat. Do not analyze this account as generic eHP.
-3. Compare the Tier's Dissonant Utility `Boost + Echo` before explaining CPH;
+3. Reconstruct the defensive chain: compare Tower and Wall damage, Energy
+   Shield absorptions, Death Defies, and Second Wind/Demon Mode/Nuke activation
+   timing. Treat `Killed By` as the final blow, not the complete cause.
+4. Compare the Tier's Dissonant Utility `Boost + Echo` before explaining CPH;
    it is a direct coin multiplier, not a minor configuration detail.
-4. Compare Cards, Modules, Ultimate Weapon toggles, Orb distances, Target
+5. Compare Cards, Modules, Ultimate Weapon toggles, Orb distances, Target
    Priority, Spotlight coverage, and game speed.
-5. Compare Auto Pick capacity and order, then distinguish perk timing from
+6. Compare Auto Pick capacity and order, then distinguish perk timing from
    final perk presence.
-6. Record Damage Slider values and change waves. Treat a binding late-run
+7. Record Damage Slider values and change waves. Treat a binding late-run
    reduction as a strong early-death confounder.
-7. Compare total coins divided by real elapsed hours. Use instantaneous coin
+8. Compare total coins divided by real elapsed hours. Use instantaneous coin
    rate only as a checkpoint, not the final CPH conclusion.
-8. Compare Reroll Dice/hour, total module Shards/hour, and Cells/hour before
+9. Compare Reroll Dice/hour, total module Shards/hour, and Cells/hour before
    judging which Tier is the better Farm for the current progression goal.
-9. Compare real run duration, clean experiment cycles per day, and the ability
+10. Compare real run duration, clean experiment cycles per day, and the ability
    to reach a natural boundary before the next Tournament.
-10. Separate causes from consequences. Lower wave count itself reduces perk
+11. Separate causes from consequences. Lower wave count itself reduces perk
    opportunities, total coin accumulation, and exposure to later Heat.
 
 ## Sources and repository authority
@@ -352,6 +430,7 @@ current live game after a release:
 - [Tower Knowledge Hub: Battle Conditions](https://the-tower.notion.site/Battle-Conditions-1dd91383b93f80d0b7c7f8c0f88ca89b)
 - [Tower Knowledge Hub: overall build guide](https://the-tower.notion.site/Guide-to-Overall-Builds-Strategies-24791383b93f80a6a157c6367c9bb6e5)
 - [Tower Knowledge Hub: Effective Health](https://the-tower.notion.site/Effective-Health-eHP-1d291383b93f8095bef7e94b9b89cd03)
+- [Tech Tree Games: version 28.3 patch notes](https://www.techtreegames.com/post/v28-3-patch-notes)
 - [The Tower Wiki: Dissonance](https://the-tower-idle-tower-defense.fandom.com/wiki/Dissonance)
 - [The Tower Wiki: Spotlight](https://the-tower-idle-tower-defense.fandom.com/wiki/Spotlight)
 - [The Tower Wiki: Modules and boss reroll rewards](https://the-tower-idle-tower-defense.fandom.com/wiki/Modules)
