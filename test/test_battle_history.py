@@ -74,6 +74,20 @@ def test_retained_source_frames_match_battle_history_navigation():
     ).matched
 
 
+def test_home_history_navigation_allows_an_extra_right_rail_control():
+    home = cv2.imread(
+        str(FIXTURES / "home_screen_eight_nav_controls_20260729.png")
+    )
+
+    result = get_match_result(
+        "navigation.battle_history_home",
+        screenshot=home,
+    )
+
+    assert result.matched
+    assert result.center == (1021, 909)
+
+
 class _FakeHistoryUi:
     def __init__(self, *, source_state="RUNNING", initial_state=None):
         self.source_state = source_state
