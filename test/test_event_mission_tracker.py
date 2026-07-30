@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from unittest.mock import patch
 
 import cv2
@@ -15,6 +16,7 @@ from core.event_mission_tracker import (
     EventMissionTracker,
     STALLED_AFTER_SECONDS,
     WARNING_AFTER_SECONDS,
+    WARNING_EVIDENCE_MAX_AGE_SECONDS,
     WARNING_REPEAT_SECONDS,
     format_warning,
 )
@@ -101,12 +103,23 @@ def test_tracker_warns_after_age_and_stall_thresholds_and_repeats(tmp_path):
     assert tracker.record_inventory(_inventory(_mission()), now=start)
 
     assert not tracker.due_warnings(now=start + WARNING_AFTER_SECONDS - 1)
+    assert not tracker.due_warnings(now=start + WARNING_AFTER_SECONDS)
+    assert tracker.record_inventory(
+        _inventory(_mission()),
+        now=start + WARNING_AFTER_SECONDS,
+    )
     warnings = tracker.due_warnings(now=start + WARNING_AFTER_SECONDS)
     assert len(warnings) == 1
     assert warnings[0].progress == "0/20"
-    assert "[EVENT_MISSION_WARNING]" in format_warning(warnings[0])
+    message = format_warning(warnings[0])
+    assert "[EVENT_MISSION_WARNING]" in message
+    assert "progress unchanged across observations" in message
     assert not tracker.due_warnings(
         now=start + WARNING_AFTER_SECONDS + WARNING_REPEAT_SECONDS - 1
+    )
+    assert tracker.record_inventory(
+        _inventory(_mission()),
+        now=start + WARNING_AFTER_SECONDS + WARNING_REPEAT_SECONDS,
     )
     assert len(
         tracker.due_warnings(
@@ -128,6 +141,10 @@ def test_observed_progress_resets_stall_age_but_preserves_first_seen(tmp_path):
     reloaded = EventMissionTracker(state)
     assert not reloaded.due_warnings(
         now=start + WARNING_AFTER_SECONDS + STALLED_AFTER_SECONDS - 1
+    )
+    reloaded.record_inventory(
+        _inventory(_mission(progress=(1, 20))),
+        now=start + WARNING_AFTER_SECONDS + STALLED_AFTER_SECONDS,
     )
     assert len(
         reloaded.due_warnings(
@@ -166,6 +183,11 @@ def test_incomplete_ocr_inventory_does_not_replace_persisted_state(tmp_path):
     )
 
     assert not tracker.record_inventory(rejected, now=start + 100)
+    assert not tracker.due_warnings(now=start + WARNING_AFTER_SECONDS)
+    assert tracker.record_inventory(
+        _inventory(_mission()),
+        now=start + WARNING_AFTER_SECONDS,
+    )
     assert len(tracker.due_warnings(now=start + WARNING_AFTER_SECONDS)) == 1
 
 
@@ -176,11 +198,19 @@ def test_authoritative_inventory_preserves_a_row_missed_by_ocr(tmp_path):
     tracker.record_inventory(_inventory(specialized), now=start)
     tracker.record_inventory(
         _inventory(_mission(name="Login for 10 days", progress=(3, 10))),
-        now=start + 24 * 3600,
+        now=start + WARNING_AFTER_SECONDS,
     )
 
-    warnings = tracker.due_warnings(now=start + WARNING_AFTER_SECONDS)
-    assert [warning.name for warning in warnings] == [specialized.name]
+    assert not tracker.due_warnings(now=start + WARNING_AFTER_SECONDS)
+
+    persisted = json.loads(
+        (tmp_path / "event_missions.json").read_text(encoding="utf-8")
+    )
+    missed = persisted["missions"][
+        "reach wave 20 without any card equipped"
+    ]
+    assert missed["progress"] == "0/20"
+    assert not missed["observed_in_latest_inventory"]
 
 
 def test_same_named_event_resets_after_the_prior_event_expired(tmp_path):
@@ -197,3 +227,107 @@ def test_same_named_event_resets_after_the_prior_event_expired(tmp_path):
     )
 
     assert not tracker.due_warnings(now=start + WARNING_AFTER_SECONDS)
+
+
+def test_single_observation_never_establishes_stalled_progress(tmp_path):
+    tracker = EventMissionTracker(tmp_path / "event_missions.json")
+    start = 7_000_000.0
+    tracker.record_inventory(_inventory(_mission()), now=start)
+
+    assert not tracker.due_warnings(now=start + WARNING_AFTER_SECONDS)
+
+
+def test_warning_requires_a_sufficiently_fresh_latest_inventory(tmp_path):
+    tracker = EventMissionTracker(tmp_path / "event_missions.json")
+    start = 8_000_000.0
+    tracker.record_inventory(_inventory(_mission()), now=start)
+    observed_at = start + WARNING_AFTER_SECONDS
+    tracker.record_inventory(_inventory(_mission()), now=observed_at)
+
+    assert not tracker.due_warnings(
+        now=observed_at + WARNING_EVIDENCE_MAX_AGE_SECONDS + 1
+    )
+
+
+def test_claimed_or_advanced_login_tier_cannot_warn_from_stale_row(tmp_path):
+    state = tmp_path / "event_missions.json"
+    tracker = EventMissionTracker(state)
+    start = 9_000_000.0
+    old_tier = _mission(name="Login for 7 days", progress=(6, 7))
+    tracker.record_inventory(_inventory(old_tier), now=start)
+    tracker.record_inventory(
+        _inventory(old_tier),
+        now=start + WARNING_AFTER_SECONDS,
+    )
+    assert len(tracker.due_warnings(now=start + WARNING_AFTER_SECONDS)) == 1
+
+    new_tier = _mission(name="Login for 10 days", progress=(8, 10))
+    latest_at = start + WARNING_AFTER_SECONDS + 60
+    tracker.record_inventory(_inventory(new_tier), now=latest_at)
+
+    assert not tracker.due_warnings(now=latest_at)
+    persisted = json.loads(state.read_text(encoding="utf-8"))
+    assert set(persisted["missions"]) == {
+        "login for 10 days",
+        "login for 7 days",
+    }
+    assert not persisted["missions"]["login for 7 days"][
+        "observed_in_latest_inventory"
+    ]
+
+
+def test_changed_progress_target_starts_a_new_mission_tier(tmp_path):
+    tracker = EventMissionTracker(tmp_path / "event_missions.json")
+    start = 10_000_000.0
+    tracker.record_inventory(
+        _inventory(
+            _mission(
+                name="Get 6000 free upgrades",
+                progress=(5900, 6000),
+            )
+        ),
+        now=start,
+    )
+    advanced_at = start + WARNING_AFTER_SECONDS
+    tracker.record_inventory(
+        _inventory(
+            _mission(
+                name="Get 15000 free upgrades",
+                progress=(6947, 15000),
+            )
+        ),
+        now=advanced_at,
+    )
+
+    assert not tracker.due_warnings(now=advanced_at)
+
+
+def test_version_one_tracker_state_is_not_warning_authority(tmp_path):
+    state = tmp_path / "event_missions.json"
+    state.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "event_name": "PRISMATIC LINES",
+                "last_inventory_at": 11_000_000.0,
+                "missions": {
+                    "login for 7 days": {
+                        "name": "Login for 7 days",
+                        "progress": "6/7",
+                        "first_seen_at": 10_000_000.0,
+                        "last_seen_at": 10_000_000.0,
+                        "last_progress_at": 10_000_000.0,
+                        "last_warned_at": None,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    tracker = EventMissionTracker(state)
+
+    assert not tracker.due_warnings(now=11_000_000.0)
+    tracker.record_inventory(_inventory(_mission()), now=11_000_000.0)
+    persisted = json.loads(state.read_text(encoding="utf-8"))
+    assert persisted["version"] == 2

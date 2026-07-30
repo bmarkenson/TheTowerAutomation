@@ -19,7 +19,8 @@ from utils.logger import log
 WARNING_AFTER_SECONDS = 3 * 24 * 60 * 60
 STALLED_AFTER_SECONDS = 2 * 24 * 60 * 60
 WARNING_REPEAT_SECONDS = 6 * 60 * 60
-_STATE_VERSION = 1
+WARNING_EVIDENCE_MAX_AGE_SECONDS = 60 * 60
+_STATE_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -65,8 +66,15 @@ class EventMissionTracker:
         previous_missions = self._missions()
         # Preserve rows that an otherwise successful OCR pass happened to miss.
         # A mission is resolved only through explicit completed/claimable row
-        # evidence or an event boundary.
-        next_missions: dict[str, dict[str, Any]] = dict(previous_missions)
+        # evidence or an event boundary, but an absent row loses warning
+        # authority until a later complete inventory observes its progress.
+        next_missions = {
+            key: {
+                **mission,
+                "observed_in_latest_inventory": False,
+            }
+            for key, mission in previous_missions.items()
+        }
         for observation in inventory.missions:
             key = _matching_key(_key(observation.name), previous_missions)
             if not observation.incomplete:
@@ -93,11 +101,18 @@ class EventMissionTracker:
         return True
 
     def due_warnings(self, *, now: float | None = None) -> tuple[EventMissionWarning, ...]:
-        """Return and persist reminders due at ``now`` without touching the UI."""
+        """Return reminders supported by the latest fresh inventory."""
 
         current = _wall_time(now)
         event_ends_at = _finite_number(self._state.get("event_ends_at"))
         if event_ends_at is not None and current >= event_ends_at:
+            return ()
+        last_inventory = _finite_number(self._state.get("last_inventory_at"))
+        if (
+            last_inventory is None
+            or current < last_inventory
+            or current - last_inventory > WARNING_EVIDENCE_MAX_AGE_SECONDS
+        ):
             return ()
 
         warnings = []
@@ -105,11 +120,18 @@ class EventMissionTracker:
         for mission in self._missions().values():
             first_seen = _finite_number(mission.get("first_seen_at"))
             last_progress = _finite_number(mission.get("last_progress_at"))
+            last_seen = _finite_number(mission.get("last_seen_at"))
             last_warned = _finite_number(mission.get("last_warned_at"))
-            if first_seen is None or last_progress is None:
+            if (
+                first_seen is None
+                or last_progress is None
+                or last_seen is None
+                or last_seen != last_inventory
+                or not mission.get("observed_in_latest_inventory")
+            ):
                 continue
-            incomplete_for = max(0.0, current - first_seen)
-            stalled_for = max(0.0, current - last_progress)
+            incomplete_for = max(0.0, last_seen - first_seen)
+            stalled_for = max(0.0, last_seen - last_progress)
             if incomplete_for < WARNING_AFTER_SECONDS or stalled_for < STALLED_AFTER_SECONDS:
                 continue
             if last_warned is not None and current - last_warned < WARNING_REPEAT_SECONDS:
@@ -163,8 +185,9 @@ def format_warning(warning: EventMissionWarning) -> str:
     progress = f" — {warning.progress}" if warning.progress else ""
     return (
         "[EVENT_MISSION_WARNING] "
-        f"Incomplete {_duration(warning.incomplete_seconds)}; "
-        f"no observed progress {_duration(warning.stalled_seconds)}: "
+        f"Observed incomplete across {_duration(warning.incomplete_seconds)}; "
+        "progress unchanged across observations spanning "
+        f"{_duration(warning.stalled_seconds)}: "
         f"{warning.name}{progress}"
     )
 
@@ -177,20 +200,36 @@ def _updated_mission(
     old = previous or {}
     old_progress = str(old.get("progress")) if old.get("progress") else None
     new_progress = observation.progress
+    old_target = _progress_target(old_progress)
+    new_target = _progress_target(new_progress)
+    tier_changed = (
+        old_target is not None
+        and new_target is not None
+        and old_target != new_target
+    )
     progress_changed = new_progress is not None and new_progress != old_progress
     first_seen = _finite_number(old.get("first_seen_at"))
     last_progress = _finite_number(old.get("last_progress_at"))
     return {
         "name": observation.name,
         "progress": new_progress or old_progress,
-        "first_seen_at": first_seen if first_seen is not None else now,
+        "first_seen_at": (
+            now
+            if tier_changed or first_seen is None
+            else first_seen
+        ),
         "last_seen_at": now,
         "last_progress_at": (
             now
-            if not old or progress_changed
+            if not old or tier_changed or progress_changed
             else (last_progress if last_progress is not None else now)
         ),
-        "last_warned_at": _finite_number(old.get("last_warned_at")),
+        "last_warned_at": (
+            None
+            if tier_changed
+            else _finite_number(old.get("last_warned_at"))
+        ),
+        "observed_in_latest_inventory": new_progress is not None,
     }
 
 
@@ -213,6 +252,14 @@ def _similar(first: str, second: str, threshold: float) -> bool:
 
 def _key(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", value.casefold()).strip()
+
+
+def _progress_target(progress: Optional[str]) -> Optional[str]:
+    if not progress or "/" not in progress:
+        return None
+    target = progress.rsplit("/", 1)[1]
+    normalized = re.sub(r"[\s,]+", "", target).upper()
+    return normalized or None
 
 
 def _wall_time(value: float | None) -> float:
@@ -241,6 +288,7 @@ __all__ = [
     "EventMissionWarning",
     "STALLED_AFTER_SECONDS",
     "WARNING_AFTER_SECONDS",
+    "WARNING_EVIDENCE_MAX_AGE_SECONDS",
     "WARNING_REPEAT_SECONDS",
     "format_warning",
 ]
