@@ -8,6 +8,55 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Event Mission warnings treated stale rows as current stalled missions
+
+- **Observed:** Operator report on 2026-07-29 after automation emitted eleven
+  `[EVENT_MISSION_WARNING]` entries at startup.
+- **Symptom:** The warnings presented old mission names and progress as if they
+  still described incomplete missions. For example, the tracker warned
+  `Login for 7 days — 6/7` while its same persisted state already contained the
+  later `Login for 10 days — 8/10` tier.
+- **Evidence:** The 19:57 warning batch used rows last seen between July 20 and
+  July 25. The last accepted inventory was at July 28 00:01, after two Event
+  rewards had been claimed, and contained only the two remaining readable
+  rows. Static tracing confirmed that `_claim_event_rewards` claims available
+  rows before `_record_event_inventory` captures the final list.
+  `EventMissionTracker.record_inventory` deliberately preserved every prior
+  row absent from a later complete OCR inventory, while `due_warnings`
+  calculated stall duration from wall-clock time since the last changed value
+  without requiring a later unchanged observation, a recent `last_seen_at`, or
+  presence in the latest inventory. A claimed or OCR-missed row could
+  therefore warn indefinitely until the Event boundary.
+- **Safety response:** Diagnosis used control, lock/PID, action-log, persisted
+  tracker, source, and read-only screenshot inspection. It did not Pause,
+  restart, navigate, exit, Surrender, or otherwise alter the active runtime or
+  device flow.
+- **Cause:** The tracker treated elapsed time without another observation as
+  evidence that progress remained unchanged. Its conservative retention of
+  OCR-missed rows had no separate warning-authority state, and a fuzzy-matched
+  mission whose progress target advanced could inherit the preceding tier's
+  age.
+- **Resolution:** A complete inventory now revokes warning authority from
+  every retained row before granting it only to rows whose progress was
+  actually read in that inventory. Warnings require the row to be present in
+  the latest inventory, that inventory to be no more than one hour old, and
+  repeated unchanged observations spanning the stall threshold. Incomplete
+  and stalled durations are measured between observations rather than extended
+  by unobserved wall-clock time. A changed progress target starts a new tier,
+  and the clearer warning text describes the observed interval. Tracker schema
+  version 2 invalidates existing version-1 stale cache data on process load.
+- **Regression:** `test/test_event_mission_tracker.py` covers a mission seen
+  only once, stale latest inventory, a row absent from a later complete OCR
+  inventory, the stale `Login for 7 days` tier beside `Login for 10 days`,
+  target advancement, progress recovery, warning cooldown, and version-1
+  migration.
+- **Validation:** All 50 Event Mission tracker and Mission reward handler tests
+  passed. The complete repository suite passed 876 tests.
+- **Rollout:** The repair was committed without restarting the active
+  automation during its Home setup. It will load at the next safe process
+  replacement.
+- **Fixed by:** `61caa78`.
+
 ### Session preflight requested Home repair after one transient mismatch
 
 - **Observed:** 2026-07-29 while reviewing the operator-reported Farm

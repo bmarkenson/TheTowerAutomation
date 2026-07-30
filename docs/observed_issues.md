@@ -154,35 +154,6 @@ for a matching recurrence or historical investigation.
   flow before changing the termination rule. The active investigation is in
   [`backlog/runtime-and-validation.md`](backlog/runtime-and-validation.md#current-validation-gates).
 
-### Event Mission warnings treated stale rows as current stalled missions
-
-- **Observed:** Operator report on 2026-07-29 after automation emitted eleven
-  `[EVENT_MISSION_WARNING]` entries at startup.
-- **Symptom:** The warnings presented old mission names and progress as if they
-  still described incomplete missions. For example, the tracker warned
-  `Login for 7 days — 6/7` while its same persisted state already contained the
-  later `Login for 10 days — 8/10` tier.
-- **Evidence:** The 19:57 warning batch used rows last seen between July 20 and
-  July 25. The last accepted inventory was at July 28 00:01, after two Event
-  rewards had been claimed, and contained only the two remaining readable
-  rows. Static tracing confirms that `_claim_event_rewards` claims available
-  rows before `_record_event_inventory` captures the final list.
-  `EventMissionTracker.record_inventory` deliberately preserves every prior
-  row absent from a later complete OCR inventory, while `due_warnings` computes
-  stall duration from wall-clock time since the last changed value without
-  requiring a later unchanged observation, a recent `last_seen_at`, or presence
-  in the latest inventory. A claimed or OCR-missed row can therefore warn
-  indefinitely until the Event boundary.
-- **Safety response:** Diagnosis used control, lock/PID, action-log, persisted
-  tracker, source, and read-only screenshot inspection. It did not Pause,
-  restart, navigate, exit, Surrender, or otherwise alter the active runtime or
-  device flow.
-- **Status:** Open and confirmed. Warning authority must distinguish an
-  observed unchanged mission from a mission that was simply not observed,
-  suppress stale/retired tiers, and require sufficiently fresh inventory
-  evidence. The active repair belongs in
-  [`backlog/handlers.md`](backlog/handlers.md#mission-rewards).
-
 ### Native strategy selection did not report acceptance or live disposition
 
 - **Observed:** 2026-07-20 in the native Windows control surface while the

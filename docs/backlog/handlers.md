@@ -14,14 +14,6 @@ completion evidence remains in the
   scheduler-owned Event Mission pass uses overlapping downward viewports. A
   paused one-off live pass with the repair claimed all four available Event
   rewards and returned to the active battle.
-- [ ] Repair false Event Mission stall warnings recorded in
-  [`../observed_issues.md`](../observed_issues.md#event-mission-warnings-treated-stale-rows-as-current-stalled-missions).
-  A warning must require repeated, sufficiently fresh observations of the same
-  incomplete tier; elapsed time without another observation is not evidence of
-  stalled progress. Reconcile claimed or advanced tiers before the post-claim
-  inventory, retain OCR-missed rows without granting them warning authority,
-  and add regressions for claim-before-inventory, a stale `Login for 7 days`
-  row alongside `Login for 10 days`, and a mission seen only once.
 
 ## Dispatch architecture
 

@@ -37,6 +37,24 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-29 Event Mission warning authority
+
+- Commit `61caa78` prevents retained, claimed, advanced, or OCR-missed Event
+  Mission rows from appearing as current stalled-progress warnings.
+- Warnings now require the same tier's progress to be read in repeated
+  observations, the row to be present in the latest complete inventory, and
+  that inventory to be no more than one hour old. Unobserved wall-clock time
+  cannot increase the reported incomplete or stalled interval.
+- Progress-target changes reset tier age, and tracker schema version 2
+  invalidates the stale version-1 cache that produced the reported
+  `Login for 7 days — 6/7` warning alongside the later 10-day tier.
+- `test/test_event_mission_tracker.py` covers single observations, stale and
+  missing rows, claimed/advanced tiers, target changes, progress recovery,
+  cooldown, and state migration. All 50 Event Mission/reward-handler tests and
+  all 876 repository tests passed.
+- The active automation was not restarted during its Home setup; the repair
+  will load at the next safe process replacement.
+
 ### 2026-07-29 Home Battle History right-rail drift
 
 - Commit `dba88f1` expands the Home Battle History template search from one
