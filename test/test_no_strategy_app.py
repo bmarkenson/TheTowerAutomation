@@ -27,6 +27,13 @@ def _app_without_strategy():
     app._supervisor.is_paused = False
     app._status_reporter = MagicMock()
     app._status_reporter.coin_rate_samples = []
+    app._game_speed_guard = MagicMock()
+    app._game_speed_guard.snapshot.return_value = {
+        "mode": "REDUCED",
+        "target": 4.0,
+        "target_semantics": "exact",
+        "timeline": [],
+    }
     app._pending_strategy_request = None
     app._strategy_boundary_confirmed = False
     app._handle_daily_gem_if_due = MagicMock(return_value=False)
@@ -89,6 +96,12 @@ def test_no_strategy_game_over_forces_full_capture_and_home_inventory():
         "second_wind_activations": [],
         "demon_mode_first_activation": None,
         "nuke_activations": [],
+    }
+    assert kwargs["battle_context"]["game_speed_control"] == {
+        "mode": "REDUCED",
+        "target": 4.0,
+        "target_semantics": "exact",
+        "timeline": [],
     }
     assert app._pending_no_strategy_record is record
     assert app._no_strategy_post_run_stage == "locks"

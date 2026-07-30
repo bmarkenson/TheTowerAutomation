@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import re
 import time
 from typing import Any, Callable, Mapping, Optional
@@ -10,13 +11,14 @@ from typing import Any, Callable, Mapping, Optional
 import cv2
 import numpy as np
 
+from core.control_directives import VALID_GAME_SPEED_MODES
 from core.input import TapVerification, safe_tap
 from core.ss_capture import (
     capture_adb_screenshot,
     is_complete_screenshot,
 )
 from core.state_detector import detect_state_and_overlays
-from utils.logger import log
+from utils.logger import log, log_action_intent, log_result
 from utils.ocr_utils import ocr_text_and_conf
 
 
@@ -27,14 +29,19 @@ SleepFn = Callable[[float], None]
 TapFn = Callable[..., bool]
 
 GAME_SPEED_REGION = (750, 895, 125, 85)
+GAME_SPEED_MINUS_REGION = (675, 895, 70, 80)
+GAME_SPEED_MINUS_POINT = (710, 935)
 GAME_SPEED_PLUS_REGION = (875, 895, 70, 80)
 GAME_SPEED_PLUS_POINT = (910, 935)
 GAME_SPEED_CHECK_INTERVAL_S = 30.0
 GAME_SPEED_RETRY_INTERVAL_S = 5.0
 GAME_SPEED_WARNING_AFTER_FAILURES = 3
 GAME_SPEED_WARNING_REPEAT_S = 5 * 60.0
+REDUCED_MODE_REMINDER_INTERVAL_S = 15 * 60.0
 MAX_GAME_SPEED_TAPS = 24
 NORMAL_MAX_GAME_SPEED = 5.0
+REDUCED_GAME_SPEED = 4.0
+_TARGET_TOLERANCE = 0.05
 
 _SPEED_PATTERN = re.compile(r"X(\d{1,2}\.\d)")
 
@@ -49,6 +56,7 @@ class GameSpeedReading:
     confidence: float
     plus_visible: bool
     reason: str
+    minus_visible: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -57,6 +65,7 @@ class GameSpeedReading:
             "raw_text": self.raw_text,
             "confidence": self.confidence,
             "plus_visible": self.plus_visible,
+            "minus_visible": self.minus_visible,
             "reason": self.reason,
         }
 
@@ -71,6 +80,9 @@ class GameSpeedResult:
     taps_sent: int
     increases: int
     reason: str
+    decreases: int = 0
+    mode: str = "AUTO"
+    target: float = NORMAL_MAX_GAME_SPEED
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -79,6 +91,9 @@ class GameSpeedResult:
             "final": self.final,
             "taps_sent": self.taps_sent,
             "increases": self.increases,
+            "decreases": self.decreases,
+            "mode": self.mode,
+            "target": self.target,
             "reason": self.reason,
         }
 
@@ -116,6 +131,22 @@ def _plus_control_visible(frame: Frame) -> bool:
     )
 
 
+def _minus_control_visible(frame: Frame) -> bool:
+    """Recognize the fixed white minus glyph without trusting coordinates alone."""
+
+    crop = _crop(frame, GAME_SPEED_MINUS_REGION)
+    if crop is None or crop.shape[:2] != (
+        GAME_SPEED_MINUS_REGION[3],
+        GAME_SPEED_MINUS_REGION[2],
+    ):
+        return False
+    bright = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) > 190
+    horizontal = float(np.mean(bright[35:48, 15:58]))
+    above = float(np.mean(bright[18:30, 15:58]))
+    below = float(np.mean(bright[53:65, 15:58]))
+    return horizontal >= 0.30 and above <= 0.12 and below <= 0.12
+
+
 def read_game_speed_control(
     screenshot: Optional[Frame],
     *,
@@ -142,6 +173,7 @@ def read_game_speed_control(
     normalized = re.sub(r"\s+", "", str(raw_text or "").upper())
     match = _SPEED_PATTERN.search(normalized)
     plus_visible = _plus_control_visible(screenshot)
+    minus_visible = _minus_control_visible(screenshot)
     if match is None:
         return GameSpeedReading(
             False,
@@ -150,6 +182,7 @@ def read_game_speed_control(
             float(confidence),
             plus_visible,
             "speed_ocr_failed",
+            minus_visible,
         )
     value = float(match.group(1))
     if not 0.0 < value <= 20.0:
@@ -160,6 +193,7 @@ def read_game_speed_control(
             float(confidence),
             plus_visible,
             "speed_out_of_range",
+            minus_visible,
         )
     if not plus_visible:
         return GameSpeedReading(
@@ -169,6 +203,7 @@ def read_game_speed_control(
             float(confidence),
             False,
             "plus_control_not_visible",
+            minus_visible,
         )
     return GameSpeedReading(
         True,
@@ -177,6 +212,7 @@ def read_game_speed_control(
         float(confidence),
         True,
         "visible",
+        minus_visible,
     )
 
 
@@ -233,8 +269,31 @@ def _wait_for_settled_speed(
     return last_frame, last_reading
 
 
-def maximize_game_speed(
+def game_speed_target(mode: str) -> float:
+    """Resolve one validated mode to its visible speed target."""
+
+    normalized = str(mode or "").strip().upper()
+    if normalized not in VALID_GAME_SPEED_MODES:
+        raise ValueError(
+            f"Unsupported game-speed mode {mode!r}; "
+            f"expected one of {sorted(VALID_GAME_SPEED_MODES)}"
+        )
+    return (
+        REDUCED_GAME_SPEED
+        if normalized == "REDUCED"
+        else NORMAL_MAX_GAME_SPEED
+    )
+
+
+def _target_satisfied(value: float, *, mode: str, target: float) -> bool:
+    if mode == "AUTO":
+        return value >= target
+    return abs(value - target) <= _TARGET_TOLERANCE
+
+
+def enforce_game_speed(
     *,
+    mode: str = "AUTO",
     screenshot: Optional[Frame] = None,
     capture_fn: CaptureFn = capture_adb_screenshot,
     detector: DetectorFn = detect_state_and_overlays,
@@ -243,8 +302,10 @@ def maximize_game_speed(
     action_guard_fn: Callable[[], bool] = lambda: True,
     max_taps: int = MAX_GAME_SPEED_TAPS,
 ) -> GameSpeedResult:
-    """Increase battle speed only until it reaches the normal x5.0 maximum."""
+    """Enforce normal maximum speed or an exact reduced x4.0 target."""
 
+    normalized_mode = str(mode or "").strip().upper()
+    target = game_speed_target(normalized_mode)
     frame = screenshot if screenshot is not None else capture_fn()
     initial_reading = measure_game_speed(frame, detector=detector)
     if not initial_reading.valid or initial_reading.value is None:
@@ -255,38 +316,125 @@ def maximize_game_speed(
             0,
             0,
             initial_reading.reason,
+            mode=normalized_mode,
+            target=target,
         )
 
     initial = initial_reading.value
     current = initial
+    reading = initial_reading
     taps_sent = 0
     increases = 0
-    if current >= NORMAL_MAX_GAME_SPEED:
+    decreases = 0
+    action_started = False
+
+    def finish(
+        success: bool,
+        final: Optional[float],
+        reason: str,
+    ) -> GameSpeedResult:
+        result = GameSpeedResult(
+            success,
+            initial,
+            final,
+            taps_sent,
+            increases,
+            reason,
+            decreases=decreases,
+            mode=normalized_mode,
+            target=target,
+        )
+        if action_started:
+            log_result(
+                (
+                    f"Game speed adjustment complete — x{final:.1f}"
+                    if success and final is not None
+                    else "Game speed adjustment failed"
+                ),
+                detail=(
+                    f"[GAME_SPEED] mode={normalized_mode} target={target:.1f} "
+                    f"initial={initial:.1f} final={final} taps={taps_sent} "
+                    f"increases={increases} decreases={decreases} "
+                    f"result={'completed' if success else 'failed'} "
+                    f"reason={reason}"
+                ),
+            )
+        return result
+
+    if _target_satisfied(current, mode=normalized_mode, target=target):
         return GameSpeedResult(
-            True, initial, current, taps_sent, increases, "target_satisfied"
+            True,
+            initial,
+            current,
+            taps_sent,
+            increases,
+            "target_satisfied",
+            mode=normalized_mode,
+            target=target,
         )
 
     for _ in range(max(1, int(max_taps))):
         if not action_guard_fn():
-            return GameSpeedResult(
-                False, initial, current, taps_sent, increases, "actions_blocked"
-            )
+            return finish(False, current, "actions_blocked")
+        direction = "increase" if current < target else "decrease"
+        if direction == "decrease" and not reading.minus_visible:
+            return finish(False, current, "minus_control_not_visible")
         assert frame is not None
+        region = (
+            GAME_SPEED_PLUS_REGION
+            if direction == "increase"
+            else GAME_SPEED_MINUS_REGION
+        )
+        point = (
+            GAME_SPEED_PLUS_POINT
+            if direction == "increase"
+            else GAME_SPEED_MINUS_POINT
+        )
+
+        def control_visible(candidate: Frame) -> bool:
+            candidate_reading = read_game_speed_control(candidate)
+            return bool(
+                candidate_reading.valid
+                and (
+                    candidate_reading.plus_visible
+                    if direction == "increase"
+                    else candidate_reading.minus_visible
+                )
+            )
+
         verification = TapVerification(
             screenshot=frame,
-            target_region=GAME_SPEED_PLUS_REGION,
-            description=f"visible game-speed plus control at x{current:.1f}",
-            verifier=lambda candidate: read_game_speed_control(candidate).valid,
+            target_region=region,
+            description=(
+                f"visible game-speed {'plus' if direction == 'increase' else 'minus'} "
+                f"control at x{current:.1f}"
+            ),
+            verifier=control_visible,
         )
+        if not action_started:
+            log_action_intent(
+                "Adjusting game speed",
+                reason=(
+                    f"{normalized_mode} mode requires "
+                    + (
+                        f"at least x{target:.1f}"
+                        if normalized_mode == "AUTO"
+                        else f"exactly x{target:.1f}"
+                    )
+                ),
+                detail=(
+                    f"[GAME_SPEED] mode={normalized_mode} "
+                    f"initial={initial:.1f} target={target:.1f}"
+                ),
+            )
+            action_started = True
         if not tap_fn(
-            GAME_SPEED_PLUS_POINT,
+            point,
             dispatch="now",
-            log_label="game_speed:increase",
+            log_label=f"game_speed:{direction}",
             verification=verification,
         ):
-            return GameSpeedResult(
-                False, initial, current, taps_sent, increases, "tap_not_authorized"
-            )
+            return finish(False, current, "tap_not_authorized")
         taps_sent += 1
         frame, reading = _wait_for_settled_speed(
             current,
@@ -294,40 +442,62 @@ def maximize_game_speed(
             sleep_fn=sleep_fn,
         )
         if not reading.valid or reading.value is None:
-            return GameSpeedResult(
-                False, initial, current, taps_sent, increases, reading.reason
-            )
-        if reading.value < current:
-            return GameSpeedResult(
-                False,
-                initial,
-                reading.value,
-                taps_sent,
-                increases,
-                "speed_decreased_after_plus",
-            )
+            return finish(False, current, reading.reason)
+        if direction == "increase" and reading.value < current:
+            return finish(False, reading.value, "speed_decreased_after_plus")
+        if direction == "decrease" and reading.value > current:
+            return finish(False, reading.value, "speed_increased_after_minus")
         if reading.value == current:
-            return GameSpeedResult(
+            return finish(
                 False,
-                initial,
                 current,
-                taps_sent,
-                increases,
-                "speed_did_not_increase",
+                (
+                    "speed_did_not_increase"
+                    if direction == "increase"
+                    else "speed_did_not_decrease"
+                ),
             )
         current = reading.value
-        increases += 1
-        if current >= NORMAL_MAX_GAME_SPEED:
-            return GameSpeedResult(
-                True, initial, current, taps_sent, increases, "target_reached"
-            )
-    return GameSpeedResult(
-        False, initial, current, taps_sent, increases, "target_not_reached"
+        if direction == "increase":
+            increases += 1
+        else:
+            decreases += 1
+        if _target_satisfied(current, mode=normalized_mode, target=target):
+            return finish(True, current, "target_reached")
+        if normalized_mode == "REDUCED" and (
+            (direction == "increase" and current > target)
+            or (direction == "decrease" and current < target)
+        ):
+            return finish(False, current, "target_crossed")
+    return finish(False, current, "target_not_reached")
+
+
+def maximize_game_speed(
+    *,
+    screenshot: Optional[Frame] = None,
+    capture_fn: CaptureFn = capture_adb_screenshot,
+    detector: DetectorFn = detect_state_and_overlays,
+    tap_fn: TapFn = safe_tap,
+    sleep_fn: SleepFn = time.sleep,
+    action_guard_fn: Callable[[], bool] = lambda: True,
+    max_taps: int = MAX_GAME_SPEED_TAPS,
+) -> GameSpeedResult:
+    """Compatibility wrapper for normal automatic maximum enforcement."""
+
+    return enforce_game_speed(
+        mode="AUTO",
+        screenshot=screenshot,
+        capture_fn=capture_fn,
+        detector=detector,
+        tap_fn=tap_fn,
+        sleep_fn=sleep_fn,
+        action_guard_fn=action_guard_fn,
+        max_taps=max_taps,
     )
 
 
 class GameSpeedGuard:
-    """Periodically restore at least x5.0 during active battles."""
+    """Periodically enforce the selected battle-speed mode."""
 
     def __init__(
         self,
@@ -337,17 +507,125 @@ class GameSpeedGuard:
         retry_interval_s: float = GAME_SPEED_RETRY_INTERVAL_S,
         warning_after_failures: int = GAME_SPEED_WARNING_AFTER_FAILURES,
         warning_repeat_s: float = GAME_SPEED_WARNING_REPEAT_S,
+        reduced_reminder_interval_s: float = (
+            REDUCED_MODE_REMINDER_INTERVAL_S
+        ),
     ) -> None:
         self._clock = clock
         self._check_interval_s = float(check_interval_s)
         self._retry_interval_s = float(retry_interval_s)
         self._warning_after_failures = max(1, int(warning_after_failures))
         self._warning_repeat_s = max(0.0, float(warning_repeat_s))
+        self._reduced_reminder_interval_s = max(
+            1.0,
+            float(reduced_reminder_interval_s),
+        )
         self._next_check_at = 0.0
         self._consecutive_failures = 0
         self._warning_active = False
         self._last_warning_at: Optional[float] = None
+        self._mode = "AUTO"
+        self._next_reduced_reminder_at: Optional[float] = None
+        self._mode_timeline: list[dict[str, Any]] = []
         self.last_result: Optional[GameSpeedResult] = None
+
+    @property
+    def mode(self) -> str:
+        return self._mode
+
+    def set_mode(self, mode: str, *, wave: Optional[int] = None) -> bool:
+        """Apply a validated mode, re-arm enforcement, and record the change."""
+
+        normalized = str(mode or "").strip().upper()
+        target = game_speed_target(normalized)
+        if normalized == self._mode:
+            return False
+        previous = self._mode
+        self._mode = normalized
+        self._next_check_at = 0.0
+        self._consecutive_failures = 0
+        self._warning_active = False
+        self._last_warning_at = None
+        self.last_result = None
+        self._record_mode_event(source="operator_control", wave=wave)
+        if normalized == "REDUCED":
+            self._next_reduced_reminder_at = (
+                self._clock() + self._reduced_reminder_interval_s
+            )
+            log(
+                "[GAME_SPEED] REDUCED mode is active; battle speed is being "
+                f"held at x{target:.1f} until AUTO is restored",
+                "WARN",
+            )
+        else:
+            self._next_reduced_reminder_at = None
+            if previous == "REDUCED":
+                log(
+                    "[GAME_SPEED] AUTO mode restored; an immediate normal-speed "
+                    "check is armed",
+                    "INFO",
+                )
+        return True
+
+    def reset_battle(self, *, wave: Optional[int] = None) -> None:
+        """Start a fresh per-battle mode timeline without changing the mode."""
+
+        self._mode_timeline = []
+        self._record_mode_event(source="battle_start", wave=wave)
+        self._next_check_at = 0.0
+        self._consecutive_failures = 0
+        self._warning_active = False
+        self._last_warning_at = None
+        self.last_result = None
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return serializable experiment metadata for the completed record."""
+
+        return {
+            "mode": self._mode,
+            "target": game_speed_target(self._mode),
+            "target_semantics": (
+                "minimum" if self._mode == "AUTO" else "exact"
+            ),
+            "timeline": [dict(event) for event in self._mode_timeline],
+        }
+
+    def _record_mode_event(
+        self,
+        *,
+        source: str,
+        wave: Optional[int],
+    ) -> None:
+        event = {
+            "changed_at": datetime.now().astimezone().isoformat(
+                timespec="seconds"
+            ),
+            "mode": self._mode,
+            "target": game_speed_target(self._mode),
+            "target_semantics": (
+                "minimum" if self._mode == "AUTO" else "exact"
+            ),
+            "source": source,
+        }
+        if isinstance(wave, int) and not isinstance(wave, bool) and wave >= 0:
+            event["approximate_wave"] = wave
+        self._mode_timeline.append(event)
+
+    def _remind_if_reduced(self, now: float) -> None:
+        if (
+            self._mode != "REDUCED"
+            or self._next_reduced_reminder_at is None
+            or now < self._next_reduced_reminder_at
+        ):
+            return
+        log(
+            "[GAME_SPEED] REDUCED mode remains active; battle speed is still "
+            f"being held at x{REDUCED_GAME_SPEED:.1f}",
+            "WARN",
+        )
+        self._next_reduced_reminder_at = (
+            now + self._reduced_reminder_interval_s
+        )
 
     def handle(
         self,
@@ -355,10 +633,12 @@ class GameSpeedGuard:
         detection: Mapping[str, Any],
         *,
         action_guard_fn: Callable[[], bool],
-        maximize_fn: Callable[..., GameSpeedResult] = maximize_game_speed,
+        maximize_fn: Callable[..., GameSpeedResult] = enforce_game_speed,
     ) -> bool:
         """Run one bounded check and report whether it dispatched any input."""
 
+        now = self._clock()
+        self._remind_if_reduced(now)
         state = str(detection.get("state") or "UNKNOWN")
         if state in {
             "HOME",
@@ -374,12 +654,12 @@ class GameSpeedGuard:
             return False
         if state != "RUNNING":
             return False
-        now = self._clock()
         if now < self._next_check_at or not action_guard_fn():
             return False
 
         previous_result = self.last_result
         result = maximize_fn(
+            mode=self._mode,
             screenshot=screenshot,
             action_guard_fn=action_guard_fn,
         )
@@ -416,7 +696,8 @@ class GameSpeedGuard:
                         else "Unable"
                     )
                     log(
-                        f"[GAME_SPEED] {qualifier} to verify normal battle speed "
+                        f"[GAME_SPEED] {qualifier} to enforce {self._mode} "
+                        f"battle speed target x{game_speed_target(self._mode):.1f} "
                         f"after {self._consecutive_failures} consecutive checks; "
                         f"automation will retry (reason={result.reason})",
                         "WARN",
@@ -432,8 +713,10 @@ class GameSpeedGuard:
         if should_log:
             log(
                 "[GAME_SPEED] "
+                f"mode={result.mode} target={result.target} "
                 f"initial={result.initial} final={result.final} "
                 f"taps={result.taps_sent} increases={result.increases} "
+                f"decreases={result.decreases} "
                 f"success={result.success} reason={result.reason}",
                 "INFO" if result.success else "DEBUG",
             )
@@ -441,13 +724,19 @@ class GameSpeedGuard:
 
 
 __all__ = [
+    "GAME_SPEED_MINUS_POINT",
+    "GAME_SPEED_MINUS_REGION",
     "GAME_SPEED_PLUS_POINT",
     "GAME_SPEED_PLUS_REGION",
     "GAME_SPEED_REGION",
     "NORMAL_MAX_GAME_SPEED",
+    "REDUCED_GAME_SPEED",
+    "VALID_GAME_SPEED_MODES",
     "GameSpeedGuard",
     "GameSpeedReading",
     "GameSpeedResult",
+    "enforce_game_speed",
+    "game_speed_target",
     "maximize_game_speed",
     "measure_game_speed",
     "read_game_speed_control",

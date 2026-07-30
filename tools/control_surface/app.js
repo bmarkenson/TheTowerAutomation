@@ -97,6 +97,10 @@ function renderStatus(payload) {
   setText("currentMode", control.mode);
   setText("controlUpdated", formatDate(control.updated_at));
   byId("modeSelect").value = ["RETRY", "WAIT", "HOME"].includes(control.mode) ? control.mode : "RETRY";
+  const gameSpeedMode = control.game_speed_mode === "REDUCED" ? "REDUCED" : "AUTO";
+  byId("autoGameSpeedButton").classList.toggle("primary", gameSpeedMode === "AUTO");
+  byId("reducedGameSpeedButton").classList.toggle("primary", gameSpeedMode === "REDUCED");
+  byId("reducedGameSpeedWarning").hidden = gameSpeedMode !== "REDUCED";
 
   if (observation) {
     setText("observedState", observation.state_label);
@@ -537,6 +541,7 @@ function renderBattleDetail(record) {
     ["Captured", formatDate(record.captured_at)],
     ["Type", record.battle_type_analysis?.label || humanize(record.battle_type || "unknown")],
     ["Strategy", record.strategy || record.run_configuration?.profile],
+    ["Game speed mode", record.runtime?.game_speed_control?.mode],
     ["Tier", value("battle_report.tier")],
     ["Wave", value("battle_report.wave")],
     ["Real time", value("battle_report.real_time")],
@@ -681,6 +686,13 @@ document.addEventListener("click", (event) => {
   if (process) {
     const action = process.dataset.processAction;
     if (action === "stop" && !window.confirm("Persist STOPPED and stop the managed Linux automation service?")) return;
+    if (
+      action === "start"
+      && state.lastStatus?.control?.game_speed_mode === "REDUCED"
+      && !window.confirm(
+        "Reduced game-speed mode is active. Start automation with speed held at x4.0?",
+      )
+    ) return;
     if (action === "restart_attached" && !window.confirm(
       "Reload the main Python automation process for this battle? Automation will pause, verify the attached replacement, and restore the current control state.",
     )) return;
@@ -702,7 +714,13 @@ document.addEventListener("click", (event) => {
     if (action === "stop" && !window.confirm("Persist STOPPED for the automation runtime?")) return;
     const payload = { action };
     if (control.dataset.minutes) payload.minutes = Number(control.dataset.minutes);
-    sendControl(payload, action === "pause" ? "Pause directive saved" : `${humanize(action)} directive saved`);
+    if (control.dataset.mode) payload.mode = control.dataset.mode;
+    const message = action === "pause"
+      ? "Pause directive saved"
+      : action === "game_speed"
+        ? `Game speed mode set to ${humanize(payload.mode)}`
+        : `${humanize(action)} directive saved`;
+    sendControl(payload, message);
     return;
   }
   const close = event.target.closest("[data-close-dialog]");

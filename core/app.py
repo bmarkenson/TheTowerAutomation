@@ -202,6 +202,7 @@ class App:
         )
         self._run_perk_selector = RunScopedPerkSelector(perk_selector_state)
         self._game_speed_guard = GameSpeedGuard()
+        self._game_speed_guard.set_mode(self._supervisor.game_speed_mode)
         self._run_initialization_gate_logged = False
         self._session_preflight_gate_logged = False
         self._session_preflight_terminal_blocked_logged = False
@@ -1625,6 +1626,12 @@ class App:
                     continue
 
                 detection = detect_state_and_overlays(img, log_matches=self._match_trace)
+                game_speed_guard = getattr(self, "_game_speed_guard", None)
+                if game_speed_guard is not None:
+                    game_speed_guard.set_mode(
+                        self._supervisor.game_speed_mode,
+                        wave=self._last_wave_value,
+                    )
                 if detection.get("state") == "HOME_SCREEN":
                     home_evidence = detect_home_battle_control(img)
                     detection["home_battle_control"] = home_evidence.control.value
@@ -1647,6 +1654,8 @@ class App:
                 if battle_started is True:
                     self._activation_tracker().reset()
                     self._perk_timeline().reset(fresh_battle=True)
+                    if game_speed_guard is not None:
+                        game_speed_guard.reset_battle()
                 continuity_pending = False
                 activity_continuity = getattr(
                     self,
@@ -1724,6 +1733,13 @@ class App:
                         )
                 game_speed_guard = getattr(self, "_game_speed_guard", None)
                 if game_speed_guard is not None:
+                    game_speed_guard.set_mode(
+                        self._supervisor.game_speed_mode,
+                        wave=self._last_wave_value,
+                    )
+                    expected_game_speed_mode = (
+                        self._supervisor.game_speed_mode
+                    )
                     game_speed_allowed = bool(
                         not is_paused
                         and not continuity_pending
@@ -1738,7 +1754,10 @@ class App:
                         img,
                         detection,
                         action_guard_fn=lambda: (
-                            game_speed_allowed and self._runtime_action_guard()
+                            game_speed_allowed
+                            and self._runtime_action_guard()
+                            and self._supervisor.game_speed_mode
+                            == expected_game_speed_mode
                         ),
                     ):
                         # The guard may have captured several newer frames while
@@ -2283,6 +2302,12 @@ class App:
             return True
         return all(bool(mv.get(key)) for key in level_skip_keys)
 
+    def _game_speed_control_snapshot(self) -> Dict[str, Any]:
+        """Return run-scoped speed-mode experiment metadata."""
+
+        guard = getattr(self, "_game_speed_guard", None)
+        return guard.snapshot() if guard is not None else {}
+
     def _no_strategy_action_guard(self) -> bool:
         """Synchronize control before one inventory action."""
 
@@ -2650,6 +2675,9 @@ class App:
                     "last_wave": self._last_wave_value,
                     "last_wave_confidence": self._last_wave_conf,
                     "coin_rate_samples": self._status_reporter.coin_rate_samples,
+                    "game_speed_control": (
+                        self._game_speed_control_snapshot()
+                    ),
                     "survival_ability_activations": (
                         self._activation_tracker().snapshot()
                     ),
@@ -2744,6 +2772,9 @@ class App:
                     "last_wave": self._last_wave_value,
                     "last_wave_confidence": self._last_wave_conf,
                     "coin_rate_samples": self._status_reporter.coin_rate_samples,
+                    "game_speed_control": (
+                        self._game_speed_control_snapshot()
+                    ),
                     "survival_ability_activations": (
                         self._activation_tracker().snapshot()
                     ),

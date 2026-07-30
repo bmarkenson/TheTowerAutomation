@@ -11,6 +11,8 @@ Commands:
   - resume                → state=RUNNING
   - stop                  → state=STOPPED
   - mode <retry|wait|home>→ set ExecMode
+  - game-speed auto       → enforce the normal x5.0 minimum
+  - game-speed reduced    → enforce exactly x4.0 until restored
   - gate                  → prompt for a pending startup-gate decision
   - gate <choice>         → resolve it non-interactively by choice id
   - force-continue        → legacy alias for gate bypass_once
@@ -41,6 +43,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from core.control_directives import (
     ControlDirectiveError,
     ControlDirectiveStore,
+    VALID_GAME_SPEED_MODES,
     VALID_MODES,
     VALID_STATES,
 )
@@ -73,6 +76,23 @@ def _set_mode(path: str, mode: str) -> None:
     except ControlDirectiveError as exc:
         raise SystemExit(f"Unable to update automation control: {exc}") from exc
     print(f"[OK] Mode set to {m} @ {path}")
+
+
+def _set_game_speed_mode(path: str, mode: str) -> None:
+    normalized = mode.upper()
+    if normalized not in VALID_GAME_SPEED_MODES:
+        raise SystemExit(
+            "Invalid game-speed mode: "
+            f"{mode}. Use one of {sorted(VALID_GAME_SPEED_MODES)}"
+        )
+    try:
+        ControlDirectiveStore(path).set_game_speed_mode(
+            normalized,
+            source="cli",
+        )
+    except ControlDirectiveError as exc:
+        raise SystemExit(f"Unable to update automation control: {exc}") from exc
+    print(f"[OK] Game speed mode set to {normalized} @ {path}")
 
 
 def _request_force_continue(path: str) -> None:
@@ -194,6 +214,7 @@ def main(argv=None):
         nargs="+",
         help=(
             "pause | resume | stop | mode <m> | gate [choice] | "
+            "game-speed <auto|reduced> | "
             "force-continue | configure-run [skip|default <check>] | "
             "set state <s> | set mode <m> | status"
         ),
@@ -229,6 +250,9 @@ def main(argv=None):
         return 0
     if cmd[0] == "mode" and len(cmd) == 2:
         _set_mode(ctrl, cmd[1])
+        return 0
+    if cmd[0] == "game-speed" and len(cmd) == 2:
+        _set_game_speed_mode(ctrl, cmd[1])
         return 0
     if cmd[0] == "force-continue" and len(cmd) == 1:
         _request_force_continue(ctrl)

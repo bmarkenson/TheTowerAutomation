@@ -175,6 +175,17 @@
                 <Button Content="Pause 15 min" Tag="pause:15" Click="Control_Click" />
                 <Button Content="Pause 30 min" Tag="pause:30" Click="Control_Click" />
               </UniformGrid>
+              <TextBlock Text="GAME SPEED" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4,10,4,0" />
+              <UniformGrid Columns="2">
+                <Button x:Name="AutoGameSpeedButton" Content="Auto maximum" Tag="AUTO" Click="GameSpeedMode_Click" />
+                <Button x:Name="ReducedGameSpeedButton" Content="Reduced x4.0" Tag="REDUCED" Click="GameSpeedMode_Click" />
+              </UniformGrid>
+              <TextBlock x:Name="GameSpeedModeText"
+                         Text="Auto maximum speed is active."
+                         TextWrapping="Wrap"
+                         Foreground="{StaticResource MutedBrush}"
+                         FontSize="10"
+                         Margin="6,2,6,4" />
               <Button x:Name="GateDecisionButton" Content="Review preflight decision" Click="GateDecision_Click" Style="{StaticResource DangerButton}" IsEnabled="False" Margin="4,8,4,2" />
               <TextBlock x:Name="GateDecisionText" Text="No preflight decision is waiting for direction." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,0,6,4" />
               <TextBlock Text="GAME OVER MODE" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4,10,4,0" />

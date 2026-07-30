@@ -689,6 +689,16 @@ public partial class BattleHistoryWindow : Window
             {
                 Flatten(evidence, "", "Observed evidence", _settingsRows);
             }
+            if (runtime.TryGetProperty(
+                    "game_speed_control",
+                    out var gameSpeedControl))
+            {
+                Flatten(
+                    gameSpeedControl,
+                    "",
+                    "Game speed control",
+                    _settingsRows);
+            }
             AppendSurvivalAbilityActivationRows(runtime, _reportRows);
             if (runtime.TryGetProperty("coin_rate_samples", out var rateSamples)
                 && rateSamples.ValueKind == JsonValueKind.Array)

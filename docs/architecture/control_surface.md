@@ -47,6 +47,7 @@ agnostic.
   Terminal-observed Tier is shown independently, including for an ambiguous
   standard Game Over whose type remains `unknown`.
 - The allowlisted write surface is pause, timed pause, resume, mode,
+  persistent `AUTO`/`REDUCED` game-speed selection,
   resolution of a runtime-published startup-gate decision,
   optional strategy-scoped one-run check configuration,
   bundled-strategy selection, stopped or
@@ -203,6 +204,8 @@ Control request examples:
 {"action": "pause", "minutes": 30}
 {"action": "resume"}
 {"action": "mode", "mode": "WAIT"}
+{"action": "game_speed", "mode": "REDUCED"}
+{"action": "game_speed", "mode": "AUTO"}
 {"action": "resolve_gate", "request_id": "...", "decision_id": "retry"}
 {"action": "resolve_tournament_launch", "request_id": "...", "decision": "start"}
 {"action": "resolve_tournament_launch", "request_id": "...", "decision": "cancel"}
@@ -229,6 +232,12 @@ Process request examples:
 - Resume and Game Over mode selection (`RETRY`, `WAIT`, or `HOME`). State and
   mode controls highlight the saved selection; amber means a live runtime has
   not yet acknowledged the latest directive.
+- Persistent game-speed selection. `AUTO` restores the normal maximum policy;
+  `REDUCED` holds exactly `x4.0` across live and future runs. Both clients keep
+  the reduced warning visible and confirm before starting a managed runtime
+  under it; the native client also distinguishes saved intent from runtime
+  acknowledgement. This requires server revision 11 and capability
+  `game_speed_mode`.
 - Automatic startup-gate decision dialogs for requests published by the
   runtime. The API accepts only an option contained in the matching pending
   request. Retry re-runs the check with fresh evidence; a bypass or configured
@@ -294,7 +303,7 @@ Process request examples:
   completed-run history in a separate native window. The history includes
   Farm/Tournament/Milestone classification, strategy, tier, wave, duration,
   Coins/hour, Cells/hour, capture quality, full sections, captured perks,
-  resolved settings, and preflight evidence.
+  resolved settings, game-speed mode/timeline, and preflight evidence.
 - Local filters for type, Tier, minimum/maximum wave, strategy, and quality.
 - Local export of the currently filtered completed-battle summaries as UTF-8
   CSV.

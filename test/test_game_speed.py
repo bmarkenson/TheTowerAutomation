@@ -8,11 +8,14 @@ import pytest
 
 from core.app import App
 from core.game_speed import (
+    GAME_SPEED_MINUS_POINT,
     GAME_SPEED_PLUS_POINT,
+    REDUCED_GAME_SPEED,
     GameSpeedGuard,
     GameSpeedReading,
     GameSpeedResult,
     NORMAL_MAX_GAME_SPEED,
+    enforce_game_speed,
     maximize_game_speed,
     measure_game_speed,
 )
@@ -27,7 +30,15 @@ def _complete_frame() -> np.ndarray:
 
 
 def _reading(value: float) -> GameSpeedReading:
-    return GameSpeedReading(True, value, f"x{value:.1f}", 90.0, True, "visible")
+    return GameSpeedReading(
+        True,
+        value,
+        f"x{value:.1f}",
+        90.0,
+        True,
+        "visible",
+        True,
+    )
 
 
 def test_retained_battle_fixtures_read_normal_and_perk_raised_maximum():
@@ -43,8 +54,10 @@ def test_retained_battle_fixtures_read_normal_and_perk_raised_maximum():
 
     assert normal_reading.valid is True
     assert normal_reading.value == 5.0
+    assert normal_reading.minus_visible is True
     assert raised_reading.valid is True
     assert raised_reading.value == 6.3
+    assert raised_reading.minus_visible is True
 
 
 def test_measurement_rejects_the_control_outside_an_active_battle():
@@ -176,6 +189,183 @@ def test_maximize_rechecks_runtime_authority_before_every_tap():
     assert result.taps_sent == 0
 
 
+def test_reduced_mode_accepts_exact_x4_without_tapping():
+    frame = _complete_frame()
+
+    with patch(
+        "core.game_speed.measure_game_speed",
+        return_value=_reading(REDUCED_GAME_SPEED),
+    ):
+        result = enforce_game_speed(
+            mode="REDUCED",
+            screenshot=frame,
+            tap_fn=lambda *_args, **_kwargs: pytest.fail(
+                "the exact reduced target must not be changed"
+            ),
+        )
+
+    assert result == GameSpeedResult(
+        True,
+        REDUCED_GAME_SPEED,
+        REDUCED_GAME_SPEED,
+        0,
+        0,
+        "target_satisfied",
+        mode="REDUCED",
+        target=REDUCED_GAME_SPEED,
+    )
+
+
+def test_reduced_mode_walks_perk_maximum_down_to_exact_x4():
+    frame = _complete_frame()
+    speed = {"value": 6.3}
+    next_values = iter((6.0, 5.5, 5.0, 4.5, 4.0))
+    taps = []
+
+    def tap(point, *, verification, **_kwargs):
+        assert point == GAME_SPEED_MINUS_POINT
+        assert verification.authorizes(point)
+        taps.append(point)
+        speed["value"] = next(next_values)
+        return True
+
+    with (
+        patch(
+            "core.game_speed.measure_game_speed",
+            side_effect=lambda *_args, **_kwargs: _reading(speed["value"]),
+        ),
+        patch(
+            "core.game_speed.read_game_speed_control",
+            side_effect=lambda *_args, **_kwargs: _reading(speed["value"]),
+        ),
+        patch("core.game_speed.log_action_intent") as action_log,
+        patch("core.game_speed.log_result") as result_log,
+    ):
+        result = enforce_game_speed(
+            mode="REDUCED",
+            screenshot=frame,
+            capture_fn=lambda: frame,
+            tap_fn=tap,
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert result == GameSpeedResult(
+        True,
+        6.3,
+        REDUCED_GAME_SPEED,
+        5,
+        0,
+        "target_reached",
+        decreases=5,
+        mode="REDUCED",
+        target=REDUCED_GAME_SPEED,
+    )
+    assert taps == [GAME_SPEED_MINUS_POINT] * 5
+    action_log.assert_called_once()
+    result_log.assert_called_once()
+
+
+def test_reduced_mode_raises_a_lower_speed_to_exact_x4():
+    frame = _complete_frame()
+    speed = {"value": 3.0}
+    taps = []
+
+    def tap(point, *, verification, **_kwargs):
+        assert point == GAME_SPEED_PLUS_POINT
+        assert verification.authorizes(point)
+        taps.append(point)
+        speed["value"] += 0.5
+        return True
+
+    with (
+        patch(
+            "core.game_speed.measure_game_speed",
+            side_effect=lambda *_args, **_kwargs: _reading(speed["value"]),
+        ),
+        patch(
+            "core.game_speed.read_game_speed_control",
+            side_effect=lambda *_args, **_kwargs: _reading(speed["value"]),
+        ),
+        patch("core.game_speed.log_action_intent"),
+        patch("core.game_speed.log_result"),
+    ):
+        result = enforce_game_speed(
+            mode="REDUCED",
+            screenshot=frame,
+            capture_fn=lambda: frame,
+            tap_fn=tap,
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert result.success is True
+    assert result.final == REDUCED_GAME_SPEED
+    assert result.increases == 2
+    assert result.decreases == 0
+    assert taps == [GAME_SPEED_PLUS_POINT] * 2
+
+
+def test_reduced_mode_refuses_to_lower_without_visible_minus_control():
+    frame = _complete_frame()
+    reading = GameSpeedReading(
+        True,
+        5.0,
+        "x5.0",
+        90.0,
+        True,
+        "visible",
+        False,
+    )
+
+    with patch("core.game_speed.measure_game_speed", return_value=reading):
+        result = enforce_game_speed(
+            mode="REDUCED",
+            screenshot=frame,
+            tap_fn=lambda *_args, **_kwargs: pytest.fail(
+                "minus input must remain blocked"
+            ),
+        )
+
+    assert result.success is False
+    assert result.reason == "minus_control_not_visible"
+    assert result.taps_sent == 0
+
+
+def test_reduced_adjustment_stops_when_control_mode_changes():
+    frame = _complete_frame()
+    speed = {"value": 5.0}
+    guard_checks = iter((True, False))
+
+    def tap(*_args, **_kwargs):
+        speed["value"] = 4.5
+        return True
+
+    with (
+        patch(
+            "core.game_speed.measure_game_speed",
+            side_effect=lambda *_args, **_kwargs: _reading(speed["value"]),
+        ),
+        patch(
+            "core.game_speed.read_game_speed_control",
+            side_effect=lambda *_args, **_kwargs: _reading(speed["value"]),
+        ),
+        patch("core.game_speed.log_action_intent"),
+        patch("core.game_speed.log_result"),
+    ):
+        result = enforce_game_speed(
+            mode="REDUCED",
+            screenshot=frame,
+            capture_fn=lambda: frame,
+            tap_fn=tap,
+            sleep_fn=lambda _seconds: None,
+            action_guard_fn=lambda: next(guard_checks),
+        )
+
+    assert result.success is False
+    assert result.reason == "actions_blocked"
+    assert result.taps_sent == 1
+    assert result.final == 4.5
+
+
 def test_guard_checks_only_running_battles_and_resets_at_home():
     now = {"value": 100.0}
     guard = GameSpeedGuard(clock=lambda: now["value"], check_interval_s=30.0)
@@ -295,9 +485,9 @@ def test_guard_warns_only_after_persistent_failures_and_rate_limits_reminders():
         call.args[0] for call in log.call_args_list if call.args[1] == "WARN"
     ]
     assert warnings == [
-        "[GAME_SPEED] Unable to verify normal battle speed after 3 "
+        "[GAME_SPEED] Unable to enforce AUTO battle speed target x5.0 after 3 "
         "consecutive checks; automation will retry (reason=speed_ocr_failed)",
-        "[GAME_SPEED] Still unable to verify normal battle speed after 5 "
+        "[GAME_SPEED] Still unable to enforce AUTO battle speed target x5.0 after 5 "
         "consecutive checks; automation will retry (reason=speed_ocr_failed)",
     ]
 
@@ -345,6 +535,82 @@ def test_guard_records_recovery_after_persistent_speed_failures():
         )
         for call in log.call_args_list
     )
+
+
+def test_reduced_mode_warns_immediately_and_rate_limits_reminders():
+    now = {"value": 100.0}
+    guard = GameSpeedGuard(
+        clock=lambda: now["value"],
+        reduced_reminder_interval_s=300.0,
+    )
+    frame = _complete_frame()
+    satisfied = GameSpeedResult(
+        True,
+        4.0,
+        4.0,
+        0,
+        0,
+        "target_satisfied",
+        mode="REDUCED",
+        target=REDUCED_GAME_SPEED,
+    )
+
+    with patch("core.game_speed.log") as runtime_log:
+        assert guard.set_mode("REDUCED", wave=123)
+        guard.handle(
+            frame,
+            {"state": "RUNNING"},
+            action_guard_fn=lambda: True,
+            maximize_fn=lambda **_kwargs: satisfied,
+        )
+        now["value"] = 399.0
+        guard.handle(
+            frame,
+            {"state": "RUNNING"},
+            action_guard_fn=lambda: True,
+            maximize_fn=lambda **_kwargs: satisfied,
+        )
+        now["value"] = 400.0
+        guard.handle(
+            frame,
+            {"state": "RUNNING"},
+            action_guard_fn=lambda: True,
+            maximize_fn=lambda **_kwargs: satisfied,
+        )
+
+    warnings = [
+        call.args[0]
+        for call in runtime_log.call_args_list
+        if len(call.args) > 1 and call.args[1] == "WARN"
+    ]
+    assert warnings == [
+        "[GAME_SPEED] REDUCED mode is active; battle speed is being held at "
+        "x4.0 until AUTO is restored",
+        "[GAME_SPEED] REDUCED mode remains active; battle speed is still "
+        "being held at x4.0",
+    ]
+    snapshot = guard.snapshot()
+    assert snapshot["mode"] == "REDUCED"
+    assert snapshot["target"] == REDUCED_GAME_SPEED
+    assert snapshot["timeline"][0]["approximate_wave"] == 123
+
+
+def test_battle_reset_records_the_active_mode_as_initial_metadata():
+    guard = GameSpeedGuard()
+    with patch("core.game_speed.log"):
+        guard.set_mode("REDUCED", wave=900)
+    guard.reset_battle(wave=1)
+
+    assert guard.snapshot()["timeline"] == [
+        {
+            "changed_at": guard.snapshot()["timeline"][0]["changed_at"],
+            "mode": "REDUCED",
+            "target": REDUCED_GAME_SPEED,
+            "target_semantics": "exact",
+            "source": "battle_start",
+            "approximate_wave": 1,
+        }
+    ]
 
 
 def test_farm_level_skips_remain_ahead_of_game_speed():

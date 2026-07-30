@@ -25,6 +25,7 @@ from core.exclusive_validation import (
 
 VALID_STATES = frozenset({"RUNNING", "PAUSED", "STOPPED"})
 VALID_MODES = frozenset({"RETRY", "WAIT", "HOME"})
+VALID_GAME_SPEED_MODES = frozenset({"AUTO", "REDUCED"})
 STRATEGY_APPLY_MODES = frozenset({"next_boundary", "active_battle"})
 GATE_DECISION_STATUSES = frozenset({"pending", "resolved", "consumed"})
 EXCLUSIVE_VALIDATION_STATUSES = frozenset(
@@ -87,6 +88,15 @@ class ControlDirectiveStore:
             "state_updated_at": data.get("state_updated_at"),
             "state_request_id": data.get("state_request_id"),
             "mode_updated_at": data.get("mode_updated_at"),
+            "game_speed_mode": _valid_game_speed_mode(
+                data.get("game_speed_mode")
+            ),
+            "game_speed_mode_updated_at": data.get(
+                "game_speed_mode_updated_at"
+            ),
+            "game_speed_mode_request_id": data.get(
+                "game_speed_mode_request_id"
+            ),
             "adb_port_updated_at": data.get("adb_port_updated_at"),
             "strategy": _valid_strategy(data.get("strategy")),
             "strategy_apply_mode": _valid_strategy_apply_mode(
@@ -180,6 +190,33 @@ class ControlDirectiveStore:
             data["mode"] = normalized
             data["updated_at"] = timestamp
             data["mode_updated_at"] = timestamp
+            if source:
+                data["updated_by"] = source
+            return data
+
+        return self.update(mutate)
+
+    def set_game_speed_mode(
+        self,
+        mode: str,
+        *,
+        source: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Persist the normal or reduced battle-speed enforcement mode."""
+
+        normalized = str(mode).strip().upper()
+        if normalized not in VALID_GAME_SPEED_MODES:
+            raise ValueError(
+                f"Unsupported game-speed mode {mode!r}; "
+                f"expected one of {sorted(VALID_GAME_SPEED_MODES)}"
+            )
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            timestamp = _updated_at()
+            data["game_speed_mode"] = normalized
+            data["updated_at"] = timestamp
+            data["game_speed_mode_updated_at"] = timestamp
+            data["game_speed_mode_request_id"] = uuid4().hex
             if source:
                 data["updated_by"] = source
             return data
@@ -1369,6 +1406,15 @@ def _valid_strategy(value: object) -> Optional[str]:
     return normalized if normalized in CONFIGURABLE_STRATEGIES else None
 
 
+def _valid_game_speed_mode(value: object) -> str:
+    normalized = str(value or "AUTO").strip().upper()
+    return (
+        normalized
+        if normalized in VALID_GAME_SPEED_MODES
+        else "AUTO"
+    )
+
+
 def _valid_strategy_apply_mode(value: object) -> str:
     normalized = str(value or "next_boundary").strip().lower()
     return normalized if normalized in STRATEGY_APPLY_MODES else "next_boundary"
@@ -1702,6 +1748,7 @@ __all__ = [
     "EXCLUSIVE_VALIDATION_OUTCOMES",
     "EXCLUSIVE_VALIDATION_STATUSES",
     "GATE_DECISION_STATUSES",
+    "VALID_GAME_SPEED_MODES",
     "VALID_MODES",
     "VALID_STATES",
 ]

@@ -41,6 +41,7 @@ public partial class MainWindow : Window
     private string? _requestedStrategy;
     private string? _pendingStrategy;
     private string _strategyApplyMode = "next_boundary";
+    private string _gameSpeedMode = "AUTO";
     private ControlSurfaceCompatibilityResult? _serverCompatibility;
     private bool _controlSurfaceRestartInFlight;
     private bool _automationRestartInFlight;
@@ -342,6 +343,26 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void GameSpeedMode_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || button.Tag is not string mode)
+        {
+            return;
+        }
+        try
+        {
+            var response = await _api.PostControlAsync(
+                new { action = "game_speed", mode },
+                CancellationToken.None);
+            RenderStatus(response);
+            await RefreshActivityAsync(force: true);
+        }
+        catch (Exception exc)
+        {
+            ShowError(exc);
+        }
+    }
+
     private async void ConfigureRun_Click(object sender, RoutedEventArgs e)
     {
         if (_startupGateContext is not { Checks.Count: > 0 } context)
@@ -563,6 +584,21 @@ public partial class MainWindow : Window
                 this,
                 "Persist STOPPED and stop the managed Linux automation service?",
                 "Stop automation",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        {
+            return;
+        }
+        if (tag.StartsWith("start:", StringComparison.Ordinal)
+            && string.Equals(
+                _gameSpeedMode,
+                "REDUCED",
+                StringComparison.OrdinalIgnoreCase)
+            && MessageBox.Show(
+                this,
+                "Reduced game-speed mode is active. Start automation with "
+                + "battle speed held at x4.0?",
+                "Reduced game speed",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Warning) != MessageBoxResult.Yes)
         {
@@ -1064,6 +1100,19 @@ public partial class MainWindow : Window
         UpdateControlSurfaceCompatibility();
         DirectiveText.Text = status.Control.State;
         ModeText.Text = status.Control.Mode;
+        _gameSpeedMode = string.Equals(
+            status.Control.GameSpeedMode,
+            "REDUCED",
+            StringComparison.OrdinalIgnoreCase)
+            ? "REDUCED"
+            : "AUTO";
+        GameSpeedModeText.Text = _gameSpeedMode == "REDUCED"
+            ? "Reduced mode is active. Current and future runs are held at "
+                + "x4.0 until Auto maximum is restored."
+            : "Auto maximum speed is active.";
+        GameSpeedModeText.Foreground = _gameSpeedMode == "REDUCED"
+            ? new SolidColorBrush(Color.FromRgb(241, 191, 91))
+            : (Brush)FindResource("MutedBrush");
         ObservedStateText.Text = status.Observation?.StateLabel ?? "-";
         WaveText.Text = status.Observation?.Wave?.ToString(CultureInfo.InvariantCulture) ?? "-";
         CoinsMinuteText.Text = status.Observation?.CoinsPerMinute ?? "-";
@@ -1188,6 +1237,9 @@ public partial class MainWindow : Window
             && status.Acknowledgements.State is not { AcknowledgesCurrent: true };
         var modePending = processActive
             && status.Acknowledgements.Mode is not { AcknowledgesCurrent: true };
+        var gameSpeedModePending = processActive
+            && status.Acknowledgements.GameSpeedMode is not
+                { AcknowledgesCurrent: true };
         var adbTargetPending = processActive
             && status.Control.AdbPort is not null
             && status.Acknowledgements.AdbTarget is not { AcknowledgesCurrent: true };
@@ -1211,6 +1263,14 @@ public partial class MainWindow : Window
             HomeModeButton,
             string.Equals(status.Control.Mode, "HOME", StringComparison.OrdinalIgnoreCase),
             modePending);
+        SetSelectionStyle(
+            AutoGameSpeedButton,
+            _gameSpeedMode == "AUTO",
+            gameSpeedModePending);
+        SetSelectionStyle(
+            ReducedGameSpeedButton,
+            _gameSpeedMode == "REDUCED",
+            gameSpeedModePending);
 
         var configuredStrategy = NormalizeStrategy(service?.Strategy);
         var requestedStrategy = NormalizeStrategy(status.Control.Strategy)

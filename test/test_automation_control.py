@@ -114,6 +114,37 @@ def test_repeated_state_directive_is_acknowledged_and_requests_fresh_status(
     assert len(acknowledgements) == 2
 
 
+def test_game_speed_mode_is_persistent_and_applies_to_a_live_supervisor(
+    tmp_path,
+):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+
+    assert store.status()["game_speed_mode"] == "AUTO"
+    assert automation_ctl_main(
+        ["--control-file", str(control_file), "game-speed", "reduced"]
+    ) == 0
+    supervisor = _supervisor(control_file)
+    assert supervisor.game_speed_mode == "REDUCED"
+
+    with patch("core.automation_supervisor.log") as runtime_log:
+        assert supervisor.apply_control()
+        assert not supervisor.apply_control()
+        assert automation_ctl_main(
+            ["--control-file", str(control_file), "game-speed", "auto"]
+        ) == 0
+        assert supervisor.apply_control()
+
+    assert supervisor.game_speed_mode == "AUTO"
+    assert ControlDirectiveStore(control_file).status()["game_speed_mode"] == "AUTO"
+    assert any(
+        call.args
+        and call.args[0]
+        == "[CTRL] Game speed mode set to AUTO via control file"
+        for call in runtime_log.call_args_list
+    )
+
+
 def test_timed_pause_expiry_persists_resume_before_changing_memory(tmp_path):
     control_file = tmp_path / "automation_ctl.json"
     supervisor = _supervisor(control_file)

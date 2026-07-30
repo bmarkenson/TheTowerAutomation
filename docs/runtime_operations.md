@@ -154,7 +154,9 @@ operation, or a persistent degradation worth surfacing to the operator.
 Scrolling outcomes and ordinary OCR repair remain diagnostic. Repeated
 game-speed verification and ADB connection failures become warnings only after
 three consecutive failures, reminders are limited to once every five minutes,
-and recovery is recorded.
+and recovery is recorded. The intentional `REDUCED` game-speed mode is
+different: warn immediately when it becomes active and every 15 minutes until
+`AUTO` is restored so an experimental setting cannot be forgotten.
 
 ## Pause, resume, and process replacement
 
@@ -165,12 +167,23 @@ Use the persistent control mechanism:
 .venv/bin/python tools/automation_ctl.py pause --minutes 15
 .venv/bin/python tools/automation_ctl.py status
 .venv/bin/python tools/automation_ctl.py resume
+.venv/bin/python tools/automation_ctl.py game-speed reduced
+.venv/bin/python tools/automation_ctl.py game-speed auto
 ```
 
 After writing `PAUSED`, wait until `actions.log` confirms that the live process
 consumed it. Paused automation continues capture, state detection, lifecycle
 observation, and status reporting, while strategy and handler actions remain
 blocked.
+
+Game-speed mode is an independent persistent directive. `AUTO` enforces the
+normal minimum `x5.0` and accepts the Game Speed perk's `x6.3` maximum.
+`REDUCED` enforces exactly `x4.0` using the freshly verified visible `+` or `-`
+control after authoritative `RUNNING` evidence. It applies to a live battle
+and survives subsequent battles or process starts until explicitly restored.
+A mode change interrupts the current adjustment before another tap, re-arms an
+immediate check, and is recorded in the completed battle's
+`runtime.game_speed_control` timeline.
 
 Before replacing a process, verify the current screen and allow any in-progress
 guarded action to reach a safe boundary. Stop the known owner cleanly, confirm
@@ -617,10 +630,12 @@ ssh <linux-user>@<linux-host>
 ```
 
 The application uses the same persistent control file as
-`tools/automation_ctl.py`. The selected state and Game Over mode are visibly
-highlighted; amber indicates that a live runtime has not acknowledged a new
-directive yet. It also shows runtime evidence, independently refreshed and
-level-filterable recent activity, and
+`tools/automation_ctl.py`. The selected state, Game Over mode, and
+`AUTO`/`REDUCED x4.0` game-speed mode are visibly highlighted; amber indicates
+that a live runtime has not acknowledged a new directive yet. Starting
+automation while `REDUCED` is selected requires confirmation, and the active
+warning remains visible until `AUTO` is restored. It also shows runtime
+evidence, independently refreshed and level-filterable recent activity, and
 unified Battle/Tournament records; filters by type, Tier, waves, strategy, and
 quality; and displays Coins/hour, Cells/hour, captured perks, resolved settings,
 and preflight evidence. A directive is shown separately from its runtime

@@ -68,6 +68,22 @@
           </div>
         </form>
 
+        <div class="mode-control">
+          <label>Game speed</label>
+          <div class="button-grid compact">
+            <button id="autoGameSpeedButton" type="button"
+                    data-control-action="game_speed"
+                    data-mode="AUTO">Auto maximum</button>
+            <button id="reducedGameSpeedButton" type="button"
+                    data-control-action="game_speed"
+                    data-mode="REDUCED">Reduced x4.0</button>
+          </div>
+          <p id="reducedGameSpeedWarning" class="callout warning" hidden>
+            Reduced mode is active. Current and future runs will be held at
+            x4.0 until Auto maximum is restored.
+          </p>
+        </div>
+
         <button id="configureRunButton" class="primary" type="button" disabled>Configure run...</button>
         <p id="configureRunSummary" class="fine-print">Strategy defaults; no one-run skips staged.</p>
         <p id="exclusiveValidationSummary" class="fine-print">No exclusive strategy validation request.</p>

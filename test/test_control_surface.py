@@ -184,6 +184,29 @@ def test_control_store_persists_strategy_without_changing_other_directives(tmp_p
     )
 
 
+def test_control_store_persists_game_speed_mode_without_changing_run_state(
+    tmp_path,
+):
+    path = tmp_path / "automation_ctl.json"
+    path.write_text(
+        json.dumps({"state": "RUNNING", "mode": "WAIT", "custom": "keep"}),
+        encoding="utf-8",
+    )
+    store = ControlDirectiveStore(path)
+
+    saved = store.set_game_speed_mode("REDUCED", source="test")
+
+    assert saved["state"] == "RUNNING"
+    assert saved["mode"] == "WAIT"
+    assert saved["custom"] == "keep"
+    assert saved["game_speed_mode"] == "REDUCED"
+    assert saved["game_speed_mode_updated_at"]
+    assert saved["game_speed_mode_request_id"]
+    assert store.status()["game_speed_mode"] == "REDUCED"
+    with pytest.raises(ValueError, match="game-speed mode"):
+        store.set_game_speed_mode("disabled")
+
+
 def test_control_store_persists_active_battle_strategy_adoption(tmp_path):
     path = tmp_path / "automation_ctl.json"
 
@@ -232,10 +255,12 @@ def test_status_separates_fresh_observation_from_control_and_lock_evidence(tmp_p
             {
                 "state": "PAUSED",
                 "mode": "WAIT",
+                "game_speed_mode": "REDUCED",
                 "adb_port": 5555,
                 "strategy": "farm_t18",
                 "updated_at": now.isoformat(),
                 "state_updated_at": now.isoformat(),
+                "game_speed_mode_updated_at": now.isoformat(),
                 "adb_port_updated_at": now.isoformat(),
                 "strategy_updated_at": now.isoformat(),
             }
@@ -245,6 +270,7 @@ def test_status_separates_fresh_observation_from_control_and_lock_evidence(tmp_p
     (tmp_path / "logs" / "actions.log").write_text(
         f"[INFO {earlier_timestamp}] [CTRL] Mode set to WAIT via control file\n"
         f"[INFO {timestamp}] [CTRL] State set to PAUSED via control file\n"
+        f"[INFO {timestamp}] [CTRL] Game speed mode set to REDUCED via control file\n"
         f"[INFO {timestamp}] [CTRL] ADB target set to localhost:5555 via control file\n"
         f"[INFO {timestamp}] [CTRL] Strategy set to farm_t18 via control file\n"
         f"[STATUS {timestamp}] State=RUNNING/PAUSED | Wave=520 | "
@@ -288,6 +314,7 @@ def test_status_separates_fresh_observation_from_control_and_lock_evidence(tmp_p
     assert status["runtime"]["instances"][0]["active"]
     assert status["acknowledgements"]["state"]["acknowledges_current"]
     assert status["acknowledgements"]["mode"]["acknowledges_current"]
+    assert status["acknowledgements"]["game_speed_mode"]["acknowledges_current"]
     assert status["acknowledgements"]["adb_target"]["acknowledges_current"]
     assert status["acknowledgements"]["strategy"]["value"] == "farm_t18"
     assert status["acknowledgements"]["strategy"]["acknowledges_current"]
@@ -576,10 +603,21 @@ def test_control_requests_are_allowlisted_and_audited(tmp_path):
     assert mode_response["control"]["mode"] == "HOME"
     assert service.status()["control"]["mode"] == "HOME"
 
+    speed_response = service.apply_control(
+        {"action": "game_speed", "mode": "REDUCED"}
+    )
+    assert speed_response["control"]["game_speed_mode"] == "REDUCED"
+    assert service.status()["control"]["game_speed_mode"] == "REDUCED"
+    assert "[CONTROL_SURFACE] Requested game speed mode REDUCED" in (
+        tmp_path / "logs" / "actions.log"
+    ).read_text(encoding="utf-8")
+
     with pytest.raises(ControlSurfaceRequestError):
         service.apply_control({"action": "tap", "x": 10, "y": 10})
     with pytest.raises(ControlSurfaceRequestError):
         service.apply_control({"action": "pause", "minutes": 0})
+    with pytest.raises(ControlSurfaceRequestError):
+        service.apply_control({"action": "game_speed", "mode": "disabled"})
 
 
 def test_control_surface_resolves_only_an_offered_pending_gate_choice(tmp_path):
@@ -739,8 +777,11 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert 'Content="Clear view"' in native_xaml
     assert 'Text="CURRENT STATUS"' in native_xaml
     assert 'Text="PREVIOUS DISTINCT STATE"' in native_xaml
-    assert "MinimumServerRevision = 10" in native_compatibility
+    assert 'id="reducedGameSpeedButton"' in html
+    assert 'Content="Reduced x4.0"' in native_xaml
+    assert "MinimumServerRevision = 11" in native_compatibility
     assert '"current_run_activity_scope"' in native_compatibility
+    assert '"game_speed_mode"' in native_compatibility
 
 
 def test_native_incompatible_api_has_prominent_start_mitigation():

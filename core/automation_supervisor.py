@@ -32,7 +32,11 @@ import numpy as np
 from numpy.typing import NDArray
 
 from core.app_setup import CONFIGURABLE_STRATEGIES
-from core.control_directives import ControlDirectiveError, ControlDirectiveStore
+from core.control_directives import (
+    ControlDirectiveError,
+    ControlDirectiveStore,
+    VALID_GAME_SPEED_MODES,
+)
 from utils.logger import log, log_action_intent, log_result
 from core.run_state import AUTOMATION
 from core.input import tap_if_visible
@@ -67,6 +71,9 @@ class AutomationSupervisor:
         self._control_store = ControlDirectiveStore(self.control_file)
         initial_directives = self._load_control_directive()
         self._strategy_request = self._parse_strategy_request(initial_directives)
+        self._game_speed_mode = self._parse_game_speed_mode(
+            initial_directives.get("game_speed_mode")
+        )
         self._gate_decision = self._parse_gate_decision(initial_directives)
         self._exclusive_validation = self._parse_exclusive_validation(
             initial_directives
@@ -89,6 +96,8 @@ class AutomationSupervisor:
         self._last_applied_state: Optional[str] = None
         self._last_state_directive_revision: object = None
         self._last_applied_mode: Optional[str] = None
+        self._last_applied_game_speed_mode: Optional[str] = None
+        self._last_game_speed_mode_revision: object = None
         self._pause_resume_at: Optional[float] = None
         self._last_invalid_resume_at: object = None
         self._last_applied_adb_request: Optional[Tuple[int, object]] = None
@@ -114,6 +123,12 @@ class AutomationSupervisor:
         """Return the latest validated strategy directive and its identity."""
 
         return self._strategy_request
+
+    @property
+    def game_speed_mode(self) -> str:
+        """Return the persistent normal or reduced speed mode."""
+
+        return self._game_speed_mode
 
     @property
     def gate_decision(self) -> Optional[Dict[str, object]]:
@@ -148,10 +163,10 @@ class AutomationSupervisor:
         }
 
     def apply_control(self) -> bool:
-        """Apply directives and report whether state intent changed on disk."""
+        """Apply directives and report whether tracked control intent changed."""
 
         directives = self._load_control_directive()
-        state_directive_changed = False
+        control_directive_changed = False
         if directives:
             state_revision = (
                 directives.get("state_request_id")
@@ -163,6 +178,24 @@ class AutomationSupervisor:
                 and state_revision != self._last_state_directive_revision
             )
             self._last_state_directive_revision = state_revision
+            game_speed_mode_revision = (
+                directives.get("game_speed_mode_request_id")
+                or directives.get("game_speed_mode_updated_at")
+                or (
+                    directives.get("updated_at")
+                    if "game_speed_mode" in directives
+                    else None
+                )
+            )
+            game_speed_mode_changed = (
+                game_speed_mode_revision is not None
+                and game_speed_mode_revision
+                != self._last_game_speed_mode_revision
+            )
+            self._last_game_speed_mode_revision = game_speed_mode_revision
+            control_directive_changed = (
+                state_directive_changed or game_speed_mode_changed
+            )
             self._strategy_request = self._parse_strategy_request(directives)
             self._gate_decision = self._parse_gate_decision(directives)
             self._exclusive_validation = self._parse_exclusive_validation(
@@ -176,6 +209,10 @@ class AutomationSupervisor:
                 acknowledge_unchanged=state_directive_changed,
             )
             self._apply_mode(directives.get("mode"))
+            self._apply_game_speed_mode(
+                directives.get("game_speed_mode"),
+                acknowledge_unchanged=game_speed_mode_changed,
+            )
             self._sync_pause_deadline(directives)
             self._apply_adb_port(
                 directives.get("adb_port"),
@@ -183,7 +220,7 @@ class AutomationSupervisor:
             )
 
         self._auto_resume_if_needed()
-        return state_directive_changed
+        return control_directive_changed
 
     @staticmethod
     def _parse_strategy_request(
@@ -201,6 +238,15 @@ class AutomationSupervisor:
         if apply_mode not in {"next_boundary", "active_battle"}:
             apply_mode = "next_boundary"
         return strategy, identity, apply_mode
+
+    @staticmethod
+    def _parse_game_speed_mode(value: object) -> str:
+        normalized = str(value or "AUTO").strip().upper()
+        return (
+            normalized
+            if normalized in VALID_GAME_SPEED_MODES
+            else "AUTO"
+        )
 
     @staticmethod
     def _parse_gate_decision(
@@ -1119,6 +1165,29 @@ class AutomationSupervisor:
             self._last_applied_mode = normalized
         except Exception as exc:
             log(f"[CTRL] Failed to set mode={normalized}: {exc}", "WARN")
+
+    def _apply_game_speed_mode(
+        self,
+        mode: object,
+        *,
+        acknowledge_unchanged: bool = False,
+    ) -> None:
+        normalized = self._parse_game_speed_mode(mode)
+        self._game_speed_mode = normalized
+        if normalized == self._last_applied_game_speed_mode:
+            if acknowledge_unchanged:
+                log(
+                    f"[CTRL] Game speed mode set to {normalized} via control file",
+                    "INFO",
+                    console=True,
+                )
+            return
+        self._last_applied_game_speed_mode = normalized
+        log(
+            f"[CTRL] Game speed mode set to {normalized} via control file",
+            "INFO",
+            console=True,
+        )
 
     def _apply_adb_port(self, port: object, updated_at: object) -> None:
         if isinstance(port, bool) or not isinstance(port, int):

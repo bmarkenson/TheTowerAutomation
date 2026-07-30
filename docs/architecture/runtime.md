@@ -79,15 +79,19 @@ exposes the plan's resolved `run_configuration` generically, and Game Over
 records copy that snapshot into the versioned battle JSON. Runtime code does
 not inherit configuration or branch on a Farm strategy name.
 
-Game speed is a global battle-only invariant. A periodic guard requires
-authoritative `RUNNING` evidence, reads the localized speed value and visible
-plus glyph, and accepts every valid reading at or above the normal `x5.0`
-maximum without input. A lower reading receives verified `+` taps only until it
-reaches at least `x5.0`; the Game Speed perk raises the visible value to `x6.3`
-without requiring a ceiling probe. Farm defers the guard while either urgent
-EHLS/EALS purchase remains incomplete; attachment and non-Farm profiles may
-correct speed as soon as their runtime policy grants the handler action
-authority. Pause is rechecked before every speed tap.
+Game speed is a global battle-only invariant with persistent operator intent
+independent of strategy and ADB target. `AUTO` requires at least `x5.0` and
+accepts the Game Speed perk's visible `x6.3` value without probing the ceiling.
+`REDUCED` requires exactly `x4.0` both before and after that perk. The periodic
+guard requires authoritative `RUNNING` evidence, reads the localized value,
+and independently verifies the visible plus or minus glyph before selecting a
+direction. Every tap is followed by settled fresh OCR; an unchanged value,
+wrong-direction transition, crossed exact target, missing control, Pause, or
+mode change fails closed. Farm defers the guard while either urgent EHLS/EALS
+purchase remains incomplete; attachment and non-Farm profiles may correct
+speed as soon as their runtime policy grants handler action authority. The
+completed record stores the current mode, target semantics, and per-battle mode
+timeline separately from derived effective game speed.
 
 Automatic-Perk profiles maintain a run-scoped selection timeline from the
 compact `current wave / next Perk wave` control. A scheduled pair is usable

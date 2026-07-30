@@ -131,6 +131,13 @@ Current strategy and queueing it cancels a different pending request. Actions
 that would be no-ops are disabled; the panel reports request acceptance
 immediately and shows selected, current, and pending values separately.
 
+The same panel selects persistent game-speed mode. **Auto maximum** retains the
+normal `x5.0`/perk-raised `x6.3` policy; **Reduced x4.0** holds exactly `x4.0`
+in the current and later battles until Auto is restored. Reduced mode remains
+visibly warned, a managed Start asks for confirmation, and amber selection
+means a live process has not acknowledged the new mode. Completed battle
+settings show the selected target and any per-battle mode changes.
+
 Every explicit Tournament selection or Start with Tournament selected creates
 one durable validation request. The panel reports Home preflight, ownership of
 the one ordinary New Battle used for battle-only checks, cleanup, and the
