@@ -8,6 +8,46 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Home Perk close accepted a transient UNKNOWN battle control
+
+- **Observed:** 2026-07-29 during Farm Tier 19 Home setup after updating the
+  shared 17-slot Auto Pick Perks order.
+- **Symptom:** Startup stopped after three setup attempts at
+  `perk_configuration (home_setup)` with
+  `Perk configuration requires NEW_BATTLE, got UNKNOWN`, even though the game
+  had returned Home.
+- **Evidence:** After the Inner Land Mines move, the first post-input scan
+  still reported rank 17, while the next attempt found the intended order
+  without another Perk input. On two later attempts, the first frame after
+  closing Perks was classified as `HOME_SCREEN` while battle-control OCR was
+  still `UNKNOWN`; repeated runtime observations 7–12 seconds later reported
+  `NEW_BATTLE`. A fresh diagnostic screenshot also authoritatively detected
+  Home with `NEW_BATTLE`.
+- **Safety response:** The failed requirement was never bypassed. Diagnosis
+  remained read-only until the runtime was persistently Paused and had
+  acknowledged both the pause and Home. The process was then replaced cleanly
+  under that pause, the exact requirement was retried, and the prior RUNNING
+  state was restored.
+- **Cause:** Perk close returned on the first `HOME_SCREEN` frame and then
+  required `NEW_BATTLE` from a single battle-control observation, before that
+  portion of the Home UI had settled. Perk-order repair likewise treated its
+  first unchanged post-input scan as terminal even when the tap was still
+  taking effect.
+- **Resolution:** Perk close now waits for the combined authoritative
+  `HOME_SCREEN` and `NEW_BATTLE` boundary, retrying only `UNKNOWN` and still
+  failing closed on a conflicting known control. An apparently unchanged
+  post-input rank gets one delayed, read-only confirmation scan without
+  issuing a duplicate input.
+- **Regression:** `test/test_home_perk_configuration.py` covers delayed rank
+  progress and Home appearing with `UNKNOWN` before `NEW_BATTLE`.
+- **Validation:** All 47 focused Home Perk and no-battle setup tests passed.
+  The complete repository suite passed 878 tests.
+- **Rollout:** Automation PID 761905 was replaced by PID 783606 under the
+  acknowledged pause. The unwaived retry passed Perks at 20:18:11, completed
+  every Home requirement at 20:20:18, started the battle, and verified every
+  session-preflight requirement at 20:23:27.
+- **Fixed by:** `8ea1961`.
+
 ### Event Mission warnings treated stale rows as current stalled missions
 
 - **Observed:** Operator report on 2026-07-29 after automation emitted eleven
