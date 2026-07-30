@@ -37,6 +37,27 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-30 native Windows host-performance telemetry
+
+- Commit `33b4687` adds one-second native Windows host and BlueStacks sampling
+  on a below-normal-priority thread, a two-minute raw ring, approximately
+  ten-second in-memory aggregates, and a bounded 24-hour local outage spool.
+  The sample path launches no helper process and records its own duration plus
+  total control-surface CPU for budget validation.
+- Server revision 12 adds the bounded `POST /api/v1/host-performance` route and
+  capability `host_performance_telemetry_v1`. SQLite aggregate UUID primary
+  keys make reconnect retries idempotent; sample-time host, ADB port, UTC, and
+  fresh activity-scope run identity remain distinct from ingest-time run
+  context.
+- The WPF status area now shows local host CPU, memory, clock, BlueStacks
+  CPU/RAM/process count, and publication health even while the API is
+  unavailable. The aggregation boundary is ready for later targeted PresentMon
+  summaries without per-frame logging.
+- All 897 repository tests passed and the self-contained Windows client
+  cross-published successfully from Linux. Windows runtime measurement of the
+  sub-0.5% CPU target remains a deployment validation; no emulator interaction
+  was needed or performed for this code-only implementation.
+
 ### 2026-07-29 Event Mission warning authority
 
 - Commit `61caa78` prevents retained, claimed, advanced, or OCR-missed Event
