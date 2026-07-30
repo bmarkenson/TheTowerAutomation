@@ -53,10 +53,19 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   CPU/RAM/process count, and publication health even while the API is
   unavailable. The aggregation boundary is ready for later targeted PresentMon
   summaries without per-frame logging.
+- Follow-up commit `34e014f` adds a locally persisted **Pause sampling** /
+  **Resume sampling** control to the always-visible health strip. Pausing
+  flushes the partial aggregate while leaving queued uploads active; resuming
+  preserves host/session sequencing and leaves an explicit UTC gap. The left
+  workspace row minima and weights were also rebalanced so every independently
+  scrollable panel remains reachable at the declared minimum window size.
 - All 897 repository tests passed and the self-contained Windows client
   cross-published successfully from Linux. Windows runtime measurement of the
   sub-0.5% CPU target remains a deployment validation; no emulator interaction
   was needed or performed for this code-only implementation.
+- The follow-up passed all 898 repository tests and the standalone Windows
+  client cross-published successfully from Linux. No live emulator interaction
+  was needed or performed.
 
 ### 2026-07-29 Event Mission warning authority
 
