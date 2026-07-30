@@ -121,36 +121,55 @@
                 BorderThickness="0,1,0,0"
                 Padding="9,7"
                 Margin="0,4,0,0">
-          <UniformGrid Columns="7">
-            <StackPanel>
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="1.1*" />
+              <ColumnDefinition Width="0.8*" />
+              <ColumnDefinition Width="1.2*" />
+              <ColumnDefinition Width="1.0*" />
+              <ColumnDefinition Width="1.25*" />
+              <ColumnDefinition Width="1.1*" />
+              <ColumnDefinition Width="0.9*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Margin="0,0,8,0">
               <TextBlock Text="HOST HEALTH" Foreground="{StaticResource MutedBrush}" FontSize="9" />
-              <TextBlock x:Name="HostHealthText" Text="Starting" FontWeight="Bold" />
+              <TextBlock x:Name="HostHealthText" Text="Starting" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
             </StackPanel>
-            <StackPanel>
+            <StackPanel Grid.Column="1" Margin="0,0,8,0">
               <TextBlock Text="HOST CPU" Foreground="{StaticResource MutedBrush}" FontSize="9" />
-              <TextBlock x:Name="HostCpuText" Text="-" FontWeight="Bold" />
+              <TextBlock x:Name="HostCpuText" Text="-" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
             </StackPanel>
-            <StackPanel>
+            <StackPanel Grid.Column="2" Margin="0,0,8,0">
               <TextBlock Text="MEMORY" Foreground="{StaticResource MutedBrush}" FontSize="9" />
-              <TextBlock x:Name="HostMemoryText" Text="-" FontWeight="Bold" />
+              <TextBlock x:Name="HostMemoryText" Text="-" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
             </StackPanel>
-            <StackPanel>
+            <StackPanel Grid.Column="3" Margin="0,0,8,0">
               <TextBlock Text="CPU CLOCK" Foreground="{StaticResource MutedBrush}" FontSize="9" />
-              <TextBlock x:Name="HostClockText" Text="-" FontWeight="Bold" />
+              <TextBlock x:Name="HostClockText" Text="-" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
             </StackPanel>
-            <StackPanel>
+            <StackPanel Grid.Column="4" Margin="0,0,8,0">
               <TextBlock Text="BLUESTACKS CPU" Foreground="{StaticResource MutedBrush}" FontSize="9" />
-              <TextBlock x:Name="BlueStacksCpuText" Text="-" FontWeight="Bold" />
+              <TextBlock x:Name="BlueStacksCpuText" Text="-" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
             </StackPanel>
-            <StackPanel>
+            <StackPanel Grid.Column="5" Margin="0,0,8,0">
               <TextBlock Text="BLUESTACKS RAM" Foreground="{StaticResource MutedBrush}" FontSize="9" />
-              <TextBlock x:Name="BlueStacksMemoryText" Text="-" FontWeight="Bold" />
+              <TextBlock x:Name="BlueStacksMemoryText" Text="-" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
             </StackPanel>
-            <StackPanel>
+            <StackPanel Grid.Column="6" Margin="0,0,8,0">
               <TextBlock Text="TELEMETRY" Foreground="{StaticResource MutedBrush}" FontSize="9" />
-              <TextBlock x:Name="HostTelemetryQueueText" Text="Local only" FontWeight="Bold" />
+              <TextBlock x:Name="HostTelemetryQueueText" Text="Local only" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
             </StackPanel>
-          </UniformGrid>
+            <Button Grid.Column="7"
+                    x:Name="HostSamplingToggleButton"
+                    Content="Pause sampling"
+                    Click="HostSamplingToggle_Click"
+                    Padding="9,5"
+                    Margin="4,0,0,0"
+                    MinWidth="104"
+                    VerticalAlignment="Center"
+                    ToolTip="Pause one-second host and BlueStacks sampling. Queued aggregates continue uploading." />
+          </Grid>
         </Border>
       </StackPanel>
     </Border>
@@ -164,13 +183,13 @@
 
       <Grid Grid.Column="0">
         <Grid.RowDefinitions>
-          <RowDefinition Height="1.25*" MinHeight="130" />
+          <RowDefinition Height="0.9*" MinHeight="100" />
           <RowDefinition Height="8" />
-          <RowDefinition Height="*" MinHeight="115" />
+          <RowDefinition Height="1.35*" MinHeight="110" />
           <RowDefinition Height="8" />
-          <RowDefinition Height="1.05*" MinHeight="125" />
+          <RowDefinition Height="1.2*" MinHeight="110" />
           <RowDefinition Height="8" />
-          <RowDefinition Height="*" MinHeight="100" />
+          <RowDefinition Height="0.65*" MinHeight="65" />
         </Grid.RowDefinitions>
 
         <Border Grid.Row="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12">

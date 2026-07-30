@@ -601,6 +601,7 @@ public sealed class ClientSettings
     public string SshDestination { get; set; } = "";
     public int LocalTunnelPort { get; set; } = 8787;
     public int RemoteApiPort { get; set; } = 8787;
+    public bool HostPerformanceSamplingEnabled { get; set; } = true;
     public WindowPlacementSettings? MainWindowPlacement { get; set; }
     public WindowPlacementSettings? BattleHistoryWindowPlacement { get; set; }
 }

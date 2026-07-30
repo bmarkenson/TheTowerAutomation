@@ -229,6 +229,16 @@ errors. Sampling uses native counters on a below-normal-priority worker; it does
 not capture the screen or start PowerShell, WMI, `nvidia-smi`, or another
 per-sample process.
 
+The compact **Pause sampling** control remains visible in the health strip at
+the window's minimum supported size. Pausing flushes the current partial
+aggregate and stops new samples, while the independent uploader continues
+draining queued telemetry. The health state changes to **Sampling paused** and
+the tooltip retains the last sample time. **Resume sampling** continues the
+same host/session sequence with an explicit UTC gap. This preference is saved
+locally across control-surface restarts and does not pause automation. The left
+workspace panels retain independent scrollbars, with their minimum heights
+balanced so every panel remains reachable at the minimum window height.
+
 Raw samples remain in a two-minute memory ring. Approximately ten-second
 aggregates are queued in
 `%LOCALAPPDATA%\TheTower\host-performance-pending.jsonl` before upload, so an

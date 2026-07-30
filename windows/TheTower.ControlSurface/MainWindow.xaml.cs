@@ -70,6 +70,8 @@ public partial class MainWindow : Window
         WindowPlacementStore.Restore(this, _settings.MainWindowPlacement);
         _api.Configure(_settings.BaseUrl, "");
         _hostPerformance = new HostPerformanceTracker(_api);
+        _hostPerformance.SetSamplingEnabled(
+            _settings.HostPerformanceSamplingEnabled);
         _hostPerformance.SnapshotUpdated += HostPerformance_SnapshotUpdated;
         _sshTunnel.Exited += Tunnel_Exited;
         _timer.Tick += async (_, _) => await Task.WhenAll(
@@ -1443,6 +1445,14 @@ public partial class MainWindow : Window
             DispatcherPriority.Background);
     }
 
+    private void HostSamplingToggle_Click(object sender, RoutedEventArgs e)
+    {
+        var enabled = !_hostPerformance.SamplingEnabled;
+        _hostPerformance.SetSamplingEnabled(enabled);
+        _settings.HostPerformanceSamplingEnabled = enabled;
+        SaveSettingsBestEffort();
+    }
+
     private void RenderHostPerformance(HostPerformanceSnapshot snapshot)
     {
         HostHealthText.Text = $"{snapshot.StateLabel} · {snapshot.HostName}";
@@ -1450,6 +1460,8 @@ public partial class MainWindow : Window
         {
             HostPerformanceHealthState.Healthy =>
                 new SolidColorBrush(Color.FromRgb(73, 214, 157)),
+            HostPerformanceHealthState.Paused =>
+                new SolidColorBrush(Color.FromRgb(98, 213, 255)),
             HostPerformanceHealthState.Critical =>
                 new SolidColorBrush(Color.FromRgb(255, 113, 135)),
             HostPerformanceHealthState.Attention
@@ -1458,6 +1470,21 @@ public partial class MainWindow : Window
                 new SolidColorBrush(Color.FromRgb(241, 191, 91)),
             _ => (Brush)FindResource("MutedBrush"),
         };
+        HostSamplingToggleButton.Content = snapshot.SamplingEnabled
+            ? "Pause sampling"
+            : "Resume sampling";
+        if (snapshot.SamplingEnabled)
+        {
+            HostSamplingToggleButton.ClearValue(StyleProperty);
+        }
+        else
+        {
+            HostSamplingToggleButton.Style =
+                (Style)FindResource("PrimaryButton");
+        }
+        HostSamplingToggleButton.ToolTip = snapshot.SamplingEnabled
+            ? "Pause one-second host and BlueStacks sampling. Queued aggregates continue uploading."
+            : "Resume one-second host and BlueStacks sampling.";
         HostCpuText.Text = FormatPercent(snapshot.HostCpuPercent);
         HostMemoryText.Text = snapshot.HostMemoryUsedPercent is null
             ? "-"
@@ -1494,6 +1521,9 @@ public partial class MainWindow : Window
 
         var details = new List<string>
         {
+            snapshot.SamplingEnabled
+                ? "Host sampling is enabled."
+                : "Host sampling is paused; queued aggregates still upload.",
             snapshot.SampledAtUtc is null
                 ? "No host sample is available yet."
                 : $"Sampled {snapshot.SampledAtUtc.Value.ToLocalTime():T}.",

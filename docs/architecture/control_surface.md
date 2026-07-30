@@ -220,6 +220,14 @@ the status API. A run ID expires from new samples when status has not refreshed
 for 15 seconds; outage telemetry remains available without being falsely
 assigned to a later run.
 
+Sampling can be paused and resumed only by the local native client. Pausing
+closes and persists the current partial aggregate before the sampler waits;
+the uploader remains active so previously queued evidence can continue
+reconnecting and publishing. Resuming keeps the same host/session identity and
+sequence, while the UTC window timestamps leave the intentional sampling gap
+explicit. The enabled state is stored in the native client's local settings
+and does not add Linux API control authority.
+
 Aggregates first enter
 `%LOCALAPPDATA%\TheTower\host-performance-pending.jsonl`. The bounded spool
 keeps the newest 24 hours at the nominal ten-second cadence and reports any

@@ -15,6 +15,7 @@ public sealed class HostPerformanceTracker : IDisposable
     private readonly WindowsHostPerformanceSampler _sampler = new();
     private readonly Queue<HostPerformanceSample> _rawSamples = new();
     private readonly ManualResetEvent _stopEvent = new(false);
+    private readonly AutoResetEvent _samplingStateChanged = new(false);
     private readonly SemaphoreSlim _uploadSignal = new(0, 1);
     private readonly CancellationTokenSource _uploadCancellation = new();
     private readonly string _sessionId = Guid.NewGuid().ToString();
@@ -25,6 +26,7 @@ public sealed class HostPerformanceTracker : IDisposable
     private Thread? _sampleThread;
     private Task? _uploadTask;
     private long _sequence;
+    private bool _samplingEnabled = true;
     private bool _uploadEnabled;
     private DateTimeOffset? _lastUploadedAtUtc;
     private string? _uploadError;
@@ -39,6 +41,17 @@ public sealed class HostPerformanceTracker : IDisposable
     }
 
     public event EventHandler<HostPerformanceSnapshot>? SnapshotUpdated;
+
+    public bool SamplingEnabled
+    {
+        get
+        {
+            lock (_stateGate)
+            {
+                return _samplingEnabled;
+            }
+        }
+    }
 
     public void Start()
     {
@@ -61,6 +74,21 @@ public sealed class HostPerformanceTracker : IDisposable
             _sampleThread.Start();
         }
         SignalUpload();
+        PublishSnapshot();
+    }
+
+    public void SetSamplingEnabled(bool enabled)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        lock (_stateGate)
+        {
+            if (_samplingEnabled == enabled)
+            {
+                return;
+            }
+            _samplingEnabled = enabled;
+        }
+        _samplingStateChanged.Set();
         PublishSnapshot();
     }
 
@@ -89,10 +117,27 @@ public sealed class HostPerformanceTracker : IDisposable
         var aggregateWindow = new List<HostPerformanceSample>(
             AggregateSampleCount);
         var nextSampleAt = DateTimeOffset.UtcNow;
+        var waitHandles = new WaitHandle[]
+        {
+            _stopEvent,
+            _samplingStateChanged,
+        };
         try
         {
             while (!_stopEvent.WaitOne(0))
             {
+                if (!SamplingEnabled)
+                {
+                    FlushAggregateWindow(aggregateWindow);
+                    PublishSnapshot();
+                    if (WaitHandle.WaitAny(waitHandles) == 0)
+                    {
+                        break;
+                    }
+                    nextSampleAt = DateTimeOffset.UtcNow;
+                    continue;
+                }
+
                 nextSampleAt += TimeSpan.FromMilliseconds(
                     SampleIntervalMilliseconds);
                 try
@@ -142,16 +187,26 @@ public sealed class HostPerformanceTracker : IDisposable
                     nextSampleAt = DateTimeOffset.UtcNow;
                     continue;
                 }
-                _stopEvent.WaitOne(delay);
+                if (WaitHandle.WaitAny(waitHandles, delay) == 0)
+                {
+                    break;
+                }
             }
         }
         finally
         {
-            if (aggregateWindow.Count > 0)
-            {
-                EnqueueAggregate(aggregateWindow);
-            }
+            FlushAggregateWindow(aggregateWindow);
         }
+    }
+
+    private void FlushAggregateWindow(List<HostPerformanceSample> samples)
+    {
+        if (samples.Count == 0)
+        {
+            return;
+        }
+        EnqueueAggregate(samples);
+        samples.Clear();
     }
 
     private HostPerformanceContext CurrentSampleContext()
@@ -418,6 +473,7 @@ public sealed class HostPerformanceTracker : IDisposable
     private HostPerformanceSnapshot BuildSnapshot()
     {
         HostPerformanceSample[] recent;
+        bool samplingEnabled;
         bool uploadEnabled;
         DateTimeOffset? lastUploadedAtUtc;
         string? uploadError;
@@ -425,6 +481,7 @@ public sealed class HostPerformanceTracker : IDisposable
         lock (_stateGate)
         {
             recent = _rawSamples.TakeLast(AggregateSampleCount).ToArray();
+            samplingEnabled = _samplingEnabled;
             uploadEnabled = _uploadEnabled;
             lastUploadedAtUtc = _lastUploadedAtUtc;
             uploadError = _uploadError;
@@ -448,6 +505,7 @@ public sealed class HostPerformanceTracker : IDisposable
                 (double?)sample.SampleDurationMilliseconds));
 
         var (state, label) = EvaluateHealth(
+            samplingEnabled,
             last,
             hostCpu,
             memory,
@@ -458,6 +516,7 @@ public sealed class HostPerformanceTracker : IDisposable
             HostName = Environment.MachineName,
             State = state,
             StateLabel = label,
+            SamplingEnabled = samplingEnabled,
             SampledAtUtc = last?.TimestampUtc,
             HostCpuPercent = hostCpu,
             HostMemoryUsedPercent = memory,
@@ -487,12 +546,17 @@ public sealed class HostPerformanceTracker : IDisposable
 
     private static (HostPerformanceHealthState State, string Label)
         EvaluateHealth(
+            bool samplingEnabled,
             HostPerformanceSample? last,
             double? hostCpu,
             double? memory,
             double? frequencyRatio,
             string? samplerError)
     {
+        if (!samplingEnabled)
+        {
+            return (HostPerformanceHealthState.Paused, "Sampling paused");
+        }
         if (last is null)
         {
             return samplerError is null
@@ -600,6 +664,7 @@ public sealed class HostPerformanceTracker : IDisposable
         }
         _disposed = true;
         _stopEvent.Set();
+        _samplingStateChanged.Set();
         _uploadCancellation.Cancel();
         SignalUpload();
         _sampleThread?.Join(TimeSpan.FromSeconds(3));
@@ -615,6 +680,7 @@ public sealed class HostPerformanceTracker : IDisposable
         }
         _sampler.Dispose();
         _stopEvent.Dispose();
+        _samplingStateChanged.Dispose();
         _uploadCancellation.Dispose();
         _uploadSignal.Dispose();
     }

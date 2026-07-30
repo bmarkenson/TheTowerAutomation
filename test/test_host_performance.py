@@ -252,6 +252,8 @@ def test_native_sampler_keeps_expensive_process_launches_out_of_sample_path():
     assert "SampleIntervalMilliseconds = 1000" in tracker
     assert "AggregateSampleCount = 10" in tracker
     assert "RawRingCapacity = 120" in tracker
+    assert "_samplingStateChanged" in tracker
+    assert "FlushAggregateWindow(aggregateWindow)" in tracker
     assert "ProcessDiscoveryIntervalSamples = 10" in sampler
     assert "GetSystemTimes" in sampler
     assert "GlobalMemoryStatusEx" in sampler
@@ -259,3 +261,30 @@ def test_native_sampler_keeps_expensive_process_launches_out_of_sample_path():
     assert "Process.Start(" not in sampler
     assert "PowerShell" not in sampler
     assert "nvidia-smi" not in sampler
+
+
+def test_native_host_sampling_control_is_persistent_and_always_visible():
+    native_root = PROJECT_ROOT / "windows" / "TheTower.ControlSurface"
+    tracker = (native_root / "HostPerformanceTracker.cs").read_text(
+        encoding="utf-8"
+    )
+    models = (native_root / "Models.cs").read_text(encoding="utf-8")
+    window = (native_root / "MainWindow.xaml").read_text(encoding="utf-8")
+    window_code = (native_root / "MainWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+
+    assert "public bool SamplingEnabled" in tracker
+    assert "public void SetSamplingEnabled(bool enabled)" in tracker
+    assert 'HostPerformanceHealthState.Paused, "Sampling paused"' in tracker
+    assert (
+        "public bool HostPerformanceSamplingEnabled { get; set; } = true;"
+        in models
+    )
+    assert 'x:Name="HostSamplingToggleButton"' in window
+    assert 'Click="HostSamplingToggle_Click"' in window
+    assert "TextTrimming=\"CharacterEllipsis\"" in window
+    assert '<RowDefinition Height="0.9*" MinHeight="100" />' in window
+    assert '<RowDefinition Height="0.65*" MinHeight="65" />' in window
+    assert "HostPerformanceSamplingEnabled" in window_code
+    assert "queued aggregates still upload" in window_code

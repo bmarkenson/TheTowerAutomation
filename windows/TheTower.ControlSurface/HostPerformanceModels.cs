@@ -110,6 +110,7 @@ internal sealed record HostPerformanceSample
 public enum HostPerformanceHealthState
 {
     Starting,
+    Paused,
     Healthy,
     Attention,
     Critical,
@@ -122,6 +123,7 @@ public sealed record HostPerformanceSnapshot
     public required string HostName { get; init; }
     public required HostPerformanceHealthState State { get; init; }
     public required string StateLabel { get; init; }
+    public required bool SamplingEnabled { get; init; }
     public DateTimeOffset? SampledAtUtc { get; init; }
     public double? HostCpuPercent { get; init; }
     public double? HostMemoryUsedPercent { get; init; }

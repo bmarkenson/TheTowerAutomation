@@ -411,6 +411,15 @@ published or waiting locally. Hover over the strip for sample cost, BlueStacks
 read/write rate, last Linux acknowledgement, and any sampling, spool, or upload
 error.
 
+Use **Pause sampling** in the always-visible health strip to stop collecting
+new one-second samples. The client immediately closes any partial aggregate,
+continues uploading already queued aggregates, shows **Sampling paused** with
+the last sample time in the strip tooltip, and remembers the choice across
+window restarts. **Resume sampling** wakes the below-normal-priority worker
+without changing host identity or discarding the local spool. The resulting
+UTC gap is intentional. This control is local to Windows and does not pause
+automation or require the tunnel.
+
 The tracker is intentionally passive: it uses native Windows counters and
 cached process handles on a below-normal-priority worker. It does not capture
 the emulator screen, invoke ADB, or start PowerShell, WMI, `nvidia-smi`, or
