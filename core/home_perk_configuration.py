@@ -636,6 +636,22 @@ def _repair_auto_pick_order(
                 row_fn=row_fn,
                 sleep_fn=sleep_fn,
             )
+            if observed_rank == before_rank:
+                log(
+                    "[HOME_PERKS] Auto Pick rank was unchanged on the first "
+                    "post-input read; confirming from a fresh complete scan",
+                    "DEBUG",
+                )
+                sleep_fn(0.8)
+                observed_rank, current, row = _locate_auto_pick_key(
+                    current,
+                    key,
+                    capture_fn=capture_fn,
+                    visible_fn=visible_fn,
+                    swipe_fn=swipe_fn,
+                    row_fn=row_fn,
+                    sleep_fn=sleep_fn,
+                )
             if observed_rank != before_rank - 1:
                 raise HomePerkConfigurationError(
                     f"{perk_configuration_label(key)} moved from rank "
@@ -1037,14 +1053,46 @@ def _close_to_home(
         raise HomePerkConfigurationError(
             "Perks configuration close button was not visible"
         )
-    home = _wait_for_state(
-        "HOME_SCREEN",
+    return _wait_for_new_battle_home(
         capture_fn=capture_fn,
         detector=detector,
+        detect_home_control_fn=detect_home_control_fn,
         sleep_fn=sleep_fn,
     )
-    _require_new_battle_home(home, detector, detect_home_control_fn)
-    return home
+
+
+def _wait_for_new_battle_home(
+    *,
+    capture_fn: Capture,
+    detector: Detector,
+    detect_home_control_fn: Callable[[Frame], Any],
+    sleep_fn: Callable[[float], None],
+    attempts: int = 24,
+) -> Frame:
+    """Wait through the Home transition until its battle control is readable."""
+
+    home_seen = False
+    last_control = HomeBattleControl.UNKNOWN
+    for attempt in range(attempts):
+        frame = capture_fn()
+        if frame is not None and detector(frame).get("state") == "HOME_SCREEN":
+            home_seen = True
+            home = detect_home_control_fn(frame)
+            last_control = home.control
+            if last_control is HomeBattleControl.NEW_BATTLE:
+                return frame
+            if last_control is not HomeBattleControl.UNKNOWN:
+                raise HomePerkConfigurationError(
+                    "Perk configuration requires NEW_BATTLE, got "
+                    f"{last_control.value}"
+                )
+        if attempt < attempts - 1:
+            sleep_fn(0.25)
+    if home_seen:
+        raise HomePerkConfigurationError(
+            f"Perk configuration requires NEW_BATTLE, got {last_control.value}"
+        )
+    raise HomePerkConfigurationError("timed out waiting for HOME_SCREEN")
 
 
 def _require_new_battle_home(

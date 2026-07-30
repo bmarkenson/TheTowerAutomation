@@ -1,11 +1,14 @@
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
 import pytest
 
+from core.battle_lifecycle import HomeBattleControl
 from core.home_perk_configuration import (
     BAN_SELECTED_TOGGLE_X,
     HomePerkConfigurationError,
+    _close_to_home,
     _repair_auto_pick_order,
     _repair_bans,
     _tap_configuration_row,
@@ -216,6 +219,97 @@ def test_auto_pick_repair_refuses_move_without_one_rank_progress():
                 row_near_fn=lambda *_args, **_kwargs: None,
                 sleep_fn=lambda _seconds: None,
             )
+
+
+def test_auto_pick_repair_confirms_delayed_rank_progress_before_failing():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    expected = [
+        "perk_wave_requirement",
+        "game_speed",
+        "coin_tradeoff",
+    ]
+    coin_row = {
+        **_row("coin_tradeoff", 2),
+        "key": "coin_tradeoff",
+    }
+    locate_results = [
+        (4, frame, coin_row),
+        (4, frame, coin_row),
+        (3, frame, coin_row),
+    ]
+    sleeps = []
+
+    with (
+        patch(
+            "core.home_perk_configuration._locate_auto_pick_key",
+            side_effect=locate_results,
+        ) as locate,
+        patch(
+            "core.home_perk_configuration._tap_configuration_row",
+            return_value=frame,
+        ) as tap,
+        patch(
+            "core.home_perk_configuration._scroll_configuration_top",
+            return_value=frame,
+        ),
+        patch(
+            "core.home_perk_configuration._capture_ranked_frames",
+            return_value=([frame], frame),
+        ),
+        patch(
+            "core.home_perk_configuration.extract_ranked_auto_pick_order",
+            return_value={
+                "quality": {"valid": True},
+                "selected": [{"key": key} for key in expected],
+            },
+        ),
+    ):
+        _repair_auto_pick_order(
+            frame,
+            expected,
+            capture_fn=lambda: frame,
+            detector=lambda _frame: {"state": "PERKS"},
+            safe_tap_fn=lambda *_args, **_kwargs: True,
+            visible_fn=lambda *_args, **_kwargs: True,
+            swipe_fn=lambda _key: True,
+            row_fn=lambda _frame: [],
+            row_near_fn=lambda *_args, **_kwargs: None,
+            observed_keys=[
+                "perk_wave_requirement",
+                "game_speed",
+                "golden_tower_bonus",
+            ],
+            sleep_fn=sleeps.append,
+        )
+
+    assert locate.call_count == 3
+    assert tap.call_count == 1
+    assert 0.8 in sleeps
+
+
+def test_close_to_home_waits_for_new_battle_control_after_home_appears():
+    unknown = np.full((1920, 1080, 3), 10, dtype=np.uint8)
+    new_battle = np.full((1920, 1080, 3), 20, dtype=np.uint8)
+    captures = iter((unknown, new_battle))
+    sleeps = []
+
+    result = _close_to_home(
+        unknown,
+        capture_fn=lambda: next(captures),
+        detector=lambda _frame: {"state": "HOME_SCREEN"},
+        detect_home_control_fn=lambda frame: SimpleNamespace(
+            control=(
+                HomeBattleControl.UNKNOWN
+                if frame is unknown
+                else HomeBattleControl.NEW_BATTLE
+            )
+        ),
+        tap_visible_fn=lambda *_args, **_kwargs: True,
+        sleep_fn=sleeps.append,
+    )
+
+    assert result is new_battle
+    assert sleeps == [0.25]
 
 
 def test_ban_repair_toggles_only_the_strategy_set():
