@@ -49,13 +49,14 @@ FARM_AUTO_PICK_ORDER = (
     "coins_bonus",
     "free_upgrade_chance",
     "orbs",
-    "damage",
     "enemy_health_tradeoff",
-    "boss_health_tradeoff",
-    "enemy_speed_tradeoff",
-    "ranged_distance_tradeoff",
     "tower_damage_boss_health_tradeoff",
+    "enemy_speed_tradeoff",
+    "boss_health_tradeoff",
+    "ranged_distance_tradeoff",
     "chain_lightning_damage",
+    "inner_land_mines",
+    "damage",
 )
 
 PERK_CONFIGURATION_LABELS = {

@@ -657,6 +657,28 @@ class FarmProfileTests(unittest.TestCase):
                 )
                 self.assertEqual(generated, build_strategy_yaml(self._source(profile_name)))
 
+    def test_shared_auto_pick_order_applies_to_current_and_future_farm_profiles(self):
+        sources = [self._source(name) for name in FARM_PROFILE_NAMES]
+        future_source = self._source()
+        future_source["meta"].update(name="farm_t20", tier=20)
+        sources.append(future_source)
+
+        for source in sources:
+            with self.subTest(profile=source["meta"]["name"]):
+                plan = build_strategy_yaml(source)
+                self.assertEqual(
+                    plan["session_preflight"]["requirements"][
+                        "perk_auto_pick_order"
+                    ],
+                    list(FARM_AUTO_PICK_ORDER),
+                )
+                self.assertEqual(
+                    plan["run_configuration"]["settings"][
+                        "perk_auto_pick_order"
+                    ],
+                    list(FARM_AUTO_PICK_ORDER),
+                )
+
     def test_farm_profile_resolves_invariants_and_tier_loadout(self):
         plan = build_strategy_yaml(self._source())
         requirements = plan["session_preflight"]["requirements"]

@@ -270,19 +270,20 @@ is:
 7. Coins Bonus
 8. Free Upgrade Chance
 9. Orbs
-10. Damage
-11. Enemy Health / Tower Regen and Lifesteal Trade-Off
-12. Boss Health / Boss Speed Trade-Off
-13. Enemy Speed / Enemy Damage Trade-Off
+10. Enemy Health / Tower Regen and Lifesteal Trade-Off
+11. Tower Damage / Boss Health Trade-Off
+12. Enemy Speed / Enemy Damage Trade-Off
+13. Boss Health / Boss Speed Trade-Off
 14. Ranged Distance / Ranged Damage Trade-Off
-15. Tower Damage / Boss Health Trade-Off
-16. Chain Lightning Damage
+15. Chain Lightning Damage
+16. Inner Land Mines
+17. Damage
 
 The operator's planned continuation when additional ranking slots are
-available is Inner Land Mines, Spotlight Damage, Bounce Shot, Defense Percent,
-Health Regen, Max Health, Smart Missiles, then the Health Regen / Max Health
-tradeoff. These rows are recognized semantically, but they are not required by
-the current 16-slot profile.
+available is Spotlight Damage, Bounce Shot, Defense Percent, Health Regen, Max
+Health, Smart Missiles, then the Health Regen / Max Health tradeoff. These rows
+are recognized semantically, but they are not required by the current 17-slot
+profile.
 
 Farm and Tournament also declare the recharge activation mode for both
 death-prevention Cards:
