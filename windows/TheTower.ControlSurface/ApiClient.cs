@@ -10,6 +10,7 @@ namespace TheTower.ControlSurface;
 public sealed class ControlSurfaceApi : IDisposable
 {
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(120) };
+    private readonly object _configurationGate = new();
     private readonly JsonSerializerOptions _json = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -24,8 +25,11 @@ public sealed class ControlSurfaceApi : IDisposable
         {
             throw new ArgumentException("API URL must be an absolute HTTP or HTTPS URL.");
         }
-        _baseUrl = uri.ToString().TrimEnd('/');
-        _token = token.Trim();
+        lock (_configurationGate)
+        {
+            _baseUrl = uri.ToString().TrimEnd('/');
+            _token = token.Trim();
+        }
     }
 
     public Task<StatusResponse> GetStatusAsync(CancellationToken cancellationToken) =>
@@ -97,6 +101,14 @@ public sealed class ControlSurfaceApi : IDisposable
         CancellationToken cancellationToken) =>
         PostAsync<StatusResponse>("/api/v1/process", payload, cancellationToken);
 
+    public Task<HostPerformancePublishResponse> PostHostPerformanceAsync(
+        HostPerformanceBatch payload,
+        CancellationToken cancellationToken) =>
+        PostAsync<HostPerformancePublishResponse>(
+            "/api/v1/host-performance",
+            payload,
+            cancellationToken);
+
     private async Task<T> GetAsync<T>(string path, CancellationToken cancellationToken)
     {
         using var request = CreateRequest(HttpMethod.Get, path);
@@ -124,10 +136,19 @@ public sealed class ControlSurfaceApi : IDisposable
 
     private HttpRequestMessage CreateRequest(HttpMethod method, string path)
     {
-        var request = new HttpRequestMessage(method, _baseUrl + path);
-        if (!string.IsNullOrEmpty(_token))
+        string baseUrl;
+        string token;
+        lock (_configurationGate)
         {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
+            baseUrl = _baseUrl;
+            token = _token;
+        }
+        var request = new HttpRequestMessage(method, baseUrl + path);
+        if (!string.IsNullOrEmpty(token))
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue(
+                "Bearer",
+                token);
         }
         request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true };
         return request;

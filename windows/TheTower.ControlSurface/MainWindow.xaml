@@ -115,6 +115,43 @@
                        FontWeight="SemiBold" />
           </Grid>
         </Border>
+        <Border x:Name="HostPerformancePanel"
+                Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="0,1,0,0"
+                Padding="9,7"
+                Margin="0,4,0,0">
+          <UniformGrid Columns="7">
+            <StackPanel>
+              <TextBlock Text="HOST HEALTH" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+              <TextBlock x:Name="HostHealthText" Text="Starting" FontWeight="Bold" />
+            </StackPanel>
+            <StackPanel>
+              <TextBlock Text="HOST CPU" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+              <TextBlock x:Name="HostCpuText" Text="-" FontWeight="Bold" />
+            </StackPanel>
+            <StackPanel>
+              <TextBlock Text="MEMORY" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+              <TextBlock x:Name="HostMemoryText" Text="-" FontWeight="Bold" />
+            </StackPanel>
+            <StackPanel>
+              <TextBlock Text="CPU CLOCK" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+              <TextBlock x:Name="HostClockText" Text="-" FontWeight="Bold" />
+            </StackPanel>
+            <StackPanel>
+              <TextBlock Text="BLUESTACKS CPU" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+              <TextBlock x:Name="BlueStacksCpuText" Text="-" FontWeight="Bold" />
+            </StackPanel>
+            <StackPanel>
+              <TextBlock Text="BLUESTACKS RAM" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+              <TextBlock x:Name="BlueStacksMemoryText" Text="-" FontWeight="Bold" />
+            </StackPanel>
+            <StackPanel>
+              <TextBlock Text="TELEMETRY" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+              <TextBlock x:Name="HostTelemetryQueueText" Text="Local only" FontWeight="Bold" />
+            </StackPanel>
+          </UniformGrid>
+        </Border>
       </StackPanel>
     </Border>
 

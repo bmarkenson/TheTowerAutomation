@@ -11,6 +11,7 @@ namespace TheTower.ControlSurface;
 public partial class MainWindow : Window
 {
     private readonly ControlSurfaceApi _api = new();
+    private readonly HostPerformanceTracker _hostPerformance;
     private readonly SshTunnelManager _sshTunnel = new();
     private readonly ClientSettings _settings;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(5) };
@@ -68,6 +69,8 @@ public partial class MainWindow : Window
         RemoteApiPortBox.Text = _settings.RemoteApiPort.ToString(CultureInfo.InvariantCulture);
         WindowPlacementStore.Restore(this, _settings.MainWindowPlacement);
         _api.Configure(_settings.BaseUrl, "");
+        _hostPerformance = new HostPerformanceTracker(_api);
+        _hostPerformance.SnapshotUpdated += HostPerformance_SnapshotUpdated;
         _sshTunnel.Exited += Tunnel_Exited;
         _timer.Tick += async (_, _) => await Task.WhenAll(
             RefreshStatusAsync(),
@@ -77,6 +80,7 @@ public partial class MainWindow : Window
         ActivityScopeFilter.SelectionChanged += ActivityScopeFilter_SelectionChanged;
         Loaded += async (_, _) =>
         {
+            _hostPerformance.Start();
             _timer.Start();
             _activityTimer.Start();
             await Task.WhenAll(
@@ -98,6 +102,8 @@ public partial class MainWindow : Window
             _activityRefreshCancellation?.Cancel();
             _battleHistoryWindow?.Close();
             _sshTunnel.Dispose();
+            _hostPerformance.SnapshotUpdated -= HostPerformance_SnapshotUpdated;
+            _hostPerformance.Dispose();
             _api.Dispose();
         };
     }
@@ -1128,6 +1134,12 @@ public partial class MainWindow : Window
         var runtime = status.Runtime.Instances.FirstOrDefault(instance => instance.Active)
             ?? status.Runtime.Instances.FirstOrDefault();
         var service = status.ProcessService;
+        _hostPerformance.UpdateServerContext(
+            status.Control.AdbPort ?? service?.AdbPort,
+            status.CurrentRun?.RunId,
+            status.Capabilities.Contains(
+                "host_performance_telemetry_v1",
+                StringComparer.Ordinal));
         ServiceText.Text = service is null
             ? "API restart needed"
             : service.Available
@@ -1416,6 +1428,100 @@ public partial class MainWindow : Window
             ?? service?.StrategyError
             ?? service?.StartupGatePolicyError
             ?? "";
+    }
+
+    private void HostPerformance_SnapshotUpdated(
+        object? sender,
+        HostPerformanceSnapshot snapshot)
+    {
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+        {
+            return;
+        }
+        _ = Dispatcher.BeginInvoke(
+            () => RenderHostPerformance(snapshot),
+            DispatcherPriority.Background);
+    }
+
+    private void RenderHostPerformance(HostPerformanceSnapshot snapshot)
+    {
+        HostHealthText.Text = $"{snapshot.StateLabel} · {snapshot.HostName}";
+        HostHealthText.Foreground = snapshot.State switch
+        {
+            HostPerformanceHealthState.Healthy =>
+                new SolidColorBrush(Color.FromRgb(73, 214, 157)),
+            HostPerformanceHealthState.Critical =>
+                new SolidColorBrush(Color.FromRgb(255, 113, 135)),
+            HostPerformanceHealthState.Attention
+                or HostPerformanceHealthState.Stale
+                or HostPerformanceHealthState.BlueStacksNotDetected =>
+                new SolidColorBrush(Color.FromRgb(241, 191, 91)),
+            _ => (Brush)FindResource("MutedBrush"),
+        };
+        HostCpuText.Text = FormatPercent(snapshot.HostCpuPercent);
+        HostMemoryText.Text = snapshot.HostMemoryUsedPercent is null
+            ? "-"
+            : $"{FormatPercent(snapshot.HostMemoryUsedPercent)} · "
+                + $"{FormatBytes(snapshot.HostAvailableMemoryBytes)} free";
+        HostClockText.Text = snapshot.HostCpuFrequencyMhz is null
+            ? "-"
+            : $"{snapshot.HostCpuFrequencyMhz.Value / 1000.0:F2} GHz"
+                + (snapshot.HostCpuFrequencyRatio is null
+                    ? ""
+                    : $" · {snapshot.HostCpuFrequencyRatio.Value:P0}");
+        BlueStacksCpuText.Text = snapshot.BlueStacksCpuPercent is null
+            ? snapshot.BlueStacksProcessCount == 0 ? "Not detected" : "-"
+            : $"{snapshot.BlueStacksCpuPercent.Value:F1}% host"
+                + (snapshot.BlueStacksCpuCorePercent is null
+                    ? ""
+                    : $" · {snapshot.BlueStacksCpuCorePercent.Value / 100.0:F1} cores");
+        BlueStacksMemoryText.Text = snapshot.BlueStacksProcessCount == 0
+            ? "-"
+            : $"{FormatBytes(snapshot.BlueStacksWorkingSetBytes)} · "
+                + $"{snapshot.BlueStacksProcessCount} proc";
+        HostTelemetryQueueText.Text = !snapshot.UploadEnabled
+            ? $"Local only · {snapshot.PendingAggregateCount} queued"
+            : snapshot.PendingAggregateCount == 0
+                ? snapshot.LastUploadedAtUtc is null
+                    ? "Buffering"
+                    : "Published"
+                : $"{snapshot.PendingAggregateCount} queued";
+        if (snapshot.DroppedAggregateCount > 0)
+        {
+            HostTelemetryQueueText.Text +=
+                $" · {snapshot.DroppedAggregateCount} dropped";
+        }
+
+        var details = new List<string>
+        {
+            snapshot.SampledAtUtc is null
+                ? "No host sample is available yet."
+                : $"Sampled {snapshot.SampledAtUtc.Value.ToLocalTime():T}.",
+            $"Sampler cost: "
+                + $"{snapshot.SampleDurationMilliseconds?.ToString("F2", CultureInfo.InvariantCulture) ?? "-"} ms/sample.",
+            $"BlueStacks I/O: read "
+                + $"{FormatRate(snapshot.BlueStacksIoReadBytesPerSecond)}, write "
+                + $"{FormatRate(snapshot.BlueStacksIoWriteBytesPerSecond)}.",
+            snapshot.LastUploadedAtUtc is null
+                ? "No aggregate has been acknowledged by Linux in this session."
+                : $"Last Linux acknowledgement: "
+                    + $"{snapshot.LastUploadedAtUtc.Value.ToLocalTime():T}.",
+        };
+        if (!string.IsNullOrWhiteSpace(snapshot.SamplerError))
+        {
+            details.Add($"Sampler: {snapshot.SamplerError}");
+        }
+        if (!string.IsNullOrWhiteSpace(snapshot.StorageError))
+        {
+            details.Add($"Local spool: {snapshot.StorageError}");
+        }
+        if (!string.IsNullOrWhiteSpace(snapshot.UploadError))
+        {
+            details.Add($"Upload: {snapshot.UploadError}");
+        }
+        HostPerformancePanel.ToolTip = string.Join(
+            Environment.NewLine,
+            details);
     }
 
     private void RenderBattles(BattleListResponse response)
@@ -1879,6 +1985,34 @@ public partial class MainWindow : Window
                 ? $"{seconds / 60}m"
                 : $"{seconds / 3600}h {seconds % 3600 / 60}m";
     }
+
+    private static string FormatPercent(double? value) =>
+        value is null
+            ? "-"
+            : $"{value.Value:F1}%";
+
+    private static string FormatBytes(ulong? value) =>
+        value is null ? "-" : FormatByteValue(value.Value);
+
+    private static string FormatBytes(long? value) =>
+        value is null ? "-" : FormatByteValue(Math.Max(0, value.Value));
+
+    private static string FormatByteValue(double value)
+    {
+        string[] units = ["B", "KiB", "MiB", "GiB", "TiB"];
+        var unit = 0;
+        while (value >= 1024.0 && unit < units.Length - 1)
+        {
+            value /= 1024.0;
+            unit++;
+        }
+        return $"{value:F1} {units[unit]}";
+    }
+
+    private static string FormatRate(double? bytesPerSecond) =>
+        bytesPerSecond is null
+            ? "-"
+            : $"{FormatByteValue(Math.Max(0, bytesPerSecond.Value))}/s";
 
     private static string FormatObservation(ObservationStatus observation)
     {

@@ -30,11 +30,13 @@ from core.control_surface import (
     ControlSurfaceRequestError,
     ControlSurfaceService,
 )
+from core.host_performance import DEFAULT_HOST_PERFORMANCE_RETENTION_DAYS
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "control_surface"
 DEFAULT_TOKEN_ENV = "THETOWER_CONTROL_TOKEN"
 MAX_REQUEST_BYTES = 8192
+MAX_HOST_PERFORMANCE_REQUEST_BYTES = 512 * 1024
 DISCARD_PURGE_INTERVAL_SECONDS = 6 * 60 * 60
 
 
@@ -75,7 +77,11 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         parsed = urlsplit(self.path)
-        if parsed.path not in {"/api/v1/control", "/api/v1/process"}:
+        if parsed.path not in {
+            "/api/v1/control",
+            "/api/v1/process",
+            "/api/v1/host-performance",
+        }:
             self._json_error(HTTPStatus.NOT_FOUND, "Endpoint not found")
             return
         if not self._authorized():
@@ -92,18 +98,25 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
         except ValueError:
             self._json_error(HTTPStatus.BAD_REQUEST, "Invalid Content-Length")
             return
-        if length <= 0 or length > MAX_REQUEST_BYTES:
+        maximum_length = (
+            MAX_HOST_PERFORMANCE_REQUEST_BYTES
+            if parsed.path == "/api/v1/host-performance"
+            else MAX_REQUEST_BYTES
+        )
+        if length <= 0 or length > maximum_length:
             self._json_error(
                 HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
-                f"JSON body must be between 1 and {MAX_REQUEST_BYTES} bytes",
+                f"JSON body must be between 1 and {maximum_length} bytes",
             )
             return
         try:
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
             if parsed.path == "/api/v1/control":
                 response = self.server.service.apply_control(payload)
-            else:
+            elif parsed.path == "/api/v1/process":
                 response = self.server.service.apply_process_action(payload)
+            else:
+                response = self.server.service.publish_host_performance(payload)
         except UnicodeDecodeError:
             self._json_error(HTTPStatus.BAD_REQUEST, "Body must be UTF-8 JSON")
             return
@@ -310,6 +323,15 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         type=int,
         default=DEFAULT_DISCARDED_BATTLE_RETENTION_DAYS,
     )
+    parser.add_argument(
+        "--host-performance-db",
+        default="logs/host_performance.sqlite3",
+    )
+    parser.add_argument(
+        "--host-performance-retention-days",
+        type=int,
+        default=DEFAULT_HOST_PERFORMANCE_RETENTION_DAYS,
+    )
     parser.add_argument("--stale-after-seconds", type=int, default=180)
     parser.add_argument(
         "--automation-service",
@@ -339,6 +361,8 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         parser.error("--stale-after-seconds must be positive")
     if args.discarded_battle_retention_days <= 0:
         parser.error("--discarded-battle-retention-days must be positive")
+    if args.host_performance_retention_days <= 0:
+        parser.error("--host-performance-retention-days must be positive")
     try:
         SystemdAutomationManager(
             args.automation_service,
@@ -378,6 +402,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         tournaments_dir=args.tournaments_dir,
         discarded_battles_dir=args.discarded_battles_dir,
         discarded_battle_retention_days=args.discarded_battle_retention_days,
+        host_performance_db=args.host_performance_db,
+        host_performance_retention_days=args.host_performance_retention_days,
         stale_after_seconds=args.stale_after_seconds,
         process_manager=process_manager,
     )

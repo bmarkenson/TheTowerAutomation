@@ -779,9 +779,12 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert 'Text="PREVIOUS DISTINCT STATE"' in native_xaml
     assert 'id="reducedGameSpeedButton"' in html
     assert 'Content="Reduced x4.0"' in native_xaml
-    assert "MinimumServerRevision = 11" in native_compatibility
+    assert "MinimumServerRevision = 12" in native_compatibility
     assert '"current_run_activity_scope"' in native_compatibility
     assert '"game_speed_mode"' in native_compatibility
+    assert '"host_performance_telemetry_v1"' in native_compatibility
+    assert 'Text="HOST HEALTH"' in native_xaml
+    assert 'Text="BLUESTACKS CPU"' in native_xaml
 
 
 def test_native_incompatible_api_has_prominent_start_mitigation():
@@ -920,6 +923,10 @@ def test_activity_current_run_scope_uses_explicit_boundary(tmp_path, monkeypatch
     assert [entry["message"] for entry in response["items"]] == [
         "Current preflight action"
     ]
+    assert service.status()["current_run"] == {
+        "run_id": scope["run_id"],
+        "started_at": scope["started_at"],
+    }
 
 
 def test_activity_current_run_scope_reports_missing_boundary_fallback(tmp_path):

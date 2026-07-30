@@ -152,6 +152,12 @@ that the lower value improved whole-run coins per hour.
   cannot by itself establish that perks or Target Priority were worse.
 - The next comparison value is `1E-19%`. This is a control choice, not a
   permanent optimum.
+- The operator confirmed both anomalous 2026-07-29 T19 runs
+  (`Battle20260729T084914-0700` and `Battle20260729T124104-0700`) used
+  Damage Slider `100%`. Their records retain the then-current `preserve`
+  policy rather than an observed slider value, so this is operator evidence,
+  but it excludes a deliberately low cap as the explanation for those two
+  runs' collapsed entity throughput.
 - The T18 Farm profile currently enforces `1E-22%`; the T19 Farm profile now
   enforces the `1E-19%` comparison value. Those policies are repository facts,
   not evidence that either number is permanently optimal.

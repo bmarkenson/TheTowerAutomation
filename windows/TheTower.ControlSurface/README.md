@@ -221,6 +221,23 @@ systemd MainPID, lock PID, lock/PID liveness, and whether the two identities
 agree. Stale lock metadata is retained for diagnosis but is not promoted as a
 live process PID.
 
+The **HOST HEALTH** strip is measured locally on Windows once per second, even
+when the SSH tunnel is down. It shows host CPU/memory/clock, combined BlueStacks
+CPU and RAM, detected process count, and aggregate publication state. Hover over
+the strip for BlueStacks I/O, sampler cost, last Linux acknowledgement, and
+errors. Sampling uses native counters on a below-normal-priority worker; it does
+not capture the screen or start PowerShell, WMI, `nvidia-smi`, or another
+per-sample process.
+
+Raw samples remain in a two-minute memory ring. Approximately ten-second
+aggregates are queued in
+`%LOCALAPPDATA%\TheTower\host-performance-pending.jsonl` before upload, so an
+API or tunnel outage does not discard recent telemetry. The bounded queue keeps
+the newest nominal 24 hours and reconnects automatically. Linux stores
+idempotent aggregates in `logs/host_performance.sqlite3` with sample-time host,
+ADB-port, UTC, and fresh current-run correlation. This requires server revision
+12 and capability `host_performance_telemetry_v1`.
+
 The Process Lifecycle panel also shows the managed localhost ADB port. While
 automation is stopped, **Save** stores the value on Linux for the next managed
 start. While a live runtime has acknowledged indefinite **Pause**, the same

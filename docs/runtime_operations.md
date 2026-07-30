@@ -401,6 +401,46 @@ start. An absent file defaults to port `5555`, strategy `farm`, and immediate
 startup gates. Explicit manual `main.py --adb-port PORT --strategy NAME
 --startup-gates POLICY` arguments still win.
 
+#### Windows host-performance tracker
+
+The native client starts its local performance tracker with the window. The
+**HOST HEALTH** strip updates from Windows once per second; it does not wait for
+the SSH tunnel or Linux API. It shows host CPU/memory/clock, combined BlueStacks
+CPU and working set, process count, and whether ten-second aggregates are
+published or waiting locally. Hover over the strip for sample cost, BlueStacks
+read/write rate, last Linux acknowledgement, and any sampling, spool, or upload
+error.
+
+The tracker is intentionally passive: it uses native Windows counters and
+cached process handles on a below-normal-priority worker. It does not capture
+the emulator screen, invoke ADB, or start PowerShell, WMI, `nvidia-smi`, or
+another command. The performance strip therefore does not establish that a
+game screen, battle, or automation process is current; use the ordinary
+runtime evidence for those claims.
+
+Raw one-second data remains only in a 120-sample memory ring. Ten-second
+aggregates are first persisted at
+`%LOCALAPPDATA%\TheTower\host-performance-pending.jsonl`; host identity is
+stable across client restarts through the adjacent
+`host-performance-host-id` file. The spool retains the newest nominal 24 hours
+and reconnects automatically. Do not delete it during an API/tunnel outage if
+the pending evidence is still needed. The GUI reports both pending and dropped
+aggregate counts.
+
+Linux accepts idempotent batches into `logs/host_performance.sqlite3`, retains
+30 days by default, and keeps sample-time and ingest-time run identities
+separate. The service options `--host-performance-db` and
+`--host-performance-retention-days` can change those defaults. Deploying this
+client requires server revision 12 and capability
+`host_performance_telemetry_v1`; use the existing confirmed **Restart Linux API
+service** path after updating the Linux checkout.
+
+The aggregate's `sample_duration_ms` and `control_surface_cpu_percent` fields
+support Windows-side budget validation. The target is below 0.5% average CPU
+without frame telemetry. PresentMon is not started by this version; a later
+targeted provider must aggregate frames in memory and keep the combined average
+below 1%.
+
 Selecting Tournament, or starting the stopped managed service with Tournament
 selected, authorizes one validation run. The control file records a durable
 request tied to that exact strategy request and generated-plan fingerprint.

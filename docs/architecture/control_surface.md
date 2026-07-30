@@ -14,6 +14,7 @@ Native Windows app
 Linux loopback HTTP server
       ├── write ──► logs/automation_ctl.json ──► automation supervisor
       ├── write ──► ~/.config/thetower/automation-adb.env ──► next-start config
+      ├── write ──► logs/host_performance.sqlite3
       ├── manage ► fixed thetower-automation.service
       ├── read  ──► logs/actions.log
       ├── read  ──► logs/activity_scope.json
@@ -40,6 +41,9 @@ agnostic.
   heartbeat. A lock file by itself may be stale.
 - Completed-battle JSON is the authoritative statistics source. List responses
   are compact summaries; the full record is loaded only when selected.
+- Windows host-performance telemetry is observational. Publishing an aggregate
+  cannot change automation intent, process state, ADB ownership, or device
+  input authority.
 - Battle type is evidence-based. A Tournament Results terminal identifies a
   Tournament; standard Game Over plus the shared Tournament/Milestone profile
   identifies a Milestone; Farm strategy/profile identity identifies Farm.
@@ -157,9 +161,10 @@ memory only. The API deliberately sends no CORS permission.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/v1/status` | Server revision/capabilities, control intent, acknowledgement, latest observation, and runtime evidence |
+| `GET` | `/api/v1/status` | Server revision/capabilities, control intent, acknowledgement, current-run identity, latest observation, and runtime evidence |
 | `POST` | `/api/v1/control` | Allowlisted control mutation |
 | `POST` | `/api/v1/process` | Start/stop or guarded-reload the fixed systemd automation unit, select its startup-gate policy, save/queue/adopt a bundled strategy, or configure/safely hand off its ADB port |
+| `POST` | `/api/v1/host-performance` | Bounded, idempotent batches of native Windows host/BlueStacks performance aggregates |
 | `GET` | `/api/v1/battles?limit=N` | Newest Battle and Tournament summaries |
 | `GET` | `/api/v1/battles/{battle_id}` | One full structured battle record |
 | `GET` | `/api/v1/activity?limit=N&levels=ERROR,WARN&scope=current_run&after=CURSOR` | Recent structured action-log entries, optionally filtered by level, explicit run scope, and opaque clear-view cursor |
@@ -196,6 +201,41 @@ Activity responses include an opaque end cursor;
 the client's non-destructive `Clear view` sends that cursor back as `after` and
 can restore the complete selected scope at any time. Server revision 10
 advertises this as the `current_run_activity_scope` capability.
+
+## Windows host-performance telemetry
+
+The native client owns host measurement because the relevant counters live on
+Windows. A dedicated below-normal-priority thread samples once per second using
+native system times, memory status, processor power information, and cached
+BlueStacks process time/memory/I/O counters. BlueStacks process discovery runs
+once per ten samples. The path does not capture the screen or launch
+PowerShell, WMI, `nvidia-smi`, or another process per sample.
+
+The client retains 120 raw samples in memory and reduces each ten-sample window
+to averages and extrema. An ADB-port or run-identity transition closes the
+current window early rather than mixing correlations. Each aggregate carries a
+stable locally generated host ID, Windows host name, client session/sequence,
+UTC window, logical-processor count, ADB port, and the run ID observed through
+the status API. A run ID expires from new samples when status has not refreshed
+for 15 seconds; outage telemetry remains available without being falsely
+assigned to a later run.
+
+Aggregates first enter
+`%LOCALAPPDATA%\TheTower\host-performance-pending.jsonl`. The bounded spool
+keeps the newest 24 hours at the nominal ten-second cadence and reports any
+drops in the GUI. Upload resumes in bounded batches after an API or tunnel
+outage. Aggregate UUIDs are primary keys in
+`logs/host_performance.sqlite3`, so retrying after a lost response is safe. The
+Linux store also records the server's current run at ingest as separate
+diagnostic context, keeps the sample-time run authoritative, and prunes records
+after 30 days by default. Server revision 12 advertises capability
+`host_performance_telemetry_v1`.
+
+The no-frame-telemetry target is below 0.5% average host CPU. Aggregate fields
+include control-surface CPU and sampling duration so the Windows deployment can
+verify that budget. A later targeted PresentMon provider should feed frame
+statistics into the same in-memory aggregation/spool path, never emit one
+record per presented frame, and keep total average CPU below 1%.
 
 Control request examples:
 
@@ -238,6 +278,11 @@ Process request examples:
   under it; the native client also distinguishes saved intent from runtime
   acknowledgement. This requires server revision 11 and capability
   `game_speed_mode`.
+- Native Windows host health for system CPU, memory, processor clock,
+  BlueStacks CPU/RAM/process identity, and local publication state. Hovering
+  the strip shows sampling cost, BlueStacks I/O, last Linux acknowledgement,
+  and any sampler/spool/upload error. The display remains local and current
+  while the API is unavailable.
 - Automatic startup-gate decision dialogs for requests published by the
   runtime. The API accepts only an option contained in the matching pending
   request. Retry re-runs the check with fresh evidence; a bypass or configured
@@ -333,16 +378,20 @@ These are the next useful additions, in approximate priority order:
    checks. The GUI must not implement them as direct taps.
 3. Detect likely manual-player activity, automatically yield tap authority, and
    show the grace-period countdown and ownership in the GUI.
-4. Add an optional current screenshot with capture time and a prominent stale
+4. Add targeted opt-in PresentMon frame telemetry through the existing
+   in-memory host-performance aggregation path. Scope collection to the
+   BlueStacks renderer, retain summaries rather than individual frames, and
+   validate the combined one-percent CPU budget on Windows.
+5. Add an optional current screenshot with capture time and a prominent stale
    watermark. It should remain read-only and rate-limited.
-5. Add battle comparisons, trend charts, and aggregate rates by strategy, tier,
+6. Add battle comparisons, trend charts, and aggregate rates by strategy, tier,
    profile, battle type, and date range.
-6. Add opt-in notifications for battle completion, invalid capture quality,
+7. Add opt-in notifications for battle completion, invalid capture quality,
    stale runtime, control acknowledgement timeout, and blocked preflight.
-7. Extend next-start strategy selection to safe custom YAML plans. Such changes
+8. Extend next-start strategy selection to safe custom YAML plans. Such changes
    should show a resolved configuration diff before they take effect.
-8. Support multiple ADB targets with independent authority, history, and health
+9. Support multiple ADB targets with independent authority, history, and health
    views.
-9. If access expands beyond an SSH tunnel and one trusted operator, add TLS,
+10. If access expands beyond an SSH tunnel and one trusted operator, add TLS,
    named users/roles, request IDs, and a durable control audit log before adding
    more write operations.

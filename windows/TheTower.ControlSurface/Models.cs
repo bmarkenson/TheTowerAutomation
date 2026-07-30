@@ -28,6 +28,9 @@ public sealed class StatusResponse
     [JsonPropertyName("prior_transition")]
     public ObservationStatus? PriorTransition { get; set; }
 
+    [JsonPropertyName("current_run")]
+    public CurrentRunStatus? CurrentRun { get; set; }
+
     [JsonPropertyName("runtime")]
     public RuntimeStatus Runtime { get; set; } = new();
 
@@ -36,6 +39,15 @@ public sealed class StatusResponse
 
     [JsonPropertyName("request")]
     public RequestStatus? Request { get; set; }
+}
+
+public sealed class CurrentRunStatus
+{
+    [JsonPropertyName("run_id")]
+    public string RunId { get; set; } = "";
+
+    [JsonPropertyName("started_at")]
+    public string? StartedAt { get; set; }
 }
 
 public sealed class AcknowledgementStatus

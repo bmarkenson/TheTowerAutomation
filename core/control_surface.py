@@ -25,6 +25,12 @@ from core.gate_decisions import startup_gate_context_for_strategy
 from core.exclusive_validation import (
     exclusive_validation_definition_for_strategy,
 )
+from core.host_performance import (
+    DEFAULT_HOST_PERFORMANCE_RETENTION_DAYS,
+    HostPerformancePayloadError,
+    HostPerformanceStorageError,
+    HostPerformanceStore,
+)
 from utils.logger import DEFAULT_ACTIVITY_SCOPE_FILENAME
 
 
@@ -32,7 +38,7 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 11
+CONTROL_SURFACE_REVISION = 12
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -42,6 +48,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "exclusive_strategy_validation_status",
     "explicit_strategy_disposition",
     "game_speed_mode",
+    "host_performance_telemetry_v1",
     "selected_strategy_process_start",
     "tournament_launch_confirmation",
 )
@@ -111,6 +118,10 @@ class ControlSurfaceService:
         discarded_battle_retention_days: int = (
             DEFAULT_DISCARDED_BATTLE_RETENTION_DAYS
         ),
+        host_performance_db: Path | str = "logs/host_performance.sqlite3",
+        host_performance_retention_days: int = (
+            DEFAULT_HOST_PERFORMANCE_RETENTION_DAYS
+        ),
         activity_scope_file: Path | str | None = None,
         stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS,
         process_manager: Optional[SystemdAutomationManager] = None,
@@ -129,6 +140,10 @@ class ControlSurfaceService:
         self.discarded_battle_retention_days = max(
             1,
             int(discarded_battle_retention_days),
+        )
+        self.host_performance_store = HostPerformanceStore(
+            self._resolve_path(host_performance_db),
+            retention_days=host_performance_retention_days,
         )
         self.stale_after_seconds = max(1, int(stale_after_seconds))
         self.control_store = ControlDirectiveStore(self.control_path)
@@ -196,6 +211,7 @@ class ControlSurfaceService:
             process_service,
         )
         healthy = bool(runtime["active"] and observation and not observation["stale"])
+        current_run = self._load_activity_scope()
 
         return {
             "api_version": 1,
@@ -209,9 +225,41 @@ class ControlSurfaceService:
             "acknowledgements": acknowledgements,
             "observation": observation,
             "prior_transition": prior_transition,
+            "current_run": (
+                {
+                    "run_id": current_run["run_id"],
+                    "started_at": current_run["started_at"],
+                }
+                if current_run is not None
+                else None
+            ),
             "runtime": runtime,
             "process_service": process_service,
         }
+
+    def publish_host_performance(
+        self,
+        request: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Persist idempotent Windows host-performance aggregates."""
+
+        current_run = self._load_activity_scope()
+        try:
+            return self.host_performance_store.publish(
+                request,
+                server_run_id=(
+                    current_run["run_id"]
+                    if current_run is not None
+                    else None
+                ),
+            )
+        except HostPerformancePayloadError as exc:
+            raise ControlSurfaceRequestError(str(exc)) from exc
+        except HostPerformanceStorageError as exc:
+            raise ControlSurfaceRequestError(
+                f"Unable to persist host-performance telemetry: {exc}",
+                status=503,
+            ) from exc
 
     def apply_control(self, request: Mapping[str, Any]) -> dict[str, Any]:
         """Apply one allowlisted control-file mutation and return fresh status."""
