@@ -8,6 +8,47 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Known ADB outage flooded the complete action log
+
+- **Observed:** 2026-07-31 after the operator requested indefinite Pause at
+  `08:28:18` PDT and stopped the BlueStacks emulator on `localhost:5555`.
+- **Symptom:** From the first empty capture at `08:28:31` through the diagnostic
+  cutoff at `11:28:02`, the runtime wrote 22,116 outage-related lines and made
+  5,699 logged connection attempts, or approximately one every 1.9 seconds.
+  The useful persistent-outage warning correctly appeared after three failures
+  and then approximately every five minutes, but it was buried under per-cycle
+  capture and reconnect detail.
+- **Cause:** The Linux automation runtime remained alive and correctly retained
+  `PAUSED`; stopping the native Windows GUI does not stop that runtime.
+  `App._capture_frame()` first called the screenshot path, whose empty result
+  logged an `ERROR`; it then called the reconnect helper, which logged attempt
+  and failure `DEBUG` entries; and finally logged a capture `FAIL` before a
+  two-second delay. The independent 30-second watchdog called the same helper.
+  The shared warning counter rate-limited `WARN`, but it neither coalesced the
+  lower-level entries nor serialized reconnect scheduling across callers.
+- **Safety response:** Pause blocked strategy, handler, and watchdog inputs.
+  The outage produced no emulator input and did not cause the runtime to infer
+  that the game process was absent. The failure was excessive logging and
+  reconnect frequency, not action-authority leakage.
+- **Resolution:** Commit `5548835` adds one process-shared, thread-safe
+  coordinator with independent state per target and bounded reconnect backoff.
+  Known disconnection now skips screenshot commands and per-cycle transport
+  errors while the main loop keeps its two-second control polling. Persistent
+  degradation retains the initial warning and five-minute reminders; one
+  recovery `RESULT` follows the first supported fresh frame. Connected capture
+  corruption still emits its diagnostic and terminal failure evidence. An
+  explicit paused target handoff validates its new target independently and
+  retains the old target and schedule on failure.
+- **Regression:** `test/test_adb_connection.py` covers long outages, bounded
+  backoff, concurrent callers, supported-frame recovery, and target switching.
+  `test/test_app_control_sync.py` covers known-outage capture suppression,
+  connected corruption, two-second control polling, and explicit handoff.
+  `test/test_ss_capture.py` covers structured empty/malformed outcomes, and
+  `test/test_watchdog.py` retains paused action-authority coverage.
+- **Validation:** All 946 repository tests passed. Validation was repository-
+  local; the live paused runtime and unavailable emulator were not changed.
+- **Fixed by:** `5548835`.
+
 ### Demon Mode tracker falsely treated its disabled Intro Sprint button as absent
 
 - **Observed:** 2026-07-30 during the Tier 19 Farm battle later retained as

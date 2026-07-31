@@ -158,11 +158,17 @@ Low-level helpers should return structured reasons and keep ordinary outcomes
 diagnostic. The workflow owner decides whether a result is a no-op, a failed
 operation, or a persistent degradation worth surfacing to the operator.
 Scrolling outcomes and ordinary OCR repair remain diagnostic. Repeated
-game-speed verification and ADB connection failures become warnings only after
-three consecutive failures, reminders are limited to once every five minutes,
-and recovery is recorded. An intentional custom exact game-speed target is
-different: warn immediately when it becomes active and every 15 minutes until
-the maximum-available target is restored so an experimental setting cannot be
+game-speed verification failures become warnings only after three consecutive
+failures, reminders are limited to once every five minutes, and recovery is
+recorded. ADB capture and watchdog callers share one target-keyed reconnect
+schedule with bounded backoff. Once disconnection is known, capture commands
+and per-attempt failure entries are suppressed; the initial persistent warning
+still appears after three actual reconnect attempts, reminders remain limited
+to once every five minutes, and one `RESULT` records recovery after a supported
+fresh frame. Connected malformed or incomplete frames retain their capture
+diagnostics. An intentional custom exact game-speed target is different: warn
+immediately when it becomes active and every 15 minutes until the
+maximum-available target is restored so an experimental setting cannot be
 forgotten.
 
 ## Pause, resume, and process replacement

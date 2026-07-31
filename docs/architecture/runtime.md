@@ -472,12 +472,19 @@ evidence is attached.
 - Control synchronization precedes capture, so an ADB outage cannot prevent a
   Pause acknowledgement or a paused target-handoff request. The watchdog may
   retry connectivity while paused but may not foreground or restart the game.
+- Frame capture and the watchdog share one thread-safe, target-keyed ADB
+  connection coordinator. A known disconnection suppresses screenshot commands
+  and repeated low-level failure entries while reconnect attempts follow a
+  bounded schedule; the main loop continues its short control-poll cadence.
+  Persistent degradation produces transition/reminder warnings, and recovery
+  is complete only after a supported fresh frame succeeds. Malformed captures
+  while transport remains connected retain their normal diagnostics.
 - An acknowledged paused runtime may migrate its localhost ADB target without
   process replacement. It acquires the new per-target lock first, temporarily
   selects that endpoint, requires successful connection and supported capture,
   then releases the old lock and acknowledges the directive. Failure restores
-  the previous target and retains Pause. Existing mission, strategy, and gate
-  state stays in memory throughout.
+  the previous target, its independent reconnect state, and Pause. Existing
+  mission, strategy, and gate state stays in memory throughout.
 - Process startup has an explicit gate policy. `immediate` retains the normal
   behavior in which the first observed active battle is a new-run boundary.
   `next_run` adopts the first active/resumable battle and structurally

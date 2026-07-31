@@ -37,6 +37,21 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-31 coalesced ADB outage retries
+
+- Commit `5548835` gives main-loop capture and the watchdog one thread-safe,
+  target-keyed connection coordinator with bounded reconnect backoff.
+- Known disconnection suppresses repeated screenshot commands and transport
+  failure logs while control polling continues every two seconds. Persistent
+  warnings remain rate-limited, and recovery is recorded once only after a
+  supported fresh frame succeeds; connected corruption retains diagnostics.
+- Explicit paused handoffs validate the requested target against its own
+  connection state without discarding the former target's outage schedule.
+- Regression coverage spans long Pause-plus-outage, concurrent callers,
+  recovery, target switching, connected corruption, handoff, and watchdog Pause
+  authority. All 946 repository tests passed; no live runtime or emulator
+  change was performed.
+
 ### 2026-07-30 Demon Mode Intro Sprint activation guard
 
 - Commit `4ac2fc0` makes the independently visible top-left Intro Sprint status
