@@ -473,6 +473,14 @@ and actionable work lives in
 - **Validation:** The complete repository suite passes 931 tests. Live
   post-repair interaction was intentionally omitted because a new operator
   battle was already running.
+- **Post-fix recovery:** The first process restart after the repair correctly
+  reached the History top and copied the July 30 20:46 Tier 19 wave-2210
+  completion, but the previously persisted July 29 wave-1405 baseline made the
+  same running battle appear new at 21:50. The atomic activity ledger was
+  repaired without device input by restoring its original 20:47 log boundary
+  while retaining the correct wave-2210 identity and current opaque scope ID.
+  The Current-run API then returned the complete activity from 20:47 onward,
+  and the live battle continued normally.
 - **Fixed by:** `29308ac`.
 
 ### Daily Gem claim drift escaped its match region and left battle in Store
