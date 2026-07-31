@@ -179,6 +179,42 @@ class DefaultStrategyTests(unittest.TestCase):
         self.assertEqual(strategy.name, "farm_t19")
 
 
+class StartupLoggingTests(unittest.TestCase):
+    def test_steady_run_entry_log_names_the_completed_transition(self):
+        app = App.__new__(App)
+
+        with patch("core.app.log") as runtime_log:
+            app._log_steady_run_entry()
+
+        runtime_log.assert_called_once_with(
+            "[RUN] All configured checks complete; entering steady run state",
+            "INFO",
+            console=True,
+        )
+
+    def test_steady_run_entry_waits_for_the_first_actionable_frame(self):
+        app = App.__new__(App)
+        app._steady_run_entry_pending = True
+
+        with patch("core.app.log") as runtime_log:
+            self.assertFalse(
+                app._maybe_log_steady_run_entry(actions_blocked=True)
+            )
+            self.assertTrue(app._steady_run_entry_pending)
+            runtime_log.assert_not_called()
+
+            self.assertTrue(
+                app._maybe_log_steady_run_entry(actions_blocked=False)
+            )
+
+        self.assertFalse(app._steady_run_entry_pending)
+        runtime_log.assert_called_once_with(
+            "[RUN] All configured checks complete; entering steady run state",
+            "INFO",
+            console=True,
+        )
+
+
 class RunBoundaryTests(unittest.TestCase):
     def test_strategy_replacement_clears_old_owned_state_and_starts_new_strategy(self):
         old_strategy = _BoundaryStrategy("farm_t18", "old_owned")

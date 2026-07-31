@@ -689,11 +689,30 @@ def test_home_preflight_logs_concise_check_results_for_operator_activity():
     )
     action_log.assert_called_once()
     assert action_log.call_args.args[0] == (
-        "Repairing Home-only run configuration"
+        "Verifying Home-only run configuration"
+    )
+    assert action_log.call_args.kwargs["reason"] == (
+        "check strategy-owned persistent settings before restart and repair "
+        "only authoritative mismatches"
     )
     result_log.assert_called_once()
     assert result_log.call_args.args[0] == (
-        "Home-only run configuration complete — supported requirements verified"
+        "Home-only run configuration complete — verified without changes"
+    )
+
+
+def test_home_preflight_result_names_repairs_that_were_applied():
+    router = _NoBattleRouter()
+
+    with patch("core.gc_no_battle_setup.log_result") as result_log:
+        result = _run(router)
+
+    assert result.complete
+    result_log.assert_called_once()
+    assert result_log.call_args.args[0] == (
+        "Home-only run configuration complete — verified; repairs applied: "
+        "Cards deck selected Farm; Workshop preset selected Farm; "
+        "Bot preset selected Farm; Guardian Chips equipped Fetch, Summon"
     )
 
 

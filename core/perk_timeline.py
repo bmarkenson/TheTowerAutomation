@@ -48,6 +48,19 @@ PWR_MAX_PATTERN = re.compile(
 )
 
 
+def _recorded_selection_summary(selection_labels: Sequence[str]) -> str:
+    """Describe recorded Perk changes without calling a singleton a batch."""
+
+    if len(selection_labels) == 1:
+        return f"Perk timeline selection recorded — {selection_labels[0]}"
+    if selection_labels:
+        return (
+            "Perk timeline selections recorded — "
+            + ", ".join(selection_labels)
+        )
+    return "Perk timeline observation recorded — no selection changes detected"
+
+
 @dataclass(frozen=True)
 class PerkProgress:
     """One OCR observation of the compact in-battle perk progress control."""
@@ -663,10 +676,7 @@ class PerkTimelineObserver:
             if capture_ok and completed_request.kind == "baseline":
                 summary = "Perk timeline baseline recorded"
             elif capture_ok:
-                summary = (
-                    "Perk timeline batch recorded — "
-                    + ", ".join(selection_labels)
-                )
+                summary = _recorded_selection_summary(selection_labels)
             else:
                 summary = "Perk timeline observation will be retried"
             log_result(

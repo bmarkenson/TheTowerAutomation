@@ -126,6 +126,7 @@ def test_module_correction_preserves_a_swap_cycle_through_temporary_module():
     actual["cannon_primary"] = "Being Annihilator"
     actions = []
     evaluations = []
+    reported_repairs = []
 
     def evaluate(_frame, _requirements, *, catalog):
         evaluations.append(dict(actual))
@@ -155,9 +156,25 @@ def test_module_correction_preserves_a_swap_cycle_through_temporary_module():
         evaluate_fn=evaluate,
         equip_fn=equip,
         temporary_equip_fn=temporary_equip,
+        repair_observer_fn=lambda slots: reported_repairs.extend(slots),
     )
 
     assert result.valid
+    assert {
+        (slot.slot_key, slot.actual, slot.expected)
+        for slot in reported_repairs
+    } == {
+        (
+            "cannon_assist",
+            "Amplifying Strike",
+            "Being Annihilator",
+        ),
+        (
+            "cannon_primary",
+            "Being Annihilator",
+            "Amplifying Strike",
+        ),
+    }
     assert actions == [
         (
             "temporary",

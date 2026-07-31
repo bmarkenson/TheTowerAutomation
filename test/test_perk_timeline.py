@@ -10,6 +10,7 @@ from core.perk_timeline import (
     PerkProgress,
     PerkTimelineObserver,
     PerkTimelineTracker,
+    _recorded_selection_summary,
     measure_perk_progress,
     timeline_perk_family,
 )
@@ -63,6 +64,20 @@ def _stabilize(
 ):
     tracker.observe(progress, wave=wave)
     return tracker.observe(progress, wave=wave)
+
+
+def test_recorded_selection_summary_uses_singular_for_one_perk():
+    assert _recorded_selection_summary(["Bounce Shot +2"]) == (
+        "Perk timeline selection recorded — Bounce Shot +2"
+    )
+
+
+def test_recorded_selection_summary_uses_plural_for_multiple_perks():
+    assert _recorded_selection_summary(
+        ["Bounce Shot +2", "Orbs +1"]
+    ) == (
+        "Perk timeline selections recorded — Bounce Shot +2, Orbs +1"
+    )
 
 
 def test_measure_perk_progress_reads_retained_dynamic_top_bar():

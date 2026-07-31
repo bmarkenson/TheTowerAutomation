@@ -209,6 +209,7 @@ class App:
         self._session_preflight_gate_logged = False
         self._session_preflight_terminal_blocked_logged = False
         self._session_preflight_repair_denial_logged = False
+        self._steady_run_entry_pending = False
         self._last_home_policy_signature: Optional[Tuple[object, ...]] = None
         rollover_state = Path(config.control_file).parent / "daily_gem_state.json"
         self._daily_gem_scheduler = DailyGemScheduler(rollover_state)
@@ -1571,6 +1572,7 @@ class App:
         self._session_preflight_gate_logged = False
         self._session_preflight_terminal_blocked_logged = False
         self._session_preflight_repair_denial_logged = False
+        self._steady_run_entry_pending = False
         self._startup_gate_waivers = {}
         self._no_strategy_inventory_complete = False
         self._no_strategy_inventory_retry_at = 0.0
@@ -1588,6 +1590,27 @@ class App:
         if not isinstance(handlers, (list, tuple, set, frozenset)):
             return False
         return name in {str(handler).strip() for handler in handlers}
+
+    def _log_steady_run_entry(self) -> None:
+        """Announce the transition from startup checks to normal execution."""
+
+        log(
+            "[RUN] All configured checks complete; entering steady run state",
+            "INFO",
+            console=True,
+        )
+
+    def _maybe_log_steady_run_entry(self, *, actions_blocked: bool) -> bool:
+        """Emit the pending steady-state notice at the first actionable frame."""
+
+        if (
+            actions_blocked
+            or not getattr(self, "_steady_run_entry_pending", False)
+        ):
+            return False
+        self._log_steady_run_entry()
+        self._steady_run_entry_pending = False
+        return True
 
     def run(self) -> None:
         log("Starting main heartbeat loop.", level="INFO", console=True)
@@ -1656,6 +1679,7 @@ class App:
                 if battle_started is True:
                     self._activation_tracker().reset()
                     self._perk_timeline().reset(fresh_battle=True)
+                    self._steady_run_entry_pending = False
                     if game_speed_guard is not None:
                         game_speed_guard.reset_battle()
                 continuity_pending = False
@@ -1804,11 +1828,15 @@ class App:
                         and strategy.requires_run_initialization()
                         and strategy.is_run_initialization_complete(self._mission_mgr.ctx)
                     ):
-                        log(
-                            "[RUN_INIT] Startup gate complete; normal handlers may resume",
-                            "INFO",
-                            console=True,
-                        )
+                        if session_preflight_pending:
+                            log(
+                                "[RUN_INIT] Initialization checks complete; "
+                                "session preflight is starting",
+                                "INFO",
+                                console=True,
+                            )
+                        else:
+                            self._steady_run_entry_pending = True
                     self._run_initialization_gate_logged = False
 
                 if session_preflight_pending:
@@ -1864,14 +1892,14 @@ class App:
                         ):
                             message = (
                                 "[SESSION_PREFLIGHT] Observation complete with "
-                                "mismatches; normal handlers may resume"
+                                "mismatches"
                             )
                         else:
                             message = (
-                                "[SESSION_PREFLIGHT] Validation complete; normal "
-                                "handlers may resume"
+                                "[SESSION_PREFLIGHT] Validation complete"
                             )
                         log(message, "INFO", console=True)
+                        self._steady_run_entry_pending = True
                     self._session_preflight_gate_logged = False
                     self._session_preflight_terminal_blocked_logged = False
                     self._session_preflight_repair_denial_logged = False
@@ -1898,6 +1926,9 @@ class App:
                         session_preflight_pending
                         and not session_preflight_terminally_blocked
                     )
+                )
+                self._maybe_log_steady_run_entry(
+                    actions_blocked=actions_blocked
                 )
 
                 if not actions_blocked and self._handler_enabled("upgrade_detail"):

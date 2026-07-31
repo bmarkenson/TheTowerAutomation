@@ -230,6 +230,9 @@ def ensure_gc_module_loadout(
     temporary_equip_fn: Optional[
         Callable[[GcModuleSlotEvidence, set[str]], Any]
     ] = None,
+    repair_observer_fn: Optional[
+        Callable[[tuple[GcModuleSlotEvidence, ...]], None]
+    ] = None,
     catalog: Optional[ModuleIconCatalog] = None,
 ) -> GcModuleLoadoutEvidence:
     """Correct a GC module loadout while remaining on the Modules screen.
@@ -344,15 +347,21 @@ def ensure_gc_module_loadout(
                 + labels
             )
 
+        invalid = [slot for slot in evidence.slots if not slot.valid]
         if not announced:
+            if repair_observer_fn is not None:
+                repair_observer_fn(tuple(invalid))
             log(
-                "[MODULE_LOADOUT] Restoring the strategy loadout through "
-                "verified level transfer and level-1 swap intermediates",
-                "DEBUG",
+                "[MODULE_LOADOUT] Repairing authoritative loadout mismatches: "
+                + ", ".join(
+                    f"{slot.slot_key}={slot.actual}->{slot.expected}"
+                    for slot in invalid
+                ),
+                "INFO",
+                console=True,
             )
             announced = True
 
-        invalid = [slot for slot in evidence.slots if not slot.valid]
         equipped_names = {
             slot.actual for slot in evidence.slots if slot.actual is not None
         }

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 import time
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 from core.card_recharge_modes import (
     CardRechargeModesResult,
@@ -157,14 +157,23 @@ class GcNoBattleSetupResult:
 
 def _finish_gc_no_battle_setup(
     result: GcNoBattleSetupResult,
+    *,
+    repairs: Sequence[str] = (),
 ) -> GcNoBattleSetupResult:
     """Emit the terminal result for one Home-only GC setup workflow."""
 
+    repair_summary = "; ".join(str(repair) for repair in repairs)
     if result.status is GcNoBattleSetupStatus.COMPLETE:
-        summary = (
-            "Home-only run configuration complete — supported requirements "
-            "verified"
-        )
+        if repair_summary:
+            summary = (
+                "Home-only run configuration complete — verified; repairs "
+                f"applied: {repair_summary}"
+            )
+        else:
+            summary = (
+                "Home-only run configuration complete — verified without "
+                "changes"
+            )
     elif result.status is GcNoBattleSetupStatus.INTERRUPTED:
         summary = (
             "Home-only run configuration interrupted — control changed during "
@@ -172,12 +181,18 @@ def _finish_gc_no_battle_setup(
         )
     else:
         summary = f"Home-only run configuration failed — {result.reason}"
+    if (
+        repair_summary
+        and result.status is not GcNoBattleSetupStatus.COMPLETE
+    ):
+        summary = f"{summary}; completed repairs: {repair_summary}"
     log_result(
         summary,
         detail=(
             f"[GC_NO_BATTLE] result={result.status.value} "
             f"failed_check={result.failed_check} reason={result.reason} "
-            f"evidence_keys={sorted(result.evidence)}"
+            f"evidence_keys={sorted(result.evidence)} "
+            f"repairs={list(repairs)}"
         ),
     )
     return result
@@ -236,10 +251,10 @@ def run_gc_no_battle_setup(
             unsupported,
         )
     log_action_intent(
-        "Repairing Home-only run configuration",
+        "Verifying Home-only run configuration",
         reason=(
-            "preflight found persistent settings that must be corrected "
-            "outside battle before restart"
+            "check strategy-owned persistent settings before restart and "
+            "repair only authoritative mismatches"
         ),
         detail=(
             f"[GC_NO_BATTLE] requirements={sorted(requirements)} "
@@ -301,6 +316,16 @@ def run_gc_no_battle_setup(
     module_mode = _module_policy(requirements)
     target_priority_mode = _target_priority_policy(requirements)
     active_waivers = dict(waivers or {})
+    repairs: list[str] = []
+
+    def record_repair(description: str) -> None:
+        repairs.append(description)
+        log(
+            f"[HOME_PREFLIGHT] Repair completed; {description}",
+            "INFO",
+            console=True,
+        )
+
     evidence: dict[str, Any] = {
         "loadout_policies": {
             "modules": module_mode,
@@ -342,7 +367,7 @@ def run_gc_no_battle_setup(
             )
         else:
             preset = _preset_spec(current_check, requirements)
-            cards = _ensure_preset(
+            cards, preset_changed = _ensure_preset(
                 cards,
                 state="CARDS",
                 slot_secondary=preset.secondary,
@@ -354,6 +379,10 @@ def run_gc_no_battle_setup(
                 measure_selection_fn=measure_selection_fn,
                 sleep_fn=sleep_fn,
             )
+            if preset_changed:
+                record_repair(
+                    f"Cards deck selected {requirements[current_check]}"
+                )
             evidence[current_check] = requirements[current_check]
         log_check(current_check)
         cards_configuration = cards
@@ -377,12 +406,24 @@ def run_gc_no_battle_setup(
                 swipe_fn=swipe_fn,
                 sleep_fn=sleep_fn,
             )
-            evidence[current_check] = recharge_result.as_dict()
+            recharge_payload = recharge_result.as_dict()
+            evidence[current_check] = recharge_payload
             cards = recharge_result.screenshot
             if not recharge_result.valid:
                 raise _SetupFailure(
                     "Card recharge modes remained invalid after correction"
                 )
+            normalized_recharge_modes = normalize_card_recharge_modes(
+                card_recharge_requirements
+            )
+            for label in recharge_payload.get("changed_labels") or ():
+                required_mode = normalized_recharge_modes.get(str(label))
+                target = (
+                    required_mode.value.replace("_", " ")
+                    if required_mode is not None
+                    else "the required mode"
+                )
+                record_repair(f"{label} recharge mode set to {target}")
         if card_recharge_requirements is not None:
             log_check(current_check)
         current = _return_home(
@@ -442,6 +483,15 @@ def run_gc_no_battle_setup(
                     requirements.get(check_id),
                     field_evidence,
                 )
+                if field_evidence.get("changed") is True:
+                    record_repair(
+                        {
+                            "perk_bans": "Ban Perks list restored",
+                            "perk_auto_pick_order": (
+                                "Auto Pick priority restored"
+                            ),
+                        }[check_id]
+                    )
             current = perk_result.home_screenshot
             if not perk_result.valid:
                 current_check = (
@@ -468,7 +518,7 @@ def run_gc_no_battle_setup(
             )
         else:
             preset = _preset_spec(current_check, requirements)
-            workshop = _ensure_preset(
+            workshop, preset_changed = _ensure_preset(
                 workshop,
                 state="WORKSHOP",
                 slot_secondary=preset.secondary,
@@ -480,6 +530,10 @@ def run_gc_no_battle_setup(
                 measure_selection_fn=measure_selection_fn,
                 sleep_fn=sleep_fn,
             )
+            if preset_changed:
+                record_repair(
+                    f"Workshop preset selected {requirements[current_check]}"
+                )
             evidence[current_check] = requirements[current_check]
         log_check(current_check)
         workshop_configuration = workshop
@@ -534,6 +588,12 @@ def run_gc_no_battle_setup(
                 raise _SetupFailure(
                     "Free Upgrade locks remained invalid after correction"
                 )
+            changed_locks = lock_payload["changed_labels"]
+            if changed_locks:
+                record_repair(
+                    "Free Upgrade locks enabled for "
+                    + ", ".join(str(label) for label in changed_locks)
+                )
             workshop = lock_result.screenshot
         log_check(current_check)
 
@@ -580,6 +640,10 @@ def run_gc_no_battle_setup(
                     "Poison Swamp Stun remained "
                     f"{stun_state} after Home correction to "
                     f"{home_stun_required}"
+                )
+            if stun_result.changed:
+                record_repair(
+                    f"Poison Swamp Stun set to {home_stun_required}"
                 )
         elif isinstance(requirements.get(current_check), Mapping):
             evidence[current_check] = {
@@ -636,7 +700,7 @@ def run_gc_no_battle_setup(
             )
         else:
             preset = _preset_spec(current_check, requirements)
-            bots = _ensure_preset(
+            bots, preset_changed = _ensure_preset(
                 bots,
                 state="EVENT",
                 slot_secondary=preset.secondary,
@@ -648,6 +712,10 @@ def run_gc_no_battle_setup(
                 measure_selection_fn=measure_selection_fn,
                 sleep_fn=sleep_fn,
             )
+            if preset_changed:
+                record_repair(
+                    f"Bot preset selected {requirements[current_check]}"
+                )
             evidence[current_check] = requirements[current_check]
         log_check(current_check)
         bots_configuration = bots
@@ -690,7 +758,7 @@ def run_gc_no_battle_setup(
                 active_waivers[current_check],
             )
         else:
-            guardians = _ensure_guardian_loadout(
+            guardians, changed_guardians = _ensure_guardian_loadout(
                 guardians,
                 requirements[current_check],
                 capture_fn,
@@ -698,6 +766,11 @@ def run_gc_no_battle_setup(
                 tap_visible_fn,
                 sleep_fn,
             )
+            if changed_guardians:
+                record_repair(
+                    "Guardian Chips equipped "
+                    + ", ".join(changed_guardians)
+                )
             evidence[current_check] = list(requirements[current_check])
         log_check(current_check)
         guardians_configuration = guardians
@@ -729,6 +802,11 @@ def run_gc_no_battle_setup(
                 safe_tap_fn,
                 sleep_fn,
             )
+            module_repairs: list[Any] = []
+
+            def observe_module_repairs(slots: Sequence[Any]) -> None:
+                module_repairs.extend(slots)
+
             module_evidence = ensure_modules_fn(
                 requirements["modules"],
                 screenshot=modules,
@@ -737,11 +815,18 @@ def run_gc_no_battle_setup(
                 safe_tap_fn=safe_tap_fn,
                 swipe_fn=swipe_fn,
                 sleep_fn=sleep_fn,
+                repair_observer_fn=observe_module_repairs,
             )
             if not module_evidence.valid:
                 raise _SetupFailure(
                     "module loadout remained invalid after correction"
                 )
+            if module_repairs:
+                assignments = ", ".join(
+                    f"{slot.slot_key}={slot.expected}"
+                    for slot in module_repairs
+                )
+                record_repair(f"Module loadout restored ({assignments})")
             module_payload = module_evidence.as_dict()
             module_payload.update(mode=module_mode, checked=True)
             evidence["modules"] = module_payload
@@ -891,7 +976,8 @@ def run_gc_no_battle_setup(
                 str(exc),
                 evidence,
                 current_check,
-            )
+            ),
+            repairs=repairs,
         )
     except Exception as exc:
         _log_home_preflight_failure(
@@ -914,7 +1000,8 @@ def run_gc_no_battle_setup(
                 str(exc),
                 evidence,
                 current_check,
-            )
+            ),
+            repairs=repairs,
         )
 
     log(
@@ -926,7 +1013,8 @@ def run_gc_no_battle_setup(
             GcNoBattleSetupStatus.COMPLETE,
             "supported no-battle requirements verified",
             evidence,
-        )
+        ),
+        repairs=repairs,
     )
 
 
@@ -1375,7 +1463,7 @@ def _ensure_preset(
         raise _SetupFailure(f"preset identity missing: {slot_secondary}")
     selection = measure_selection_fn(frame, slot_region)
     if selection.selected:
-        return frame
+        return frame, False
     if not tap_visible_fn(slot_label, screenshot=frame, retries=1):
         raise _SetupFailure(f"preset tap failed: {slot_label}")
     updated = _wait_for(
@@ -1386,7 +1474,7 @@ def _ensure_preset(
     )
     if not measure_selection_fn(updated, slot_region).selected:
         raise _SetupFailure(f"preset did not become selected: {slot_label}")
-    return updated
+    return updated, True
 
 
 def _ensure_event_bots_top(
@@ -1480,6 +1568,7 @@ def _ensure_guardian_loadout(
         f"GUARDIAN_{chip.upper()}_EQUIPPED" for chip in required_chips
     }
     current = frame
+    changed: list[str] = []
     for (
         expected_secondary,
         replacement_source_secondary,
@@ -1503,6 +1592,11 @@ def _ensure_guardian_loadout(
                 detector=detector,
                 tap_visible_fn=tap_visible_fn,
                 sleep_fn=sleep_fn,
+            )
+            changed.append(
+                expected_secondary.removeprefix("GUARDIAN_")
+                .removesuffix("_EQUIPPED")
+                .title()
             )
             continue
 
@@ -1535,6 +1629,11 @@ def _ensure_guardian_loadout(
                 tap_visible_fn=tap_visible_fn,
                 sleep_fn=sleep_fn,
             )
+            changed.append(
+                expected_secondary.removeprefix("GUARDIAN_")
+                .removesuffix("_EQUIPPED")
+                .title()
+            )
             continue
         if not tap_visible_fn(inventory_label, screenshot=current, retries=1):
             raise _SetupFailure(
@@ -1547,6 +1646,11 @@ def _ensure_guardian_loadout(
             detector=detector,
             sleep_fn=sleep_fn,
         )
+        changed.append(
+            expected_secondary.removeprefix("GUARDIAN_")
+            .removesuffix("_EQUIPPED")
+            .title()
+        )
 
     detected = set(detector(current).get("secondary_states") or ())
     missing = desired - detected
@@ -1554,7 +1658,7 @@ def _ensure_guardian_loadout(
         raise _SetupFailure(
             "unsupported Guardian mismatch: " + ", ".join(sorted(missing))
         )
-    return current
+    return current, tuple(changed)
 
 
 def _replace_guardian_chip(
