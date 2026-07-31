@@ -804,6 +804,21 @@ and actionable work lives in
   before dispatch. Damage, upgrade navigation, No Strategy, Orb Distance,
   initialization, and Tournament-focused validation passed 169 tests.
 - **Fixed by:** `3abd62a`.
+- **Follow-up (2026-07-30):** The bounded fallback was working, but its expected
+  initial miss still appeared as an operator warning. `logs/actions.log`
+  recorded five `0.85`/`0.86` current-viewport misses from 19:23 through
+  19:59; each was followed by upgrade-list search, an exact Damage match, and
+  successful `1E-19%` verification. `safe_tap()` logged every exhausted
+  template probe as `WARN` even when its caller owned a fallback or terminal
+  workflow result. Commit `325f31e` adds a template-failure log-level option
+  that preserves `WARN` by default and lets handled probes remain `DEBUG`.
+  Damage Slider search, Home Battle/Resume alternatives, guarded navigation
+  retries, and Perk Timeline retries now use the diagnostic path; tap authority
+  and unsafe verification warnings are unchanged. Regression coverage is in
+  `test/test_clickmap_access.py`, `test/test_damage_adjuster.py`,
+  `test/test_home_screen_handler.py`, `test/test_gc_preflight_navigation.py`,
+  and `test/test_perk_timeline.py`. Repository-wide validation passed 929
+  tests.
 
 ### Auto Pick repair used a row position captured during scroll settling
 
