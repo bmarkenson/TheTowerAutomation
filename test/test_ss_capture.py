@@ -6,9 +6,11 @@ import numpy as np
 import pytest
 
 from core.ss_capture import (
+    ScreenshotFailure,
     _decode_raw_screencap,
     capture_adb_raw_screenshot,
     capture_adb_screenshot,
+    capture_adb_screenshot_result,
     is_complete_screenshot,
     normalize_device_screenshot,
 )
@@ -92,6 +94,38 @@ def test_png_capture_returns_none_when_fresh_retry_is_also_incomplete():
 
     assert frame is None
     assert capture.call_count == 2
+
+
+def test_png_capture_reports_connected_malformed_data():
+    with (
+        patch("core.ss_capture.screencap_png", return_value=b"not a PNG"),
+        patch("core.ss_capture.log") as runtime_log,
+    ):
+        result = capture_adb_screenshot_result()
+
+    assert result.frame is None
+    assert result.failure is ScreenshotFailure.MALFORMED
+    assert result.detail == "Invalid screenshot data (not PNG)"
+    runtime_log.assert_called_once_with(
+        "[ADB] Screenshot capture failed: Invalid screenshot data (not PNG)",
+        "ERROR",
+    )
+
+
+def test_png_capture_can_silence_an_expected_transport_outage():
+    with (
+        patch("core.ss_capture.screencap_png", return_value=None) as capture,
+        patch("core.ss_capture.log") as runtime_log,
+    ):
+        result = capture_adb_screenshot_result(
+            log_empty=False,
+            report_adb_errors=False,
+        )
+
+    assert result.frame is None
+    assert result.failure is ScreenshotFailure.EMPTY
+    runtime_log.assert_not_called()
+    capture.assert_called_once_with(report_errors=False)
 
 
 def test_raw_capture_retries_incomplete_frame_before_returning_evidence():

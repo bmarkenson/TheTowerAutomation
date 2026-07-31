@@ -114,6 +114,7 @@ def adb_shell(
 def screencap_png(
     device_id: Optional[str] = None,
     check: bool = True,
+    report_errors: bool = True,
 ) -> Optional[bytes]:
     """
     ---
@@ -125,6 +126,7 @@ def screencap_png(
       params:
         device_id: "str|None — explicit device; else env ADB_DEVICE; else module ADB_DEVICE_ID"
         check: "bool — if True, non‑zero exit raises CalledProcessError (caught)"
+        report_errors: "bool — print subprocess failures when True"
       notes:
         - "Uses 'adb exec-out screencap -p'"
     ---
@@ -154,15 +156,17 @@ def screencap_png(
         return result.stdout
     except subprocess.CalledProcessError as e:
         # Mirror adb_shell's lightweight reporting without pulling in logger here.
-        print(f"[ERROR] ADB screencap failed: {e}")
-        if e.stderr:
+        if report_errors:
+            print(f"[ERROR] ADB screencap failed: {e}")
+        if report_errors and e.stderr:
             try:
                 print(f"[STDERR] {e.stderr.decode(errors='ignore').strip()}")
             except Exception:
                 pass
         return None
     except Exception as e:
-        print(f"[ERROR] Unexpected ADB screencap exception: {e}")
+        if report_errors:
+            print(f"[ERROR] Unexpected ADB screencap exception: {e}")
         return None
 
 

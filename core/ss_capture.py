@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 import struct
 from typing import Optional
@@ -20,6 +22,25 @@ from core.screen_geometry import (
 
 
 Frame = NDArray[np.uint8]
+
+
+class ScreenshotFailure(str, Enum):
+    """Classify why a screenshot produced no usable frame."""
+
+    EMPTY = "empty"
+    MALFORMED = "malformed"
+    INCOMPLETE = "incomplete"
+    ERROR = "error"
+
+
+@dataclass(frozen=True)
+class ScreenshotCaptureResult:
+    """Return a frame or a structured capture failure."""
+
+    frame: Optional[Frame]
+    failure: Optional[ScreenshotFailure] = None
+    detail: Optional[str] = None
+
 
 LATEST_SCREENSHOT = Path("screenshots/latest.png")
 INCOMPLETE_CAPTURE_ATTEMPTS = 2
@@ -119,6 +140,60 @@ def capture_adb_raw_screenshot() -> Optional[Frame]:
         return None
 
 
+def capture_adb_screenshot_result(
+    *,
+    log_empty: bool = True,
+    report_adb_errors: bool = True,
+) -> ScreenshotCaptureResult:
+    """Capture one screenshot with a structured transport/content outcome."""
+
+    try:
+        device_id = resolve_adb_device()
+        for attempt in range(1, INCOMPLETE_CAPTURE_ATTEMPTS + 1):
+            png_data = screencap_png(report_errors=report_adb_errors)
+            if not png_data:
+                detail = "empty screenshot data"
+                if log_empty:
+                    log("[ADB] Empty screenshot data", "ERROR")
+                return ScreenshotCaptureResult(
+                    None,
+                    ScreenshotFailure.EMPTY,
+                    detail,
+                )
+
+            if not png_data.startswith(b'\x89PNG\r\n\x1a\n'):
+                raise ValueError("Invalid screenshot data (not PNG)")
+
+            img_array = np.frombuffer(png_data, dtype=np.uint8)
+            img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+            if img is None:
+                raise ValueError("OpenCV failed to decode image")
+
+            img = normalize_device_screenshot(img, device_id=device_id)
+            if img is not None:
+                return ScreenshotCaptureResult(img)
+            _log_incomplete_capture("PNG", attempt)
+        return ScreenshotCaptureResult(
+            None,
+            ScreenshotFailure.INCOMPLETE,
+            "two incomplete screenshots",
+        )
+    except ValueError as exc:
+        log(f"[ADB] Screenshot capture failed: {exc}", "ERROR")
+        return ScreenshotCaptureResult(
+            None,
+            ScreenshotFailure.MALFORMED,
+            str(exc),
+        )
+    except Exception as exc:
+        log(f"[ADB] Screenshot capture failed: {exc}", "ERROR")
+        return ScreenshotCaptureResult(
+            None,
+            ScreenshotFailure.ERROR,
+            str(exc),
+        )
+
+
 def capture_adb_screenshot() -> Optional[Frame]:
     """
     ---
@@ -139,32 +214,7 @@ def capture_adb_screenshot() -> Optional[Frame]:
     Returns:
         np.ndarray (BGR) on success, or None on failure.
     """
-    try:
-        device_id = resolve_adb_device()
-        for attempt in range(1, INCOMPLETE_CAPTURE_ATTEMPTS + 1):
-            png_data = screencap_png()
-            if not png_data:
-                log("[ADB] Empty screenshot data", "ERROR")
-                return None
-
-            if not png_data.startswith(b'\x89PNG\r\n\x1a\n'):
-                raise ValueError("Invalid screenshot data (not PNG)")
-
-            # Convert PNG bytes to OpenCV image
-            img_array = np.frombuffer(png_data, dtype=np.uint8)
-            img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-            if img is None:
-                raise ValueError("OpenCV failed to decode image")
-
-            img = normalize_device_screenshot(img, device_id=device_id)
-            if img is not None:
-                return img
-            _log_incomplete_capture("PNG", attempt)
-        return None
-
-    except Exception as e:
-        log(f"[ADB] Screenshot capture failed: {e}", "ERROR")
-        return None
+    return capture_adb_screenshot_result().frame
 
 
 def _log_incomplete_capture(source: str, attempt: int) -> None:
@@ -179,7 +229,36 @@ def _log_incomplete_capture(source: str, attempt: int) -> None:
     )
 
 
-def capture_and_save_screenshot(path: Path | str = LATEST_SCREENSHOT, *, log_capture: bool = True) -> Optional[Frame]:
+def capture_and_save_screenshot_result(
+    path: Path | str = LATEST_SCREENSHOT,
+    *,
+    log_capture: bool = True,
+    log_empty: bool = True,
+    report_adb_errors: bool = True,
+) -> ScreenshotCaptureResult:
+    """Capture and save a screenshot while retaining its failure kind."""
+
+    target = Path(path)
+    result = capture_adb_screenshot_result(
+        log_empty=log_empty,
+        report_adb_errors=report_adb_errors,
+    )
+    if result.frame is not None:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(target), result.frame)
+        if log_capture:
+            log(
+                f"Captured screenshot: shape={result.frame.shape}, path={target}",
+                level="DEBUG",
+            )
+    return result
+
+
+def capture_and_save_screenshot(
+    path: Path | str = LATEST_SCREENSHOT,
+    *,
+    log_capture: bool = True,
+) -> Optional[Frame]:
     """
     ---
     spec:
@@ -204,14 +283,10 @@ def capture_and_save_screenshot(path: Path | str = LATEST_SCREENSHOT, *, log_cap
     Returns:
         np.ndarray (BGR) on success, or None on failure.
     """
-    target = Path(path)
-    img = capture_adb_screenshot()
-    if img is not None:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(str(target), img)
-        if log_capture:
-            log(f"Captured screenshot: shape={img.shape}, path={target}", level="DEBUG")
-    return img
+    return capture_and_save_screenshot_result(
+        path,
+        log_capture=log_capture,
+    ).frame
 
 
 def main():

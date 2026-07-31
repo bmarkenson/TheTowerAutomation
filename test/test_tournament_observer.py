@@ -345,6 +345,8 @@ def test_tournament_main_loop_keeps_status_and_recovery_read_only():
     app = App.__new__(App)
     app._config = SimpleNamespace(wait_on_start=False)
     app._supervisor = MagicMock(is_paused=False, auto_return_secs=900)
+    app._adb_connection_coordinator = MagicMock()
+    app._adb_connection_coordinator.ensure_connected.return_value = False
     app._mission_mgr = manager
     app._state_tracker = MagicMock()
     app._status_reporter = MagicMock()
@@ -364,7 +366,6 @@ def test_tournament_main_loop_keeps_status_and_recovery_read_only():
 
     try:
         with (
-            patch("core.app.ensure_adb_connected", return_value=False),
             patch("core.app.threading.Thread"),
             patch(
                 "core.app.detect_state_and_overlays",

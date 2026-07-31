@@ -2240,6 +2240,8 @@ class PausedStartupObservationTests(unittest.TestCase):
         app = App.__new__(App)
         app._config = SimpleNamespace(wait_on_start=False)
         app._supervisor = supervisor
+        app._adb_connection_coordinator = MagicMock()
+        app._adb_connection_coordinator.ensure_connected.return_value = False
         app._mission_mgr = manager
         app._state_tracker = MagicMock()
         app._status_reporter = MagicMock()
@@ -2257,7 +2259,6 @@ class PausedStartupObservationTests(unittest.TestCase):
         app._handle_primary_states = MagicMock()
 
         with (
-            patch("core.app.ensure_adb_connected", return_value=False),
             patch("core.app.threading.Thread") as thread,
             patch(
                 "core.app.detect_state_and_overlays",
@@ -2319,6 +2320,8 @@ class PausedStartupObservationTests(unittest.TestCase):
         app = App.__new__(App)
         app._config = SimpleNamespace(wait_on_start=False)
         app._supervisor = supervisor
+        app._adb_connection_coordinator = MagicMock()
+        app._adb_connection_coordinator.ensure_connected.return_value = False
         app._mission_mgr = manager
         app._state_tracker = MagicMock()
         app._status_reporter = MagicMock()
@@ -2336,7 +2339,6 @@ class PausedStartupObservationTests(unittest.TestCase):
         app._handle_primary_states = MagicMock()
 
         with (
-            patch("core.app.ensure_adb_connected", return_value=False),
             patch("core.app.threading.Thread"),
             patch(
                 "core.app.detect_state_and_overlays",
@@ -2387,6 +2389,8 @@ class PausedStartupObservationTests(unittest.TestCase):
         app = App.__new__(App)
         app._config = SimpleNamespace(wait_on_start=False)
         app._supervisor = supervisor
+        app._adb_connection_coordinator = MagicMock()
+        app._adb_connection_coordinator.ensure_connected.return_value = False
         app._mission_mgr = manager
         app._state_tracker = MagicMock()
         app._status_reporter = MagicMock()
@@ -2406,7 +2410,6 @@ class PausedStartupObservationTests(unittest.TestCase):
         app._handle_primary_states = MagicMock()
 
         with (
-            patch("core.app.ensure_adb_connected", return_value=False),
             patch("core.app.threading.Thread"),
             patch(
                 "core.app.detect_state_and_overlays",

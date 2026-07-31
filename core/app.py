@@ -19,11 +19,16 @@ from utils.logger import (
     log_result,
     set_mission_log_path,
 )
-from core.watchdog import watchdog_process_check, ensure_adb_connected
+from core.watchdog import watchdog_process_check
+from core.adb_connection import AdbConnectionCoordinator
 from core.adb_target_session import AdbTargetSession
 from core.artifact_retention import RuntimeArtifactRetention
 from core.activity_continuity import ActivityContinuityCoordinator
-from core.ss_capture import capture_and_save_screenshot
+from core.ss_capture import (
+    ScreenshotFailure,
+    capture_and_save_screenshot,
+    capture_and_save_screenshot_result,
+)
 from core.state_detector import detect_state_and_overlays
 from core.automation_supervisor import AutomationSupervisor
 from core.daily_gem_scheduler import DailyGemScheduler
@@ -112,12 +117,16 @@ class App:
         config: AppConfig,
         *,
         adb_target_session: Optional[AdbTargetSession] = None,
+        adb_connection_coordinator: Optional[AdbConnectionCoordinator] = None,
         gate_decision_prompt: Optional[
             Callable[[Mapping[str, Any]], Optional[str]]
         ] = None,
     ) -> None:
         self._config = config
         self._adb_target_session = adb_target_session
+        self._adb_connection_coordinator = (
+            adb_connection_coordinator or AdbConnectionCoordinator()
+        )
         set_mission_log_path(config.mission_log_path)
         self._supervisor = AutomationSupervisor(
             control_file=config.control_file,
@@ -1647,10 +1656,14 @@ class App:
         if self._supervisor.is_paused:
             if stop_blind_gem_tapper():
                 self._blind_tapper_suspended = True
-        if ensure_adb_connected():
+        if self._adb_connection_coordinator.ensure_connected():
             time.sleep(2)
 
-        threading.Thread(target=watchdog_process_check, daemon=True).start()
+        threading.Thread(
+            target=watchdog_process_check,
+            args=(30, self._adb_connection_coordinator),
+            daemon=True,
+        ).start()
 
         try:
             while True:
@@ -2157,16 +2170,60 @@ class App:
 
     def _capture_frame(self) -> Optional[Frame]:
         """Capture a new frame from the device, retrying once if ADB reconnects."""
-        img = capture_and_save_screenshot(log_capture=False)
-        if img is None:
-            if ensure_adb_connected():
-                time.sleep(1)
-                img = capture_and_save_screenshot(log_capture=False)
-            if img is None:
-                log("Failed to capture screenshot.", level="FAIL")
-                time.sleep(2)
-                return None
-        return img
+        coordinator = self._adb_connection_coordinator
+        if (
+            not coordinator.capture_allowed()
+            and not coordinator.ensure_connected()
+        ):
+            time.sleep(2)
+            return None
+
+        result = capture_and_save_screenshot_result(
+            log_capture=False,
+            log_empty=False,
+            report_adb_errors=False,
+        )
+        if result.frame is not None:
+            coordinator.record_capture_success()
+            return result.frame
+
+        if not coordinator.ensure_connected():
+            time.sleep(2)
+            return None
+        if result.failure is ScreenshotFailure.EMPTY:
+            log(
+                "[ADB] Empty screenshot data while the target remains connected",
+                "ERROR",
+            )
+
+        time.sleep(1)
+        retry = capture_and_save_screenshot_result(
+            log_capture=False,
+            log_empty=False,
+            report_adb_errors=False,
+        )
+        if retry.frame is not None:
+            coordinator.record_capture_success()
+            return retry.frame
+
+        if not coordinator.ensure_connected():
+            time.sleep(2)
+            return None
+        if retry.failure is ScreenshotFailure.EMPTY:
+            log(
+                "[ADB] Empty screenshot data while the target remains connected",
+                "ERROR",
+            )
+        failure_detail = retry.detail or (
+            retry.failure.value if retry.failure is not None else "unknown"
+        )
+        log(
+            "Failed to capture screenshot while ADB remained connected "
+            f"({failure_detail}).",
+            level="FAIL",
+        )
+        time.sleep(2)
+        return None
 
     def _run_home_setup_attempts(
         self,
@@ -2230,10 +2287,18 @@ class App:
         log(f"[CTRL] Validating paused ADB target handoff to {target}", "INFO")
 
         def validate() -> bool:
-            if not ensure_adb_connected():
+            if not self._adb_connection_coordinator.ensure_connected(force=True):
                 return False
             time.sleep(1)
-            return capture_and_save_screenshot(log_capture=False) is not None
+            result = capture_and_save_screenshot_result(
+                log_capture=False,
+                log_empty=False,
+                report_adb_errors=False,
+            )
+            if result.frame is None:
+                return False
+            self._adb_connection_coordinator.record_capture_success()
+            return True
 
         try:
             return session.handoff(target, validate=validate)

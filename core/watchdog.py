@@ -23,21 +23,19 @@ defaults:
     - _last_foreground_pkg caches last seen foreground for change logging only
 """
 
-import os
 import re
-import subprocess
-import threading
 import time
-from typing import Callable
 
 from core.run_state import AUTOMATION, RunState
-from core.adb_utils import adb_shell, ADB_DEVICE_ID
+from core.adb_connection import (
+    AdbConnectionCoordinator,
+    DEFAULT_ADB_CONNECTION_COORDINATOR,
+)
+from core.adb_utils import adb_shell
 from core.adb_target_session import ADB_TARGET_OPERATION_LOCK
 from utils.logger import log
 
 GAME_PACKAGE = "com.TechTreeGames.TheTower"
-ADB_CONNECTION_WARNING_AFTER_FAILURES = 3
-ADB_CONNECTION_WARNING_REPEAT_S = 5 * 60.0
 """
 spec:
   name: GAME_PACKAGE
@@ -54,76 +52,6 @@ spec:
   kind: module-global cache
   r: str|None (last detected foreground package), used to suppress noisy logs.
 """
-
-
-class _AdbConnectionLogState:
-    """Promote only persistent ADB connection failures to warnings."""
-
-    def __init__(
-        self,
-        *,
-        clock: Callable[[], float] = time.monotonic,
-        warning_after_failures: int = ADB_CONNECTION_WARNING_AFTER_FAILURES,
-        warning_repeat_s: float = ADB_CONNECTION_WARNING_REPEAT_S,
-    ) -> None:
-        self._clock = clock
-        self._warning_after_failures = max(1, int(warning_after_failures))
-        self._warning_repeat_s = max(0.0, float(warning_repeat_s))
-        self._lock = threading.Lock()
-        self._target = ""
-        self._failures = 0
-        self._warning_active = False
-        self._last_warning_at: float | None = None
-
-    def record(self, target: str, *, connected: bool) -> None:
-        now = self._clock()
-        with self._lock:
-            if target != self._target:
-                self._target = target
-                self._failures = 0
-                self._warning_active = False
-                self._last_warning_at = None
-
-            if connected:
-                failures = self._failures
-                warning_was_active = self._warning_active
-                self._failures = 0
-                self._warning_active = False
-                self._last_warning_at = None
-                if failures:
-                    log(
-                        f"[WATCHDOG] ADB target {target} recovered after "
-                        f"{failures} failed connection attempt(s)",
-                        "INFO" if warning_was_active else "DEBUG",
-                    )
-                return
-
-            self._failures += 1
-            if self._failures < self._warning_after_failures:
-                return
-            warning_due = (
-                not self._warning_active
-                or self._last_warning_at is None
-                or now - self._last_warning_at >= self._warning_repeat_s
-            )
-            self._warning_active = True
-            if not warning_due:
-                return
-            qualifier = (
-                "remains unavailable"
-                if self._last_warning_at is not None
-                else "is unavailable"
-            )
-            log(
-                f"[WATCHDOG] ADB target {target} {qualifier} after "
-                f"{self._failures} connection attempts; automation inputs "
-                "remain suspended while retries continue",
-                "WARN",
-            )
-            self._last_warning_at = now
-
-
-_adb_connection_log_state = _AdbConnectionLogState()
 
 
 def _parse_pkg_from_text(text: str):
@@ -299,67 +227,17 @@ def _pid_running(package: str) -> bool:
     return False
 
 
-def _adb_target() -> str:
-    return os.getenv("ADB_DEVICE") or ADB_DEVICE_ID or ""
-
-
-def _adb_is_connected(target: str) -> bool:
-    try:
-        res = subprocess.run(["adb", "devices"], capture_output=True, text=True, check=False)
-        if res.returncode != 0 or not res.stdout:
-            return False
-        for line in res.stdout.splitlines()[1:]:  # skip header
-            parts = line.split()
-            if len(parts) >= 2 and parts[0] == target and parts[1].lower() == "device":
-                return True
-        return False
-    except Exception:
-        return False
-
-
-def _adb_connect(target: str) -> bool:
-    # Only attempt TCP/IP connect targets like host:port
-    if not target or ":" not in target:
-        return False
-    try:
-        res = subprocess.run(["adb", "connect", target], capture_output=True, text=True, check=False)
-        out = (res.stdout or "") + (res.stderr or "")
-        low = out.lower()
-        if "connected to" in low or "already connected to" in low:
-            return True
-        return False
-    except Exception:
-        return False
-
-
-def ensure_adb_connected() -> bool:
-    """Best-effort: ensure the configured ADB target is connected. Returns True on success."""
-    target = _adb_target()
-    if not target:
-        return True  # nothing to do
-    if _adb_is_connected(target):
-        _adb_connection_log_state.record(target, connected=True)
-        return True
-    log(
-        f"[WATCHDOG] ADB target not connected ({target}); attempting adb connect",
-        "DEBUG",
-    )
-    if _adb_connect(target):
-        _adb_connection_log_state.record(target, connected=True)
-        log(f"[WATCHDOG] adb connect {target}: success", "DEBUG")
-        return True
-    _adb_connection_log_state.record(target, connected=False)
-    log(f"[WATCHDOG] adb connect {target}: failed", "DEBUG")
-    return False
-
-
-def _watchdog_process_check_once() -> None:
+def _watchdog_process_check_once(
+    connection_coordinator: AdbConnectionCoordinator = (
+        DEFAULT_ADB_CONNECTION_COORDINATOR
+    ),
+) -> None:
     """Run one fail-closed watchdog inspection for the current target."""
 
     # Serialize against a target migration. Failure to reach ADB is not
     # evidence that the Android game process is absent.
     with ADB_TARGET_OPERATION_LOCK:
-        connected = ensure_adb_connected()
+        connected = connection_coordinator.ensure_connected()
         if not connected:
             return
         time.sleep(2)
@@ -381,7 +259,12 @@ def _watchdog_process_check_once() -> None:
             bring_to_foreground()
 
 
-def watchdog_process_check(interval=30):
+def watchdog_process_check(
+    interval=30,
+    connection_coordinator: AdbConnectionCoordinator = (
+        DEFAULT_ADB_CONNECTION_COORDINATOR
+    ),
+):
     """
     spec:
       name: watchdog_process_check
@@ -397,7 +280,7 @@ def watchdog_process_check(interval=30):
     """
     while True:
         try:
-            _watchdog_process_check_once()
+            _watchdog_process_check_once(connection_coordinator)
 
         except Exception as e:
             log(f"[WATCHDOG ERROR] {e}", "ERROR")
