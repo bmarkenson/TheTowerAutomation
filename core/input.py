@@ -111,12 +111,17 @@ def safe_tap(
     screenshot=None,
     log_label: Optional[str] = None,
     verification: Optional[TapVerification] = None,
+    failure_log_level: Literal["DEBUG", "WARN"] = "WARN",
 ) -> bool:
     """Tap only a freshly matched or explicitly reverified target.
 
     Template-backed names are always matched immediately before dispatch.
     Coordinate and static named targets require :class:`TapVerification`;
     otherwise the tap fails closed.
+
+    ``failure_log_level`` applies only when a template-backed target exhausts
+    its match attempts. Callers that own a fallback or workflow-level outcome
+    may keep that expected miss diagnostic without weakening tap authority.
     """
 
     if dispatch not in ("now", "queue"):
@@ -153,7 +158,10 @@ def safe_tap(
                 if attempt < attempts - 1:
                     time.sleep(max(0.0, float(retry_delay)))
         if last_err is not None:
-            log(f"[SKIP] TAP_SAFE failed for {label}: {last_err}", "WARN")
+            log(
+                f"[SKIP] TAP_SAFE failed for {label}: {last_err}",
+                failure_log_level,
+            )
         return False
 
     if isinstance(name, (tuple, list)):
@@ -217,6 +225,7 @@ def tap_if_visible(
     retry_delay: float = 0.5,
     dispatch: DispatchMode = "now",
     screenshot=None,
+    failure_log_level: Literal["DEBUG", "WARN"] = "WARN",
 ) -> bool:
     return safe_tap(
         name,
@@ -224,6 +233,7 @@ def tap_if_visible(
         retry_delay=retry_delay,
         dispatch=dispatch,
         screenshot=screenshot,
+        failure_log_level=failure_log_level,
     )
 
 

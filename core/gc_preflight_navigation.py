@@ -253,7 +253,12 @@ def _guarded_visible_tap(
             raise _NavigationFailure(
                 f"refusing {key}: state={state}, expected={sorted(allowed_states)}"
             )
-        if tap_visible_fn(key, screenshot=frame, retries=0):
+        if tap_visible_fn(
+            key,
+            screenshot=frame,
+            retries=0,
+            failure_log_level="DEBUG",
+        ):
             return
         if attempt < attempts - 1:
             sleep_fn(max(0.0, float(retry_delay_s)))

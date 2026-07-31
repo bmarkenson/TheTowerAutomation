@@ -8,6 +8,7 @@ from core.input import (
     safe_long_press,
     safe_tap,
     swipe_now,
+    tap_if_visible,
     tap_unchecked_for_tooling,
 )
 from core.label_tapper import swipe_relative_in_region
@@ -82,6 +83,47 @@ def test_coordinate_tap_fails_closed_when_verifier_rejects_target():
         assert not safe_tap((10, 20), verification=verification)
 
     dispatch.assert_not_called()
+
+
+def test_template_probe_can_keep_handled_failure_diagnostic():
+    with (
+        patch(
+            "core.input.get_label_match",
+            side_effect=ValueError("match below threshold"),
+        ),
+        patch("core.input.log") as log,
+        patch("core.input._dispatch_tap") as dispatch,
+    ):
+        assert not tap_if_visible(
+            "buttons.damage_adjuster:attack",
+            failure_log_level="DEBUG",
+        )
+
+    dispatch.assert_not_called()
+    log.assert_called_once_with(
+        "[SKIP] TAP_SAFE failed for buttons.damage_adjuster:attack: "
+        "match below threshold",
+        "DEBUG",
+    )
+
+
+def test_template_tap_failure_remains_warning_by_default():
+    with (
+        patch(
+            "core.input.get_label_match",
+            side_effect=ValueError("match below threshold"),
+        ),
+        patch("core.input.log") as log,
+        patch("core.input._dispatch_tap") as dispatch,
+    ):
+        assert not tap_if_visible("buttons.damage_adjuster:attack")
+
+    dispatch.assert_not_called()
+    log.assert_called_once_with(
+        "[SKIP] TAP_SAFE failed for buttons.damage_adjuster:attack: "
+        "match below threshold",
+        "WARN",
+    )
 
 
 def test_reusable_tap_authority_evaluates_initial_frame_once():

@@ -718,4 +718,7 @@ def test_visible_navigation_rechecks_fresh_state_while_destination_renders():
 
     assert captures == 3
     assert [kwargs["retries"] for _key, kwargs in taps] == [0, 0, 0]
+    assert [
+        kwargs["failure_log_level"] for _key, kwargs in taps
+    ] == ["DEBUG", "DEBUG", "DEBUG"]
     assert sleeps == [0.25, 0.25]

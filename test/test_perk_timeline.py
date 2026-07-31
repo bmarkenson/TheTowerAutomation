@@ -458,11 +458,13 @@ def test_mid_battle_baseline_repeats_after_crossing_scheduled_wave():
     screen = {"state": "RUNNING"}
     progress = {"value": initial}
     capture_rounds = []
+    open_kwargs = []
 
     def capture():
         return panel if screen["state"] == "PERKS" else running
 
     def open_panel(key, **kwargs):
+        open_kwargs.append(kwargs)
         screen["state"] = "PERKS"
         return True
 
@@ -508,6 +510,7 @@ def test_mid_battle_baseline_repeats_after_crossing_scheduled_wave():
         )
 
     assert capture_rounds == [1, 2]
+    assert open_kwargs[0]["failure_log_level"] == "DEBUG"
     assert tracker.pending is None
     assert tracker.snapshot()["baseline_status"] == "observed_mid_battle"
     assert _stabilize(tracker, advanced, wave=545) is None

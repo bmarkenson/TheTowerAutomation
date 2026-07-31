@@ -368,6 +368,7 @@ def test_open_damage_adjuster_uses_settled_screenshot_workflow():
     assert reading.percentage == "1E-22%"
     assert taps[0][0] == "buttons.damage_adjuster:attack"
     assert taps[0][1]["retries"] == 1
+    assert taps[0][1]["failure_log_level"] == "DEBUG"
 
 
 def test_open_damage_adjuster_finds_damage_above_current_viewport():

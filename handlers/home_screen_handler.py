@@ -92,8 +92,16 @@ def handle_home_screen(restart_enabled=True):
 
     if restart_enabled:
         log("[HOME] Auto-start enabled — tapping 'Battle' button", "INFO")
-        if not tap_if_visible("buttons.battle:home", retries=1):
-            if not tap_if_visible("buttons.resume_battle:home", retries=1):
+        if not tap_if_visible(
+            "buttons.battle:home",
+            retries=1,
+            failure_log_level="DEBUG",
+        ):
+            if not tap_if_visible(
+                "buttons.resume_battle:home",
+                retries=1,
+                failure_log_level="DEBUG",
+            ):
                 if not _tap_verified_home_battle_control():
                     log("[HOME] Battle/Resume controls not verified; leaving handler", "WARN")
         time.sleep(2)

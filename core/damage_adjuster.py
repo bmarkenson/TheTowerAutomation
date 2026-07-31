@@ -225,6 +225,7 @@ def open_damage_adjuster(
         "buttons.damage_adjuster:attack",
         screenshot=screenshot,
         retries=1,
+        failure_log_level="DEBUG",
     )
     if not opened:
         log(

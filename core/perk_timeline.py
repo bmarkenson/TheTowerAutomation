@@ -665,6 +665,7 @@ class PerkTimelineObserver:
                     dispatch="now",
                     log_label="perk_timeline:open",
                     screenshot=screenshot,
+                    failure_log_level="DEBUG",
                 ):
                     raise _RouteFailed("verified Perks control was unavailable")
                 self._route_open = True

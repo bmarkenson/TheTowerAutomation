@@ -10,6 +10,7 @@ from core.battle_lifecycle import HomeBattleControl
 from core.home_battle import HomeBattleEvidence, detect_home_battle_control
 from handlers.home_screen_handler import (
     _tap_verified_home_battle_control,
+    handle_home_screen,
     tap_verified_new_battle,
 )
 
@@ -66,6 +67,26 @@ def test_home_battle_fallback_refuses_unknown_screen():
         assert not _tap_verified_home_battle_control()
 
     tap.assert_not_called()
+
+
+def test_home_battle_alternative_probes_keep_misses_diagnostic():
+    with (
+        patch(
+            "handlers.home_screen_handler.tap_if_visible",
+            side_effect=(False, True),
+        ) as tap,
+        patch("handlers.home_screen_handler.time.sleep"),
+    ):
+        handle_home_screen()
+
+    assert [call.args[0] for call in tap.call_args_list] == [
+        "buttons.battle:home",
+        "buttons.resume_battle:home",
+    ]
+    assert all(
+        call.kwargs["failure_log_level"] == "DEBUG"
+        for call in tap.call_args_list
+    )
 
 
 def test_validation_new_battle_tap_refuses_resume_control():
