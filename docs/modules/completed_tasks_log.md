@@ -47,10 +47,14 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   schedules another bounded poll; an advanced row becomes the baseline of the
   existing Retry scope instead of creating an attachment scope.
 - Focused logger, Game Over, activity-continuity, and run-initialization
-  coverage passed 129 tests, followed by all 950 repository tests. The live
-  battle was not navigated or restarted; its Current-run ledger alone was
-  restored to the verified 07:23 Retry boundary while preserving its correct
-  History identity and opaque scope ID.
+  coverage passed 129 tests, followed by all 950 repository tests. The ledger
+  repair sent no game input and did not restart the battle; it restored the
+  verified 07:23 Retry boundary while preserving the correct History identity
+  and opaque scope ID.
+- A guarded attached-battle reload then loaded the fix and restored `RUNNING`.
+  The replacement runtime scrolled History to its proven top, recopied the
+  unchanged Tier 19 wave-4903 entry, returned to battle, and preserved the
+  repaired scope.
 
 ### 2026-07-31 GUI-managed reverse ADB forwarding
 

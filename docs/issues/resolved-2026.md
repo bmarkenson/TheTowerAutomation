@@ -566,6 +566,12 @@ and actionable work lives in
   wiring.
 - **Validation:** The 129 focused logger, Game Over, activity-continuity, and
   run-initialization tests passed, followed by all 950 repository tests.
+- **Rollout:** The guarded attached-battle reload replaced PID 2908012 with
+  PID 2958817 under an acknowledged Pause, loaded `next_run` attachment
+  semantics, reacquired the same `localhost:5555` lock, and restored `RUNNING`.
+  Its live continuity pass reached the proven History top, recopied the same
+  July 31 Tier 19 wave-4903 identity, returned to the active battle, and logged
+  `scope_preserved` for the repaired 07:23 scope.
 - **Fixed by:** `2ce357d`.
 
 ### Daily Gem claim drift escaped its match region and left battle in Store
