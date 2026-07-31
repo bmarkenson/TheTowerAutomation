@@ -11,6 +11,29 @@ for a matching recurrence or historical investigation.
 
 ## Open
 
+### Battle History row verifier rejected joined OCR labels
+
+- **Observed:** 2026-07-29 after the Home Battle History navigation-region
+  repair, with recurrences through 2026-07-30.
+- **Symptom:** The continuity route successfully matched and opened Battle
+  History, then reported `latest Battle History row was not verified`, returned
+  Home, and continued without recording a baseline.
+- **Evidence:** `logs/actions.log` records the post-navigation failures at
+  18:28, 19:57, and 20:16 on 2026-07-29 and 17:43 on 2026-07-30. The retained
+  no-battle History frame now canonicalized as
+  `test/fixtures/ui_state_20260714/no_battle_battle_history_20260719.png`
+  produces `Tier18 Wave130`; the verifier required literal spaces after both
+  labels. The current live list similarly produced `Tier19 Wave 20`.
+- **Safety response:** Every failed route used its verified Return to Game
+  control and restored `HOME_SCREEN/NEW_BATTLE`. The operator stopped
+  automation before diagnosis. The authorized post-repair live check held the
+  target lock, retained `STOPPED`, copied Tier 19 wave 20, and restored verified
+  Home without starting a battle.
+- **Status:** Cause confirmed and repair validated. Tier and Wave row/detail
+  evidence now permits OCR-omitted whitespace while still requiring numeric
+  values. The focused 16-test continuity set and all 904 repository tests pass;
+  archive this entry with its fixing commit.
+
 ### Stopped control could not interrupt an in-progress Home setup guard
 
 - **Observed:** 2026-07-28 while cleaning up the authorized Tier 19

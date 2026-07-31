@@ -54,6 +54,30 @@ def test_retained_history_frames_verify_latest_row_and_copied_detail():
     assert history_detail_matches_identity(detail, identity)
 
 
+def test_retained_no_battle_history_row_allows_joined_ocr_labels():
+    history = cv2.imread(
+        str(
+            FIXTURES
+            / "ui_state_20260714"
+            / "no_battle_battle_history_20260719.png"
+        )
+    )
+
+    assert latest_history_row_visible(history)
+
+
+def test_history_detail_allows_joined_ocr_identity_labels():
+    identity = parse_battle_history_report(HISTORY_REPORT)
+
+    assert history_detail_matches_identity(
+        FRAME,
+        identity,
+        detector=lambda _frame: {"state": "BATTLE_HISTORY"},
+        is_visible_fn=lambda _key, *, screenshot=None: screenshot is FRAME,
+        ocr_fn=lambda _image, **_kwargs: ("Tier18 Wave9112", 90.0),
+    )
+
+
 def test_retained_source_frames_match_battle_history_navigation():
     home = cv2.imread(
         str(FIXTURES / "home_screen_no_reward_badges_20260714.png")

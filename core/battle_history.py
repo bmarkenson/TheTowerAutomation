@@ -169,7 +169,10 @@ def latest_history_row_visible(
         psm=6,
     )
     normalized = re.sub(r"[^A-Z0-9]+", " ", text.upper()).strip()
-    return "TIER " in f"{normalized} " and "WAVE " in f"{normalized} "
+    return _has_labeled_number(normalized, "TIER") and _has_labeled_number(
+        normalized,
+        "WAVE",
+    )
 
 
 def history_detail_matches_identity(
@@ -194,8 +197,8 @@ def history_detail_matches_identity(
     )
     normalized = re.sub(r"[^A-Z0-9]+", " ", text.upper()).strip()
     return (
-        f"TIER {identity.tier}" in normalized
-        and f"WAVE {identity.wave}" in normalized
+        _has_labeled_number(normalized, "TIER", identity.tier)
+        and _has_labeled_number(normalized, "WAVE", identity.wave)
     )
 
 
@@ -601,6 +604,18 @@ def _restore_source_best_effort(
 
 def _slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", str(value or "").lower()).strip("_")
+
+
+def _has_labeled_number(
+    normalized: str,
+    label: str,
+    expected: Optional[str] = None,
+) -> bool:
+    number_pattern = r"\d+" if expected is None else re.escape(str(expected))
+    return re.search(
+        rf"\b{re.escape(label.upper())}\s*{number_pattern}\b",
+        normalized,
+    ) is not None
 
 
 __all__ = [
