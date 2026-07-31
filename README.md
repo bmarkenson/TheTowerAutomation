@@ -165,13 +165,14 @@ to dismiss before continuing. This preserves the slot's existing level instead
 of leaving the incoming module at its previous level.
 
 While a battle is active, the game-speed guard periodically reads the visible
-control and enforces the persistent operator mode. `AUTO` accepts `x5.0` and
-the perk-raised `x6.3` without input and uses verified `+` taps below `x5.0`.
-`REDUCED` uses separately verified `+` or `-` controls to hold exactly `x4.0`
-before or after the Game Speed perk. Every tap is followed by fresh OCR, and a
-mode change or Pause is rechecked before the next input. Farm gives the urgent
-EHLS/EALS purchases first action priority; other profiles may enforce speed
-immediately after `RUNNING` is verified.
+control and enforces the persistent numeric target. Targets from `x0.0` through
+`x6.0` are exact. The `x6.3` selection means maximum available: at `x5.0` the
+guard verifies the current ceiling with one `+` tap rather than assuming that
+the perk is absent; no change proves the no-perk maximum, while an active perk
+advances the control toward `x6.3`. Every tap is followed by fresh OCR, and a
+target change or Pause is rechecked before the next input. Farm gives the
+urgent EHLS/EALS purchases first action priority; other profiles may enforce
+speed immediately after `RUNNING` is verified.
 
 ### Validating Tournament setup
 
@@ -299,17 +300,19 @@ A plain `pause` is indefinite and survives automation restarts. Pass
 same authoritative control file, so the supervisor persists `RUNNING` before
 resuming and cannot race against a stale `PAUSED` directive.
 
-Select the persistent game-speed mode independently of Pause:
+Select the persistent game-speed target independently of Pause:
 
 ```bash
-.venv/bin/python tools/automation_ctl.py game-speed reduced
-.venv/bin/python tools/automation_ctl.py game-speed auto
+.venv/bin/python tools/automation_ctl.py game-speed 4.0
+.venv/bin/python tools/automation_ctl.py game-speed max
 ```
 
-`REDUCED` holds current and future battles at `x4.0` until `AUTO` is restored.
-The runtime warns immediately and every 15 minutes while reduced mode remains
-active. Completed records retain the mode, exact target, and per-battle mode
-timeline alongside the derived effective game speed.
+Exact targets are available in `x0.5` increments from `x0.0` through `x6.0`;
+`max` selects the `x6.3` maximum-available policy. A custom exact target applies
+to current and future battles until changed. The runtime warns immediately and
+every 15 minutes while one remains active. Completed records retain the target,
+its semantics, and the per-battle target timeline alongside derived effective
+game speed.
 
 A standalone native Windows GUI now exposes these controls, managed automation
 start/stop, runtime health, recent activity, filters, and structured completed

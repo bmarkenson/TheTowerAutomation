@@ -35,7 +35,8 @@ from core.app_setup import CONFIGURABLE_STRATEGIES
 from core.control_directives import (
     ControlDirectiveError,
     ControlDirectiveStore,
-    VALID_GAME_SPEED_MODES,
+    MAXIMUM_GAME_SPEED_TARGET,
+    normalize_game_speed_target,
 )
 from utils.logger import log, log_action_intent, log_result
 from core.run_state import AUTOMATION
@@ -71,8 +72,8 @@ class AutomationSupervisor:
         self._control_store = ControlDirectiveStore(self.control_file)
         initial_directives = self._load_control_directive()
         self._strategy_request = self._parse_strategy_request(initial_directives)
-        self._game_speed_mode = self._parse_game_speed_mode(
-            initial_directives.get("game_speed_mode")
+        self._game_speed_target = self._parse_game_speed_target(
+            initial_directives.get("game_speed_target")
         )
         self._gate_decision = self._parse_gate_decision(initial_directives)
         self._exclusive_validation = self._parse_exclusive_validation(
@@ -96,8 +97,8 @@ class AutomationSupervisor:
         self._last_applied_state: Optional[str] = None
         self._last_state_directive_revision: object = None
         self._last_applied_mode: Optional[str] = None
-        self._last_applied_game_speed_mode: Optional[str] = None
-        self._last_game_speed_mode_revision: object = None
+        self._last_applied_game_speed_target: Optional[float] = None
+        self._last_game_speed_target_revision: object = None
         self._pause_resume_at: Optional[float] = None
         self._last_invalid_resume_at: object = None
         self._last_applied_adb_request: Optional[Tuple[int, object]] = None
@@ -125,10 +126,10 @@ class AutomationSupervisor:
         return self._strategy_request
 
     @property
-    def game_speed_mode(self) -> str:
-        """Return the persistent normal or reduced speed mode."""
+    def game_speed_target(self) -> float:
+        """Return the persistent exact or maximum-available speed target."""
 
-        return self._game_speed_mode
+        return self._game_speed_target
 
     @property
     def gate_decision(self) -> Optional[Dict[str, object]]:
@@ -178,23 +179,23 @@ class AutomationSupervisor:
                 and state_revision != self._last_state_directive_revision
             )
             self._last_state_directive_revision = state_revision
-            game_speed_mode_revision = (
-                directives.get("game_speed_mode_request_id")
-                or directives.get("game_speed_mode_updated_at")
+            game_speed_target_revision = (
+                directives.get("game_speed_target_request_id")
+                or directives.get("game_speed_target_updated_at")
                 or (
                     directives.get("updated_at")
-                    if "game_speed_mode" in directives
+                    if "game_speed_target" in directives
                     else None
                 )
             )
-            game_speed_mode_changed = (
-                game_speed_mode_revision is not None
-                and game_speed_mode_revision
-                != self._last_game_speed_mode_revision
+            game_speed_target_changed = (
+                game_speed_target_revision is not None
+                and game_speed_target_revision
+                != self._last_game_speed_target_revision
             )
-            self._last_game_speed_mode_revision = game_speed_mode_revision
+            self._last_game_speed_target_revision = game_speed_target_revision
             control_directive_changed = (
-                state_directive_changed or game_speed_mode_changed
+                state_directive_changed or game_speed_target_changed
             )
             self._strategy_request = self._parse_strategy_request(directives)
             self._gate_decision = self._parse_gate_decision(directives)
@@ -209,9 +210,9 @@ class AutomationSupervisor:
                 acknowledge_unchanged=state_directive_changed,
             )
             self._apply_mode(directives.get("mode"))
-            self._apply_game_speed_mode(
-                directives.get("game_speed_mode"),
-                acknowledge_unchanged=game_speed_mode_changed,
+            self._apply_game_speed_target(
+                directives.get("game_speed_target"),
+                acknowledge_unchanged=game_speed_target_changed,
             )
             self._sync_pause_deadline(directives)
             self._apply_adb_port(
@@ -240,13 +241,11 @@ class AutomationSupervisor:
         return strategy, identity, apply_mode
 
     @staticmethod
-    def _parse_game_speed_mode(value: object) -> str:
-        normalized = str(value or "AUTO").strip().upper()
-        return (
-            normalized
-            if normalized in VALID_GAME_SPEED_MODES
-            else "AUTO"
-        )
+    def _parse_game_speed_target(value: object) -> float:
+        try:
+            return normalize_game_speed_target(value)
+        except ValueError:
+            return MAXIMUM_GAME_SPEED_TARGET
 
     @staticmethod
     def _parse_gate_decision(
@@ -1166,25 +1165,27 @@ class AutomationSupervisor:
         except Exception as exc:
             log(f"[CTRL] Failed to set mode={normalized}: {exc}", "WARN")
 
-    def _apply_game_speed_mode(
+    def _apply_game_speed_target(
         self,
-        mode: object,
+        target: object,
         *,
         acknowledge_unchanged: bool = False,
     ) -> None:
-        normalized = self._parse_game_speed_mode(mode)
-        self._game_speed_mode = normalized
-        if normalized == self._last_applied_game_speed_mode:
+        normalized = self._parse_game_speed_target(target)
+        self._game_speed_target = normalized
+        if normalized == self._last_applied_game_speed_target:
             if acknowledge_unchanged:
                 log(
-                    f"[CTRL] Game speed mode set to {normalized} via control file",
+                    f"[CTRL] Game speed target set to x{normalized:.1f} "
+                    "via control file",
                     "INFO",
                     console=True,
                 )
             return
-        self._last_applied_game_speed_mode = normalized
+        self._last_applied_game_speed_target = normalized
         log(
-            f"[CTRL] Game speed mode set to {normalized} via control file",
+            f"[CTRL] Game speed target set to x{normalized:.1f} "
+            "via control file",
             "INFO",
             console=True,
         )

@@ -11,8 +11,7 @@ Commands:
   - resume                → state=RUNNING
   - stop                  → state=STOPPED
   - mode <retry|wait|home>→ set ExecMode
-  - game-speed auto       → enforce the normal x5.0 minimum
-  - game-speed reduced    → enforce exactly x4.0 until restored
+  - game-speed <target>   → enforce x0.0..x6.0, or x6.3/max available
   - gate                  → prompt for a pending startup-gate decision
   - gate <choice>         → resolve it non-interactively by choice id
   - force-continue        → legacy alias for gate bypass_once
@@ -43,9 +42,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from core.control_directives import (
     ControlDirectiveError,
     ControlDirectiveStore,
-    VALID_GAME_SPEED_MODES,
     VALID_MODES,
     VALID_STATES,
+    normalize_game_speed_target,
 )
 from core.gate_decisions import (
     prompt_for_gate_decision,
@@ -78,21 +77,21 @@ def _set_mode(path: str, mode: str) -> None:
     print(f"[OK] Mode set to {m} @ {path}")
 
 
-def _set_game_speed_mode(path: str, mode: str) -> None:
-    normalized = mode.upper()
-    if normalized not in VALID_GAME_SPEED_MODES:
-        raise SystemExit(
-            "Invalid game-speed mode: "
-            f"{mode}. Use one of {sorted(VALID_GAME_SPEED_MODES)}"
-        )
+def _set_game_speed_target(path: str, target: str) -> None:
+    raw_target = "6.3" if target.strip().lower() == "max" else target
+    if raw_target.lower().startswith("x"):
+        raw_target = raw_target[1:]
     try:
-        ControlDirectiveStore(path).set_game_speed_mode(
+        normalized = normalize_game_speed_target(raw_target)
+        ControlDirectiveStore(path).set_game_speed_target(
             normalized,
             source="cli",
         )
+    except ValueError as exc:
+        raise SystemExit(f"Invalid game-speed target: {exc}") from exc
     except ControlDirectiveError as exc:
         raise SystemExit(f"Unable to update automation control: {exc}") from exc
-    print(f"[OK] Game speed mode set to {normalized} @ {path}")
+    print(f"[OK] Game speed target set to x{normalized:.1f} @ {path}")
 
 
 def _request_force_continue(path: str) -> None:
@@ -214,7 +213,7 @@ def main(argv=None):
         nargs="+",
         help=(
             "pause | resume | stop | mode <m> | gate [choice] | "
-            "game-speed <auto|reduced> | "
+            "game-speed <0.0..6.0|6.3|max> | "
             "force-continue | configure-run [skip|default <check>] | "
             "set state <s> | set mode <m> | status"
         ),
@@ -252,7 +251,7 @@ def main(argv=None):
         _set_mode(ctrl, cmd[1])
         return 0
     if cmd[0] == "game-speed" and len(cmd) == 2:
-        _set_game_speed_mode(ctrl, cmd[1])
+        _set_game_speed_target(ctrl, cmd[1])
         return 0
     if cmd[0] == "force-continue" and len(cmd) == 1:
         _request_force_continue(ctrl)

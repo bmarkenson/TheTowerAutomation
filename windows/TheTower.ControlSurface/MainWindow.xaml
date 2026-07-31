@@ -281,12 +281,26 @@
                   <Button Content="Pause 30 min" Tag="pause:30" Click="Control_Click" />
                 </UniformGrid>
                 <TextBlock Text="GAME SPEED" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4,10,4,0" />
-                <UniformGrid Columns="2">
-                  <Button x:Name="AutoGameSpeedButton" Content="Auto maximum" Tag="AUTO" Click="GameSpeedMode_Click" />
-                  <Button x:Name="ReducedGameSpeedButton" Content="Reduced x4.0" Tag="REDUCED" Click="GameSpeedMode_Click" />
-                </UniformGrid>
-                <TextBlock x:Name="GameSpeedModeText"
-                           Text="Auto maximum speed is active."
+                <ComboBox x:Name="GameSpeedTargetBox"
+                          SelectionChanged="GameSpeedTargetBox_SelectionChanged"
+                          Margin="4">
+                  <ComboBoxItem Content="x0.0" Tag="0.0" />
+                  <ComboBoxItem Content="x0.5" Tag="0.5" />
+                  <ComboBoxItem Content="x1.0" Tag="1.0" />
+                  <ComboBoxItem Content="x1.5" Tag="1.5" />
+                  <ComboBoxItem Content="x2.0" Tag="2.0" />
+                  <ComboBoxItem Content="x2.5" Tag="2.5" />
+                  <ComboBoxItem Content="x3.0" Tag="3.0" />
+                  <ComboBoxItem Content="x3.5" Tag="3.5" />
+                  <ComboBoxItem Content="x4.0" Tag="4.0" />
+                  <ComboBoxItem Content="x4.5" Tag="4.5" />
+                  <ComboBoxItem Content="x5.0" Tag="5.0" />
+                  <ComboBoxItem Content="x5.5" Tag="5.5" />
+                  <ComboBoxItem Content="x6.0" Tag="6.0" />
+                  <ComboBoxItem Content="x6.3 — Maximum available" Tag="6.3" />
+                </ComboBox>
+                <TextBlock x:Name="GameSpeedTargetText"
+                           Text="Maximum available speed is active."
                            TextWrapping="Wrap"
                            Foreground="{StaticResource MutedBrush}"
                            FontSize="10"

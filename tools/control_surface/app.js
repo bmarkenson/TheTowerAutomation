@@ -97,10 +97,16 @@ function renderStatus(payload) {
   setText("currentMode", control.mode);
   setText("controlUpdated", formatDate(control.updated_at));
   byId("modeSelect").value = ["RETRY", "WAIT", "HOME"].includes(control.mode) ? control.mode : "RETRY";
-  const gameSpeedMode = control.game_speed_mode === "REDUCED" ? "REDUCED" : "AUTO";
-  byId("autoGameSpeedButton").classList.toggle("primary", gameSpeedMode === "AUTO");
-  byId("reducedGameSpeedButton").classList.toggle("primary", gameSpeedMode === "REDUCED");
-  byId("reducedGameSpeedWarning").hidden = gameSpeedMode !== "REDUCED";
+  const gameSpeedTarget = Number(control.game_speed_target);
+  const normalizedGameSpeedTarget = Number.isFinite(gameSpeedTarget)
+    ? gameSpeedTarget
+    : 6.3;
+  byId("gameSpeedTargetSelect").value = normalizedGameSpeedTarget.toFixed(1);
+  const gameSpeedWarning = byId("gameSpeedTargetWarning");
+  gameSpeedWarning.hidden = normalizedGameSpeedTarget >= 6.3;
+  gameSpeedWarning.textContent = normalizedGameSpeedTarget < 6.3
+    ? `Exact x${normalizedGameSpeedTarget.toFixed(1)} persists across current and future runs.`
+    : "";
 
   if (observation) {
     setText("observedState", observation.state_label);
@@ -688,9 +694,11 @@ document.addEventListener("click", (event) => {
     if (action === "stop" && !window.confirm("Persist STOPPED and stop the managed Linux automation service?")) return;
     if (
       action === "start"
-      && state.lastStatus?.control?.game_speed_mode === "REDUCED"
+      && Number(state.lastStatus?.control?.game_speed_target) < 6.3
       && !window.confirm(
-        "Reduced game-speed mode is active. Start automation with speed held at x4.0?",
+        `A custom game-speed target is active. Start automation with speed held at x${Number(
+          state.lastStatus.control.game_speed_target,
+        ).toFixed(1)}?`,
       )
     ) return;
     if (action === "restart_attached" && !window.confirm(
@@ -717,9 +725,7 @@ document.addEventListener("click", (event) => {
     if (control.dataset.mode) payload.mode = control.dataset.mode;
     const message = action === "pause"
       ? "Pause directive saved"
-      : action === "game_speed"
-        ? `Game speed mode set to ${humanize(payload.mode)}`
-        : `${humanize(action)} directive saved`;
+      : `${humanize(action)} directive saved`;
     sendControl(payload, message);
     return;
   }
@@ -736,6 +742,14 @@ byId("customPauseForm").addEventListener("submit", (event) => {
 byId("applyModeButton").addEventListener("click", () => {
   const mode = byId("modeSelect").value;
   sendControl({ action: "mode", mode }, `Mode set to ${mode}`);
+});
+
+byId("gameSpeedTargetSelect").addEventListener("change", () => {
+  const target = Number(byId("gameSpeedTargetSelect").value);
+  sendControl(
+    { action: "game_speed", target },
+    `Game speed target set to x${target.toFixed(1)}`,
+  );
 });
 
 byId("battleRows").addEventListener("click", (event) => {

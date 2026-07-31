@@ -202,7 +202,9 @@ class App:
         )
         self._run_perk_selector = RunScopedPerkSelector(perk_selector_state)
         self._game_speed_guard = GameSpeedGuard()
-        self._game_speed_guard.set_mode(self._supervisor.game_speed_mode)
+        self._game_speed_guard.set_target(
+            self._supervisor.game_speed_target
+        )
         self._run_initialization_gate_logged = False
         self._session_preflight_gate_logged = False
         self._session_preflight_terminal_blocked_logged = False
@@ -1628,8 +1630,8 @@ class App:
                 detection = detect_state_and_overlays(img, log_matches=self._match_trace)
                 game_speed_guard = getattr(self, "_game_speed_guard", None)
                 if game_speed_guard is not None:
-                    game_speed_guard.set_mode(
-                        self._supervisor.game_speed_mode,
+                    game_speed_guard.set_target(
+                        self._supervisor.game_speed_target,
                         wave=self._last_wave_value,
                     )
                 if detection.get("state") == "HOME_SCREEN":
@@ -1733,12 +1735,12 @@ class App:
                         )
                 game_speed_guard = getattr(self, "_game_speed_guard", None)
                 if game_speed_guard is not None:
-                    game_speed_guard.set_mode(
-                        self._supervisor.game_speed_mode,
+                    game_speed_guard.set_target(
+                        self._supervisor.game_speed_target,
                         wave=self._last_wave_value,
                     )
-                    expected_game_speed_mode = (
-                        self._supervisor.game_speed_mode
+                    expected_game_speed_target = (
+                        self._supervisor.game_speed_target
                     )
                     game_speed_allowed = bool(
                         not is_paused
@@ -1756,8 +1758,8 @@ class App:
                         action_guard_fn=lambda: (
                             game_speed_allowed
                             and self._runtime_action_guard()
-                            and self._supervisor.game_speed_mode
-                            == expected_game_speed_mode
+                            and self._supervisor.game_speed_target
+                            == expected_game_speed_target
                         ),
                     ):
                         # The guard may have captured several newer frames while

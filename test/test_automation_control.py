@@ -114,33 +114,33 @@ def test_repeated_state_directive_is_acknowledged_and_requests_fresh_status(
     assert len(acknowledgements) == 2
 
 
-def test_game_speed_mode_is_persistent_and_applies_to_a_live_supervisor(
+def test_game_speed_target_is_persistent_and_applies_to_a_live_supervisor(
     tmp_path,
 ):
     control_file = tmp_path / "automation_ctl.json"
     store = ControlDirectiveStore(control_file)
 
-    assert store.status()["game_speed_mode"] == "AUTO"
+    assert store.status()["game_speed_target"] == 6.3
     assert automation_ctl_main(
-        ["--control-file", str(control_file), "game-speed", "reduced"]
+        ["--control-file", str(control_file), "game-speed", "4.5"]
     ) == 0
     supervisor = _supervisor(control_file)
-    assert supervisor.game_speed_mode == "REDUCED"
+    assert supervisor.game_speed_target == 4.5
 
     with patch("core.automation_supervisor.log") as runtime_log:
         assert supervisor.apply_control()
         assert not supervisor.apply_control()
         assert automation_ctl_main(
-            ["--control-file", str(control_file), "game-speed", "auto"]
+            ["--control-file", str(control_file), "game-speed", "max"]
         ) == 0
         assert supervisor.apply_control()
 
-    assert supervisor.game_speed_mode == "AUTO"
-    assert ControlDirectiveStore(control_file).status()["game_speed_mode"] == "AUTO"
+    assert supervisor.game_speed_target == 6.3
+    assert ControlDirectiveStore(control_file).status()["game_speed_target"] == 6.3
     assert any(
         call.args
         and call.args[0]
-        == "[CTRL] Game speed mode set to AUTO via control file"
+        == "[CTRL] Game speed target set to x6.3 via control file"
         for call in runtime_log.call_args_list
     )
 

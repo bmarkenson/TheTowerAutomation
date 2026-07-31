@@ -25,7 +25,10 @@ from core.exclusive_validation import (
 
 VALID_STATES = frozenset({"RUNNING", "PAUSED", "STOPPED"})
 VALID_MODES = frozenset({"RETRY", "WAIT", "HOME"})
-VALID_GAME_SPEED_MODES = frozenset({"AUTO", "REDUCED"})
+VALID_GAME_SPEED_TARGETS = tuple(
+    [step / 2 for step in range(13)] + [6.3]
+)
+MAXIMUM_GAME_SPEED_TARGET = 6.3
 STRATEGY_APPLY_MODES = frozenset({"next_boundary", "active_battle"})
 GATE_DECISION_STATUSES = frozenset({"pending", "resolved", "consumed"})
 EXCLUSIVE_VALIDATION_STATUSES = frozenset(
@@ -88,14 +91,14 @@ class ControlDirectiveStore:
             "state_updated_at": data.get("state_updated_at"),
             "state_request_id": data.get("state_request_id"),
             "mode_updated_at": data.get("mode_updated_at"),
-            "game_speed_mode": _valid_game_speed_mode(
-                data.get("game_speed_mode")
+            "game_speed_target": _valid_game_speed_target(
+                data.get("game_speed_target")
             ),
-            "game_speed_mode_updated_at": data.get(
-                "game_speed_mode_updated_at"
+            "game_speed_target_updated_at": data.get(
+                "game_speed_target_updated_at"
             ),
-            "game_speed_mode_request_id": data.get(
-                "game_speed_mode_request_id"
+            "game_speed_target_request_id": data.get(
+                "game_speed_target_request_id"
             ),
             "adb_port_updated_at": data.get("adb_port_updated_at"),
             "strategy": _valid_strategy(data.get("strategy")),
@@ -196,27 +199,22 @@ class ControlDirectiveStore:
 
         return self.update(mutate)
 
-    def set_game_speed_mode(
+    def set_game_speed_target(
         self,
-        mode: str,
+        target: object,
         *,
         source: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Persist the normal or reduced battle-speed enforcement mode."""
+        """Persist one exact target or the x6.3 maximum-available target."""
 
-        normalized = str(mode).strip().upper()
-        if normalized not in VALID_GAME_SPEED_MODES:
-            raise ValueError(
-                f"Unsupported game-speed mode {mode!r}; "
-                f"expected one of {sorted(VALID_GAME_SPEED_MODES)}"
-            )
+        normalized = normalize_game_speed_target(target)
 
         def mutate(data: dict[str, Any]) -> dict[str, Any]:
             timestamp = _updated_at()
-            data["game_speed_mode"] = normalized
+            data["game_speed_target"] = normalized
             data["updated_at"] = timestamp
-            data["game_speed_mode_updated_at"] = timestamp
-            data["game_speed_mode_request_id"] = uuid4().hex
+            data["game_speed_target_updated_at"] = timestamp
+            data["game_speed_target_request_id"] = uuid4().hex
             if source:
                 data["updated_by"] = source
             return data
@@ -1406,13 +1404,29 @@ def _valid_strategy(value: object) -> Optional[str]:
     return normalized if normalized in CONFIGURABLE_STRATEGIES else None
 
 
-def _valid_game_speed_mode(value: object) -> str:
-    normalized = str(value or "AUTO").strip().upper()
-    return (
-        normalized
-        if normalized in VALID_GAME_SPEED_MODES
-        else "AUTO"
-    )
+def normalize_game_speed_target(value: object) -> float:
+    """Return one supported game-speed target or raise ``ValueError``."""
+
+    if isinstance(value, bool):
+        raise ValueError("Game-speed target must be numeric")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Game-speed target must be numeric") from exc
+    if not math.isfinite(parsed):
+        raise ValueError("Game-speed target must be finite")
+    for target in VALID_GAME_SPEED_TARGETS:
+        if math.isclose(parsed, target, abs_tol=1e-9):
+            return target
+    choices = ", ".join(f"{target:.1f}" for target in VALID_GAME_SPEED_TARGETS)
+    raise ValueError(f"Unsupported game-speed target {value!r}; expected {choices}")
+
+
+def _valid_game_speed_target(value: object) -> float:
+    try:
+        return normalize_game_speed_target(value)
+    except ValueError:
+        return MAXIMUM_GAME_SPEED_TARGET
 
 
 def _valid_strategy_apply_mode(value: object) -> str:
@@ -1748,7 +1762,9 @@ __all__ = [
     "EXCLUSIVE_VALIDATION_OUTCOMES",
     "EXCLUSIVE_VALIDATION_STATUSES",
     "GATE_DECISION_STATUSES",
-    "VALID_GAME_SPEED_MODES",
+    "MAXIMUM_GAME_SPEED_TARGET",
+    "VALID_GAME_SPEED_TARGETS",
     "VALID_MODES",
     "VALID_STATES",
+    "normalize_game_speed_target",
 ]

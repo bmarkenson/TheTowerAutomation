@@ -20,7 +20,11 @@ from core.battle_classification import (
     classification_for_record,
     observed_tier_for_record,
 )
-from core.control_directives import ControlDirectiveError, ControlDirectiveStore
+from core.control_directives import (
+    ControlDirectiveError,
+    ControlDirectiveStore,
+    MAXIMUM_GAME_SPEED_TARGET,
+)
 from core.gate_decisions import startup_gate_context_for_strategy
 from core.exclusive_validation import (
     exclusive_validation_definition_for_strategy,
@@ -38,7 +42,7 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 13
+CONTROL_SURFACE_REVISION = 14
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -47,7 +51,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "current_run_activity_scope",
     "exclusive_strategy_validation_status",
     "explicit_strategy_disposition",
-    "game_speed_mode",
+    "game_speed_target",
     "host_performance_gpu_v1",
     "host_performance_telemetry_v1",
     "selected_strategy_process_start",
@@ -82,9 +86,9 @@ _STATE_ACK_RE = re.compile(
 _MODE_ACK_RE = re.compile(
     r"^\[CTRL] Mode set to (?P<value>RETRY|WAIT|HOME) via control file$"
 )
-_GAME_SPEED_MODE_ACK_RE = re.compile(
-    r"^\[CTRL] Game speed mode set to "
-    r"(?P<value>AUTO|REDUCED) via control file$"
+_GAME_SPEED_TARGET_ACK_RE = re.compile(
+    r"^\[CTRL] Game speed target set to "
+    r"(?P<value>x(?:[0-5]\.[05]|6\.[03])) via control file$"
 )
 _ADB_TARGET_ACK_RE = re.compile(
     r"^\[CTRL] ADB target set to (?P<value>localhost:(?:[1-9]\d{0,4})) via control file$"
@@ -164,8 +168,8 @@ class ControlSurfaceService:
             control = {
                 "state": "UNKNOWN",
                 "mode": "UNKNOWN",
-                "game_speed_mode": "AUTO",
-                "game_speed_mode_updated_at": None,
+                "game_speed_target": MAXIMUM_GAME_SPEED_TARGET,
+                "game_speed_target_updated_at": None,
                 "adb_port": None,
                 "resume_at": None,
                 "remaining_seconds": None,
@@ -319,14 +323,13 @@ class ControlSurfaceService:
                 self.control_store.set_mode(mode, source="control-surface")
                 audit = f"Requested mode {mode}"
             elif action == "game_speed":
-                game_speed_mode = str(
-                    request.get("mode") or ""
-                ).strip().upper()
-                self.control_store.set_game_speed_mode(
-                    game_speed_mode,
+                game_speed_target = request.get("target")
+                saved = self.control_store.set_game_speed_target(
+                    game_speed_target,
                     source="control-surface",
                 )
-                audit = f"Requested game speed mode {game_speed_mode}"
+                saved_target = saved["game_speed_target"]
+                audit = f"Requested game speed target x{saved_target:.1f}"
             elif action == "resolve_gate":
                 request_id = str(request.get("request_id") or "").strip()
                 decision_id = str(request.get("decision_id") or "").strip().lower()
@@ -1508,13 +1511,13 @@ class ControlSurfaceService:
     ) -> dict[str, Any]:
         state_ack = None
         mode_ack = None
-        game_speed_mode_ack = None
+        game_speed_target_ack = None
         adb_target_ack = None
         strategy_ack = None
         state_updated_at = control.get("state_updated_at")
         mode_updated_at = control.get("mode_updated_at")
-        game_speed_mode_updated_at = control.get(
-            "game_speed_mode_updated_at"
+        game_speed_target_updated_at = control.get(
+            "game_speed_target_updated_at"
         )
         adb_port_updated_at = control.get("adb_port_updated_at")
         strategy_updated_at = control.get("strategy_updated_at")
@@ -1545,14 +1548,21 @@ class ControlSurfaceService:
                     control.get("mode"),
                     mode_updated_at or legacy_updated_at,
                 )
-            if game_speed_mode_ack is None and (
-                match := _GAME_SPEED_MODE_ACK_RE.fullmatch(entry["message"])
+            if game_speed_target_ack is None and (
+                match := _GAME_SPEED_TARGET_ACK_RE.fullmatch(entry["message"])
             ):
-                game_speed_mode_ack = _ack_entry(
+                target = control.get("game_speed_target")
+                expected_target = (
+                    f"x{target:.1f}"
+                    if isinstance(target, (int, float))
+                    and not isinstance(target, bool)
+                    else None
+                )
+                game_speed_target_ack = _ack_entry(
                     entry,
                     match.group("value"),
-                    control.get("game_speed_mode"),
-                    game_speed_mode_updated_at,
+                    expected_target,
+                    game_speed_target_updated_at,
                 )
             if adb_target_ack is None and (
                 match := _ADB_TARGET_ACK_RE.fullmatch(entry["message"])
@@ -1581,7 +1591,7 @@ class ControlSurfaceService:
             if (
                 state_ack is not None
                 and mode_ack is not None
-                and game_speed_mode_ack is not None
+                and game_speed_target_ack is not None
                 and (control.get("adb_port") is None or adb_target_ack is not None)
                 and (control.get("strategy") is None or strategy_ack is not None)
             ):
@@ -1589,7 +1599,7 @@ class ControlSurfaceService:
         return {
             "state": state_ack,
             "mode": mode_ack,
-            "game_speed_mode": game_speed_mode_ack,
+            "game_speed_target": game_speed_target_ack,
             "adb_target": adb_target_ack,
             "strategy": strategy_ack,
         }

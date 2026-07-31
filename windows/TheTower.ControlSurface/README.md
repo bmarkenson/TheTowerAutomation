@@ -150,12 +150,15 @@ Current strategy and queueing it cancels a different pending request. Actions
 that would be no-ops are disabled; the panel reports request acceptance
 immediately and shows selected, current, and pending values separately.
 
-The same panel selects persistent game-speed mode. **Auto maximum** retains the
-normal `x5.0`/perk-raised `x6.3` policy; **Reduced x4.0** holds exactly `x4.0`
-in the current and later battles until Auto is restored. Reduced mode remains
-visibly warned, a managed Start asks for confirmation, and amber selection
-means a live process has not acknowledged the new mode. Completed battle
-settings show the selected target and any per-battle mode changes.
+The same panel selects a persistent numeric game-speed target. The dropdown
+offers `x0.0` through `x6.0` in `x0.5` increments and `x6.3 — Maximum
+available`. Lower values are exact targets for the current and later battles.
+Maximum available actively verifies the visible `+` ceiling, accepting `x5.0`
+only after a no-change probe proves the perk is absent and advancing to `x6.3`
+when it is present. A custom target remains visibly warned, a managed Start
+asks for confirmation, and an amber border means a live process has not
+acknowledged the new target. Completed battle settings show the selected target
+and any per-battle target changes.
 
 Every explicit Tournament selection or Start with Tournament selected creates
 one durable validation request. The panel reports Home preflight, ownership of

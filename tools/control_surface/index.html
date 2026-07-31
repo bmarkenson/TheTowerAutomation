@@ -69,18 +69,25 @@
         </form>
 
         <div class="mode-control">
-          <label>Game speed</label>
-          <div class="button-grid compact">
-            <button id="autoGameSpeedButton" type="button"
-                    data-control-action="game_speed"
-                    data-mode="AUTO">Auto maximum</button>
-            <button id="reducedGameSpeedButton" type="button"
-                    data-control-action="game_speed"
-                    data-mode="REDUCED">Reduced x4.0</button>
-          </div>
-          <p id="reducedGameSpeedWarning" class="callout warning" hidden>
-            Reduced mode is active. Current and future runs will be held at
-            x4.0 until Auto maximum is restored.
+          <label for="gameSpeedTargetSelect">Game speed</label>
+          <select id="gameSpeedTargetSelect">
+            <option value="0.0">x0.0</option>
+            <option value="0.5">x0.5</option>
+            <option value="1.0">x1.0</option>
+            <option value="1.5">x1.5</option>
+            <option value="2.0">x2.0</option>
+            <option value="2.5">x2.5</option>
+            <option value="3.0">x3.0</option>
+            <option value="3.5">x3.5</option>
+            <option value="4.0">x4.0</option>
+            <option value="4.5">x4.5</option>
+            <option value="5.0">x5.0</option>
+            <option value="5.5">x5.5</option>
+            <option value="6.0">x6.0</option>
+            <option value="6.3">x6.3 — Maximum available</option>
+          </select>
+          <p id="gameSpeedTargetWarning" class="callout warning" hidden>
+            A custom exact target is active.
           </p>
         </div>
 

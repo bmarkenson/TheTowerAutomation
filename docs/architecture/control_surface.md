@@ -51,7 +51,7 @@ agnostic.
   Terminal-observed Tier is shown independently, including for an ambiguous
   standard Game Over whose type remains `unknown`.
 - The allowlisted write surface is pause, timed pause, resume, mode,
-  persistent `AUTO`/`REDUCED` game-speed selection,
+  persistent numeric game-speed target selection,
   resolution of a runtime-published startup-gate decision,
   optional strategy-scoped one-run check configuration,
   bundled-strategy selection, stopped or
@@ -269,8 +269,8 @@ Control request examples:
 {"action": "pause", "minutes": 30}
 {"action": "resume"}
 {"action": "mode", "mode": "WAIT"}
-{"action": "game_speed", "mode": "REDUCED"}
-{"action": "game_speed", "mode": "AUTO"}
+{"action": "game_speed", "target": 4.0}
+{"action": "game_speed", "target": 6.3}
 {"action": "resolve_gate", "request_id": "...", "decision_id": "retry"}
 {"action": "resolve_tournament_launch", "request_id": "...", "decision": "start"}
 {"action": "resolve_tournament_launch", "request_id": "...", "decision": "cancel"}
@@ -297,12 +297,12 @@ Process request examples:
 - Resume and Game Over mode selection (`RETRY`, `WAIT`, or `HOME`). State and
   mode controls highlight the saved selection; amber means a live runtime has
   not yet acknowledged the latest directive.
-- Persistent game-speed selection. `AUTO` restores the normal maximum policy;
-  `REDUCED` holds exactly `x4.0` across live and future runs. Both clients keep
-  the reduced warning visible and confirm before starting a managed runtime
-  under it; the native client also distinguishes saved intent from runtime
-  acknowledgement. This requires server revision 11 and capability
-  `game_speed_mode`.
+- Persistent numeric game-speed selection from `x0.0` through `x6.0` in
+  `x0.5` increments, plus `x6.3` for maximum available. Lower values are exact
+  targets across live and future runs. Both clients keep the custom-target
+  warning visible and confirm before starting a managed runtime under it; the
+  native client also distinguishes saved intent from runtime acknowledgement.
+  This requires server revision 14 and capability `game_speed_target`.
 - Native Windows host health for system CPU, memory, processor clock,
   BlueStacks CPU/RAM/process identity, and local publication state. Hovering
   the strip shows sampling cost, BlueStacks I/O, last Linux acknowledgement,
@@ -373,7 +373,7 @@ Process request examples:
   completed-run history in a separate native window. The history includes
   Farm/Tournament/Milestone classification, strategy, tier, wave, duration,
   Coins/hour, Cells/hour, capture quality, full sections, captured perks,
-  resolved settings, game-speed mode/timeline, and preflight evidence.
+  resolved settings, game-speed target/timeline, and preflight evidence.
 - Local filters for type, Tier, minimum/maximum wave, strategy, and quality.
 - Local export of the currently filtered completed-battle summaries as UTF-8
   CSV.

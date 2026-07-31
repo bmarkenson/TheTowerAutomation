@@ -58,8 +58,8 @@ public sealed class AcknowledgementStatus
     [JsonPropertyName("mode")]
     public DirectiveAcknowledgement? Mode { get; set; }
 
-    [JsonPropertyName("game_speed_mode")]
-    public DirectiveAcknowledgement? GameSpeedMode { get; set; }
+    [JsonPropertyName("game_speed_target")]
+    public DirectiveAcknowledgement? GameSpeedTarget { get; set; }
 
     [JsonPropertyName("adb_target")]
     public DirectiveAcknowledgement? AdbTarget { get; set; }
@@ -124,8 +124,8 @@ public sealed class ControlStatus
     [JsonPropertyName("mode")]
     public string Mode { get; set; } = "UNKNOWN";
 
-    [JsonPropertyName("game_speed_mode")]
-    public string GameSpeedMode { get; set; } = "AUTO";
+    [JsonPropertyName("game_speed_target")]
+    public double GameSpeedTarget { get; set; } = 6.3;
 
     [JsonPropertyName("remaining_seconds")]
     public int? RemainingSeconds { get; set; }

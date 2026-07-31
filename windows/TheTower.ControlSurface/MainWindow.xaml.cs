@@ -45,7 +45,9 @@ public partial class MainWindow : Window
     private string? _requestedStrategy;
     private string? _pendingStrategy;
     private string _strategyApplyMode = "next_boundary";
-    private string _gameSpeedMode = "AUTO";
+    private double _gameSpeedTarget = 6.3;
+    private bool _updatingGameSpeedTargetSelection;
+    private bool _gameSpeedTargetRequestInFlight;
     private ControlSurfaceCompatibilityResult? _serverCompatibility;
     private bool _controlSurfaceRestartInFlight;
     private bool _automationRestartInFlight;
@@ -500,16 +502,27 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void GameSpeedMode_Click(object sender, RoutedEventArgs e)
+    private async void GameSpeedTargetBox_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
     {
-        if (sender is not Button button || button.Tag is not string mode)
+        if (_updatingGameSpeedTargetSelection
+            || _gameSpeedTargetRequestInFlight
+            || GameSpeedTargetBox.SelectedItem is not ComboBoxItem item
+            || !double.TryParse(
+                item.Tag?.ToString(),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out var target))
         {
             return;
         }
+        _gameSpeedTargetRequestInFlight = true;
+        GameSpeedTargetBox.IsEnabled = false;
         try
         {
             var response = await _api.PostControlAsync(
-                new { action = "game_speed", mode },
+                new { action = "game_speed", target },
                 CancellationToken.None);
             RenderStatus(response);
             await RefreshActivityAsync(force: true);
@@ -517,6 +530,12 @@ public partial class MainWindow : Window
         catch (Exception exc)
         {
             ShowError(exc);
+            await RefreshStatusAsync(force: true);
+        }
+        finally
+        {
+            _gameSpeedTargetRequestInFlight = false;
+            GameSpeedTargetBox.IsEnabled = true;
         }
     }
 
@@ -747,15 +766,12 @@ public partial class MainWindow : Window
             return;
         }
         if (tag.StartsWith("start:", StringComparison.Ordinal)
-            && string.Equals(
-                _gameSpeedMode,
-                "REDUCED",
-                StringComparison.OrdinalIgnoreCase)
+            && _gameSpeedTarget < 6.3
             && MessageBox.Show(
                 this,
-                "Reduced game-speed mode is active. Start automation with "
-                + "battle speed held at x4.0?",
-                "Reduced game speed",
+                $"A custom game-speed target is active. Start automation with "
+                + $"battle speed held at x{_gameSpeedTarget:F1}?",
+                "Custom game speed",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Warning) != MessageBoxResult.Yes)
         {
@@ -1257,17 +1273,13 @@ public partial class MainWindow : Window
         UpdateControlSurfaceCompatibility();
         DirectiveText.Text = FormatAutomationState(status.Control);
         ModeText.Text = FormatStatusToken(status.Control.Mode);
-        _gameSpeedMode = string.Equals(
-            status.Control.GameSpeedMode,
-            "REDUCED",
-            StringComparison.OrdinalIgnoreCase)
-            ? "REDUCED"
-            : "AUTO";
-        GameSpeedModeText.Text = _gameSpeedMode == "REDUCED"
-            ? "Reduced mode is active. Current and future runs are held at "
-                + "x4.0 until Auto maximum is restored."
-            : "Auto maximum speed is active.";
-        GameSpeedModeText.Foreground = _gameSpeedMode == "REDUCED"
+        _gameSpeedTarget = status.Control.GameSpeedTarget;
+        SelectGameSpeedTarget(_gameSpeedTarget);
+        GameSpeedTargetText.Text = _gameSpeedTarget < 6.3
+            ? $"Exact x{_gameSpeedTarget:F1} persists across current and future runs."
+            : "Maximum available: verifies the + ceiling at x5.0 without "
+                + "the perk and advances to x6.3 when the perk is active.";
+        GameSpeedTargetText.Foreground = _gameSpeedTarget < 6.3
             ? new SolidColorBrush(Color.FromRgb(241, 191, 91))
             : (Brush)FindResource("MutedBrush");
         ObservedStateText.Text = FormatGameScreen(
@@ -1410,8 +1422,8 @@ public partial class MainWindow : Window
             && status.Acknowledgements.State is not { AcknowledgesCurrent: true };
         var modePending = processActive
             && status.Acknowledgements.Mode is not { AcknowledgesCurrent: true };
-        var gameSpeedModePending = processActive
-            && status.Acknowledgements.GameSpeedMode is not
+        var gameSpeedTargetPending = processActive
+            && status.Acknowledgements.GameSpeedTarget is not
                 { AcknowledgesCurrent: true };
         var adbTargetPending = processActive
             && status.Control.AdbPort is not null
@@ -1436,14 +1448,9 @@ public partial class MainWindow : Window
             HomeModeButton,
             string.Equals(status.Control.Mode, "HOME", StringComparison.OrdinalIgnoreCase),
             modePending);
-        SetSelectionStyle(
-            AutoGameSpeedButton,
-            _gameSpeedMode == "AUTO",
-            gameSpeedModePending);
-        SetSelectionStyle(
-            ReducedGameSpeedButton,
-            _gameSpeedMode == "REDUCED",
-            gameSpeedModePending);
+        GameSpeedTargetBox.BorderBrush = gameSpeedTargetPending
+            ? new SolidColorBrush(Color.FromRgb(241, 191, 91))
+            : (Brush)FindResource("BorderBrush");
 
         var configuredStrategy = NormalizeStrategy(service?.Strategy);
         var requestedStrategy = NormalizeStrategy(status.Control.Strategy)
@@ -1883,6 +1890,33 @@ public partial class MainWindow : Window
         StrategySelectionBox.SelectedItem is ComboBoxItem item
             ? NormalizeStrategy(item.Tag?.ToString())
             : null;
+
+    private void SelectGameSpeedTarget(double target)
+    {
+        var item = GameSpeedTargetBox.Items
+            .OfType<ComboBoxItem>()
+            .FirstOrDefault(candidate =>
+                double.TryParse(
+                    candidate.Tag?.ToString(),
+                    NumberStyles.Float,
+                    CultureInfo.InvariantCulture,
+                    out var candidateTarget)
+                && Math.Abs(candidateTarget - target) < 0.001);
+        if (item is null || ReferenceEquals(GameSpeedTargetBox.SelectedItem, item))
+        {
+            return;
+        }
+
+        _updatingGameSpeedTargetSelection = true;
+        try
+        {
+            GameSpeedTargetBox.SelectedItem = item;
+        }
+        finally
+        {
+            _updatingGameSpeedTargetSelection = false;
+        }
+    }
 
     private void SelectStrategy(string? strategy)
     {

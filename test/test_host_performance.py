@@ -345,7 +345,7 @@ def test_native_sampler_keeps_expensive_process_launches_out_of_sample_path():
     assert "nvidia-smi" not in gpu_sampler
 
 
-def test_native_host_sampling_control_is_persistent_and_always_visible():
+def test_native_host_sampling_control_is_persistent_and_collapsible():
     native_root = PROJECT_ROOT / "windows" / "TheTower.ControlSurface"
     tracker = (native_root / "HostPerformanceTracker.cs").read_text(
         encoding="utf-8"
@@ -370,7 +370,9 @@ def test_native_host_sampling_control_is_persistent_and_always_visible():
     assert 'x:Name="GpuCompetitorText"' in window
     assert 'Click="HostSamplingToggle_Click"' in window
     assert "TextTrimming=\"CharacterEllipsis\"" in window
-    assert '<RowDefinition Height="0.9*" MinHeight="85" />' in window
-    assert '<RowDefinition Height="0.65*" MinHeight="54" />' in window
+    assert 'x:Name="HostHealthToggleButton"' in window
+    assert 'Click="HostHealthToggle_Click"' in window
+    assert 'x:Name="HostPerformancePanel"' in window
+    assert "SetHostHealthExpanded" in window_code
     assert "HostPerformanceSamplingEnabled" in window_code
     assert "queued aggregates still upload" in window_code
