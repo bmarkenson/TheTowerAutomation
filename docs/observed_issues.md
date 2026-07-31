@@ -11,6 +11,43 @@ for a matching recurrence or historical investigation.
 
 ## Open
 
+### Battle History continuity check selected the first visible row without proving list top
+
+- **Observed:** 2026-07-30 during a live Tier 19 Farm Retry sequence on
+  `localhost:5555`, immediately after a natural Game Over and Retry.
+- **Symptom:** The continuity check opened Battle History and selected the
+  first visible row without scrolling the retained list to its newest/top
+  boundary. It therefore treated an older completed battle as the latest one
+  and restarted the Current run activity scope from the wrong identity.
+- **Evidence:** `logs/actions.log` records the current battle being saved as
+  `Battle20260730T204649-0700.json` at 20:47:21, followed by Battle History
+  navigation and a direct fixed-row tap at 20:47:50 with no intervening swipe.
+  At 20:48:03 the copied entry was logged as `Jul 29, 2026 13:56`, Tier 19,
+  wave 1405, instead of the battle that had just completed on July 30.
+- **Safety response:** Diagnosis used the action log and the already retained
+  list capture. The newly running Retry battle was not paused, navigated,
+  exited, or otherwise changed. Repair validation used fake guarded input and
+  retained fixtures only.
+- **Cause:** `read_latest_completed_battle()` verified and tapped a fixed
+  first-row region as soon as the Battle History list appeared. The route had
+  no scroll-to-top gesture or authoritative top-edge proof, so a retained
+  scroll position silently redefined "latest" as "first visible."
+- **Resolution:** The list route now performs a bounded, screen-guarded
+  downward swipe loop and requires stable-edge evidence before validating or
+  tapping the first row. It rechecks persistent input authority before every
+  swipe and fails closed, restoring the source without selecting any row, if
+  the top cannot be proven.
+- **Regression:** `test/test_battle_history.py` verifies the top gesture occurs
+  before the row tap for running, Home, and interrupted-detail routes; checks
+  Pause between swipes; and verifies failed edge detection restores the source
+  without a row tap. The focused Battle History, scrolling, continuity, and
+  clickmap set passes 39 tests.
+- **Validation:** The complete repository suite passes 931 tests. Live
+  post-repair interaction was intentionally omitted because a new operator
+  battle was already running.
+- **Status:** Resolved in the validated working tree; move this entry to the
+  resolved archive after recording the fixing commit.
+
 ### Stopped control could not interrupt an in-progress Home setup guard
 
 - **Observed:** 2026-07-28 while cleaning up the authorized Tier 19

@@ -173,6 +173,19 @@
         "duration_ms": 230
       }
     },
+    "goto_top:battle_history": {
+      "roles": [
+        "gesture"
+      ],
+      "swipe": {
+        "type": "swipe",
+        "x1": 540,
+        "y1": 500,
+        "x2": 540,
+        "y2": 1600,
+        "duration_ms": 250
+      }
+    },
     "goto_bottom:more_stats": {
       "roles": [
         "gesture"

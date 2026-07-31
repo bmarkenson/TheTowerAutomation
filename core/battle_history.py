@@ -22,8 +22,9 @@ from core.gc_preflight_navigation import (
     _guarded_visible_tap,
 )
 from core.home_battle import detect_home_battle_control
-from core.input import TapVerification, safe_tap, tap_if_visible
+from core.input import TapVerification, safe_tap, swipe_now, tap_if_visible
 from core.label_tapper import is_visible
+from core.scrolling import scroll_to_edge
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
 from utils.ocr_utils import ocr_text_and_conf
@@ -33,6 +34,9 @@ Frame = np.ndarray
 Capture = Callable[[], Optional[Frame]]
 Detector = Callable[[Frame], Mapping[str, Any]]
 LATEST_HISTORY_ROW_REGION = (0, 280, 1080, 190)
+BATTLE_HISTORY_CONTENT_REGION = (0, 280, 1060, 1400)
+BATTLE_HISTORY_INDICATOR = "indicators.battle_history"
+BATTLE_HISTORY_TOP_GESTURE = "gesture_targets.goto_top:battle_history"
 HISTORY_DETAIL_IDENTITY_REGION = (120, 400, 840, 530)
 _BATTLE_REPORT_FIELDS = (
     "battle_date",
@@ -214,6 +218,8 @@ def read_latest_completed_battle(
     clipboard_fn: Callable[[], ClipboardReadResult] = read_battle_report_clipboard,
     home_control_fn: Callable[[Frame], Any] = detect_home_battle_control,
     action_guard_fn: Callable[[], bool] = lambda: True,
+    scroll_top_fn: Callable[..., Any] = scroll_to_edge,
+    swipe_fn: Callable[[str], bool] = swipe_now,
     latest_row_visible_fn: Optional[Callable[[Frame], bool]] = None,
     detail_matches_fn: Optional[
         Callable[[Frame, BattleHistoryIdentity], bool]
@@ -250,6 +256,10 @@ def read_latest_completed_battle(
     def guarded_safe_tap(*args, **kwargs) -> bool:
         require_action()
         return bool(safe_tap_fn(*args, **kwargs))
+
+    def guarded_swipe(key: str) -> bool:
+        require_action()
+        return bool(swipe_fn(key))
 
     row_visible = latest_row_visible_fn or (
         lambda frame: latest_history_row_visible(
@@ -336,6 +346,24 @@ def read_latest_completed_battle(
             )
 
         if not is_visible_fn("buttons.copy:more_stats", screenshot=frame):
+            top = scroll_top_fn(
+                BATTLE_HISTORY_TOP_GESTURE,
+                source_label=BATTLE_HISTORY_INDICATOR,
+                screenshot=frame,
+                progress_region=BATTLE_HISTORY_CONTENT_REGION,
+                max_swipes=8,
+                settle_s=0.8,
+                capture_fn=guarded_capture,
+                visible_fn=is_visible_fn,
+                swipe_fn=guarded_swipe,
+                sleep_fn=sleep_fn,
+            )
+            if top.screenshot is None or not top.success:
+                raise _NavigationFailure(
+                    "Battle History top was not verified "
+                    f"({top.reason})"
+                )
+            frame = top.screenshot
             if not row_visible(frame):
                 raise _NavigationFailure(
                     "latest Battle History row was not verified"

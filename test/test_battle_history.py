@@ -121,6 +121,7 @@ class _FakeHistoryUi:
         self.inputs = []
         self.pause_after_open = False
         self.actions_allowed = True
+        self.top_scroll_succeeds = True
 
     def capture(self):
         return FRAME.copy()
@@ -165,6 +166,39 @@ class _FakeHistoryUi:
         self.state = "BATTLE_HISTORY_DETAIL"
         return True
 
+    def swipe(self, key):
+        self.inputs.append(key)
+        return True
+
+    def scroll_top(
+        self,
+        key,
+        *,
+        screenshot,
+        capture_fn,
+        swipe_fn,
+        source_label,
+        progress_region,
+        max_swipes,
+        settle_s,
+        **_kwargs,
+    ):
+        assert key == "gesture_targets.goto_top:battle_history"
+        assert source_label == "indicators.battle_history"
+        assert progress_region == (0, 280, 1060, 1400)
+        assert max_swipes == 8
+        assert settle_s == 0.8
+        assert swipe_fn(key)
+        return SimpleNamespace(
+            success=self.top_scroll_succeeds,
+            screenshot=capture_fn(),
+            reason=(
+                "edge_reached"
+                if self.top_scroll_succeeds
+                else "max_swipes_exceeded"
+            ),
+        )
+
     def clipboard_read(self):
         return ClipboardReadResult(self.clipboard, "battle_report")
 
@@ -185,6 +219,8 @@ def _read(ui, *, source_state="RUNNING", expected_home_control=None):
             control=HomeBattleControl.NEW_BATTLE
         ),
         action_guard_fn=lambda: ui.actions_allowed,
+        scroll_top_fn=ui.scroll_top,
+        swipe_fn=ui.swipe,
         latest_row_visible_fn=lambda _frame: True,
         detail_matches_fn=lambda _frame, _identity: True,
         sleep_fn=lambda _seconds: None,
@@ -203,6 +239,7 @@ def test_history_reader_copies_latest_detail_and_restores_running():
     assert ui.inputs == [
         "navigation.menu_open_button",
         "navigation.battle_history_running",
+        "gesture_targets.goto_top:battle_history",
         "buttons.battle_history_latest",
         "buttons.copy:more_stats",
         "buttons.close:more_stats",
@@ -225,6 +262,7 @@ def test_history_reader_copies_latest_detail_and_restores_home():
     assert ui.state == "HOME_SCREEN"
     assert ui.inputs == [
         "navigation.battle_history_home",
+        "gesture_targets.goto_top:battle_history",
         "buttons.battle_history_latest",
         "buttons.copy:more_stats",
         "buttons.close:more_stats",
@@ -244,6 +282,7 @@ def test_history_reader_recovers_an_interrupted_detail_before_copying_latest():
     assert ui.state == "RUNNING"
     assert ui.inputs == [
         "buttons.close:more_stats",
+        "gesture_targets.goto_top:battle_history",
         "buttons.battle_history_latest",
         "buttons.copy:more_stats",
         "buttons.close:more_stats",
@@ -270,9 +309,51 @@ def test_history_reader_resumes_after_pause_without_sending_cleanup_input():
 
     assert resumed.complete
     assert ui.state == "RUNNING"
-    assert ui.inputs[-4:] == [
+    assert ui.inputs[-5:] == [
+        "gesture_targets.goto_top:battle_history",
         "buttons.battle_history_latest",
         "buttons.copy:more_stats",
         "buttons.close:more_stats",
         "buttons.return_to_game",
+    ]
+
+
+def test_history_reader_fails_closed_when_top_cannot_be_verified():
+    ui = _FakeHistoryUi()
+    ui.top_scroll_succeeds = False
+
+    result = _read(ui)
+
+    assert result.status is BattleHistoryReadStatus.FAILED
+    assert result.reason == (
+        "Battle History top was not verified (max_swipes_exceeded)"
+    )
+    assert result.source_restored
+    assert ui.state == "RUNNING"
+    assert ui.inputs == [
+        "navigation.menu_open_button",
+        "navigation.battle_history_running",
+        "gesture_targets.goto_top:battle_history",
+        "buttons.return_to_game",
+    ]
+
+
+def test_history_reader_checks_control_before_each_top_scroll_swipe():
+    ui = _FakeHistoryUi()
+
+    def interrupted_scroll(key, *, swipe_fn, **_kwargs):
+        assert swipe_fn(key)
+        ui.actions_allowed = False
+        swipe_fn(key)
+
+    ui.scroll_top = interrupted_scroll
+
+    result = _read(ui)
+
+    assert result.status is BattleHistoryReadStatus.PAUSED
+    assert ui.state == "BATTLE_HISTORY"
+    assert ui.inputs == [
+        "navigation.menu_open_button",
+        "navigation.battle_history_running",
+        "gesture_targets.goto_top:battle_history",
     ]
