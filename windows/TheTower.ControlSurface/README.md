@@ -75,9 +75,12 @@ is not started automatically when the application opens; select **Start tunnel**
 after launch.
 
 The main and Battle History windows also remember their normal position, size,
-and maximized state in `%LOCALAPPDATA%\TheTower\control-surface.json`. A saved
-position that no longer leaves a usable title bar on the current virtual desktop
-is ignored, and a window is never reopened minimized.
+and maximized state in `%LOCALAPPDATA%\TheTower\control-surface.json`. The main
+window additionally remembers its control-pane width, latest-battle height,
+selected control tab, and the expanded state of Previous Game Screen, Host
+Health, and the latest-battle summary. **Reset layout** restores those pane
+defaults. A saved position that no longer leaves a usable title bar on the
+current virtual desktop is ignored, and a window is never reopened minimized.
 
 Only one control-surface process is allowed per Windows session. Launching the
 application again restores and foregrounds the existing main window, or flashes
@@ -107,11 +110,27 @@ loaded records. Periodic battle refreshes leave an unchanged list alone and
 defer genuine updates while a Type, Strategy, or Quality filter menu is open so
 the popup and selected battle remain stable.
 
-Drag the dividers in the operational window to resize the control column, SSH
-tunnel, automation controls, process lifecycle, runtime evidence, latest battle,
-and recent activity areas. The battle-history window has a separate draggable
-divider between its battle list and selected-battle report. Data-grid columns
-remain directly resizable as well.
+The left workspace uses full-height **Controls**, **Process**, **Setup**, and
+**Details** tabs instead of dividing its height among several independently
+scrolling cards. Everyday Pause, Resume, game-speed, Game Over, strategy, and
+run-configuration actions remain on Controls. Service state, PID, ADB target,
+Start, Reload, and Stop are on Process. API and SSH fields are confined to the
+no-scroll Setup tab; the optional bearer token remains memory-only. Detailed
+lock and runtime evidence is on Details.
+
+Drag the main vertical divider and the latest-battle divider to resize those
+panes. Their positions persist locally. Previous Game Screen, Host Health, and
+the latest-battle summary can be collapsed independently. The battle-history
+window has a separate draggable divider between its battle list and
+selected-battle report. Data-grid columns remain directly resizable as well.
+
+The status strip distinguishes **Automation**—the requested control
+directive—from **Game Screen**, the observer's latest detected game context.
+For example, a normal active run displays `Running` and `Battle` instead of two
+unqualified `RUNNING` values. Wave and Coins/min remain prominent. Service and
+PID evidence remains available on Process without occupying the always-visible
+status strip, and Previous Game Screen remains visible by default but can be
+collapsed.
 
 The Automation Control panel uses selection highlights instead of permanently
 colored Pause and Resume actions. Cyan is the saved state or Game Over mode;

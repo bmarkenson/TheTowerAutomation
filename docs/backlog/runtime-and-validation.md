@@ -309,11 +309,19 @@ evidence.
     - [x] Persist the main and Battle History window positions, sizes, and
       maximized states locally; reject unusable off-screen placement and never
       reopen minimized.
-    - [ ] Allow the fixed operational panels to be moved, resized, collapsed,
-      or hidden, and persist the panel arrangement and splitter positions.
-    - Preserve minimum usable sizes for safety-critical controls and provide a
-      Reset Layout action.
+    - [x] Replace the four-card scrolling rail with full-height Controls,
+      Process, Setup, and Details tabs. Persist the selected tab, control-pane
+      width, and latest-battle height.
+    - [x] Make Previous Game Screen, Host Health, and the latest-battle summary
+      independently collapsible, persist their state, preserve minimum pane
+      sizes, and provide a Reset Layout action.
+    - [ ] Validate the revised layout on Windows at the minimum, default, and
+      maximized window sizes. Based on operator use, decide whether arbitrary
+      drag-to-reorder, hiding, or floating panes would add enough value beyond
+      the tabbed and collapsible layout.
 11. [ ] Make the optional connection Token field self-explanatory and advanced.
-    Explain that it is an in-memory bearer credential for an explicitly
-    authenticated adapter or reverse proxy and should remain blank for the
-    normal loopback SSH-tunnel configuration.
+    - [x] Move it to Setup, label it optional, and explain in tooltips that it
+      is an in-memory bearer credential which is never saved.
+    - [ ] Confirm on Windows that the tooltip and Setup placement make clear
+      that the field is only for an explicitly authenticated adapter or reverse
+      proxy and should remain blank for the normal loopback SSH tunnel.

@@ -19,9 +19,7 @@
           <ColumnDefinition Width="Auto" />
           <ColumnDefinition Width="*" />
           <ColumnDefinition Width="Auto" />
-          <ColumnDefinition Width="220" />
           <ColumnDefinition Width="Auto" />
-          <ColumnDefinition Width="170" />
           <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
         <StackPanel Grid.Column="0" Margin="0,0,24,0">
@@ -29,11 +27,18 @@
           <TextBlock Text="Native control surface" Foreground="{StaticResource MutedBrush}" FontSize="11" />
         </StackPanel>
         <TextBlock Grid.Column="1" x:Name="ConnectionText" Text="Not connected" VerticalAlignment="Center" Foreground="#F1BF5B" FontWeight="SemiBold" />
-        <TextBlock Grid.Column="2" Text="API" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Margin="8" />
-        <TextBox Grid.Column="3" x:Name="BaseUrlBox" VerticalAlignment="Center" />
-        <TextBlock Grid.Column="4" Text="Token" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Margin="8" />
-        <PasswordBox Grid.Column="5" x:Name="TokenBox" VerticalAlignment="Center" />
-        <Button Grid.Column="6" Content="Connect" Style="{StaticResource PrimaryButton}" Click="Connect_Click" />
+        <Button Grid.Column="2"
+                Content="Controls"
+                Click="ShowControls_Click"
+                ToolTip="Open the everyday automation controls." />
+        <Button Grid.Column="3"
+                Content="Connection setup"
+                Click="ShowSetup_Click"
+                ToolTip="Open API and SSH tunnel settings." />
+        <Button Grid.Column="4"
+                Content="Reset layout"
+                Click="ResetLayout_Click"
+                ToolTip="Restore the default pane sizes and expanded sections." />
       </Grid>
     </Border>
 
@@ -75,24 +80,66 @@
       </Grid>
     </Border>
 
-    <Border Grid.Row="2" Background="{StaticResource PanelAltBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="14" Margin="0,0,0,10">
+    <Border Grid.Row="2"
+            Background="{StaticResource PanelAltBrush}"
+            BorderBrush="{StaticResource BorderBrush}"
+            BorderThickness="1"
+            CornerRadius="10"
+            Padding="14"
+            Margin="0,0,0,10">
       <StackPanel>
-        <TextBlock Text="CURRENT STATUS"
-                   Foreground="#62D5FF"
-                   FontSize="10"
-                   FontWeight="Bold"
-                   Margin="0,0,0,7" />
-        <UniformGrid Columns="8">
-          <StackPanel><TextBlock Text="DIRECTIVE" Foreground="{StaticResource MutedBrush}" FontSize="10" /><TextBlock x:Name="DirectiveText" Text="-" FontSize="17" FontWeight="Bold" /></StackPanel>
-          <StackPanel><TextBlock Text="OBSERVED UI" Foreground="{StaticResource MutedBrush}" FontSize="10" /><TextBlock x:Name="ObservedStateText" Text="-" FontSize="17" FontWeight="Bold" /></StackPanel>
-          <StackPanel><TextBlock Text="WAVE" Foreground="{StaticResource MutedBrush}" FontSize="10" /><TextBlock x:Name="WaveText" Text="-" FontSize="17" FontWeight="Bold" /></StackPanel>
-          <StackPanel><TextBlock Text="COINS / MIN" Foreground="{StaticResource MutedBrush}" FontSize="10" /><TextBlock x:Name="CoinsMinuteText" Text="-" FontSize="17" FontWeight="Bold" /></StackPanel>
-          <StackPanel><TextBlock Text="MODE" Foreground="{StaticResource MutedBrush}" FontSize="10" /><TextBlock x:Name="ModeText" Text="-" FontSize="17" FontWeight="Bold" /></StackPanel>
-          <StackPanel><TextBlock Text="SERVICE" Foreground="{StaticResource MutedBrush}" FontSize="10" /><TextBlock x:Name="ServiceText" Text="-" FontSize="17" FontWeight="Bold" /></StackPanel>
-          <StackPanel><TextBlock Text="PROCESS PID" Foreground="{StaticResource MutedBrush}" FontSize="10" /><TextBlock x:Name="ProcessPidText" Text="-" FontSize="17" FontWeight="Bold" /></StackPanel>
-          <StackPanel><TextBlock Text="HEARTBEAT" Foreground="{StaticResource MutedBrush}" FontSize="10" /><TextBlock x:Name="HeartbeatText" Text="-" FontSize="17" FontWeight="Bold" /></StackPanel>
+        <Grid Margin="0,0,0,7">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <TextBlock Text="CURRENT STATUS"
+                     Foreground="#62D5FF"
+                     FontSize="10"
+                     FontWeight="Bold"
+                     VerticalAlignment="Center" />
+          <Button Grid.Column="1"
+                  x:Name="PreviousStateToggleButton"
+                  Content="Hide previous state"
+                  Click="PreviousStateToggle_Click"
+                  Padding="9,4"
+                  FontSize="10" />
+          <Button Grid.Column="2"
+                  x:Name="HostHealthToggleButton"
+                  Content="Show host health"
+                  Click="HostHealthToggle_Click"
+                  Padding="9,4"
+                  FontSize="10" />
+        </Grid>
+        <UniformGrid Columns="6">
+          <StackPanel ToolTip="The requested automation control state. The controls pane shows whether the live runtime has acknowledged it.">
+            <TextBlock Text="AUTOMATION" Foreground="{StaticResource MutedBrush}" FontSize="10" />
+            <TextBlock x:Name="DirectiveText" Text="-" FontSize="17" FontWeight="Bold" />
+          </StackPanel>
+          <StackPanel ToolTip="The game screen most recently identified by the observer.">
+            <TextBlock Text="GAME SCREEN" Foreground="{StaticResource MutedBrush}" FontSize="10" />
+            <TextBlock x:Name="ObservedStateText" Text="-" FontSize="17" FontWeight="Bold" />
+          </StackPanel>
+          <StackPanel>
+            <TextBlock Text="WAVE" Foreground="{StaticResource MutedBrush}" FontSize="10" />
+            <TextBlock x:Name="WaveText" Text="-" FontSize="17" FontWeight="Bold" />
+          </StackPanel>
+          <StackPanel>
+            <TextBlock Text="COINS / MIN" Foreground="{StaticResource MutedBrush}" FontSize="10" />
+            <TextBlock x:Name="CoinsMinuteText" Text="-" FontSize="17" FontWeight="Bold" />
+          </StackPanel>
+          <StackPanel ToolTip="What automation should do when the current battle ends.">
+            <TextBlock Text="AFTER GAME OVER" Foreground="{StaticResource MutedBrush}" FontSize="10" />
+            <TextBlock x:Name="ModeText" Text="-" FontSize="17" FontWeight="Bold" />
+          </StackPanel>
+          <StackPanel>
+            <TextBlock Text="HEARTBEAT" Foreground="{StaticResource MutedBrush}" FontSize="10" />
+            <TextBlock x:Name="HeartbeatText" Text="-" FontSize="17" FontWeight="Bold" />
+          </StackPanel>
         </UniformGrid>
-        <Border Background="{StaticResource PanelBrush}"
+        <Border x:Name="PreviousStatePanel"
+                Background="{StaticResource PanelBrush}"
                 BorderBrush="{StaticResource BorderBrush}"
                 BorderThickness="0,1,0,0"
                 Padding="9,6"
@@ -102,7 +149,7 @@
               <ColumnDefinition Width="Auto" />
               <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <TextBlock Text="PREVIOUS DISTINCT STATE"
+            <TextBlock Text="PREVIOUS GAME SCREEN"
                        Foreground="{StaticResource MutedBrush}"
                        FontSize="10"
                        FontWeight="Bold"
@@ -116,6 +163,7 @@
           </Grid>
         </Border>
         <Border x:Name="HostPerformancePanel"
+                Visibility="Collapsed"
                 Background="{StaticResource PanelBrush}"
                 BorderBrush="{StaticResource BorderBrush}"
                 BorderThickness="0,1,0,0"
@@ -173,9 +221,7 @@
                     MinWidth="104"
                     VerticalAlignment="Center"
                     ToolTip="Pause one-second host and BlueStacks sampling. Queued aggregates continue uploading." />
-            <Grid Grid.Row="1"
-                  Grid.ColumnSpan="8"
-                  Margin="0,7,0,0">
+            <Grid Grid.Row="1" Grid.ColumnSpan="8" Margin="0,7,0,0">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="0.8*" />
                 <ColumnDefinition Width="1.35*" />
@@ -206,108 +252,144 @@
 
     <Grid Grid.Row="3">
       <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="340" MinWidth="260" />
+        <ColumnDefinition x:Name="SidebarColumn" Width="380" MinWidth="320" />
         <ColumnDefinition Width="8" />
         <ColumnDefinition Width="*" MinWidth="600" />
       </Grid.ColumnDefinitions>
 
-      <Grid Grid.Column="0">
-        <Grid.RowDefinitions>
-          <RowDefinition Height="0.9*" MinHeight="85" />
-          <RowDefinition Height="8" />
-          <RowDefinition Height="1.35*" MinHeight="90" />
-          <RowDefinition Height="8" />
-          <RowDefinition Height="1.2*" MinHeight="90" />
-          <RowDefinition Height="8" />
-          <RowDefinition Height="0.65*" MinHeight="54" />
-        </Grid.RowDefinitions>
+      <Border Grid.Column="0"
+              Background="{StaticResource PanelBrush}"
+              BorderBrush="{StaticResource BorderBrush}"
+              BorderThickness="1"
+              CornerRadius="10"
+              Padding="6">
+        <TabControl x:Name="SidebarTabs"
+                    Background="{StaticResource PanelBrush}"
+                    BorderThickness="0">
+          <TabItem Header="Controls">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+              <StackPanel Margin="7">
+                <TextBlock Text="AUTOMATION"
+                           Foreground="{StaticResource MutedBrush}"
+                           FontSize="10"
+                           FontWeight="Bold"
+                           Margin="4" />
+                <UniformGrid Columns="2">
+                  <Button x:Name="PauseButton" Content="Paused" Tag="pause" Click="Control_Click" />
+                  <Button x:Name="ResumeButton" Content="Running" Tag="resume" Click="Control_Click" />
+                  <Button Content="Pause 15 min" Tag="pause:15" Click="Control_Click" />
+                  <Button Content="Pause 30 min" Tag="pause:30" Click="Control_Click" />
+                </UniformGrid>
+                <TextBlock Text="GAME SPEED" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4,10,4,0" />
+                <UniformGrid Columns="2">
+                  <Button x:Name="AutoGameSpeedButton" Content="Auto maximum" Tag="AUTO" Click="GameSpeedMode_Click" />
+                  <Button x:Name="ReducedGameSpeedButton" Content="Reduced x4.0" Tag="REDUCED" Click="GameSpeedMode_Click" />
+                </UniformGrid>
+                <TextBlock x:Name="GameSpeedModeText"
+                           Text="Auto maximum speed is active."
+                           TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedBrush}"
+                           FontSize="10"
+                           Margin="6,2,6,4" />
+                <Button x:Name="GateDecisionButton"
+                        Content="Review preflight decision"
+                        Click="GateDecision_Click"
+                        Style="{StaticResource DangerButton}"
+                        IsEnabled="False"
+                        Visibility="Collapsed"
+                        Margin="4,8,4,2" />
+                <TextBlock x:Name="GateDecisionText"
+                           Text="No preflight decision is waiting for direction."
+                           TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedBrush}"
+                           FontSize="10"
+                           Visibility="Collapsed"
+                           Margin="6,0,6,4" />
+                <TextBlock Text="AFTER GAME OVER" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4,10,4,0" />
+                <UniformGrid Columns="3">
+                  <Button x:Name="RetryModeButton" Content="Retry" Tag="RETRY" Click="Mode_Click" />
+                  <Button x:Name="WaitModeButton" Content="Wait" Tag="WAIT" Click="Mode_Click" />
+                  <Button x:Name="HomeModeButton" Content="Home" Tag="HOME" Click="Mode_Click" />
+                </UniformGrid>
+                <TextBlock Text="STRATEGY" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4,10,4,0" />
+                <ComboBox x:Name="StrategySelectionBox"
+                          SelectionChanged="StrategySelectionBox_SelectionChanged"
+                          IsEnabled="False"
+                          Margin="4">
+                  <ComboBoxItem Content="Farm T18" Tag="farm_t18" />
+                  <ComboBoxItem Content="Farm T19" Tag="farm_t19" />
+                  <ComboBoxItem Content="Tournament" Tag="tournament" />
+                  <ComboBoxItem Content="No strategy" Tag="none" />
+                </ComboBox>
+                <UniformGrid Columns="2">
+                  <Button x:Name="QueueStrategyButton" Content="Queue next" Click="QueueStrategy_Click" IsEnabled="False" />
+                  <Button x:Name="AdoptStrategyButton" Content="Adopt now" Click="AdoptStrategy_Click" Style="{StaticResource PrimaryButton}" IsEnabled="False" />
+                </UniformGrid>
+                <TextBlock x:Name="StrategySelectionText"
+                           Text="Waiting for strategy status."
+                           TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedBrush}"
+                           FontSize="10"
+                           Margin="6,4,6,0" />
+                <TextBlock x:Name="TournamentValidationText"
+                           Text="No exclusive strategy validation request."
+                           TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedBrush}"
+                           FontSize="10"
+                           Margin="6,2,6,0" />
+                <Button x:Name="TournamentLaunchButton"
+                        Content="Review Tournament launch"
+                        Click="TournamentLaunch_Click"
+                        Style="{StaticResource PrimaryButton}"
+                        IsEnabled="False"
+                        Visibility="Collapsed"
+                        Margin="4,4,4,2" />
+                <Button x:Name="ConfigureRunButton"
+                        Content="Configure next run..."
+                        Click="ConfigureRun_Click"
+                        Style="{StaticResource PrimaryButton}"
+                        IsEnabled="False"
+                        Margin="4,8,4,2" />
+                <TextBlock x:Name="ConfigureRunText"
+                           Text="Strategy defaults; no one-run skips staged."
+                           TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedBrush}"
+                           FontSize="10"
+                           Margin="6,0,6,4" />
+                <TextBlock x:Name="ControlSelectionText"
+                           Text="Waiting for control status."
+                           TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedBrush}"
+                           FontSize="10"
+                           Margin="6,4" />
+              </StackPanel>
+            </ScrollViewer>
+          </TabItem>
 
-        <Border Grid.Row="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12">
-          <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel>
-              <TextBlock Text="SSH TUNNEL" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4" />
-              <TextBlock Text="Linux destination (host, alias, or user@host)" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="4,5,4,2" />
-              <TextBox x:Name="SshDestinationBox" TextChanged="SshDestinationBox_TextChanged" />
-              <UniformGrid Columns="2" Margin="0,5,0,0">
-                <StackPanel Margin="4">
-                  <TextBlock Text="Local port" Foreground="{StaticResource MutedBrush}" FontSize="11" />
-                  <TextBox x:Name="LocalTunnelPortBox" />
+          <TabItem Header="Process">
+            <Grid Margin="7">
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+              </Grid.RowDefinitions>
+              <Grid Grid.Row="0" Margin="4,4,4,10">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                  <TextBlock Text="SERVICE" Foreground="{StaticResource MutedBrush}" FontSize="10" />
+                  <TextBlock x:Name="ServiceText" Text="-" FontSize="15" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
                 </StackPanel>
-                <StackPanel Margin="4">
-                  <TextBlock Text="Remote API port" Foreground="{StaticResource MutedBrush}" FontSize="11" />
-                  <TextBox x:Name="RemoteApiPortBox" />
+                <StackPanel Grid.Column="1">
+                  <TextBlock Text="PROCESS PID" Foreground="{StaticResource MutedBrush}" FontSize="10" />
+                  <TextBlock x:Name="ProcessPidText" Text="-" FontSize="15" FontWeight="Bold" />
                 </StackPanel>
-              </UniformGrid>
-              <UniformGrid Columns="2">
-                <Button x:Name="StartTunnelButton" Content="Start tunnel" Click="StartTunnel_Click" Style="{StaticResource PrimaryButton}" />
-                <Button x:Name="StopTunnelButton" Content="Stop tunnel" Click="StopTunnel_Click" IsEnabled="False" />
-              </UniformGrid>
-              <TextBlock x:Name="TunnelStatusText" Text="Stopped" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="6,5,6,2" />
-              <TextBlock x:Name="LinuxServiceCompatibilityText" Text="Waiting for Linux API compatibility status." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,3,6,0" />
-              <Button x:Name="RestartControlSurfaceButton" Content="Restart Linux API service" Click="RestartControlSurface_Click" Style="{StaticResource PrimaryButton}" IsEnabled="False" Visibility="Collapsed" Margin="4,3,4,2" />
-              <TextBlock Text="Destination and ports are saved after a successful start. The tunnel does not auto-start." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,2" />
-            </StackPanel>
-          </ScrollViewer>
-        </Border>
-        <GridSplitter Grid.Row="1" Height="8" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ResizeDirection="Rows" ResizeBehavior="PreviousAndNext" Cursor="SizeNS" Style="{StaticResource PanelSplitter}" />
-
-        <Border Grid.Row="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12">
-          <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel>
-              <TextBlock Text="AUTOMATION CONTROL" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4" />
-              <UniformGrid Columns="2">
-                <Button x:Name="PauseButton" Content="Paused" Tag="pause" Click="Control_Click" />
-                <Button x:Name="ResumeButton" Content="Running" Tag="resume" Click="Control_Click" />
-                <Button Content="Pause 15 min" Tag="pause:15" Click="Control_Click" />
-                <Button Content="Pause 30 min" Tag="pause:30" Click="Control_Click" />
-              </UniformGrid>
-              <TextBlock Text="GAME SPEED" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4,10,4,0" />
-              <UniformGrid Columns="2">
-                <Button x:Name="AutoGameSpeedButton" Content="Auto maximum" Tag="AUTO" Click="GameSpeedMode_Click" />
-                <Button x:Name="ReducedGameSpeedButton" Content="Reduced x4.0" Tag="REDUCED" Click="GameSpeedMode_Click" />
-              </UniformGrid>
-              <TextBlock x:Name="GameSpeedModeText"
-                         Text="Auto maximum speed is active."
-                         TextWrapping="Wrap"
-                         Foreground="{StaticResource MutedBrush}"
-                         FontSize="10"
-                         Margin="6,2,6,4" />
-              <Button x:Name="GateDecisionButton" Content="Review preflight decision" Click="GateDecision_Click" Style="{StaticResource DangerButton}" IsEnabled="False" Margin="4,8,4,2" />
-              <TextBlock x:Name="GateDecisionText" Text="No preflight decision is waiting for direction." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,0,6,4" />
-              <TextBlock Text="GAME OVER MODE" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4,10,4,0" />
-              <UniformGrid Columns="3">
-                <Button x:Name="RetryModeButton" Content="Retry" Tag="RETRY" Click="Mode_Click" />
-                <Button x:Name="WaitModeButton" Content="Wait" Tag="WAIT" Click="Mode_Click" />
-                <Button x:Name="HomeModeButton" Content="Home" Tag="HOME" Click="Mode_Click" />
-              </UniformGrid>
-              <TextBlock Text="STRATEGY" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4,10,4,0" />
-              <ComboBox x:Name="StrategySelectionBox" SelectionChanged="StrategySelectionBox_SelectionChanged" IsEnabled="False" Margin="4">
-                <ComboBoxItem Content="Farm T18" Tag="farm_t18" />
-                <ComboBoxItem Content="Farm T19" Tag="farm_t19" />
-                <ComboBoxItem Content="Tournament" Tag="tournament" />
-                <ComboBoxItem Content="No strategy" Tag="none" />
-              </ComboBox>
-              <UniformGrid Columns="2">
-                <Button x:Name="QueueStrategyButton" Content="Queue for next boundary" Click="QueueStrategy_Click" IsEnabled="False" />
-                <Button x:Name="AdoptStrategyButton" Content="Adopt for active battle" Click="AdoptStrategy_Click" Style="{StaticResource PrimaryButton}" IsEnabled="False" />
-              </UniformGrid>
-              <TextBlock x:Name="StrategySelectionText" Text="Waiting for strategy status." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,4,6,0" />
-              <TextBlock x:Name="TournamentValidationText" Text="No exclusive strategy validation request." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,2,6,0" />
-              <Button x:Name="TournamentLaunchButton" Content="Review Tournament launch" Click="TournamentLaunch_Click" Style="{StaticResource PrimaryButton}" IsEnabled="False" Margin="4,4,4,2" />
-              <TextBlock Text="Select a strategy, then choose its disposition. Queue preserves the current battle strategy; selecting Current and queueing cancels a different pending request. Adopt changes behavior and Battle End identity after fresh active-battle evidence; new-run gates wait for the next genuine boundary unless the observer declares a read-only attachment check." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,2,6,4" />
-              <Button x:Name="ConfigureRunButton" Content="Configure run..." Click="ConfigureRun_Click" Style="{StaticResource PrimaryButton}" IsEnabled="False" Margin="4,4,4,2" />
-              <TextBlock x:Name="ConfigureRunText" Text="Strategy defaults; no one-run skips staged." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,0,6,4" />
-              <TextBlock x:Name="ControlSelectionText" Text="Waiting for control status." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,4" />
-            </StackPanel>
-          </ScrollViewer>
-        </Border>
-        <GridSplitter Grid.Row="3" Height="8" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ResizeDirection="Rows" ResizeBehavior="PreviousAndNext" Cursor="SizeNS" Style="{StaticResource PanelSplitter}" />
-
-        <Border Grid.Row="4" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12">
-          <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel>
-              <TextBlock Text="PROCESS LIFECYCLE" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4" />
-              <Grid Margin="4,4,4,8">
+              </Grid>
+              <Grid Grid.Row="1" Margin="4,4,4,8">
                 <Grid.ColumnDefinitions>
                   <ColumnDefinition Width="Auto" />
                   <ColumnDefinition Width="*" />
@@ -317,38 +399,156 @@
                 <TextBox Grid.Column="1" x:Name="AdbPortBox" MinWidth="70" VerticalAlignment="Center" />
                 <Button Grid.Column="2" x:Name="SetAdbPortButton" Content="Save" Click="SetAdbPort_Click" IsEnabled="False" />
               </Grid>
-              <TextBlock x:Name="AdbPortHelpText" Text="Pause automation before switching a live ADB port." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,0,6,8" />
-              <CheckBox x:Name="AttachCurrentBattleBox" Content="Attach to current battle; run gates next battle" Click="StartupGatePolicy_Click" Margin="6,4,6,2" IsEnabled="False" />
-              <TextBlock Text="Use this when automation is starting in an existing battle. Normal automation continues, but startup and session gates wait for the next run boundary unless the observer declares a read-only attachment check." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="24,0,6,8" />
-              <Button x:Name="StartPausedButton" Content="Start paused" Tag="start:PAUSED" Click="Process_Click" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
-              <Button x:Name="StartRunningButton" Content="Start running" Tag="start:RUNNING" Click="Process_Click" Style="{StaticResource SuccessButton}" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
-              <TextBlock Text="Start applies the strategy currently selected above before launching automation. Leave attachment unchecked on no-battle Home so that strategy startup gates run immediately." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,0,6,4" />
-              <Button x:Name="ReloadAutomationButton" Content="Reload automation for current battle" Click="ReloadAutomation_Click" Style="{StaticResource PrimaryButton}" Margin="4,12,4,2" IsEnabled="False" />
-              <TextBlock Text="Safely pauses and replaces the main Python process, attaches the replacement to the current battle, verifies readiness, and restores the prior control state." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,0,6,4" />
-              <Button x:Name="CompleteStopButton" Content="Completely stop automation" Tag="stop" Click="Process_Click" Style="{StaticResource DangerButton}" Margin="4,12,4,4" IsEnabled="False" />
-              <TextBlock Text="Stop persists STOPPED before stopping the fixed Linux systemd service." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="6" />
-            </StackPanel>
-          </ScrollViewer>
-        </Border>
-        <GridSplitter Grid.Row="5" Height="8" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ResizeDirection="Rows" ResizeBehavior="PreviousAndNext" Cursor="SizeNS" Style="{StaticResource PanelSplitter}" />
+              <StackPanel Grid.Row="2">
+                <TextBlock x:Name="AdbPortHelpText"
+                           Text="Pause automation before switching a live ADB port."
+                           TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedBrush}"
+                           FontSize="10"
+                           Margin="6,0,6,8" />
+                <CheckBox x:Name="AttachCurrentBattleBox"
+                          Content="Attach to current battle; run gates next battle"
+                          Click="StartupGatePolicy_Click"
+                          Margin="6,4,6,2"
+                          IsEnabled="False"
+                          ToolTip="Use when automation is starting in an existing battle." />
+                <UniformGrid Columns="2" Margin="0,6,0,0">
+                  <Button x:Name="StartPausedButton" Content="Start paused" Tag="start:PAUSED" Click="Process_Click" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+                  <Button x:Name="StartRunningButton" Content="Start running" Tag="start:RUNNING" Click="Process_Click" Style="{StaticResource SuccessButton}" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+                </UniformGrid>
+              </StackPanel>
+              <StackPanel Grid.Row="3" Margin="0,10,0,0">
+                <Button x:Name="ReloadAutomationButton"
+                        Content="Reload automation for current battle"
+                        Click="ReloadAutomation_Click"
+                        Style="{StaticResource PrimaryButton}"
+                        IsEnabled="False"
+                        ToolTip="Safely replace the process, attach to the current battle, verify readiness, and restore its control state." />
+                <Button x:Name="CompleteStopButton"
+                        Content="Completely stop automation"
+                        Tag="stop"
+                        Click="Process_Click"
+                        Style="{StaticResource DangerButton}"
+                        Margin="4,12,4,4"
+                        IsEnabled="False"
+                        ToolTip="Persist STOPPED, then stop the fixed Linux automation service." />
+              </StackPanel>
+              <TextBlock Grid.Row="4"
+                         Text="Start uses the strategy selected on the Controls tab. Detailed process and lock evidence is on the Details tab."
+                         TextWrapping="Wrap"
+                         VerticalAlignment="Bottom"
+                         Foreground="{StaticResource MutedBrush}"
+                         FontSize="10"
+                         Margin="6" />
+            </Grid>
+          </TabItem>
 
-        <Border Grid.Row="6" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12">
-          <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel>
-              <TextBlock Text="RUNTIME EVIDENCE" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4" />
-              <TextBlock x:Name="RuntimeDetailText" Text="No runtime evidence." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="4,8" />
-              <TextBlock x:Name="LastErrorText" Text="" TextWrapping="Wrap" Foreground="#FFACB9" Margin="4" />
-            </StackPanel>
-          </ScrollViewer>
-        </Border>
-      </Grid>
+          <TabItem Header="Setup">
+            <Grid Margin="9">
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+              </Grid.RowDefinitions>
+              <TextBlock Grid.Row="0"
+                         Text="API CONNECTION"
+                         Foreground="{StaticResource MutedBrush}"
+                         FontSize="10"
+                         FontWeight="Bold"
+                         Margin="4,2,4,5" />
+              <Grid Grid.Row="1">
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="API URL" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Margin="4" />
+                <TextBox Grid.Column="1" x:Name="BaseUrlBox" VerticalAlignment="Center" />
+                <TextBlock Grid.Row="1"
+                           Text="Token (optional)"
+                           VerticalAlignment="Center"
+                           Foreground="{StaticResource MutedBrush}"
+                           Margin="4"
+                           ToolTip="Only for an authenticated API endpoint. The token is held in memory and is never saved." />
+                <PasswordBox Grid.Row="1"
+                             Grid.Column="1"
+                             x:Name="TokenBox"
+                             VerticalAlignment="Center"
+                             ToolTip="Optional in-memory bearer token; never saved." />
+                <Button Grid.Row="2"
+                        Grid.ColumnSpan="2"
+                        Content="Connect"
+                        Style="{StaticResource PrimaryButton}"
+                        Click="Connect_Click" />
+              </Grid>
+              <TextBlock Grid.Row="2"
+                         Text="SSH TUNNEL"
+                         Foreground="{StaticResource MutedBrush}"
+                         FontSize="10"
+                         FontWeight="Bold"
+                         Margin="4,12,4,5" />
+              <Grid Grid.Row="3">
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBlock Text="Linux destination (host, alias, or user@host)" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="4,2" />
+                <TextBox Grid.Row="1" x:Name="SshDestinationBox" TextChanged="SshDestinationBox_TextChanged" />
+                <UniformGrid Grid.Row="2" Columns="2" Margin="0,5,0,0">
+                  <StackPanel Margin="4">
+                    <TextBlock Text="Local port" Foreground="{StaticResource MutedBrush}" FontSize="11" />
+                    <TextBox x:Name="LocalTunnelPortBox" />
+                  </StackPanel>
+                  <StackPanel Margin="4">
+                    <TextBlock Text="Remote API port" Foreground="{StaticResource MutedBrush}" FontSize="11" />
+                    <TextBox x:Name="RemoteApiPortBox" />
+                  </StackPanel>
+                </UniformGrid>
+              </Grid>
+              <StackPanel Grid.Row="4" VerticalAlignment="Top">
+                <UniformGrid Columns="2">
+                  <Button x:Name="StartTunnelButton" Content="Start tunnel" Click="StartTunnel_Click" Style="{StaticResource PrimaryButton}" />
+                  <Button x:Name="StopTunnelButton" Content="Stop tunnel" Click="StopTunnel_Click" IsEnabled="False" />
+                </UniformGrid>
+                <TextBlock x:Name="TunnelStatusText" Text="Stopped" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="6,5,6,2" />
+                <TextBlock x:Name="LinuxServiceCompatibilityText" Text="Waiting for Linux API compatibility status." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,3,6,0" />
+                <Button x:Name="RestartControlSurfaceButton" Content="Restart Linux API service" Click="RestartControlSurface_Click" Style="{StaticResource PrimaryButton}" IsEnabled="False" Visibility="Collapsed" Margin="4,3,4,2" />
+              </StackPanel>
+            </Grid>
+          </TabItem>
 
-      <GridSplitter Grid.Column="1" Width="8" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" Cursor="SizeWE" Style="{StaticResource PanelSplitter}" />
+          <TabItem Header="Details">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+              <StackPanel Margin="9">
+                <TextBlock Text="RUNTIME EVIDENCE" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4" />
+                <TextBlock x:Name="RuntimeDetailText" Text="No runtime evidence." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="4,8" />
+                <TextBlock x:Name="LastErrorText" Text="" TextWrapping="Wrap" Foreground="#FFACB9" Margin="4" />
+              </StackPanel>
+            </ScrollViewer>
+          </TabItem>
+        </TabControl>
+      </Border>
+
+      <GridSplitter Grid.Column="1"
+                    Width="8"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch"
+                    ResizeDirection="Columns"
+                    ResizeBehavior="PreviousAndNext"
+                    Cursor="SizeWE"
+                    Style="{StaticResource PanelSplitter}" />
 
       <Grid Grid.Column="2">
         <Grid.RowDefinitions>
-          <RowDefinition Height="205" MinHeight="155" />
-          <RowDefinition Height="8" />
+          <RowDefinition x:Name="LatestBattleRow" Height="205" MinHeight="48" />
+          <RowDefinition x:Name="LatestBattleSplitterRow" Height="8" />
           <RowDefinition Height="*" MinHeight="180" />
         </Grid.RowDefinitions>
 
@@ -356,13 +556,22 @@
           <Grid>
             <Grid.RowDefinitions>
               <RowDefinition Height="Auto" />
-              <RowDefinition Height="Auto" />
-              <RowDefinition Height="*" />
+              <RowDefinition x:Name="LatestBattleTitleRow" Height="Auto" />
+              <RowDefinition x:Name="LatestBattleMetricsRow" Height="*" />
             </Grid.RowDefinitions>
             <Grid Grid.Row="0">
-              <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
               <TextBlock Text="MOST RECENT COMPLETED BATTLE" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="4" VerticalAlignment="Center" />
-              <Button Grid.Column="1" Content="Open battle history..." Click="OpenBattleHistory_Click" Style="{StaticResource PrimaryButton}" />
+              <Button Grid.Column="1"
+                      x:Name="LatestBattleToggleButton"
+                      Content="Hide summary"
+                      Click="LatestBattleToggle_Click"
+                      Padding="10,5" />
+              <Button Grid.Column="2" Content="Open battle history..." Click="OpenBattleHistory_Click" Style="{StaticResource PrimaryButton}" />
             </Grid>
             <StackPanel Grid.Row="1" Margin="4,5,4,12">
               <TextBlock x:Name="LatestBattleTitleText" Text="No completed battles found" FontSize="17" FontWeight="Bold" />
@@ -385,7 +594,15 @@
           </Grid>
         </Border>
 
-        <GridSplitter Grid.Row="1" Height="8" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ResizeDirection="Rows" ResizeBehavior="PreviousAndNext" Cursor="SizeNS" Style="{StaticResource PanelSplitter}" />
+        <GridSplitter Grid.Row="1"
+                      x:Name="LatestBattleSplitter"
+                      Height="8"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Stretch"
+                      ResizeDirection="Rows"
+                      ResizeBehavior="PreviousAndNext"
+                      Cursor="SizeNS"
+                      Style="{StaticResource PanelSplitter}" />
 
         <Border Grid.Row="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="10">
           <Grid>

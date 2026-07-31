@@ -604,6 +604,7 @@ public sealed class ClientSettings
     public bool HostPerformanceSamplingEnabled { get; set; } = true;
     public WindowPlacementSettings? MainWindowPlacement { get; set; }
     public WindowPlacementSettings? BattleHistoryWindowPlacement { get; set; }
+    public MainWindowLayoutSettings MainWindowLayout { get; set; } = new();
 }
 
 public sealed class WindowPlacementSettings
@@ -613,4 +614,14 @@ public sealed class WindowPlacementSettings
     public double Width { get; set; }
     public double Height { get; set; }
     public bool Maximized { get; set; }
+}
+
+public sealed class MainWindowLayoutSettings
+{
+    public double SidebarWidth { get; set; } = 380;
+    public double LatestBattleHeight { get; set; } = 205;
+    public bool PreviousStateExpanded { get; set; } = true;
+    public bool HostHealthExpanded { get; set; }
+    public bool LatestBattleExpanded { get; set; } = true;
+    public int SidebarTabIndex { get; set; }
 }

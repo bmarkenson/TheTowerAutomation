@@ -10,6 +10,9 @@ namespace TheTower.ControlSurface;
 
 public partial class MainWindow : Window
 {
+    private const double DefaultSidebarWidth = 380;
+    private const double DefaultLatestBattleHeight = 205;
+    private const double MinimumExpandedLatestBattleHeight = 155;
     private readonly ControlSurfaceApi _api = new();
     private readonly HostPerformanceTracker _hostPerformance;
     private readonly SshTunnelManager _sshTunnel = new();
@@ -56,6 +59,8 @@ public partial class MainWindow : Window
     private string? _autoPromptedTournamentLaunchRequestId;
     private bool _tournamentLaunchDialogOpen;
     private bool _tournamentLaunchCanStart;
+    private double _lastExpandedLatestBattleHeight =
+        DefaultLatestBattleHeight;
 
     public MainWindow()
     {
@@ -68,6 +73,7 @@ public partial class MainWindow : Window
         LocalTunnelPortBox.Text = _settings.LocalTunnelPort.ToString(CultureInfo.InvariantCulture);
         RemoteApiPortBox.Text = _settings.RemoteApiPort.ToString(CultureInfo.InvariantCulture);
         WindowPlacementStore.Restore(this, _settings.MainWindowPlacement);
+        RestoreMainWindowLayout();
         _api.Configure(_settings.BaseUrl, "");
         _hostPerformance = new HostPerformanceTracker(_api);
         _hostPerformance.SetSamplingEnabled(
@@ -93,6 +99,7 @@ public partial class MainWindow : Window
         Closing += (_, _) =>
         {
             CaptureWindowPlacement();
+            CaptureMainWindowLayout();
             SaveSettingsBestEffort();
         };
         Closed += (_, _) =>
@@ -109,6 +116,148 @@ public partial class MainWindow : Window
             _api.Dispose();
         };
     }
+
+    private void ShowControls_Click(object sender, RoutedEventArgs e) =>
+        SidebarTabs.SelectedIndex = 0;
+
+    private void ShowSetup_Click(object sender, RoutedEventArgs e) =>
+        SidebarTabs.SelectedIndex = 2;
+
+    private void PreviousStateToggle_Click(object sender, RoutedEventArgs e)
+    {
+        var expanded = PreviousStatePanel.Visibility != Visibility.Visible;
+        SetPreviousStateExpanded(expanded);
+        _settings.MainWindowLayout.PreviousStateExpanded = expanded;
+        SaveSettingsBestEffort();
+    }
+
+    private void HostHealthToggle_Click(object sender, RoutedEventArgs e)
+    {
+        var expanded = HostPerformancePanel.Visibility != Visibility.Visible;
+        SetHostHealthExpanded(expanded);
+        _settings.MainWindowLayout.HostHealthExpanded = expanded;
+        SaveSettingsBestEffort();
+    }
+
+    private void LatestBattleToggle_Click(object sender, RoutedEventArgs e)
+    {
+        var expanded = LatestBattleTitleRow.Height.Value == 0;
+        SetLatestBattleExpanded(expanded);
+        _settings.MainWindowLayout.LatestBattleExpanded = expanded;
+        SaveSettingsBestEffort();
+    }
+
+    private void ResetLayout_Click(object sender, RoutedEventArgs e)
+    {
+        _settings.MainWindowLayout = new MainWindowLayoutSettings();
+        _lastExpandedLatestBattleHeight = DefaultLatestBattleHeight;
+        RestoreMainWindowLayout();
+        SaveSettingsBestEffort();
+    }
+
+    private void RestoreMainWindowLayout()
+    {
+        _settings.MainWindowLayout ??= new MainWindowLayoutSettings();
+        var layout = _settings.MainWindowLayout;
+        SidebarColumn.Width = new GridLength(ClampFinite(
+            layout.SidebarWidth,
+            320,
+            650,
+            DefaultSidebarWidth));
+        _lastExpandedLatestBattleHeight = ClampFinite(
+            layout.LatestBattleHeight,
+            MinimumExpandedLatestBattleHeight,
+            500,
+            DefaultLatestBattleHeight);
+        SidebarTabs.SelectedIndex = Math.Clamp(
+            layout.SidebarTabIndex,
+            0,
+            SidebarTabs.Items.Count - 1);
+        SetPreviousStateExpanded(layout.PreviousStateExpanded);
+        SetHostHealthExpanded(layout.HostHealthExpanded);
+        SetLatestBattleExpanded(layout.LatestBattleExpanded);
+    }
+
+    private void CaptureMainWindowLayout()
+    {
+        var layout = _settings.MainWindowLayout;
+        if (double.IsFinite(SidebarColumn.ActualWidth)
+            && SidebarColumn.ActualWidth >= 320)
+        {
+            layout.SidebarWidth = SidebarColumn.ActualWidth;
+        }
+        if (LatestBattleTitleRow.Height.Value > 0
+            && double.IsFinite(LatestBattleRow.ActualHeight)
+            && LatestBattleRow.ActualHeight >= MinimumExpandedLatestBattleHeight)
+        {
+            _lastExpandedLatestBattleHeight = LatestBattleRow.ActualHeight;
+        }
+        layout.LatestBattleHeight = _lastExpandedLatestBattleHeight;
+        layout.PreviousStateExpanded =
+            PreviousStatePanel.Visibility == Visibility.Visible;
+        layout.HostHealthExpanded =
+            HostPerformancePanel.Visibility == Visibility.Visible;
+        layout.LatestBattleExpanded = LatestBattleTitleRow.Height.Value > 0;
+        layout.SidebarTabIndex = SidebarTabs.SelectedIndex;
+    }
+
+    private void SetPreviousStateExpanded(bool expanded)
+    {
+        PreviousStatePanel.Visibility = expanded
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        PreviousStateToggleButton.Content = expanded
+            ? "Hide previous state"
+            : "Show previous state";
+    }
+
+    private void SetHostHealthExpanded(bool expanded)
+    {
+        HostPerformancePanel.Visibility = expanded
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        HostHealthToggleButton.Content = expanded
+            ? "Hide host health"
+            : "Show host health";
+    }
+
+    private void SetLatestBattleExpanded(bool expanded)
+    {
+        if (expanded)
+        {
+            LatestBattleRow.MinHeight = MinimumExpandedLatestBattleHeight;
+            LatestBattleRow.Height = new GridLength(
+                _lastExpandedLatestBattleHeight);
+            LatestBattleTitleRow.Height = GridLength.Auto;
+            LatestBattleMetricsRow.Height = new GridLength(1, GridUnitType.Star);
+            LatestBattleSplitterRow.Height = new GridLength(8);
+            LatestBattleSplitter.Visibility = Visibility.Visible;
+            LatestBattleToggleButton.Content = "Hide summary";
+            return;
+        }
+
+        if (double.IsFinite(LatestBattleRow.ActualHeight)
+            && LatestBattleRow.ActualHeight >= MinimumExpandedLatestBattleHeight)
+        {
+            _lastExpandedLatestBattleHeight = LatestBattleRow.ActualHeight;
+        }
+        LatestBattleTitleRow.Height = new GridLength(0);
+        LatestBattleMetricsRow.Height = new GridLength(0);
+        LatestBattleRow.MinHeight = 48;
+        LatestBattleRow.Height = GridLength.Auto;
+        LatestBattleSplitterRow.Height = new GridLength(0);
+        LatestBattleSplitter.Visibility = Visibility.Collapsed;
+        LatestBattleToggleButton.Content = "Show summary";
+    }
+
+    private static double ClampFinite(
+        double value,
+        double minimum,
+        double maximum,
+        double fallback) =>
+        double.IsFinite(value)
+            ? Math.Clamp(value, minimum, maximum)
+            : fallback;
 
     private async void Connect_Click(object sender, RoutedEventArgs e)
     {
@@ -1106,8 +1255,8 @@ public partial class MainWindow : Window
     {
         _serverCompatibility = ControlSurfaceCompatibility.Evaluate(status);
         UpdateControlSurfaceCompatibility();
-        DirectiveText.Text = status.Control.State;
-        ModeText.Text = status.Control.Mode;
+        DirectiveText.Text = FormatAutomationState(status.Control);
+        ModeText.Text = FormatStatusToken(status.Control.Mode);
         _gameSpeedMode = string.Equals(
             status.Control.GameSpeedMode,
             "REDUCED",
@@ -1121,7 +1270,8 @@ public partial class MainWindow : Window
         GameSpeedModeText.Foreground = _gameSpeedMode == "REDUCED"
             ? new SolidColorBrush(Color.FromRgb(241, 191, 91))
             : (Brush)FindResource("MutedBrush");
-        ObservedStateText.Text = status.Observation?.StateLabel ?? "-";
+        ObservedStateText.Text = FormatGameScreen(
+            status.Observation?.StateLabel);
         WaveText.Text = status.Observation?.Wave?.ToString(CultureInfo.InvariantCulture) ?? "-";
         CoinsMinuteText.Text = status.Observation?.CoinsPerMinute ?? "-";
         HeartbeatText.Text = status.Observation is null
@@ -1215,6 +1365,12 @@ public partial class MainWindow : Window
         var pendingGate = status.Control.GateDecision is
             { Status: "pending" } gate ? gate : null;
         GateDecisionButton.IsEnabled = pendingGate is not null;
+        GateDecisionButton.Visibility = pendingGate is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        GateDecisionText.Visibility = pendingGate is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
         GateDecisionText.Text = status.Control.GateDecision switch
         {
             { Status: "pending" } decision =>
@@ -1352,6 +1508,10 @@ public partial class MainWindow : Window
         TournamentLaunchButton.IsEnabled =
             _currentTournamentLaunch is { Launch.Status: "awaiting_operator" }
             && _serverCompatibility?.IsCompatible == true;
+        TournamentLaunchButton.Visibility =
+            _currentTournamentLaunch is { Launch.Status: "awaiting_operator" }
+                ? Visibility.Visible
+                : Visibility.Collapsed;
         if (_currentTournamentLaunch is
                 { Launch.Status: "awaiting_operator" } launchReceipt
             && launchReceipt.RequestId
@@ -2094,6 +2254,49 @@ public partial class MainWindow : Window
             ? "-"
             : $"{FormatByteValue(Math.Max(0, bytesPerSecond.Value))}/s";
 
+    private static string FormatAutomationState(ControlStatus control)
+    {
+        var state = FormatStatusToken(control.State);
+        return string.Equals(
+                control.State,
+                "PAUSED",
+                StringComparison.OrdinalIgnoreCase)
+            && control.RemainingSeconds is not null
+                ? $"{state} · {FormatAge(control.RemainingSeconds)} left"
+                : state;
+    }
+
+    private static string FormatGameScreen(string? stateLabel)
+    {
+        if (string.IsNullOrWhiteSpace(stateLabel))
+        {
+            return "-";
+        }
+
+        var primaryState = stateLabel.Split('/', 2)[0];
+        return primaryState.ToUpperInvariant() switch
+        {
+            "RUNNING" => "Battle",
+            "HOME_SCREEN" => "Home",
+            "NEW_BATTLE" => "New battle",
+            "GAME_OVER" => "Game over",
+            "TOURNAMENT_SCREEN" => "Tournament",
+            "BATTLE_HISTORY" => "Battle history",
+            _ => FormatStatusToken(primaryState),
+        };
+    }
+
+    private static string FormatStatusToken(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "-";
+        }
+
+        return CultureInfo.InvariantCulture.TextInfo.ToTitleCase(
+            value.Replace('_', ' ').ToLowerInvariant());
+    }
+
     private static string FormatObservation(ObservationStatus observation)
     {
         var wave = observation.Wave is null
@@ -2104,7 +2307,7 @@ public partial class MainWindow : Window
             out var parsed)
             ? parsed.LocalDateTime.ToString("g", CultureInfo.CurrentCulture)
             : observation.ObservedAt ?? "-";
-        return $"{observation.StateLabel}{wave} · {observedAt}";
+        return $"{FormatGameScreen(observation.StateLabel)}{wave} · {observedAt}";
     }
 
     private static int ParsePort(string value, string label)
