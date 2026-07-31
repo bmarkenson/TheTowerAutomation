@@ -19,12 +19,14 @@ _BUTTON_PATHS = {
     "demon_mode": "floating_buttons.demon_mode",
     "nuke": "floating_buttons.nuke",
 }
+_INTRO_SPRINT_ACTIVE_PATH = "indicators.intro_sprint_active"
 _SECOND_WIND_WING_PATHS = (
     "indicators.second_wind_left_wing",
     "indicators.second_wind_right_wing",
 )
 _SECOND_WIND_ACTIVE_PATH = "indicators.second_wind_active"
 _SECOND_WIND_REARM_WAVES = 400
+_INTRO_SPRINT_END_CONFIRMATION_FRAMES = 5
 _PRESENCE_THRESHOLDS = {
     # The disabled Intro Sprint Demon Mode icon scored 0.856-0.875 against
     # the existing enabled template in retained live frames. Its next-best
@@ -50,6 +52,35 @@ class _ButtonObservation:
         self.visible_streak = 0
         self.absent_streak = 0
         self.absence_started_frame = None
+
+
+@dataclass
+class _IntroSprintObservation:
+    observed_active: bool = False
+    ended: bool = False
+    absent_streak: int = 0
+
+    @property
+    def blocks_demon_mode_activation(self) -> bool:
+        return self.observed_active and not self.ended
+
+    def reset_streak(self) -> None:
+        self.absent_streak = 0
+
+    def observe(self, match: MatchResult) -> None:
+        if match.failure_reason is not None:
+            self.reset_streak()
+            return
+        if match.matched:
+            self.observed_active = True
+            self.ended = False
+            self.reset_streak()
+            return
+        if not self.observed_active or self.ended:
+            return
+        self.absent_streak += 1
+        if self.absent_streak >= _INTRO_SPRINT_END_CONFIRMATION_FRAMES:
+            self.ended = True
 
 
 @dataclass
@@ -81,10 +112,11 @@ class BattleActivationTracker:
 
     Demon Mode and Nuke remain visible while disabled during Intro Sprint as
     well as when enabled. With automatic activation configured, disappearance
-    is the useful transition. The small wings beside the tower establish that
-    Second Wind is available; its fixed active-status glyph above Nuke is the
-    authoritative activation signal. This avoids treating transiently obscured
-    tower wings as activations.
+    is the useful transition, but the top-left Intro Sprint status vetoes Demon
+    Mode disappearance until its own sustained exit is confirmed. The small
+    wings beside the tower establish that Second Wind is available; its fixed
+    active-status glyph above Nuke is the authoritative activation signal.
+    This avoids treating transiently obscured tower wings as activations.
     """
 
     def __init__(
@@ -110,6 +142,7 @@ class BattleActivationTracker:
         self._buttons = {
             name: _ButtonObservation() for name in _BUTTON_PATHS
         }
+        self._intro_sprint = _IntroSprintObservation()
         self._second_wind = _SecondWindObservation()
         self._demon_mode_first_activation: Optional[dict[str, Any]] = None
         self._second_wind_activations: list[dict[str, Any]] = []
@@ -123,6 +156,7 @@ class BattleActivationTracker:
         self._buttons = {
             name: _ButtonObservation() for name in _BUTTON_PATHS
         }
+        self._intro_sprint = _IntroSprintObservation()
         self._second_wind = _SecondWindObservation()
         self._demon_mode_first_activation = None
         self._second_wind_activations = []
@@ -145,8 +179,25 @@ class BattleActivationTracker:
         if str(ui_state or "").upper() != "RUNNING":
             for state in self._buttons.values():
                 state.reset_streaks()
+            self._intro_sprint.reset_streak()
             self._second_wind.reset_streaks()
             return []
+
+        try:
+            intro_sprint_match = get_match_result(
+                _INTRO_SPRINT_ACTIVE_PATH,
+                screenshot=frame,
+            )
+            self._intro_sprint.observe(intro_sprint_match)
+        except Exception as exc:
+            self._intro_sprint.reset_streak()
+            if "intro_sprint" not in self._reported_match_errors:
+                log(
+                    "[BATTLE_EVENT] Could not observe Intro Sprint status: "
+                    f"{exc}",
+                    "WARN",
+                )
+                self._reported_match_errors.add("intro_sprint")
 
         matches: dict[str, MatchResult] = {}
         for name, dot_path in _BUTTON_PATHS.items():
@@ -208,6 +259,10 @@ class BattleActivationTracker:
                 wave_confidence=wave_confidence,
                 wave_observed_at=wave_observed_at,
                 observed_at=when,
+                disappearance_blocked=(
+                    name == "demon_mode"
+                    and self._intro_sprint.blocks_demon_mode_activation
+                ),
             )
             if event is not None:
                 events.append(copy.deepcopy(event))
@@ -271,6 +326,7 @@ class BattleActivationTracker:
         wave_confidence: float,
         wave_observed_at: Optional[datetime],
         observed_at: datetime,
+        disappearance_blocked: bool = False,
     ) -> Optional[dict[str, Any]]:
         state = self._buttons[name]
         if match.failure_reason is not None:
@@ -287,6 +343,10 @@ class BattleActivationTracker:
             return None
 
         state.visible_streak = 0
+        if disappearance_blocked:
+            state.absent_streak = 0
+            state.absence_started_frame = None
+            return None
         if not state.armed:
             return None
         if state.absent_streak == 0:

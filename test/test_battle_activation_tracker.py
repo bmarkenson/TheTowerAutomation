@@ -32,6 +32,8 @@ def test_tracker_records_first_demon_mode_and_every_rearmed_nuke():
 
     def match_button(dot_path, *, screenshot):
         del screenshot
+        if dot_path == "indicators.intro_sprint_active":
+            return _match(visible=False)
         if dot_path.startswith("indicators.second_wind_"):
             return _match(visible=False)
         name = dot_path.rsplit(".", 1)[-1]
@@ -101,6 +103,8 @@ def test_nonrunning_and_match_failures_cannot_confirm_disappearance():
 
     def match_button(dot_path, *, screenshot):
         del screenshot
+        if dot_path == "indicators.intro_sprint_active":
+            return _match(visible=False)
         if dot_path.startswith("indicators.second_wind_"):
             return _match(visible=False)
         return _match(visible=visible, failure_reason=failure_reason)
@@ -134,6 +138,61 @@ def test_nonrunning_and_match_failures_cannot_confirm_disappearance():
     assert [event["ability"] for event in events] == ["demon_mode", "nuke"]
 
 
+def test_intermittent_intro_sprint_misses_keep_demon_mode_blocked():
+    tracker = BattleActivationTracker(
+        presence_confirmation_frames=1,
+        absence_confirmation_frames=1,
+    )
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    demon_visible = True
+    intro_visible = True
+    intro_failure = False
+
+    def match_button(dot_path, *, screenshot):
+        del screenshot
+        if dot_path == "indicators.intro_sprint_active":
+            return _match(
+                visible=intro_visible,
+                failure_reason=(
+                    "status obscured by battle effects" if intro_failure else None
+                ),
+            )
+        if dot_path.startswith("indicators.second_wind_"):
+            return _match(visible=False)
+        if dot_path == "floating_buttons.demon_mode":
+            return _match(visible=demon_visible)
+        return _match(visible=True)
+
+    def observe():
+        return tracker.observe(
+            frame,
+            ui_state="RUNNING",
+            wave=500,
+            wave_confidence=95.0,
+            wave_observed_at=None,
+        )
+
+    with patch(
+        "core.battle_activation_tracker.get_match_result",
+        side_effect=match_button,
+    ):
+        assert observe() == []
+        demon_visible = False
+        intro_visible = False
+        for _ in range(4):
+            assert observe() == []
+
+        intro_failure = True
+        assert observe() == []
+        intro_failure = False
+
+        for _ in range(4):
+            assert observe() == []
+        events = observe()
+
+    assert [event["ability"] for event in events] == ["demon_mode"]
+
+
 def test_reset_clears_prior_battle_events_and_arming():
     tracker = BattleActivationTracker(
         presence_confirmation_frames=1,
@@ -144,6 +203,8 @@ def test_reset_clears_prior_battle_events_and_arming():
 
     def match_button(dot_path, *, screenshot):
         del screenshot
+        if dot_path == "indicators.intro_sprint_active":
+            return _match(visible=False)
         if dot_path.startswith("indicators.second_wind_"):
             return _match(visible=False)
         return _match(visible=visible)
@@ -226,6 +287,118 @@ def test_intro_sprint_disabled_buttons_register_as_present():
     assert tracker.snapshot()["schema_version"] == 4
 
 
+def test_intro_sprint_status_matches_noisy_icon_only():
+    active_crop = cv2.imread(
+        str(FIXTURES / "intro_sprint_status_active_noisy_20260730_wave480.png")
+    )
+    absent_crop = cv2.imread(
+        str(FIXTURES / "intro_sprint_status_absent_20260730_wave3897.png")
+    )
+    assert active_crop is not None
+    assert absent_crop is not None
+
+    active_frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    active_frame[230:600, 0:220] = active_crop
+    absent_frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    absent_frame[230:600, 0:220] = absent_crop
+
+    active_match = get_match_result(
+        "indicators.intro_sprint_active",
+        screenshot=active_frame,
+    )
+    absent_match = get_match_result(
+        "indicators.intro_sprint_active",
+        screenshot=absent_frame,
+    )
+
+    assert active_match.matched
+    assert active_match.confidence >= 0.75
+    assert not absent_match.matched
+    assert absent_match.confidence < 0.4
+
+
+def test_intro_sprint_blocks_noisy_demon_disappearance_across_reflow():
+    """The active status vetoes misses even when floating buttons reflow."""
+
+    initial_strip = cv2.imread(
+        str(
+            FIXTURES
+            / "intro_sprint_disabled_floating_buttons_20260725_wave100.png"
+        )
+    )
+    degraded_strip = cv2.imread(
+        str(FIXTURES / "demon_mode_disabled_intro_sprint_20260730_wave480.png")
+    )
+    activated_strip = cv2.imread(
+        str(FIXTURES / "demon_mode_post_activation_20260730_wave3897.png")
+    )
+    active_status = cv2.imread(
+        str(FIXTURES / "intro_sprint_status_active_noisy_20260730_wave480.png")
+    )
+    absent_status = cv2.imread(
+        str(FIXTURES / "intro_sprint_status_absent_20260730_wave3897.png")
+    )
+    assert initial_strip is not None
+    assert degraded_strip is not None
+    assert activated_strip is not None
+    assert active_status is not None
+    assert absent_status is not None
+
+    initial_frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    initial_frame[790:903, 7:915] = initial_strip
+    reflowed_strip = degraded_strip.copy()
+    reflowed_strip[29:114, 335:461] = activated_strip[29:114, 335:461]
+    reflowed_strip[29:114, 178:304] = degraded_strip[29:114, 335:461]
+    reflowed_frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    reflowed_frame[230:600, 0:220] = active_status
+    reflowed_frame[778:915, 0:927] = reflowed_strip
+    activated_frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    activated_frame[230:600, 0:220] = absent_status
+    activated_frame[778:915, 0:927] = activated_strip
+
+    reflowed_match = get_match_result(
+        "floating_buttons.demon_mode",
+        screenshot=reflowed_frame,
+    )
+    activated_match = get_match_result(
+        "floating_buttons.demon_mode",
+        screenshot=activated_frame,
+    )
+    assert reflowed_match.bbox == (178, 807, 126, 85)
+    assert 0.75 <= reflowed_match.confidence < 0.8
+    assert activated_match.bbox == (178, 807, 126, 85)
+    assert activated_match.confidence < 0.7
+
+    tracker = BattleActivationTracker()
+
+    def observe(frame, wave):
+        return tracker.observe(
+            frame,
+            ui_state="RUNNING",
+            wave=wave,
+            wave_confidence=99.0,
+            wave_observed_at=None,
+        )
+
+    assert observe(initial_frame, 100) == []
+    assert observe(initial_frame, 110) == []
+    for wave in range(480, 486):
+        assert observe(reflowed_frame, wave) == []
+    assert tracker.snapshot()["demon_mode_first_activation"] is None
+
+    for _ in range(5):
+        assert observe(activated_frame, 3897) == []
+    events = observe(activated_frame, 3897)
+
+    assert [event["ability"] for event in events] == ["demon_mode"]
+    assert events[0]["approximate_wave"] == 3897
+    assert events[0]["presence_confidence"] >= 0.8
+    assert events[0]["absence_confidence"] == round(
+        activated_match.confidence,
+        3,
+    )
+
+
 def test_tracker_records_active_second_wind_icon_and_rearm_estimate():
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
     tracker = BattleActivationTracker(
@@ -237,6 +410,8 @@ def test_tracker_records_active_second_wind_icon_and_rearm_estimate():
 
     def match_visual(dot_path, *, screenshot):
         del screenshot
+        if dot_path == "indicators.intro_sprint_active":
+            return _match(visible=False)
         if dot_path.endswith(("_left_wing", "_right_wing")):
             return _match(visible=wings_visible)
         if dot_path == "indicators.second_wind_active":
@@ -393,6 +568,8 @@ def test_one_visible_wing_disproves_second_wind_activation():
     )
 
     def match_visual(dot_path, *, screenshot):
+        if dot_path == "indicators.intro_sprint_active":
+            return _match(visible=False)
         if dot_path.startswith("indicators.second_wind_"):
             return get_match_result(dot_path, screenshot=screenshot)
         return _match(visible=True)
@@ -432,6 +609,8 @@ def test_confirmed_activation_preserves_first_absent_frame_as_evidence():
 
     def match_visual(dot_path, *, screenshot):
         del screenshot
+        if dot_path == "indicators.intro_sprint_active":
+            return _match(visible=False)
         if dot_path.endswith(("_left_wing", "_right_wing")):
             return _match(visible=wings_visible)
         if dot_path == "indicators.second_wind_active":
@@ -495,6 +674,8 @@ def test_second_wind_cannot_activate_without_first_observing_wings():
     )
 
     def match_visual(dot_path, *, screenshot):
+        if dot_path == "indicators.intro_sprint_active":
+            return _match(visible=False)
         if dot_path.startswith("indicators.second_wind_"):
             return get_match_result(dot_path, screenshot=screenshot)
         return _match(visible=True)

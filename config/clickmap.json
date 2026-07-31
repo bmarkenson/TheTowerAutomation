@@ -420,6 +420,20 @@
       ],
       "region_ref": "second_wind_active"
     },
+    "intro_sprint_active": {
+      "match_template": "indicators/intro_sprint_active.png",
+      "match_region": {
+        "x": 0,
+        "y": 315,
+        "w": 140,
+        "h": 130
+      },
+      "match_threshold": 0.65,
+      "match_padding": 0,
+      "roles": [
+        "indicator"
+      ]
+    },
     "poison_swamp_stun_off": {
       "match_template": "indicators/poison_swamp_stun_off.png",
       "match_region": {
