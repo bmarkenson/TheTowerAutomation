@@ -1276,13 +1276,49 @@ public partial class MainWindow : Window
         ModeText.Text = FormatStatusToken(status.Control.Mode);
         _gameSpeedTarget = status.Control.GameSpeedTarget;
         SelectGameSpeedTarget(_gameSpeedTarget);
-        GameSpeedTargetText.Text = _gameSpeedTarget < 6.3
-            ? $"Exact x{_gameSpeedTarget:F1} persists across current and future runs."
-            : "Maximum available: verifies the + ceiling at x5.0 without "
-                + "the perk and advances to x6.3 when the perk is active.";
+        var observedGameSpeed = status.Observation?.GameSpeed;
+        ObservedSpeedText.Text = observedGameSpeed is double observed
+            ? $"x{observed:F1}"
+            : "-";
+        var exactSpeedReached = observedGameSpeed is double exactObserved
+            && Math.Abs(exactObserved - _gameSpeedTarget) <= 0.06;
+        var maximumSpeedReached = observedGameSpeed is double maximumObserved
+            && (
+                Math.Abs(maximumObserved - 5.0) <= 0.06
+                || Math.Abs(maximumObserved - 6.3) <= 0.06
+            );
+        if (_gameSpeedTarget < 6.3)
+        {
+            GameSpeedTargetText.Text = observedGameSpeed is not double current
+                ? $"Target x{_gameSpeedTarget:F1}; awaiting an observed speed "
+                    + "from the next status frame."
+                : exactSpeedReached
+                    ? $"Target x{_gameSpeedTarget:F1} • observed x{current:F1}. "
+                        + "The target is enforced in this and future battles."
+                    : $"Target x{_gameSpeedTarget:F1} • observed x{current:F1}. "
+                        + "Automation will correct it on the next safe running frame.";
+        }
+        else
+        {
+            GameSpeedTargetText.Text = observedGameSpeed is double current
+                ? maximumSpeedReached
+                    ? $"Maximum available • observed x{current:F1}. The guard "
+                        + "verifies the + ceiling at x5.0 and advances to x6.3 "
+                        + "with the perk."
+                    : $"Maximum available • observed x{current:F1}. Automation "
+                        + "will increase it on the next safe running frame."
+                : "Maximum available; awaiting an observed speed from the next "
+                    + "status frame.";
+        }
         GameSpeedTargetText.Foreground = _gameSpeedTarget < 6.3
             ? new SolidColorBrush(Color.FromRgb(241, 191, 91))
             : (Brush)FindResource("MutedBrush");
+        ObservedSpeedText.Foreground = observedGameSpeed is null
+            ? (Brush)FindResource("MutedBrush")
+            : exactSpeedReached
+                || (_gameSpeedTarget >= 6.3 && maximumSpeedReached)
+                ? new SolidColorBrush(Color.FromRgb(101, 230, 166))
+                : new SolidColorBrush(Color.FromRgb(241, 191, 91));
         ObservedStateText.Text = FormatGameScreen(
             status.Observation?.StateLabel);
         WaveText.Text = status.Observation?.Wave?.ToString(CultureInfo.InvariantCulture) ?? "-";

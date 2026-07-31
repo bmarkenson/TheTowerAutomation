@@ -108,17 +108,33 @@ function renderStatus(payload) {
   const normalizedGameSpeedTarget = Number.isFinite(gameSpeedTarget)
     ? gameSpeedTarget
     : 6.3;
+  const rawObservedGameSpeed = observation?.game_speed;
+  const observedGameSpeed = Number(rawObservedGameSpeed);
+  const hasObservedGameSpeed =
+    rawObservedGameSpeed != null && Number.isFinite(observedGameSpeed);
   byId("gameSpeedTargetSelect").value = normalizedGameSpeedTarget.toFixed(1);
   const gameSpeedWarning = byId("gameSpeedTargetWarning");
   gameSpeedWarning.hidden = normalizedGameSpeedTarget >= 6.3;
   gameSpeedWarning.textContent = normalizedGameSpeedTarget < 6.3
-    ? `Exact x${normalizedGameSpeedTarget.toFixed(1)} persists across current and future runs.`
+    ? hasObservedGameSpeed
+      ? `Target x${normalizedGameSpeedTarget.toFixed(1)} · observed x${observedGameSpeed.toFixed(1)}.`
+      : `Target x${normalizedGameSpeedTarget.toFixed(1)}; awaiting a status-frame observation.`
     : "";
+  setText(
+    "gameSpeedObserved",
+    hasObservedGameSpeed
+      ? `The latest status frame read x${observedGameSpeed.toFixed(1)}. The selected target is enforced during Running.`
+      : "Waiting for an observed speed from the next Running status frame.",
+  );
 
   if (observation) {
     setText("observedState", observation.state_label);
     setText("observedWave", observation.wave);
     setText("observedCoins", observation.coins_per_minute);
+    setText(
+      "observedSpeed",
+      hasObservedGameSpeed ? `x${observedGameSpeed.toFixed(1)}` : dash,
+    );
     setText("lastObserved", `${formatDate(observation.observed_at)} · ${formatAge(observation.age_seconds)}`);
     setText("observedMenu", observation.menu);
     setText("observedSecondary", observation.secondary?.join(", ") || dash);
@@ -127,7 +143,7 @@ function renderStatus(payload) {
     setBadge(byId("heartbeatBadge"), observation.stale ? "Stale" : "Fresh", observation.stale ? "warn" : "good");
     byId("staleWarning").hidden = !observation.stale;
   } else {
-    ["observedState", "observedWave", "observedCoins", "lastObserved", "observedMenu", "observedSecondary", "observedOverlays", "priorTransition"].forEach((id) => setText(id, dash));
+    ["observedState", "observedWave", "observedCoins", "observedSpeed", "lastObserved", "observedMenu", "observedSecondary", "observedOverlays", "priorTransition"].forEach((id) => setText(id, dash));
     setBadge(byId("heartbeatBadge"), "No heartbeat", "bad");
     byId("staleWarning").hidden = false;
   }

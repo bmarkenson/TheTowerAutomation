@@ -46,7 +46,7 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 15
+CONTROL_SURFACE_REVISION = 16
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -59,6 +59,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "game_speed_target",
     "host_performance_gpu_v1",
     "host_performance_telemetry_v1",
+    "observed_game_speed",
     "selected_strategy_process_start",
     "tournament_launch_confirmation",
 )
@@ -80,7 +81,8 @@ _ACTIVITY_CURSOR_RE = re.compile(r"(?P<source>\d+:\d+)@(?P<offset>\d+)")
 _STATUS_RE = re.compile(
     r"^State=(?P<state>[^|]+?)\s*\|\s*"
     r"Wave=(?P<wave>[^|]+?)\s*\|\s*"
-    r"Coins/min=(?P<coins>[^|]+?)\s*\|\s*"
+    r"Coins/min=(?P<coins>[^|]+?)"
+    r"(?:\s*\|\s*Speed=(?P<speed>[^|]+?))?\s*\|\s*"
     r"Menu=(?P<menu>[^|]+?)\s*\|\s*"
     r"Secondary=\[(?P<secondary>.*?)]\s*\|\s*"
     r"Overlays=\[(?P<overlays>.*?)]\s*$"
@@ -88,7 +90,8 @@ _STATUS_RE = re.compile(
 _STATUS_SUMMARY_RE = re.compile(
     r"^State=(?P<state>[^|]+?)\s*\|\s*"
     r"Wave=(?P<wave>[^|]+?)\s*\|\s*"
-    r"Coins/min=(?P<coins>[^|]+?)\s*$"
+    r"Coins/min=(?P<coins>[^|]+?)"
+    r"(?:\s*\|\s*Speed=(?P<speed>[^|]+?))?\s*$"
 )
 _STATUS_DETAIL_PREFIX = "[STATUS_DETAIL] "
 _STATE_ACK_RE = re.compile(
@@ -1487,6 +1490,12 @@ class ControlSurfaceService:
                 age_seconds = max(0, round(now - observed_at.timestamp()))
             wave_text = match.group("wave").strip()
             state_label = match.group("state").strip()
+            speed_text = (match.group("speed") or "").strip()
+            speed_match = re.fullmatch(
+                r"x(?P<value>(?:[0-9]|1[0-9]|20)(?:\.\d+)?)",
+                speed_text,
+                re.IGNORECASE,
+            )
             observations.append(
                 {
                     "state": state_label.split("/", 1)[0],
@@ -1494,6 +1503,11 @@ class ControlSurfaceService:
                     "state_label": state_label,
                     "wave": int(wave_text) if wave_text.isdigit() else None,
                     "coins_per_minute": _none_if_dash(match.group("coins")),
+                    "game_speed": (
+                        float(speed_match.group("value"))
+                        if speed_match is not None
+                        else None
+                    ),
                     "menu": _none_if_dash(detail_match.group("menu"))
                     if detail_match
                     else None,

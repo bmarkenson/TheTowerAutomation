@@ -336,6 +336,13 @@ Process request examples:
   no effect at verified Home **New Battle**, where normal pre-battle checks
   always run. This requires server revision 15 and capability
   `automatic_battle_attachment`.
+- Target and observed game speed are separate fields. Selecting a target
+  persists operator intent and immediately re-arms enforcement during
+  `RUNNING`; every periodic status frame independently reads the visible game
+  speed without extra capture or input. The native and browser clients show
+  both values, and retained Coins/min samples include the corresponding
+  observed speed for mid-run analysis. This requires server revision 16 and
+  capability `observed_game_speed`.
 - Persistent ADB-port selection for the next managed start, plus live handoff
   while the runtime has acknowledged `PAUSED`. The API accepts only an integer
   TCP port; the runtime keeps Pause and its former target if new-target

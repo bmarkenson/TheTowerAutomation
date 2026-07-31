@@ -97,7 +97,13 @@ guard while either urgent EHLS/EALS purchase remains incomplete; attachment
 and non-Farm profiles may correct speed as soon as their runtime policy grants
 handler action authority. The completed record stores the current target,
 target semantics, and per-battle target timeline separately from derived
-effective game speed.
+effective game speed. Each periodic status frame also reads the visible speed
+without sending input. That observation is published separately from the
+target and retained alongside the contemporaneous Coins/min sample. A direct
+manual change in the game is therefore observable drift, not a new directive:
+the periodic guard restores the selected target. Selecting a new target in the
+control surface re-arms the guard immediately and records its approximate wave
+in the target timeline.
 
 Automatic-Perk profiles maintain a run-scoped selection timeline from the
 compact `current wave / next Perk wave` control. A scheduled pair is usable

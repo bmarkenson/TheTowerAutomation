@@ -121,7 +121,7 @@ main { max-width: 1440px; margin: 0 auto; padding: 0 1.5rem 4rem; }
 .state-pill.paused { color: #f7d58f; border-color: rgba(241, 191, 91, .5); background: rgba(241, 191, 91, .1); }
 .state-pill.stopped, .state-pill.unknown { color: #ffacb9; border-color: rgba(255, 113, 135, .5); background: rgba(255, 113, 135, .1); }
 
-.status-strip-meta { display: grid; grid-template-columns: repeat(4, minmax(5.5rem, 1fr)); gap: 1.5rem; }
+.status-strip-meta { display: grid; grid-template-columns: repeat(5, minmax(5.5rem, 1fr)); gap: 1.5rem; }
 .status-strip-meta div { min-width: 0; }
 .status-strip-meta span { display: block; color: var(--muted); font-size: .7rem; margin-bottom: .18rem; }
 .status-strip-meta strong { display: block; overflow: hidden; text-overflow: ellipsis; font-size: .95rem; }

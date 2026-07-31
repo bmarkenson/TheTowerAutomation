@@ -160,7 +160,13 @@ only after a no-change probe proves the perk is absent and advancing to `x6.3`
 when it is present. A custom target remains visibly warned, a managed Start
 asks for confirmation, and an amber border means a live process has not
 acknowledged the new target. Completed battle settings show the selected target
-and any per-battle target changes.
+and any per-battle target changes. Selecting a different value during
+`RUNNING` tells automation to enforce it immediately; changing speed directly
+in the game is treated as drift and will be corrected. The status strip and
+the helper below the dropdown separately show **Observed Speed**, read from the
+same periodic status screenshot. Coins/min samples retain that observed speed,
+which makes a deliberate mid-run change identifiable by time and approximate
+wave instead of blending it invisibly into the battle.
 
 Every explicit Tournament selection or Start with Tournament selected creates
 one durable validation request. The panel reports Home preflight, ownership of

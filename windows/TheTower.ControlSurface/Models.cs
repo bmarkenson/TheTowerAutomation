@@ -322,6 +322,9 @@ public sealed class ObservationStatus
     [JsonPropertyName("coins_per_minute")]
     public string? CoinsPerMinute { get; set; }
 
+    [JsonPropertyName("game_speed")]
+    public double? GameSpeed { get; set; }
+
     [JsonPropertyName("menu")]
     public string? Menu { get; set; }
 

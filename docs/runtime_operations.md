@@ -409,6 +409,16 @@ start. An absent file defaults to port `5555`, strategy `farm`, and automatic
 attachment with read-only validation. Explicit manual `main.py --adb-port
 PORT --strategy NAME --startup-gates POLICY` arguments still win.
 
+The game-speed dropdown is the authoritative way to make a manual speed change
+persistent. A new selection is acknowledged by the runtime, enforced on the
+next safe `RUNNING` frame, and rechecked every 30 seconds. Changing the visible
+speed directly in the game does not change that target; automation treats it
+as drift and restores the selected value. Every periodic status frame
+independently reads the visible speed and publishes **Observed Speed** without
+another screenshot or any input. The same observation is retained with that
+frame's Coins/min sample, so a deliberate mid-run target change can be
+correlated by timestamp and approximate wave.
+
 #### Windows host-performance tracker
 
 The native client starts its local performance tracker with the window. The

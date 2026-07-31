@@ -288,7 +288,7 @@ def test_status_separates_fresh_observation_from_control_and_lock_evidence(tmp_p
         f"[INFO {timestamp}] [CTRL] ADB target set to localhost:5555 via control file\n"
         f"[INFO {timestamp}] [CTRL] Strategy set to farm_t18 via control file\n"
         f"[STATUS {timestamp}] State=RUNNING/PAUSED | Wave=520 | "
-        "Coins/min=1.2T | Menu=UW_MENU | Secondary=[PERKS] | "
+        "Coins/min=1.2T | Speed=x4.5 | Menu=UW_MENU | Secondary=[PERKS] | "
         "Overlays=[MENU_OPEN]\n",
         encoding="utf-8",
     )
@@ -318,6 +318,7 @@ def test_status_separates_fresh_observation_from_control_and_lock_evidence(tmp_p
         "state_label": "RUNNING/PAUSED",
         "wave": 520,
         "coins_per_minute": "1.2T",
+        "game_speed": 4.5,
         "menu": "UW_MENU",
         "secondary": ["PERKS"],
         "overlays": ["MENU_OPEN"],
@@ -340,9 +341,10 @@ def test_status_reads_concise_heartbeat_with_paired_diagnostic_detail(tmp_path):
     log_path = tmp_path / "logs" / "actions.log"
     log_path.parent.mkdir(parents=True)
     log_path.write_text(
-        f"[STATUS {timestamp}] State=RUNNING/PAUSED | Wave=521 | Coins/min=1.3T\n"
+        f"[STATUS {timestamp}] State=RUNNING/PAUSED | Wave=521 | "
+        "Coins/min=1.3T | Speed=x5.0\n"
         f"[DEBUG {timestamp}] [STATUS_DETAIL] State=RUNNING/PAUSED | Wave=521 | "
-        "Coins/min=1.3T | Menu=UW_MENU | Secondary=[PERKS] | "
+        "Coins/min=1.3T | Speed=x5.0 | Menu=UW_MENU | Secondary=[PERKS] | "
         "Overlays=[MENU_OPEN]\n",
         encoding="utf-8",
     )
@@ -356,6 +358,7 @@ def test_status_reads_concise_heartbeat_with_paired_diagnostic_detail(tmp_path):
         "state_label": "RUNNING/PAUSED",
         "wave": 521,
         "coins_per_minute": "1.3T",
+        "game_speed": 5.0,
         "menu": "UW_MENU",
         "secondary": ["PERKS"],
         "overlays": ["MENU_OPEN"],
@@ -403,6 +406,7 @@ def test_status_exposes_prior_meaningful_state_transition(tmp_path):
         "state_label": "HOME_SCREEN",
         "wave": None,
         "coins_per_minute": None,
+        "game_speed": None,
         "menu": None,
         "secondary": [],
         "overlays": [],
@@ -793,12 +797,15 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert 'Text="PREVIOUS GAME SCREEN"' in native_xaml
     assert 'id="gameSpeedTargetSelect"' in html
     assert 'Content="x6.3 — Maximum available"' in native_xaml
-    assert "MinimumServerRevision = 15" in native_compatibility
+    assert "MinimumServerRevision = 16" in native_compatibility
     assert '"current_run_activity_scope"' in native_compatibility
     assert '"game_speed_target"' in native_compatibility
     assert '"host_performance_telemetry_v1"' in native_compatibility
     assert '"host_performance_gpu_v1"' in native_compatibility
     assert '"automatic_battle_attachment"' in native_compatibility
+    assert '"observed_game_speed"' in native_compatibility
+    assert 'id="observedSpeed"' in html
+    assert 'id="gameSpeedObserved"' in html
     assert 'Content="Validate current battle if attached"' in native_xaml
     assert 'Content="Skip checks for current battle"' in native_xaml
     assert "AttachCurrentBattleBox" not in native_xaml
@@ -806,6 +813,7 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert 'Content="Switch this battle"' in native_xaml
     assert 'Text="HOST HEALTH"' in native_xaml
     assert 'Text="BLUESTACKS CPU"' in native_xaml
+    assert 'Text="OBSERVED SPEED"' in native_xaml
 
 
 def test_native_incompatible_api_has_prominent_start_mitigation():

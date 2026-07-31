@@ -21,6 +21,7 @@ from utils.wave_detector import detect_wave_number_from_image
 from utils.coin_detector import detect_coins_from_image, format_compact_decimal
 from core.clickmap_access import get_clickmap, resolve_dot_path
 from core.automation_supervisor import AutomationSupervisor
+from core.game_speed import read_game_speed_control
 
 
 Frame = NDArray[np.uint8]
@@ -142,11 +143,21 @@ class StatusReporter:
         coins_eff = None
         has_min = False
         coins_debug_tmp: Optional[Path] = None
+        game_speed = None
+        game_speed_conf = -1.0
 
         if ui_state != "RUNNING":
             wave = None
             wave_conf = -1.0
         else:
+            try:
+                speed_reading = read_game_speed_control(img)
+                if speed_reading.valid and speed_reading.value is not None:
+                    game_speed = speed_reading.value
+                    game_speed_conf = speed_reading.confidence
+            except Exception:
+                game_speed, game_speed_conf = None, -1.0
+
             # The app already observed this frame's wave. Repeat OCR only when
             # an explicit diagnostic sample requested the winning bin image;
             # never let this auxiliary pass replace the shared observation.
@@ -180,13 +191,15 @@ class StatusReporter:
 
         wave_str = str(wave) if wave is not None else "—"
         coins_str = format_compact_decimal(coins_eff) if coins_eff is not None else "—"
+        speed_str = f"x{game_speed:.1f}" if game_speed is not None else "—"
         menu_str = menu or "—"
         sec_str = ", ".join(sorted(secondary)) if secondary else "—"
         ovl_str = ", ".join(sorted(overlays)) if overlays else "—"
         state_str = self._supervisor.format_state(ui_state)
 
         status_summary = (
-            f"State={state_str} | Wave={wave_str} | Coins/min={coins_str}"
+            f"State={state_str} | Wave={wave_str} | Coins/min={coins_str} | "
+            f"Speed={speed_str}"
         )
         log_status(
             status_summary,
@@ -206,6 +219,12 @@ class StatusReporter:
                     "coins_per_minute_decimal": str(coins_eff),
                     "display": coins_str,
                     "confidence": round(float(coins_conf), 1),
+                    "game_speed": game_speed,
+                    "game_speed_confidence": (
+                        round(float(game_speed_conf), 1)
+                        if game_speed is not None
+                        else None
+                    ),
                 }
             )
             # A missed terminal boundary must not grow process memory forever.
@@ -225,6 +244,8 @@ class StatusReporter:
                     f"conf={wave_conf:.1f}",
                     f"coins={coins_str}",
                     f"coins_conf={coins_conf:.1f}",
+                    f"game_speed={speed_str}",
+                    f"game_speed_conf={game_speed_conf:.1f}",
                 ],
             )
 
@@ -241,6 +262,8 @@ class StatusReporter:
                     f"coins={coins_str}",
                     f"coins_conf={coins_conf:.1f}",
                     f"has_min={'yes' if has_min else 'no'}",
+                    f"game_speed={speed_str}",
+                    f"game_speed_conf={game_speed_conf:.1f}",
                 ],
             )
 

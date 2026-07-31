@@ -2464,6 +2464,14 @@ class PausedStartupObservationTests(unittest.TestCase):
                     "core.status_report.detect_coins_from_image",
                     return_value=(Decimal("100"), 99.0, False),
                 ),
+                patch(
+                    "core.status_report.read_game_speed_control",
+                    return_value=SimpleNamespace(
+                        valid=True,
+                        value=4.5,
+                        confidence=97.0,
+                    ),
+                ),
                 patch("core.automation_supervisor.tap_if_visible") as tap,
                 patch("core.status_report.log_status") as status_log,
             ):
@@ -2483,10 +2491,10 @@ class PausedStartupObservationTests(unittest.TestCase):
 
         tap.assert_not_called()
         status_log.assert_called_once_with(
-            "State=RUNNING | Wave=1 | Coins/min=1",
+            "State=RUNNING | Wave=1 | Coins/min=1 | Speed=x4.5",
             detail=(
                 "[STATUS_DETAIL] State=RUNNING | Wave=1 | Coins/min=1 | "
-                "Menu=— | Secondary=[—] | Overlays=[—]"
+                "Speed=x4.5 | Menu=— | Secondary=[—] | Overlays=[—]"
             ),
         )
 
@@ -2511,6 +2519,14 @@ class PausedStartupObservationTests(unittest.TestCase):
                     "core.status_report.detect_coins_from_image",
                     return_value=(Decimal("1230000"), 98.5, True),
                 ),
+                patch(
+                    "core.status_report.read_game_speed_control",
+                    return_value=SimpleNamespace(
+                        valid=True,
+                        value=5.0,
+                        confidence=96.5,
+                    ),
+                ),
                 patch("core.status_report.log_status"),
             ):
                 reporter.maybe_report(
@@ -2534,6 +2550,8 @@ class PausedStartupObservationTests(unittest.TestCase):
         assert sample["coins_per_minute_decimal"] == "1230000"
         assert sample["display"] == "1.23M"
         assert sample["confidence"] == 98.5
+        assert sample["game_speed"] == 5.0
+        assert sample["game_speed_confidence"] == 96.5
         reporter.reset_coin_rate_samples()
         assert reporter.coin_rate_samples == []
 

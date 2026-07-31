@@ -112,7 +112,7 @@
                   Padding="9,4"
                   FontSize="10" />
         </Grid>
-        <UniformGrid Columns="6">
+        <UniformGrid Columns="7">
           <StackPanel ToolTip="The requested automation control state. The controls pane shows whether the live runtime has acknowledged it.">
             <TextBlock Text="AUTOMATION" Foreground="{StaticResource MutedBrush}" FontSize="10" />
             <TextBlock x:Name="DirectiveText" Text="-" FontSize="17" FontWeight="Bold" />
@@ -128,6 +128,10 @@
           <StackPanel>
             <TextBlock Text="COINS / MIN" Foreground="{StaticResource MutedBrush}" FontSize="10" />
             <TextBlock x:Name="CoinsMinuteText" Text="-" FontSize="17" FontWeight="Bold" />
+          </StackPanel>
+          <StackPanel ToolTip="Speed read directly from the latest periodic game screenshot.">
+            <TextBlock Text="OBSERVED SPEED" Foreground="{StaticResource MutedBrush}" FontSize="10" />
+            <TextBlock x:Name="ObservedSpeedText" Text="-" FontSize="17" FontWeight="Bold" />
           </StackPanel>
           <StackPanel ToolTip="What automation should do when the current battle ends.">
             <TextBlock Text="AFTER GAME OVER" Foreground="{StaticResource MutedBrush}" FontSize="10" />
