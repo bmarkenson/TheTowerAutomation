@@ -104,8 +104,25 @@ for a matching recurrence or historical investigation.
   outcome than a host-load spike or missing tradeoff Perk. Lower game speed
   may be protective against the earlier scheduling collapse, but this
   comparison cannot establish causation because it has no completed, clean
-  x3.5 control. The ongoing battle that began at `02:24:09` is also mixed:
-  Death Stranding remained active through approximately wave 900.
+  x3.5 control.
+- The mixed follow-up that began at `02:24:09` ended at wave 2,437. Death
+  Stranding remained active only through approximately wave 900, x3.5 remained
+  selected through approximately wave 1,867, and the rest ran clean at x6.3.
+  It reported `786.43q` Coins/hour, 229.0 enemies per played wave, 626 as the
+  largest Golden Combo, 11 Death Defies, and 21 Energy Shield hits. It acquired
+  the −44% enemy-speed tradeoff at scheduled wave 1,540 but never acquired the
+  −55% enemy-health tradeoff. Second Wind, Demon Mode, and Nuke activated at
+  approximately waves 2,134, 2,161, and 2,373 before Scatter ended the run at
+  2,437. Its final 15 minutes of host and BlueStacks load were materially the
+  same as the following full run, excluding a host-performance collapse.
+- The next clean x6.3 run reached wave 4,903 with `1.56Q` Coins/hour, 262.1
+  enemies per played wave, 725 as the largest Golden Combo, 41 Death Defies,
+  and 62 Energy Shield hits. It acquired the enemy-health and enemy-speed
+  tradeoffs at scheduled waves 1,287 and 1,420. This is a healthy uncontended
+  `1E-19%` baseline, though its entity density and combo remained modestly
+  below the strongest recent full-run controls. A subsequent clean run had
+  reached wave 2,489 with both tradeoffs when the operator paused automation
+  and stopped the emulator; it has no terminal battle record.
 
 ### Windows performance telemetry exceeded its client CPU budget
 

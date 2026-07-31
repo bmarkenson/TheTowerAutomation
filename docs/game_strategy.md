@@ -179,6 +179,13 @@ that the lower value improved whole-run coins per hour.
   [runtime backlog](backlog/runtime-and-validation.md#strategy-driven-damage-slider-schedule);
   the exact Tier 19 schedule remains an experiment choice, not current runtime
   behavior.
+- The next uncontended comparison was directionally compatible with that
+  experiment but did not establish causation. A mixed-speed `1E-19%` run never
+  received the −55% tradeoff and ended at wave 2,437; the immediately following
+  clean x6.3 run received −55% at scheduled wave 1,287 and reached wave 4,903.
+  Because the earlier wave-2,053 run died despite already having −55%, the perk
+  is neither necessary nor sufficient evidence of safety. The pair strengthens
+  the case for a configurable A/B transition test, not for assuming its result.
 
 For a useful comparison, record the initial slider value, every changed value
 and wave, whether damage visibly changed, and the final value. A run with a
