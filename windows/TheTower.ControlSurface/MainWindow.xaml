@@ -410,6 +410,7 @@
                           Content="Attach to current battle; run gates next battle"
                           Click="StartupGatePolicy_Click"
                           Margin="6,4,6,2"
+                          Foreground="{StaticResource MutedBrush}"
                           IsEnabled="False"
                           ToolTip="Use when automation is starting in an existing battle." />
                 <UniformGrid Columns="2" Margin="0,6,0,0">
