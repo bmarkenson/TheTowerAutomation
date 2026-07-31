@@ -37,6 +37,21 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-31 automatic-Retry activity continuity
+
+- Commit `2ce357d` starts the next Current-run scope immediately after a
+  verified automatic Retry and persists the preceding completed-battle
+  fingerprint as pending comparison evidence.
+- After run initialization and session preflight, continuity polls the newest
+  Battle History entry. A stale prior row releases normal battle actions and
+  schedules another bounded poll; an advanced row becomes the baseline of the
+  existing Retry scope instead of creating an attachment scope.
+- Focused logger, Game Over, activity-continuity, and run-initialization
+  coverage passed 129 tests, followed by all 950 repository tests. The live
+  battle was not navigated or restarted; its Current-run ledger alone was
+  restored to the verified 07:23 Retry boundary while preserving its correct
+  History identity and opaque scope ID.
+
 ### 2026-07-31 GUI-managed reverse ADB forwarding
 
 - Commit `3ac1d88` preserves the Windows-local API forward and adds a separate

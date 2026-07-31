@@ -145,6 +145,16 @@ guarded read:
 - a source screen that cannot be restored keeps normal inputs blocked and
   retries instead of guessing.
 
+A successful automatic Game Over **Retry** starts the next Current-run scope
+immediately after the verified Retry tap. That scope retains the preceding
+History fingerprint only as pending comparison evidence. After run
+initialization and session preflight release their exclusive startup authority,
+automation polls the newest History entry. If the game still exposes the prior
+entry, the same scope remains active and another bounded poll is scheduled
+without blocking ordinary battle actions. Only an advanced entry completes the
+new scope's baseline; it never creates a second attachment scope for the battle
+that automation itself started.
+
 Only the fingerprint, Battle Date, Tier, Wave, and capture time are retained in
 the scope ledger; the copied report remains clipboard input. The complete
 inspection has one operator-facing `ACTION` and one `RESULT`. Its menu, row,

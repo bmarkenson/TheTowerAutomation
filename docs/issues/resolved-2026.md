@@ -524,6 +524,50 @@ and actionable work lives in
   and the live battle continued normally.
 - **Fixed by:** `29308ac`.
 
+### Automatic Retry did not establish or baseline the next Current run
+
+- **Observed:** 2026-07-31 after automation restarted during the Tier 19 Farm
+  battle that followed the `Jul 31, 2026 07:22` completion.
+- **Symptom:** Battle History correctly identified that wave-4903 completion as
+  the newest entry, but continuity treated the 16:03 process attachment as a
+  new battle boundary. The native Current-run activity therefore omitted the
+  first approximately eight hours of the battle automation itself had started.
+- **Evidence:** `logs/actions.log` records the natural Game Over and saved
+  `Battle20260731T072302-0700.json`, a verified Retry tap at 07:23:43, completed
+  terminal handling at 07:23:46, and the new battle's initialization beginning
+  at 07:23:52. No `[RUN_SCOPE]` entry accompanied Retry. At 16:03 the repaired
+  top-edge reader copied Tier 19 wave 4903 with fingerprint `d200b4d9…`, then
+  created `battle_history_changed_on_attachment` scope
+  `10f325810b944300b38cf3f81df96398` at that attachment instead.
+- **Safety response:** Diagnosis and implementation did not pause, navigate,
+  exit, Surrender, restart, or otherwise alter the active battle. After fresh
+  control, lock, API, ADB, log, and screenshot inspection confirmed the same
+  run at Tier 19 wave 3450, only the ignored activity ledger was repaired. Its
+  opaque scope ID and authoritative wave-4903 identity were preserved while
+  the boundary moved to the successful 07:23 Retry; a `/api/v1/activity`
+  current-run read confirmed the corrected 07:23:43 start.
+- **Cause:** The Game Over Retry route finalized strategy lifecycle state and
+  tapped Retry, but Current-run scope creation was owned only by verified Home
+  `NEW_BATTLE` and later process-attachment continuity. The runtime also had no
+  persisted state distinguishing a not-yet-published post-Retry History row
+  from an authoritative new baseline.
+- **Resolution:** A successful verified Retry now creates the next scope
+  immediately and retains the previous completed-battle identity as pending
+  comparison evidence. After run initialization and session preflight finish,
+  continuity polls Battle History. A still-unchanged newest row schedules
+  another 15-second poll without blocking normal battle actions or replacing
+  the Retry scope; the first advanced row completes that same scope's baseline.
+  The pending comparison survives process replacement.
+- **Regression:** `test/test_game_over_handler.py` proves the scope callback
+  follows a successful Retry tap. `test/test_logger.py` covers Retry-scope
+  metadata and completion. `test/test_activity_continuity.py` covers startup
+  deferral, stale-row rejection, bounded repolling, same-scope preservation,
+  and advanced-row recording. `test/test_run_initialization.py` verifies app
+  wiring.
+- **Validation:** The 129 focused logger, Game Over, activity-continuity, and
+  run-initialization tests passed, followed by all 950 repository tests.
+- **Fixed by:** `2ce357d`.
+
 ### Daily Gem claim drift escaped its match region and left battle in Store
 
 - **Observed:** 2026-07-28 during the active Tier 19 Farm battle's rollover
