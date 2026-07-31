@@ -83,7 +83,42 @@
     <Style TargetType="TabItem">
       <Setter Property="Background" Value="#151F31" />
       <Setter Property="Foreground" Value="#EDF2F7" />
+      <Setter Property="BorderBrush" Value="#344660" />
+      <Setter Property="BorderThickness" Value="1" />
       <Setter Property="Padding" Value="14,7" />
+      <Setter Property="Margin" Value="0,0,2,0" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="{x:Type TabItem}">
+            <Border x:Name="TabChrome"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    Padding="{TemplateBinding Padding}"
+                    SnapsToDevicePixels="True">
+              <ContentPresenter ContentSource="Header"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                RecognizesAccessKey="True" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="TabChrome" Property="Background" Value="#1B2A42" />
+                <Setter TargetName="TabChrome" Property="BorderBrush" Value="#4B617F" />
+              </Trigger>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter Property="Panel.ZIndex" Value="1" />
+                <Setter Property="Foreground" Value="#BCEEFF" />
+                <Setter TargetName="TabChrome" Property="Background" Value="#0E4E67" />
+                <Setter TargetName="TabChrome" Property="BorderBrush" Value="#62D5FF" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Foreground" Value="#5F6F85" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
     </Style>
     <Style x:Key="PanelSplitter" TargetType="GridSplitter">
       <Setter Property="Background" Value="#263349" />
