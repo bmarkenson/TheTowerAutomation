@@ -8,6 +8,8 @@ screenshots/matches/Game20260716_101413_*_OCR_EVIDENCE.png
 screenshots/matches/Game20260722_202039_*_OCR_EVIDENCE.png
 screenshots/matches/Game20260725_210917_*_OCR_EVIDENCE.png
 screenshots/matches/Game20260726_004643_*_OCR_EVIDENCE.png
+screenshots/matches/SurvivalActivation20260730T150618-0700_demon_mode_01_first_absent.png
+screenshots/matches/SurvivalActivation20260730T200505-0700_demon_mode_01_first_absent.png
 screenshots/matches/guild_chest_guardian_retained_20260717.png
 screenshots/matches/guild_chest_750_available_20260717.png
 screenshots/matches/guild_chests_claimed_20260717.png

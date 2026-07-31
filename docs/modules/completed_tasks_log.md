@@ -37,6 +37,22 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-30 Demon Mode Intro Sprint activation guard
+
+- Commit `4ac2fc0` makes the independently visible top-left Intro Sprint status
+  veto Demon Mode disappearance until five consecutive clean status absences
+  confirm that the sprint ended. Obscured or failed status matches reset that
+  streak instead of being treated as absence.
+- The tracker keeps the existing whole-region button matcher, so Demon Mode,
+  Nuke, and Missile Barrage may reflow among their three slots without creating
+  a fixed-position assumption.
+- `test/test_battle_activation_tracker.py` covers the retained wave-480 false
+  notice, the post-activation comparator, synthetic third-to-second-slot
+  reflow, and intermittent status-match failures. All 938 repository tests,
+  recursive clickmap integrity, and state-definition validation passed.
+- Validation used retained fixtures only; no live battle, emulator, runtime, or
+  control state was changed.
+
 ### 2026-07-30 paired-cycle EHLS/EALS startup
 
 - Commit `b8229d5` removes the ineffective production H.264 warm-up and makes

@@ -8,6 +8,45 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Demon Mode tracker falsely treated its disabled Intro Sprint button as absent
+
+- **Observed:** 2026-07-30 during the Tier 19 Farm battle later retained as
+  `Battle20260730T204649-0700`.
+- **Symptom:** `logs/actions.log` reported a first Demon Mode activation at
+  approximately wave 490 and retained
+  `screenshots/matches/SurvivalActivation20260730T200505-0700_demon_mode_01_first_absent.png`.
+  The evidence frame is visibly still in Intro Sprint at wave 480 and still
+  shows the disabled Demon Mode button in the third floating-button position.
+  Activating Demon Mode would itself have ended Intro Sprint.
+- **Evidence:** Replaying the matcher against the retained frame localizes the
+  Demon Mode button at `(335,807,126,85)` with confidence `0.783562`, narrowly
+  below the tracker's custom `0.800` presence threshold; Nuke remains a
+  positive match at `0.949987`. In the post-activation comparator
+  `screenshots/matches/SurvivalActivation20260730T150618-0700_demon_mode_01_first_absent.png`,
+  the rectangular button is absent after the floating controls reflow and the
+  best non-button candidate scores `0.506201`. The terminal battle report
+  records one eventual Demon Mode use, but the false first event disarmed
+  further tracking, so its actual activation wave cannot be recovered.
+- **Safety response:** Diagnosis and validation replayed retained images only.
+  They did not change a battle, emulator, runtime, or control state.
+- **Cause:** Button disappearance was the tracker's only Demon Mode activation
+  authority. It did not consult the noisy but independently visible top-left
+  Intro Sprint status, so two below-threshold button matches could report an
+  impossible activation while Intro Sprint was still active. Floating buttons
+  can reflow when any of Demon Mode, Nuke, or Missile Barrage disappears, so
+  fixed-slot continuity was not a valid repair.
+- **Resolution:** The tracker now matches the top-left Intro Sprint status and,
+  once observed, vetoes Demon Mode disappearance until five consecutive clean
+  status absences confirm its exit. A failed or obscured status match resets
+  that absence streak. The normal two-frame button-disappearance confirmation
+  then runs without anchoring Demon Mode to a fixed slot.
+- **Regression:** `test/test_battle_activation_tracker.py` covers the retained
+  wave-480 false-positive and post-activation crops, a third-to-second-slot
+  reflow, noisy status matching, and intermittent status-match failures.
+- **Validation:** All 938 repository tests passed. The recursive clickmap
+  integrity check and state-definition validation also passed.
+- **Fixed by:** `4ac2fc0`.
+
 ### EHLS/EALS startup race delayed the first EALS purchase
 
 - **Observed:** 2026-07-30 during repeated authorized Tier 19 Farm startup
