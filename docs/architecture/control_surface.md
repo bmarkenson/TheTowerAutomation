@@ -137,14 +137,24 @@ expiry attempt.
 ## Transport and access
 
 The server binds to `127.0.0.1:8787` by default. The Windows app can launch and
-own the passwordless OpenSSH tunnel itself. It invokes `ssh.exe` without a
-shell, uses only validated destination/port fields, enables BatchMode and
-forward-failure detection, and closes its tunnel process when the app exits.
-The equivalent manual command is:
+own two passwordless OpenSSH processes: the existing Windows-local API forward
+and a separately controllable ADB reverse forward. It invokes `ssh.exe` without
+a shell, uses only validated destination/port fields, enables BatchMode and
+forward-failure detection, and closes both processes when the app exits. The
+equivalent manual commands are:
 
 ```powershell
 ssh -N -L 8787:127.0.0.1:8787 <linux-user>@<linux-host>
+ssh -N -R 127.0.0.1:5555:127.0.0.1:5555 <linux-user>@<linux-host>
 ```
+
+The reverse listener address is fixed to Linux loopback. Its Linux port and
+Windows BlueStacks port are separate settings, both defaulting to 5555, so
+multiple PCs can expose distinct Linux ports without changing their local
+listeners. The independent process boundary keeps an ADB bind conflict or
+reconnect cycle from interrupting API control. Accepted forwarding, local
+Windows-listener detection, conflicts, and bounded automatic reconnect are
+reported separately in the GUI.
 
 SSH provides host authentication and encryption while the HTTP listener remains
 unreachable from the LAN. Host-key trust must already exist in the Windows

@@ -712,12 +712,28 @@ Linux can compile the Windows-targeted project but cannot run its WPF UI. The
 self-contained single-file output is
 `windows\TheTower.ControlSurface\publish\win-x64\TheTower.ControlSurface.exe`.
 
-The app can own the SSH tunnel itself. Enter the Linux SSH destination
-(`host`, SSH config alias, or `user@host`), keep local and remote ports at 8787,
-and select **Start tunnel**. It launches Windows `ssh.exe` in BatchMode with
-forward-failure and keepalive checks, then connects the API to
-`http://127.0.0.1:8787`. Establish host-key trust once from PowerShell before
-using the non-interactive app tunnel:
+The app can own both SSH transports itself through separate `ssh.exe`
+processes. Enter the Linux SSH destination (`host`, SSH config alias, or
+`user@host`), keep the API ports at 8787, and select **Start API tunnel**. For
+ADB, set the Windows BlueStacks listener port and the Linux-exposed port, then
+select **Start ADB forward**. Both ADB settings default to 5555 but remain
+independent so several PCs can use distinct Linux ports. The resulting
+topology is:
+
+```text
+Windows API client -> 127.0.0.1:8787 -L-> Linux 127.0.0.1:8787
+Linux automation -> 127.0.0.1:<linux-adb-port> -R-> Windows 127.0.0.1:<windows-bluestacks-port>
+```
+
+The reverse listener is always requested on Linux `127.0.0.1`, never a LAN
+interface. The API and ADB forwards are independently startable and stoppable,
+so an occupied Linux ADB port cannot take down API control. Each process uses
+BatchMode, `ExitOnForwardFailure`, and keepalives. The GUI separately reports
+the Windows TCP-listener check and the accepted OpenSSH reverse listener. ADB
+bind or SSH-policy conflicts retain the SSH error and pause retries; other
+unexpected exits automatically retry with bounded 5/10/20/30-second backoff.
+Stopping the ADB forward cancels that retry. Establish host-key trust once from
+PowerShell before using either non-interactive app tunnel:
 
 ```powershell
 ssh <linux-user>@<linux-host>
@@ -741,6 +757,7 @@ The Linux service still serves the browser client at
 
 ```powershell
 ssh -N -L 8787:127.0.0.1:8787 <linux-user>@<linux-host>
+ssh -N -R 127.0.0.1:5555:127.0.0.1:5555 <linux-user>@<linux-host>
 ```
 
 The loopback listener plus SSH tunnel is the recommended transport. A direct

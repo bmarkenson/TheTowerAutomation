@@ -479,6 +479,16 @@ evidence is attached.
   Persistent degradation produces transition/reminder warnings, and recovery
   is complete only after a supported fresh frame succeeds. Malformed captures
   while transport remains connected retain their normal diagnostics.
+- The native Windows control surface owns API local forwarding and ADB reverse
+  forwarding as separate OpenSSH processes. The ADB process requests only
+  `127.0.0.1:<linux-port>` and targets the independently configured Windows
+  BlueStacks listener. Windows-listener presence and accepted SSH forwarding
+  are separate evidence; neither proves a current emulator screen or runtime
+  owner. `ExitOnForwardFailure` preserves bind/policy diagnostics. A forwarding
+  conflict pauses automatic ADB reconnect, while other unexpected exits use
+  bounded backoff without disturbing the API process. The Windows listener
+  port, Linux-exposed per-PC port, and managed runtime ADB target remain
+  explicit independent settings even when all three normally use 5555.
 - An acknowledged paused runtime may migrate its localhost ADB target without
   process replacement. It acquires the new per-target lock first, temporarily
   selects that endpoint, requires successful connection and supported capture,

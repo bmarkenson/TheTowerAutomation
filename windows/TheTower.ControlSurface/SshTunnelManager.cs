@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Net;
+using System.Net.NetworkInformation;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -13,8 +15,16 @@ public sealed class SshTunnelManager : IDisposable
 
     private readonly object _gate = new();
     private readonly StringBuilder _stderr = new();
+    private readonly string _displayName;
     private Process? _process;
     private bool _stopping;
+
+    public SshTunnelManager(string displayName = "SSH tunnel")
+    {
+        _displayName = string.IsNullOrWhiteSpace(displayName)
+            ? "SSH tunnel"
+            : displayName.Trim();
+    }
 
     public event EventHandler<TunnelExitedEventArgs>? Exited;
 
@@ -29,10 +39,38 @@ public sealed class SshTunnelManager : IDisposable
         }
     }
 
-    public async Task StartAsync(
+    public Task StartLocalForwardAsync(
         string destination,
         int localPort,
         int remotePort,
+        CancellationToken cancellationToken) =>
+        StartAsync(
+            destination,
+            "-L",
+            $"{localPort}:127.0.0.1:{remotePort}",
+            localPort,
+            remotePort,
+            cancellationToken);
+
+    public Task StartReverseForwardAsync(
+        string destination,
+        int linuxPort,
+        int windowsPort,
+        CancellationToken cancellationToken) =>
+        StartAsync(
+            destination,
+            "-R",
+            $"127.0.0.1:{linuxPort}:127.0.0.1:{windowsPort}",
+            linuxPort,
+            windowsPort,
+            cancellationToken);
+
+    private async Task StartAsync(
+        string destination,
+        string forwardOption,
+        string forwardSpecification,
+        int firstPort,
+        int secondPort,
         CancellationToken cancellationToken)
     {
         destination = destination.Trim();
@@ -41,14 +79,14 @@ public sealed class SshTunnelManager : IDisposable
             throw new ArgumentException(
                 "SSH destination must be a host, SSH alias, or user@host using only letters, numbers, '.', '_', and '-'.");
         }
-        ValidatePort(localPort, nameof(localPort));
-        ValidatePort(remotePort, nameof(remotePort));
+        ValidatePort(firstPort, nameof(firstPort));
+        ValidatePort(secondPort, nameof(secondPort));
 
         lock (_gate)
         {
             if (_process is { HasExited: false })
             {
-                throw new InvalidOperationException("The SSH tunnel is already running.");
+                throw new InvalidOperationException($"The {_displayName} is already running.");
             }
             _process?.Dispose();
             _process = null;
@@ -73,7 +111,7 @@ public sealed class SshTunnelManager : IDisposable
                      "-o", "ExitOnForwardFailure=yes",
                      "-o", "ServerAliveInterval=30",
                      "-o", "ServerAliveCountMax=3",
-                     "-L", $"{localPort}:127.0.0.1:{remotePort}",
+                     forwardOption, forwardSpecification,
                      destination,
                  })
         {
@@ -125,7 +163,10 @@ public sealed class SshTunnelManager : IDisposable
         await Task.Delay(TimeSpan.FromMilliseconds(750), cancellationToken);
         if (process.HasExited)
         {
-            throw new InvalidOperationException(BuildExitMessage(process.ExitCode));
+            var exit = BuildExitState(process.ExitCode);
+            throw new SshTunnelStartException(
+                exit.Message,
+                exit.ForwardSetupFailed);
         }
     }
 
@@ -247,9 +288,22 @@ public sealed class SshTunnelManager : IDisposable
     public static bool IsValidDestination(string destination) =>
         DestinationPattern.IsMatch(destination.Trim());
 
+    public static bool IsWindowsLoopbackPortListening(int port)
+    {
+        ValidatePort(port, nameof(port));
+        return IPGlobalProperties
+            .GetIPGlobalProperties()
+            .GetActiveTcpListeners()
+            .Any(endpoint =>
+                endpoint.Port == port
+                && (endpoint.Address.Equals(IPAddress.Loopback)
+                    || endpoint.Address.Equals(IPAddress.Any)));
+    }
+
     private void OnProcessExited(Process process)
     {
         bool expected;
+        bool forwardSetupFailed;
         string message;
         int exitCode;
         try
@@ -263,26 +317,50 @@ public sealed class SshTunnelManager : IDisposable
         lock (_gate)
         {
             expected = _stopping;
-            message = expected ? "SSH tunnel stopped." : BuildExitMessage(exitCode);
+            var exit = BuildExitState(exitCode);
+            message = expected ? $"{_displayName} stopped." : exit.Message;
+            forwardSetupFailed = exit.ForwardSetupFailed;
             if (ReferenceEquals(_process, process))
             {
                 _process = null;
             }
         }
-        Exited?.Invoke(this, new TunnelExitedEventArgs(expected, message));
+        Exited?.Invoke(
+            this,
+            new TunnelExitedEventArgs(expected, message, forwardSetupFailed));
     }
 
-    private string BuildExitMessage(int exitCode)
+    private TunnelExitState BuildExitState(int exitCode)
     {
         string detail;
         lock (_gate)
         {
             detail = _stderr.ToString().Trim();
         }
-        return string.IsNullOrEmpty(detail)
-            ? $"SSH tunnel exited with code {exitCode}."
-            : $"SSH tunnel exited with code {exitCode}: {detail}";
+        var message = string.IsNullOrEmpty(detail)
+            ? $"{_displayName} exited with code {exitCode}."
+            : $"{_displayName} exited with code {exitCode}: {detail}";
+        return new TunnelExitState(
+            message,
+            IsForwardSetupFailure(detail));
     }
+
+    private static bool IsForwardSetupFailure(string detail) =>
+        detail.Contains(
+            "remote port forwarding failed",
+            StringComparison.OrdinalIgnoreCase)
+        || detail.Contains(
+            "cannot listen to port",
+            StringComparison.OrdinalIgnoreCase)
+        || detail.Contains(
+            "address already in use",
+            StringComparison.OrdinalIgnoreCase)
+        || detail.Contains(
+            "port forwarding is disabled",
+            StringComparison.OrdinalIgnoreCase)
+        || detail.Contains(
+            "administratively prohibited",
+            StringComparison.OrdinalIgnoreCase);
 
     private static void ValidatePort(int port, string parameterName)
     {
@@ -321,6 +399,26 @@ public sealed class SshTunnelManager : IDisposable
             process.Dispose();
         }
     }
+
+    private sealed record TunnelExitState(
+        string Message,
+        bool ForwardSetupFailed);
 }
 
-public sealed record TunnelExitedEventArgs(bool Expected, string Message);
+public sealed record TunnelExitedEventArgs(
+    bool Expected,
+    string Message,
+    bool ForwardSetupFailed);
+
+public sealed class SshTunnelStartException : InvalidOperationException
+{
+    public SshTunnelStartException(
+        string message,
+        bool forwardSetupFailed)
+        : base(message)
+    {
+        ForwardSetupFailed = forwardSetupFailed;
+    }
+
+    public bool ForwardSetupFailed { get; }
+}

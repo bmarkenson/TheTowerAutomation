@@ -52,11 +52,33 @@ resulting `.exe` to Windows for runtime testing.
 
 ## Connect
 
-The app can start and stop the recommended SSH tunnel itself. Enter the Linux
-destination as an SSH config alias, host, or `user@host`; leave both ports at
-8787; and select **Start tunnel**. It uses the Windows OpenSSH Client with
-BatchMode, keepalives, and `ExitOnForwardFailure`, and stops its tunnel when the
-application exits.
+The app manages two independently controlled Windows OpenSSH processes. The
+API tunnel preserves the Windows-local forward from `127.0.0.1:8787` to the
+Linux API at `127.0.0.1:8787`. The ADB reverse forward exposes the PC's
+Windows-local BlueStacks listener through a configurable Linux loopback port:
+
+```text
+-L 8787:127.0.0.1:8787
+-R 127.0.0.1:<linux-adb-port>:127.0.0.1:<windows-bluestacks-port>
+```
+
+Enter the Linux destination as an SSH config alias, host, or `user@host`.
+Leave the API ports at 8787 unless the Linux API is configured differently.
+The Windows BlueStacks and Linux ADB ports are separate saved settings that
+both default to 5555. Keep them equal for one PC, or assign each PC a distinct
+Linux port such as 5555 and 5556 while retaining its actual Windows listener
+port. The Linux endpoint is always requested on `127.0.0.1`; the GUI does not
+offer a non-loopback ADB bind.
+
+Each process uses BatchMode, keepalives, and `ExitOnForwardFailure`. An ADB
+remote-listener conflict therefore does not stop the API tunnel. The Setup tab
+reports whether Windows has a TCP listener for the configured BlueStacks port
+separately from whether OpenSSH accepted the Linux reverse listener. Raw SSH
+exit detail is retained. A bind or SSH-policy conflict pauses automatic ADB
+reconnect until the operator changes the port or policy and starts it again;
+other unexpected ADB-tunnel exits retry after 5, 10, 20, then at most 30
+seconds. **Stop ADB forward** cancels a pending retry. Both tunnel processes
+stop when the application exits.
 
 Passwordless public-key authentication must already work, and the host key
 must already be trusted. The one-time interactive setup or manual equivalent is:
@@ -64,15 +86,16 @@ must already be trusted. The one-time interactive setup or manual equivalent is:
 ```powershell
 ssh <linux-user>@<linux-host>
 ssh -N -L 8787:127.0.0.1:8787 <linux-user>@<linux-host>
+ssh -N -R 127.0.0.1:5555:127.0.0.1:5555 <linux-user>@<linux-host>
 ```
 
 Starting the in-app tunnel automatically selects
 `http://127.0.0.1:<local-port>` and connects. The standalone **Connect** button
 supports an already-running manual tunnel or an authenticated TLS reverse
 proxy. The application persists the URL, SSH destination, and port preferences,
-but the bearer token is held only in memory and is never saved. The saved tunnel
-is not started automatically when the application opens; select **Start tunnel**
-after launch.
+but the bearer token is held only in memory and is never saved. Saved API and
+ADB tunnel settings are not started automatically when the application opens;
+select **Start API tunnel** and **Start ADB forward** as needed after launch.
 
 The main and Battle History windows also remember their normal position, size,
 and maximized state in `%LOCALAPPDATA%\TheTower\control-surface.json`. The main
@@ -115,8 +138,9 @@ The left workspace uses full-height **Controls**, **Process**, **Setup**, and
 scrolling cards. Everyday Pause, Resume, game-speed, Game Over, strategy, and
 run-configuration actions remain on Controls. Service state, PID, ADB target,
 Start, Reload, and Stop are on Process. API and SSH fields are confined to the
-no-scroll Setup tab; the optional bearer token remains memory-only. Detailed
-lock and runtime evidence is on Details.
+Setup tab, which scrolls when its independent API and ADB tunnel controls do
+not fit; the optional bearer token remains memory-only. Detailed lock and
+runtime evidence is on Details.
 
 Drag the main vertical divider and the latest-battle divider to resize those
 panes. Their positions persist locally. Previous Game Screen, Host Health, and
@@ -313,13 +337,16 @@ following battle performs complete gates. Both Start actions persist the
 strategy currently visible in the Strategy dropdown before launching the Linux
 process.
 
-The ADB port, bundled strategy, and startup-gate policy share the managed
-Linux environment file while remaining independent settings. Changing the ADB
-port changes the emulator target, not the SSH/API tunnel ports.
+The managed runtime ADB port, bundled strategy, and startup-gate policy share
+the Linux environment file while remaining independent settings. The Process
+tab's ADB port selects the Linux runtime target. The Setup tab's Windows
+BlueStacks and Linux ADB-forward ports configure transport. Normally the
+managed runtime port matches the Linux ADB-forward port, but changing either
+setting does not silently rewrite the other or alter the API tunnel.
 
 An in-app SSH process is reported as connected only after the forwarded Linux
 status endpoint responds successfully. If OpenSSH remains alive but that probe
-fails, the app labels the API unavailable and keeps **Stop tunnel** enabled.
+fails, the app labels the API unavailable and keeps **Stop API tunnel** enabled.
 
 The status endpoint advertises its API version, monotonic server revision, and
 supported capabilities. The Windows build carries an expected API version, a

@@ -319,8 +319,9 @@ game speed.
 
 A standalone native Windows GUI now exposes these controls, managed automation
 start/stop, runtime health, recent activity, filters, and structured completed
-Battle/Tournament records through a loopback Linux service. It can own the
-passwordless OpenSSH tunnel itself; the browser client remains available as a
+Battle/Tournament records through a loopback Linux service. It can own
+independent passwordless OpenSSH processes for the API tunnel and the
+loopback-only ADB reverse forward; the browser client remains available as a
 fallback. See the
 [`native Windows control surface`](docs/runtime_operations.md#native-windows-control-surface)
 procedure.

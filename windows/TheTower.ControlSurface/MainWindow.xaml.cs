@@ -15,7 +15,8 @@ public partial class MainWindow : Window
     private const double MinimumExpandedLatestBattleHeight = 155;
     private readonly ControlSurfaceApi _api = new();
     private readonly HostPerformanceTracker _hostPerformance;
-    private readonly SshTunnelManager _sshTunnel = new();
+    private readonly SshTunnelManager _apiTunnel = new("API tunnel");
+    private readonly SshTunnelManager _adbTunnel = new("ADB reverse tunnel");
     private readonly ClientSettings _settings;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(5) };
     private readonly DispatcherTimer _activityTimer = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -25,6 +26,7 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<ActivityEntry> _activity = [];
     private BattleListResponse _latestBattles = new();
     private BattleHistoryWindow? _battleHistoryWindow;
+    private CancellationTokenSource? _adbReconnectCancellation;
     private CancellationTokenSource? _refreshCancellation;
     private CancellationTokenSource? _battleRefreshCancellation;
     private CancellationTokenSource? _activityRefreshCancellation;
@@ -51,6 +53,9 @@ public partial class MainWindow : Window
     private ControlSurfaceCompatibilityResult? _serverCompatibility;
     private bool _controlSurfaceRestartInFlight;
     private bool _automationRestartInFlight;
+    private bool _adbForwardDesired;
+    private bool _adbForwardStarting;
+    private int _adbReconnectAttempt;
     private StartupGateContext? _startupGateContext;
     private IReadOnlyDictionary<string, StartupGateWaiverStatus> _startupGateWaivers
         = new Dictionary<string, StartupGateWaiverStatus>();
@@ -74,6 +79,10 @@ public partial class MainWindow : Window
         SshDestinationBox.Text = _settings.SshDestination;
         LocalTunnelPortBox.Text = _settings.LocalTunnelPort.ToString(CultureInfo.InvariantCulture);
         RemoteApiPortBox.Text = _settings.RemoteApiPort.ToString(CultureInfo.InvariantCulture);
+        WindowsBlueStacksAdbPortBox.Text =
+            _settings.WindowsBlueStacksAdbPort.ToString(CultureInfo.InvariantCulture);
+        LinuxAdbForwardPortBox.Text =
+            _settings.LinuxAdbForwardPort.ToString(CultureInfo.InvariantCulture);
         WindowPlacementStore.Restore(this, _settings.MainWindowPlacement);
         RestoreMainWindowLayout();
         _api.Configure(_settings.BaseUrl, "");
@@ -81,15 +90,21 @@ public partial class MainWindow : Window
         _hostPerformance.SetSamplingEnabled(
             _settings.HostPerformanceSamplingEnabled);
         _hostPerformance.SnapshotUpdated += HostPerformance_SnapshotUpdated;
-        _sshTunnel.Exited += Tunnel_Exited;
-        _timer.Tick += async (_, _) => await Task.WhenAll(
-            RefreshStatusAsync(),
-            RefreshBattlesAsync());
+        _apiTunnel.Exited += ApiTunnel_Exited;
+        _adbTunnel.Exited += AdbTunnel_Exited;
+        _timer.Tick += async (_, _) =>
+        {
+            RefreshWindowsAdbListenerStatus();
+            await Task.WhenAll(
+                RefreshStatusAsync(),
+                RefreshBattlesAsync());
+        };
         _activityTimer.Tick += async (_, _) => await RefreshActivityAsync();
         ActivityLevelFilter.SelectionChanged += ActivityLevelFilter_SelectionChanged;
         ActivityScopeFilter.SelectionChanged += ActivityScopeFilter_SelectionChanged;
         Loaded += async (_, _) =>
         {
+            RefreshWindowsAdbListenerStatus();
             _hostPerformance.Start();
             _timer.Start();
             _activityTimer.Start();
@@ -106,13 +121,16 @@ public partial class MainWindow : Window
         };
         Closed += (_, _) =>
         {
+            _adbForwardDesired = false;
+            CancelAdbReconnect();
             _timer.Stop();
             _activityTimer.Stop();
             _refreshCancellation?.Cancel();
             _battleRefreshCancellation?.Cancel();
             _activityRefreshCancellation?.Cancel();
             _battleHistoryWindow?.Close();
-            _sshTunnel.Dispose();
+            _adbTunnel.Dispose();
+            _apiTunnel.Dispose();
             _hostPerformance.SnapshotUpdated -= HostPerformance_SnapshotUpdated;
             _hostPerformance.Dispose();
             _api.Dispose();
@@ -309,7 +327,7 @@ public partial class MainWindow : Window
         try
         {
             using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(35));
-            await _sshTunnel.RestartControlSurfaceServiceAsync(
+            await _apiTunnel.RestartControlSurfaceServiceAsync(
                 destination,
                 cancellation.Token);
             LinuxServiceCompatibilityText.Text =
@@ -372,9 +390,9 @@ public partial class MainWindow : Window
         {
             var localPort = ParsePort(LocalTunnelPortBox.Text, "Local tunnel port");
             var remotePort = ParsePort(RemoteApiPortBox.Text, "Remote API port");
-            TunnelStatusText.Text = "Starting Windows OpenSSH...";
+            TunnelStatusText.Text = "Starting Windows OpenSSH API tunnel...";
             StartTunnelButton.IsEnabled = false;
-            await _sshTunnel.StartAsync(
+            await _apiTunnel.StartLocalForwardAsync(
                 SshDestinationBox.Text,
                 localPort,
                 remotePort,
@@ -398,7 +416,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exc)
         {
-            var tunnelRunning = _sshTunnel.IsRunning;
+            var tunnelRunning = _apiTunnel.IsRunning;
             StartTunnelButton.IsEnabled = !tunnelRunning;
             StopTunnelButton.IsEnabled = tunnelRunning;
             TunnelStatusText.Text = tunnelRunning
@@ -416,7 +434,7 @@ public partial class MainWindow : Window
         try
         {
             StopTunnelButton.IsEnabled = false;
-            await _sshTunnel.StopAsync();
+            await _apiTunnel.StopAsync();
             TunnelStatusText.Text = "Stopped";
             TunnelStatusText.Foreground = (Brush)FindResource("MutedBrush");
             ConnectionText.Text = "Tunnel stopped";
@@ -432,7 +450,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void Tunnel_Exited(object? sender, TunnelExitedEventArgs args)
+    private void ApiTunnel_Exited(object? sender, TunnelExitedEventArgs args)
     {
         _ = Dispatcher.InvokeAsync(() =>
         {
@@ -449,6 +467,304 @@ public partial class MainWindow : Window
                 ConnectionText.Foreground = new SolidColorBrush(Color.FromRgb(255, 113, 135));
             }
         });
+    }
+
+    private async void StartAdbForward_Click(object sender, RoutedEventArgs e)
+    {
+        CancelAdbReconnect();
+        _adbForwardDesired = true;
+        _adbReconnectAttempt = 0;
+        await StartAdbForwardAsync(userInitiated: true);
+    }
+
+    private async Task StartAdbForwardAsync(bool userInitiated)
+    {
+        if (_adbForwardStarting
+            || _adbTunnel.IsRunning
+            || !_adbForwardDesired)
+        {
+            return;
+        }
+
+        _adbForwardStarting = true;
+        StartAdbForwardButton.IsEnabled = false;
+        StopAdbForwardButton.IsEnabled = false;
+        try
+        {
+            var windowsPort = userInitiated
+                ? ParsePort(
+                    WindowsBlueStacksAdbPortBox.Text,
+                    "Windows BlueStacks ADB port")
+                : _settings.WindowsBlueStacksAdbPort;
+            var linuxPort = userInitiated
+                ? ParsePort(
+                    LinuxAdbForwardPortBox.Text,
+                    "Linux ADB port")
+                : _settings.LinuxAdbForwardPort;
+            var destination = userInitiated
+                ? SshDestinationBox.Text.Trim()
+                : _settings.SshDestination;
+            if (userInitiated)
+            {
+                SaveAdbForwardSettings(windowsPort, linuxPort);
+            }
+            SetAdbForwardInputsEnabled(false);
+            RefreshWindowsAdbListenerStatus();
+            AdbForwardStatusText.Text =
+                $"Starting reverse forward on Linux loopback port {linuxPort}...";
+            AdbForwardStatusText.Foreground =
+                new SolidColorBrush(Color.FromRgb(241, 191, 91));
+
+            await _adbTunnel.StartReverseForwardAsync(
+                destination,
+                linuxPort,
+                windowsPort,
+                CancellationToken.None);
+
+            if (!_adbForwardDesired)
+            {
+                await _adbTunnel.StopAsync();
+                return;
+            }
+            _adbReconnectAttempt = 0;
+            AdbForwardStatusText.Text =
+                $"Active: Linux 127.0.0.1:{linuxPort} → Windows "
+                + $"127.0.0.1:{windowsPort}. OpenSSH accepted the remote "
+                + "listener; unexpected exits reconnect automatically. "
+                + "The API tunnel is independent.";
+            AdbForwardStatusText.Foreground =
+                new SolidColorBrush(Color.FromRgb(73, 214, 157));
+            StopAdbForwardButton.IsEnabled = true;
+        }
+        catch (SshTunnelStartException exc) when (exc.ForwardSetupFailed)
+        {
+            SetAdbForwardConflict(exc.Message);
+            if (userInitiated)
+            {
+                ShowError(exc);
+            }
+        }
+        catch (ArgumentException exc)
+        {
+            _adbForwardDesired = false;
+            SetAdbForwardInputsEnabled(true);
+            StartAdbForwardButton.IsEnabled = true;
+            StopAdbForwardButton.IsEnabled = false;
+            AdbForwardStatusText.Text = exc.Message;
+            AdbForwardStatusText.Foreground =
+                new SolidColorBrush(Color.FromRgb(255, 113, 135));
+            LastErrorText.Text = exc.Message;
+            if (userInitiated)
+            {
+                ShowError(exc);
+            }
+        }
+        catch (Exception exc)
+        {
+            LastErrorText.Text = exc.Message;
+            if (_adbForwardDesired)
+            {
+                ScheduleAdbReconnect(exc.Message);
+            }
+            else
+            {
+                StartAdbForwardButton.IsEnabled = true;
+                StopAdbForwardButton.IsEnabled = false;
+            }
+            if (userInitiated)
+            {
+                ShowError(exc);
+            }
+        }
+        finally
+        {
+            _adbForwardStarting = false;
+        }
+    }
+
+    private async void StopAdbForward_Click(object sender, RoutedEventArgs e)
+    {
+        _adbForwardDesired = false;
+        CancelAdbReconnect();
+        StopAdbForwardButton.IsEnabled = false;
+        try
+        {
+            await _adbTunnel.StopAsync();
+            AdbForwardStatusText.Text =
+                "Stopped. Automatic ADB-forward reconnect is disabled; "
+                + "the API tunnel is unchanged.";
+            AdbForwardStatusText.Foreground = (Brush)FindResource("MutedBrush");
+        }
+        catch (Exception exc)
+        {
+            ShowError(exc);
+        }
+        finally
+        {
+            SetAdbForwardInputsEnabled(true);
+            StartAdbForwardButton.IsEnabled = true;
+        }
+    }
+
+    private void AdbTunnel_Exited(object? sender, TunnelExitedEventArgs args)
+    {
+        _ = Dispatcher.InvokeAsync(() =>
+        {
+            if (args.Expected || !_adbForwardDesired)
+            {
+                StartAdbForwardButton.IsEnabled = true;
+                StopAdbForwardButton.IsEnabled = false;
+                return;
+            }
+            if (args.ForwardSetupFailed)
+            {
+                SetAdbForwardConflict(args.Message);
+                return;
+            }
+            LastErrorText.Text = args.Message;
+            ScheduleAdbReconnect(args.Message);
+        });
+    }
+
+    private void SetAdbForwardConflict(string detail)
+    {
+        _adbForwardDesired = false;
+        CancelAdbReconnect();
+        StartAdbForwardButton.IsEnabled = true;
+        StopAdbForwardButton.IsEnabled = false;
+        SetAdbForwardInputsEnabled(true);
+        AdbForwardStatusText.Text =
+            "Linux ADB listener conflict or SSH forwarding-policy refusal. "
+            + "Automatic reconnect is paused; choose a free per-PC Linux port "
+            + "or correct the SSH policy, then start the ADB forward again. "
+            + $"The API tunnel is unchanged. {detail}";
+        AdbForwardStatusText.Foreground =
+            new SolidColorBrush(Color.FromRgb(255, 113, 135));
+        LastErrorText.Text = detail;
+    }
+
+    private void ScheduleAdbReconnect(string reason)
+    {
+        if (!_adbForwardDesired || _adbReconnectCancellation is not null)
+        {
+            return;
+        }
+
+        _adbReconnectAttempt++;
+        var delaySeconds = Math.Min(
+            30,
+            5 * (1 << Math.Min(_adbReconnectAttempt - 1, 3)));
+        var cancellation = new CancellationTokenSource();
+        _adbReconnectCancellation = cancellation;
+        StartAdbForwardButton.IsEnabled = false;
+        StopAdbForwardButton.IsEnabled = true;
+        SetAdbForwardInputsEnabled(false);
+        AdbForwardStatusText.Text =
+            $"ADB reverse tunnel disconnected: {reason} Reconnecting in "
+            + $"{delaySeconds}s (attempt {_adbReconnectAttempt}); the API "
+            + "tunnel is unchanged.";
+        AdbForwardStatusText.Foreground =
+            new SolidColorBrush(Color.FromRgb(241, 191, 91));
+        _ = ReconnectAdbForwardAfterDelayAsync(
+            delaySeconds,
+            cancellation);
+    }
+
+    private async Task ReconnectAdbForwardAfterDelayAsync(
+        int delaySeconds,
+        CancellationTokenSource cancellation)
+    {
+        try
+        {
+            await Task.Delay(
+                TimeSpan.FromSeconds(delaySeconds),
+                cancellation.Token);
+            if (!_adbForwardDesired || cancellation.IsCancellationRequested)
+            {
+                return;
+            }
+            if (ReferenceEquals(_adbReconnectCancellation, cancellation))
+            {
+                _adbReconnectCancellation = null;
+            }
+            await StartAdbForwardAsync(userInitiated: false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Stopping the ADB forward cancels its pending reconnect.
+        }
+        finally
+        {
+            if (ReferenceEquals(_adbReconnectCancellation, cancellation))
+            {
+                _adbReconnectCancellation = null;
+            }
+            cancellation.Dispose();
+        }
+    }
+
+    private void CancelAdbReconnect()
+    {
+        var cancellation = _adbReconnectCancellation;
+        _adbReconnectCancellation = null;
+        if (cancellation is null)
+        {
+            return;
+        }
+        cancellation.Cancel();
+    }
+
+    private void RefreshWindowsAdbListenerStatus()
+    {
+        if (!int.TryParse(
+                WindowsBlueStacksAdbPortBox.Text.Trim(),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var port)
+            || port is < 1 or > 65535)
+        {
+            WindowsAdbListenerStatusText.Text =
+                "Enter a Windows BlueStacks ADB port between 1 and 65535.";
+            WindowsAdbListenerStatusText.Foreground =
+                new SolidColorBrush(Color.FromRgb(255, 113, 135));
+            return;
+        }
+
+        try
+        {
+            var listening = SshTunnelManager.IsWindowsLoopbackPortListening(port);
+            WindowsAdbListenerStatusText.Text = listening
+                ? $"Windows ADB listener detected for 127.0.0.1:{port}."
+                : $"No Windows TCP listener detected for 127.0.0.1:{port}; "
+                    + "the reverse forward can stay active, but ADB connections "
+                    + "will fail until BlueStacks listens.";
+            WindowsAdbListenerStatusText.Foreground = listening
+                ? new SolidColorBrush(Color.FromRgb(73, 214, 157))
+                : new SolidColorBrush(Color.FromRgb(241, 191, 91));
+        }
+        catch (Exception exc)
+        {
+            WindowsAdbListenerStatusText.Text =
+                $"Unable to inspect the Windows listener: {exc.Message}";
+            WindowsAdbListenerStatusText.Foreground =
+                new SolidColorBrush(Color.FromRgb(255, 113, 135));
+        }
+    }
+
+    private void WindowsBlueStacksAdbPortBox_TextChanged(
+        object sender,
+        TextChangedEventArgs e)
+    {
+        if (IsLoaded)
+        {
+            RefreshWindowsAdbListenerStatus();
+        }
+    }
+
+    private void SetAdbForwardInputsEnabled(bool enabled)
+    {
+        WindowsBlueStacksAdbPortBox.IsEnabled = enabled;
+        LinuxAdbForwardPortBox.IsEnabled = enabled;
     }
 
     private async void Control_Click(object sender, RoutedEventArgs e)
@@ -2416,6 +2732,21 @@ public partial class MainWindow : Window
         _settings.SshDestination = SshDestinationBox.Text.Trim();
         _settings.LocalTunnelPort = localPort;
         _settings.RemoteApiPort = remotePort;
+        SettingsStore.Save(_settings);
+    }
+
+    private void SaveAdbForwardSettings(int windowsPort, int linuxPort)
+    {
+        var destination = SshDestinationBox.Text.Trim();
+        if (!SshTunnelManager.IsValidDestination(destination))
+        {
+            throw new ArgumentException(
+                "SSH destination must be a host, SSH alias, or user@host using "
+                + "only letters, numbers, '.', '_', and '-'.");
+        }
+        _settings.SshDestination = destination;
+        _settings.WindowsBlueStacksAdbPort = windowsPort;
+        _settings.LinuxAdbForwardPort = linuxPort;
         SettingsStore.Save(_settings);
     }
 

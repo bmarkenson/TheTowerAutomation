@@ -842,6 +842,47 @@ def test_native_incompatible_api_has_prominent_start_mitigation():
     assert "StartBlockerDescription" in native_code
 
 
+def test_native_control_surface_manages_adb_reverse_forward_independently():
+    native_root = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+    )
+    tunnel_manager = (native_root / "SshTunnelManager.cs").read_text(
+        encoding="utf-8"
+    )
+    models = (native_root / "Models.cs").read_text(encoding="utf-8")
+    window = (native_root / "MainWindow.xaml").read_text(encoding="utf-8")
+    window_code = (native_root / "MainWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"-L"' in tunnel_manager
+    assert '"-R"' in tunnel_manager
+    assert (
+        '$"127.0.0.1:{linuxPort}:127.0.0.1:{windowsPort}"'
+        in tunnel_manager
+    )
+    assert '"ExitOnForwardFailure=yes"' in tunnel_manager
+    assert "IsWindowsLoopbackPortListening" in tunnel_manager
+    assert "GetActiveTcpListeners" in tunnel_manager
+    assert (
+        "public int WindowsBlueStacksAdbPort { get; set; } = 5555;"
+        in models
+    )
+    assert "public int LinuxAdbForwardPort { get; set; } = 5555;" in models
+    assert 'x:Name="WindowsBlueStacksAdbPortBox"' in window
+    assert 'x:Name="LinuxAdbForwardPortBox"' in window
+    assert 'Content="Start ADB forward"' in window
+    assert 'Content="Stop ADB forward"' in window
+    assert '_apiTunnel = new("API tunnel")' in window_code
+    assert '_adbTunnel = new("ADB reverse tunnel")' in window_code
+    assert "StartReverseForwardAsync" in window_code
+    assert "ScheduleAdbReconnect" in window_code
+    assert "Automatic reconnect is paused" in window_code
+    assert "The API tunnel is unchanged" in window_code
+
+
 def test_control_surface_configures_run_from_selected_strategy_checks(tmp_path):
     service = _service(tmp_path)
     initial = service.status()["control"]
