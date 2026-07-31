@@ -37,6 +37,24 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-31 GUI-managed reverse ADB forwarding
+
+- Commit `3ac1d88` preserves the Windows-local API forward and adds a separate
+  GUI-owned OpenSSH process for
+  `-R 127.0.0.1:<linux-port>:127.0.0.1:<windows-port>`.
+- Windows BlueStacks and Linux-exposed ADB ports are separate persisted
+  settings that both default to 5555, allowing distinct Linux loopback ports
+  for several PCs. The managed runtime target remains an independent explicit
+  setting.
+- The Setup tab reports Windows TCP-listener presence separately from accepted
+  remote forwarding, retains `ExitOnForwardFailure` diagnostics, isolates API
+  control from ADB conflicts, pauses retry on bind/policy failures, and applies
+  bounded reconnect backoff to other unexpected ADB-tunnel exits.
+- `test/test_control_surface.py` passed 39 focused tests, and
+  `windows/TheTower.ControlSurface/publish-linux.sh` successfully produced the
+  self-contained Windows executable. Validation was repository-local; no live
+  runtime, ADB target, or emulator was inspected or changed.
+
 ### 2026-07-31 coalesced ADB outage retries
 
 - Commit `5548835` gives main-loop capture and the watchdog one thread-safe,
