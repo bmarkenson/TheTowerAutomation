@@ -66,6 +66,20 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - The follow-up passed all 898 repository tests and the standalone Windows
   client cross-published successfully from Linux. No live emulator interaction
   was needed or performed.
+- Commit `7e56957` adds vendor-neutral Windows GPU Engine, Adapter Memory, and
+  Process Memory collection through one persistent native PDH query with reused
+  result buffers. Ten-second aggregates include host and BlueStacks GPU
+  utilization/memory plus a bounded top-five list of competing processes;
+  neither sampling nor attribution launches a helper process.
+- Server revision 13 advertises `host_performance_gpu_v1` while continuing to
+  accept CPU-only aggregates already present in older Windows outage spools.
+  The WPF health strip adds a compact GPU row and exposes the incremental GPU
+  counter duration for deployment-side CPU-budget measurement. PresentMon
+  remains a separate future opt-in provider.
+- The GPU follow-up passed all 902 repository tests and the standalone Windows
+  client cross-published successfully from Linux. Actual Windows runtime
+  measurement against the sub-0.5% target remains pending; no emulator
+  interaction was needed or performed.
 
 ### 2026-07-29 Event Mission warning authority
 
