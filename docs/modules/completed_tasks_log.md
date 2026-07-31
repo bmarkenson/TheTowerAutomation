@@ -147,6 +147,22 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   Tier 19 wave-20 report and restored verified `HOME_SCREEN/NEW_BATTLE`.
   Automation remained `STOPPED` and the diagnostic target lock was released.
 
+### 2026-07-30 Battle History top-edge proof
+
+- Commit `29308ac` makes the newest-entry reader scroll Battle History to a
+  proven stable top boundary before it validates or taps the first row. A
+  retained list position can no longer silently redefine "latest" as "first
+  visible."
+- Every swipe verifies the Battle History screen and rechecks persistent input
+  authority. A missing or unstable edge now fails closed and restores the
+  source without selecting a row.
+- The 39-test focused Battle History, scrolling, continuity, and clickmap set
+  covers running, Home, interrupted-detail, Pause-between-swipes, and
+  failed-edge paths. All 931 repository tests passed.
+- Live post-repair interaction was intentionally omitted because the
+  operator's next Tier 19 Retry battle was already running; diagnosis and
+  validation did not alter it.
+
 ### 2026-07-29 Battle History-backed activity continuity
 
 - Commit `2c4342d` fingerprints the newest copied in-game Battle History report
