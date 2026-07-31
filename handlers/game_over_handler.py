@@ -48,6 +48,7 @@ def handle_game_over(
     battle_context: Optional[Mapping[str, Any]] = None,
     control_sync: Optional[Callable[[], None]] = None,
     before_terminal_action: Optional[Callable[[], None]] = None,
+    after_retry_started: Optional[Callable[[], None]] = None,
     return_home_after_battle: bool = False,
 ):
     """
@@ -227,6 +228,8 @@ def handle_game_over(
     else:
         if not tap_if_visible("buttons.retry:game_over", retries=1):
             return _abort_handler("Retry Game", session_id)
+        if after_retry_started is not None:
+            after_retry_started()
         route = "retry"
         route_summary = "selected Retry"
 

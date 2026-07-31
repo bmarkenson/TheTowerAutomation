@@ -1823,13 +1823,19 @@ class GcFarmProfileTests(unittest.TestCase):
         app._handle_mission_rewards_if_due = MagicMock(return_value=False)
         frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
 
-        with patch("core.app.handle_game_over") as game_over:
+        with (
+            patch("core.app.handle_game_over") as game_over,
+            patch("core.app.start_retry_activity_scope") as retry_scope,
+        ):
             app._handle_primary_states("GAME_OVER", set(), frame)
+
+            game_over.call_args.kwargs["after_retry_started"]()
 
         reported = game_over.call_args.kwargs["battle_context"][
             "session_preflight_evidence"
         ]
         self.assertEqual(reported["free_upgrade_locks"], boundary_evidence)
+        retry_scope.assert_called_once_with()
         manager.on_game_over.assert_called_once_with()
 
     def test_home_repair_game_over_skips_surrendered_battle_capture(self):

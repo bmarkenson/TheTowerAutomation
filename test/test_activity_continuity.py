@@ -173,6 +173,106 @@ def test_home_new_battle_records_baseline_without_replacing_scope(
     )
 
 
+def test_post_retry_history_poll_waits_for_startup_gates(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "TOWER_ACTION_LOG_PATH",
+        str(tmp_path / "logs" / "actions.log"),
+    )
+    previous = _identity(wave="9112")
+    _scope_with_baseline(previous)
+    retry_scope = logger.start_retry_activity_scope()
+    assert retry_scope is not None
+    reads = []
+    coordinator = ActivityContinuityCoordinator(
+        history_reader=lambda **kwargs: reads.append(kwargs)
+    )
+
+    assert not coordinator.needs_check(
+        {"state": "RUNNING"},
+        post_retry_poll_allowed=False,
+    )
+    outcome = coordinator.handle(
+        {"state": "RUNNING"},
+        actions_allowed=True,
+        action_guard_fn=lambda: True,
+        post_retry_poll_allowed=False,
+    )
+
+    assert not outcome.pending
+    assert not outcome.recapture
+    assert reads == []
+    assert logger.get_activity_scope() == retry_scope
+
+
+def test_post_retry_history_poll_rejects_stale_latest_then_records_new_entry(
+    tmp_path,
+    monkeypatch,
+):
+    log_path = tmp_path / "logs" / "actions.log"
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(log_path))
+    previous = _identity(wave="9112")
+    latest = _identity(wave="9333")
+    _scope_with_baseline(previous)
+    retry_scope = logger.start_retry_activity_scope()
+    assert retry_scope is not None
+    now = [100.0]
+    identities = [previous, latest]
+    coordinator = ActivityContinuityCoordinator(
+        history_reader=lambda **_kwargs: _complete(identities.pop(0)),
+        clock=lambda: now[0],
+    )
+
+    stale = coordinator.handle(
+        {"state": "RUNNING"},
+        actions_allowed=True,
+        action_guard_fn=lambda: True,
+    )
+
+    current = logger.get_activity_scope()
+    assert stale.recapture
+    assert not stale.pending
+    assert current is not None
+    assert current["run_id"] == retry_scope["run_id"]
+    assert "latest_completed_battle" not in current
+    assert "pending_latest_completed_battle" in current
+
+    now[0] = 114.9
+    assert not coordinator.needs_check({"state": "RUNNING"})
+    waiting = coordinator.handle(
+        {"state": "RUNNING"},
+        actions_allowed=True,
+        action_guard_fn=lambda: True,
+    )
+    assert not waiting.pending
+    assert not waiting.recapture
+    assert len(identities) == 1
+
+    now[0] = 115.0
+    assert coordinator.needs_check({"state": "RUNNING"})
+    recorded = coordinator.handle(
+        {"state": "RUNNING"},
+        actions_allowed=True,
+        action_guard_fn=lambda: True,
+    )
+
+    current = logger.get_activity_scope()
+    assert recorded.recapture
+    assert not recorded.pending
+    assert current is not None
+    assert current["run_id"] == retry_scope["run_id"]
+    assert (
+        current["latest_completed_battle"]["fingerprint"]
+        == latest.fingerprint
+    )
+    assert "pending_latest_completed_battle" not in current
+    contents = log_path.read_text(encoding="utf-8")
+    assert contents.count("Polling the post-Retry Battle History baseline") == 1
+    assert "Post-Retry Battle History baseline recorded" in contents
+
+
 def test_unverified_attachment_uses_conservative_new_scope(
     tmp_path,
     monkeypatch,

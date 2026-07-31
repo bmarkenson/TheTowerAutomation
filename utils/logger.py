@@ -103,6 +103,33 @@ def start_activity_scope(
 ) -> Optional[dict[str, object]]:
     """Start one explicit current-run activity scope without risking runtime work."""
 
+    return _start_activity_scope(reason=reason, boundary=boundary)
+
+
+def start_retry_activity_scope() -> Optional[dict[str, object]]:
+    """Start a Retry-owned scope whose new History baseline is still pending."""
+
+    current_scope = _load_activity_scope()
+    previous_completed_battle = _scope_completed_battle(current_scope)
+    return _start_activity_scope(
+        reason="game_over_retry",
+        extra_payload={
+            "pending_latest_completed_battle": {
+                "schema_version": 1,
+                "previous_completed_battle": previous_completed_battle,
+            }
+        },
+    )
+
+
+def _start_activity_scope(
+    *,
+    reason: str,
+    boundary: Optional[Mapping[str, object]] = None,
+    extra_payload: Optional[Mapping[str, object]] = None,
+) -> Optional[dict[str, object]]:
+    """Persist one scope, optionally with internally owned lifecycle metadata."""
+
     normalized_reason = _normalize_activity_scope_reason(reason)
 
     primary_path = get_action_log_path()
@@ -130,6 +157,8 @@ def start_activity_scope(
             else 0
         ),
     }
+    if extra_payload:
+        payload.update(dict(extra_payload))
     write_error: Optional[OSError] = None
     with _WRITE_LOCK:
         try:
@@ -185,11 +214,32 @@ def record_activity_scope_battle_history(
         ):
             return None
         payload["latest_completed_battle"] = dict(latest_completed_battle)
+        payload.pop("pending_latest_completed_battle", None)
         try:
             _write_json_atomic(scope_path, payload)
         except OSError:
             return None
     return dict(payload)
+
+
+def _scope_completed_battle(
+    scope: Optional[Mapping[str, object]],
+) -> Optional[dict[str, object]]:
+    """Return the last authoritative History identity across Retry scopes."""
+
+    if scope is None:
+        return None
+    raw = scope.get("latest_completed_battle")
+    if not isinstance(raw, Mapping):
+        pending = scope.get("pending_latest_completed_battle")
+        if isinstance(pending, Mapping):
+            raw = pending.get("previous_completed_battle")
+    if not isinstance(raw, Mapping):
+        return None
+    fingerprint = str(raw.get("fingerprint") or "").strip()
+    if not fingerprint:
+        return None
+    return dict(raw)
 
 
 def _normalize_activity_scope_reason(reason: str) -> str:

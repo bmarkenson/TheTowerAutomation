@@ -311,6 +311,7 @@ def test_game_over_finalizes_boundary_before_terminal_navigation():
             handle_game_over(
                 capture_stats=False,
                 before_terminal_action=lambda: events.append(("boundary", None)),
+                after_retry_started=lambda: events.append(("scope", None)),
             )
     finally:
         AUTOMATION.state = original_state
@@ -319,6 +320,7 @@ def test_game_over_finalizes_boundary_before_terminal_navigation():
     assert events == [
         ("boundary", None),
         ("tap", "buttons.retry:game_over"),
+        ("scope", None),
     ]
 
 

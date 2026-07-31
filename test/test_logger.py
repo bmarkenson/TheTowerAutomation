@@ -215,6 +215,49 @@ def test_battle_history_identity_updates_only_the_matching_scope(
     assert logger.get_activity_scope() == updated
 
 
+def test_retry_scope_waits_for_a_new_history_identity(tmp_path, monkeypatch):
+    isolated_log = tmp_path / "logs" / "actions.log"
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(isolated_log))
+    original = logger.start_activity_scope(reason="new_battle_preflight")
+    assert original is not None
+    previous_identity = {
+        "fingerprint": "previous-battle",
+        "battle_date": "Jul 31, 2026 07:22",
+        "tier": "19",
+        "wave": "4903",
+    }
+    original = logger.record_activity_scope_battle_history(
+        run_id=str(original["run_id"]),
+        latest_completed_battle=previous_identity,
+    )
+    assert original is not None
+
+    retry_scope = logger.start_retry_activity_scope()
+
+    assert retry_scope is not None
+    assert retry_scope["run_id"] != original["run_id"]
+    assert retry_scope["reason"] == "game_over_retry"
+    assert "latest_completed_battle" not in retry_scope
+    assert retry_scope["pending_latest_completed_battle"] == {
+        "schema_version": 1,
+        "previous_completed_battle": previous_identity,
+    }
+
+    latest_identity = {
+        **previous_identity,
+        "fingerprint": "new-battle",
+        "wave": "5100",
+    }
+    completed = logger.record_activity_scope_battle_history(
+        run_id=str(retry_scope["run_id"]),
+        latest_completed_battle=latest_identity,
+    )
+
+    assert completed is not None
+    assert completed["latest_completed_battle"] == latest_identity
+    assert "pending_latest_completed_battle" not in completed
+
+
 def test_log_result_pairs_terminal_summary_with_diagnostic_detail(
     tmp_path,
     monkeypatch,

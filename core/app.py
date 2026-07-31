@@ -18,6 +18,7 @@ from utils.logger import (
     log_action_intent,
     log_result,
     set_mission_log_path,
+    start_retry_activity_scope,
 )
 from core.watchdog import watchdog_process_check
 from core.adb_connection import AdbConnectionCoordinator
@@ -1721,8 +1722,20 @@ class App:
                     None,
                 )
                 if activity_continuity is not None:
+                    initialization_blocks_history = (
+                        self._mission_mgr.run_initialization_pending()
+                    )
+                    session_preflight_blocks_history = bool(
+                        not initialization_blocks_history
+                        and self._mission_mgr.session_preflight_pending()
+                    )
+                    post_retry_poll_allowed = not (
+                        initialization_blocks_history
+                        or session_preflight_blocks_history
+                    )
                     continuity_needed = activity_continuity.needs_check(
-                        detection
+                        detection,
+                        post_retry_poll_allowed=post_retry_poll_allowed,
                     )
                     if (
                         not is_paused
@@ -1734,6 +1747,7 @@ class App:
                         detection,
                         actions_allowed=not is_paused,
                         action_guard_fn=self._runtime_action_guard,
+                        post_retry_poll_allowed=post_retry_poll_allowed,
                     )
                     continuity_pending = continuity.pending
                     if continuity.recapture:
@@ -2883,6 +2897,9 @@ class App:
                 self._supervisor.apply_control()
                 self._observe_strategy_request()
 
+            def mark_retry_started() -> None:
+                start_retry_activity_scope()
+
             if repair_in_progress:
                 log(
                     "[SESSION_PREFLIGHT] Automation-owned repair Surrender "
@@ -2897,6 +2914,7 @@ class App:
                 ),
                 control_sync=sync_terminal_control,
                 before_terminal_action=finalize_run_boundary,
+                after_retry_started=mark_retry_started,
                 return_home_after_battle=(repair_in_progress or no_strategy_run),
                 battle_context={
                     "strategy": strategy.name if strategy else None,
