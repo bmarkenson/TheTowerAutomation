@@ -70,6 +70,12 @@ _LOG_RE = re.compile(
     r"^\[(?P<level>[A-Z_]+) (?P<timestamp>[^\]]+)] (?P<message>.*)$"
 )
 _LOG_LEVEL_RE = re.compile(r"[A-Z_]+")
+_OPERATION_DETAIL_RE = re.compile(
+    r"(?:^|\s)\[OPERATION] id=(?P<operation_id>[A-Za-z0-9._:-]{1,128})$"
+)
+_OPERATIONAL_ACTIVITY_LEVELS = frozenset(
+    {"ACTION", "RESULT", "WARN", "ERROR", "FAIL"}
+)
 _ACTIVITY_CURSOR_RE = re.compile(r"(?P<source>\d+:\d+)@(?P<offset>\d+)")
 _STATUS_RE = re.compile(
     r"^State=(?P<state>[^|]+?)\s*\|\s*"
@@ -1289,6 +1295,7 @@ class ControlSurfaceService:
             for line, offset in line_records
             if (entry := _parse_log_line(line)) is not None
         ]
+        parsed_records = _attach_operation_ids(parsed_records)
 
         normalized_scope = str(scope or "all").strip().lower()
         if normalized_scope not in {"all", "current_run"}:
@@ -1351,6 +1358,8 @@ class ControlSurfaceService:
             parsed = [
                 entry for entry in parsed if entry["level"] in selected_levels
             ]
+        if selected_levels == _OPERATIONAL_ACTIVITY_LEVELS:
+            parsed = _collapse_completed_operations(parsed)
         return {
             "items": parsed[-requested_limit:],
             "available_levels": available_levels,
@@ -1824,6 +1833,58 @@ def _lines_from_offset(path: Path, offset: int) -> list[str]:
     except OSError:
         return []
     return data.decode("utf-8", errors="replace").splitlines()
+
+
+def _attach_operation_ids(
+    records: Sequence[tuple[dict[str, str], int]],
+) -> list[tuple[dict[str, Any], int]]:
+    """Attach paired DEBUG correlation metadata to its semantic summary."""
+
+    annotated: list[tuple[dict[str, Any], int]] = [
+        (dict(entry), offset) for entry, offset in records
+    ]
+    for index in range(1, len(annotated)):
+        detail, _detail_offset = annotated[index]
+        if detail["level"] != "DEBUG":
+            continue
+        match = _OPERATION_DETAIL_RE.search(detail["message"])
+        if match is None:
+            continue
+        summary, summary_offset = annotated[index - 1]
+        if (
+            summary["level"] not in {"ACTION", "RESULT"}
+            or summary["timestamp"] != detail["timestamp"]
+        ):
+            continue
+        summary["operation_id"] = match.group("operation_id")
+        annotated[index - 1] = (summary, summary_offset)
+    return annotated
+
+
+def _collapse_completed_operations(
+    entries: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Fold correlated completed pairs for the Operational audience only."""
+
+    collapsed: list[Optional[dict[str, Any]]] = []
+    pending_actions: dict[str, int] = {}
+    for source in entries:
+        entry = dict(source)
+        operation_id = str(entry.get("operation_id") or "")
+        if entry.get("level") == "ACTION" and operation_id:
+            pending_actions[operation_id] = len(collapsed)
+            collapsed.append(entry)
+            continue
+        if entry.get("level") == "RESULT" and operation_id:
+            action_index = pending_actions.pop(operation_id, None)
+            if action_index is not None:
+                action = collapsed[action_index]
+                collapsed[action_index] = None
+                if action is not None:
+                    entry["collapsed_action"] = action["message"]
+                    entry["collapsed"] = True
+        collapsed.append(entry)
+    return [entry for entry in collapsed if entry is not None]
 
 
 def _parse_log_line(line: str) -> Optional[dict[str, str]]:

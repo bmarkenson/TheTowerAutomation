@@ -22,7 +22,12 @@ from core.run_perk_selector import canonical_perk_family
 from core.scrolling import capture_scroll_to_edge, scroll_to_edge
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
-from utils.logger import log, log_action_intent, log_result
+from utils.logger import (
+    log,
+    log_action_intent,
+    log_result,
+    new_operation_id,
+)
 from utils.ocr_utils import ocr_text_and_conf
 
 
@@ -48,14 +53,45 @@ PWR_MAX_PATTERN = re.compile(
 )
 
 
-def _recorded_selection_summary(selection_labels: Sequence[str]) -> str:
+def _recorded_selection_summary(
+    selection_labels: Sequence[str],
+    *,
+    all_selected: bool = False,
+    scheduled_waves: Sequence[int] = (),
+) -> str:
     """Describe recorded Perk changes without calling a singleton a batch."""
 
+    wave_values = [int(wave) for wave in scheduled_waves]
+    if len(wave_values) == 1:
+        wave_context = f" at wave {wave_values[0]}"
+    elif wave_values:
+        wave_context = (
+            " across waves " + ", ".join(str(wave) for wave in wave_values)
+        )
+    else:
+        wave_context = ""
+    if all_selected:
+        if len(selection_labels) == 1:
+            return (
+                f"All Perks selected{wave_context} — final selection: "
+                f"{selection_labels[0]}"
+            )
+        if selection_labels:
+            return (
+                f"All Perks selected{wave_context} — final selections: "
+                + ", ".join(selection_labels)
+            )
+        return f"All Perks selected{wave_context}"
+    if wave_context:
+        wave_context = wave_context.replace(" at ", " for ", 1)
     if len(selection_labels) == 1:
-        return f"Perk timeline selection recorded — {selection_labels[0]}"
+        return (
+            f"Perk timeline selection recorded{wave_context} — "
+            f"{selection_labels[0]}"
+        )
     if selection_labels:
         return (
-            "Perk timeline selections recorded — "
+            f"Perk timeline selections recorded{wave_context} — "
             + ", ".join(selection_labels)
         )
     return "Perk timeline observation recorded — no selection changes detected"
@@ -545,15 +581,18 @@ class PerkTimelineObserver:
                 return False
             if not actions_allowed:
                 return False
+            operation_id = new_operation_id()
             log_action_intent(
                 "Restoring the battle view",
                 reason="close the perk timeline's completed panel route",
                 detail="[PERK_TIMELINE] route_restore=pending",
+                operation_id=operation_id,
             )
             if not action_guard_fn():
                 log_result(
                     "Perk timeline panel restore paused",
                     detail="[PERK_TIMELINE] route_restore=interrupted",
+                    operation_id=operation_id,
                 )
                 return False
             close_result = _close_perks_panel(
@@ -571,6 +610,7 @@ class PerkTimelineObserver:
                         f"dispatched={close_result.dispatched} "
                         f"observed_state={close_result.observed_state}"
                     ),
+                    operation_id=operation_id,
                 )
                 return close_result.dispatched
             self._route_open = False
@@ -580,6 +620,7 @@ class PerkTimelineObserver:
                     "[PERK_TIMELINE] route_restore=complete "
                     f"observed_state={close_result.observed_state}"
                 ),
+                operation_id=operation_id,
             )
             return True
         if not actions_allowed:
@@ -602,6 +643,7 @@ class PerkTimelineObserver:
                 )
             )
         )
+        operation_id = new_operation_id()
         log_action_intent(
             "Recording the perk selection timeline",
             reason=reason,
@@ -609,6 +651,7 @@ class PerkTimelineObserver:
                 f"[PERK_TIMELINE] mode={request.snapshot_mode} "
                 f"observed_wave={request.observed_wave}"
             ),
+            operation_id=operation_id,
         )
 
         navigated = state == "PERKS"
@@ -676,7 +719,13 @@ class PerkTimelineObserver:
             if capture_ok and completed_request.kind == "baseline":
                 summary = "Perk timeline baseline recorded"
             elif capture_ok:
-                summary = _recorded_selection_summary(selection_labels)
+                summary = _recorded_selection_summary(
+                    selection_labels,
+                    all_selected=(
+                        completed_request.progress_after.status == "complete"
+                    ),
+                    scheduled_waves=completed_request.scheduled_waves,
+                )
             else:
                 summary = "Perk timeline observation will be retried"
             log_result(
@@ -690,18 +739,21 @@ class PerkTimelineObserver:
                     f"selection_count={len(selection_labels)} "
                     f"close_state={close_result.observed_state}"
                 ),
+                operation_id=operation_id,
             )
             return True
         except _RouteInterrupted as exc:
             log_result(
                 "Perk timeline observation paused",
                 detail=f"[PERK_TIMELINE] result=interrupted reason={exc}",
+                operation_id=operation_id,
             )
             return navigated
         except _RouteFailed as exc:
             log_result(
                 "Perk timeline observation failed",
                 detail=f"[PERK_TIMELINE] result=failed reason={exc}",
+                operation_id=operation_id,
             )
             return navigated
         except Exception as exc:
@@ -712,6 +764,7 @@ class PerkTimelineObserver:
             log_result(
                 "Perk timeline observation failed",
                 detail=f"[PERK_TIMELINE] result=failed error={exc}",
+                operation_id=operation_id,
             )
             return navigated
 

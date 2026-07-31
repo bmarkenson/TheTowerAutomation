@@ -923,6 +923,59 @@ def test_activity_preserves_result_and_input_levels(tmp_path):
     ]
 
 
+def test_operational_activity_folds_only_correlated_completed_pairs(tmp_path):
+    log_path = tmp_path / "logs" / "actions.log"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text(
+        "[ACTION 2026-07-19 17:00:00] Recording the perk selection timeline\n"
+        "[DEBUG 2026-07-19 17:00:00] [PERK_TIMELINE] mode=full "
+        "[OPERATION] id=perk-100\n"
+        "[WARN 2026-07-19 17:00:01] A separate warning remains visible\n"
+        "[RESULT 2026-07-19 17:00:02] Perk timeline selection recorded — "
+        "Bounce Shot +2\n"
+        "[DEBUG 2026-07-19 17:00:02] [PERK_TIMELINE] result=recorded "
+        "[OPERATION] id=perk-100\n"
+        "[ACTION 2026-07-19 17:00:03] A still-running operation\n"
+        "[DEBUG 2026-07-19 17:00:03] [PENDING] state=running "
+        "[OPERATION] id=pending-1\n",
+        encoding="utf-8",
+    )
+    service = _service(tmp_path)
+
+    operational = service.activity(
+        levels=["ACTION", "RESULT", "WARN", "ERROR", "FAIL"],
+    )
+    all_levels = service.activity()
+    actions_only = service.activity(levels=["ACTION"])
+    results_only = service.activity(levels=["RESULT"])
+
+    assert [
+        (entry["level"], entry["message"])
+        for entry in operational["items"]
+    ] == [
+        ("WARN", "A separate warning remains visible"),
+        ("RESULT", "Perk timeline selection recorded — Bounce Shot +2"),
+        ("ACTION", "A still-running operation"),
+    ]
+    folded_result = operational["items"][1]
+    assert folded_result["operation_id"] == "perk-100"
+    assert folded_result["collapsed"] is True
+    assert (
+        folded_result["collapsed_action"]
+        == "Recording the perk selection timeline"
+    )
+    assert [
+        entry["level"] for entry in all_levels["items"]
+    ] == ["ACTION", "DEBUG", "WARN", "RESULT", "DEBUG", "ACTION", "DEBUG"]
+    assert [entry["message"] for entry in actions_only["items"]] == [
+        "Recording the perk selection timeline",
+        "A still-running operation",
+    ]
+    assert [entry["message"] for entry in results_only["items"]] == [
+        "Perk timeline selection recorded — Bounce Shot +2"
+    ]
+
+
 def test_activity_current_run_scope_uses_explicit_boundary(tmp_path, monkeypatch):
     from utils import logger
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 from datetime import datetime
 import json
 import os
+import re
 import tempfile
 import threading
 from typing import Mapping, Optional, Sequence
@@ -20,6 +21,28 @@ DEFAULT_ACTION_LOG_BACKUP_COUNT = 5
 ACTION_LOG_MAX_BYTES_ENV = "TOWER_ACTION_LOG_MAX_BYTES"
 ACTION_LOG_BACKUP_COUNT_ENV = "TOWER_ACTION_LOG_BACKUP_COUNT"
 _WRITE_LOCK = threading.Lock()
+_OPERATION_ID_RE = re.compile(r"[A-Za-z0-9._:-]{1,128}")
+
+
+def new_operation_id() -> str:
+    """Return an opaque identifier for one ACTION/RESULT workflow pair."""
+
+    return uuid.uuid4().hex
+
+
+def _operation_detail(
+    detail: Optional[str],
+    operation_id: Optional[str],
+) -> Optional[str]:
+    """Attach correlation metadata to diagnostic detail, not summary text."""
+
+    if operation_id is None:
+        return detail
+    normalized = str(operation_id).strip()
+    if not _OPERATION_ID_RE.fullmatch(normalized):
+        raise ValueError("operation_id contains unsupported characters")
+    marker = f"[OPERATION] id={normalized}"
+    return f"{detail} {marker}" if detail else marker
 
 
 def get_action_log_path() -> str:
@@ -471,11 +494,13 @@ def _log_summary(
     level: str,
     *,
     detail: Optional[str],
+    operation_id: Optional[str],
     extra_path: Optional[str],
     console: Optional[bool],
 ) -> None:
     """Write one semantic summary with optional paired diagnostic evidence."""
 
+    detail = _operation_detail(detail, operation_id)
     if detail is None:
         log(summary, level, extra_path=extra_path, console=console)
         return
@@ -492,6 +517,7 @@ def log_action(
     summary: str,
     *,
     detail: Optional[str] = None,
+    operation_id: Optional[str] = None,
     extra_path: Optional[str] = None,
     console: Optional[bool] = None,
 ) -> None:
@@ -501,6 +527,7 @@ def log_action(
         summary,
         "ACTION",
         detail=detail,
+        operation_id=operation_id,
         extra_path=extra_path,
         console=console,
     )
@@ -510,6 +537,7 @@ def log_result(
     summary: str,
     *,
     detail: Optional[str] = None,
+    operation_id: Optional[str] = None,
     extra_path: Optional[str] = None,
     console: Optional[bool] = None,
 ) -> None:
@@ -519,6 +547,7 @@ def log_result(
         summary,
         "RESULT",
         detail=detail,
+        operation_id=operation_id,
         extra_path=extra_path,
         console=console,
     )
@@ -537,6 +566,7 @@ def log_input(
         summary,
         "INPUT",
         detail=detail,
+        operation_id=None,
         extra_path=extra_path,
         console=console,
     )
@@ -547,6 +577,7 @@ def log_action_intent(
     *,
     reason: str,
     detail: Optional[str] = None,
+    operation_id: Optional[str] = None,
     extra_path: Optional[str] = None,
     console: Optional[bool] = None,
 ) -> None:
@@ -561,6 +592,7 @@ def log_action_intent(
     log_action(
         f"{normalized_purpose} — {normalized_reason}",
         detail=detail,
+        operation_id=operation_id,
         extra_path=extra_path,
         console=console,
     )

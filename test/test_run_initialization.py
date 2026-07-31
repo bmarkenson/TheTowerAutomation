@@ -183,12 +183,12 @@ class StartupLoggingTests(unittest.TestCase):
     def test_steady_run_entry_log_names_the_completed_transition(self):
         app = App.__new__(App)
 
-        with patch("core.app.log") as runtime_log:
+        with patch("core.app.log_result") as runtime_log:
             app._log_steady_run_entry()
 
         runtime_log.assert_called_once_with(
             "[RUN] All configured checks complete; entering steady run state",
-            "INFO",
+            detail="[RUN] result=steady_state",
             console=True,
         )
 
@@ -196,7 +196,7 @@ class StartupLoggingTests(unittest.TestCase):
         app = App.__new__(App)
         app._steady_run_entry_pending = True
 
-        with patch("core.app.log") as runtime_log:
+        with patch("core.app.log_result") as runtime_log:
             self.assertFalse(
                 app._maybe_log_steady_run_entry(actions_blocked=True)
             )
@@ -210,7 +210,7 @@ class StartupLoggingTests(unittest.TestCase):
         self.assertFalse(app._steady_run_entry_pending)
         runtime_log.assert_called_once_with(
             "[RUN] All configured checks complete; entering steady run state",
-            "INFO",
+            detail="[RUN] result=steady_state",
             console=True,
         )
 

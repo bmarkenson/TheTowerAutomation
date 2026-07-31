@@ -65,6 +65,45 @@ def test_log_action_intent_writes_one_human_readable_header(
     )
 
 
+def test_correlated_action_and_result_keep_individual_summary_lines(
+    tmp_path,
+    monkeypatch,
+):
+    isolated_log = tmp_path / "actions.log"
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(isolated_log))
+    operation_id = logger.new_operation_id()
+
+    logger.log_action_intent(
+        "Recording the perk selection timeline",
+        reason="record the selection scheduled for wave 100",
+        detail="[PERK_TIMELINE] mode=full",
+        operation_id=operation_id,
+        console=False,
+    )
+    logger.log_result(
+        "Perk timeline selection recorded — Bounce Shot +2",
+        detail="[PERK_TIMELINE] result=recorded",
+        operation_id=operation_id,
+        console=False,
+    )
+
+    lines = isolated_log.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 4
+    assert lines[0].endswith(
+        "] Recording the perk selection timeline — "
+        "record the selection scheduled for wave 100"
+    )
+    assert lines[1].endswith(
+        f"] [PERK_TIMELINE] mode=full [OPERATION] id={operation_id}"
+    )
+    assert lines[2].endswith(
+        "] Perk timeline selection recorded — Bounce Shot +2"
+    )
+    assert lines[3].endswith(
+        f"] [PERK_TIMELINE] result=recorded [OPERATION] id={operation_id}"
+    )
+
+
 def test_start_activity_scope_records_exact_log_boundary(tmp_path, monkeypatch):
     isolated_log = tmp_path / "logs" / "actions.log"
     monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(isolated_log))

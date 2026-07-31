@@ -116,6 +116,12 @@ latest status and prior meaningful state transition separately while retaining
 complete status history in `Status only` and `All levels`. Centralized runtime
 input emitters record taps, swipes, and presses as `INPUT`.
 
+When an `ACTION` and `RESULT` carry the same operation ID, the Operational view
+folds the completed pair into its `RESULT` row. A pending operation continues
+to show its `ACTION`, and every other activity view retains the individual log
+lines. Correlation metadata is stored on the paired diagnostic detail so the
+durable human-readable summaries remain unchanged.
+
 The native GUI's default `Current run` activity scope is anchored by the
 atomic `logs/activity_scope.json` ledger rather than inferred from status text.
 Automation startup creates the ledger only when no valid scope exists, so

@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import cv2
@@ -7,6 +8,7 @@ import numpy as np
 
 from core.battle_perks import ocr_latest_selected_perk
 from core.perk_timeline import (
+    PerkCaptureRequest,
     PerkProgress,
     PerkTimelineObserver,
     PerkTimelineTracker,
@@ -77,6 +79,73 @@ def test_recorded_selection_summary_uses_plural_for_multiple_perks():
         ["Bounce Shot +2", "Orbs +1"]
     ) == (
         "Perk timeline selections recorded — Bounce Shot +2, Orbs +1"
+    )
+
+
+def test_recorded_selection_summary_announces_all_perks_selected():
+    assert _recorded_selection_summary(
+        ["Orbs +1"],
+        all_selected=True,
+        scheduled_waves=[100],
+    ) == "All Perks selected at wave 100 — final selection: Orbs +1"
+
+
+def test_observer_announces_all_perks_after_terminal_capture():
+    tracker = PerkTimelineTracker()
+    terminal = PerkProgress("complete", None, None, "View Perks", 95.0)
+    request = PerkCaptureRequest(
+        kind="selection",
+        scheduled_wave=100,
+        observed_wave=101,
+        progress_after=terminal,
+        snapshot_mode="full",
+        scheduled_waves=(100,),
+        observed_wave_end=101,
+    )
+    tracker._pending = request
+    tracker._batches = [
+        {
+            "selections": [
+                {"display_text": "Orbs +1"},
+            ]
+        }
+    ]
+    observer = PerkTimelineObserver(tracker)
+    observer._route_open = True
+    panel = np.ones((1920, 1080, 3), dtype=np.uint8)
+
+    with (
+        patch.object(
+            observer,
+            "_capture_pending",
+            return_value=(True, request),
+        ),
+        patch(
+            "core.perk_timeline._close_perks_panel",
+            return_value=SimpleNamespace(
+                dispatched=True,
+                closed=True,
+                observed_state="RUNNING",
+            ),
+        ),
+        patch("core.perk_timeline.log_action_intent") as action_log,
+        patch("core.perk_timeline.log_result") as result_log,
+    ):
+        navigated = observer.handle(
+            panel,
+            {"state": "PERKS"},
+            wave=101,
+            actions_allowed=True,
+            action_guard_fn=lambda: True,
+            capture_fn=lambda: panel,
+        )
+
+    assert navigated is True
+    assert result_log.call_args.args[0] == (
+        "All Perks selected at wave 100 — final selection: Orbs +1"
+    )
+    assert result_log.call_args.kwargs["operation_id"] == (
+        action_log.call_args.kwargs["operation_id"]
     )
 
 
@@ -523,6 +592,8 @@ def test_observer_guards_each_panel_input_and_records_complete_batch():
             "core.perk_timeline.capture_scroll_to_edge",
             side_effect=fake_capture_scroll,
         ),
+        patch("core.perk_timeline.log_action_intent") as action_log,
+        patch("core.perk_timeline.log_result") as result_log,
     ):
         navigated = observer.handle(
             running,
@@ -551,6 +622,10 @@ def test_observer_guards_each_panel_input_and_records_complete_batch():
     ]
     assert len(guards) == 4
     assert tracker.snapshot()["batches"][0]["scheduled_wave"] == 100
+    assert action_log.call_args.kwargs["operation_id"]
+    assert result_log.call_args.kwargs["operation_id"] == (
+        action_log.call_args.kwargs["operation_id"]
+    )
 
 
 def test_observer_leaves_owned_panel_open_when_pause_arrives_before_swipe():

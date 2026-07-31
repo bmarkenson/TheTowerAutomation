@@ -1613,9 +1613,9 @@ class App:
     def _log_steady_run_entry(self) -> None:
         """Announce the transition from startup checks to normal execution."""
 
-        log(
+        log_result(
             "[RUN] All configured checks complete; entering steady run state",
-            "INFO",
+            detail="[RUN] result=steady_state",
             console=True,
         )
 
