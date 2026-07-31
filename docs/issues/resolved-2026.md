@@ -328,6 +328,40 @@ and actionable work lives in
   clickmap-integrity checks passed, followed by all 870 repository tests.
 - **Fixed by:** `dba88f1`.
 
+### Battle History row verifier rejected joined OCR labels
+
+- **Observed:** 2026-07-29 after the Home Battle History navigation-region
+  repair, with recurrences through 2026-07-30.
+- **Symptom:** The continuity route successfully matched and opened Battle
+  History, then reported `latest Battle History row was not verified`, returned
+  Home, and continued without recording a baseline.
+- **Evidence:** `logs/actions.log` records the post-navigation failures at
+  18:28, 19:57, and 20:16 on 2026-07-29 and 17:43 on 2026-07-30. The promoted
+  no-battle History fixture produces `Tier18 Wave130`; the verifier required
+  literal spaces after both labels. The current live list similarly produced
+  `Tier19 Wave 20`.
+- **Safety response:** Every failed route used its verified Return to Game
+  control and restored `HOME_SCREEN/NEW_BATTLE`. The operator stopped
+  automation before diagnosis. The authorized post-repair live check held the
+  target lock, retained `STOPPED`, copied Tier 19 wave 20, and restored verified
+  Home without starting a battle.
+- **Cause:** OCR can join a label to its numeric value. The verifier normalized
+  punctuation but still searched for literal `TIER ` and `WAVE ` substrings,
+  so valid `Tier18` and `Wave130` evidence failed.
+- **Resolution:** Shared Tier/Wave evidence now permits omitted whitespace
+  while still requiring a numeric value. The same rule verifies the visible
+  list row and, with exact expected values, unchanged copied-report detail.
+- **Regression:** `test/test_battle_history.py::
+  test_retained_no_battle_history_row_allows_joined_ocr_labels` exercises the
+  promoted frame, and
+  `test_history_detail_allows_joined_ocr_identity_labels` covers exact copied
+  Tier/Wave identity.
+- **Validation:** All 16 focused Battle History and activity-continuity tests
+  passed, followed by all 904 repository tests. The authorized live route
+  matched `Tier19 Wave 20`, copied and fingerprinted Tier 19 wave 20, and
+  restored verified `HOME_SCREEN/NEW_BATTLE` while control remained `STOPPED`.
+- **Fixed by:** `e58bad1`.
+
 ### Daily Gem claim drift escaped its match region and left battle in Store
 
 - **Observed:** 2026-07-28 during the active Tier 19 Farm battle's rollover

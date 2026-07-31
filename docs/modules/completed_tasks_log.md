@@ -113,6 +113,20 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   clickmap-integrity checks passed, followed by all 870 repository tests. No
   live input or automation restart was required.
 
+### 2026-07-30 Battle History joined-label OCR
+
+- Commit `e58bad1` accepts OCR-omitted whitespace between the Tier/Wave labels
+  and their numeric values in both newest-row and copied-detail evidence. It
+  preserves numeric and exact-identity requirements instead of weakening the
+  route to generic text presence.
+- The previously ignored no-battle source frame is promoted to
+  `test/fixtures/ui_state_20260714/no_battle_battle_history_20260719.png`;
+  focused coverage also exercises a joined exact detail identity.
+- All 16 focused continuity tests and all 904 repository tests passed. An
+  operator-authorized live check then copied and fingerprinted the current
+  Tier 19 wave-20 report and restored verified `HOME_SCREEN/NEW_BATTLE`.
+  Automation remained `STOPPED` and the diagnostic target lock was released.
+
 ### 2026-07-29 Battle History-backed activity continuity
 
 - Commit `2c4342d` fingerprints the newest copied in-game Battle History report
