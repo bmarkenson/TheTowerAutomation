@@ -11,6 +11,124 @@ for a matching recurrence or historical investigation.
 
 ## Open
 
+### T19 Farm retained near-normal game-clock speed while entity throughput collapsed
+
+- **Observed:** 2026-07-29 during a main-PC Tier 19 Farm Retry sequence on
+  `localhost:5555`. Nine battles ended at waves 1207–1725 around two longer
+  battles ending at waves 4142 and 4732 with only `606.81q` and `676.29q`
+  Coins/hour. The operator confirmed that Death Stranding was not active
+  during the two longer runs and that Damage Slider remained `100%` throughout
+  the sequence.
+- **Symptom:** The two longer runs retained effective game speeds of `4.9526`
+  and `4.9839`, comparable to `4.9730` and `4.9608` in the surrounding healthy
+  main-PC controls, but reported only `192.6` and `196.0` enemies per
+  non-skipped wave. The controls reported `270.5` and `275.4`. All nine short
+  runs were killed by Scatter after their first survival-ability chain; the
+  two longer outliers recorded 18 and 50 Death Defies.
+- **Evidence:** The anomalous records are
+  `logs/battles/Battle20260729T084914-0700.json` and
+  `logs/battles/Battle20260729T124104-0700.json`. Same-tier, same-profile
+  controls are `logs/battles/Battle20260728T201308-0700.json` and
+  `logs/battles/Battle20260730T083128-0700.json`. Dividing the reported
+  `Coins / Kill` by total enemies gives approximately `0.549T` and `0.599T`
+  for the anomalies versus `0.588T` and `0.611T` for the controls; Critical
+  Coin per enemy is likewise comparable. Golden Tower and Black Hole remained
+  active for nearly every reported enemy. The anomalies instead reduced
+  largest Golden Combo to 603 and 587 versus 751 and 763, and total coins per
+  enemy to `5.34T` and `5.82T` versus `11.11T` and `12.57T`. This supports
+  sparse or missed entity processing plus lost combo density rather than a
+  missing global coin multiplier or disabled economic Ultimate Weapon.
+- **Configuration evidence:** Every retained battle identifies strict
+  `farm_t19` / Farm / Tier 19 rather than Dissonance. Session preflight
+  verified the selected Farm Cards, Workshop, and Bots presets; all expected
+  Modules, Guardians, Ultimate Weapons, and Target Priority; and Auto Pick
+  Perks. Final perk records do not show a uniform missing Damage or enemy-health
+  tradeoff, and the short records reached the reported maximum Free Attack and
+  Defense Upgrade counts. The preflight did not inspect every card inside the
+  selected Farm preset, and Free Upgrade locks were deferred because the Retry
+  boundary lacked authoritative no-battle Home evidence.
+- **Current analysis:** A host/emulator execution collapse is the leading
+  explanation. The game clock and wave schedule appear able to advance near
+  normal speed while frame- or update-dependent spawning, attacks, effects, or
+  crowd control receive fewer execution opportunities. That model explains
+  both lower entity/combo throughput and a Scatter breach instead of uniform
+  slowdown, but the game's internal scheduling has not been observed and this
+  remains an inference. A stale or altered Farm card deck, especially Enemy
+  Balance, is not fully excluded; however, a missing Enemy Balance card alone
+  would reduce enemies while normally easing survival, and the retained
+  card-derived economic and combat counts argue against a wholesale loadout
+  change. The deferred Free Upgrade locks are a weaker unresolved confounder.
+- **Safety response:** The investigation used retained battle records and
+  action logs only; it did not alter a live battle or emulator. Commit
+  `33b4687` added the passive
+  [Windows host-performance telemetry](architecture/control_surface.md#windows-host-performance-telemetry)
+  needed for future correlation without asserting a cause for this historical
+  sequence.
+- **Status:** Confirmed anomaly; exact source unresolved. On recurrence,
+  correlate the run's UTC/host/ADB intervals with host and BlueStacks CPU,
+  memory, power/clock, process, and sampler-cost aggregates. Capture exact card
+  membership and Free Upgrade locks at an authoritative new-battle boundary.
+  If host counters do not distinguish a healthy run from the anomaly, add the
+  already planned targeted PresentMon summaries before changing game strategy
+  or game-speed policy.
+
+#### Controlled Death Stranding comparison at game speed x3.5
+
+- On 2026-07-30/31, the Windows tracker observed the Death Stranding process
+  continuously from approximately `22:02:51` through `02:38:30` PDT while the
+  main-PC emulator remained on `localhost:5555`. Automation had reduced game
+  speed from x6.3 to x3.5 immediately before that interval.
+- `Battle20260731T012549-0700` survived to wave 4,534. Its first approximately
+  2,600 waves were x6.3 without contention and its remaining approximately
+  1,900 waves were x3.5 with Death Stranding. It reported `1.08Q` Coins/hour,
+  262.7 enemies per played wave, 748 as the largest Golden Combo, 40 Death
+  Defies, and 52 Energy Shield hits.
+- `Battle20260731T022258-0700` ran entirely at x3.5 with Death Stranding and
+  ended at wave 2,053. It reported `365.92q` Coins/hour from the More Stats
+  clipboard, 214.0 enemies per played wave, 591 as the largest Golden Combo,
+  one Death Defy, and nine Energy Shield hits. Both the −44% enemy-speed and
+  −55% enemy-health tradeoffs were selected by waves 1,240 and 1,540. Smart
+  Missile Barrage, Demon Mode, and Nuke activated at waves 1,962, 1,968, and
+  2,043; Scatter ended the battle ten waves later.
+- The short run does **not** reproduce the collapsed-throughput signature. A
+  same-wave x6.3 comparison ending at wave 2,030 reported 216.9 enemies per
+  played wave, versus 214.0 in the x3.5/contended run. The contended run also
+  processed 224.6 projectiles per game-second, higher than the recent
+  same-wave controls. Its final 15 minutes of host CPU, GPU, VRAM, and
+  Death Stranding load were materially indistinguishable from the final 15
+  minutes of the long mixed run.
+- **Interpretation:** x3.5 under contention preserved ordinary same-wave entity
+  throughput in this comparison, but it did not guarantee survival. The sharp
+  difference in Death Defies and shield hits makes survival variance during
+  the first lethal-pressure cycle a stronger explanation for the wave-2,053
+  outcome than a host-load spike or missing tradeoff Perk. Lower game speed
+  may be protective against the earlier scheduling collapse, but this
+  comparison cannot establish causation because it has no completed, clean
+  x3.5 control. The ongoing battle that began at `02:24:09` is also mixed:
+  Death Stranding remained active through approximately wave 900.
+
+### Windows performance telemetry exceeded its client CPU budget
+
+- **Observed:** 2026-07-30/31 in passive Windows host-performance telemetry
+  while comparing clean and Death Stranding-contended main-PC battles.
+- **Symptom:** `control_surface_cpu_percent` averaged approximately `0.82%`
+  during the clean x6.3 interval, `1.91–1.92%` during the two contended
+  intervals, and `1.76%` during the short post-contention x3.5 interval. The
+  architecture target is less than `0.5%` host CPU for non-frame telemetry.
+  Aggregate collection duration increased from approximately 50 ms clean to
+  115 ms under contention.
+- **Evidence:** `logs/host_performance.sqlite3` retained complete aggregate
+  windows throughout the comparison. This CPU counter covers the complete
+  Windows control-surface process, so it does not yet attribute the excess to
+  the sampler, UI, serialization, or another client activity.
+- **Safety response:** Collection remained passive and preserved its expected
+  cadence; no battle or emulator action was taken for the investigation.
+- **Status:** Confirmed budget violation; source unresolved. Profile the
+  control-surface client and the sampler separately in clean and contended
+  conditions before reducing evidence coverage or changing the sampling
+  cadence. Actionable work is retained in the
+  [runtime backlog](backlog/runtime-and-validation.md).
+
 ### Stopped control could not interrupt an in-progress Home setup guard
 
 - **Observed:** 2026-07-28 while cleaning up the authorized Tier 19

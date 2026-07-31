@@ -82,6 +82,167 @@ checked-item detail remains in the
   produced `182T`; the resulting split disagreed with the copied `2.72T` total,
   correctly invalidated record quality, and retained source screenshots.
 
+## Strategy-driven Damage Slider schedule
+
+- [ ] Add a generic, profile-declared Damage Slider schedule driven by
+  authoritative selected-Perk evidence. Keep `YamlStrategy` and the action
+  executor strategy-agnostic; the Tier 19 behavior must come entirely from the
+  compact Farm source and its generated plan.
+
+### Proposed Tier 19 experiment
+
+- Enforce `1E-18%` as the initial Tier 19 Farm value.
+- Once the selected-Perks timeline authoritatively contains
+  `enemy_health_tradeoff` (the −55% enemy-health tradeoff), enforce `1E-19%`.
+- If that perk never appears, retain `1E-18%` for the entire battle.
+- If retained results show that `1E-18%` is still unsafe, change only the
+  configured initial value to `1E-17%`; do not add Tier-specific runtime code.
+- Do not add a fixed-wave transition to this experiment. Its question is
+  whether the safer initial cap should remain until the required perk appears.
+- Treat this exact schedule as proposed rather than approved for implementation.
+  On 2026-07-31, one `1E-19%` run survived to wave 4,534 and another ended at
+  wave 2,053 despite having both the −44% enemy-speed and −55% enemy-health
+  tradeoffs before wave 1,540. The proposed transition would therefore not
+  have prevented the observed early death. Retain the generic capability, but
+  choose the first configured schedule only after deciding what hypothesis the
+  next experiment should isolate.
+
+### Compact source schema
+
+Keep the existing static `value` as the initial value for backward
+compatibility and make transitions optional:
+
+```yaml
+loadout:
+  damage_slider:
+    mode: enforce
+    value: "1e-18"
+    transitions:
+      mode: enforce
+      stages:
+        - id: enemy_health_55
+          enabled: true
+          when:
+            perks_all:
+              - enemy_health_tradeoff
+          value: "1e-19"
+```
+
+`transitions.mode` has three explicit behaviors:
+
+- `enforce`: evaluate stages and apply the selected target.
+- `observe`: evaluate and record the target that would have applied without
+  changing the slider. This is the preferred reproducible transition-bypass
+  mode for an A/B test.
+- `disabled`: retain the initial value and perform no transition observation
+  or input.
+
+Each stage also has `enabled: true|false` so one candidate can be skipped
+without deleting or reordering the remaining experiment. The builder must
+normalize all percentages through the existing Damage Slider normalizer and
+reject duplicate IDs, empty conditions, invalid modes, non-boolean `enabled`,
+and malformed perk lists.
+
+### Multiple perks and multiple stages
+
+Support any number of ordered stages. A stage condition may declare
+`perks_all`, `perks_any`, or both:
+
+- Every family in `perks_all` must be selected.
+- At least one family in `perks_any` must be selected.
+- When both are present, both requirements apply.
+- Only positive selected-Perk evidence is supported initially. Do not trigger
+  from the apparent absence of a perk because an incomplete or delayed
+  observation could make that unsafe.
+
+The effective target is the initial value overridden by the **last matching
+enabled stage** in source order. This state-derived rule permits multiple
+transitions, combinations, and alternatives while remaining deterministic. It
+also allows a restarted runtime to jump directly to the correct current target
+instead of replaying obsolete intermediate taps. Later stages do not require
+earlier stages to have fired; their declared conditions are authoritative.
+
+An illustrative extension, not part of the initial Tier 19 experiment, is:
+
+```yaml
+stages:
+  - id: first_survival_perk
+    enabled: true
+    when:
+      perks_any:
+        - enemy_health_tradeoff
+        - enemy_speed_tradeoff
+    value: "1e-19"
+  - id: combined_survival_perks
+    enabled: true
+    when:
+      perks_all:
+        - enemy_health_tradeoff
+        - enemy_speed_tradeoff
+    value: "1e-20"
+```
+
+### Runtime observation and action contract
+
+- `PerkTimelineObserver` remains the authority for selected families. Publish
+  its current selected-family set only after a source-complete baseline or an
+  accepted timeline update. Use canonical family IDs, never display-text
+  substring matching in the strategy evaluator.
+- Add generic `perks_all` / `perks_any` conditions to `YamlStrategy`, backed by
+  the published runtime fact. Do not add a strategy-name or Tier conditional.
+- Generate run-scoped effective-stage, completion, and observation state.
+  Reset it at every authoritative new-battle boundary.
+- Evaluate transitions only after initialization and session preflight have
+  completed. Capture may identify the perk while paused, but Pause and every
+  existing action-authority block must prevent the slider input until Resume.
+- Reuse `damage_slider_configure`. Let generated actions name their result and
+  completion variables so a transition cannot overwrite the initial
+  `damage_slider_checked` gate. An enforce failure remains incomplete and
+  retries with a bounded cooldown; an already-matching target completes
+  idempotently.
+- Let the action supply operator-facing context so its `ACTION` explains which
+  stage and perk condition changed the target. Preserve the existing paired
+  terminal `RESULT` and detailed input logs.
+- On a cold restart or mid-battle attach, obtain an authoritative selected-Perk
+  baseline, compute the last matching stage, observe the current slider, and
+  enforce only the resulting target. If the baseline is incomplete, take no
+  transition action.
+
+### Battle evidence
+
+- Extend declared `run_configuration.loadout.damage_slider` with the normalized
+  initial value, transition mode, ordered stages, and enabled states. Preserve
+  compatibility with records that contain only `mode` and `value`.
+- Add run-time Damage Slider control evidence containing the effective stage,
+  trigger families, scheduled and observed perk waves where available,
+  previous and intended targets, mode, attempt time, observed initial/final
+  values, step count, success, and reason.
+- Persist transition evidence when it happens rather than only at terminal
+  capture, so a runtime restart cannot erase the experiment history. A
+  mid-battle attach must distinguish reconstructed current state from an
+  observed transition whose original wave is unavailable.
+- Display the actual transition sequence in completed-battle output. Analytics
+  must group by the declared schedule and applied sequence rather than treating
+  every scheduled run as a static initial-value run.
+
+### Required validation
+
+- Builder tests for normalization, legacy static profiles, ordered stages,
+  all/any conditions, disabled stages, and all transition modes.
+- Evaluator tests proving last-match-wins selection, no action before
+  authoritative perk evidence, direct restart catch-up, new-run reset, and
+  pause/action-authority blocking.
+- Executor tests for independent result variables, idempotent already-matched
+  completion, bounded failure retry, observe mode, and contextual logging.
+- Battle-record tests for declared versus observed values and retained
+  transition evidence across restart.
+- A generated-plan regression for the exact Tier 19 `1E-18%` →
+  `enemy_health_tradeoff` → `1E-19%` experiment, plus proof that Tier 18 and
+  static Damage Slider profiles remain unchanged.
+- Retained fixtures are sufficient for automated development. Perform live
+  validation only at a natural safe run and never Surrender an operator-owned
+  battle to manufacture the transition.
+
 ## Runtime control
 
 - [ ] Make `STOPPED` interrupt an in-progress Home setup without another device
@@ -123,6 +284,12 @@ checked-item detail remains in the
   - [x] Allow a stopped managed start to attach to an existing battle without
     replaying startup/session gates, then re-arm those gates at the next
     authoritative run boundary without seeding completion state.
+  - [ ] Attribute and reduce Windows control-surface CPU use for passive
+    performance collection. Retained 2026-07-30/31 aggregates measured
+    approximately `0.82%` process CPU clean and `1.9%` under contention,
+    exceeding the `<0.5%` non-frame telemetry target. Profile sampler work
+    separately from UI and other process activity, retain complete evidence
+    cadence, and validate both clean and contended cases.
   - [x] Add a guarded active-battle automation reload that pauses and obtains a
     fresh runtime-owned `RUNNING` observation, replaces the fixed systemd unit
     once with attachment semantics, verifies the new PID/lock/startup/control/

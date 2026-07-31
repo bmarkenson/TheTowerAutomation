@@ -157,10 +157,28 @@ that the lower value improved whole-run coins per hour.
   Damage Slider `100%`. Their records retain the then-current `preserve`
   policy rather than an observed slider value, so this is operator evidence,
   but it excludes a deliberately low cap as the explanation for those two
-  runs' collapsed entity throughput.
+  runs' collapsed entity throughput. The complete evidence and current
+  host/emulator scheduling hypothesis are retained in the
+  [open issue](observed_issues.md#t19-farm-retained-near-normal-game-clock-speed-while-entity-throughput-collapsed).
 - The T18 Farm profile currently enforces `1E-22%`; the T19 Farm profile now
   enforces the `1E-19%` comparison value. Those policies are repository facts,
   not evidence that either number is permanently optimal.
+- The 2026-07-31 comparison did not support treating the −55% enemy-health
+  tradeoff as the safety boundary. A `1E-19%` run survived to wave 4,534, while
+  another ended at wave 2,053 despite acquiring the −44% enemy-speed and −55%
+  enemy-health tradeoffs by waves 1,240 and 1,540. The short run entered its
+  Smart Missile Barrage/Demon Mode/Nuke survival sequence at waves
+  1,962/1,968/2,043 and Scatter ended it at 2,053. Its one Death Defy and nine
+  Energy Shield hits, versus 40 and 52 in the longer run, make survival
+  variance before the renewable ability loop stabilized a material confounder.
+- An initial `1E-18%` cap changing to `1E-19%` after the −55% perk remains a
+  possible experiment, but it would not have prevented that observed early
+  death and should not be treated as the decided Tier 19 policy. The generic
+  multiple-perk transition design and an observation-only bypass are retained
+  in the
+  [runtime backlog](backlog/runtime-and-validation.md#strategy-driven-damage-slider-schedule);
+  the exact Tier 19 schedule remains an experiment choice, not current runtime
+  behavior.
 
 For a useful comparison, record the initial slider value, every changed value
 and wave, whether damage visibly changed, and the final value. A run with a
