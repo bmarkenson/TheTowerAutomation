@@ -984,6 +984,75 @@ def test_operational_activity_folds_only_correlated_completed_pairs(tmp_path):
     ]
 
 
+def test_activity_formats_structured_and_legacy_perk_bundles(tmp_path):
+    log_path = tmp_path / "logs" / "actions.log"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text(
+        "[RESULT 2026-07-30 20:58:44] Perk timeline selections recorded "
+        "for wave 950 — x1.98 coins, but tower max health -70.0%, "
+        "Perk wave requirement -75.00%\n"
+        "[DEBUG 2026-07-30 20:58:44] [PERK_TIMELINE] result=recorded "
+        "selection_count=2 close_state=RUNNING "
+        '[ACTIVITY_DATA] {"kind":"perk_selection_bundle","items":'
+        '[{"alias":"CTO","label":"x1.98 coins, but tower max health '
+        '-70.0%"},{"alias":"PWR","label":"Perk wave requirement '
+        '-75.00%"}]} [OPERATION] id=perk-950\n'
+        "[RESULT 2026-07-30 20:59:44] Perk timeline selections recorded "
+        "for wave 1050 — legacy comma-separated list\n"
+        "[DEBUG 2026-07-30 20:59:44] [PERK_TIMELINE] result=recorded "
+        "selection_count=8 close_state=RUNNING "
+        "[OPERATION] id=perk-1050\n",
+        encoding="utf-8",
+    )
+
+    items = _service(tmp_path).activity(levels=["RESULT"])["items"]
+
+    assert items[0]["display_message"] == (
+        "Perk timeline selections recorded for wave 950 — "
+        "2 Perks: CTO, PWR"
+    )
+    assert items[0]["activity_kind"] == "perk_selection_bundle"
+    assert items[0]["detail_items"] == [
+        {
+            "alias": "CTO",
+            "label": "x1.98 coins, but tower max health -70.0%",
+        },
+        {
+            "alias": "PWR",
+            "label": "Perk wave requirement -75.00%",
+        },
+    ]
+    assert items[1]["display_message"] == (
+        "Perk timeline selections recorded for wave 1050 — 8 Perks"
+    )
+    assert "detail_items" not in items[1]
+
+
+def test_clients_use_compact_perk_activity_and_preserve_full_copy_text():
+    native_root = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+    )
+    native_xaml = (native_root / "MainWindow.xaml").read_text(
+        encoding="utf-8"
+    )
+    native_models = (native_root / "Models.cs").read_text(
+        encoding="utf-8"
+    )
+    native_code = (native_root / "MainWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+    browser_script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert 'Binding="{Binding DisplayMessage}"' in native_xaml
+    assert 'Text="{Binding ExpandedMessage}"' in native_xaml
+    assert 'JsonPropertyName("detail_items")' in native_models
+    assert "• {item.Alias} — {item.Label}" in native_models
+    assert "entry.Message" in native_code
+    assert "entry.display_message || entry.message" in browser_script
+
+
 def test_activity_current_run_scope_uses_explicit_boundary(tmp_path, monkeypatch):
     from utils import logger
 

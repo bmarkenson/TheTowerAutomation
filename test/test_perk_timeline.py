@@ -12,6 +12,8 @@ from core.perk_timeline import (
     PerkProgress,
     PerkTimelineObserver,
     PerkTimelineTracker,
+    _perk_activity_data,
+    _perk_selection_alias,
     _recorded_selection_summary,
     measure_perk_progress,
     timeline_perk_family,
@@ -88,6 +90,37 @@ def test_recorded_selection_summary_announces_all_perks_selected():
         all_selected=True,
         scheduled_waves=[100],
     ) == "All Perks selected at wave 100 — final selection: Orbs +1"
+
+
+def test_perk_selection_aliases_use_familiar_community_names():
+    assert _perk_selection_alias(
+        "Perk wave requirement -75.00%"
+    ) == "PWR"
+    assert _perk_selection_alias(
+        "x1.98 coins, but tower max health -70.0%"
+    ) == "CTO"
+    assert _perk_selection_alias(
+        "tower health regen x8.80, but tower max health -60%"
+    ) == "RTO"
+    assert _perk_selection_alias(
+        "Enemies damage -55.0%, but tower damage -50%"
+    ) == "50/50"
+    assert _perk_selection_alias("Golden tower bonus x1.5") == "GT"
+    assert _perk_selection_alias("Black Hole duration +12.0s") == "BH"
+
+
+def test_perk_activity_data_preserves_exact_bundled_item_boundaries():
+    marker = _perk_activity_data(
+        [
+            "x1.98 coins, but tower max health -70.0%",
+            "Perk wave requirement -75.00%",
+        ]
+    )
+
+    assert marker.startswith(" [ACTIVITY_DATA] ")
+    assert '"alias":"CTO"' in marker
+    assert '"alias":"PWR"' in marker
+    assert "x1.98 coins, but tower max health -70.0%" in marker
 
 
 def test_observer_announces_all_perks_after_terminal_capture():

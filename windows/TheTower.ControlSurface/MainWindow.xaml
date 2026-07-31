@@ -690,7 +690,7 @@
                 <ComboBoxItem Content="All recent" Tag="all" />
               </ComboBox>
               <CheckBox x:Name="ActivityAutoFollowBox" Content="Follow newest" IsChecked="True" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Margin="14,0,0,0" />
-              <TextBlock Text="Double-click a row to show the full line"
+              <TextBlock Text="Double-click a row to show full details"
                          Foreground="{StaticResource MutedBrush}"
                          FontSize="10"
                          VerticalAlignment="Center"
@@ -720,9 +720,8 @@
                     <ScrollViewer MaxHeight="180"
                                   VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollBarVisibility="Disabled">
-                      <TextBlock TextWrapping="Wrap">
-                        <Run Text="[" /><Run Text="{Binding Level}" /><Run Text=" " /><Run Text="{Binding Timestamp}" /><Run Text="] " /><Run Text="{Binding Message}" />
-                      </TextBlock>
+                      <TextBlock Text="{Binding ExpandedMessage}"
+                                 TextWrapping="Wrap" />
                     </ScrollViewer>
                   </Border>
                 </DataTemplate>
@@ -730,7 +729,7 @@
               <DataGrid.Columns>
                 <DataGridTextColumn Header="Time" Binding="{Binding Timestamp}" Width="155" />
                 <DataGridTextColumn Header="Level" Binding="{Binding Level}" Width="80" />
-                <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="*" />
+                <DataGridTextColumn Header="Message" Binding="{Binding DisplayMessage}" Width="*" />
               </DataGrid.Columns>
             </DataGrid>
           </Grid>

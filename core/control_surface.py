@@ -74,6 +74,14 @@ _LOG_LEVEL_RE = re.compile(r"[A-Z_]+")
 _OPERATION_DETAIL_RE = re.compile(
     r"(?:^|\s)\[OPERATION] id=(?P<operation_id>[A-Za-z0-9._:-]{1,128})$"
 )
+_ACTIVITY_DATA_RE = re.compile(
+    r"(?:^|\s)\[ACTIVITY_DATA] (?P<payload>\{.*\})"
+    r"(?:\s+\[OPERATION] id=[A-Za-z0-9._:-]{1,128})?$"
+)
+_PERK_SELECTION_COUNT_RE = re.compile(
+    r"^\[PERK_TIMELINE] result=recorded\b.*"
+    r"\bselection_count=(?P<count>\d+)\b"
+)
 _OPERATIONAL_ACTIVITY_LEVELS = frozenset(
     {"ACTION", "RESULT", "WARN", "ERROR", "FAIL"}
 )
@@ -1852,7 +1860,7 @@ def _lines_from_offset(path: Path, offset: int) -> list[str]:
 def _attach_operation_ids(
     records: Sequence[tuple[dict[str, str], int]],
 ) -> list[tuple[dict[str, Any], int]]:
-    """Attach paired DEBUG correlation metadata to its semantic summary."""
+    """Attach paired DEBUG activity metadata to its semantic summary."""
 
     annotated: list[tuple[dict[str, Any], int]] = [
         (dict(entry), offset) for entry, offset in records
@@ -1861,18 +1869,82 @@ def _attach_operation_ids(
         detail, _detail_offset = annotated[index]
         if detail["level"] != "DEBUG":
             continue
-        match = _OPERATION_DETAIL_RE.search(detail["message"])
-        if match is None:
-            continue
         summary, summary_offset = annotated[index - 1]
         if (
             summary["level"] not in {"ACTION", "RESULT"}
             or summary["timestamp"] != detail["timestamp"]
         ):
             continue
-        summary["operation_id"] = match.group("operation_id")
+        operation_match = _OPERATION_DETAIL_RE.search(detail["message"])
+        if operation_match is not None:
+            summary["operation_id"] = operation_match.group("operation_id")
+        summary.update(
+            _activity_display_metadata(
+                summary["message"],
+                detail["message"],
+            )
+        )
         annotated[index - 1] = (summary, summary_offset)
     return annotated
+
+
+def _activity_display_metadata(
+    summary: str,
+    detail: str,
+) -> dict[str, Any]:
+    """Build optional compact and expanded presentation data."""
+
+    prefix = summary.partition(" — ")[0]
+    activity_match = _ACTIVITY_DATA_RE.search(detail)
+    if activity_match is not None:
+        try:
+            payload = json.loads(activity_match.group("payload"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            payload = None
+        if isinstance(payload, Mapping) and (
+            payload.get("kind") == "perk_selection_bundle"
+        ):
+            raw_items = payload.get("items")
+            items = []
+            if isinstance(raw_items, Sequence) and not isinstance(
+                raw_items,
+                (str, bytes),
+            ):
+                for raw_item in raw_items[:64]:
+                    if not isinstance(raw_item, Mapping):
+                        continue
+                    label = " ".join(
+                        str(raw_item.get("label") or "").split()
+                    )[:500]
+                    alias = " ".join(
+                        str(raw_item.get("alias") or "").split()
+                    )[:80]
+                    if label:
+                        items.append(
+                            {
+                                "alias": alias or label,
+                                "label": label,
+                            }
+                        )
+            if len(items) > 1:
+                aliases = ", ".join(item["alias"] for item in items)
+                return {
+                    "activity_kind": "perk_selection_bundle",
+                    "display_message": (
+                        f"{prefix} — {len(items)} Perks: {aliases}"
+                    ),
+                    "detail_items": items,
+                }
+
+    count_match = _PERK_SELECTION_COUNT_RE.search(detail)
+    if count_match is not None:
+        count = int(count_match.group("count"))
+        if count > 1:
+            return {
+                "activity_kind": "perk_selection_bundle",
+                "display_message": f"{prefix} — {count} Perks",
+            }
+    return {}
 
 
 def _collapse_completed_operations(

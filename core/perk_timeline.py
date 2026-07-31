@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 from dataclasses import dataclass, replace
 from datetime import datetime
+import json
 import re
 import time
 from typing import Any, Callable, Mapping, Optional, Sequence
@@ -51,6 +52,7 @@ PWR_MAX_PATTERN = re.compile(
     r"perk wave requirement.*-\s*75(?:\.0+)?\s*%",
     re.IGNORECASE,
 )
+_ACTIVITY_DATA_MARKER = "[ACTIVITY_DATA]"
 
 
 def _recorded_selection_summary(
@@ -95,6 +97,79 @@ def _recorded_selection_summary(
             + ", ".join(selection_labels)
         )
     return "Perk timeline observation recorded — no selection changes detected"
+
+
+def _perk_selection_alias(selection_label: str) -> str:
+    """Return the familiar compact name used in Perk activity summaries."""
+
+    label = " ".join(str(selection_label or "unknown").split())
+    normalized = label.casefold()
+    tradeoff_aliases = (
+        ("CTO", ("coins", "tower max health")),
+        ("RTO", ("tower health regen", "tower max health")),
+        ("50/50", ("enemies damage", "tower damage")),
+        ("DMG/Boss HP", ("tower damage", "boss", "health")),
+        ("Boss HP/Speed", ("boss health", "boss speed")),
+        (
+            "Enemy HP/Regen",
+            ("enemies have", "health", "tower health regen"),
+        ),
+        ("Enemy Speed/DMG", ("enemies speed", "enemies damage")),
+        ("Ranged TO", ("ranged enemies", "attack distance", "damage")),
+        ("Cash TO", ("cash per wave", "enemy kills")),
+        ("Lifesteal/KB", ("lifesteal", "knockback")),
+    )
+    for alias, fragments in tradeoff_aliases:
+        if all(fragment in normalized for fragment in fragments):
+            return alias
+
+    family_aliases = {
+        "all_coins_bonuses": "Coins",
+        "black_hole_duration": "BH",
+        "chain_lightning_damage": "CL",
+        "chrono_field_duration": "CF",
+        "damage": "DMG",
+        "defense_percent": "Def%",
+        "free_upgrade_chance": "Free Ups",
+        "golden_tower_bonus": "GT",
+        "health_regen": "Regen",
+        "inner_mines": "ILM",
+        "max_game_speed": "GS",
+        "max_health": "HP",
+        "orbs": "Orbs",
+        "perk_wave_requirement": "PWR",
+        "smart_missiles": "SM",
+        "spotlight_damage_bonus": "SL",
+        "swamp_radius": "PS",
+        "wave_on_death": "DW",
+    }
+    family = canonical_perk_family(label)
+    return family_aliases.get(family, label)
+
+
+def _perk_activity_data(selection_labels: Sequence[str]) -> str:
+    """Encode exact item boundaries for compact and expanded activity views."""
+
+    normalized = [
+        " ".join(str(label or "unknown").split())
+        for label in selection_labels
+    ]
+    if len(normalized) < 2:
+        return ""
+    payload = {
+        "kind": "perk_selection_bundle",
+        "items": [
+            {
+                "alias": _perk_selection_alias(label),
+                "label": label,
+            }
+            for label in normalized
+        ],
+    }
+    return (
+        f" {_ACTIVITY_DATA_MARKER} "
+        + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    )
 
 
 @dataclass(frozen=True)
@@ -739,6 +814,7 @@ class PerkTimelineObserver:
                     f"{list(completed_request.scheduled_waves)} "
                     f"selection_count={len(selection_labels)} "
                     f"close_state={close_result.observed_state}"
+                    f"{_perk_activity_data(selection_labels) if capture_ok else ''}"
                 ),
                 operation_id=operation_id,
             )

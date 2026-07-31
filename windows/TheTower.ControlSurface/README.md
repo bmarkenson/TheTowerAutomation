@@ -241,9 +241,12 @@ log-formatted lines. Automatic rendering holds the visible rows while a
 selection exists and those entries remain in the current log tail. Copying or
 clearing the selection resumes the live display; log rotation or tail expiry
 clears a stale selection automatically so current activity cannot remain hidden.
-Double-click a row to expand its complete log-formatted line in a word-wrapped
-detail area; double-click it again to collapse the detail and resume live
-updates.
+Bundled Perk results use familiar community aliases such as **PWR**, **CTO**,
+**RTO**, **GT**, **BH**, and **DW** in the compact row. Double-click a row to
+expand its full log-formatted detail; a structured Perk bundle is shown as one
+full-name item per line beside its alias. Double-click it again to collapse the
+detail and resume live updates. Copying still uses the original complete log
+message rather than the compact presentation.
 
 The live banner shows the PID only when systemd or the active runtime lock
 identifies a currently live process. The Runtime Evidence panel shows the

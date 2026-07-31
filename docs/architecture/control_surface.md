@@ -179,6 +179,12 @@ The Operational view contains `ACTION`, `RESULT`, `WARN`, `ERROR`, and
 `FAIL`; individual device actions and their evidence remain available through
 `INPUT`, `DEBUG`, `MATCH`, and `STATE`.
 
+Semantic summaries may carry optional presentation metadata in their paired
+diagnostic detail. The API uses that metadata to give bundled Perk results a
+short alias-based row and an exact itemized expansion without changing the
+durable `RESULT` message. Older bundles without structured item metadata still
+receive a compact count when their paired detail remains in the log tail.
+
 The periodic operator heartbeat contains state, wave, and Coins/min. Its paired
 `[STATUS_DETAIL]` diagnostic retains menu, secondary-state, and overlay
 evidence. Until the planned atomic runtime snapshot replaces log-derived live

@@ -456,7 +456,10 @@ function renderActivity(payload) {
     level.className = `activity-level ${entry.level}`;
     time.textContent = entry.timestamp;
     level.textContent = entry.level;
-    message.textContent = entry.message;
+    message.textContent = entry.display_message || entry.message;
+    if (entry.display_message) {
+      message.title = entry.message;
+    }
     item.append(time, level, message);
     list.append(item);
   }

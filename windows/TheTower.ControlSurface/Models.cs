@@ -592,6 +592,56 @@ public sealed class ActivityEntry
 
     [JsonPropertyName("message")]
     public string Message { get; set; } = "";
+
+    [JsonPropertyName("activity_kind")]
+    public string? ActivityKind { get; set; }
+
+    [JsonPropertyName("display_message")]
+    public string? ActivityDisplayMessage { get; set; }
+
+    [JsonPropertyName("detail_items")]
+    public List<ActivityDetailItem> DetailItems { get; set; } = [];
+
+    public string DisplayMessage =>
+        string.IsNullOrWhiteSpace(ActivityDisplayMessage)
+            ? Message
+            : ActivityDisplayMessage;
+
+    public string ExpandedMessage
+    {
+        get
+        {
+            var fullLine = $"[{Level} {Timestamp}] {Message}";
+            if (DetailItems.Count == 0)
+            {
+                return fullLine;
+            }
+
+            var separatorIndex = Message.IndexOf(
+                " — ",
+                StringComparison.Ordinal);
+            var heading = separatorIndex < 0
+                ? Message
+                : Message[..separatorIndex];
+            var items = DetailItems.Select(item =>
+                string.IsNullOrWhiteSpace(item.Alias)
+                    ? $"• {item.Label}"
+                    : $"• {item.Alias} — {item.Label}");
+            return $"[{Level} {Timestamp}] {heading}"
+                + Environment.NewLine
+                + Environment.NewLine
+                + string.Join(Environment.NewLine, items);
+        }
+    }
+}
+
+public sealed class ActivityDetailItem
+{
+    [JsonPropertyName("alias")]
+    public string Alias { get; set; } = "";
+
+    [JsonPropertyName("label")]
+    public string Label { get; set; } = "";
 }
 
 public sealed record ReportRow(string Category, string Name, string Value);
