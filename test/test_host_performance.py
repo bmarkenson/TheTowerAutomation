@@ -61,6 +61,20 @@ def _request(*aggregates):
     }
 
 
+def _gpu_competitor(**overrides):
+    payload = {
+        "process_id": 4242,
+        "process_name": "Desktop Window Manager",
+        "sample_count": 10,
+        "gpu_percent_avg": 7.5,
+        "gpu_percent_max": 18.25,
+        "dedicated_memory_bytes_max": 268_435_456,
+        "shared_memory_bytes_max": 134_217_728,
+    }
+    payload.update(overrides)
+    return payload
+
+
 def _write_activity_scope(root: Path, run_id: str) -> None:
     path = root / "logs" / "activity_scope.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -110,6 +124,37 @@ def test_host_performance_publish_is_idempotent_and_keeps_sample_run(tmp_path):
     assert stored["adb_port"] == 5555
     assert stored["host_name"] == "MAIN-PC"
     assert stored["metrics"]["bluestacks_cpu_percent_avg"] == 18.75
+    assert stored["gpu_competitors"] == []
+
+
+def test_host_performance_stores_gpu_metrics_and_bounded_competitors(tmp_path):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    aggregate = _aggregate(
+        metrics={
+            "host_gpu_percent_avg": 42.5,
+            "host_gpu_percent_max": 77.0,
+            "host_gpu_dedicated_memory_bytes_avg": 3_221_225_472,
+            "bluestacks_gpu_percent_avg": 35.0,
+            "bluestacks_gpu_percent_max": 68.0,
+            "gpu_sample_duration_ms_avg": 0.35,
+            "gpu_sample_duration_ms_max": 0.6,
+        },
+        gpu_competitors=[_gpu_competitor()],
+    )
+
+    response = service.publish_host_performance(_request(aggregate))
+
+    assert response["accepted"] == 1
+    with sqlite3.connect(
+        tmp_path / "logs" / "host_performance.sqlite3"
+    ) as database:
+        payload = json.loads(
+            database.execute(
+                "SELECT payload_json FROM host_performance_aggregates"
+            ).fetchone()[0]
+        )
+    assert payload["metrics"]["host_gpu_percent_avg"] == 42.5
+    assert payload["gpu_competitors"] == [_gpu_competitor()]
 
 
 def test_host_performance_retention_prunes_old_aggregates(tmp_path):
@@ -164,6 +209,29 @@ def test_host_performance_retention_prunes_old_aggregates(tmp_path):
         (
             lambda aggregate: aggregate.update(run_id="../../escape"),
             "bounded run identifier",
+        ),
+        (
+            lambda aggregate: aggregate.update(
+                gpu_competitors=[
+                    _gpu_competitor(gpu_percent_avg=40.0, gpu_percent_max=20.0)
+                ]
+            ),
+            "must not exceed",
+        ),
+        (
+            lambda aggregate: aggregate.update(
+                gpu_competitors=[_gpu_competitor(sample_count=11)]
+            ),
+            "must be between 1 and 10",
+        ),
+        (
+            lambda aggregate: aggregate.update(
+                gpu_competitors=[
+                    _gpu_competitor(process_id=index + 1)
+                    for index in range(6)
+                ]
+            ),
+            "at most 5",
         ),
         (
             lambda aggregate: aggregate.update(
@@ -247,6 +315,9 @@ def test_native_sampler_keeps_expensive_process_launches_out_of_sample_path():
     tracker = (native_root / "HostPerformanceTracker.cs").read_text(
         encoding="utf-8"
     )
+    gpu_sampler = (native_root / "WindowsGpuPerformanceSampler.cs").read_text(
+        encoding="utf-8"
+    )
 
     assert "ThreadPriority.BelowNormal" in tracker
     assert "SampleIntervalMilliseconds = 1000" in tracker
@@ -258,9 +329,20 @@ def test_native_sampler_keeps_expensive_process_launches_out_of_sample_path():
     assert "GetSystemTimes" in sampler
     assert "GlobalMemoryStatusEx" in sampler
     assert "GetProcessIoCounters" in sampler
+    assert "PdhCollectQueryData" in gpu_sampler
+    assert "PdhFormatNoScale" in gpu_sampler
+    assert "private uint _capacity" in gpu_sampler
+    assert r"\GPU Engine(*)\Utilization Percentage" in gpu_sampler
+    assert r"\GPU Process Memory(*)\Dedicated Usage" in gpu_sampler
+    assert "MaximumSampleCompetitors = 8" in gpu_sampler
+    assert "MaximumGpuCompetitors = 5" in tracker
     assert "Process.Start(" not in sampler
+    assert "Process.Start(" not in gpu_sampler
+    assert "Process.GetProcesses(" not in gpu_sampler
     assert "PowerShell" not in sampler
+    assert "PowerShell" not in gpu_sampler
     assert "nvidia-smi" not in sampler
+    assert "nvidia-smi" not in gpu_sampler
 
 
 def test_native_host_sampling_control_is_persistent_and_always_visible():
@@ -276,15 +358,19 @@ def test_native_host_sampling_control_is_persistent_and_always_visible():
 
     assert "public bool SamplingEnabled" in tracker
     assert "public void SetSamplingEnabled(bool enabled)" in tracker
+    assert "_sampler.ResetRateBaselines();" in tracker
     assert 'HostPerformanceHealthState.Paused, "Sampling paused"' in tracker
     assert (
         "public bool HostPerformanceSamplingEnabled { get; set; } = true;"
         in models
     )
     assert 'x:Name="HostSamplingToggleButton"' in window
+    assert 'x:Name="HostGpuText"' in window
+    assert 'x:Name="BlueStacksGpuText"' in window
+    assert 'x:Name="GpuCompetitorText"' in window
     assert 'Click="HostSamplingToggle_Click"' in window
     assert "TextTrimming=\"CharacterEllipsis\"" in window
-    assert '<RowDefinition Height="0.9*" MinHeight="100" />' in window
-    assert '<RowDefinition Height="0.65*" MinHeight="65" />' in window
+    assert '<RowDefinition Height="0.9*" MinHeight="85" />' in window
+    assert '<RowDefinition Height="0.65*" MinHeight="54" />' in window
     assert "HostPerformanceSamplingEnabled" in window_code
     assert "queued aggregates still upload" in window_code

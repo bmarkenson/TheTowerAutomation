@@ -57,6 +57,33 @@ public sealed class HostPerformanceAggregate
 
     [JsonPropertyName("metrics")]
     public Dictionary<string, double> Metrics { get; set; } = [];
+
+    [JsonPropertyName("gpu_competitors")]
+    public List<HostPerformanceGpuCompetitor> GpuCompetitors { get; set; } = [];
+}
+
+public sealed class HostPerformanceGpuCompetitor
+{
+    [JsonPropertyName("process_id")]
+    public int ProcessId { get; set; }
+
+    [JsonPropertyName("process_name")]
+    public string ProcessName { get; set; } = "";
+
+    [JsonPropertyName("sample_count")]
+    public int SampleCount { get; set; }
+
+    [JsonPropertyName("gpu_percent_avg")]
+    public double GpuPercentAverage { get; set; }
+
+    [JsonPropertyName("gpu_percent_max")]
+    public double GpuPercentMaximum { get; set; }
+
+    [JsonPropertyName("dedicated_memory_bytes_max")]
+    public long DedicatedMemoryBytesMaximum { get; set; }
+
+    [JsonPropertyName("shared_memory_bytes_max")]
+    public long SharedMemoryBytesMaximum { get; set; }
 }
 
 public sealed class HostPerformancePublishResponse
@@ -103,9 +130,27 @@ internal sealed record HostPerformanceSample
     public double? BlueStacksIoWriteBytesPerSecond { get; init; }
     public int BlueStacksThreadCount { get; init; }
     public int BlueStacksHandleCount { get; init; }
+    public bool GpuCountersAvailable { get; init; }
+    public double? HostGpuPercent { get; init; }
+    public long? HostGpuDedicatedMemoryBytes { get; init; }
+    public long? HostGpuSharedMemoryBytes { get; init; }
+    public double? BlueStacksGpuPercent { get; init; }
+    public long? BlueStacksGpuDedicatedMemoryBytes { get; init; }
+    public long? BlueStacksGpuSharedMemoryBytes { get; init; }
+    public int GpuProcessCount { get; init; }
+    public IReadOnlyList<HostGpuProcessSample> GpuCompetitors { get; init; } = [];
+    public double? GpuSampleDurationMilliseconds { get; init; }
+    public string? GpuError { get; init; }
     public double? ControlSurfaceCpuPercent { get; init; }
     public double SampleDurationMilliseconds { get; init; }
 }
+
+internal sealed record HostGpuProcessSample(
+    int ProcessId,
+    string ProcessName,
+    double GpuPercent,
+    long DedicatedMemoryBytes,
+    long SharedMemoryBytes);
 
 public enum HostPerformanceHealthState
 {
@@ -136,6 +181,17 @@ public sealed record HostPerformanceSnapshot
     public long? BlueStacksWorkingSetBytes { get; init; }
     public double? BlueStacksIoReadBytesPerSecond { get; init; }
     public double? BlueStacksIoWriteBytesPerSecond { get; init; }
+    public bool GpuCountersAvailable { get; init; }
+    public double? HostGpuPercent { get; init; }
+    public long? HostGpuDedicatedMemoryBytes { get; init; }
+    public long? HostGpuSharedMemoryBytes { get; init; }
+    public double? BlueStacksGpuPercent { get; init; }
+    public long? BlueStacksGpuDedicatedMemoryBytes { get; init; }
+    public long? BlueStacksGpuSharedMemoryBytes { get; init; }
+    public IReadOnlyList<HostPerformanceGpuCompetitor> GpuCompetitors
+        { get; init; } = [];
+    public double? GpuSampleDurationMilliseconds { get; init; }
+    public string? GpuError { get; init; }
     public double? SampleDurationMilliseconds { get; init; }
     public int PendingAggregateCount { get; init; }
     public long DroppedAggregateCount { get; init; }

@@ -779,10 +779,11 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert 'Text="PREVIOUS DISTINCT STATE"' in native_xaml
     assert 'id="reducedGameSpeedButton"' in html
     assert 'Content="Reduced x4.0"' in native_xaml
-    assert "MinimumServerRevision = 12" in native_compatibility
+    assert "MinimumServerRevision = 13" in native_compatibility
     assert '"current_run_activity_scope"' in native_compatibility
     assert '"game_speed_mode"' in native_compatibility
     assert '"host_performance_telemetry_v1"' in native_compatibility
+    assert '"host_performance_gpu_v1"' in native_compatibility
     assert 'Text="HOST HEALTH"' in native_xaml
     assert 'Text="BLUESTACKS CPU"' in native_xaml
 

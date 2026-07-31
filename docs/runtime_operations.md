@@ -411,6 +411,23 @@ published or waiting locally. Hover over the strip for sample cost, BlueStacks
 read/write rate, last Linux acknowledgement, and any sampling, spool, or upload
 error.
 
+The second line shows busiest-engine host GPU utilization, adapter
+dedicated/shared GPU memory, BlueStacks GPU utilization and dedicated memory,
+and the highest-using competing process. Hover over the strip for the bounded
+top-five competitor list with PID, average/maximum utilization, and dedicated
+memory. The tracker uses one persistent native PDH query and reusable buffers;
+process names come from the existing ten-second discovery pass. It does not
+start PerfMon, PowerShell, WMI, `nvidia-smi`, or a vendor utility. Missing
+driver/Windows GPU counter support is shown as **Unavailable** rather than
+fabricated as zero.
+
+Windows has a
+[documented case](https://learn.microsoft.com/en-us/troubleshoot/windows-client/performance/gpu-process-memory-counters-report-wrong-value)
+where `GPU Process Memory` can remain incorrectly elevated after resources are
+released. Treat competitor memory as supporting context, not proof of a leak
+or active contention; utilization and the run-correlated time series remain
+the stronger evidence.
+
 Use **Pause sampling** in the always-visible health strip to stop collecting
 new one-second samples. The client immediately closes any partial aggregate,
 continues uploading already queued aggregates, shows **Sampling paused** with
@@ -440,15 +457,18 @@ Linux accepts idempotent batches into `logs/host_performance.sqlite3`, retains
 30 days by default, and keeps sample-time and ingest-time run identities
 separate. The service options `--host-performance-db` and
 `--host-performance-retention-days` can change those defaults. Deploying this
-client requires server revision 12 and capability
-`host_performance_telemetry_v1`; use the existing confirmed **Restart Linux API
-service** path after updating the Linux checkout.
+client requires server revision 13 and capabilities
+`host_performance_telemetry_v1` and `host_performance_gpu_v1`; use the existing
+confirmed **Restart Linux API service** path after updating the Linux checkout.
 
 The aggregate's `sample_duration_ms` and `control_surface_cpu_percent` fields
 support Windows-side budget validation. The target is below 0.5% average CPU
-without frame telemetry. PresentMon is not started by this version; a later
-targeted provider must aggregate frames in memory and keep the combined average
-below 1%.
+without frame telemetry. `gpu_sample_duration_ms` isolates the GPU counter
+portion for deployment measurement. PresentMon is not started by this version;
+a later opt-in provider must target the BlueStacks renderer, aggregate frames
+in memory, and keep the combined average below 1%. GPU temperature and clocks
+remain absent because these Windows counters are not vendor-neutral sensor
+interfaces.
 
 Selecting Tournament, or starting the stopped managed service with Tournament
 selected, authorizes one validation run. The control file records a durable

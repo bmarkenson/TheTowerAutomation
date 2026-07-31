@@ -208,8 +208,21 @@ The native client owns host measurement because the relevant counters live on
 Windows. A dedicated below-normal-priority thread samples once per second using
 native system times, memory status, processor power information, and cached
 BlueStacks process time/memory/I/O counters. BlueStacks process discovery runs
-once per ten samples. The path does not capture the screen or launch
-PowerShell, WMI, `nvidia-smi`, or another process per sample.
+once per ten samples. One persistent PDH query also reads Windows `GPU Engine`,
+`GPU Adapter Memory`, and `GPU Process Memory` wildcard counters. Its unmanaged
+result buffers are reused, and the already scheduled process discovery supplies
+names without another per-sample process scan. The path does not capture the
+screen or launch PowerShell, WMI, `nvidia-smi`, or another process per sample.
+
+Host and BlueStacks GPU utilization use the busiest-engine convention: values
+from processes sharing a physical engine are combined, then the busiest engine
+is reported and capped at 100%. Adapter-level dedicated/shared usage represents
+host GPU memory; process-level usage supplies BlueStacks and competitor
+attribution. Raw samples retain at most eight non-BlueStacks competitors.
+Each ten-second aggregate publishes at most five, ranked first by maximum GPU
+use and then GPU memory, with PID, process name, observation count, average and
+maximum utilization, and maximum dedicated/shared memory. No per-process or
+per-engine sample is published individually.
 
 The client retains 120 raw samples in memory and reduces each ten-sample window
 to averages and extrema. An ADB-port or run-identity transition closes the
@@ -237,13 +250,17 @@ outage. Aggregate UUIDs are primary keys in
 Linux store also records the server's current run at ingest as separate
 diagnostic context, keeps the sample-time run authoritative, and prunes records
 after 30 days by default. Server revision 12 advertises capability
-`host_performance_telemetry_v1`.
+`host_performance_telemetry_v1`; server revision 13 adds
+`host_performance_gpu_v1`.
 
 The no-frame-telemetry target is below 0.5% average host CPU. Aggregate fields
 include control-surface CPU and sampling duration so the Windows deployment can
-verify that budget. A later targeted PresentMon provider should feed frame
-statistics into the same in-memory aggregation/spool path, never emit one
-record per presented frame, and keep total average CPU below 1%.
+verify that budget. GPU collection also records its own sampling duration.
+Temperature and clock telemetry are not included because Windows does not
+provide them through the same vendor-neutral counters. A later targeted
+PresentMon provider should feed frame statistics into the same in-memory
+aggregation/spool path, never emit one record per presented frame, and keep
+total average CPU below 1%.
 
 Control request examples:
 

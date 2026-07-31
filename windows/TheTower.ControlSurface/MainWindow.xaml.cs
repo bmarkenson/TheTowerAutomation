@@ -1141,6 +1141,9 @@ public partial class MainWindow : Window
             status.CurrentRun?.RunId,
             status.Capabilities.Contains(
                 "host_performance_telemetry_v1",
+                StringComparer.Ordinal)
+            && status.Capabilities.Contains(
+                "host_performance_gpu_v1",
                 StringComparer.Ordinal));
         ServiceText.Text = service is null
             ? "API restart needed"
@@ -1506,6 +1509,30 @@ public partial class MainWindow : Window
             ? "-"
             : $"{FormatBytes(snapshot.BlueStacksWorkingSetBytes)} · "
                 + $"{snapshot.BlueStacksProcessCount} proc";
+        HostGpuText.Text = !snapshot.GpuCountersAvailable
+            ? "Unavailable"
+            : FormatPercent(snapshot.HostGpuPercent);
+        HostGpuMemoryText.Text = !snapshot.GpuCountersAvailable
+            ? "-"
+            : $"{FormatBytes(snapshot.HostGpuDedicatedMemoryBytes)} dedicated"
+                + $" · {FormatBytes(snapshot.HostGpuSharedMemoryBytes)} shared";
+        BlueStacksGpuText.Text = !snapshot.GpuCountersAvailable
+            ? "-"
+            : snapshot.BlueStacksProcessCount == 0
+                ? "Not detected"
+                : $"{FormatPercent(snapshot.BlueStacksGpuPercent)}"
+                    + $" · {FormatBytes(snapshot.BlueStacksGpuDedicatedMemoryBytes)}";
+        var topGpuCompetitor = snapshot.GpuCompetitors.FirstOrDefault();
+        GpuCompetitorText.Text = !snapshot.GpuCountersAvailable
+            ? "-"
+            : topGpuCompetitor is null
+                ? "None detected"
+                : $"{topGpuCompetitor.ProcessName} · "
+                    + $"{topGpuCompetitor.GpuPercentAverage:F1}%";
+        GpuCompetitorText.Foreground =
+            topGpuCompetitor?.GpuPercentMaximum >= 20.0
+                ? new SolidColorBrush(Color.FromRgb(241, 191, 91))
+                : new SolidColorBrush(Color.FromRgb(237, 242, 247));
         HostTelemetryQueueText.Text = !snapshot.UploadEnabled
             ? $"Local only · {snapshot.PendingAggregateCount} queued"
             : snapshot.PendingAggregateCount == 0
@@ -1532,6 +1559,13 @@ public partial class MainWindow : Window
             $"BlueStacks I/O: read "
                 + $"{FormatRate(snapshot.BlueStacksIoReadBytesPerSecond)}, write "
                 + $"{FormatRate(snapshot.BlueStacksIoWriteBytesPerSecond)}.",
+            snapshot.GpuCountersAvailable
+                ? $"GPU counter cost: "
+                    + $"{snapshot.GpuSampleDurationMilliseconds?.ToString("F2", CultureInfo.InvariantCulture) ?? "-"} ms/sample."
+                : "Windows GPU performance counters are unavailable.",
+            $"BlueStacks GPU memory: "
+                + $"{FormatBytes(snapshot.BlueStacksGpuDedicatedMemoryBytes)} dedicated, "
+                + $"{FormatBytes(snapshot.BlueStacksGpuSharedMemoryBytes)} shared.",
             snapshot.LastUploadedAtUtc is null
                 ? "No aggregate has been acknowledged by Linux in this session."
                 : $"Last Linux acknowledgement: "
@@ -1540,6 +1574,22 @@ public partial class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(snapshot.SamplerError))
         {
             details.Add($"Sampler: {snapshot.SamplerError}");
+        }
+        foreach (var competitor in snapshot.GpuCompetitors)
+        {
+            details.Add(
+                $"Other GPU: {competitor.ProcessName} "
+                + $"(PID {competitor.ProcessId}) — "
+                + $"{competitor.GpuPercentAverage:F1}% avg, "
+                + $"{competitor.GpuPercentMaximum:F1}% max, "
+                + $"{FormatBytes(competitor.DedicatedMemoryBytesMaximum)} "
+                + "dedicated, "
+                + $"{FormatBytes(competitor.SharedMemoryBytesMaximum)} "
+                + "shared.");
+        }
+        if (!string.IsNullOrWhiteSpace(snapshot.GpuError))
+        {
+            details.Add($"GPU counters: {snapshot.GpuError}");
         }
         if (!string.IsNullOrWhiteSpace(snapshot.StorageError))
         {

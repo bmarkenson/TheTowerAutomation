@@ -12,7 +12,10 @@ internal sealed class WindowsHostPerformanceSampler : IDisposable
         1,
         Environment.ProcessorCount);
     private readonly Process _controlSurfaceProcess = Process.GetCurrentProcess();
+    private readonly WindowsGpuPerformanceSampler _gpuSampler = new();
     private readonly Dictionary<int, ProcessTotals> _previousProcessTotals = [];
+    private readonly Dictionary<int, string> _processNames = [];
+    private readonly HashSet<int> _blueStacksProcessIds = [];
     private readonly List<TrackedProcess> _blueStacksProcesses = [];
     private SystemTimes? _previousSystemTimes;
     private TimeSpan? _previousControlSurfaceCpu;
@@ -44,6 +47,9 @@ internal sealed class WindowsHostPerformanceSampler : IDisposable
         var hostCpuPercent = ReadHostCpuPercent();
         var (memoryUsedPercent, availableMemoryBytes) = ReadMemory();
         var processMetrics = ReadBlueStacksMetrics(elapsedSeconds);
+        var gpuMetrics = _gpuSampler.Sample(
+            _blueStacksProcessIds,
+            _processNames);
         var controlSurfaceCpuPercent = ReadControlSurfaceCpuPercent(
             elapsedSeconds);
         _previousSampleAtUtc = sampledAtUtc;
@@ -69,6 +75,21 @@ internal sealed class WindowsHostPerformanceSampler : IDisposable
                 processMetrics.IoWriteBytesPerSecond,
             BlueStacksThreadCount = processMetrics.ThreadCount,
             BlueStacksHandleCount = processMetrics.HandleCount,
+            GpuCountersAvailable = gpuMetrics.Available,
+            HostGpuPercent = gpuMetrics.HostGpuPercent,
+            HostGpuDedicatedMemoryBytes =
+                gpuMetrics.HostDedicatedMemoryBytes,
+            HostGpuSharedMemoryBytes = gpuMetrics.HostSharedMemoryBytes,
+            BlueStacksGpuPercent = gpuMetrics.BlueStacksGpuPercent,
+            BlueStacksGpuDedicatedMemoryBytes =
+                gpuMetrics.BlueStacksDedicatedMemoryBytes,
+            BlueStacksGpuSharedMemoryBytes =
+                gpuMetrics.BlueStacksSharedMemoryBytes,
+            GpuProcessCount = gpuMetrics.ProcessCount,
+            GpuCompetitors = gpuMetrics.Competitors,
+            GpuSampleDurationMilliseconds =
+                gpuMetrics.SampleDurationMilliseconds,
+            GpuError = gpuMetrics.Error,
             ControlSurfaceCpuPercent = controlSurfaceCpuPercent,
             SampleDurationMilliseconds = sampleTimer.Elapsed.TotalMilliseconds,
         };
@@ -81,17 +102,23 @@ internal sealed class WindowsHostPerformanceSampler : IDisposable
             tracked.Process.Dispose();
         }
         _blueStacksProcesses.Clear();
+        _blueStacksProcessIds.Clear();
+        _processNames.Clear();
 
         foreach (var process in Process.GetProcesses())
         {
             try
             {
-                if (!IsBlueStacksProcessName(process.ProcessName))
+                var processId = process.Id;
+                var processName = process.ProcessName;
+                _processNames[processId] = processName;
+                if (!IsBlueStacksProcessName(processName))
                 {
                     process.Dispose();
                     continue;
                 }
                 process.Refresh();
+                _blueStacksProcessIds.Add(processId);
                 _blueStacksProcesses.Add(
                     new TrackedProcess(
                         process,
@@ -340,6 +367,16 @@ internal sealed class WindowsHostPerformanceSampler : IDisposable
     private static ulong ToUInt64(FileTime value) =>
         ((ulong)value.High << 32) | value.Low;
 
+    public void ResetRateBaselines()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _previousSystemTimes = null;
+        _previousControlSurfaceCpu = null;
+        _previousSampleAtUtc = null;
+        _previousProcessTotals.Clear();
+        _gpuSampler.ResetRateBaseline();
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -352,6 +389,7 @@ internal sealed class WindowsHostPerformanceSampler : IDisposable
             tracked.Process.Dispose();
         }
         _blueStacksProcesses.Clear();
+        _gpuSampler.Dispose();
         _controlSurfaceProcess.Dispose();
     }
 

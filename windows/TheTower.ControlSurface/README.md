@@ -229,6 +229,16 @@ errors. Sampling uses native counters on a below-normal-priority worker; it does
 not capture the screen or start PowerShell, WMI, `nvidia-smi`, or another
 per-sample process.
 
+The strip's second line reports busiest-engine host GPU utilization,
+dedicated/shared adapter memory, BlueStacks GPU utilization/memory, and the top
+competing GPU process. Its tooltip lists up to five non-BlueStacks competitors
+with PID, average/maximum utilization, and memory. Collection uses one
+persistent native Windows PDH query with reusable buffers; names reuse the
+existing ten-second process discovery. Missing counters display as unavailable.
+GPU temperature and clocks are not collected because the corresponding sensor
+interfaces are vendor-specific. PresentMon frame telemetry remains a separate
+future opt-in provider.
+
 The compact **Pause sampling** control remains visible in the health strip at
 the window's minimum supported size. Pausing flushes the current partial
 aggregate and stops new samples, while the independent uploader continues
@@ -246,7 +256,8 @@ API or tunnel outage does not discard recent telemetry. The bounded queue keeps
 the newest nominal 24 hours and reconnects automatically. Linux stores
 idempotent aggregates in `logs/host_performance.sqlite3` with sample-time host,
 ADB-port, UTC, and fresh current-run correlation. This requires server revision
-12 and capability `host_performance_telemetry_v1`.
+13 and capabilities `host_performance_telemetry_v1` and
+`host_performance_gpu_v1`.
 
 The Process Lifecycle panel also shows the managed localhost ADB port. While
 automation is stopped, **Save** stores the value on Linux for the next managed

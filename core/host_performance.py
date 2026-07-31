@@ -15,6 +15,7 @@ from uuid import UUID
 
 HOST_PERFORMANCE_SCHEMA_VERSION = 1
 MAX_HOST_PERFORMANCE_BATCH = 120
+MAX_GPU_COMPETITORS = 5
 DEFAULT_HOST_PERFORMANCE_RETENTION_DAYS = 30
 
 _RUN_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
@@ -46,6 +47,28 @@ _METRIC_LIMITS: dict[str, tuple[float, float]] = {
     "bluestacks_thread_count_max": (0.0, 1_000_000.0),
     "bluestacks_handle_count_avg": (0.0, 10_000_000.0),
     "bluestacks_handle_count_max": (0.0, 10_000_000.0),
+    "host_gpu_percent_avg": (0.0, 100.0),
+    "host_gpu_percent_max": (0.0, 100.0),
+    "host_gpu_dedicated_memory_bytes_avg": (0.0, float(2**63 - 1)),
+    "host_gpu_dedicated_memory_bytes_max": (0.0, float(2**63 - 1)),
+    "host_gpu_shared_memory_bytes_avg": (0.0, float(2**63 - 1)),
+    "host_gpu_shared_memory_bytes_max": (0.0, float(2**63 - 1)),
+    "bluestacks_gpu_percent_avg": (0.0, 100.0),
+    "bluestacks_gpu_percent_max": (0.0, 100.0),
+    "bluestacks_gpu_dedicated_memory_bytes_avg": (
+        0.0,
+        float(2**63 - 1),
+    ),
+    "bluestacks_gpu_dedicated_memory_bytes_max": (
+        0.0,
+        float(2**63 - 1),
+    ),
+    "bluestacks_gpu_shared_memory_bytes_avg": (0.0, float(2**63 - 1)),
+    "bluestacks_gpu_shared_memory_bytes_max": (0.0, float(2**63 - 1)),
+    "gpu_process_count_min": (0.0, 100_000.0),
+    "gpu_process_count_max": (0.0, 100_000.0),
+    "gpu_sample_duration_ms_avg": (0.0, 60_000.0),
+    "gpu_sample_duration_ms_max": (0.0, 60_000.0),
     "control_surface_cpu_percent_avg": (0.0, 100.0),
     "control_surface_cpu_percent_max": (0.0, 100.0),
     "sample_duration_ms_avg": (0.0, 60_000.0),
@@ -253,9 +276,11 @@ def _validate_aggregate(
         "context_observed_at_utc",
         "metrics",
     }
-    if set(aggregate) != required:
-        missing = sorted(required - set(aggregate))
-        extra = sorted(set(aggregate) - required)
+    optional = {"gpu_competitors"}
+    provided = set(aggregate)
+    if not required.issubset(provided) or provided - required - optional:
+        missing = sorted(required - provided)
+        extra = sorted(provided - required - optional)
         detail = []
         if missing:
             detail.append("missing " + ", ".join(missing))
@@ -379,6 +404,109 @@ def _validate_aggregate(
             maximum=maximum,
         )
     normalized["metrics"] = normalized_metrics
+    normalized["gpu_competitors"] = _validate_gpu_competitors(
+        aggregate.get("gpu_competitors", []),
+        field=f"aggregates[{index}].gpu_competitors",
+        maximum_samples=normalized["sample_count"],
+    )
+    return normalized
+
+
+def _validate_gpu_competitors(
+    value: object,
+    *,
+    field: str,
+    maximum_samples: int,
+) -> list[dict[str, Any]]:
+    if not isinstance(value, Sequence) or isinstance(
+        value,
+        (str, bytes, bytearray),
+    ):
+        raise HostPerformancePayloadError(f"{field} must be a JSON array")
+    if len(value) > MAX_GPU_COMPETITORS:
+        raise HostPerformancePayloadError(
+            f"{field} must contain at most {MAX_GPU_COMPETITORS} items"
+        )
+
+    required = {
+        "process_id",
+        "process_name",
+        "sample_count",
+        "gpu_percent_avg",
+        "gpu_percent_max",
+        "dedicated_memory_bytes_max",
+        "shared_memory_bytes_max",
+    }
+    normalized: list[dict[str, Any]] = []
+    identities: set[tuple[int, str]] = set()
+    for index, item in enumerate(value):
+        item_field = f"{field}[{index}]"
+        if not isinstance(item, Mapping) or set(item) != required:
+            raise HostPerformancePayloadError(
+                f"{item_field} must define exactly "
+                + ", ".join(sorted(required))
+            )
+        process_id = _bounded_integer(
+            item.get("process_id"),
+            field=f"{item_field}.process_id",
+            minimum=1,
+            maximum=2**31 - 1,
+        )
+        process_name = _bounded_text(
+            item.get("process_name"),
+            field=f"{item_field}.process_name",
+            maximum=128,
+        )
+        identity = (process_id, process_name.casefold())
+        if identity in identities:
+            raise HostPerformancePayloadError(
+                f"{field} contains duplicate process identity "
+                + f"{process_name} ({process_id})"
+            )
+        identities.add(identity)
+        gpu_average = _bounded_number(
+            item.get("gpu_percent_avg"),
+            field=f"{item_field}.gpu_percent_avg",
+            minimum=0.0,
+            maximum=100.0,
+        )
+        gpu_maximum = _bounded_number(
+            item.get("gpu_percent_max"),
+            field=f"{item_field}.gpu_percent_max",
+            minimum=0.0,
+            maximum=100.0,
+        )
+        if gpu_average > gpu_maximum:
+            raise HostPerformancePayloadError(
+                f"{item_field}.gpu_percent_avg must not exceed "
+                "gpu_percent_max"
+            )
+        normalized.append(
+            {
+                "process_id": process_id,
+                "process_name": process_name,
+                "sample_count": _bounded_integer(
+                    item.get("sample_count"),
+                    field=f"{item_field}.sample_count",
+                    minimum=1,
+                    maximum=maximum_samples,
+                ),
+                "gpu_percent_avg": gpu_average,
+                "gpu_percent_max": gpu_maximum,
+                "dedicated_memory_bytes_max": _bounded_integer(
+                    item.get("dedicated_memory_bytes_max"),
+                    field=f"{item_field}.dedicated_memory_bytes_max",
+                    minimum=0,
+                    maximum=2**63 - 1,
+                ),
+                "shared_memory_bytes_max": _bounded_integer(
+                    item.get("shared_memory_bytes_max"),
+                    field=f"{item_field}.shared_memory_bytes_max",
+                    minimum=0,
+                    maximum=2**63 - 1,
+                ),
+            }
+        )
     return normalized
 
 
@@ -493,5 +621,6 @@ __all__ = [
     "HostPerformanceStorageError",
     "HostPerformanceStore",
     "MAX_HOST_PERFORMANCE_BATCH",
+    "MAX_GPU_COMPETITORS",
     "validate_host_performance_request",
 ]

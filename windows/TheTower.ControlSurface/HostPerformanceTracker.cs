@@ -6,6 +6,7 @@ public sealed class HostPerformanceTracker : IDisposable
     private const int AggregateSampleCount = 10;
     private const int RawRingCapacity = 120;
     private const int UploadBatchSize = 120;
+    private const int MaximumGpuCompetitors = 5;
     private static readonly TimeSpan RunContextFreshness =
         TimeSpan.FromSeconds(15);
 
@@ -133,6 +134,10 @@ public sealed class HostPerformanceTracker : IDisposable
                     if (WaitHandle.WaitAny(waitHandles) == 0)
                     {
                         break;
+                    }
+                    if (SamplingEnabled)
+                    {
+                        _sampler.ResetRateBaselines();
                     }
                     nextSampleAt = DateTimeOffset.UtcNow;
                     continue;
@@ -309,6 +314,50 @@ public sealed class HostPerformanceTracker : IDisposable
             samples.Select(sample => (double?)sample.BlueStacksHandleCount));
         AddAverageAndMaximum(
             metrics,
+            "host_gpu_percent",
+            samples.Select(sample => sample.HostGpuPercent));
+        AddAverageAndMaximum(
+            metrics,
+            "host_gpu_dedicated_memory_bytes",
+            samples.Select(sample =>
+                sample.HostGpuDedicatedMemoryBytes is null
+                    ? null
+                    : (double?)sample.HostGpuDedicatedMemoryBytes.Value));
+        AddAverageAndMaximum(
+            metrics,
+            "host_gpu_shared_memory_bytes",
+            samples.Select(sample =>
+                sample.HostGpuSharedMemoryBytes is null
+                    ? null
+                    : (double?)sample.HostGpuSharedMemoryBytes.Value));
+        AddAverageAndMaximum(
+            metrics,
+            "bluestacks_gpu_percent",
+            samples.Select(sample => sample.BlueStacksGpuPercent));
+        AddAverageAndMaximum(
+            metrics,
+            "bluestacks_gpu_dedicated_memory_bytes",
+            samples.Select(sample =>
+                sample.BlueStacksGpuDedicatedMemoryBytes is null
+                    ? null
+                    : (double?)sample.BlueStacksGpuDedicatedMemoryBytes.Value));
+        AddAverageAndMaximum(
+            metrics,
+            "bluestacks_gpu_shared_memory_bytes",
+            samples.Select(sample =>
+                sample.BlueStacksGpuSharedMemoryBytes is null
+                    ? null
+                    : (double?)sample.BlueStacksGpuSharedMemoryBytes.Value));
+        AddMinimumAndMaximum(
+            metrics,
+            "gpu_process_count",
+            samples.Select(sample => (double?)sample.GpuProcessCount));
+        AddAverageAndMaximum(
+            metrics,
+            "gpu_sample_duration_ms",
+            samples.Select(sample => sample.GpuSampleDurationMilliseconds));
+        AddAverageAndMaximum(
+            metrics,
             "control_surface_cpu_percent",
             samples.Select(sample => sample.ControlSurfaceCpuPercent));
         AddAverageAndMaximum(
@@ -337,7 +386,39 @@ public sealed class HostPerformanceTracker : IDisposable
                 ? null
                 : FormatTimestamp(last.Context.ObservedAtUtc),
             Metrics = metrics,
+            GpuCompetitors = BuildGpuCompetitors(samples),
         };
+    }
+
+    private static List<HostPerformanceGpuCompetitor> BuildGpuCompetitors(
+        IReadOnlyList<HostPerformanceSample> samples)
+    {
+        var windowSampleCount = Math.Max(1, samples.Count);
+        return samples
+            .SelectMany(sample => sample.GpuCompetitors)
+            .GroupBy(
+                process => (process.ProcessId, process.ProcessName))
+            .Select(group => new HostPerformanceGpuCompetitor
+            {
+                ProcessId = group.Key.ProcessId,
+                ProcessName = group.Key.ProcessName,
+                SampleCount = group.Count(),
+                GpuPercentAverage =
+                    group.Sum(process => process.GpuPercent)
+                    / windowSampleCount,
+                GpuPercentMaximum =
+                    group.Max(process => process.GpuPercent),
+                DedicatedMemoryBytesMaximum =
+                    group.Max(process => process.DedicatedMemoryBytes),
+                SharedMemoryBytesMaximum =
+                    group.Max(process => process.SharedMemoryBytes),
+            })
+            .OrderByDescending(process => process.GpuPercentMaximum)
+            .ThenByDescending(process =>
+                (double)process.DedicatedMemoryBytesMaximum
+                + process.SharedMemoryBytesMaximum)
+            .Take(MaximumGpuCompetitors)
+            .ToList();
     }
 
     private async Task UploadLoopAsync(CancellationToken cancellationToken)
@@ -500,6 +581,12 @@ public sealed class HostPerformanceTracker : IDisposable
             recent.Select(sample => sample.BlueStacksCpuPercent));
         var blueStacksCoreCpu = Average(
             recent.Select(sample => sample.BlueStacksCpuCorePercent));
+        var hostGpu = Average(
+            recent.Select(sample => sample.HostGpuPercent));
+        var blueStacksGpu = Average(
+            recent.Select(sample => sample.BlueStacksGpuPercent));
+        var gpuSampleDuration = Average(
+            recent.Select(sample => sample.GpuSampleDurationMilliseconds));
         var sampleDuration = Average(
             recent.Select(sample =>
                 (double?)sample.SampleDurationMilliseconds));
@@ -533,6 +620,19 @@ public sealed class HostPerformanceTracker : IDisposable
             BlueStacksIoWriteBytesPerSecond = Average(
                 recent.Select(sample =>
                     sample.BlueStacksIoWriteBytesPerSecond)),
+            GpuCountersAvailable = last?.GpuCountersAvailable ?? false,
+            HostGpuPercent = hostGpu,
+            HostGpuDedicatedMemoryBytes =
+                last?.HostGpuDedicatedMemoryBytes,
+            HostGpuSharedMemoryBytes = last?.HostGpuSharedMemoryBytes,
+            BlueStacksGpuPercent = blueStacksGpu,
+            BlueStacksGpuDedicatedMemoryBytes =
+                last?.BlueStacksGpuDedicatedMemoryBytes,
+            BlueStacksGpuSharedMemoryBytes =
+                last?.BlueStacksGpuSharedMemoryBytes,
+            GpuCompetitors = BuildGpuCompetitors(recent),
+            GpuSampleDurationMilliseconds = gpuSampleDuration,
+            GpuError = last?.GpuError,
             SampleDurationMilliseconds = sampleDuration,
             PendingAggregateCount = _spool.PendingCount,
             DroppedAggregateCount = _spool.DroppedCount,

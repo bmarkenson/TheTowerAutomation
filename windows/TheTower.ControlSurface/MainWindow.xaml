@@ -122,6 +122,10 @@
                 Padding="9,7"
                 Margin="0,4,0,0">
           <Grid>
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="1.1*" />
               <ColumnDefinition Width="0.8*" />
@@ -169,6 +173,32 @@
                     MinWidth="104"
                     VerticalAlignment="Center"
                     ToolTip="Pause one-second host and BlueStacks sampling. Queued aggregates continue uploading." />
+            <Grid Grid.Row="1"
+                  Grid.ColumnSpan="8"
+                  Margin="0,7,0,0">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="0.8*" />
+                <ColumnDefinition Width="1.35*" />
+                <ColumnDefinition Width="1.2*" />
+                <ColumnDefinition Width="1.65*" />
+              </Grid.ColumnDefinitions>
+              <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                <TextBlock Text="HOST GPU" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+                <TextBlock x:Name="HostGpuText" Text="Starting" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+              <StackPanel Grid.Column="1" Margin="0,0,8,0">
+                <TextBlock Text="GPU MEMORY" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+                <TextBlock x:Name="HostGpuMemoryText" Text="-" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+              <StackPanel Grid.Column="2" Margin="0,0,8,0">
+                <TextBlock Text="BLUESTACKS GPU" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+                <TextBlock x:Name="BlueStacksGpuText" Text="-" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+              <StackPanel Grid.Column="3">
+                <TextBlock Text="TOP OTHER GPU PROCESS" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+                <TextBlock x:Name="GpuCompetitorText" Text="-" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </Grid>
           </Grid>
         </Border>
       </StackPanel>
@@ -183,13 +213,13 @@
 
       <Grid Grid.Column="0">
         <Grid.RowDefinitions>
-          <RowDefinition Height="0.9*" MinHeight="100" />
+          <RowDefinition Height="0.9*" MinHeight="85" />
           <RowDefinition Height="8" />
-          <RowDefinition Height="1.35*" MinHeight="110" />
+          <RowDefinition Height="1.35*" MinHeight="90" />
           <RowDefinition Height="8" />
-          <RowDefinition Height="1.2*" MinHeight="110" />
+          <RowDefinition Height="1.2*" MinHeight="90" />
           <RowDefinition Height="8" />
-          <RowDefinition Height="0.65*" MinHeight="65" />
+          <RowDefinition Height="0.65*" MinHeight="54" />
         </Grid.RowDefinitions>
 
         <Border Grid.Row="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12">
