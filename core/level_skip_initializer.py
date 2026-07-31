@@ -44,6 +44,7 @@ TARGET_TEMPLATE = {
 PURCHASE_X_FRACTION = 0.78
 PURCHASE_Y_FRACTION = 0.77
 EHLS_TAPS_PER_BURST = 4
+EALS_TAPS_PER_BURST = 8
 
 
 @dataclass(frozen=True)
@@ -191,6 +192,24 @@ def _tap_and_capture(
     return captured["frame"], taps_sent, dispatch_ok
 
 
+def _tap_burst(
+    *,
+    point: Point,
+    label: str,
+    tap_fn: Callable[..., bool],
+    verification: TapVerification,
+    max_taps: int,
+) -> Tuple[int, bool]:
+    """Dispatch one bounded burst from a reusable verified target."""
+
+    taps_sent = 0
+    for _attempt in range(max(1, int(max_taps))):
+        if not tap_fn(point, label=label, verification=verification):
+            return taps_sent, False
+        taps_sent += 1
+    return taps_sent, True
+
+
 def _target_tap_verification(
     frame: Frame,
     target: str,
@@ -222,13 +241,19 @@ def initialize_level_skips(
     monotonic_fn: Callable[[], float] = time.monotonic,
     timeout_s: float = 35.0,
     target_wave: int = 40,
-    frame_stream_factory: Optional[Callable[[], ScreenrecordFrameStream]] = (
-        ScreenrecordFrameStream
-    ),
+    frame_stream_factory: Optional[Callable[[], ScreenrecordFrameStream]] = None,
     stream_ready_timeout_s: float = 8.0,
     ehls_taps_per_burst: int = EHLS_TAPS_PER_BURST,
+    eals_taps_per_burst: int = EALS_TAPS_PER_BURST,
 ) -> LevelSkipInitializationResult:
-    """Gold-box EHLS then EALS with minimum capture and navigation overhead."""
+    """Gold-box EHLS then EALS with minimum capture and navigation overhead.
+
+    The guarded screenshot path is the production default. Android's H.264
+    stream has never become live before this short startup race on the current
+    emulator, and warming it contends with the screenshots and inputs that
+    actually complete the upgrades. Tests may still inject a live stream to
+    exercise that optional low-latency path.
+    """
 
     log_action_intent(
         "Initializing level skips",
@@ -238,7 +263,8 @@ def initialize_level_skips(
         ),
         detail=(
             f"[RUN_INIT] target_wave={target_wave} timeout_s={timeout_s} "
-            f"ehls_taps_per_burst={ehls_taps_per_burst}"
+            f"ehls_taps_per_burst={ehls_taps_per_burst} "
+            f"eals_taps_per_burst={eals_taps_per_burst}"
         ),
     )
     started = monotonic_fn()
@@ -361,6 +387,7 @@ def initialize_level_skips(
 
     target_boxes = boxes
     ehls_burst_limit = max(1, int(ehls_taps_per_burst))
+    eals_burst_limit = max(1, int(eals_taps_per_burst))
     ehls_unobserved_taps = 0
     last_stream_sequence = -1
     last_stream_state_check = monotonic_fn()
@@ -432,11 +459,11 @@ def initialize_level_skips(
                 completion_frames[target] = frame
                 completion_elapsed[target] = monotonic_fn() - started
 
-                # EHLS and EALS are deliberately kept in view together. Once
-                # EHLS is verified Max, dispatch the first EALS purchase from
-                # this same verified frame before another state scan or
-                # screenshot can consume the handoff. Wave OCR is deferred
-                # until both upgrades are complete.
+                # EHLS and EALS are deliberately kept in view together. The
+                # guarded-screenshot fallback primes EALS during the EHLS
+                # feedback cycle below. The optional live-stream path still
+                # uses this handoff to avoid another state scan. Wave OCR is
+                # deferred until both upgrades are complete.
                 if target == EHLS:
                     eals_box = _target_boxes(frame).get(EALS)
                     if eals_box is None:
@@ -446,8 +473,9 @@ def initialize_level_skips(
                         eals_box.rect,
                     )
                     if not eals_is_gold_boxed:
-                        eals_first_tap_elapsed_s = monotonic_fn() - started
-                        eals_first_tap_frame = frame
+                        if eals_first_tap_elapsed_s is None:
+                            eals_first_tap_elapsed_s = monotonic_fn() - started
+                            eals_first_tap_frame = frame
                         if frame_stream is not None:
                             if not tap_fn(
                                 _purchase_point(eals_box),
@@ -472,6 +500,7 @@ def initialize_level_skips(
                                     EALS,
                                     eals_box,
                                 ),
+                                max_taps=eals_burst_limit,
                             )
                             taps_sent += burst_taps
                             if not dispatch_ok:
@@ -501,17 +530,58 @@ def initialize_level_skips(
                     ehls_unobserved_taps += 1
                 sleep_fn(0.04)
             else:
-                frame, burst_taps, dispatch_ok = _tap_and_capture(
-                    point=point,
-                    label=f"level_skip:{target}",
-                    capture_fn=capture_fn,
-                    tap_fn=tap_fn,
-                    verification=verification,
-                    max_taps=ehls_burst_limit if target == EHLS else None,
-                )
-                taps_sent += burst_taps
-                if not dispatch_ok:
-                    return finish("tap_dispatch_failed")
+                if target == EHLS:
+                    burst_taps, dispatch_ok = _tap_burst(
+                        point=point,
+                        label=f"level_skip:{EHLS}",
+                        tap_fn=tap_fn,
+                        verification=verification,
+                        max_taps=ehls_burst_limit,
+                    )
+                    taps_sent += burst_taps
+                    if not dispatch_ok:
+                        return finish("tap_dispatch_failed")
+
+                    eals_box = _target_boxes(frame).get(EALS)
+                    if eals_box is None:
+                        return finish("eals_early_target_lost")
+                    eals_is_gold_boxed, _metrics = evaluate_upgrade_box_gold_box(
+                        frame,
+                        eals_box.rect,
+                    )
+                    if eals_is_gold_boxed:
+                        frame = capture_fn()
+                    else:
+                        if eals_first_tap_elapsed_s is None:
+                            eals_first_tap_elapsed_s = monotonic_fn() - started
+                            eals_first_tap_frame = frame
+                        frame, eals_taps, dispatch_ok = _tap_and_capture(
+                            point=_purchase_point(eals_box),
+                            label=f"level_skip:{EALS}",
+                            capture_fn=capture_fn,
+                            tap_fn=tap_fn,
+                            verification=_target_tap_verification(
+                                frame,
+                                EALS,
+                                eals_box,
+                            ),
+                            max_taps=eals_burst_limit,
+                        )
+                        taps_sent += eals_taps
+                        if not dispatch_ok:
+                            return finish("eals_early_tap_dispatch_failed")
+                else:
+                    frame, burst_taps, dispatch_ok = _tap_and_capture(
+                        point=point,
+                        label=f"level_skip:{EALS}",
+                        capture_fn=capture_fn,
+                        tap_fn=tap_fn,
+                        verification=verification,
+                        max_taps=eals_burst_limit,
+                    )
+                    taps_sent += burst_taps
+                    if not dispatch_ok:
+                        return finish("tap_dispatch_failed")
                 if frame is None:
                     return finish("capture_after_tap_failed")
         else:

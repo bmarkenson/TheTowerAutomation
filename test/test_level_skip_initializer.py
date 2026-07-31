@@ -8,6 +8,7 @@ from automation.missions.base import MissionContext
 from core.action_executor import execute_actions
 from core.level_skip_initializer import (
     EALS,
+    EALS_TAPS_PER_BURST,
     EHLS,
     LevelSkipInitializationResult,
     _default_scroll_to_bottom,
@@ -71,9 +72,8 @@ def test_default_scroll_to_bottom_records_input_before_dispatch():
 
 def test_fallback_initializer_taps_ehls_before_eals():
     initial = _frame(1)
-    after_ehls = _frame(2)
     complete = _frame(3)
-    captures = iter((after_ehls, complete))
+    captures = iter((complete,))
     taps = []
     events = []
 
@@ -87,7 +87,7 @@ def test_fallback_initializer_taps_ehls_before_eals():
         value = int(frame[0, 0, 0])
         is_ehls = rect[0] < 500
         maxed = value >= (2 if is_ehls else 3)
-        if is_ehls and value == 2:
+        if is_ehls and value == 3:
             events.append("ehls_max_observed")
         return maxed, {}
 
@@ -123,6 +123,8 @@ def test_fallback_initializer_taps_ehls_before_eals():
             )[-1],
             sleep_fn=lambda _seconds: None,
             frame_stream_factory=None,
+            ehls_taps_per_burst=1,
+            eals_taps_per_burst=1,
         )
 
     assert result.success
@@ -135,11 +137,9 @@ def test_fallback_initializer_taps_ehls_before_eals():
         f"level_skip:{EHLS}",
         f"level_skip:{EALS}",
     ]
-    handoff = events.index("ehls_max_observed")
-    assert events[handoff:handoff + 2] == [
-        "ehls_max_observed",
-        f"level_skip:{EALS}",
-    ]
+    assert events.index(f"level_skip:{EHLS}") < events.index(
+        f"level_skip:{EALS}"
+    ) < events.index("ehls_max_observed")
     first_wave_ocr = events.index("wave_ocr")
     assert all(
         index < first_wave_ocr
@@ -148,13 +148,70 @@ def test_fallback_initializer_taps_ehls_before_eals():
     )
 
 
+def test_guarded_screenshot_path_is_the_production_default():
+    initial = _frame(1)
+    complete = _frame(3)
+    captures = iter((complete,))
+    taps = []
+
+    def gold_box(frame, rect):
+        value = int(frame[0, 0, 0])
+        is_ehls = rect[0] < 500
+        return value >= (2 if is_ehls else 3), {}
+
+    with (
+        patch(
+            "core.level_skip_initializer.detect_state_and_overlays",
+            return_value={"state": "RUNNING", "menu": "UTILITY_MENU"},
+        ),
+        patch(
+            "core.level_skip_initializer.detect_current_buy_quantity",
+            return_value="max",
+        ),
+        patch(
+            "core.level_skip_initializer._target_boxes",
+            return_value={
+                EHLS: _box(EHLS, "affordable"),
+                EALS: _box(EALS, "affordable"),
+            },
+        ),
+        patch(
+            "core.level_skip_initializer.evaluate_upgrade_box_gold_box",
+            side_effect=gold_box,
+        ),
+        patch(
+            "core.level_skip_initializer.detect_wave_number_from_image",
+            return_value=(10, 99.0),
+        ),
+        patch(
+            "core.level_skip_initializer.ScreenrecordFrameStream",
+            side_effect=AssertionError("production path must not start a stream"),
+        ),
+    ):
+        result = initialize_level_skips(
+            screenshot=initial,
+            capture_fn=lambda: next(captures),
+            tap_fn=lambda point, *, label, verification: (
+                taps.append((label, point)) or True
+            ),
+            sleep_fn=lambda _seconds: None,
+            ehls_taps_per_burst=1,
+            eals_taps_per_burst=1,
+        )
+
+    assert result.success
+    assert [label for label, _point in taps] == [
+        f"level_skip:{EHLS}",
+        f"level_skip:{EALS}",
+    ]
+
+
 def test_initializer_logs_why_before_its_tap_sequence(tmp_path, monkeypatch):
     action_log = tmp_path / "actions.log"
     monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(action_log))
     initial = _frame(1)
-    after_ehls = _frame(2)
     complete = _frame(3)
-    captures = iter((after_ehls, complete))
+    captures = iter((complete,))
 
     def logged_tap(_point, *, label, verification):
         assert verification is not None
@@ -197,6 +254,8 @@ def test_initializer_logs_why_before_its_tap_sequence(tmp_path, monkeypatch):
             tap_fn=logged_tap,
             sleep_fn=lambda _seconds: None,
             frame_stream_factory=None,
+            ehls_taps_per_burst=1,
+            eals_taps_per_burst=1,
         )
 
     assert result.success
@@ -263,20 +322,32 @@ def test_fallback_reuses_verified_tap_authority_during_capture():
     assert concurrent_tap_seen.is_set()
 
 
-def test_fallback_caps_ehls_burst_before_waiting_for_capture_feedback():
+def test_fallback_caps_bursts_while_waiting_for_capture_feedback():
     initial = _frame(1)
     after_ehls = _frame(2)
     complete = _frame(3)
     capture_calls = 0
     taps = []
+    ehls_burst_complete = Event()
+    eals_burst_complete = Event()
 
     def capture():
         nonlocal capture_calls
         capture_calls += 1
-        if capture_calls == 1:
-            Event().wait(timeout=0.25)
-            return after_ehls
-        return complete
+        burst_complete = (
+            ehls_burst_complete if capture_calls == 1 else eals_burst_complete
+        )
+        assert burst_complete.wait(timeout=1.0)
+        return after_ehls if capture_calls == 1 else complete
+
+    def tap(point, *, label, verification):
+        taps.append((label, point))
+        count = [item_label for item_label, _point in taps].count(label)
+        if label == f"level_skip:{EHLS}" and count == 4:
+            ehls_burst_complete.set()
+        if label == f"level_skip:{EALS}" and count == EALS_TAPS_PER_BURST:
+            eals_burst_complete.set()
+        return True
 
     def gold_box(frame, rect):
         value = int(frame[0, 0, 0])
@@ -308,9 +379,7 @@ def test_fallback_caps_ehls_burst_before_waiting_for_capture_feedback():
         result = initialize_level_skips(
             screenshot=initial,
             capture_fn=capture,
-            tap_fn=lambda point, *, label, verification: (
-                taps.append((label, point)) or True
-            ),
+            tap_fn=tap,
             sleep_fn=lambda _seconds: None,
             frame_stream_factory=None,
         )
@@ -321,7 +390,7 @@ def test_fallback_caps_ehls_burst_before_waiting_for_capture_feedback():
     ) == 4
     assert [label for label, _point in taps].count(
         f"level_skip:{EALS}"
-    ) >= 1
+    ) == EALS_TAPS_PER_BURST
 
 
 def test_ehls_warmup_burst_forces_feedback_before_a_fifth_tap():
@@ -382,16 +451,17 @@ def test_ehls_warmup_burst_forces_feedback_before_a_fifth_tap():
             ),
             sleep_fn=lambda _seconds: None,
             frame_stream_factory=lambda: stream,
+            eals_taps_per_burst=1,
         )
 
     assert result.success
-    assert taps == [
+    assert taps[:4] == [
         (f"level_skip:{EHLS}", False),
         (f"level_skip:{EHLS}", False),
         (f"level_skip:{EHLS}", False),
         (f"level_skip:{EHLS}", False),
-        (f"level_skip:{EALS}", True),
     ]
+    assert taps[4:] == [(f"level_skip:{EALS}", True)]
     assert stream.stopped
 
 
@@ -425,6 +495,8 @@ def test_initializer_finishes_without_taps_when_both_skips_start_gold_boxed():
             ),
             sleep_fn=lambda _seconds: None,
             frame_stream_factory=None,
+            ehls_taps_per_burst=1,
+            eals_taps_per_burst=1,
         )
 
     assert result.success
@@ -468,6 +540,8 @@ def test_initializer_skips_ehls_taps_when_only_ehls_starts_gold_boxed():
             ),
             sleep_fn=lambda _seconds: None,
             frame_stream_factory=None,
+            ehls_taps_per_burst=1,
+            eals_taps_per_burst=1,
         )
 
     assert result.success
@@ -511,6 +585,8 @@ def test_initializer_does_not_tap_eals_when_it_starts_gold_boxed():
             ),
             sleep_fn=lambda _seconds: None,
             frame_stream_factory=None,
+            ehls_taps_per_burst=1,
+            eals_taps_per_burst=1,
         )
 
     assert result.success
