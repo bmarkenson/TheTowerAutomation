@@ -8,6 +8,44 @@ and actionable work lives in
 
 ## Resolved issues
 
+### EHLS/EALS startup race delayed the first EALS purchase
+
+- **Observed:** 2026-07-30 during repeated authorized Tier 19 Farm startup
+  tests after additional Enemy Health and Attack Level Skip Workshop levels
+  were purchased.
+- **Symptom:** The initializer did not begin EALS until wave 20 in the first
+  failing run. Disabling an ineffective live-stream warm-up moved the first
+  EALS tap to wave 10, but it arrived only just before the wave transition and
+  final confirmation still lagged.
+- **Evidence:** The H.264 frame stream never became live during the short
+  startup window and always fell back after contending with guarded captures
+  and inputs. The screenshot fallback then waited for EHLS feedback before
+  beginning EALS, while its original unbounded EALS tap loop could delay the
+  feedback capture itself.
+- **Safety response:** Every test battle was explicitly owned and authorized
+  by the operator. Automation acknowledged `PAUSED` and `WAIT` before each
+  Surrender, Retry was dispatched manually from a fresh Game Over frame, and
+  `RUNNING / RETRY` was restored only after a fresh running-battle frame. The
+  ordinary Game Over handler did not capture stats or choose a route for these
+  test transitions.
+- **Cause:** The optional stream warm-up added contention without producing
+  frames on the active emulator. After fallback, EHLS and EALS used serialized
+  feedback cycles, and EALS had no tap cap during a blocking screenshot.
+- **Resolution:** Guarded screenshots are now the production default. Each
+  fallback feedback cycle sends the bounded EHLS burst first, immediately
+  begins a separately bounded EALS burst, and uses that EALS-time screenshot
+  as feedback for both upgrades. The injectable live-stream path remains for
+  tests and future environments where it actually becomes live.
+- **Regression:** `test/test_level_skip_initializer.py` covers the production
+  screenshot default, EHLS-before-EALS paired-cycle ordering, reusable tap
+  authority during capture, and independent EHLS/EALS burst limits.
+- **Validation:** All 922 repository tests passed. In the final live run, the
+  first EALS purchase moved from the earlier wave-10 edge to wave 1 at 4.89
+  seconds; EHLS confirmed Max at wave 10. EALS still confirmed at wave 20
+  despite receiving inputs from wave 1, identifying remaining progression as
+  an in-run cash/level limit rather than the startup race.
+- **Fixed by:** `b8229d5`.
+
 ### Home Perk close accepted a transient UNKNOWN battle control
 
 - **Observed:** 2026-07-29 during Farm Tier 19 Home setup after updating the

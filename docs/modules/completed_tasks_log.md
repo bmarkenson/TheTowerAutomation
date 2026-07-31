@@ -37,6 +37,26 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-30 paired-cycle EHLS/EALS startup
+
+- Commit `b8229d5` removes the ineffective production H.264 warm-up and makes
+  the guarded screenshot path the default for the short level-skip startup
+  race.
+- The fallback now keeps EHLS first while beginning a bounded EALS burst in
+  the same feedback cycle. Independent four-tap EHLS and eight-tap EALS caps
+  prevent capture starvation without serializing EALS behind an EHLS
+  screenshot.
+- The final authorized Tier 19 live run moved the first EALS purchase to wave
+  1 at 4.89 seconds. EHLS confirmed Max at wave 10; EALS confirmed at wave 20
+  after receiving inputs from wave 1, so the remaining timing reflects
+  available in-run progression rather than startup idling.
+- Every test restart used acknowledged `PAUSED / WAIT` control and manual
+  Retry, so no Game Over handler work ran for the test boundary. Automation
+  was restored to `RUNNING / RETRY`.
+- `test/test_level_skip_initializer.py` covers the production capture path,
+  paired-cycle order, reusable tap authority, and independent burst limits.
+  All 922 repository tests passed.
+
 ### 2026-07-30 native Windows host-performance telemetry
 
 - Commit `33b4687` adds one-second native Windows host and BlueStacks sampling
