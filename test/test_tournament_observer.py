@@ -75,7 +75,14 @@ def test_tournament_strategy_declares_exclusive_validation_then_observes():
         "ehls_completed",
         "eals_completed",
     ]
-    assert len(strategy.rules) == 4
+    assert len(strategy.rules) == 5
+    attached_validation = strategy.rules[0]
+    assert attached_validation["name"] == (
+        "validate_requested_attached_session_preflight"
+    )
+    assert attached_validation["attached_validation_only"] is True
+    assert attached_validation["do"][0]["type"] == "session_preflight"
+    assert attached_validation["do"][0]["allow_repair"] is False
     level_skip_rule = next(
         rule
         for rule in strategy.rules

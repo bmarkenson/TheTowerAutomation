@@ -335,10 +335,20 @@
                   <ComboBoxItem Content="Tournament" Tag="tournament" />
                   <ComboBoxItem Content="No strategy" Tag="none" />
                 </ComboBox>
-                <UniformGrid Columns="2">
-                  <Button x:Name="QueueStrategyButton" Content="Queue next" Click="QueueStrategy_Click" IsEnabled="False" />
-                  <Button x:Name="AdoptStrategyButton" Content="Adopt now" Click="AdoptStrategy_Click" Style="{StaticResource PrimaryButton}" IsEnabled="False" />
-                </UniformGrid>
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <Button x:Name="QueueStrategyButton" Grid.Column="0" Content="Use next battle" Click="QueueStrategy_Click" IsEnabled="False" />
+                  <Button x:Name="AdoptStrategyButton" Grid.Column="1" Content="Switch this battle" Click="AdoptStrategy_Click" Style="{StaticResource PrimaryButton}" IsEnabled="False" />
+                </Grid>
+                <TextBlock x:Name="StrategyActionHelpText"
+                           Text="Choose when the selected strategy should take effect."
+                           TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedBrush}"
+                           FontSize="10"
+                           Margin="6,2,6,0" />
                 <TextBlock x:Name="StrategySelectionText"
                            Text="Waiting for strategy status."
                            TextWrapping="Wrap"
@@ -420,13 +430,29 @@
                            Foreground="{StaticResource MutedBrush}"
                            FontSize="10"
                            Margin="6,0,6,8" />
-                <CheckBox x:Name="AttachCurrentBattleBox"
-                          Content="Attach to current battle; run gates next battle"
-                          Click="StartupGatePolicy_Click"
-                          Margin="6,4,6,2"
-                          Foreground="{StaticResource MutedBrush}"
-                          IsEnabled="False"
-                          ToolTip="Use when automation is starting in an existing battle." />
+                <TextBlock Text="IF A BATTLE IS ALREADY RUNNING"
+                           Foreground="{StaticResource MutedBrush}"
+                           FontSize="10"
+                           FontWeight="Bold"
+                           Margin="6,4,6,2" />
+                <RadioButton x:Name="ValidateAttachedBattleRadio"
+                             GroupName="AttachedBattleChecks"
+                             Content="Validate current battle if attached"
+                             Click="StartupGatePolicy_Click"
+                             IsChecked="True"
+                             Foreground="#EDF2F7"
+                             Margin="8,4,6,2" />
+                <RadioButton x:Name="SkipAttachedBattleChecksRadio"
+                             GroupName="AttachedBattleChecks"
+                             Content="Skip checks for current battle"
+                             Click="StartupGatePolicy_Click"
+                             Foreground="#EDF2F7"
+                             Margin="8,4,6,2" />
+                <TextBlock Text="Attachment is automatic. Validation is read-only; a setup mismatch asks before restarting. At Home, normal pre-battle checks always run."
+                           TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedBrush}"
+                           FontSize="10"
+                           Margin="8,2,6,4" />
                 <UniformGrid Columns="2" Margin="0,6,0,0">
                   <Button x:Name="StartPausedButton" Content="Start paused" Tag="start:PAUSED" Click="Process_Click" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
                   <Button x:Name="StartRunningButton" Content="Start running" Tag="start:RUNNING" Click="Process_Click" Style="{StaticResource SuccessButton}" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
@@ -449,7 +475,7 @@
                         ToolTip="Persist STOPPED, then stop the fixed Linux automation service." />
               </StackPanel>
               <TextBlock Grid.Row="4"
-                         Text="Start uses the strategy selected on the Controls tab. Detailed process and lock evidence is on the Details tab."
+                         Text="Start uses the strategy selected on Controls and automatically detects whether it is joining a battle. Detailed evidence is on Details."
                          TextWrapping="Wrap"
                          VerticalAlignment="Bottom"
                          Foreground="{StaticResource MutedBrush}"

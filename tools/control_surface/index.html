@@ -112,6 +112,16 @@
 
         <div class="lifecycle-control">
           <label>Linux automation service</label>
+          <label for="attachmentPolicySelect">If a battle is already running</label>
+          <select id="attachmentPolicySelect">
+            <option value="auto_validate">Validate current battle if attached</option>
+            <option value="auto">Skip checks for current battle</option>
+          </select>
+          <p class="fine-print">
+            Attachment is automatic. Validation is read-only; a repairable
+            mismatch asks before restarting. At Home, normal pre-battle checks
+            always run.
+          </p>
           <div class="button-grid compact">
             <button type="button" data-process-action="start" data-run-state="PAUSED">Start paused</button>
             <button class="success" type="button" data-process-action="start" data-run-state="RUNNING">Start running</button>

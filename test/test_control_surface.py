@@ -793,11 +793,17 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert 'Text="PREVIOUS GAME SCREEN"' in native_xaml
     assert 'id="gameSpeedTargetSelect"' in html
     assert 'Content="x6.3 — Maximum available"' in native_xaml
-    assert "MinimumServerRevision = 14" in native_compatibility
+    assert "MinimumServerRevision = 15" in native_compatibility
     assert '"current_run_activity_scope"' in native_compatibility
     assert '"game_speed_target"' in native_compatibility
     assert '"host_performance_telemetry_v1"' in native_compatibility
     assert '"host_performance_gpu_v1"' in native_compatibility
+    assert '"automatic_battle_attachment"' in native_compatibility
+    assert 'Content="Validate current battle if attached"' in native_xaml
+    assert 'Content="Skip checks for current battle"' in native_xaml
+    assert "AttachCurrentBattleBox" not in native_xaml
+    assert 'Content="Use next battle"' in native_xaml
+    assert 'Content="Switch this battle"' in native_xaml
     assert 'Text="HOST HEALTH"' in native_xaml
     assert 'Text="BLUESTACKS CPU"' in native_xaml
 

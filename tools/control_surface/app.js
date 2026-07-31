@@ -7,6 +7,7 @@ const state = {
   lastStatus: null,
   lastGatePrompted: null,
   lastTournamentLaunchPrompted: null,
+  attachmentPolicyDirty: false,
 };
 
 const byId = (id) => document.getElementById(id);
@@ -97,6 +98,12 @@ function renderStatus(payload) {
   setText("currentMode", control.mode);
   setText("controlUpdated", formatDate(control.updated_at));
   byId("modeSelect").value = ["RETRY", "WAIT", "HOME"].includes(control.mode) ? control.mode : "RETRY";
+  if (!state.attachmentPolicyDirty) {
+    byId("attachmentPolicySelect").value =
+      processService?.startup_gate_policy === "auto"
+        ? "auto"
+        : "auto_validate";
+  }
   const gameSpeedTarget = Number(control.game_speed_target);
   const normalizedGameSpeedTarget = Number.isFinite(gameSpeedTarget)
     ? gameSpeedTarget
@@ -153,6 +160,8 @@ function renderStatus(payload) {
     button.disabled = Boolean(control.error);
   });
   const processActive = Boolean(runtime.active || processService?.active);
+  byId("attachmentPolicySelect").disabled =
+    processActive || Boolean(control.error) || !processService?.available;
   document.querySelectorAll("[data-process-action]").forEach((button) => {
     const action = button.dataset.processAction;
     const unavailable = Boolean(control.error) || !processService?.available;
@@ -706,6 +715,10 @@ document.addEventListener("click", (event) => {
     )) return;
     const payload = { action };
     if (process.dataset.runState) payload.run_state = process.dataset.runState;
+    if (action === "start") {
+      payload.startup_gate_policy = byId("attachmentPolicySelect").value;
+      state.attachmentPolicyDirty = false;
+    }
     sendProcess(
       payload,
       action === "stop"
@@ -750,6 +763,10 @@ byId("gameSpeedTargetSelect").addEventListener("change", () => {
     { action: "game_speed", target },
     `Game speed target set to x${target.toFixed(1)}`,
   );
+});
+
+byId("attachmentPolicySelect").addEventListener("change", () => {
+  state.attachmentPolicyDirty = true;
 });
 
 byId("battleRows").addEventListener("click", (event) => {

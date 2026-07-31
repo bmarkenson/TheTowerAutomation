@@ -72,15 +72,16 @@ agnostic.
   one-launch `next_run` policy, Pause consumption, and a first observation
   before the prior control state is restored. Failure after preparation begins
   remains paused; an initial precondition rejection does not mutate control.
-- A stopped start request may choose `immediate` startup gates or `next_run`.
-  `next_run` attaches to the first already-active/resumable battle: normal
-  strategy and handler work continues, but rules explicitly tagged as run
-  initialization or session preflight remain suppressed unless the selected
-  observer profile explicitly declares a read-only attachment check. Tournament
-  uses that exception to report configuration without repair authority. A
-  terminal result or verified Home `NEW_BATTLE` boundary removes the
-  suppression, so the next battle runs its real gates without fabricated
-  completion state.
+- A stopped start request automatically distinguishes verified Home
+  `NEW_BATTLE` from an already-active/resumable battle. Home always runs the
+  complete pre-battle gates. An existing battle is attached without inventing a
+  run boundary. `auto_validate` performs one read-only strategy validation; a
+  Home-repairable mismatch offers guarded restart/repair as an explicit
+  operator decision. `auto` skips all strategy setup checks for only that
+  attached battle. A terminal result or verified Home `NEW_BATTLE` clears the
+  attachment choice, so the next battle runs its real gates without fabricated
+  completion state. `next_run` remains the guarded-reload policy and
+  `immediate` is the explicit forced-first-battle policy.
 - An active strategy request persists the next-start setting and a versioned
   control directive. By default it remains pending during a battle. The
   current strategy first finalizes the terminal report and its Game Over hook;
@@ -280,9 +281,8 @@ Control request examples:
 Process request examples:
 
 ```json
-{"action": "start", "run_state": "PAUSED"}
-{"action": "start", "run_state": "RUNNING"}
-{"action": "start", "run_state": "RUNNING", "startup_gate_policy": "next_run"}
+{"action": "start", "run_state": "PAUSED", "startup_gate_policy": "auto_validate"}
+{"action": "start", "run_state": "RUNNING", "startup_gate_policy": "auto"}
 {"action": "stop"}
 {"action": "restart_attached"}
 {"action": "set_adb_port", "adb_port": 5565}
@@ -329,11 +329,13 @@ Process request examples:
   clients. It replaces the main Python process only after fresh owner and
   `RUNNING` evidence, verifies the attached replacement, restores the prior
   control state, and leaves failures paused.
-- Optional attachment to an existing battle on process start. The selected
-  policy persists on Linux; attached-run startup/session gates wait for the
-  next real run boundary while ordinary automation remains available, except
-  for an explicitly declared read-only observer check such as Tournament
-  preflight.
+- Automatic attachment to an existing/resumable battle on process start. The
+  Process tab offers **Validate current battle if attached** or **Skip checks
+  for current battle**. Validation is read-only and a repairable mismatch asks
+  before the guarded battle restart/repair path is authorized. The choice has
+  no effect at verified Home **New Battle**, where normal pre-battle checks
+  always run. This requires server revision 15 and capability
+  `automatic_battle_attachment`.
 - Persistent ADB-port selection for the next managed start, plus live handoff
   while the runtime has acknowledged `PAUSED`. The API accepts only an integer
   TCP port; the runtime keeps Pause and its former target if new-target
@@ -341,10 +343,12 @@ Process request examples:
 - Validated strategy selection (`farm_t18`, `farm_t19`,
   `tournament`, or `none`). A stopped selection is saved for the next start;
   an active selection is queued for a confirmed run boundary by default. The
-  native GUI separates a strategy dropdown from explicit **Queue for next
-  boundary** and **Adopt for active battle** actions. The latter applies normal
-  behavior and report identity after fresh active-battle evidence while
-  deferring new-run gates. The dropdown preserves an unsent selection across
+  native GUI separates a strategy dropdown from explicit **Use next battle**
+  and **Switch this battle** actions while active. When stopped, **Save startup
+  default** only persists the selection; Start already uses the visible
+  selection. **Switch this battle** applies normal behavior and report identity
+  after fresh active-battle evidence while deferring new-run gates. The
+  dropdown preserves an unsent selection across
   status refreshes, action buttons disable requests that would be no-ops, and
   status reports selected, current, and pending strategies separately.
 - Durable Tournament-validation status in both clients. It distinguishes Home

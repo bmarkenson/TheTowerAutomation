@@ -14,7 +14,11 @@ import threading
 import time
 from typing import Any, Mapping, Optional, Sequence
 
-from core.app_setup import CONFIGURABLE_STRATEGIES, STARTUP_GATE_POLICIES
+from core.app_setup import (
+    CONFIGURABLE_STRATEGIES,
+    DEFAULT_STARTUP_GATE_POLICY,
+    STARTUP_GATE_POLICIES,
+)
 from core.automation_process import AutomationProcessError, SystemdAutomationManager
 from core.battle_classification import (
     classification_for_record,
@@ -42,11 +46,12 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 14
+CONTROL_SURFACE_REVISION = 15
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
     "attached_automation_restart",
+    "automatic_battle_attachment",
     "completed_battle_discard",
     "current_run_activity_scope",
     "exclusive_strategy_validation_status",
@@ -548,28 +553,31 @@ class ControlSurfaceService:
                     "strategy",
                     status=409,
                 )
-            requested_gate_policy = request.get("startup_gate_policy")
-            if requested_gate_policy is not None:
-                if not isinstance(requested_gate_policy, str):
-                    raise ControlSurfaceRequestError(
-                        "startup_gate_policy must be immediate or next_run"
-                    )
-                requested_gate_policy = requested_gate_policy.strip().lower()
-                if requested_gate_policy not in STARTUP_GATE_POLICIES:
-                    raise ControlSurfaceRequestError(
-                        "startup_gate_policy must be immediate or next_run"
-                    )
-                if before.get("active") and (
-                    before.get("startup_gate_policy") != requested_gate_policy
-                ):
-                    raise ControlSurfaceRequestError(
-                        "Completely stop automation before changing startup gates",
-                        status=409,
-                    )
+            requested_gate_policy = request.get(
+                "startup_gate_policy",
+                DEFAULT_STARTUP_GATE_POLICY,
+            )
+            if not isinstance(requested_gate_policy, str):
+                raise ControlSurfaceRequestError(
+                    "startup_gate_policy must be one of: "
+                    + ", ".join(STARTUP_GATE_POLICIES)
+                )
+            requested_gate_policy = requested_gate_policy.strip().lower()
+            if requested_gate_policy not in STARTUP_GATE_POLICIES:
+                raise ControlSurfaceRequestError(
+                    "startup_gate_policy must be one of: "
+                    + ", ".join(STARTUP_GATE_POLICIES)
+                )
+            if before.get("active") and (
+                before.get("startup_gate_policy") != requested_gate_policy
+            ):
+                raise ControlSurfaceRequestError(
+                    "Completely stop automation before changing startup gates",
+                    status=409,
+                )
             try:
                 if not before.get("active"):
-                    if requested_gate_policy is not None:
-                        manager.set_startup_gate_policy(requested_gate_policy)
+                    manager.set_startup_gate_policy(requested_gate_policy)
                     if requested_strategy is not None:
                         manager.set_strategy(requested_strategy)
                         self.control_store.set_strategy(
@@ -620,11 +628,7 @@ class ControlSurfaceService:
                         pass
                 self._append_audit(f"Failed to start service: {exc}")
                 raise ControlSurfaceRequestError(str(exc), status=503) from exc
-            gate_description = (
-                requested_gate_policy
-                or before.get("startup_gate_policy")
-                or "immediate"
-            )
+            gate_description = requested_gate_policy
             audit = (
                 f"Started automation service with state {requested_state} "
                 f"and startup gates {gate_description}"
@@ -747,7 +751,7 @@ class ControlSurfaceService:
         audit_warning = self._append_audit(audit)
         response = self.status()
         response["request"] = {"accepted": True, "action": action}
-        if action == "start" and requested_gate_policy is not None:
+        if action == "start":
             response["request"]["startup_gate_policy"] = requested_gate_policy
         if action == "start" and requested_strategy is not None:
             response["request"]["strategy"] = requested_strategy

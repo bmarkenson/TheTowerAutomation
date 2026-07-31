@@ -566,6 +566,116 @@ class DeferredStartupGateTests(unittest.TestCase):
         self.assertFalse(manager.session_preflight_pending())
         self.assertEqual(manager.no_battle_setup_requirements(), {})
 
+    def test_attached_validation_runs_read_only_session_check(self):
+        strategy = self._strategy()
+        manager = MissionManager(
+            None,
+            strategy,
+            defer_startup_gates_until_next_run=True,
+            validate_attached_battle=True,
+        )
+        manager.start()
+
+        manager.maybe_run_start({"state": "RUNNING"})
+        actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
+
+        self.assertTrue(manager.attached_validation_requested())
+        self.assertTrue(manager.session_preflight_pending())
+        self.assertEqual(
+            actions,
+            [
+                {
+                    "type": "gc_session_preflight",
+                    "requirements": {"cards_deck": "Farm"},
+                    "allow_repair": False,
+                    "mismatch_policy": "block",
+                }
+            ],
+        )
+
+    def test_explicit_skip_suppresses_even_profile_attached_checks(self):
+        strategy = self._strategy()
+        session_rule = next(
+            rule for rule in strategy.rules if rule["name"] == "session_gate"
+        )
+        session_rule["run_when_attached"] = True
+        manager = MissionManager(
+            None,
+            strategy,
+            defer_startup_gates_until_next_run=True,
+            skip_attached_checks=True,
+        )
+        manager.start()
+
+        manager.maybe_run_start({"state": "RUNNING"})
+        actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
+
+        self.assertTrue(manager.ctx.data["skip_attached_checks"])
+        self.assertEqual(actions, [{"type": "normal_action"}])
+        self.assertFalse(manager.session_preflight_pending())
+
+        manager.maybe_run_start({"state": "GAME_OVER"})
+        manager.maybe_run_start({"state": "RUNNING"})
+
+        self.assertFalse(manager.ctx.data["skip_attached_checks"])
+        self.assertTrue(manager.run_initialization_pending())
+
+    def test_attached_tournament_validation_uses_observer_action_only(self):
+        strategy = get_strategy("tournament")
+        manager = MissionManager(
+            None,
+            strategy,
+            defer_startup_gates_until_next_run=True,
+            validate_attached_battle=True,
+        )
+        manager.start()
+
+        manager.maybe_run_start({"state": "RUNNING"})
+        actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
+
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]["type"], "session_preflight")
+        self.assertFalse(actions[0]["allow_repair"])
+        self.assertEqual(actions[0]["mismatch_policy"], "notify")
+
+    def test_new_battle_home_ignores_attached_battle_choice(self):
+        manager = MissionManager(
+            None,
+            self._strategy(),
+            defer_startup_gates_until_next_run=True,
+            validate_attached_battle=True,
+            skip_attached_checks=True,
+        )
+        manager.start()
+
+        manager.maybe_run_start(
+            {"state": "HOME_SCREEN", "home_battle_control": "NEW_BATTLE"}
+        )
+
+        self.assertFalse(manager.ctx.data["startup_gates_deferred"])
+        self.assertFalse(manager.attached_validation_requested())
+        self.assertFalse(manager.ctx.data["skip_attached_checks"])
+        self.assertTrue(manager.no_battle_setup_requirements())
+
+    def test_operator_can_authorize_guarded_restart_after_attached_mismatch(self):
+        manager = MissionManager(
+            None,
+            self._strategy(),
+            defer_startup_gates_until_next_run=True,
+            validate_attached_battle=True,
+        )
+        manager.start()
+        manager.maybe_run_start({"state": "RUNNING"})
+        mv = manager.ctx.data["mission_vars"]
+        mv["gc_session_preflight_blocked"] = True
+        mv["gc_session_preflight_restart_available"] = True
+
+        self.assertTrue(manager.session_preflight_restart_available())
+        self.assertTrue(manager.authorize_session_preflight_restart())
+        self.assertFalse(mv["gc_session_preflight_blocked"])
+        self.assertTrue(mv["gc_session_preflight_repair_required"])
+        self.assertFalse(mv["gc_session_preflight_restart_available"])
+
     def test_terminal_boundary_rearms_gates_for_next_battle(self):
         strategy = self._strategy()
         manager = MissionManager(
@@ -1819,6 +1929,45 @@ class GcFarmProfileTests(unittest.TestCase):
         self.assertTrue(mv["gc_session_preflight_blocked"])
         self.assertFalse(mv["gc_session_preflight_repair_required"])
 
+    def test_read_only_attached_mismatch_exposes_restart_without_requesting_it(self):
+        strategy = get_strategy("farm_t18")
+        ctx = MissionContext()
+        strategy.on_start(ctx)
+        mv = ctx.data["mission_vars"]
+        mv["last_detection_state"] = "RUNNING"
+        action = next(
+            rule
+            for rule in strategy.rules
+            if rule["name"] == "validate_requested_attached_session_preflight"
+        )["do"][0]
+        evidence = SimpleNamespace(
+            as_dict=lambda: {
+                "valid": False,
+                "failed_checks": ["modules"],
+            },
+            requires_no_battle_repair=True,
+            failed_checks=("modules",),
+        )
+        result = GcLivePreflightResult(
+            GcPreflightNavigationStatus.MISMATCH,
+            "configuration mismatch",
+            evidence,
+        )
+
+        with patch(
+            "core.action_executor.run_read_only_gc_preflight",
+            return_value=result,
+        ):
+            execute_actions(
+                object(),
+                [{**action, "_strategy": True}],
+                ctx,
+            )
+
+        self.assertTrue(mv["gc_session_preflight_blocked"])
+        self.assertTrue(mv["gc_session_preflight_restart_available"])
+        self.assertFalse(mv["gc_session_preflight_repair_required"])
+
     def test_session_preflight_no_battle_mismatch_requests_guarded_repair(self):
         strategy = get_strategy("gc_farm_t19_experiment")
         ctx = MissionContext()
@@ -2022,7 +2171,7 @@ class GcFarmProfileTests(unittest.TestCase):
             app._attempt_session_preflight_repair({"state": "RUNNING"})
 
         manager.begin_session_preflight_repair.assert_called_once_with()
-        surrender.assert_called_once_with()
+        surrender.assert_called_once_with(action_guard=app._runtime_action_guard)
         manager.fail_session_preflight_repair.assert_not_called()
 
     def test_app_fails_closed_when_guarded_surrender_does_not_complete(self):

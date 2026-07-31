@@ -61,20 +61,23 @@ For example:
 .venv/bin/python main.py --adb-port 5555 --strategy farm_t19
 ```
 
-To replace automation while retaining the battle already in progress, use the
-explicit next-run startup policy:
+Startup now classifies the first fresh game view automatically. At verified
+Home **New Battle**, normal pre-battle checks always run. If the first view is
+an active battle or Home **Resume Battle**, the default policy attaches to that
+battle and runs a read-only strategy validation:
 
 ```bash
-.venv/bin/python main.py --adb-port 5555 --strategy farm_t18 --startup-gates next_run
+.venv/bin/python main.py --adb-port 5555 --strategy farm_t18 --startup-gates auto_validate
 ```
 
-This attaches to the existing/resumable battle and suppresses only tagged
-new-run initialization and session-preflight rules. Normal automation remains
-active. The Tournament observer is the narrow exception: its explicitly
-read-only preflight runs on attachment so mismatches can be recorded without
-repair authority or an operator decision. Game Over, Tournament Results, or
-verified Home `NEW_BATTLE` evidence re-arms the gates for the following battle.
-The default `immediate` policy retains normal first-battle startup gating.
+Validation never repairs or restarts the attached battle on its own. A
+Home-repairable mismatch publishes an operator decision that can authorize the
+existing guarded restart/repair path. To attach and skip all strategy setup
+checks for only that current battle, use `--startup-gates auto`. Game Over,
+Tournament Results, or verified Home `NEW_BATTLE` evidence clears either
+attachment choice and re-arms the complete gates for the following battle.
+`immediate` remains an advanced forced-first-battle policy, while `next_run` is
+reserved for the guarded process-reload workflow.
 
 For a gate-free experiment, select the no-strategy mode explicitly:
 

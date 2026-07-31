@@ -201,15 +201,15 @@ the same bounded floating-gem sweep used by normal battles; the profile does
 not run an independent or continuous floating-gem handler. No Tournament
 battle gains validation-battle Surrender authority.
 
-Attachment to an already-running Tournament remains observer-only and does
-not use the exclusive validation receipt. Without Home boundary evidence, the
-guarded compatibility route inspects Cards, Ultimate Weapons, Modules, Bots,
-and Guardians in battle. Workshop is the only check that takes resumable Exit
-Battle → Go Home. It may enforce only Damage Slider `100%`, the Range `98.38m`
-or `30.00m` Orb Distance preset selected by the observed Range, and Poison
-Swamp Stun `on`; other readable Ranges remain untouched. It never selects a
-Home preset or equips a loadout and must verify that Resume returns to the same
-Tournament.
+Automatic validation of an already-running Tournament remains observer-only
+and does not use the exclusive validation receipt. Without Home boundary
+evidence, it inspects Cards, Ultimate Weapons, Modules, Bots, and Guardians in
+battle. Workshop is the only check that takes resumable Exit Battle → Go Home.
+The automatic attachment path suppresses the profile's attachment-time
+configuration actions, never selects a Home preset or equips a loadout, and
+must verify that Resume returns to the same Tournament. The separate guarded
+process-reload workflow retains its explicit `next_run` compatibility policy;
+it is not the user-facing validation choice.
 A mismatch is retained as session evidence but cannot request Home repair or
 block result capture. Observation-only mismatches complete the one-shot pass
 without an operator decision or run-scoped waiver; they cannot make the

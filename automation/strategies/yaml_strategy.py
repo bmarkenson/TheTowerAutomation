@@ -126,6 +126,49 @@ class YamlStrategy(BaseStrategy):
         self._runtime_policy: Dict[str, Any] = copy.deepcopy(
             self.config.get("runtime_policy") or {}
         )
+        attached_validation_action: Optional[Dict[str, Any]] = None
+        if (
+            self._runtime_policy.get("session_preflight_on_attach") is True
+        ):
+            for rule in self.rules:
+                if str(rule.get("gate_phase") or "") != "session_preflight":
+                    continue
+                for action in rule.get("do") or []:
+                    if (action or {}).get("type") in {
+                        "gc_session_preflight",
+                        "session_preflight",
+                    }:
+                        attached_validation_action = copy.deepcopy(action)
+                        break
+                if attached_validation_action is not None:
+                    break
+        elif self._session_preflight_requirements:
+            attached_validation_action = {
+                "type": "gc_session_preflight",
+                "requirements": copy.deepcopy(
+                    self._session_preflight_requirements
+                ),
+                "mismatch_policy": "block",
+            }
+        if self._session_preflight_assertions and attached_validation_action:
+            attached_validation_action["allow_repair"] = False
+            self.rules.insert(
+                0,
+                {
+                    "name": "validate_requested_attached_session_preflight",
+                    "gate_phase": "session_preflight",
+                    "run_when_attached": True,
+                    "attached_validation_only": True,
+                    "when": {"state": "RUNNING"},
+                    "assert": [
+                        "attached_validation_requested",
+                        "!gc_session_preflight_completed",
+                        "!gc_session_preflight_attempted",
+                    ],
+                    "cooldown_sec": 30.0,
+                    "do": [attached_validation_action],
+                }
+            )
 
     @classmethod
     def from_file(cls, path: str) -> "YamlStrategy":
@@ -257,9 +300,14 @@ class YamlStrategy(BaseStrategy):
             if (
                 ctx.data.get("startup_gates_deferred")
                 and gate_phase in {"run_initialization", "session_preflight"}
-                and not bool(rule.get("run_when_attached"))
             ):
-                continue
+                if ctx.data.get("skip_attached_checks"):
+                    continue
+                if ctx.data.get("attached_validation_requested"):
+                    if not bool(rule.get("attached_validation_only")):
+                        continue
+                if not bool(rule.get("run_when_attached")):
+                    continue
             when = dict(rule.get("when") or {})
             if "assert" in rule:
                 when["assert"] = rule["assert"]

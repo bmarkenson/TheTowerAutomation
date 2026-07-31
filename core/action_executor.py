@@ -381,6 +381,7 @@ def execute_actions(
                 if mv is not None:
                     mv["gc_session_preflight_attempted"] = True
                     mv["gc_session_preflight_blocked"] = False
+                    mv["gc_session_preflight_restart_available"] = False
                 effective_requirements = dict(requirements)
                 if mv is not None:
                     waivers = mv.get("gc_session_preflight_waivers")
@@ -431,6 +432,7 @@ def execute_actions(
                         mv["gc_session_preflight_failed_checks"] = []
                         mv["gc_session_preflight_repair_required"] = False
                         mv["gc_session_preflight_repair_in_progress"] = False
+                        mv["gc_session_preflight_restart_available"] = False
                         _reset_repair_mismatch_attempts(mv)
                     log_mission(
                         "[SESSION_PREFLIGHT] Session validation completed: "
@@ -442,15 +444,18 @@ def execute_actions(
                         act.get("mismatch_policy") or "block"
                     ).strip().lower()
                     observation_only = mismatch_policy == "notify"
-                    repairable = bool(
-                        not observation_only
-                        and act.get("allow_repair", True)
-                        and result.evidence is not None
+                    home_repair_available = bool(
+                        result.evidence is not None
                         and getattr(
                             result.evidence,
                             "requires_no_battle_repair",
                             False,
                         )
+                    )
+                    repairable = bool(
+                        not observation_only
+                        and act.get("allow_repair", True)
+                        and home_repair_available
                     )
                     failed_checks = list(
                         getattr(result.evidence, "failed_checks", ())
@@ -501,6 +506,9 @@ def execute_actions(
                             repair_requested
                         )
                         mv["gc_session_preflight_repair_in_progress"] = False
+                        mv["gc_session_preflight_restart_available"] = (
+                            home_repair_available
+                        )
                         if repairable and not repair_requested:
                             mv["gc_session_preflight_attempted"] = False
                         if repair_requested:
@@ -543,6 +551,7 @@ def execute_actions(
                         mv["gc_session_preflight_attempted"] = False
                         mv["gc_session_preflight_repair_required"] = False
                         mv["gc_session_preflight_repair_in_progress"] = False
+                        mv["gc_session_preflight_restart_available"] = False
                         mv["gc_session_preflight_failed_checks"] = []
                         _reset_repair_mismatch_attempts(mv)
                     interrupted_level = (

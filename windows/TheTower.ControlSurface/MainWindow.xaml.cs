@@ -787,9 +787,10 @@ public partial class MainWindow : Window
                 var strategy = SelectedStrategy()
                     ?? throw new InvalidOperationException(
                         "Select a strategy before starting automation.");
-                var startupGatePolicy = AttachCurrentBattleBox.IsChecked == true
-                    ? "next_run"
-                    : "immediate";
+                var startupGatePolicy =
+                    SkipAttachedBattleChecksRadio.IsChecked == true
+                        ? "auto"
+                        : "auto_validate";
                 response = await _api.PostProcessAsync(
                     new
                     {
@@ -1331,7 +1332,10 @@ public partial class MainWindow : Window
             processActive);
         StartPausedButton.ToolTip = startBlocker;
         StartRunningButton.ToolTip = startBlocker;
-        AttachCurrentBattleBox.IsEnabled = lifecycleAvailable && !processActive;
+        ValidateAttachedBattleRadio.IsEnabled =
+            lifecycleAvailable && !processActive;
+        SkipAttachedBattleChecksRadio.IsEnabled =
+            lifecycleAvailable && !processActive;
         CompleteStopButton.IsEnabled = lifecycleAvailable && service?.Active == true;
         ReloadAutomationButton.IsEnabled = lifecycleAvailable
             && service?.Active == true
@@ -1412,10 +1416,10 @@ public partial class MainWindow : Window
         }
         if (!_startupGatePolicyDirty && !processActive)
         {
-            AttachCurrentBattleBox.IsChecked = string.Equals(
-                service?.StartupGatePolicy,
-                "next_run",
-                StringComparison.OrdinalIgnoreCase);
+            var skipAttachedChecks = service?.StartupGatePolicy is
+                "auto" or "next_run";
+            SkipAttachedBattleChecksRadio.IsChecked = skipAttachedChecks;
+            ValidateAttachedBattleRadio.IsChecked = !skipAttachedChecks;
         }
 
         var statePending = processActive
@@ -1979,8 +1983,14 @@ public partial class MainWindow : Window
         StrategySelectionBox.IsEnabled =
             _strategyLifecycleAvailable && !_strategyRequestInFlight;
         QueueStrategyButton.Content = _strategyProcessActive
-            ? "Queue for next boundary"
-            : "Save for next start";
+            ? "Use next battle"
+            : "Save startup default";
+        QueueStrategyButton.ToolTip = _strategyProcessActive
+            ? "Keep this battle unchanged and apply the selection at the next confirmed battle boundary."
+            : "Remember this strategy without starting automation. The Process-tab Start buttons already use the current selection.";
+        Grid.SetColumnSpan(
+            QueueStrategyButton,
+            _strategyProcessActive ? 1 : 2);
         QueueStrategyButton.IsEnabled = _strategyLifecycleAvailable
             && hasSelection
             && !queueAlreadyRequested
@@ -1995,6 +2005,14 @@ public partial class MainWindow : Window
                 StringComparison.OrdinalIgnoreCase)
             && !adoptionAlreadyRequested
             && !_strategyRequestInFlight;
+        AdoptStrategyButton.Visibility = _strategyProcessActive
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        AdoptStrategyButton.ToolTip =
+            "Request this strategy for the current battle. New-run setup still waits for a genuine boundary.";
+        StrategyActionHelpText.Text = _strategyProcessActive
+            ? "Use next battle leaves the current strategy alone. Switch this battle changes normal strategy behavior now; startup setup still waits for the next real boundary."
+            : "Start already uses this selection. Save startup default only if it should be remembered without starting automation.";
     }
 
     private void UpdateControlSurfaceCompatibility()

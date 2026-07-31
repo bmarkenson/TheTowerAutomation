@@ -17,9 +17,14 @@ DEFAULT_ADB_PORT = 5555
 ADB_PORT_ENVIRONMENT_VARIABLE = "THETOWER_ADB_PORT"
 DEFAULT_STRATEGY = "farm"
 STRATEGY_ENVIRONMENT_VARIABLE = "THETOWER_STRATEGY"
-DEFAULT_STARTUP_GATE_POLICY = "immediate"
+DEFAULT_STARTUP_GATE_POLICY = "auto_validate"
 STARTUP_GATE_POLICY_ENVIRONMENT_VARIABLE = "THETOWER_STARTUP_GATES"
-STARTUP_GATE_POLICIES = ("immediate", "next_run")
+STARTUP_GATE_POLICIES = (
+    "auto",
+    "auto_validate",
+    "immediate",
+    "next_run",
+)
 CONFIGURABLE_STRATEGIES = (
     "farm_t18",
     "farm_t19",
@@ -126,9 +131,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
             DEFAULT_STARTUP_GATE_POLICY,
         ),
         help=(
-            "Startup-gate policy: immediate treats the first observed battle "
-            "as a new run; next_run attaches to an existing battle and arms "
-            "gates only after its next authoritative run boundary"
+            "Startup-gate policy: auto attaches when fresh evidence first "
+            "shows an active/resumable battle and otherwise runs normal gates; "
+            "auto_validate also runs safe strategy validation after attachment; "
+            "immediate forces first-battle gates; next_run explicitly requests "
+            "attachment semantics"
         ),
     )
     parser.add_argument("--mission-log", default=None,

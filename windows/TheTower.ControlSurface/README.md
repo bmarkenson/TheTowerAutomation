@@ -138,17 +138,19 @@ amber means a live runtime has not acknowledged that directive yet. Mode buttons
 apply immediately, which prevents a periodic status refresh from replacing an
 unsaved combo-box selection. The strategy dropdown likewise preserves an
 unsent choice across refreshes. For an active process, selection alone does not
-change the current or queued strategy: choose **Queue for next boundary** to
-leave the current battle's strategy in place, or **Adopt for active battle** to
-request adoption after fresh running or resumable-Home evidence. For a stopped
+change the current or queued strategy: choose **Use next battle** to leave the
+current battle's strategy in place, or **Switch this battle** to request
+adoption after fresh running or resumable-Home evidence. For a stopped
 process, **Start paused** and **Start running** atomically save and launch the
 strategy that is visibly selected, so an older next-start value cannot win the
-process boundary. Adoption changes normal strategy behavior and Battle End
-identity without a restart, while new-run initialization, session preflight,
-and Home-only gates wait for the next genuine boundary. Selecting the displayed
-Current strategy and queueing it cancels a different pending request. Actions
-that would be no-ops are disabled; the panel reports request acceptance
-immediately and shows selected, current, and pending values separately.
+process boundary. **Save startup default** is only needed to persist a stopped
+selection without starting. Adoption changes normal strategy behavior and
+Battle End identity without a restart, while new-run initialization, session
+preflight, and Home-only gates wait for the next genuine boundary. Selecting
+the displayed Current strategy and queueing it cancels a different pending
+request. Actions that would be no-ops are disabled; the panel reports request
+acceptance immediately and shows selected, current, and pending values
+separately.
 
 The same panel selects a persistent numeric game-speed target. The dropdown
 offers `x0.0` through `x6.0` in `x0.5` increments and `x6.3 — Maximum
@@ -289,21 +291,18 @@ without recreating its startup/session gates. Wait for target acknowledgement
 before resuming; a failed connection or capture leaves the runtime paused on
 its former target.
 
-When starting automation in a battle that was already running, select
-**Attach to current battle; run gates next battle** before **Start paused** or
-**Start running**. Normal automation continues on that battle, but new-run
-initialization and session-preflight rules remain suppressed until Game Over,
-Tournament Results, or a verified Home **New Battle** boundary. The next battle
-then performs those gates normally. Leave the option clear when the first
-observed battle needs its startup gates immediately. Both Start actions persist
-the strategy currently visible in the Strategy dropdown before launching the
-Linux process.
-
-The Tournament observer is the deliberate exception to session-preflight
-suppression: it performs its read-only check on the attached run so the warning
-above can report mismatches without changing configuration or blocking natural
-terminal capture. That attachment path does not use the one-shot validation
-request and never gains Surrender authority.
+Attachment is automatic when Start first finds an active battle or Home
+**Resume Battle**. The Process tab offers two explicit choices:
+**Validate current battle if attached** runs one read-only strategy check;
+**Skip checks for current battle** suppresses all strategy setup checks for
+that battle. A repairable validation mismatch offers **Restart battle and
+repair setup**, but does not restart or change configuration unless the
+operator chooses it. At verified Home **New Battle**, this choice is ignored
+and normal pre-battle checks always run. Game Over, Tournament Results, or a
+verified Home **New Battle** boundary clears the attached-battle choice so the
+following battle performs complete gates. Both Start actions persist the
+strategy currently visible in the Strategy dropdown before launching the Linux
+process.
 
 The ADB port, bundled strategy, and startup-gate policy share the managed
 Linux environment file while remaining independent settings. Changing the ADB

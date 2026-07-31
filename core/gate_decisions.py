@@ -6,7 +6,9 @@ import json
 from typing import Any, Callable, Mapping, Sequence
 
 
-VALID_GATE_DECISION_ACTIONS = frozenset({"pause", "retry", "waive"})
+VALID_GATE_DECISION_ACTIONS = frozenset(
+    {"pause", "repair_restart", "retry", "waive"}
+)
 STARTUP_GATE_CHECK_LABELS = {
     "cards_deck": "Cards deck",
     "card_recharge_modes": "Card recharge modes",
@@ -89,6 +91,7 @@ def build_gate_decision_options(
     configured_fallbacks: Sequence[Mapping[str, Any]] = (),
     *,
     advisory: bool = False,
+    allow_repair_restart: bool = False,
 ) -> list[dict[str, str]]:
     """Return safe operator choices for one failed requirement."""
 
@@ -152,6 +155,21 @@ def build_gate_decision_options(
                 "kind": "standard",
             },
         ]
+
+    if allow_repair_restart:
+        options.append(
+            {
+                "id": "restart_and_repair",
+                "label": "Restart battle and repair setup",
+                "description": (
+                    "End this battle through the guarded repair route, correct "
+                    "the Home-only strategy setup, and validate the new battle."
+                ),
+                "action": "repair_restart",
+                "kind": "standard",
+            }
+        )
+        seen.add("restart_and_repair")
 
     defaults = (
         {

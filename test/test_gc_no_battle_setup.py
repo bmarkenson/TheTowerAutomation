@@ -1776,3 +1776,62 @@ def test_terminal_session_bypass_rearms_only_the_failed_auto_pick_check():
         "gate-auto-pick",
         completion_reason="waived auto_pick_perks for this run",
     )
+
+
+def test_attached_session_mismatch_restarts_only_after_operator_authorization():
+    manager = Mock()
+    manager.strategy = SimpleNamespace(
+        name="farm_t18",
+        session_preflight_requirements=lambda: {"modules": {"cannon": "Farm"}},
+    )
+    manager.session_preflight_failure_checks.return_value = ["modules"]
+    manager.session_preflight_restart_available.return_value = True
+    manager.authorize_session_preflight_restart.return_value = True
+    manager.gate_fallbacks.return_value = []
+    manager.ctx.data = {
+        "mission_vars": {
+            "gc_session_preflight_last_reason": "configuration mismatch",
+        }
+    }
+    options = build_gate_decision_options(
+        "modules",
+        allow_repair_restart=True,
+    )
+    pending = {
+        "request_id": "gate-attached-modules",
+        "status": "pending",
+        "strategy": "farm_t18",
+        "phase": "session_preflight",
+        "check_id": "modules",
+        "reason": "configuration mismatch",
+        "expected": {"cannon": "Farm"},
+        "options": options,
+    }
+    resolved = {
+        **pending,
+        "status": "resolved",
+        "decision_id": "restart_and_repair",
+        "selected_option": next(
+            option for option in options
+            if option["id"] == "restart_and_repair"
+        ),
+    }
+    supervisor = Mock()
+    supervisor.gate_decision = None
+    supervisor.publish_gate_decision.return_value = pending
+    supervisor.resolve_gate_decision.return_value = resolved
+    app = App.__new__(App)
+    app._mission_mgr = manager
+    app._supervisor = supervisor
+    app._gate_decision_prompt = lambda _decision: "restart_and_repair"
+    app._gate_prompted_request_id = None
+
+    app._handle_terminal_session_gate_decision()
+
+    manager.authorize_session_preflight_restart.assert_called_once_with()
+    supervisor.consume_gate_decision.assert_called_once_with(
+        "gate-attached-modules",
+        completion_reason=(
+            "authorized guarded battle restart to repair modules"
+        ),
+    )

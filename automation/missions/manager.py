@@ -20,6 +20,8 @@ class MissionManager:
         strategy: Optional[BaseStrategy],
         *,
         defer_startup_gates_until_next_run: bool = False,
+        validate_attached_battle: bool = False,
+        skip_attached_checks: bool = False,
         action_guard_fn: Optional[Callable[[], bool]] = None,
     ):
         self.mission = mission
@@ -29,6 +31,8 @@ class MissionManager:
         self._last_state = None
         self._mission_was_complete = False
         self._startup_gates_deferred = bool(defer_startup_gates_until_next_run)
+        self._validate_initial_attachment = bool(validate_attached_battle)
+        self._skip_initial_attachment_checks = bool(skip_attached_checks)
         self._action_guard_fn = action_guard_fn
         self._new_battle_home_observed = False
         self._exclusive_validation_prepared_request_id: Optional[str] = None
@@ -52,6 +56,7 @@ class MissionManager:
             "exclusive_validation_battle"
         ] = False
         self.ctx.data["startup_gates_deferred"] = self._startup_gates_deferred
+        self._clear_attached_check_state()
         if self._startup_gates_deferred:
             self._record_deferred_free_upgrade_lock_evidence()
         self._started = True
@@ -87,9 +92,25 @@ class MissionManager:
             home_control=control,
         )
         if self._battle_lifecycle.last_observation_adopted:
+            if self._skip_initial_attachment_checks:
+                self.ctx.data["skip_attached_checks"] = True
+            if self._validate_initial_attachment:
+                self.ctx.data["attached_validation_requested"] = True
+                self.ctx.data.setdefault("mission_vars", {})[
+                    "attached_validation_requested"
+                ] = True
             log(
                 "[RUN_INIT] Attached to existing battle; startup gates deferred "
-                "until the next run boundary",
+                "until the next run boundary"
+                + (
+                    "; requested strategy validation is armed"
+                    if self._validate_initial_attachment
+                    else (
+                        "; strategy setup checks are skipped for this battle"
+                        if self._skip_initial_attachment_checks
+                        else ""
+                    )
+                ),
                 "INFO",
                 console=True,
             )
@@ -108,6 +129,7 @@ class MissionManager:
         return battle_started
 
     def _arm_startup_gates(self) -> None:
+        self._clear_attached_check_state()
         if not self._startup_gates_deferred:
             return
         self._startup_gates_deferred = False
@@ -117,6 +139,15 @@ class MissionManager:
             "INFO",
             console=True,
         )
+
+    def _clear_attached_check_state(self) -> None:
+        """Clear process-start choices at a strategy or real run boundary."""
+
+        self.ctx.data["attached_validation_requested"] = False
+        self.ctx.data["skip_attached_checks"] = False
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        mv["attached_validation_requested"] = False
+        mv["gc_session_preflight_restart_available"] = False
 
     def _free_upgrade_lock_requirements(self) -> list[Any]:
         if not self.strategy:
@@ -227,6 +258,7 @@ class MissionManager:
         self._startup_gates_deferred = False
         self._new_battle_home_observed = False
         self.ctx.data["startup_gates_deferred"] = False
+        self._clear_attached_check_state()
 
     def adopt_strategy_for_active_battle(
         self,
@@ -235,6 +267,7 @@ class MissionManager:
         """Adopt reporting and normal rules without inventing a run boundary."""
 
         self._replace_strategy(strategy)
+        self._clear_attached_check_state()
         self._startup_gates_deferred = True
         self._new_battle_home_observed = False
         self.ctx.data["startup_gates_deferred"] = True
@@ -322,15 +355,20 @@ class MissionManager:
         ):
             return False
         if self._startup_gates_deferred:
-            try:
-                policy = self.strategy.runtime_policy()
-            except Exception:
-                policy = {}
-            if not (
-                isinstance(policy, Mapping)
-                and policy.get("session_preflight_on_attach") is True
-            ):
+            if self.ctx.data.get("skip_attached_checks") is True:
                 return False
+            if self.ctx.data.get("attached_validation_requested") is True:
+                pass
+            else:
+                try:
+                    policy = self.strategy.runtime_policy()
+                except Exception:
+                    policy = {}
+                if not (
+                    isinstance(policy, Mapping)
+                    and policy.get("session_preflight_on_attach") is True
+                ):
+                    return False
         if self.run_initialization_pending():
             return False
         if not self.strategy.requires_session_preflight():
@@ -342,6 +380,32 @@ class MissionManager:
 
         mv = self.ctx.data.setdefault("mission_vars", {})
         return bool(mv.get("gc_session_preflight_repair_required"))
+
+    def attached_validation_requested(self) -> bool:
+        """Return whether this process adopted and is validating a live battle."""
+
+        return bool(self.ctx.data.get("attached_validation_requested"))
+
+    def session_preflight_restart_available(self) -> bool:
+        """Return whether attached validation found a Home-repairable mismatch."""
+
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        return bool(
+            self.attached_validation_requested()
+            and mv.get("gc_session_preflight_restart_available")
+        )
+
+    def authorize_session_preflight_restart(self) -> bool:
+        """Convert a confirmed attached mismatch into the guarded repair path."""
+
+        if not self.session_preflight_restart_available():
+            return False
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        mv["gc_session_preflight_blocked"] = False
+        mv["gc_session_preflight_repair_required"] = True
+        mv["gc_session_preflight_repair_in_progress"] = False
+        mv["gc_session_preflight_restart_available"] = False
+        return True
 
     def session_preflight_repair_in_progress(self) -> bool:
         """Return whether this process surrendered a run for preflight repair."""
@@ -389,6 +453,7 @@ class MissionManager:
         mv["gc_session_preflight_blocked"] = False
         mv["gc_session_preflight_repair_required"] = False
         mv["gc_session_preflight_repair_in_progress"] = False
+        mv["gc_session_preflight_restart_available"] = False
         mv["gc_session_preflight_failed_checks"] = []
         self._reset_session_preflight_repair_attempts()
 
@@ -401,6 +466,7 @@ class MissionManager:
         mv["gc_session_preflight_blocked"] = False
         mv["gc_session_preflight_repair_required"] = False
         mv["gc_session_preflight_repair_in_progress"] = False
+        mv["gc_session_preflight_restart_available"] = False
         mv["gc_session_preflight_failed_checks"] = []
         self._reset_session_preflight_repair_attempts()
 
@@ -428,6 +494,7 @@ class MissionManager:
         mv = self.ctx.data.setdefault("mission_vars", {})
         mv["gc_session_preflight_repair_required"] = False
         mv["gc_session_preflight_repair_in_progress"] = False
+        mv["gc_session_preflight_restart_available"] = False
         mv["gc_session_preflight_blocked"] = True
         mv["gc_session_preflight_last_reason"] = str(reason)
 
@@ -500,6 +567,7 @@ class MissionManager:
         }
         mv["gc_session_preflight_repair_required"] = False
         mv["gc_session_preflight_repair_in_progress"] = False
+        mv["gc_session_preflight_restart_available"] = False
         if repairing:
             # The next battle must establish fresh session evidence for the
             # corrected no-battle settings.

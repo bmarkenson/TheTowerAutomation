@@ -393,15 +393,15 @@ systemd signals the process; start persists `PAUSED` until systemd reports the
 unit active.
 
 The Windows controls can select the localhost ADB port, bundled strategy, and
-startup-gate policy used by the next managed start. While automation is
-stopped, select the new values and then start paused or running. Each Start
-request atomically persists the strategy currently visible in the client before
-launching the service, so a stale saved strategy cannot bypass that selection's
-Home-only gates. The API persists the validated settings in
+attached-battle check policy used by the next managed start. While automation
+is stopped, select the new values and then start paused or running. Each Start
+request atomically persists the strategy currently visible in the client
+before launching the service, so a stale saved strategy cannot bypass that
+selection's Home-only gates. The API persists the validated settings in
 `~/.config/thetower/automation-adb.env`; the systemd unit reads that file at
-start. An absent file defaults to port `5555`, strategy `farm`, and immediate
-startup gates. Explicit manual `main.py --adb-port PORT --strategy NAME
---startup-gates POLICY` arguments still win.
+start. An absent file defaults to port `5555`, strategy `farm`, and automatic
+attachment with read-only validation. Explicit manual `main.py --adb-port
+PORT --strategy NAME --startup-gates POLICY` arguments still win.
 
 #### Windows host-performance tracker
 
@@ -529,16 +529,17 @@ Skip and Enemy Attack Level Skip before normal observer handling; the
 disposable validation battle does not buy those upgrades or fabricate their
 completion. Automation never Surrenders the real Tournament battle.
 
-When replacing automation during a battle, select **Attach to current battle;
-run gates next battle** before starting. The new process observes and controls
-that existing run normally but suppresses only rules tagged as run
-initialization or session preflight. The Tournament observer is the narrow
-exception: it runs its declared preflight on attachment, enforces only Damage
-Slider `100%`, the Orb Distance preset selected by a configured observed Range,
-and Poison Swamp Stun `on`, and reports other bad settings without acquiring
-Home-repair authority. An unconfigured readable Range remains untouched.
-The suppression survives transient Unknown screens and Home `RESUME_BATTLE`.
-It ends only at Game Over, Tournament Results, or verified Home `NEW_BATTLE`;
+Attachment is automatic when fresh evidence first shows an active battle or
+Home **Resume Battle**. Before Start, select **Validate current battle if
+attached** for one read-only strategy check, or **Skip checks for current
+battle** to suppress all strategy setup checks for that attached battle.
+Validation does not change configuration or restart the battle. If it finds a
+Home-repairable mismatch, the decision dialog may offer **Restart battle and
+repair setup**; only selecting that response authorizes the guarded repair
+route. At verified Home **New Battle**, the selection is ignored and normal
+pre-battle checks run without asking. Attachment state survives transient
+Unknown screens and Home `RESUME_BATTLE`. It ends at Game Over, Tournament
+Results, or verified Home `NEW_BATTLE`;
 the following battle then performs the real gates. Do not select this for a
 process that is expected to configure a newly started battle immediately.
 

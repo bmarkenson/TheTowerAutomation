@@ -441,6 +441,20 @@ def test_advisory_gate_decision_persists_nonblocking_pause_choice(tmp_path):
     assert resolved["selected_option"]["action"] == "pause"
 
 
+def test_attached_mismatch_can_offer_guarded_restart():
+    options = build_gate_decision_options(
+        "modules",
+        allow_repair_restart=True,
+    )
+
+    restart = next(
+        option for option in options
+        if option["id"] == "restart_and_repair"
+    )
+    assert restart["action"] == "repair_restart"
+    assert "guarded repair route" in restart["description"]
+
+
 def test_runtime_can_persist_advisory_pause(tmp_path):
     control_file = tmp_path / "automation_ctl.json"
     supervisor = _supervisor(control_file)

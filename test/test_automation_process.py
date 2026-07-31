@@ -25,7 +25,7 @@ class FakeManager:
         self.fail_start = fail_start
         self.adb_port = 5555
         self.strategy = "farm"
-        self.startup_gate_policy = "immediate"
+        self.startup_gate_policy = "auto_validate"
         self.pid = os.getpid()
         self.calls: list[str] = []
         self.on_start = None
@@ -95,14 +95,14 @@ class FakeManager:
             raise AutomationProcessError(
                 "Completely stop automation before changing startup gates"
             )
-        if policy not in {"immediate", "next_run"}:
+        if policy not in {"auto", "auto_validate", "immediate", "next_run"}:
             raise AutomationProcessError("invalid startup gate policy")
         self.startup_gate_policy = policy
         return self.status()
 
     def persist_startup_gate_policy(self, policy):
         self.calls.append(f"persist_startup_gate_policy:{policy}")
-        if policy not in {"immediate", "next_run"}:
+        if policy not in {"auto", "auto_validate", "immediate", "next_run"}:
             raise AutomationProcessError("invalid startup gate policy")
         self.startup_gate_policy = policy
         return self.status()
@@ -165,6 +165,12 @@ def test_startup_gate_policy_defaults_from_managed_environment(monkeypatch):
     monkeypatch.setenv("THETOWER_STARTUP_GATES", "next_run")
 
     assert parse_args([]).startup_gates == "next_run"
+
+
+def test_startup_gate_policy_defaults_to_automatic_attached_validation(monkeypatch):
+    monkeypatch.delenv("THETOWER_STARTUP_GATES", raising=False)
+
+    assert parse_args([]).startup_gates == "auto_validate"
 
 
 def test_systemd_manager_uses_only_the_fixed_named_service(tmp_path):
@@ -239,7 +245,7 @@ def test_systemd_manager_persists_stopped_adb_target_atomically(tmp_path):
     assert environment_file.read_text(encoding="utf-8") == (
         "THETOWER_ADB_PORT=5565\n"
         "THETOWER_STRATEGY=farm\n"
-        "THETOWER_STARTUP_GATES=immediate\n"
+        "THETOWER_STARTUP_GATES=auto_validate\n"
     )
     assert stat.S_IMODE(environment_file.stat().st_mode) == 0o600
     assert status["adb_port"] == 5565
@@ -275,7 +281,7 @@ def test_systemd_manager_persists_strategy_and_preserves_adb_port(tmp_path):
     assert environment_file.read_text(encoding="utf-8") == (
         "THETOWER_ADB_PORT=5565\n"
         "THETOWER_STRATEGY=tournament\n"
-        "THETOWER_STARTUP_GATES=immediate\n"
+        "THETOWER_STARTUP_GATES=auto_validate\n"
     )
     assert status["adb_port"] == 5565
 
@@ -310,7 +316,7 @@ def test_systemd_manager_can_persist_strategy_while_active(tmp_path):
     assert environment_file.read_text(encoding="utf-8") == (
         "THETOWER_ADB_PORT=5565\n"
         "THETOWER_STRATEGY=tournament\n"
-        "THETOWER_STARTUP_GATES=immediate\n"
+        "THETOWER_STARTUP_GATES=auto_validate\n"
     )
 
 
@@ -490,10 +496,14 @@ def test_start_running_crosses_new_process_boundary_paused(tmp_path):
         {"action": "start", "run_state": "RUNNING"}
     )
 
-    assert manager.calls == ["start"]
+    assert manager.calls == ["set_startup_gate_policy:auto_validate", "start"]
     assert service.control_store.read()["state"] == "RUNNING"
     assert response["process_service"]["active"]
-    assert response["request"] == {"accepted": True, "action": "start"}
+    assert response["request"] == {
+        "accepted": True,
+        "action": "start",
+        "startup_gate_policy": "auto_validate",
+    }
 
 
 def test_start_can_attach_current_battle_and_persists_policy_before_start(tmp_path):
@@ -573,7 +583,13 @@ def test_start_with_saved_tournament_creates_fresh_validation_request(tmp_path):
 
     assert second_request_id != first_request_id
     assert second["receipts"][second_request_id]["status"] == "pending"
-    assert manager.calls == ["start", "stop", "start"]
+    assert manager.calls == [
+        "set_startup_gate_policy:auto_validate",
+        "start",
+        "stop",
+        "set_startup_gate_policy:auto_validate",
+        "start",
+    ]
 
 
 @pytest.mark.parametrize("policy", ["", "later", 1, True])
@@ -639,7 +655,11 @@ def test_start_paused_and_complete_stop_preserve_safe_ordering(tmp_path):
     )
     response = service.apply_process_action({"action": "stop"})
 
-    assert manager.calls == ["start", "stop"]
+    assert manager.calls == [
+        "set_startup_gate_policy:auto_validate",
+        "start",
+        "stop",
+    ]
     assert service.control_store.read()["state"] == "STOPPED"
     assert response["process_service"]["active"] is False
 
@@ -685,7 +705,7 @@ def test_attached_restart_pauses_replaces_and_restores_running_intent(tmp_path):
         "stop",
         "set_startup_gate_policy:next_run",
         "start",
-        "persist_startup_gate_policy:immediate",
+        "persist_startup_gate_policy:auto_validate",
     ]
     assert len(pause_checks) == 1
     assert pause_checks[0][0] == manager.pid - 1
@@ -694,7 +714,7 @@ def test_attached_restart_pauses_replaces_and_restores_running_intent(tmp_path):
     assert len(replacement_checks) == 1
     assert replacement_checks[0][0] == manager.pid
     assert replacement_checks[0][1] > 0
-    assert manager.startup_gate_policy == "immediate"
+    assert manager.startup_gate_policy == "auto_validate"
     assert service.control_store.read()["state"] == "RUNNING"
     assert response["request"] == {
         "accepted": True,
@@ -726,9 +746,9 @@ def test_attached_restart_failure_restores_policy_and_leaves_pause(tmp_path):
         "stop",
         "set_startup_gate_policy:next_run",
         "start",
-        "set_startup_gate_policy:immediate",
+        "set_startup_gate_policy:auto_validate",
     ]
-    assert manager.startup_gate_policy == "immediate"
+    assert manager.startup_gate_policy == "auto_validate"
     assert service.control_store.read()["state"] == "PAUSED"
 
 

@@ -136,7 +136,14 @@ class App:
             self._load_mission(config),
             self._load_strategy(config),
             defer_startup_gates_until_next_run=(
-                config.startup_gate_policy == "next_run"
+                config.startup_gate_policy
+                in {"auto", "auto_validate", "next_run"}
+            ),
+            validate_attached_battle=(
+                config.startup_gate_policy == "auto_validate"
+            ),
+            skip_attached_checks=(
+                config.startup_gate_policy == "auto"
             ),
             action_guard_fn=self._runtime_action_guard,
         )
@@ -1221,11 +1228,13 @@ class App:
         reason: str,
         expected: object,
         blocking: bool = True,
+        allow_repair_restart: bool = False,
     ) -> Optional[Dict[str, Any]]:
         options = build_gate_decision_options(
             check_id,
             self._mission_mgr.gate_fallbacks(check_id),
             advisory=not blocking,
+            allow_repair_restart=allow_repair_restart,
         )
         directive = self._supervisor.publish_gate_decision(
             strategy=self._current_strategy_name(),
@@ -1326,6 +1335,12 @@ class App:
             if not self._supervisor.persist_state("PAUSED"):
                 return False
             completion_reason = f"paused for manual {check_id} changes"
+        elif action == "repair_restart":
+            if not self._mission_mgr.authorize_session_preflight_restart():
+                return False
+            completion_reason = (
+                f"authorized guarded battle restart to repair {check_id}"
+            )
         else:
             return False
         self._supervisor.consume_gate_decision(
@@ -1334,7 +1349,7 @@ class App:
         )
         log(
             f"[GATE_DECISION] {completion_reason}",
-            "WARN" if action == "waive" else "INFO",
+            "WARN" if action in {"waive", "repair_restart"} else "INFO",
             console=True,
         )
         return True
@@ -1356,6 +1371,10 @@ class App:
                 check_id=check_id,
                 reason=reason,
                 expected=requirements.get(check_id),
+                allow_repair_restart=(
+                    getattr(self, "_auto_start_enabled", True)
+                    and self._mission_mgr.session_preflight_restart_available()
+                ),
             )
             if directive and directive.get("status") == "pending":
                 directive = self._prompt_for_gate_decision(directive) or directive
@@ -2272,12 +2291,22 @@ class App:
         if not self._mission_mgr.begin_session_preflight_repair():
             return
 
-        log(
-            "[SESSION_PREFLIGHT] Ending the active GC run to repair Home-only settings",
-            "WARN",
+        attached_authorization = (
+            self._mission_mgr.attached_validation_requested()
+        )
+        log_action_intent(
+            "Restarting the battle for Home-only strategy repair",
+            reason=(
+                "the operator authorized the attached-battle restart after "
+                "read-only validation"
+                if attached_authorization
+                else "repeated session validation established the configured "
+                "guarded recovery threshold"
+            ),
+            detail="[SESSION_PREFLIGHT] repair_transition=surrender_to_game_over",
             console=True,
         )
-        if not surrender_run():
+        if not surrender_run(action_guard=self._runtime_action_guard):
             reason = "guarded Surrender did not reach Game Over"
             self._mission_mgr.fail_session_preflight_repair(reason)
             log(
@@ -2285,10 +2314,18 @@ class App:
                 "ERROR",
                 console=True,
             )
+            log_result(
+                f"Battle restart for strategy repair failed — {reason}",
+                detail="[SESSION_PREFLIGHT] repair_transition=failed",
+                console=True,
+            )
             return
-        log(
-            "[SESSION_PREFLIGHT] GC run ended; Game Over will return Home for repair",
-            "INFO",
+        log_result(
+            "Battle ended for strategy repair — Game Over reached",
+            detail=(
+                "[SESSION_PREFLIGHT] repair_transition=game_over; "
+                "next_step=return_home_and_revalidate"
+            ),
             console=True,
         )
 
