@@ -571,6 +571,15 @@ evidence is attached.
   scope whose log boundary includes the continuity action. A readable identity
   is persisted with a run-ID compare-and-set so a stale inspection cannot
   overwrite a newer lifecycle boundary.
+- Completion of a session configuration gate writes a receipt into that same
+  run scope. The receipt identifies the strategy and fingerprints its exact
+  session assertions, requirements, fallbacks, and generated gate rules. Only
+  a run-ID-stable continuity result proving unchanged Battle History may reuse
+  an exact matching receipt on process attachment. Reuse structurally
+  suppresses the attached session rules without fabricating their in-memory
+  completion variables; a missing or mismatched receipt, later battle,
+  unreadable identity, or failed scope compare runs the declared attachment
+  checks normally.
 - Battle History continuity inspection has exclusive input authority while
   pending. Pause is checked before each input, all initialization, preflight,
   handler, and blind-tapper paths remain blocked, and restoration to the source

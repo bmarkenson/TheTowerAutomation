@@ -593,6 +593,127 @@ class DeferredStartupGateTests(unittest.TestCase):
             ],
         )
 
+    def test_completed_session_check_persists_scope_bound_receipt(self):
+        strategy = self._strategy()
+        manager = MissionManager(None, strategy)
+        manager.start()
+        manager.maybe_run_start({"state": "RUNNING"})
+        manager.ctx.data["mission_vars"]["session_gate_done"] = True
+        scope = {"run_id": "current-run"}
+
+        with (
+            patch(
+                "automation.missions.manager.get_activity_scope",
+                return_value=scope,
+            ),
+            patch(
+                "automation.missions.manager."
+                "record_activity_scope_session_preflight",
+                return_value={**scope, "session_preflight": {}},
+            ) as record,
+        ):
+            persisted = manager.persist_session_preflight_completion()
+
+        self.assertTrue(persisted)
+        record.assert_called_once_with(
+            run_id="current-run",
+            strategy=strategy.name,
+            configuration_fingerprint=(
+                strategy.session_preflight_fingerprint()
+            ),
+        )
+
+    def test_confirmed_same_battle_reuses_matching_session_receipt(self):
+        strategy = self._strategy()
+        manager = MissionManager(
+            None,
+            strategy,
+            defer_startup_gates_until_next_run=True,
+            validate_attached_battle=True,
+        )
+        manager.start()
+        manager.maybe_run_start({"state": "RUNNING"})
+        scope = {
+            "run_id": "current-run",
+            "session_preflight": {
+                "schema_version": 1,
+                "status": "completed",
+                "strategy": strategy.name,
+                "configuration_fingerprint": (
+                    strategy.session_preflight_fingerprint()
+                ),
+            },
+        }
+
+        with patch(
+            "automation.missions.manager.get_activity_scope",
+            return_value=scope,
+        ):
+            reused = manager.reuse_session_preflight_for_confirmed_attachment(
+                "current-run"
+            )
+
+        self.assertTrue(reused)
+        self.assertTrue(
+            manager.ctx.data["attached_session_preflight_reused"]
+        )
+        self.assertFalse(manager.attached_validation_requested())
+        self.assertFalse(manager.session_preflight_pending())
+        self.assertEqual(
+            strategy.tick(manager.ctx, object(), {"state": "RUNNING"}),
+            [{"type": "normal_action"}],
+        )
+
+    def test_same_battle_without_matching_receipt_still_runs_checks(self):
+        strategy = self._strategy()
+        manager = MissionManager(
+            None,
+            strategy,
+            defer_startup_gates_until_next_run=True,
+            validate_attached_battle=True,
+        )
+        manager.start()
+        manager.maybe_run_start({"state": "RUNNING"})
+        scope = {
+            "run_id": "current-run",
+            "session_preflight": {
+                "schema_version": 1,
+                "status": "completed",
+                "strategy": strategy.name,
+                "configuration_fingerprint": "older-configuration",
+            },
+        }
+
+        with patch(
+            "automation.missions.manager.get_activity_scope",
+            return_value=scope,
+        ):
+            reused = manager.reuse_session_preflight_for_confirmed_attachment(
+                "current-run"
+            )
+
+        self.assertFalse(reused)
+        self.assertFalse(
+            manager.ctx.data["attached_session_preflight_reused"]
+        )
+        self.assertTrue(manager.attached_validation_requested())
+        self.assertTrue(manager.session_preflight_pending())
+
+    def test_app_applies_same_battle_continuity_before_recapture(self):
+        app = App.__new__(App)
+        app._mission_mgr = MagicMock()
+
+        app._apply_activity_continuity_outcome(
+            SimpleNamespace(
+                confirmed_same_battle_scope_id="current-run"
+            )
+        )
+
+        reuse = (
+            app._mission_mgr.reuse_session_preflight_for_confirmed_attachment
+        )
+        reuse.assert_called_once_with("current-run")
+
     def test_explicit_skip_suppresses_even_profile_attached_checks(self):
         strategy = self._strategy()
         session_rule = next(

@@ -81,11 +81,15 @@ agnostic.
   complete pre-battle gates. An existing battle is attached without inventing a
   run boundary. `auto_validate` performs one read-only strategy validation; a
   Home-repairable mismatch offers guarded restart/repair as an explicit
-  operator decision. `auto` skips all strategy setup checks for only that
-  attached battle. A terminal result or verified Home `NEW_BATTLE` clears the
-  attachment choice, so the next battle runs its real gates without fabricated
-  completion state. `next_run` remains the guarded-reload policy and
-  `immediate` is the explicit forced-first-battle policy.
+  operator decision. If Battle History proves the Current-run scope still
+  identifies the same battle and that scope holds a matching completed-check
+  receipt, the attached session checks are reused instead of repeated.
+  Missing, stale, unreadable, or configuration-mismatched evidence retains the
+  declared attachment validation. `auto` skips all strategy setup checks for
+  only that attached battle. A terminal result or verified Home `NEW_BATTLE`
+  clears the attachment choice, so the next battle runs its real gates without
+  fabricated completion state. `next_run` remains the guarded-reload policy
+  and `immediate` is the explicit forced-first-battle policy.
 - An active strategy request persists the next-start setting and a versioned
   control directive. By default it remains pending during a battle. The
   current strategy first finalizes the terminal report and its Game Over hook;

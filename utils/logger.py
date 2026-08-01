@@ -222,6 +222,48 @@ def record_activity_scope_battle_history(
     return dict(payload)
 
 
+def record_activity_scope_session_preflight(
+    *,
+    run_id: str,
+    strategy: str,
+    configuration_fingerprint: str,
+) -> Optional[dict[str, object]]:
+    """Attach a completed session-check receipt to the matching run scope."""
+
+    expected_run_id = str(run_id or "").strip()
+    normalized_strategy = str(strategy or "").strip()
+    normalized_fingerprint = str(configuration_fingerprint or "").strip()
+    if not expected_run_id:
+        raise ValueError("Activity scope run ID must not be empty")
+    if not normalized_strategy:
+        raise ValueError("Session preflight strategy must not be empty")
+    if not normalized_fingerprint:
+        raise ValueError("Session preflight fingerprint must not be empty")
+
+    scope_path = get_activity_scope_path()
+    with _WRITE_LOCK:
+        payload = _load_activity_scope()
+        if (
+            payload is None
+            or str(payload.get("run_id") or "") != expected_run_id
+        ):
+            return None
+        payload["session_preflight"] = {
+            "schema_version": 1,
+            "status": "completed",
+            "strategy": normalized_strategy,
+            "configuration_fingerprint": normalized_fingerprint,
+            "completed_at": datetime.now().astimezone().isoformat(
+                timespec="microseconds"
+            ),
+        }
+        try:
+            _write_json_atomic(scope_path, payload)
+        except OSError:
+            return None
+    return dict(payload)
+
+
 def _scope_completed_battle(
     scope: Optional[Mapping[str, object]],
 ) -> Optional[dict[str, object]]:

@@ -72,12 +72,16 @@ battle and runs a read-only strategy validation:
 
 Validation never repairs or restarts the attached battle on its own. A
 Home-repairable mismatch publishes an operator decision that can authorize the
-existing guarded restart/repair path. To attach and skip all strategy setup
-checks for only that current battle, use `--startup-gates auto`. Game Over,
-Tournament Results, or verified Home `NEW_BATTLE` evidence clears either
+existing guarded restart/repair path. When the Current-run ledger contains a
+matching completed-check receipt and Battle History proves that attachment
+returned to that same battle, automation reuses the receipt instead of
+repeating its session configuration checks. A missing or configuration-
+mismatched receipt still runs validation. To attach and skip all strategy
+setup checks for only that current battle, use `--startup-gates auto`. Game
+Over, Tournament Results, or verified Home `NEW_BATTLE` evidence clears either
 attachment choice and re-arms the complete gates for the following battle.
-`immediate` remains an advanced forced-first-battle policy, while `next_run` is
-reserved for the guarded process-reload workflow.
+`immediate` remains an advanced forced-first-battle policy, while `next_run`
+is reserved for the guarded process-reload workflow.
 
 For a gate-free experiment, select the no-strategy mode explicitly:
 

@@ -3,7 +3,13 @@ from __future__ import annotations
 import copy
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional
 
-from utils.logger import log, log_mission, start_activity_scope
+from utils.logger import (
+    get_activity_scope,
+    log,
+    log_mission,
+    record_activity_scope_session_preflight,
+    start_activity_scope,
+)
 from automation.missions.base import BaseMission, MissionContext
 from automation.strategies.base import BaseStrategy
 from core.battle_lifecycle import BattleLifecycle, HomeBattleControl
@@ -36,6 +42,7 @@ class MissionManager:
         self._action_guard_fn = action_guard_fn
         self._new_battle_home_observed = False
         self._exclusive_validation_prepared_request_id: Optional[str] = None
+        self._session_preflight_receipt_key: Optional[tuple[str, str]] = None
         self._battle_lifecycle = BattleLifecycle(
             adopt_initial_battle=self._startup_gates_deferred,
         )
@@ -145,9 +152,121 @@ class MissionManager:
 
         self.ctx.data["attached_validation_requested"] = False
         self.ctx.data["skip_attached_checks"] = False
+        self.ctx.data["attached_session_preflight_reused"] = False
+        self._session_preflight_receipt_key = None
         mv = self.ctx.data.setdefault("mission_vars", {})
         mv["attached_validation_requested"] = False
         mv["gc_session_preflight_restart_available"] = False
+
+    def _session_preflight_identity(self) -> Optional[tuple[str, str]]:
+        if not self.strategy or not self.strategy.requires_session_preflight():
+            return None
+        fingerprint = str(
+            self.strategy.session_preflight_fingerprint() or ""
+        ).strip()
+        strategy_name = str(self.strategy.name or "").strip()
+        if not fingerprint or not strategy_name:
+            return None
+        return strategy_name, fingerprint
+
+    def persist_session_preflight_completion(self) -> bool:
+        """Persist a scope-bound receipt after the configured checks finish."""
+
+        if self._session_preflight_receipt_key is not None:
+            return False
+        if (
+            not self._battle_lifecycle.active_battle_observed
+            or not self.strategy
+            or not self.strategy.requires_session_preflight()
+            or not self.strategy.is_session_preflight_complete(self.ctx)
+        ):
+            return False
+        identity = self._session_preflight_identity()
+        if identity is None:
+            return False
+        scope = get_activity_scope()
+        if scope is None:
+            return False
+        run_id = str(scope.get("run_id") or "").strip()
+        if not run_id:
+            return False
+        strategy_name, fingerprint = identity
+        receipt_key = (run_id, fingerprint)
+        if self._session_preflight_receipt_key == receipt_key:
+            return False
+        existing = scope.get("session_preflight")
+        if (
+            isinstance(existing, Mapping)
+            and existing.get("schema_version") == 1
+            and existing.get("status") == "completed"
+            and str(existing.get("strategy") or "") == strategy_name
+            and str(existing.get("configuration_fingerprint") or "")
+            == fingerprint
+        ):
+            self._session_preflight_receipt_key = receipt_key
+            return False
+        updated = record_activity_scope_session_preflight(
+            run_id=run_id,
+            strategy=strategy_name,
+            configuration_fingerprint=fingerprint,
+        )
+        if updated is None:
+            return False
+        self._session_preflight_receipt_key = receipt_key
+        log(
+            "[SESSION_PREFLIGHT] Completed configuration-check receipt saved "
+            f"for current run scope={run_id}",
+            "DEBUG",
+        )
+        return True
+
+    def reuse_session_preflight_for_confirmed_attachment(
+        self,
+        run_id: str,
+    ) -> bool:
+        """Suppress repeated checks only for a proven same-battle receipt."""
+
+        expected_run_id = str(run_id or "").strip()
+        identity = self._session_preflight_identity()
+        if (
+            not expected_run_id
+            or identity is None
+            or not self._startup_gates_deferred
+            or not self._battle_lifecycle.active_battle_observed
+        ):
+            return False
+        scope = get_activity_scope()
+        if (
+            scope is None
+            or str(scope.get("run_id") or "") != expected_run_id
+        ):
+            return False
+        receipt = scope.get("session_preflight")
+        if not isinstance(receipt, Mapping):
+            return False
+        strategy_name, fingerprint = identity
+        if not (
+            receipt.get("schema_version") == 1
+            and receipt.get("status") == "completed"
+            and str(receipt.get("strategy") or "") == strategy_name
+            and str(receipt.get("configuration_fingerprint") or "")
+            == fingerprint
+        ):
+            return False
+
+        self.ctx.data["attached_session_preflight_reused"] = True
+        self.ctx.data["attached_validation_requested"] = False
+        mv = self.ctx.data.setdefault("mission_vars", {})
+        mv["attached_validation_requested"] = False
+        mv["gc_session_preflight_restart_available"] = False
+        self._session_preflight_receipt_key = (expected_run_id, fingerprint)
+        log(
+            "[SESSION_PREFLIGHT] Reusing completed configuration checks for "
+            "the continuity-confirmed attached battle",
+            "INFO",
+            console=True,
+        )
+        return True
 
     def _free_upgrade_lock_requirements(self) -> list[Any]:
         if not self.strategy:
@@ -355,7 +474,11 @@ class MissionManager:
         ):
             return False
         if self._startup_gates_deferred:
-            if self.ctx.data.get("skip_attached_checks") is True:
+            if (
+                self.ctx.data.get("skip_attached_checks") is True
+                or self.ctx.data.get("attached_session_preflight_reused")
+                is True
+            ):
                 return False
             if self.ctx.data.get("attached_validation_requested") is True:
                 pass
@@ -631,6 +754,7 @@ class MissionManager:
                 )
             except Exception as exc:
                 log(f"[EXEC] error: {exc}", "ERROR")
+        self.persist_session_preflight_completion()
 
 def _materialize_actions(actions: Optional[Iterable[Any]]) -> List[Any]:
     if not actions:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any, Dict, List, Mapping, MutableSet
 
 from automation.missions.base import MissionContext
@@ -58,6 +60,29 @@ class BaseStrategy:
         """Return configured operator fallback choices keyed by requirement."""
 
         return {}
+
+    def session_preflight_fingerprint(self) -> str:
+        """Identify the exact session-check contract for restart reuse."""
+
+        try:
+            encoded = json.dumps(
+                self._session_preflight_fingerprint_payload(),
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        except (TypeError, ValueError):
+            return ""
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _session_preflight_fingerprint_payload(self) -> Mapping[str, Any]:
+        """Return the stable settings represented by a completion receipt."""
+
+        return {
+            "strategy": self.name,
+            "requirements": self.session_preflight_requirements(),
+            "run_configuration": self.run_configuration(),
+            "runtime_policy": self.runtime_policy(),
+        }
 
     def run_configuration(self) -> Mapping[str, Any]:
         """Return the resolved configuration recorded with battle results."""

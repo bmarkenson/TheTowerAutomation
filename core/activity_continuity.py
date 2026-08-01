@@ -31,6 +31,7 @@ POST_RETRY_HISTORY_POLL_INTERVAL_SECONDS = 15.0
 class ActivityContinuityOutcome:
     pending: bool = False
     recapture: bool = False
+    confirmed_same_battle_scope_id: Optional[str] = None
 
 
 class ActivityContinuityCoordinator:
@@ -344,9 +345,23 @@ class ActivityContinuityCoordinator:
                 ),
             )
 
+        confirmed_same_battle_scope_id = None
+        if (
+            updated is not None
+            and self._pending_mode == "compare"
+            and baseline is not None
+            and not changed
+        ):
+            confirmed_same_battle_scope_id = run_id
+
         self._checked_scope_id = run_id
         self._reset_pending()
-        return ActivityContinuityOutcome(recapture=True)
+        return ActivityContinuityOutcome(
+            recapture=True,
+            confirmed_same_battle_scope_id=(
+                confirmed_same_battle_scope_id
+            ),
+        )
 
     def _handle_failed_read(
         self,

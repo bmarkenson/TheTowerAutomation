@@ -62,6 +62,7 @@ def test_unchanged_history_preserves_scope_on_attachment(tmp_path, monkeypatch):
     current = logger.get_activity_scope()
     assert outcome.recapture
     assert not outcome.pending
+    assert outcome.confirmed_same_battle_scope_id == original["run_id"]
     assert current is not None
     assert current["run_id"] == original["run_id"]
     contents = (
@@ -97,6 +98,7 @@ def test_interrupted_history_route_is_resumed_as_attachment_check(
 
     current = logger.get_activity_scope()
     assert outcome.recapture
+    assert outcome.confirmed_same_battle_scope_id == original["run_id"]
     assert current is not None
     assert current["run_id"] == original["run_id"]
     assert observed_sources == ["BATTLE_HISTORY"]
@@ -124,6 +126,7 @@ def test_advanced_history_starts_scope_at_continuity_action(
 
     current = logger.get_activity_scope()
     assert outcome.recapture
+    assert outcome.confirmed_same_battle_scope_id is None
     assert current is not None
     assert current["run_id"] != original["run_id"]
     assert current["reason"] == "battle_history_changed_on_attachment"

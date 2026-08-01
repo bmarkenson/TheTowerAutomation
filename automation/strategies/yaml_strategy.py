@@ -214,6 +214,35 @@ class YamlStrategy(BaseStrategy):
     def session_preflight_gate_fallbacks(self) -> Dict[str, Any]:
         return copy.deepcopy(self._session_preflight_gate_fallbacks)
 
+    def _session_preflight_fingerprint_payload(self) -> Dict[str, Any]:
+        """Include every generated session-gate rule in the reuse identity."""
+
+        return {
+            "strategy": self.name,
+            "session_preflight": {
+                "complete_when": copy.deepcopy(
+                    self._session_preflight_assertions
+                ),
+                "requirements": copy.deepcopy(
+                    self._session_preflight_requirements
+                ),
+                "fallbacks": copy.deepcopy(
+                    self._session_preflight_gate_fallbacks
+                ),
+                "rules": [
+                    copy.deepcopy(rule)
+                    for rule in self.rules
+                    if str(rule.get("gate_phase") or "").strip()
+                    == "session_preflight"
+                ],
+            },
+            "runtime_policy": {
+                "session_preflight_on_attach": self._runtime_policy.get(
+                    "session_preflight_on_attach"
+                )
+            },
+        }
+
     def run_configuration(self) -> Dict[str, Any]:
         return copy.deepcopy(self._run_configuration)
 
@@ -302,7 +331,10 @@ class YamlStrategy(BaseStrategy):
                 ctx.data.get("startup_gates_deferred")
                 and gate_phase in {"run_initialization", "session_preflight"}
             ):
-                if ctx.data.get("skip_attached_checks"):
+                if (
+                    ctx.data.get("skip_attached_checks")
+                    or ctx.data.get("attached_session_preflight_reused")
+                ):
                     continue
                 if (
                     ctx.data.get("attached_validation_requested")

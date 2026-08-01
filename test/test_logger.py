@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 
 from utils import logger
 
@@ -212,6 +213,37 @@ def test_battle_history_identity_updates_only_the_matching_scope(
     assert rejected is None
     assert updated is not None
     assert updated["latest_completed_battle"] == identity
+    assert logger.get_activity_scope() == updated
+
+
+def test_session_preflight_receipt_updates_only_the_matching_scope(
+    tmp_path,
+    monkeypatch,
+):
+    isolated_log = tmp_path / "logs" / "actions.log"
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(isolated_log))
+    scope = logger.start_activity_scope(reason="new_battle_preflight")
+    assert scope is not None
+
+    rejected = logger.record_activity_scope_session_preflight(
+        run_id="different-run",
+        strategy="farm_t19",
+        configuration_fingerprint="abc123",
+    )
+    updated = logger.record_activity_scope_session_preflight(
+        run_id=str(scope["run_id"]),
+        strategy="farm_t19",
+        configuration_fingerprint="abc123",
+    )
+
+    assert rejected is None
+    assert updated is not None
+    receipt = updated["session_preflight"]
+    assert receipt["schema_version"] == 1
+    assert receipt["status"] == "completed"
+    assert receipt["strategy"] == "farm_t19"
+    assert receipt["configuration_fingerprint"] == "abc123"
+    assert datetime.fromisoformat(str(receipt["completed_at"]))
     assert logger.get_activity_scope() == updated
 
 

@@ -1648,6 +1648,19 @@ class App:
         self._steady_run_entry_pending = False
         return True
 
+    def _apply_activity_continuity_outcome(self, outcome: object) -> None:
+        """Reuse session checks after continuity proves the same run scope."""
+
+        confirmed_scope_id = getattr(
+            outcome,
+            "confirmed_same_battle_scope_id",
+            None,
+        )
+        if confirmed_scope_id:
+            self._mission_mgr.reuse_session_preflight_for_confirmed_attachment(
+                str(confirmed_scope_id)
+            )
+
     def run(self) -> None:
         log("Starting main heartbeat loop.", level="INFO", console=True)
         self._prune_generated_artifacts(force=True)
@@ -1757,6 +1770,7 @@ class App:
                         post_retry_poll_allowed=post_retry_poll_allowed,
                     )
                     continuity_pending = continuity.pending
+                    self._apply_activity_continuity_outcome(continuity)
                     if continuity.recapture:
                         continue
                 self._observe_exclusive_validation_battle_start(
