@@ -98,6 +98,20 @@ def test_retained_source_frames_match_battle_history_navigation():
     ).matched
 
 
+def test_tournament_history_navigation_allows_the_left_rail_column():
+    tournament = cv2.imread(
+        str(FIXTURES / "running_menu_tournament_trophy_20260718.png")
+    )
+
+    result = get_match_result(
+        "navigation.battle_history_running",
+        screenshot=tournament,
+    )
+
+    assert result.matched
+    assert result.center == (909, 696)
+
+
 def test_home_history_navigation_allows_an_extra_right_rail_control():
     home = cv2.imread(
         str(FIXTURES / "home_screen_eight_nav_controls_20260729.png")

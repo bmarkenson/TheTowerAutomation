@@ -2114,9 +2114,9 @@
     "battle_history_running": {
       "match_template": "navigation/battle_history_running.png",
       "match_region": {
-        "x": 950,
+        "x": 850,
         "y": 620,
-        "w": 130,
+        "w": 230,
         "h": 150
       },
       "match_threshold": 0.9,
