@@ -1,10 +1,13 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Net;
+using System.Net.NetworkInformation;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using TheTower.TunnelProtocol;
 
 namespace TheTower.ControlSurface;
 
@@ -15,8 +18,7 @@ public partial class MainWindow : Window
     private const double MinimumExpandedLatestBattleHeight = 155;
     private readonly ControlSurfaceApi _api = new();
     private readonly HostPerformanceTracker _hostPerformance;
-    private readonly SshTunnelManager _apiTunnel = new("API tunnel");
-    private readonly SshTunnelManager _adbTunnel = new("ADB reverse tunnel");
+    private readonly TunnelHostConnection _tunnelHost = new();
     private readonly ClientSettings _settings;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(5) };
     private readonly DispatcherTimer _activityTimer = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -28,10 +30,10 @@ public partial class MainWindow : Window
     private readonly SemaphoreSlim _battleRefreshGate = new(1, 1);
     private readonly SemaphoreSlim _activityRefreshGate = new(1, 1);
     private readonly SemaphoreSlim _serviceStatusGate = new(1, 1);
+    private readonly SemaphoreSlim _tunnelHostRefreshGate = new(1, 1);
     private readonly ObservableCollection<ActivityEntry> _activity = [];
     private BattleListResponse _latestBattles = new();
     private BattleHistoryWindow? _battleHistoryWindow;
-    private CancellationTokenSource? _adbReconnectCancellation;
     private CancellationTokenSource? _refreshCancellation;
     private CancellationTokenSource? _battleRefreshCancellation;
     private CancellationTokenSource? _activityRefreshCancellation;
@@ -57,15 +59,15 @@ public partial class MainWindow : Window
     private bool _updatingGameSpeedTargetSelection;
     private bool _gameSpeedTargetRequestInFlight;
     private ControlSurfaceCompatibilityResult? _serverCompatibility;
-    private ControlSurfaceServiceState? _controlSurfaceServiceState;
+    private LinuxApiServiceSnapshot? _controlSurfaceServiceState;
+    private TunnelHostSnapshot? _tunnelHostSnapshot;
+    private TunnelHostProtocolMismatchException? _tunnelHostProtocolMismatch;
     private bool _controlSurfaceServiceActionInFlight;
     private bool _controlSurfaceRestartInFlight;
     private bool _apiTunnelActionInFlight;
     private bool _adbTunnelRestartInFlight;
     private bool _automationRestartInFlight;
-    private bool _adbForwardDesired;
     private bool _adbForwardStarting;
-    private int _adbReconnectAttempt;
     private StartupGateContext? _startupGateContext;
     private IReadOnlyDictionary<string, StartupGateWaiverStatus> _startupGateWaivers
         = new Dictionary<string, StartupGateWaiverStatus>();
@@ -100,12 +102,11 @@ public partial class MainWindow : Window
         _hostPerformance.SetSamplingEnabled(
             _settings.HostPerformanceSamplingEnabled);
         _hostPerformance.SnapshotUpdated += HostPerformance_SnapshotUpdated;
-        _apiTunnel.Exited += ApiTunnel_Exited;
-        _adbTunnel.Exited += AdbTunnel_Exited;
         _timer.Tick += async (_, _) =>
         {
             RefreshWindowsAdbListenerStatus();
             await Task.WhenAll(
+                RefreshTunnelHostStatusAsync(),
                 RefreshStatusAsync(),
                 RefreshBattlesAsync());
         };
@@ -121,6 +122,7 @@ public partial class MainWindow : Window
             _timer.Start();
             _activityTimer.Start();
             _serviceStatusTimer.Start();
+            await InitializeTunnelHostAsync();
             await Task.WhenAll(
                 RefreshStatusAsync(),
                 RefreshBattlesAsync(),
@@ -133,10 +135,8 @@ public partial class MainWindow : Window
             CaptureMainWindowLayout();
             SaveSettingsBestEffort();
         };
-        Closed += (_, _) =>
+        Closed += async (_, _) =>
         {
-            _adbForwardDesired = false;
-            CancelAdbReconnect();
             _timer.Stop();
             _activityTimer.Stop();
             _serviceStatusTimer.Stop();
@@ -145,8 +145,7 @@ public partial class MainWindow : Window
             _activityRefreshCancellation?.Cancel();
             _serviceStatusCancellation?.Cancel();
             _battleHistoryWindow?.Close();
-            _adbTunnel.Dispose();
-            _apiTunnel.Dispose();
+            await _tunnelHost.DisposeAsync();
             _hostPerformance.SnapshotUpdated -= HostPerformance_SnapshotUpdated;
             _hostPerformance.Dispose();
             _api.Dispose();
@@ -313,16 +312,252 @@ public partial class MainWindow : Window
         }
     }
 
+    private async Task InitializeTunnelHostAsync()
+    {
+        try
+        {
+            var snapshot = await _tunnelHost.EnsureConnectedAsync(
+                startIfMissing: true,
+                CancellationToken.None);
+            if (string.IsNullOrWhiteSpace(snapshot.Configuration.SshDestination)
+                && TunnelHostConfigurationValidator.IsValidDestination(
+                    SshDestinationBox.Text))
+            {
+                snapshot = await _tunnelHost.SendAsync(
+                    new TunnelHostRequest
+                    {
+                        Command = TunnelHostCommand.Configure,
+                        Configuration = BuildTunnelHostConfiguration(),
+                    },
+                    CancellationToken.None);
+            }
+            else if (!string.IsNullOrWhiteSpace(
+                         snapshot.Configuration.SshDestination))
+            {
+                ApplyTunnelHostConfiguration(snapshot.Configuration);
+            }
+            RenderTunnelHostSnapshot(snapshot);
+        }
+        catch (TunnelHostProtocolMismatchException exc)
+        {
+            RenderTunnelHostProtocolMismatch(exc);
+        }
+        catch (Exception exc)
+        {
+            RenderTunnelHostUnavailable(exc.Message);
+        }
+    }
+
+    private async Task RefreshTunnelHostStatusAsync(bool force = false)
+    {
+        var entered = force
+            ? await WaitForTunnelHostRefreshAsync()
+            : await _tunnelHostRefreshGate.WaitAsync(0);
+        if (!entered)
+        {
+            return;
+        }
+        try
+        {
+            var snapshot = await _tunnelHost.EnsureConnectedAsync(
+                startIfMissing: false,
+                CancellationToken.None);
+            RenderTunnelHostSnapshot(snapshot);
+        }
+        catch (TunnelHostProtocolMismatchException exc)
+        {
+            RenderTunnelHostProtocolMismatch(exc);
+        }
+        catch (Exception exc)
+        {
+            RenderTunnelHostUnavailable(exc.Message);
+        }
+        finally
+        {
+            _tunnelHostRefreshGate.Release();
+        }
+    }
+
+    private async Task<bool> WaitForTunnelHostRefreshAsync()
+    {
+        await _tunnelHostRefreshGate.WaitAsync();
+        return true;
+    }
+
+    private TunnelHostConfiguration BuildTunnelHostConfiguration() => new()
+    {
+        SshDestination = SshDestinationBox.Text.Trim(),
+        LocalApiPort = ParsePort(
+            LocalTunnelPortBox.Text,
+            "Local tunnel port"),
+        RemoteApiPort = ParsePort(
+            RemoteApiPortBox.Text,
+            "Remote API port"),
+        WindowsBlueStacksAdbPort = ParsePort(
+            WindowsBlueStacksAdbPortBox.Text,
+            "Windows BlueStacks ADB port"),
+        LinuxAdbPort = ParsePort(
+            LinuxAdbForwardPortBox.Text,
+            "Linux ADB port"),
+    };
+
+    private void ApplyTunnelHostConfiguration(
+        TunnelHostConfiguration configuration)
+    {
+        SshDestinationBox.Text = configuration.SshDestination;
+        LocalTunnelPortBox.Text = configuration.LocalApiPort.ToString(
+            CultureInfo.InvariantCulture);
+        RemoteApiPortBox.Text = configuration.RemoteApiPort.ToString(
+            CultureInfo.InvariantCulture);
+        WindowsBlueStacksAdbPortBox.Text =
+            configuration.WindowsBlueStacksAdbPort.ToString(
+                CultureInfo.InvariantCulture);
+        LinuxAdbForwardPortBox.Text = configuration.LinuxAdbPort.ToString(
+            CultureInfo.InvariantCulture);
+        BaseUrlBox.Text = $"http://127.0.0.1:{configuration.LocalApiPort}";
+        _api.Configure(BaseUrlBox.Text, TokenBox.Password);
+    }
+
+    private void RenderTunnelHostSnapshot(TunnelHostSnapshot snapshot)
+    {
+        _tunnelHostSnapshot = snapshot;
+        _tunnelHostProtocolMismatch = null;
+        TunnelHostStatusText.Text =
+            $"Connected to per-user host PID {snapshot.HostProcessId} "
+            + $"(protocol v{snapshot.ProtocolVersion}, host {snapshot.HostVersion}).";
+        TunnelHostStatusText.Foreground =
+            new SolidColorBrush(Color.FromRgb(73, 214, 157));
+        TunnelHostStatusText.ToolTip =
+            $"Instance {snapshot.HostInstanceId}; started "
+            + $"{snapshot.HostStartedAt.LocalDateTime:g}. Closing this GUI "
+            + "does not stop a desired tunnel.";
+        RestartTunnelHostButton.IsEnabled = true;
+        RenderApiTunnelState(snapshot.ApiTunnel);
+        RenderAdbTunnelState(snapshot.AdbTunnel);
+        if (snapshot.LinuxApiService.ObservedAt is not null)
+        {
+            if (snapshot.LinuxApiService.QuerySucceeded)
+            {
+                RenderControlSurfaceServiceState(snapshot.LinuxApiService);
+            }
+            else if (!string.IsNullOrWhiteSpace(
+                         snapshot.LinuxApiService.LastDiagnostic))
+            {
+                SetUnknownControlSurfaceServiceState(
+                    snapshot.LinuxApiService.LastDiagnostic);
+            }
+        }
+        else
+        {
+            SetUnqueriedControlSurfaceServiceState(
+                "Linux API service state has not been queried by this host.");
+        }
+        UpdateControlSurfaceServiceControls();
+        UpdateRestartSshControls();
+    }
+
+    private void RenderTunnelHostProtocolMismatch(
+        TunnelHostProtocolMismatchException exception)
+    {
+        _tunnelHostProtocolMismatch = exception;
+        _tunnelHostSnapshot = null;
+        TunnelHostStatusText.Text =
+            "Protocol mismatch — explicit tunnel-host restart required. "
+            + exception.Message;
+        TunnelHostStatusText.Foreground =
+            new SolidColorBrush(Color.FromRgb(255, 113, 135));
+        TunnelHostStatusText.ToolTip =
+            "Restarting the companion stops its owned SSH children and starts "
+            + "the packaged host with both tunnel desires cleared.";
+        RestartTunnelHostButton.IsEnabled = true;
+        SetApiTunnelTopStatus(
+            "Host mismatch",
+            exception.Message,
+            new SolidColorBrush(Color.FromRgb(255, 113, 135)));
+        SetAdbTunnelTopStatus(
+            "Host mismatch",
+            exception.Message,
+            new SolidColorBrush(Color.FromRgb(255, 113, 135)));
+        StartTunnelButton.IsEnabled = false;
+        StopTunnelButton.IsEnabled = false;
+        StartAdbForwardButton.IsEnabled = false;
+        StopAdbForwardButton.IsEnabled = false;
+        UpdateControlSurfaceServiceControls();
+        UpdateRestartSshControls();
+    }
+
+    private void RenderTunnelHostUnavailable(string detail)
+    {
+        _tunnelHostSnapshot = null;
+        TunnelHostStatusText.Text = $"Tunnel host unavailable: {detail}";
+        TunnelHostStatusText.Foreground =
+            new SolidColorBrush(Color.FromRgb(255, 113, 135));
+        TunnelHostStatusText.ToolTip = detail;
+        RestartTunnelHostButton.IsEnabled = true;
+        SetApiTunnelTopStatus(
+            "Host unavailable",
+            detail,
+            new SolidColorBrush(Color.FromRgb(255, 113, 135)));
+        SetAdbTunnelTopStatus(
+            "Host unavailable",
+            detail,
+            new SolidColorBrush(Color.FromRgb(255, 113, 135)));
+        StartTunnelButton.IsEnabled = false;
+        StopTunnelButton.IsEnabled = false;
+        StartAdbForwardButton.IsEnabled = false;
+        StopAdbForwardButton.IsEnabled = false;
+        UpdateControlSurfaceServiceControls();
+        UpdateRestartSshControls();
+    }
+
+    private async void RestartTunnelHost_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (MessageBox.Show(
+                this,
+                "Restart the per-user tunnel host?\n\nThis explicitly stops "
+                + "both host-owned SSH processes. The replacement loads saved "
+                + "configuration but does not replay either tunnel until you "
+                + "start it again.",
+                "Restart tunnel host",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        RestartTunnelHostButton.IsEnabled = false;
+        try
+        {
+            using var cancellation = new CancellationTokenSource(
+                TimeSpan.FromSeconds(15));
+            var snapshot = await _tunnelHost.RestartHostAsync(
+                _tunnelHostProtocolMismatch,
+                cancellation.Token);
+            ApplyTunnelHostConfiguration(snapshot.Configuration);
+            RenderTunnelHostSnapshot(snapshot);
+            SetHttpConnectionStatus(
+                "Unavailable — tunnel host restarted",
+                new SolidColorBrush(Color.FromRgb(241, 191, 91)));
+        }
+        catch (Exception exc)
+        {
+            RenderTunnelHostUnavailable(exc.Message);
+            ShowError(exc);
+        }
+        finally
+        {
+            RestartTunnelHostButton.IsEnabled = true;
+        }
+    }
+
     private void SshDestinationBox_TextChanged(
         object sender,
         TextChangedEventArgs e)
     {
-        _controlSurfaceServiceState = null;
-        LinuxApiServiceStatusText.Text = "Unknown";
-        LinuxApiServiceStatusText.Foreground =
-            new SolidColorBrush(Color.FromRgb(241, 191, 91));
-        LinuxApiServiceStatusText.ToolTip =
-            "Service state has not been queried for this SSH destination.";
+        SetUnqueriedControlSurfaceServiceState(
+            "Service state has not been queried for this SSH destination.");
         UpdateControlSurfaceServiceControls();
         UpdateControlSurfaceCompatibility();
     }
@@ -337,20 +572,20 @@ public partial class MainWindow : Window
         }
         await ChangeControlSurfaceServiceAsync(
             _controlSurfaceServiceState.IsActive
-                ? ControlSurfaceServiceAction.Stop
-                : ControlSurfaceServiceAction.Start);
+                ? LinuxApiServiceAction.Stop
+                : LinuxApiServiceAction.Start);
     }
 
     private async void RestartControlSurface_Click(object sender, RoutedEventArgs e)
     {
-        await ChangeControlSurfaceServiceAsync(ControlSurfaceServiceAction.Restart);
+        await ChangeControlSurfaceServiceAsync(LinuxApiServiceAction.Restart);
     }
 
     private async Task ChangeControlSurfaceServiceAsync(
-        ControlSurfaceServiceAction action)
+        LinuxApiServiceAction action)
     {
         var destination = SshDestinationBox.Text.Trim();
-        if (!SshTunnelManager.IsValidDestination(destination))
+        if (!TunnelHostConfigurationValidator.IsValidDestination(destination))
         {
             ShowError(new InvalidOperationException(
                 $"Enter a valid Linux SSH destination before {ServiceActionPresentParticiple(action).ToLowerInvariant()} the service."));
@@ -358,12 +593,12 @@ public partial class MainWindow : Window
         }
         var confirmation = action switch
         {
-            ControlSurfaceServiceAction.Stop =>
+            LinuxApiServiceAction.Stop =>
                 "Stop the fixed Linux API service "
                 + "(thetower-control-surface.service)?\n\n"
                 + "The Windows GUI will lose HTTP API access until the service "
                 + "is started again. Main automation and both SSH tunnels are unchanged.",
-            ControlSurfaceServiceAction.Restart =>
+            LinuxApiServiceAction.Restart =>
                 "Restart the fixed Linux API service "
                 + "(thetower-control-surface.service)?\n\n"
                 + "This briefly interrupts the control API. It does not restart "
@@ -376,7 +611,7 @@ public partial class MainWindow : Window
                     confirmation,
                     $"{ServiceActionLabel(action)} Linux API service",
                     MessageBoxButton.YesNo,
-                    action == ControlSurfaceServiceAction.Stop
+                    action == LinuxApiServiceAction.Stop
                         ? MessageBoxImage.Warning
                         : MessageBoxImage.Question) != MessageBoxResult.Yes)
         {
@@ -385,7 +620,7 @@ public partial class MainWindow : Window
 
         _controlSurfaceServiceActionInFlight = true;
         _controlSurfaceRestartInFlight =
-            action == ControlSurfaceServiceAction.Restart;
+            action == LinuxApiServiceAction.Restart;
         LinuxApiServiceStatusText.Text = ServiceActionPresentParticiple(action);
         LinuxApiServiceStatusText.Foreground =
             new SolidColorBrush(Color.FromRgb(241, 191, 91));
@@ -397,13 +632,18 @@ public partial class MainWindow : Window
         try
         {
             using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(40));
-            await _apiTunnel.ChangeControlSurfaceServiceAsync(
-                destination,
-                action,
+            var snapshot = await _tunnelHost.SendAsync(
+                new TunnelHostRequest
+                {
+                    Command = TunnelHostCommand.ChangeLinuxApiService,
+                    Configuration = BuildTunnelHostConfiguration(),
+                    ServiceAction = action,
+                },
                 cancellation.Token);
+            RenderTunnelHostSnapshot(snapshot);
             commandCompleted = true;
             await RefreshControlSurfaceServiceStatusAsync(force: true);
-            if (action == ControlSurfaceServiceAction.Stop)
+            if (action == LinuxApiServiceAction.Stop)
             {
                 _serverCompatibility = null;
                 UpdateControlSurfaceCompatibility();
@@ -428,6 +668,10 @@ public partial class MainWindow : Window
         }
         catch (Exception exc)
         {
+            if (exc is TunnelHostCommandException { Snapshot: not null } hostError)
+            {
+                RenderTunnelHostSnapshot(hostError.Snapshot);
+            }
             if (commandCompleted)
             {
                 await RefreshControlSurfaceServiceStatusAsync(force: true);
@@ -448,30 +692,30 @@ public partial class MainWindow : Window
         }
     }
 
-    private static string ServiceActionLabel(ControlSurfaceServiceAction action) =>
+    private static string ServiceActionLabel(LinuxApiServiceAction action) =>
         action switch
         {
-            ControlSurfaceServiceAction.Start => "Start",
-            ControlSurfaceServiceAction.Stop => "Stop",
-            ControlSurfaceServiceAction.Restart => "Restart",
+            LinuxApiServiceAction.Start => "Start",
+            LinuxApiServiceAction.Stop => "Stop",
+            LinuxApiServiceAction.Restart => "Restart",
             _ => throw new ArgumentOutOfRangeException(nameof(action)),
         };
 
     private static string ServiceActionPresentParticiple(
-        ControlSurfaceServiceAction action) =>
+        LinuxApiServiceAction action) =>
         action switch
         {
-            ControlSurfaceServiceAction.Start => "Starting",
-            ControlSurfaceServiceAction.Stop => "Stopping",
-            ControlSurfaceServiceAction.Restart => "Restarting",
+            LinuxApiServiceAction.Start => "Starting",
+            LinuxApiServiceAction.Stop => "Stopping",
+            LinuxApiServiceAction.Restart => "Restarting",
             _ => throw new ArgumentOutOfRangeException(nameof(action)),
         };
 
-    private static string ServiceActionPastTense(ControlSurfaceServiceAction action) =>
+    private static string ServiceActionPastTense(LinuxApiServiceAction action) =>
         action switch
         {
-            ControlSurfaceServiceAction.Start => "started",
-            ControlSurfaceServiceAction.Restart => "restarted",
+            LinuxApiServiceAction.Start => "started",
+            LinuxApiServiceAction.Restart => "restarted",
             _ => throw new ArgumentOutOfRangeException(nameof(action)),
         };
 
@@ -530,7 +774,7 @@ public partial class MainWindow : Window
         try
         {
             var destination = SshDestinationBox.Text.Trim();
-            if (!SshTunnelManager.IsValidDestination(destination))
+            if (!TunnelHostConfigurationValidator.IsValidDestination(destination))
             {
                 _controlSurfaceServiceState = null;
                 LinuxApiServiceStatusText.Text = "SSH destination needed";
@@ -540,10 +784,15 @@ public partial class MainWindow : Window
                     "Enter a valid Linux SSH destination in Connection setup.";
                 return;
             }
-            RenderControlSurfaceServiceState(
-                await _apiTunnel.GetControlSurfaceServiceStateAsync(
-                    destination,
-                    _serviceStatusCancellation.Token));
+            var snapshot = await _tunnelHost.SendAsync(
+                new TunnelHostRequest
+                {
+                    Command = TunnelHostCommand.QueryLinuxApiService,
+                    Configuration = BuildTunnelHostConfiguration(),
+                },
+                _serviceStatusCancellation.Token);
+            RenderTunnelHostSnapshot(snapshot);
+            RenderControlSurfaceServiceState(snapshot.LinuxApiService);
         }
         catch (OperationCanceledException)
         {
@@ -555,6 +804,10 @@ public partial class MainWindow : Window
         }
         catch (Exception exc)
         {
+            if (exc is TunnelHostCommandException { Snapshot: not null } hostError)
+            {
+                RenderTunnelHostSnapshot(hostError.Snapshot);
+            }
             SetUnknownControlSurfaceServiceState(exc.Message);
         }
         finally
@@ -564,7 +817,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void RenderControlSurfaceServiceState(ControlSurfaceServiceState state)
+    private void RenderControlSurfaceServiceState(LinuxApiServiceSnapshot state)
     {
         _controlSurfaceServiceState = state;
         var (label, color) = state.ActiveState switch
@@ -593,13 +846,25 @@ public partial class MainWindow : Window
         LinuxApiServiceStatusText.ToolTip = detail;
     }
 
+    private void SetUnqueriedControlSurfaceServiceState(string detail)
+    {
+        _controlSurfaceServiceState = null;
+        LinuxApiServiceStatusText.Text = "Unknown — not queried";
+        LinuxApiServiceStatusText.Foreground =
+            new SolidColorBrush(Color.FromRgb(241, 191, 91));
+        LinuxApiServiceStatusText.ToolTip = detail;
+    }
+
     private void UpdateControlSurfaceServiceControls()
     {
-        var destinationValid = SshTunnelManager.IsValidDestination(
+        var destinationValid = TunnelHostConfigurationValidator.IsValidDestination(
             SshDestinationBox.Text);
+        var hostAvailable = _tunnelHostSnapshot is not null
+            && _tunnelHostProtocolMismatch is null;
         var stableState = _controlSurfaceServiceState is not null
             && _controlSurfaceServiceState.ActiveState is "active" or "inactive" or "failed";
         ToggleControlSurfaceServiceButton.IsEnabled = destinationValid
+            && hostAvailable
             && stableState
             && !_controlSurfaceServiceActionInFlight;
         ToggleControlSurfaceServiceButton.Content =
@@ -612,6 +877,7 @@ public partial class MainWindow : Window
                 : "Start only the fixed Linux control API service; automation and SSH tunnels are unchanged."
             : "Wait for a Linux API service-status query over SSH.";
         RestartControlSurfaceTopButton.IsEnabled = destinationValid
+            && hostAvailable
             && !_controlSurfaceServiceActionInFlight;
         RestartControlSurfaceTopButton.ToolTip = destinationValid
             ? "Restart only the fixed Linux control API service; automation and SSH tunnels are unchanged."
@@ -638,6 +904,10 @@ public partial class MainWindow : Window
         finally
         {
             _apiTunnelActionInFlight = false;
+            if (_tunnelHostSnapshot is not null)
+            {
+                RenderApiTunnelState(_tunnelHostSnapshot.ApiTunnel);
+            }
             UpdateRestartSshControls();
         }
     }
@@ -646,41 +916,34 @@ public partial class MainWindow : Window
     {
         try
         {
-            var localPort = ParsePort(LocalTunnelPortBox.Text, "Local tunnel port");
-            var remotePort = ParsePort(RemoteApiPortBox.Text, "Remote API port");
+            var configuration = BuildTunnelHostConfiguration();
             TunnelStatusText.Text = "Starting Windows OpenSSH API tunnel...";
             SetApiTunnelTopStatus(
                 "Starting",
                 TunnelStatusText.Text,
                 new SolidColorBrush(Color.FromRgb(241, 191, 91)));
             StartTunnelButton.IsEnabled = false;
-            await _apiTunnel.StartLocalForwardAsync(
-                SshDestinationBox.Text,
-                localPort,
-                remotePort,
+            var snapshot = await _tunnelHost.SendAsync(
+                new TunnelHostRequest
+                {
+                    Command = TunnelHostCommand.StartTunnel,
+                    Tunnel = TunnelKind.Api,
+                    Configuration = configuration,
+                },
                 CancellationToken.None);
-            SetApiTunnelTopStatus(
-                "Active",
-                "OpenSSH accepted the Windows-local API listener.",
-                new SolidColorBrush(Color.FromRgb(73, 214, 157)));
+            RenderTunnelHostSnapshot(snapshot);
 
-            BaseUrlBox.Text = $"http://127.0.0.1:{localPort}";
+            BaseUrlBox.Text =
+                $"http://127.0.0.1:{configuration.LocalApiPort}";
             _api.Configure(BaseUrlBox.Text, TokenBox.Password);
 
             using var probeCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(12));
             var status = await _api.GetStatusAsync(probeCancellation.Token);
             RenderStatus(status);
             SaveSettings();
-            TunnelStatusText.Text = $"Connected: localhost:{localPort} -> {SshDestinationBox.Text.Trim()}:{remotePort}";
-            TunnelStatusText.Foreground = new SolidColorBrush(Color.FromRgb(73, 214, 157));
-            SetApiTunnelTopStatus(
-                "Active",
-                TunnelStatusText.Text,
-                new SolidColorBrush(Color.FromRgb(73, 214, 157)));
             SetHttpConnectionStatus(
                 "Connected",
                 new SolidColorBrush(Color.FromRgb(73, 214, 157)));
-            StopTunnelButton.IsEnabled = true;
             await RefreshControlSurfaceServiceStatusAsync(force: true);
             await Task.WhenAll(
                 RefreshBattlesAsync(force: true),
@@ -688,9 +951,12 @@ public partial class MainWindow : Window
         }
         catch (Exception exc)
         {
-            var tunnelRunning = _apiTunnel.IsRunning;
-            StartTunnelButton.IsEnabled = !tunnelRunning;
-            StopTunnelButton.IsEnabled = tunnelRunning;
+            if (exc is TunnelHostCommandException { Snapshot: not null } hostError)
+            {
+                RenderTunnelHostSnapshot(hostError.Snapshot);
+            }
+            var tunnelRunning = _tunnelHostSnapshot?.ApiTunnel.ObservedState
+                == TunnelObservedState.Running;
             TunnelStatusText.Text = tunnelRunning
                 ? $"Tunnel running, but the Linux API is unavailable: {exc.Message}"
                 : exc.Message;
@@ -713,13 +979,13 @@ public partial class MainWindow : Window
         try
         {
             StopTunnelButton.IsEnabled = false;
-            await _apiTunnel.StopAsync();
-            TunnelStatusText.Text = "Stopped";
-            TunnelStatusText.Foreground = (Brush)FindResource("MutedBrush");
-            SetApiTunnelTopStatus(
-                "Stopped",
-                "The Windows-local API SSH tunnel is stopped.",
-                (Brush)FindResource("MutedBrush"));
+            RenderTunnelHostSnapshot(await _tunnelHost.SendAsync(
+                new TunnelHostRequest
+                {
+                    Command = TunnelHostCommand.StopTunnel,
+                    Tunnel = TunnelKind.Api,
+                },
+                CancellationToken.None));
             SetHttpConnectionStatus(
                 "Unavailable — tunnel stopped",
                 new SolidColorBrush(Color.FromRgb(241, 191, 91)));
@@ -730,35 +996,8 @@ public partial class MainWindow : Window
         }
         finally
         {
-            StartTunnelButton.IsEnabled = true;
-        }
-    }
-
-    private void ApiTunnel_Exited(object? sender, TunnelExitedEventArgs args)
-    {
-        _ = Dispatcher.InvokeAsync(() =>
-        {
-            StartTunnelButton.IsEnabled = true;
-            StopTunnelButton.IsEnabled = false;
-            TunnelStatusText.Text = args.Message;
-            TunnelStatusText.Foreground = args.Expected
-                ? (Brush)FindResource("MutedBrush")
-                : new SolidColorBrush(Color.FromRgb(255, 113, 135));
-            if (!args.Expected)
-            {
-                LastErrorText.Text = args.Message;
-                SetHttpConnectionStatus(
-                    "Unavailable — tunnel exited",
-                    new SolidColorBrush(Color.FromRgb(255, 113, 135)));
-            }
-            SetApiTunnelTopStatus(
-                args.Expected ? "Stopped" : "Exited",
-                args.Message,
-                args.Expected
-                    ? (Brush)FindResource("MutedBrush")
-                    : new SolidColorBrush(Color.FromRgb(255, 113, 135)));
             UpdateRestartSshControls();
-        });
+        }
     }
 
     private void RestartSshMenu_Click(object sender, RoutedEventArgs e)
@@ -786,16 +1025,37 @@ public partial class MainWindow : Window
         {
             StartTunnelButton.IsEnabled = false;
             StopTunnelButton.IsEnabled = false;
-            await _apiTunnel.StopAsync();
-            await StartApiTunnelCoreAsync();
+            var configuration = BuildTunnelHostConfiguration();
+            var snapshot = await _tunnelHost.SendAsync(
+                new TunnelHostRequest
+                {
+                    Command = TunnelHostCommand.RestartTunnel,
+                    Tunnel = TunnelKind.Api,
+                    Configuration = configuration,
+                },
+                CancellationToken.None);
+            RenderTunnelHostSnapshot(snapshot);
+            BaseUrlBox.Text =
+                $"http://127.0.0.1:{configuration.LocalApiPort}";
+            _api.Configure(BaseUrlBox.Text, TokenBox.Password);
+            SaveSettings();
+            await RefreshStatusAsync(force: true);
         }
         catch (Exception exc)
         {
+            if (exc is TunnelHostCommandException { Snapshot: not null } hostError)
+            {
+                RenderTunnelHostSnapshot(hostError.Snapshot);
+            }
             ShowError(exc);
         }
         finally
         {
             _apiTunnelActionInFlight = false;
+            if (_tunnelHostSnapshot is not null)
+            {
+                RenderApiTunnelState(_tunnelHostSnapshot.ApiTunnel);
+            }
             UpdateRestartSshControls();
         }
     }
@@ -808,8 +1068,6 @@ public partial class MainWindow : Window
         }
         _adbTunnelRestartInFlight = true;
         UpdateRestartSshControls();
-        _adbForwardDesired = false;
-        CancelAdbReconnect();
         SetAdbTunnelTopStatus(
             "Restarting",
             "Restarting only the ADB reverse-forward SSH tunnel.",
@@ -818,19 +1076,34 @@ public partial class MainWindow : Window
         {
             StartAdbForwardButton.IsEnabled = false;
             StopAdbForwardButton.IsEnabled = false;
-            await _adbTunnel.StopAsync();
-            _adbForwardDesired = true;
-            _adbReconnectAttempt = 0;
-            await StartAdbForwardAsync(userInitiated: true);
+            var configuration = BuildTunnelHostConfiguration();
+            SaveAdbForwardSettings(
+                configuration.WindowsBlueStacksAdbPort,
+                configuration.LinuxAdbPort);
+            RenderTunnelHostSnapshot(await _tunnelHost.SendAsync(
+                new TunnelHostRequest
+                {
+                    Command = TunnelHostCommand.RestartTunnel,
+                    Tunnel = TunnelKind.Adb,
+                    Configuration = configuration,
+                },
+                CancellationToken.None));
         }
         catch (Exception exc)
         {
-            _adbForwardDesired = false;
+            if (exc is TunnelHostCommandException { Snapshot: not null } hostError)
+            {
+                RenderTunnelHostSnapshot(hostError.Snapshot);
+            }
             ShowError(exc);
         }
         finally
         {
             _adbTunnelRestartInFlight = false;
+            if (_tunnelHostSnapshot is not null)
+            {
+                RenderAdbTunnelState(_tunnelHostSnapshot.AdbTunnel);
+            }
             UpdateRestartSshControls();
         }
     }
@@ -861,9 +1134,14 @@ public partial class MainWindow : Window
 
     private void UpdateRestartSshControls()
     {
-        RestartApiTunnelMenuItem.IsEnabled = !_apiTunnelActionInFlight;
+        var hostAvailable = _tunnelHostSnapshot is not null
+            && _tunnelHostProtocolMismatch is null;
+        RestartApiTunnelMenuItem.IsEnabled =
+            hostAvailable && !_apiTunnelActionInFlight;
         RestartAdbTunnelMenuItem.IsEnabled =
-            !_adbTunnelRestartInFlight && !_adbForwardStarting;
+            hostAvailable
+            && !_adbTunnelRestartInFlight
+            && !_adbForwardStarting;
         RestartSshButton.IsEnabled =
             RestartApiTunnelMenuItem.IsEnabled
             || RestartAdbTunnelMenuItem.IsEnabled;
@@ -871,17 +1149,12 @@ public partial class MainWindow : Window
 
     private async void StartAdbForward_Click(object sender, RoutedEventArgs e)
     {
-        CancelAdbReconnect();
-        _adbForwardDesired = true;
-        _adbReconnectAttempt = 0;
-        await StartAdbForwardAsync(userInitiated: true);
+        await StartAdbForwardAsync();
     }
 
-    private async Task StartAdbForwardAsync(bool userInitiated)
+    private async Task StartAdbForwardAsync()
     {
-        if (_adbForwardStarting
-            || _adbTunnel.IsRunning
-            || !_adbForwardDesired)
+        if (_adbForwardStarting)
         {
             return;
         }
@@ -891,23 +1164,10 @@ public partial class MainWindow : Window
         StopAdbForwardButton.IsEnabled = false;
         try
         {
-            var windowsPort = userInitiated
-                ? ParsePort(
-                    WindowsBlueStacksAdbPortBox.Text,
-                    "Windows BlueStacks ADB port")
-                : _settings.WindowsBlueStacksAdbPort;
-            var linuxPort = userInitiated
-                ? ParsePort(
-                    LinuxAdbForwardPortBox.Text,
-                    "Linux ADB port")
-                : _settings.LinuxAdbForwardPort;
-            var destination = userInitiated
-                ? SshDestinationBox.Text.Trim()
-                : _settings.SshDestination;
-            if (userInitiated)
-            {
-                SaveAdbForwardSettings(windowsPort, linuxPort);
-            }
+            var configuration = BuildTunnelHostConfiguration();
+            var windowsPort = configuration.WindowsBlueStacksAdbPort;
+            var linuxPort = configuration.LinuxAdbPort;
+            SaveAdbForwardSettings(windowsPort, linuxPort);
             SetAdbForwardInputsEnabled(false);
             RefreshWindowsAdbListenerStatus();
             AdbForwardStatusText.Text =
@@ -919,42 +1179,17 @@ public partial class MainWindow : Window
                 AdbForwardStatusText.Text,
                 AdbForwardStatusText.Foreground);
 
-            await _adbTunnel.StartReverseForwardAsync(
-                destination,
-                linuxPort,
-                windowsPort,
-                CancellationToken.None);
-
-            if (!_adbForwardDesired)
-            {
-                await _adbTunnel.StopAsync();
-                return;
-            }
-            _adbReconnectAttempt = 0;
-            AdbForwardStatusText.Text =
-                $"Active: Linux 127.0.0.1:{linuxPort} → Windows "
-                + $"127.0.0.1:{windowsPort}. OpenSSH accepted the remote "
-                + "listener; unexpected exits reconnect automatically. "
-                + "The API tunnel is independent.";
-            AdbForwardStatusText.Foreground =
-                new SolidColorBrush(Color.FromRgb(73, 214, 157));
-            SetAdbTunnelTopStatus(
-                "Active",
-                AdbForwardStatusText.Text,
-                AdbForwardStatusText.Foreground);
-            StopAdbForwardButton.IsEnabled = true;
-        }
-        catch (SshTunnelStartException exc) when (exc.ForwardSetupFailed)
-        {
-            SetAdbForwardConflict(exc.Message);
-            if (userInitiated)
-            {
-                ShowError(exc);
-            }
+            RenderTunnelHostSnapshot(await _tunnelHost.SendAsync(
+                new TunnelHostRequest
+                {
+                    Command = TunnelHostCommand.StartTunnel,
+                    Tunnel = TunnelKind.Adb,
+                    Configuration = configuration,
+                },
+                CancellationToken.None));
         }
         catch (ArgumentException exc)
         {
-            _adbForwardDesired = false;
             SetAdbForwardInputsEnabled(true);
             StartAdbForwardButton.IsEnabled = true;
             StopAdbForwardButton.IsEnabled = false;
@@ -966,55 +1201,40 @@ public partial class MainWindow : Window
                 AdbForwardStatusText.Text,
                 AdbForwardStatusText.Foreground);
             LastErrorText.Text = exc.Message;
-            if (userInitiated)
-            {
-                ShowError(exc);
-            }
+            ShowError(exc);
         }
         catch (Exception exc)
         {
+            if (exc is TunnelHostCommandException { Snapshot: not null } hostError)
+            {
+                RenderTunnelHostSnapshot(hostError.Snapshot);
+            }
             LastErrorText.Text = exc.Message;
-            if (_adbForwardDesired)
-            {
-                ScheduleAdbReconnect(exc.Message);
-            }
-            else
-            {
-                StartAdbForwardButton.IsEnabled = true;
-                StopAdbForwardButton.IsEnabled = false;
-                SetAdbTunnelTopStatus(
-                    "Stopped",
-                    exc.Message,
-                    (Brush)FindResource("MutedBrush"));
-            }
-            if (userInitiated)
-            {
-                ShowError(exc);
-            }
+            ShowError(exc);
         }
         finally
         {
             _adbForwardStarting = false;
+            if (_tunnelHostSnapshot is not null)
+            {
+                RenderAdbTunnelState(_tunnelHostSnapshot.AdbTunnel);
+            }
             UpdateRestartSshControls();
         }
     }
 
     private async void StopAdbForward_Click(object sender, RoutedEventArgs e)
     {
-        _adbForwardDesired = false;
-        CancelAdbReconnect();
         StopAdbForwardButton.IsEnabled = false;
         try
         {
-            await _adbTunnel.StopAsync();
-            AdbForwardStatusText.Text =
-                "Stopped. Automatic ADB-forward reconnect is disabled; "
-                + "the API tunnel is unchanged.";
-            AdbForwardStatusText.Foreground = (Brush)FindResource("MutedBrush");
-            SetAdbTunnelTopStatus(
-                "Stopped",
-                AdbForwardStatusText.Text,
-                AdbForwardStatusText.Foreground);
+            RenderTunnelHostSnapshot(await _tunnelHost.SendAsync(
+                new TunnelHostRequest
+                {
+                    Command = TunnelHostCommand.StopTunnel,
+                    Tunnel = TunnelKind.Adb,
+                },
+                CancellationToken.None));
         }
         catch (Exception exc)
         {
@@ -1022,130 +1242,117 @@ public partial class MainWindow : Window
         }
         finally
         {
-            SetAdbForwardInputsEnabled(true);
-            StartAdbForwardButton.IsEnabled = true;
+            UpdateRestartSshControls();
         }
     }
 
-    private void AdbTunnel_Exited(object? sender, TunnelExitedEventArgs args)
+    private void RenderApiTunnelState(TunnelStateSnapshot state)
     {
-        _ = Dispatcher.InvokeAsync(() =>
-        {
-            if (args.Expected || !_adbForwardDesired)
-            {
-                StartAdbForwardButton.IsEnabled = true;
-                StopAdbForwardButton.IsEnabled = false;
-                SetAdbTunnelTopStatus(
-                    "Stopped",
-                    args.Message,
-                    (Brush)FindResource("MutedBrush"));
-                UpdateRestartSshControls();
-                return;
-            }
-            if (args.ForwardSetupFailed)
-            {
-                SetAdbForwardConflict(args.Message);
-                return;
-            }
-            LastErrorText.Text = args.Message;
-            ScheduleAdbReconnect(args.Message);
-        });
+        var (summary, color) = TunnelStatePresentation(state);
+        var detail = TunnelStateDetail(state);
+        TunnelStatusText.Text = detail;
+        TunnelStatusText.Foreground = color;
+        TunnelStatusText.ToolTip = state.LastDiagnostic?.RawDetail;
+        SetApiTunnelTopStatus(summary, detail, color);
+        var canRetry = state.ObservedState is
+            TunnelObservedState.Conflict or TunnelObservedState.Faulted;
+        StartTunnelButton.Content = canRetry
+            ? "Retry API tunnel"
+            : "Start API tunnel";
+        StartTunnelButton.IsEnabled = !_apiTunnelActionInFlight
+            && _tunnelHostProtocolMismatch is null
+            && (!state.Desired || canRetry);
+        StopTunnelButton.IsEnabled = !_apiTunnelActionInFlight && state.Desired;
     }
 
-    private void SetAdbForwardConflict(string detail)
+    private void RenderAdbTunnelState(TunnelStateSnapshot state)
     {
-        _adbForwardDesired = false;
-        CancelAdbReconnect();
-        StartAdbForwardButton.IsEnabled = true;
-        StopAdbForwardButton.IsEnabled = false;
-        SetAdbForwardInputsEnabled(true);
-        AdbForwardStatusText.Text =
-            "Linux ADB listener conflict or SSH forwarding-policy refusal. "
-            + "Automatic reconnect is paused; choose a free per-PC Linux port "
-            + "or correct the SSH policy, then start the ADB forward again. "
-            + $"The API tunnel is unchanged. {detail}";
-        AdbForwardStatusText.Foreground =
-            new SolidColorBrush(Color.FromRgb(255, 113, 135));
-        SetAdbTunnelTopStatus(
-            "Conflict",
-            AdbForwardStatusText.Text,
-            AdbForwardStatusText.Foreground);
-        LastErrorText.Text = detail;
+        var (summary, color) = TunnelStatePresentation(state);
+        var detail = TunnelStateDetail(state) + " The API tunnel is unchanged.";
+        AdbForwardStatusText.Text = detail;
+        AdbForwardStatusText.Foreground = color;
+        AdbForwardStatusText.ToolTip = state.LastDiagnostic?.RawDetail;
+        SetAdbTunnelTopStatus(summary, detail, color);
+        var canRetry = state.ObservedState is
+            TunnelObservedState.Conflict or TunnelObservedState.Faulted;
+        StartAdbForwardButton.Content = canRetry
+            ? "Retry ADB forward"
+            : "Start ADB forward";
+        StartAdbForwardButton.IsEnabled = !_adbForwardStarting
+            && !_adbTunnelRestartInFlight
+            && _tunnelHostProtocolMismatch is null
+            && (!state.Desired || canRetry);
+        StopAdbForwardButton.IsEnabled = !_adbForwardStarting
+            && !_adbTunnelRestartInFlight
+            && state.Desired;
+        SetAdbForwardInputsEnabled(!state.Desired || canRetry);
     }
 
-    private void ScheduleAdbReconnect(string reason)
+    private (string Summary, Brush Color) TunnelStatePresentation(
+        TunnelStateSnapshot state)
     {
-        if (!_adbForwardDesired || _adbReconnectCancellation is not null)
+        var muted = (Brush)FindResource("MutedBrush");
+        return state.ObservedState switch
         {
-            return;
-        }
-
-        _adbReconnectAttempt++;
-        var delaySeconds = Math.Min(
-            30,
-            5 * (1 << Math.Min(_adbReconnectAttempt - 1, 3)));
-        var cancellation = new CancellationTokenSource();
-        _adbReconnectCancellation = cancellation;
-        StartAdbForwardButton.IsEnabled = false;
-        StopAdbForwardButton.IsEnabled = true;
-        SetAdbForwardInputsEnabled(false);
-        AdbForwardStatusText.Text =
-            $"ADB reverse tunnel disconnected: {reason} Reconnecting in "
-            + $"{delaySeconds}s (attempt {_adbReconnectAttempt}); the API "
-            + "tunnel is unchanged.";
-        AdbForwardStatusText.Foreground =
-            new SolidColorBrush(Color.FromRgb(241, 191, 91));
-        SetAdbTunnelTopStatus(
-            $"Retry in {delaySeconds}s",
-            AdbForwardStatusText.Text,
-            AdbForwardStatusText.Foreground);
-        _ = ReconnectAdbForwardAfterDelayAsync(
-            delaySeconds,
-            cancellation);
+            TunnelObservedState.Stopped => ("Stopped", muted),
+            TunnelObservedState.Starting => (
+                "Starting",
+                new SolidColorBrush(Color.FromRgb(241, 191, 91))),
+            TunnelObservedState.Running => (
+                "Active",
+                new SolidColorBrush(Color.FromRgb(73, 214, 157))),
+            TunnelObservedState.Stopping => (
+                "Stopping",
+                new SolidColorBrush(Color.FromRgb(241, 191, 91))),
+            TunnelObservedState.RetryWaiting => (
+                RetrySummary(state),
+                new SolidColorBrush(Color.FromRgb(241, 191, 91))),
+            TunnelObservedState.Conflict => (
+                "Conflict",
+                new SolidColorBrush(Color.FromRgb(255, 113, 135))),
+            TunnelObservedState.Faulted => (
+                "Faulted",
+                new SolidColorBrush(Color.FromRgb(255, 113, 135))),
+            _ => (state.ObservedState.ToString(), muted),
+        };
     }
 
-    private async Task ReconnectAdbForwardAfterDelayAsync(
-        int delaySeconds,
-        CancellationTokenSource cancellation)
+    private static string RetrySummary(TunnelStateSnapshot state)
     {
-        try
-        {
-            await Task.Delay(
-                TimeSpan.FromSeconds(delaySeconds),
-                cancellation.Token);
-            if (!_adbForwardDesired || cancellation.IsCancellationRequested)
-            {
-                return;
-            }
-            if (ReferenceEquals(_adbReconnectCancellation, cancellation))
-            {
-                _adbReconnectCancellation = null;
-            }
-            await StartAdbForwardAsync(userInitiated: false);
-        }
-        catch (OperationCanceledException)
-        {
-            // Stopping the ADB forward cancels its pending reconnect.
-        }
-        finally
-        {
-            if (ReferenceEquals(_adbReconnectCancellation, cancellation))
-            {
-                _adbReconnectCancellation = null;
-            }
-            cancellation.Dispose();
-        }
+        var seconds = state.RetryAt is null
+            ? 0
+            : Math.Max(
+                0,
+                (int)Math.Ceiling(
+                    (state.RetryAt.Value - DateTimeOffset.UtcNow).TotalSeconds));
+        return $"Retry in {seconds}s";
     }
 
-    private void CancelAdbReconnect()
+    private static string TunnelStateDetail(TunnelStateSnapshot state)
     {
-        var cancellation = _adbReconnectCancellation;
-        _adbReconnectCancellation = null;
-        if (cancellation is null)
+        var endpoint = state.ActiveEndpoint?.Display ?? "No active endpoint.";
+        var pid = state.ProcessId is null ? "no SSH PID" : $"SSH PID {state.ProcessId}";
+        var diagnostic = state.LastDiagnostic is null
+            ? ""
+            : $" Last SSH diagnostic: {state.LastDiagnostic.Summary}";
+        return state.ObservedState switch
         {
-            return;
-        }
-        cancellation.Cancel();
+            TunnelObservedState.Stopped =>
+                $"Stopped; desired state is off. {diagnostic}".Trim(),
+            TunnelObservedState.Running =>
+                $"Desired and active: {endpoint} ({pid}).{diagnostic}",
+            TunnelObservedState.RetryWaiting =>
+                $"Desired but disconnected; {RetrySummary(state).ToLowerInvariant()} "
+                + $"(attempt {state.RetryAttempt}). {endpoint}.{diagnostic}",
+            TunnelObservedState.Conflict =>
+                "Desired, but retry is paused for a bind or SSH-policy conflict. "
+                + $"{endpoint}.{diagnostic}",
+            TunnelObservedState.Faulted =>
+                $"Desired but faulted. {endpoint}.{diagnostic}",
+            _ =>
+                $"{state.ObservedState}: desired={state.Desired}. "
+                + $"{endpoint} ({pid}).{diagnostic}",
+        };
     }
 
     private void RefreshWindowsAdbListenerStatus()
@@ -1166,7 +1373,7 @@ public partial class MainWindow : Window
 
         try
         {
-            var listening = SshTunnelManager.IsWindowsLoopbackPortListening(port);
+            var listening = IsWindowsLoopbackPortListening(port);
             WindowsAdbListenerStatusText.Text = listening
                 ? $"Windows ADB listener detected for 127.0.0.1:{port}."
                 : $"No Windows TCP listener detected for 127.0.0.1:{port}; "
@@ -1200,6 +1407,15 @@ public partial class MainWindow : Window
         WindowsBlueStacksAdbPortBox.IsEnabled = enabled;
         LinuxAdbForwardPortBox.IsEnabled = enabled;
     }
+
+    private static bool IsWindowsLoopbackPortListening(int port) =>
+        IPGlobalProperties
+            .GetIPGlobalProperties()
+            .GetActiveTcpListeners()
+            .Any(endpoint =>
+                endpoint.Port == port
+                && (endpoint.Address.Equals(IPAddress.Loopback)
+                    || endpoint.Address.Equals(IPAddress.Any)));
 
     private async void Control_Click(object sender, RoutedEventArgs e)
     {
@@ -2942,8 +3158,10 @@ public partial class MainWindow : Window
             return;
         }
 
-        var destinationValid = SshTunnelManager.IsValidDestination(
+        var destinationValid = TunnelHostConfigurationValidator.IsValidDestination(
             SshDestinationBox.Text);
+        var hostAvailable = _tunnelHostSnapshot is not null
+            && _tunnelHostProtocolMismatch is null;
         CompatibilityBanner.Visibility = Visibility.Visible;
         CompatibilityBannerTitle.Text = _controlSurfaceRestartInFlight
             ? "RESTARTING LINUX API — AUTOMATION START REMAINS DISABLED"
@@ -2995,14 +3213,20 @@ public partial class MainWindow : Window
             new SolidColorBrush(Color.FromRgb(241, 191, 91));
         RestartControlSurfaceButton.Visibility = Visibility.Visible;
         RestartControlSurfaceButton.IsEnabled =
-            destinationValid && !_controlSurfaceServiceActionInFlight;
+            destinationValid
+            && hostAvailable
+            && !_controlSurfaceServiceActionInFlight;
         RestartControlSurfaceBannerButton.IsEnabled =
-            destinationValid && !_controlSurfaceServiceActionInFlight;
-        RestartControlSurfaceBannerButton.ToolTip = destinationValid
+            destinationValid
+            && hostAvailable
+            && !_controlSurfaceServiceActionInFlight;
+        RestartControlSurfaceBannerButton.ToolTip = destinationValid && hostAvailable
             ? "Restart only the fixed Linux control API, verify compatibility, "
                 + "and leave game automation stopped."
-            : "Enter a valid Linux SSH destination in the SSH Tunnel panel to "
-                + "enable this mitigation.";
+            : !destinationValid
+                ? "Enter a valid Linux SSH destination in the SSH Tunnel panel to "
+                    + "enable this mitigation."
+                : "Reconnect or restart the per-user tunnel host first.";
     }
 
     private string? StartBlockerDescription(
@@ -3290,7 +3514,7 @@ public partial class MainWindow : Window
     private void SaveAdbForwardSettings(int windowsPort, int linuxPort)
     {
         var destination = SshDestinationBox.Text.Trim();
-        if (!SshTunnelManager.IsValidDestination(destination))
+        if (!TunnelHostConfigurationValidator.IsValidDestination(destination))
         {
             throw new ArgumentException(
                 "SSH destination must be a host, SSH alias, or user@host using "

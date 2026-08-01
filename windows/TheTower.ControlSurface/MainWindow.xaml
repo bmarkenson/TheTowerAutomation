@@ -631,6 +631,26 @@
                 </UniformGrid>
               </Grid>
               <StackPanel Grid.Row="4" VerticalAlignment="Top">
+                <TextBlock Text="TUNNEL HOST"
+                           Foreground="{StaticResource MutedBrush}"
+                           FontSize="10"
+                           FontWeight="Bold"
+                           Margin="4,8,4,2" />
+                <TextBlock x:Name="TunnelHostStatusText"
+                           Text="Starting the per-user companion..."
+                           TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedBrush}"
+                           FontSize="10"
+                           Margin="6,2,6,2" />
+                <Button x:Name="RestartTunnelHostButton"
+                        Content="Restart tunnel host..."
+                        Click="RestartTunnelHost_Click"
+                        IsEnabled="False"
+                        Margin="4,3,4,2"
+                        ToolTip="Explicitly stop the companion and its owned SSH children, then start the packaged host without replaying tunnel desire." />
+                <Border BorderBrush="{StaticResource BorderBrush}"
+                        BorderThickness="0,1,0,0"
+                        Margin="4,10,4,5" />
                 <TextBlock Text="API TUNNEL"
                            Foreground="{StaticResource MutedBrush}"
                            FontSize="10"
@@ -640,7 +660,7 @@
                   <Button x:Name="StartTunnelButton" Content="Start API tunnel" Click="StartTunnel_Click" Style="{StaticResource PrimaryButton}" />
                   <Button x:Name="StopTunnelButton" Content="Stop API tunnel" Click="StopTunnel_Click" IsEnabled="False" />
                 </UniformGrid>
-                <TextBlock x:Name="TunnelStatusText" Text="Stopped" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="6,5,6,2" />
+                <TextBlock x:Name="TunnelStatusText" Text="Stopped" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="6,5,6,2" ToolTipService.ShowDuration="30000" />
                 <TextBlock x:Name="LinuxServiceCompatibilityText" Text="Waiting for Linux API compatibility status." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="6,3,6,0" />
                 <Button x:Name="RestartControlSurfaceButton" Content="Restart Linux API service" Click="RestartControlSurface_Click" Style="{StaticResource PrimaryButton}" IsEnabled="False" Visibility="Collapsed" Margin="4,3,4,2" />
                 <Border BorderBrush="{StaticResource BorderBrush}"
@@ -689,6 +709,7 @@
                            TextWrapping="Wrap"
                            Foreground="{StaticResource MutedBrush}"
                            FontSize="10"
+                           ToolTipService.ShowDuration="30000"
                            Margin="6,5,6,2" />
               </StackPanel>
               </Grid>

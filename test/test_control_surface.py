@@ -865,56 +865,90 @@ def test_native_incompatible_api_has_prominent_start_mitigation():
     assert "StartBlockerDescription" in native_code
 
 
-def test_native_control_surface_manages_adb_reverse_forward_independently():
-    native_root = (
-        Path(__file__).parents[1]
-        / "windows"
-        / "TheTower.ControlSurface"
-    )
-    tunnel_manager = (native_root / "SshTunnelManager.cs").read_text(
+def test_per_user_tunnel_host_owns_independent_api_and_adb_ssh_processes():
+    windows_root = Path(__file__).parents[1] / "windows"
+    gui_root = windows_root / "TheTower.ControlSurface"
+    host_root = windows_root / "TheTower.TunnelHost"
+    core_root = windows_root / "TheTower.TunnelHost.Core"
+    protocol_root = windows_root / "TheTower.TunnelProtocol"
+    process_code = (host_root / "OpenSshTunnelProcess.cs").read_text(
         encoding="utf-8"
     )
-    models = (native_root / "Models.cs").read_text(encoding="utf-8")
-    window = (native_root / "MainWindow.xaml").read_text(encoding="utf-8")
-    window_code = (native_root / "MainWindow.xaml.cs").read_text(
+    protocol = (protocol_root / "TunnelHostProtocol.cs").read_text(
+        encoding="utf-8"
+    )
+    identity = (protocol_root / "UserScopedIpcIdentity.cs").read_text(
+        encoding="utf-8"
+    )
+    supervisor = (core_root / "TunnelSupervisor.cs").read_text(
+        encoding="utf-8"
+    )
+    program = (host_root / "Program.cs").read_text(encoding="utf-8")
+    pipe_server = (host_root / "TunnelHostNamedPipeServer.cs").read_text(
+        encoding="utf-8"
+    )
+    job = (core_root / "WindowsKillOnCloseJob.cs").read_text(
+        encoding="utf-8"
+    )
+    connection = (gui_root / "TunnelHostConnection.cs").read_text(
+        encoding="utf-8"
+    )
+    window_code = (gui_root / "MainWindow.xaml.cs").read_text(
         encoding="utf-8"
     )
 
-    assert '"-L"' in tunnel_manager
-    assert '"-R"' in tunnel_manager
+    assert not (gui_root / "SshTunnelManager.cs").exists()
+    assert '"-L"' in protocol
+    assert '"-R"' in protocol
     assert (
-        '$"127.0.0.1:{linuxPort}:127.0.0.1:{windowsPort}"'
-        in tunnel_manager
+        '$"127.0.0.1:{configuration.LinuxAdbPort}:127.0.0.1:'
+        '{configuration.WindowsBlueStacksAdbPort}"'
+        in protocol
     )
-    assert '"ExitOnForwardFailure=yes"' in tunnel_manager
-    assert "IsWindowsLoopbackPortListening" in tunnel_manager
-    assert "GetActiveTcpListeners" in tunnel_manager
-    assert (
-        "public int WindowsBlueStacksAdbPort { get; set; } = 5555;"
-        in models
-    )
-    assert "public int LinuxAdbForwardPort { get; set; } = 5555;" in models
-    assert 'x:Name="WindowsBlueStacksAdbPortBox"' in window
-    assert 'x:Name="LinuxAdbForwardPortBox"' in window
-    assert 'Content="Start ADB forward"' in window
-    assert 'Content="Stop ADB forward"' in window
-    assert '_apiTunnel = new("API tunnel")' in window_code
-    assert '_adbTunnel = new("ADB reverse tunnel")' in window_code
-    assert "StartReverseForwardAsync" in window_code
-    assert "ScheduleAdbReconnect" in window_code
-    assert "Automatic reconnect is paused" in window_code
+    assert '"BatchMode=yes"' in process_code
+    assert '"StrictHostKeyChecking=yes"' in process_code
+    assert '"ConnectTimeout=10"' in process_code
+    assert '"ExitOnForwardFailure=yes"' in process_code
+    assert '"ServerAliveInterval=30"' in process_code
+    assert '"ServerAliveCountMax=3"' in process_code
+    assert "PipeOptions.CurrentUserOnly" in identity
+    assert "WindowsIdentity.GetCurrent().User" in identity
+    assert "private readonly TunnelKind _kind" in supervisor
+    assert program.count("new TunnelSupervisor") == 2
+    assert "TunnelKind.Api" in program
+    assert "TunnelKind.Adb" in program
+    assert "AssignCurrentProcess" in program
+    assert "JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE" in job
+    assert "KillOnJobCloseLimit = 0x00002000" in job
+    assert "TunnelHostConnection _tunnelHost" in window_code
+    assert 'FileName = "ssh.exe"' not in window_code
+    assert "ShutdownHost" not in window_code
+    assert "await _tunnelHost.DisposeAsync()" in window_code
+    assert "RetrySummary" in window_code
     assert "The API tunnel is unchanged" in window_code
+    assert 'ErrorCode = "protocol_mismatch"' in pipe_server
+    assert "MinimumProtocolVersion" in pipe_server
+    assert "MaximumProtocolVersion" in pipe_server
+    assert "HostExecutablePath" in pipe_server
+    assert "StopVerifiedIncompatibleHostAsync" in connection
+    assert "compatibility.HostProcessId" in connection
+    assert "compatibility.HostStartedAt" in connection
+    assert "ConfirmShutdown = true" in connection
 
 
 def test_native_control_surface_exposes_independent_api_service_and_tunnel_health():
-    native_root = (
-        Path(__file__).parents[1]
-        / "windows"
-        / "TheTower.ControlSurface"
-    )
-    tunnel_manager = (native_root / "SshTunnelManager.cs").read_text(
+    windows_root = Path(__file__).parents[1] / "windows"
+    native_root = windows_root / "TheTower.ControlSurface"
+    service_controller = (
+        windows_root
+        / "TheTower.TunnelHost"
+        / "OpenSshLinuxApiServiceController.cs"
+    ).read_text(
         encoding="utf-8"
     )
+    host_protocol = (
+        windows_root / "TheTower.TunnelProtocol" / "TunnelHostProtocol.cs"
+    ).read_text(encoding="utf-8")
     window = (native_root / "MainWindow.xaml").read_text(encoding="utf-8")
     window_code = (native_root / "MainWindow.xaml.cs").read_text(
         encoding="utf-8"
@@ -928,17 +962,37 @@ def test_native_control_surface_exposes_independent_api_service_and_tunnel_healt
     assert 'Content="Restart API service"' in window
     assert 'Header="Restart API tunnel"' in window
     assert 'Header="Restart ADB tunnel"' in window
+    assert 'x:Name="TunnelHostStatusText"' in window
+    assert 'Content="Restart tunnel host..."' in window
     assert 'Text="AUTOMATION SERVICE"' in window
-    assert "ControlSurfaceServiceAction.Start" in tunnel_manager
-    assert "ControlSurfaceServiceAction.Stop" in tunnel_manager
-    assert "ControlSurfaceServiceAction.Restart" in tunnel_manager
-    assert '"systemctl", "--user", verb, ControlSurfaceService' in tunnel_manager
-    assert "GetControlSurfaceServiceStateAsync" in tunnel_manager
-    assert '"--property=ActiveState"' in tunnel_manager
+    assert "LinuxApiServiceAction.Start" in service_controller
+    assert "LinuxApiServiceAction.Stop" in service_controller
+    assert "LinuxApiServiceAction.Restart" in service_controller
+    assert '"systemctl", "--user", verb, ControlSurfaceService' in service_controller
+    assert '"--property=ActiveState"' in service_controller
+    assert "params string[] commandArguments" in service_controller
+    assert "ControlSurfaceService" in service_controller
+    assert "RemoteCommand" not in host_protocol
+    assert "ServiceUnit" not in host_protocol
     assert "RefreshControlSurfaceServiceStatusAsync" in window_code
     assert "RestartApiTunnel_Click" in window_code
     assert "RestartAdbTunnel_Click" in window_code
     assert "Unavailable — service stopped" in window_code
+
+
+def test_windows_publish_package_requires_gui_and_tunnel_host_executables():
+    native_root = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+    )
+    powershell = (native_root / "publish.ps1").read_text(encoding="utf-8")
+    linux = (native_root / "publish-linux.sh").read_text(encoding="utf-8")
+
+    for script in (powershell, linux):
+        assert "TheTower.ControlSurface.exe" in script
+        assert "TheTower.TunnelHost.exe" in script
+        assert "TheTower.TunnelHost.csproj" in script
 
 
 def test_control_surface_configures_run_from_selected_strategy_checks(tmp_path):

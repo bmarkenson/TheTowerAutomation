@@ -6,11 +6,14 @@ by the automation and CLI. The earlier browser client remains a useful fallback
 served by that same API.
 
 ```text
-Native Windows app
-      │ starts/stops passwordless Windows OpenSSH
-      │ fixed SSH query/start/stop/restart ► thetower-control-surface.service
-      │ local-forward (recommended)
-      ▼
+Native Windows WPF app
+      ├── current-user named pipe ──► TheTower.TunnelHost.exe
+      │                                  ├── API ssh.exe local forward
+      │                                  ├── ADB ssh.exe reverse forward
+      │                                  └── fixed SSH query/actions
+      │                                      ► thetower-control-surface.service
+      └── loopback HTTP through API forward
+                         ▼
 Linux loopback HTTP server
       ├── write ──► logs/automation_ctl.json ──► automation supervisor
       ├── write ──► ~/.config/thetower/automation-adb.env ──► next-start config
@@ -23,9 +26,10 @@ Linux loopback HTTP server
       └── read  ──► logs/tournaments/Tournament*.json
 ```
 
-The Windows app is a thin client. A self-contained `win-x64` publish needs no
-Python, ADB, repository checkout, browser, or preinstalled .NET runtime on the
-operator PC. The Linux adapter remains independently testable and transport
+The Windows app is a thin client. A self-contained `win-x64` package contains
+the WPF GUI and its headless tunnel-host companion and needs no Python, ADB,
+repository checkout, browser, or preinstalled .NET runtime on the operator PC.
+The Linux adapter remains independently testable and transport
 agnostic.
 
 ## Authority boundaries
@@ -145,12 +149,14 @@ expiry attempt.
 
 ## Transport and access
 
-The server binds to `127.0.0.1:8787` by default. The Windows app can launch and
-own two passwordless OpenSSH processes: the existing Windows-local API forward
-and a separately controllable ADB reverse forward. It invokes `ssh.exe` without
-a shell, uses only validated destination/port fields, enables BatchMode and
-forward-failure detection, and closes both processes when the app exits. The
-equivalent manual commands are:
+The server binds to `127.0.0.1:8787` by default. A dedicated per-user
+`TheTower.TunnelHost.exe` owns two passwordless OpenSSH processes: the
+Windows-local API forward and a separately controllable ADB reverse forward.
+The WPF app never starts or adopts `ssh.exe`; it starts or attaches to the host
+and uses its local IPC protocol. The host invokes `ssh.exe` without a shell,
+uses only validated destination/port fields, and enables BatchMode, strict
+host-key checking, a bounded connect timeout, forward-failure detection, and
+keepalives. The equivalent manual commands are:
 
 ```powershell
 ssh -N -L 8787:127.0.0.1:8787 <linux-user>@<linux-host>
@@ -163,31 +169,67 @@ multiple PCs can expose distinct Linux ports without changing their local
 listeners. The independent process boundary keeps an ADB bind conflict or
 reconnect cycle from interrupting API control. Accepted forwarding, local
 Windows-listener detection, conflicts, and bounded automatic reconnect are
-reported separately in the GUI.
+reported separately in the GUI. Both supervisors preserve desired state while
+distinguishing starting, active, retry-waiting, conflict, faulted, and stopped
+observation. A forwarding bind or policy conflict pauses retry only for that
+tunnel; ordinary unexpected exits use independent 5/10/20/30-second capped
+backoff.
 
 The always-visible UI treats systemd API-service state, HTTP reachability, API
 forward state, and ADB-forward state as four different signals. A fixed
 `systemctl --user show` query supplies API-service state even while that service
 is stopped. Service control uses bounded one-shot SSH commands; forwarding
-continues to use the two independently owned long-running processes.
+continues to use the two independently owned long-running processes. The host
+accepts only the fixed action enum and the validated destination; there is no
+IPC field for a remote command, unit, path, shell, or executable.
 
-### Proposed persistent tunnel host
+### Persistent per-user tunnel host
 
-The current Windows app still owns and closes both `ssh.exe` children. Keeping
-forwards alive after the WPF window exits should not be implemented by merely
-detaching those children: a later GUI could not reliably establish process
-ownership, configuration currency, reconnect policy, or safe termination.
+The headless host is started on demand by the GUI and remains the authoritative
+owner after the WPF process exits. It is neither a Windows service nor a tray
+application and is not registered for login startup. Closing the GUI only
+disconnects one IPC client. The host stays alive while either tunnel remains
+desired; with no desired tunnel and no GUI connection, it exits after a
+15-second bounded idle period. Because it remains an ordinary process in the
+interactive user's logon session, Windows logoff ends it.
 
-The proposed follow-up is one per-user companion host, started on demand by the
-GUI, that owns both tunnel processes while keeping them independently
-controllable. A versioned, current-user-only named pipe would expose desired and
-observed state, last SSH diagnostics, reconnect/conflict state, and fixed API
-service query/actions. A single-instance mutex would prevent competing hosts.
-Configuration would remain per Windows user and retain separate per-PC Linux
-ADB ports. The first version should be headless and persist only after an
-explicit GUI start; optional start-at-login and tray UI can be later choices.
-A Windows service is not preferred because OpenSSH keys and `known_hosts` are
-already scoped to the interactive user's profile.
+The IPC contract uses four-byte little-endian length framing around bounded JSON
+messages. Every request carries protocol version 1, a bounded client identity,
+a unique request ID, and one typed command. The stable named-pipe and mutex
+identities are derived from the Windows user's SID. The server uses
+`PipeOptions.CurrentUserOnly`; the pipe name deliberately does not contain the
+protocol version so incompatible peers can return an explicit supported-version,
+host-PID, instance, start-time, and executable-path response. The GUI disables
+dependent commands on mismatch. Explicit host replacement either asks a
+compatible host to shut down or verifies all of that incompatible-host process
+identity before termination. Replacement stops owned tunnels and never replays
+their desired state.
+
+The snapshot returned on attach includes per-tunnel desired/observed state,
+child PID, active endpoint, retry attempt/time, conflict/failure classification,
+raw bounded SSH diagnostic, fixed Linux API-service observation, host instance,
+host PID, and state revision. Reopening the GUI therefore observes the existing
+owner rather than inferring ownership from arbitrary processes. The host never
+enumerates or adopts pre-existing `ssh.exe` instances.
+
+Validated configuration is stored per user in
+`%LOCALAPPDATA%\TheTower\tunnel-host.json`, including the SSH destination, API
+ports, Windows BlueStacks port, and distinct Linux ADB port. Desired state is
+intentionally absent. A fresh host loads configuration with both supervisors
+stopped, so a new logon, crash replacement, upgrade, or idle restart cannot
+silently re-establish a forward.
+
+Before any SSH child is created, the host associates itself with a Windows Job
+Object configured with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. Normal child
+inheritance places both long-running forwards and bounded service-command SSH
+processes in the same job. Closing the final job handle on graceful exit, crash,
+forced termination, or logoff terminates every owned child without granting
+authority over unrelated SSH processes.
+
+A Windows service remains inappropriate because OpenSSH keys and `known_hosts`
+are already scoped to the interactive user's profile. Optional start-at-login
+and tray UI remain deferred choices rather than implicit consequences of this
+ownership change.
 
 SSH provides host authentication and encryption while the HTTP listener remains
 unreachable from the LAN. Host-key trust must already exist in the Windows

@@ -1,8 +1,9 @@
 # Native Windows Control Surface
 
 This WPF application is the primary desktop client for the Linux control
-surface API. It has no browser dependency and can be published as a
-self-contained, single-file Windows executable.
+surface API. It has no browser dependency. The published package contains the
+self-contained single-file GUI and a separate self-contained, headless
+per-user tunnel host.
 
 ## Publish
 
@@ -13,14 +14,17 @@ this directory:
 .\publish.ps1
 ```
 
-The executable is written to:
+The complete package is written to:
 
 ```text
 publish\win-x64\TheTower.ControlSurface.exe
+publish\win-x64\TheTower.TunnelHost.exe
 ```
 
 The target PC does not need the .NET runtime because the publish is
-self-contained. The output directory is ignored by Git.
+self-contained. Deploy the complete `win-x64` directory; copying only the GUI
+executable deliberately fails closed because it would leave no authoritative
+SSH owner. The output directory is ignored by Git.
 
 The same Windows executable can be compiled on Ubuntu 24.04 even though WPF
 cannot be run there. Do not use Ubuntu's `dotnet-sdk-8.0` package for this
@@ -47,15 +51,23 @@ windows/TheTower.ControlSurface/publish-linux.sh
 
 Set `THETOWER_DOTNET=/absolute/path/to/dotnet` to select a different Microsoft
 SDK installation. The script rejects SDKs missing WindowsDesktop before it
-starts the build. The project explicitly enables Windows targeting; copy the
-resulting `.exe` to Windows for runtime testing.
+starts the build. It publishes both projects into a staging directory, verifies
+both required executables, and replaces the prior package only after both
+succeed. The GUI project explicitly enables Windows targeting; copy the
+complete result directory to Windows for runtime testing.
 
 ## Connect
 
-The app manages two independently controlled Windows OpenSSH processes. The
-API tunnel preserves the Windows-local forward from `127.0.0.1:8787` to the
-Linux API at `127.0.0.1:8787`. The ADB reverse forward exposes the PC's
-Windows-local BlueStacks listener through a configurable Linux loopback port:
+The GUI starts `TheTower.TunnelHost.exe` on demand and controls it through a
+length-prefixed JSON v1 named-pipe protocol. The stable pipe and single-instance
+mutex names are derived from the current Windows user's SID, and the server
+uses `PipeOptions.CurrentUserOnly`. The GUI never starts, adopts, or kills an
+`ssh.exe` process directly.
+
+The host owns two independently controlled Windows OpenSSH processes. The API
+tunnel preserves the Windows-local forward from `127.0.0.1:8787` to the Linux
+API at `127.0.0.1:8787`. The ADB reverse forward exposes the PC's Windows-local
+BlueStacks listener through a configurable Linux loopback port:
 
 ```text
 -L 8787:127.0.0.1:8787
@@ -70,15 +82,21 @@ Linux port such as 5555 and 5556 while retaining its actual Windows listener
 port. The Linux endpoint is always requested on `127.0.0.1`; the GUI does not
 offer a non-loopback ADB bind.
 
-Each process uses BatchMode, keepalives, and `ExitOnForwardFailure`. An ADB
-remote-listener conflict therefore does not stop the API tunnel. The Setup tab
-reports whether Windows has a TCP listener for the configured BlueStacks port
-separately from whether OpenSSH accepted the Linux reverse listener. Raw SSH
-exit detail is retained. A bind or SSH-policy conflict pauses automatic ADB
-reconnect until the operator changes the port or policy and starts it again;
-other unexpected ADB-tunnel exits retry after 5, 10, 20, then at most 30
-seconds. **Stop ADB forward** cancels a pending retry. Both tunnel processes
-stop when the application exits.
+Each process uses BatchMode, strict host-key checking, a bounded connect
+timeout, keepalives, and `ExitOnForwardFailure`. An ADB remote-listener conflict
+therefore does not stop the API tunnel. The Setup tab reports whether Windows
+has a TCP listener for the configured BlueStacks port separately from whether
+OpenSSH accepted the Linux reverse listener. Raw SSH exit detail is retained.
+A bind or SSH-policy conflict keeps that tunnel desired but pauses its retry
+until the operator changes the port or policy and selects Retry/Restart. Other
+unexpected exits retry independently after 5, 10, 20, then at most 30 seconds.
+An explicit Stop clears only that tunnel's desired state and cancels its retry.
+
+The host joins itself to a Windows Job Object configured with
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` before it starts any SSH process. Its
+forwarding and fixed-service-query children inherit that job, so a host crash,
+forced exit, ordinary shutdown, or user logoff cannot leave unmanaged SSH
+orphans. It never enumerates or adopts a pre-existing `ssh.exe`.
 
 Passwordless public-key authentication must already work, and the host key
 must already be trusted. The one-time interactive setup or manual equivalent is:
@@ -89,13 +107,38 @@ ssh -N -L 8787:127.0.0.1:8787 <linux-user>@<linux-host>
 ssh -N -R 127.0.0.1:5555:127.0.0.1:5555 <linux-user>@<linux-host>
 ```
 
-Starting the in-app tunnel automatically selects
+Starting the API tunnel automatically selects
 `http://127.0.0.1:<local-port>` and connects. The standalone **Connect** button
 supports an already-running manual tunnel or an authenticated TLS reverse
 proxy. The application persists the URL, SSH destination, and port preferences,
-but the bearer token is held only in memory and is never saved. Saved API and
-ADB tunnel settings are not started automatically when the application opens;
-select **Start API tunnel** and **Start ADB forward** as needed after launch.
+but the bearer token is held only in memory and is never saved. The companion
+persists only validated tunnel configuration in
+`%LOCALAPPDATA%\TheTower\tunnel-host.json`; desired/running state is never
+written there.
+
+Closing the GUI disconnects its pipe but does not stop a desired tunnel.
+Reopening the GUI attaches to the existing per-user host and immediately
+recovers each tunnel's desired/observed state, SSH PID, active endpoint,
+retry/conflict state, and last raw diagnostic. A newly created host loads saved
+configuration with both tunnel desires off; the operator must explicitly start
+each one. When neither tunnel is desired and no GUI remains connected, the host
+exits after 15 seconds. It is not registered for login startup and has no tray
+UI. Normal Windows logoff terminates the interactive user's host and its Job
+Object children.
+
+The companion also owns bounded SSH status queries and Start/Stop/Restart for
+the fixed `thetower-control-surface.service` user unit. IPC requests carry only
+the action enum and validated connection configuration; there is no remote
+command, unit, path, or shell-input field. HTTP API traffic remains in the GUI.
+
+The Setup tab shows the connected host version, instance, and PID. A protocol
+mismatch disables tunnel/service commands and requires explicit **Restart
+tunnel host...** confirmation. A compatible restart asks the existing host to
+stop its owned children; an incompatible replacement verifies the reported PID,
+start time, and executable path before terminating it. In either case the new
+host loads configuration but does not replay tunnel desire. Headless startup
+failures are retained in
+`%LOCALAPPDATA%\TheTower\tunnel-host-startup.log`.
 
 The main and Battle History windows also remember their normal position, size,
 and maximized state in `%LOCALAPPDATA%\TheTower\control-surface.json`. The main
@@ -401,9 +444,9 @@ BlueStacks and Linux ADB-forward ports configure transport. Normally the
 managed runtime port matches the Linux ADB-forward port, but changing either
 setting does not silently rewrite the other or alter the API tunnel.
 
-An in-app SSH process is reported as connected only after the forwarded Linux
-status endpoint responds successfully. If OpenSSH remains alive but that probe
-fails, the app labels the API unavailable and keeps **Stop API tunnel** enabled.
+The companion reports API SSH state independently of the GUI's HTTP probe. If
+OpenSSH remains alive but that probe fails, the top bar keeps API SSH active,
+labels HTTP unavailable, and keeps **Stop API tunnel** enabled.
 
 The status endpoint advertises its API version, monotonic server revision, and
 supported capabilities. The Windows build carries an expected API version, a
@@ -429,6 +472,41 @@ shows the full-width recovery banner. These operations do not install an
 update, choose another command or service, restart main automation, alter the
 active battle, or change either SSH tunnel. If the compatibility banner
 remains, update the Linux checkout and restart the API service again.
+
+## Windows-only lifecycle validation
+
+Linux cross-publishing and the automated protocol/core tests cannot execute a
+WPF session, Windows OpenSSH, named-pipe access-token enforcement, Job Object
+inheritance, or user logoff. Before treating a new package as deployed, perform
+this bounded validation on Windows with passwordless SSH and host-key trust
+already configured:
+
+1. Publish or copy the complete directory and confirm both executables are
+   adjacent. Launch the GUI with no existing host; verify saved fields load but
+   neither tunnel starts until its explicit Start action.
+2. Start API and ADB tunnels independently. Record the companion PID and both
+   SSH PIDs/endpoints from Setup, close the GUI, and verify both forwards remain
+   usable. Reopen the GUI and verify it recovers desire, observed state, PID,
+   endpoint, retry/conflict state, and diagnostics without starting replacements.
+3. Stop and restart each tunnel separately. Create an occupied Linux ADB bind,
+   confirm only ADB enters Conflict with raw SSH detail and no automatic retry,
+   and confirm API SSH plus HTTP remain unaffected. Correct the port and use
+   Retry/Restart; verify 5/10/20/30-second bounded-backoff presentation for an
+   ordinary disconnect and that Stop cancels it.
+4. Query and Start/Stop/Restart only
+   `thetower-control-surface.service`; verify the four top-bar signals remain
+   distinct and main automation is untouched.
+5. With both tunnels desired, terminate the displayed companion PID from a
+   separate PowerShell session. Verify its two owned `ssh.exe` children also
+   exit, no pre-existing unrelated SSH process is adopted or stopped, and a new
+   GUI/host does not replay either tunnel.
+6. Exercise **Restart tunnel host...** for a compatible build and, using two
+   deliberately different protocol builds, the mismatch path. Confirm the
+   warning is explicit, replacement validates the companion identity, both SSH
+   children stop, and the replacement starts with desires off.
+7. With no desired tunnel, close the GUI and confirm the companion exits after
+   about 15 seconds. Then start a desired tunnel, sign out of Windows, sign back
+   in, and confirm neither the host nor a tunnel starts automatically.
 
 The Linux API and fixed systemd user units must be installed first; see
 [`../../deploy/systemd/README.md`](../../deploy/systemd/README.md).

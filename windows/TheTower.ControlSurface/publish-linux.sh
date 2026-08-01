@@ -3,8 +3,10 @@
 set -euo pipefail
 
 client_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-project_path="${client_dir}/TheTower.ControlSurface.csproj"
+gui_project="${client_dir}/TheTower.ControlSurface.csproj"
+host_project="${client_dir}/../TheTower.TunnelHost/TheTower.TunnelHost.csproj"
 publish_dir="${client_dir}/publish/win-x64"
+staging_dir="${client_dir}/publish/.win-x64-staging-$$"
 data_root="${XDG_DATA_HOME:-${HOME}/.local/share}"
 default_dotnet="${data_root}/thetower-dotnet/dotnet"
 dotnet_bin="${THETOWER_DOTNET:-${default_dotnet}}"
@@ -29,20 +31,40 @@ if [[ -z "${sdk_base}" || ! -f "${windows_desktop_targets}" ]]; then
     exit 1
 fi
 
-"${dotnet_bin}" publish "${project_path}" \
-    --configuration Release \
-    --runtime win-x64 \
-    --self-contained true \
-    --output "${publish_dir}" \
-    -p:PublishSingleFile=true \
-    -p:IncludeNativeLibrariesForSelfExtract=true \
-    -p:EnableCompressionInSingleFile=true
+cleanup_staging() {
+    rm -rf -- "${staging_dir}"
+}
+trap cleanup_staging EXIT
+mkdir -p -- "${staging_dir}"
 
-executable="${publish_dir}/TheTower.ControlSurface.exe"
-if [[ ! -f "${executable}" ]]; then
-    echo "Publish completed without creating ${executable}" >&2
-    exit 1
-fi
+for project_path in "${host_project}" "${gui_project}"; do
+    "${dotnet_bin}" publish "${project_path}" \
+        --configuration Release \
+        --runtime win-x64 \
+        --self-contained true \
+        --output "${staging_dir}" \
+        -p:PublishSingleFile=true \
+        -p:IncludeNativeLibrariesForSelfExtract=true \
+        -p:EnableCompressionInSingleFile=true
+done
 
-echo "Published standalone Windows application to:"
-echo "${executable}"
+required_files=(
+    "TheTower.ControlSurface.exe"
+    "TheTower.TunnelHost.exe"
+)
+for file_name in "${required_files[@]}"; do
+    if [[ ! -f "${staging_dir}/${file_name}" ]]; then
+        echo "Publish completed without creating ${staging_dir}/${file_name}" >&2
+        exit 1
+    fi
+done
+
+rm -rf -- "${publish_dir}"
+mv -- "${staging_dir}" "${publish_dir}"
+trap - EXIT
+
+echo "Published complete standalone Control Surface package to:"
+echo "${publish_dir}"
+for file_name in "${required_files[@]}"; do
+    echo "  ${file_name}"
+done

@@ -736,16 +736,20 @@ Build the native WPF application on Windows with the .NET 8 SDK by running
 `windows/TheTower.ControlSurface/publish-linux.sh` after following the
 [Windows client README](../windows/TheTower.ControlSurface/README.md#publish).
 Linux can compile the Windows-targeted project but cannot run its WPF UI. The
-self-contained single-file output is
-`windows\TheTower.ControlSurface\publish\win-x64\TheTower.ControlSurface.exe`.
+self-contained package contains both
+`windows\TheTower.ControlSurface\publish\win-x64\TheTower.ControlSurface.exe`
+and the adjacent headless `TheTower.TunnelHost.exe`. Deploy the complete
+directory; the GUI deliberately refuses to start tunnels when the companion is
+missing.
 
-The app can own both SSH transports itself through separate `ssh.exe`
-processes. Enter the Linux SSH destination (`host`, SSH config alias, or
-`user@host`), keep the API ports at 8787, and select **Start API tunnel**. For
-ADB, set the Windows BlueStacks listener port and the Linux-exposed port, then
-select **Start ADB forward**. Both ADB settings default to 5555 but remain
-independent so several PCs can use distinct Linux ports. The resulting
-topology is:
+The GUI starts or attaches to one per-user `TheTower.TunnelHost.exe` over a
+versioned, current-user-only named pipe. The host, not the GUI, authoritatively
+owns two separate `ssh.exe` transports. Enter the Linux SSH destination
+(`host`, SSH config alias, or `user@host`), keep the API ports at 8787, and
+select **Start API tunnel**. For ADB, set the Windows BlueStacks listener port
+and the Linux-exposed port, then select **Start ADB forward**. Both ADB settings
+default to 5555 but remain independent so several PCs can use distinct Linux
+ports. The resulting topology is:
 
 ```text
 Windows API client -> 127.0.0.1:8787 -L-> Linux 127.0.0.1:8787
@@ -755,26 +759,48 @@ Linux automation -> 127.0.0.1:<linux-adb-port> -R-> Windows 127.0.0.1:<windows-b
 The reverse listener is always requested on Linux `127.0.0.1`, never a LAN
 interface. The API and ADB forwards are independently startable and stoppable,
 so an occupied Linux ADB port cannot take down API control. Each process uses
-BatchMode, `ExitOnForwardFailure`, and keepalives. The GUI separately reports
-the Windows TCP-listener check and the accepted OpenSSH reverse listener. ADB
-bind or SSH-policy conflicts retain the SSH error and pause retries; other
-unexpected exits automatically retry with bounded 5/10/20/30-second backoff.
-Stopping the ADB forward cancels that retry. Establish host-key trust once from
-PowerShell before using either non-interactive app tunnel:
+BatchMode, strict host-key checking, a bounded connect timeout,
+`ExitOnForwardFailure`, and keepalives. The GUI separately reports the Windows
+TCP-listener check and the accepted OpenSSH reverse listener. Bind or SSH-policy
+conflicts retain raw SSH detail and pause retries only for the affected tunnel;
+other unexpected exits automatically retry with independent bounded
+5/10/20/30-second backoff. Explicit Stop clears that tunnel's desired state and
+cancels its retry. Establish host-key trust once from PowerShell before using
+either non-interactive tunnel:
 
 ```powershell
 ssh <linux-user>@<linux-host>
 ```
 
 The top bar reports the Linux control API service, HTTP reachability, API SSH
-forward, and ADB SSH forward separately. API service state comes from a bounded
-SSH query of the fixed `thetower-control-surface.service` user unit, so **Start
-API**, **Stop API**, and **Restart API service** remain available even when HTTP
-is down. Those controls cannot select another unit or command and do not affect
+forward, and ADB SSH forward separately. The companion owns bounded SSH status
+queries and Start/Stop/Restart for the fixed
+`thetower-control-surface.service` user unit, so those controls remain available
+even when HTTP is down. The IPC contract provides no field for another unit,
+remote command, path, or shell input, and the controls do not affect
 `thetower-automation.service`. **Restart SSH...** restarts either forward
 without cycling the other one. A stopped API service is reported as an expected
 HTTP-unavailable state; failed SSH status queries retain their diagnostic in
-the service-status tooltip.
+the service-status tooltip. HTTP API requests remain in the GUI.
+
+Closing the GUI only disconnects its named-pipe client. Any desired forward
+continues under the host, and reopening the GUI reattaches to the existing host
+and recovers desired/observed state, child PID, endpoint, retry/conflict state,
+and last SSH diagnostic. Tunnel configuration is stored per Windows user, but
+desired state is not: a host created after logoff, host exit, upgrade, or idle
+shutdown starts with both forwards stopped until the operator explicitly starts
+them. With no desired forward and no connected GUI, the host exits after a
+15-second idle period. There is no Windows service, tray icon, or login-start
+registration.
+
+The host joins itself to a Windows Job Object configured to kill all inherited
+children when its final job handle closes. It never enumerates or adopts
+pre-existing `ssh.exe` processes. A protocol-version mismatch disables dependent
+controls and exposes an explicit confirmed host replacement; replacement stops
+owned children and never replays tunnel desire. Complete the
+[Windows-only lifecycle validation](../windows/TheTower.ControlSurface/README.md#windows-only-lifecycle-validation)
+after deploying a new package; Linux validation cannot execute the WPF,
+Windows named-pipe security, Job Object, OpenSSH, or logoff lifecycle.
 
 The application uses the same persistent control file as
 `tools/automation_ctl.py`. The selected state, Game Over mode, and
