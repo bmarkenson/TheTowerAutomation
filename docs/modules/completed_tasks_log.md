@@ -37,6 +37,24 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-01 expanded GUI strategy profile editing
+
+- Commit `f942a5d` advances the Linux control surface to revision 18 and adds
+  durable custom-profile skips for Auto Pick enabled, Perk Bans, and Auto Pick
+  priority. These profile-owned decisions are distinct from one-run waivers,
+  participate in the generated strategy fingerprint, reapply at each run, and
+  prevent corrective input to the skipped Perk controls.
+- Custom publications now retain a complete Farm setup snapshot. The native
+  editor adds zero-to-six Perk Ban selection plus add/remove/reorder controls
+  for Auto Pick priority while preserving every setup value that does not yet
+  have a dedicated control. Bundled plans remain byte-for-structure equivalent,
+  and publishing still neither selects nor activates the custom profile.
+- Runtime, builder, API, compatibility, and Windows-editor regressions passed
+  with the complete 1,006-test repository suite. Linux cross-publishing also
+  produced the self-contained Windows executable. Validation was
+  repository-local and did not inspect or change the live process, control
+  state, ADB target, emulator, or battle.
+
 ### 2026-08-01 restart-stable session configuration checks
 
 - Commit `f5b137b` records a completed session-preflight receipt in the
