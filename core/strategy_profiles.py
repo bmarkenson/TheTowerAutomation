@@ -24,6 +24,18 @@ from core.perk_configuration import (
     PERK_CONFIGURATION_LABELS,
     normalize_perk_configuration_requirements,
 )
+from core.strategy_authoring import (
+    AUTHORING_SCHEMA_VERSION,
+    StrategyAuthoringConflictError,
+    StrategyAuthoringError,
+    StrategyBaseStore,
+    farm_source_from_resolution,
+    fingerprint_document,
+    legacy_farm_source_to_strategy_source,
+    normalize_strategy_source,
+    resolve_strategy_source,
+    setting_registry_catalog,
+)
 from tools.strategy_builders.lib import build_strategy_yaml
 
 
@@ -59,6 +71,7 @@ FARM_LOADOUT_KEYS = (
     "target_priority",
 )
 STRATEGY_PROFILE_SCHEMA_VERSION = 1
+STRATEGY_PUBLICATION_SCHEMA_VERSION = 2
 MAX_PROFILE_FILE_BYTES = 4 * 1024 * 1024
 _STRATEGY_ID_RE = re.compile(r"[a-z][a-z0-9_]{2,47}")
 _RESERVED_STRATEGY_IDS = frozenset(
@@ -206,11 +219,15 @@ class StrategyProfileStore:
         *,
         profile_directory: Path | str | None = None,
         builtin_strategies_directory: Path | str = BUILTIN_STRATEGIES_DIR,
+        base_directory: Path | str | None = None,
     ) -> None:
         self.profile_directory = strategy_profile_directory(profile_directory)
         self.builtin_strategies_directory = Path(
             builtin_strategies_directory
         ).resolve()
+        self.base_store = StrategyBaseStore(
+            base_directory or self.profile_directory / "bases"
+        )
         self._publish_lock = threading.Lock()
 
     def strategy_ids(self) -> tuple[str, ...]:
@@ -221,6 +238,57 @@ class StrategyProfileStore:
             value,
             self.profile_directory,
             allow_legacy_aliases=False,
+        )
+
+    def setting_registry(self) -> list[dict[str, Any]]:
+        """Return backend authoring metadata without exposing normalizers."""
+
+        return setting_registry_catalog()
+
+    def publish_base(
+        self,
+        raw_base: object,
+        *,
+        expected_latest_fingerprint: object = None,
+    ) -> dict[str, Any]:
+        """Publish the next immutable sparse base revision."""
+
+        try:
+            return self.base_store.publish(
+                raw_base,
+                expected_latest_fingerprint=expected_latest_fingerprint,
+            )
+        except StrategyAuthoringConflictError as exc:
+            raise StrategyProfileConflictError(str(exc)) from exc
+        except StrategyAuthoringError as exc:
+            raise StrategyProfileError(str(exc)) from exc
+
+    def authoring_source(self, strategy_id: object) -> Optional[dict[str, Any]]:
+        """Return a schema-2 source, converting schema-1 only in memory."""
+
+        identifier = normalize_strategy_id(strategy_id)
+        if identifier is None:
+            return None
+        if identifier in {"farm_t18", "farm_t19"}:
+            source = _load_yaml_mapping(
+                self.builtin_strategies_directory / f"{identifier}.source.yaml",
+                "bundled strategy source",
+            )
+            return legacy_farm_source_to_strategy_source(
+                source,
+                display_name=_default_display_name(identifier),
+            )
+        if identifier in _RESERVED_STRATEGY_IDS:
+            return None
+        path = _profile_path(self.profile_directory, identifier)
+        if not path.is_file() or path.is_symlink():
+            return None
+        publication = _load_publication(path, expected_id=identifier)
+        if publication["schema_version"] == STRATEGY_PUBLICATION_SCHEMA_VERSION:
+            return _copy_mapping(publication["source"])
+        return legacy_farm_source_to_strategy_source(
+            publication["source"],
+            display_name=publication["display_name"],
         )
 
     def catalog(self) -> dict[str, Any]:
@@ -272,37 +340,46 @@ class StrategyProfileStore:
     def validate(self, raw_profile: object) -> dict[str, Any]:
         """Validate a GUI draft and return its resolved, generated summary."""
 
-        source, display_name = self._normalize_draft(raw_profile)
+        source, display_name = self._authoring_source_from_draft(raw_profile)
         try:
-            plan = build_strategy_yaml(source)
+            base_snapshot = self._load_base_snapshot(source)
+            resolution = resolve_strategy_source(source, base_snapshot)
+            compact_source = farm_source_from_resolution(source, resolution)
+            plan = build_strategy_yaml(compact_source)
         except Exception as exc:
             raise StrategyProfileError(str(exc)) from exc
-        source_fingerprint = _fingerprint(source)
+        source_fingerprint = fingerprint_document(source)
+        base_fingerprint = fingerprint_document(base_snapshot or {})
+        resolution_fingerprint = fingerprint_document(resolution)
         plan_fingerprint = _fingerprint(plan)
         rules = plan.get("rules")
         rule_count = len(rules) if isinstance(rules, list) else 0
-        loadout = source["loadout"]
-        setup = source["setup"]
+        loadout = compact_source["loadout"]
+        setup = compact_source["setup"]
         return {
             "valid": True,
             "profile": {
-                "id": source["meta"]["name"],
+                "id": source["id"],
                 "display_name": display_name,
                 "family": "farm",
-                "tier": source["meta"]["tier"],
-                "version": source["meta"]["version"],
+                "tier": source["tier"],
+                "version": source["version"],
                 "built_in": False,
                 "editable": True,
                 "published_at": None,
                 "source_fingerprint": source_fingerprint,
+                "base_fingerprint": base_fingerprint,
+                "resolution_fingerprint": resolution_fingerprint,
                 "plan_fingerprint": plan_fingerprint,
                 "loadout": _copy_mapping(loadout),
                 "setup": _copy_mapping(setup),
             },
             "source": source,
+            "base_snapshot": base_snapshot,
+            "resolution": resolution,
             "plan": plan,
             "rule_count": rule_count,
-            "summary": _profile_summary(source, rule_count),
+            "summary": _profile_summary(compact_source, rule_count),
             "resolved_configuration": _copy_mapping(
                 plan.get("run_configuration") or {}
             ),
@@ -378,7 +455,8 @@ class StrategyProfileStore:
             current = str(existing["source_fingerprint"])
             if expected != current:
                 raise StrategyProfileConflictError(
-                    f"Profile {identifier!r} changed after it was opened; reload it before publishing"
+                    f"Profile {identifier!r} changed after it was opened; "
+                    "reload it before publishing"
                 )
         elif expected is not None:
             raise StrategyProfileConflictError(
@@ -387,9 +465,12 @@ class StrategyProfileStore:
 
         validation = self.validate(raw_profile)
         source = validation.pop("source")
+        base_snapshot = validation.pop("base_snapshot")
+        resolution = validation.pop("resolution")
         plan = validation.pop("plan")
         publication = {
-            "schema_version": STRATEGY_PROFILE_SCHEMA_VERSION,
+            "schema_version": STRATEGY_PUBLICATION_SCHEMA_VERSION,
+            "kind": "strategy_publication",
             "id": identifier,
             "display_name": validation["profile"]["display_name"],
             "published_at": datetime.now().astimezone().isoformat(
@@ -398,8 +479,14 @@ class StrategyProfileStore:
             "source_fingerprint": validation["profile"][
                 "source_fingerprint"
             ],
+            "base_fingerprint": validation["profile"]["base_fingerprint"],
+            "resolution_fingerprint": validation["profile"][
+                "resolution_fingerprint"
+            ],
             "plan_fingerprint": validation["profile"]["plan_fingerprint"],
             "source": source,
+            "base_snapshot": base_snapshot,
+            "resolution": resolution,
             "plan": plan,
         }
         self._atomic_write(path, publication)
@@ -407,6 +494,66 @@ class StrategyProfileStore:
         validation["profile"] = self._publication_item(stored)
         validation["published"] = True
         return validation
+
+    def _authoring_source_from_draft(
+        self,
+        raw_profile: object,
+    ) -> tuple[dict[str, Any], str]:
+        if not isinstance(raw_profile, Mapping):
+            raise StrategyProfileError("profile must be an object")
+        is_authoring = (
+            raw_profile.get("kind") == "strategy"
+            or raw_profile.get("schema_version") == AUTHORING_SCHEMA_VERSION
+            and "settings" in raw_profile
+        )
+        if is_authoring:
+            identifier = _draft_identifier(raw_profile)
+            if identifier in _RESERVED_STRATEGY_IDS:
+                raise StrategyProfileError(
+                    f"{identifier!r} is a bundled or reserved strategy name; "
+                    "clone it under a new id"
+                )
+            try:
+                source = normalize_strategy_source(
+                    raw_profile,
+                    version=self._next_profile_version(identifier),
+                )
+            except StrategyAuthoringError as exc:
+                raise StrategyProfileError(str(exc)) from exc
+            return source, source["display_name"]
+
+        compact_source, display_name = self._normalize_draft(raw_profile)
+        try:
+            source = legacy_farm_source_to_strategy_source(
+                compact_source,
+                display_name=display_name,
+            )
+        except StrategyAuthoringError as exc:
+            raise StrategyProfileError(str(exc)) from exc
+        return source, display_name
+
+    def _load_base_snapshot(
+        self,
+        source: Mapping[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        base = source.get("base")
+        if not isinstance(base, Mapping):
+            return None
+        try:
+            publication = self.base_store.load(base["id"], base["revision"])
+        except StrategyAuthoringError as exc:
+            raise StrategyProfileError(str(exc)) from exc
+        return _copy_mapping(publication["snapshot"])
+
+    def _next_profile_version(self, identifier: str) -> int:
+        path = _profile_path(self.profile_directory, identifier)
+        if not path.is_file() or path.is_symlink():
+            return 1
+        try:
+            publication = _load_publication(path, expected_id=identifier)
+            return _publication_version(publication) + 1
+        except (StrategyProfileError, TypeError, ValueError):
+            return 1
 
     def _normalize_draft(
         self,
@@ -436,15 +583,7 @@ class StrategyProfileStore:
         if not 1 <= tier <= 100:
             raise StrategyProfileError("tier must be between 1 and 100")
 
-        path = _profile_path(self.profile_directory, identifier)
-        version = 1
-        if path.is_file() and not path.is_symlink():
-            try:
-                current = _load_publication(path, expected_id=identifier)
-                current_version = int(current["source"]["meta"].get("version") or 0)
-                version = current_version + 1
-            except (StrategyProfileError, TypeError, ValueError):
-                version = 1
+        version = self._next_profile_version(identifier)
 
         raw_loadout = raw_profile.get("loadout")
         if not isinstance(raw_loadout, Mapping):
@@ -534,7 +673,19 @@ class StrategyProfileStore:
     @staticmethod
     def _publication_item(publication: Mapping[str, Any]) -> dict[str, Any]:
         source = publication["source"]
-        meta = source["meta"]
+        if publication["schema_version"] == STRATEGY_PUBLICATION_SCHEMA_VERSION:
+            compact_source = farm_source_from_resolution(
+                source,
+                publication["resolution"],
+            )
+            meta = compact_source["meta"]
+            loadout = compact_source["loadout"]
+            setup = compact_source["setup"]
+        else:
+            compact_source = source
+            meta = source["meta"]
+            loadout = source.get("loadout") or {}
+            setup = _normalize_farm_setup(source.get("setup"))
         return {
             "id": publication["id"],
             "display_name": publication["display_name"],
@@ -546,8 +697,8 @@ class StrategyProfileStore:
             "published_at": publication["published_at"],
             "source_fingerprint": publication["source_fingerprint"],
             "plan_fingerprint": publication["plan_fingerprint"],
-            "loadout": _copy_mapping(source.get("loadout") or {}),
-            "setup": _normalize_farm_setup(source.get("setup")),
+            "loadout": _copy_mapping(loadout),
+            "setup": _copy_mapping(setup),
         }
 
     @staticmethod
@@ -701,11 +852,18 @@ def _load_publication(path: Path, *, expected_id: str) -> dict[str, Any]:
         raise StrategyProfileError(f"Unable to read profile publication: {exc}") from exc
     if not isinstance(loaded, dict):
         raise StrategyProfileError("Profile publication must be an object")
-    if loaded.get("schema_version") != STRATEGY_PROFILE_SCHEMA_VERSION:
+    schema_version = loaded.get("schema_version")
+    if schema_version not in {
+        STRATEGY_PROFILE_SCHEMA_VERSION,
+        STRATEGY_PUBLICATION_SCHEMA_VERSION,
+    }:
         raise StrategyProfileError("Unsupported profile publication schema")
     identifier = normalize_strategy_id(loaded.get("id"))
     if identifier != expected_id or identifier in _RESERVED_STRATEGY_IDS:
         raise StrategyProfileError("Profile publication id does not match its filename")
+    if schema_version == STRATEGY_PUBLICATION_SCHEMA_VERSION:
+        return _load_authoring_publication(loaded, expected_id=expected_id)
+
     source = loaded.get("source")
     plan = loaded.get("plan")
     if not isinstance(source, dict) or not isinstance(plan, dict):
@@ -732,6 +890,67 @@ def _load_publication(path: Path, *, expected_id: str) -> dict[str, Any]:
     if not display_name or len(display_name) > 80 or not published_at:
         raise StrategyProfileError("Profile publication metadata is incomplete")
     return loaded
+
+
+def _load_authoring_publication(
+    loaded: dict[str, Any],
+    *,
+    expected_id: str,
+) -> dict[str, Any]:
+    if loaded.get("kind") != "strategy_publication":
+        raise StrategyProfileError("Profile publication has the wrong kind")
+    try:
+        source = normalize_strategy_source(loaded.get("source"))
+    except StrategyAuthoringError as exc:
+        raise StrategyProfileError(f"Invalid authoring source: {exc}") from exc
+    if source != loaded.get("source") or source["id"] != expected_id:
+        raise StrategyProfileError("Profile publication contains a non-canonical source")
+
+    base_snapshot = loaded.get("base_snapshot")
+    try:
+        resolution = resolve_strategy_source(source, base_snapshot)
+    except StrategyAuthoringError as exc:
+        raise StrategyProfileError(f"Invalid embedded base or resolution: {exc}") from exc
+    stored_resolution = loaded.get("resolution")
+    if not isinstance(stored_resolution, dict) or stored_resolution != resolution:
+        raise StrategyProfileError("Profile resolution is not derived from its source")
+
+    source_fingerprint = str(loaded.get("source_fingerprint") or "")
+    base_fingerprint = str(loaded.get("base_fingerprint") or "")
+    resolution_fingerprint = str(loaded.get("resolution_fingerprint") or "")
+    plan_fingerprint = str(loaded.get("plan_fingerprint") or "")
+    if source_fingerprint != fingerprint_document(source):
+        raise StrategyProfileError("Profile source fingerprint does not match")
+    if base_fingerprint != fingerprint_document(base_snapshot or {}):
+        raise StrategyProfileError("Profile base fingerprint does not match")
+    if resolution_fingerprint != fingerprint_document(resolution):
+        raise StrategyProfileError("Profile resolution fingerprint does not match")
+
+    plan = loaded.get("plan")
+    if not isinstance(plan, dict):
+        raise StrategyProfileError("Profile publication requires a plan object")
+    if plan_fingerprint != fingerprint_document(plan):
+        raise StrategyProfileError("Profile plan fingerprint does not match")
+    display_name = str(loaded.get("display_name") or "").strip()
+    published_at = str(loaded.get("published_at") or "").strip()
+    if (
+        not display_name
+        or display_name != source["display_name"]
+        or len(display_name) > 80
+        or not published_at
+    ):
+        raise StrategyProfileError("Profile publication metadata is incomplete")
+    return loaded
+
+
+def _publication_version(publication: Mapping[str, Any]) -> int:
+    source = publication["source"]
+    if publication.get("schema_version") == STRATEGY_PUBLICATION_SCHEMA_VERSION:
+        return int(source.get("version") or 0)
+    meta = source.get("meta")
+    if not isinstance(meta, Mapping):
+        return 0
+    return int(meta.get("version") or 0)
 
 
 def _load_yaml_mapping(path: Path, description: str) -> dict[str, Any]:

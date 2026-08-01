@@ -37,6 +37,30 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-01 backend strategy authoring model
+
+- This commit implements the backend slice of the sparse strategy-authoring
+  architecture: an immutable Farm setting registry, sparse versioned base
+  revisions, sparse strategy sources, generic policy resolution with
+  provenance, and schema-2 self-contained publications with source, base,
+  resolution, and plan fingerprints.
+- Strategy publications pin and embed the exact base snapshot, while later
+  base revisions are append-only and do not propagate. The runtime loader
+  validates and consumes only the embedded resolution and generated plan;
+  bases remain non-activatable and publication remains separate from existing
+  activation controls.
+- Schema-1 custom profiles remain readable without rewrite and convert in
+  memory to explicit local directives. Legacy `preserve` policies and durable
+  skipped checks become explicit ignores, and matching values are never
+  inferred as inherited. Repository Farm T18/T19 sources and the retained
+  schema-1 custom publication regenerate their exact protected plans and run
+  configuration through the shared builder.
+- Focused authoring/profile/builder coverage passed 28 tests, the broader
+  profile, run-initialization, control-surface, and Farm compatibility set
+  passed 163 tests, and the complete repository suite passed all 1,027 tests.
+  Validation was repository-local and did not inspect or change the live
+  process, control state, ADB target, emulator, or battle.
+
 ### 2026-08-01 live player-save Perk calibration
 
 - Commit `48f7f23` cross-validates the `data-9-game-1073` candidate mapping
