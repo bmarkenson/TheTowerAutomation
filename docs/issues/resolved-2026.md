@@ -8,6 +8,53 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Game-speed verification trusted inconsistent OCR and forgot a proven ceiling
+
+- **Observed:** 2026-07-31 during a Tier 17+ Tournament battle and again on
+  2026-08-01 after a Tier 19 Farm target change from exact `x4.0` to maximum
+  available.
+- **Symptom:** A no-change `+` ceiling probe from the correct `x5.0` speed
+  reported `final=3.0` and `reason=speed_decreased_after_plus`. On the later
+  run, the first `+` advanced `x4.0` to `x4.5`, but all bounded post-tap OCR
+  reads failed and the action was reported as failed before a later retry
+  reached and confirmed `x5.0`. Transient OCR failures also discarded the
+  earlier `x5.0` ceiling proof and caused otherwise unnecessary repeat probes.
+- **Evidence:** The first log sequence contains an isolated `x3.0` status
+  bracketed by `x5.0` observations without a speed input, then the false
+  post-`+` decrease at 20:07:43 and a correct `x5.0` confirmation 14 seconds
+  later. The recurrence records a `+` from `x4.0` at 01:32:09, four failed
+  post-tap reads, later authoritative `x4.5`, and recovery to `x5.0` at
+  01:33:05. Fresh read-only captures after both incidents visibly and
+  programmatically read `x5.0`. This recurred after the maximum-target selector
+  deliberately restored active `x5.0` ceiling probes; it is distinct from the
+  obsolete repeated-probe policy fixed by `1f6385a`.
+- **Safety response:** Diagnosis used control, owner-process, ADB, screenshot,
+  log, and source inspection without sending device input. Before live
+  activation, fresh evidence showed operator-owned `PAUSED` control and a
+  Welcome Back / resume dialog rather than an active `RUNNING` frame, so the
+  guarded reload was not attempted and the pause and battle were left intact.
+- **Cause:** Post-tap settling accepted the first numerically different OCR
+  reading, including a directionally impossible decrease after `+`. Invalid
+  OCR reset same-value stabilization instead of allowing bounded agreement
+  across gaps. Separately, the guard inferred a proven normal ceiling only
+  from its immediately previous result, so any transient read failure erased
+  that proof.
+- **Resolution:** Post-tap verification now requires two agreeing,
+  directionally consistent readings within the bounded capture window.
+  Impossible readings are ignored and logged with raw text and confidence;
+  partial evidence without consensus remains invalid. Unreadable post-input
+  outcomes are reported as deferred rather than falsely failed. The guard
+  retains a proven `x5.0` maximum through transient OCR failures and clears it
+  only on a target or battle boundary.
+- **Regression:** `test/test_game_speed.py` covers the observed false `x3.0`
+  after `+`, matching progress readings separated by OCR gaps, deferred
+  post-input verification, and maximum-ceiling retention across an OCR
+  failure.
+- **Validation:** The focused game-speed suite passed 26 tests. The complete
+  repository suite passed all 993 tests. Live activation remains pending until
+  the same runtime is again safely observable as an active battle.
+- **Fixed by:** `852febf`.
+
 ### Perk timeline restart and hidden-UI gaps lost or misattributed selections
 
 - **Observed:** 2026-07-31 during repository-local review of same-battle

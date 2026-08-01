@@ -37,6 +37,21 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-01 game-speed OCR transition hardening
+
+- Commit `852febf` requires two agreeing, directionally consistent readings
+  after every game-speed input. One impossible `x3.0` read can no longer turn
+  an `x5.0` ceiling probe into a false decrease, while matching progress reads
+  may reach consensus across intermittent OCR gaps.
+- Post-input OCR uncertainty is reported as deferred with raw diagnostic
+  evidence instead of as a completed adjustment failure. A proven normal
+  `x5.0` maximum now survives transient read failures, preventing redundant
+  ceiling probes until a target or battle boundary resets that proof.
+- The focused game-speed suite passed 26 tests and the complete repository
+  suite passed all 993 tests. Live activation was intentionally deferred when
+  fresh evidence showed operator-owned Pause and a Welcome Back / resume
+  dialog instead of the active `RUNNING` state required by the guarded reload.
+
 ### 2026-07-31 versioned player-save observation channel
 
 - Commit `174ce10` adds bounded gzip/NRBF decoding, exact
