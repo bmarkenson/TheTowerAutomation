@@ -37,6 +37,27 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-01 live player-save Perk calibration
+
+- Commit `48f7f23` cross-validates the `data-9-game-1073` candidate mapping
+  against game `28.3.1` UI evidence at one new-battle Home boundary. Cards,
+  Workshop, Bots, First Perk, six Ban Perks, all 18 ranked Auto Pick rows,
+  Guardians, and the three automation-managed Free Upgrade locks agreed with
+  stable save reads.
+- The comparison corrected the candidate perk IDs after Auto Pick rank 9 and
+  mapped ID `21` to Swamp Radius. Ban observation now follows selected-tile
+  outlines, including the dark green Swamp Radius row, while Auto Pick
+  observation reads every category color only up to the Rankings Unlocked
+  divider. The live audit pages replayed with six authoritative bans and 18
+  authoritative ranks without warnings; only synthetic structural regressions
+  were added to the repository.
+- The mapping remains `candidate`: Target Priority, all possible Free Upgrade
+  locks, Ultimate Weapon detail polarity, and unranked Auto Pick IDs remain
+  pending, so the existing UI path is still required for every check. The live
+  audit did not select a preset, change configuration, or start a battle.
+- Focused Home/Perks validation passed 108 tests, and the complete repository
+  suite passed all 1,011 tests.
+
 ### 2026-08-01 native GUI API-service and SSH health controls
 
 - Commit `6660ac8` adds always-visible, independent status for the fixed Linux
