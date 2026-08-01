@@ -188,6 +188,48 @@ def test_module_correction_preserves_a_swap_cycle_through_temporary_module():
     assert len(evaluations) == 4
 
 
+def test_live_module_correction_sets_ancestral_once_for_repair_batch():
+    module_frame = np.full((1920, 1080, 3), 32, dtype=np.uint8)
+    actual = dict(GC_MODULES)
+    actual["generator_primary"] = "Project Funding"
+    actual["armor_primary"] = "Sharp Fortitude"
+    filter_modes = []
+    equipped_slots = []
+
+    def evaluate(_frame, _requirements, *, catalog):
+        return _evidence(actual)
+
+    def set_filter(mode, **_kwargs):
+        filter_modes.append(mode)
+        return module_frame
+
+    def equip(slot, **_kwargs):
+        equipped_slots.append(slot.slot_key)
+        actual[slot.slot_key] = slot.expected
+        return module_frame
+
+    with (
+        patch(
+            "core.gc_module_loadout._set_module_rarity_filter",
+            side_effect=set_filter,
+        ),
+        patch(
+            "core.gc_module_loadout._equip_inventory_module",
+            side_effect=equip,
+        ),
+    ):
+        result = ensure_gc_module_loadout(
+            GC_MODULES,
+            screenshot=module_frame,
+            detector=lambda _frame: {"state": "MODULES"},
+            evaluate_fn=evaluate,
+        )
+
+    assert result.valid
+    assert set(equipped_slots) == {"generator_primary", "armor_primary"}
+    assert filter_modes == ["ancestral", "all"]
+
+
 def test_module_correction_refuses_unknown_overview_evidence():
     module_frame = np.full((1920, 1080, 3), 32, dtype=np.uint8)
     evidence = _evidence(dict(GC_MODULES))
@@ -589,7 +631,9 @@ def test_inventory_candidate_waits_for_fresh_detail_before_ocr():
     with (
         patch(
             "core.gc_module_loadout._set_module_rarity_filter",
-            return_value=frame,
+            side_effect=lambda *_args, **_kwargs: pytest.fail(
+                "inventory search must reuse the active Ancestral filter"
+            ),
         ),
         patch(
             "core.gc_module_loadout._scroll_inventory_to_top",

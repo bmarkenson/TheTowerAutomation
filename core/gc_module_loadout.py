@@ -252,7 +252,9 @@ def ensure_gc_module_loadout(
     cycle is broken with a verified level-1 same-family temporary module rather
     than Unequip. Every inventory choice is authoritatively classified by icon
     before its detail name is confirmed, and the complete settled overview is
-    re-evaluated after each transition.
+    re-evaluated after each transition. Live repair selects the Ancestral
+    inventory filter once before its first replacement and restores all
+    rarities only after the complete repaired loadout is verified.
     """
 
     selected_catalog = catalog or load_module_icon_catalog()
@@ -262,8 +264,23 @@ def ensure_gc_module_loadout(
     )
     current = screenshot if screenshot is not None else capture_fn()
     _require_modules(current, detector)
+    ancestral_filter_active = False
+
+    def ensure_ancestral_filter() -> None:
+        nonlocal ancestral_filter_active
+        if ancestral_filter_active:
+            return
+        _set_module_rarity_filter(
+            "ancestral",
+            capture_fn=capture_fn,
+            detector=detector,
+            safe_tap_fn=safe_tap_fn,
+            sleep_fn=sleep_fn,
+        )
+        ancestral_filter_active = True
 
     def live_equip(slot: GcModuleSlotEvidence):
+        ensure_ancestral_filter()
         return _equip_inventory_module(
             slot,
             capture_fn=capture_fn,
@@ -279,6 +296,7 @@ def ensure_gc_module_loadout(
         slot: GcModuleSlotEvidence,
         excluded_names: set[str],
     ):
+        ensure_ancestral_filter()
         attempted: list[str] = []
         for module in selected_catalog.modules:
             if module.family != slot.family or module.name in excluded_names:
@@ -318,17 +336,12 @@ def ensure_gc_module_loadout(
 
     equip_action = equip_fn or live_equip
     temporary_action = temporary_equip_fn or live_temporary_equip
-    changed = False
     announced = False
 
     for _step in range(_MAX_CORRECTION_STEPS):
         evidence = evaluate_fn(current, expected, catalog=selected_catalog)
         if evidence.valid:
-            if (
-                changed
-                and equip_fn is None
-                and temporary_equip_fn is None
-            ):
+            if ancestral_filter_active:
                 current = _set_module_rarity_filter(
                     "all",
                     capture_fn=capture_fn,
@@ -381,7 +394,6 @@ def ensure_gc_module_loadout(
         )
         if direct is not None:
             current = equip_action(direct)
-            changed = True
             _require_modules(current, detector)
             continue
 
@@ -398,7 +410,6 @@ def ensure_gc_module_loadout(
             "DEBUG",
         )
         current = temporary_action(cycle, excluded_names)
-        changed = True
         _require_modules(current, detector)
 
     raise ModuleLoadoutCorrectionError(
@@ -747,13 +758,7 @@ def _find_inventory_detail(
     catalog,
     required_level: Optional[int] = None,
 ):
-    current = _set_module_rarity_filter(
-        "ancestral",
-        capture_fn=capture_fn,
-        detector=detector,
-        safe_tap_fn=safe_tap_fn,
-        sleep_fn=sleep_fn,
-    )
+    current = _capture_modules(capture_fn, detector)
     current = _scroll_inventory_to_top(
         current,
         capture_fn=capture_fn,
