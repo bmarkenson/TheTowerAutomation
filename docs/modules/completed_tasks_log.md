@@ -37,6 +37,30 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-31 constrained GUI Strategy Profile Builder
+
+- Commit `f22d85d` adds a versioned custom-profile catalog shared by the Linux
+  control service, managed-process configuration, control directives, and
+  runtime strategy loader. Valid custom Farm publications contain their compact
+  source and exact generated plan in one fingerprinted document beneath the
+  fixed `config/strategies/custom` directory; advisory locking, stale-revision
+  rejection, `fsync`, and atomic replacement protect concurrent publication.
+- Linux server revision 17 adds the allowlisted strategy-profile catalog and
+  validate/publish endpoints. The native WPF client now populates strategy
+  selection dynamically and provides a Strategy Profiles window that can clone
+  bundled Farm templates, edit Tier loadout policies, validate without writing,
+  and publish without selecting or activating the result. Bundled profiles,
+  shared Farm invariants, preset catalogs, Tournament policy, raw rules, and
+  executor actions remain outside the editor's write surface.
+- Regression coverage verifies catalog and preset exposure, normalization,
+  atomic/versioned publication, stale-write conflicts, tamper exclusion,
+  dynamic runtime loading, managed-service selection, control-file selection,
+  HTTP response boundaries, and the publish-versus-activate separation. The
+  complete repository suite passed 973 tests, and the Linux cross-publish
+  produced the self-contained Windows executable successfully. Validation was
+  repository-local and did not inspect or change the live process, ADB target,
+  emulator, control state, or battle.
+
 ### 2026-07-31 Tournament Module reference observation
 
 - Commit `6e69437` changes Tournament Modules from an enforced loadout to an
