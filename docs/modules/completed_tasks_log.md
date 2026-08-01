@@ -37,6 +37,21 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-31 Tournament Module reference observation
+
+- Commit `6e69437` changes Tournament Modules from an enforced loadout to an
+  observed `tournament_standard` reference. Every equipped slot still requires
+  authoritative identity evidence, but a confident difference is named in the
+  successful preflight result without changing the loadout or warning as an
+  invariant failure.
+- Enforced Tournament settings retain mismatch behavior, and missing or
+  ambiguous Module identity remains incomplete evidence. Focused validation
+  passed 98 tests and the complete repository suite passed 971 tests.
+- The implementation audit confirmed that Module replacement preserves
+  slot-owned levels through guarded transfers but does not capture, retain, or
+  threshold-check the numeric equipped levels. Follow-up validation for Primary
+  level 201+ and Assist level 195+ is recorded in the active runtime backlog.
+
 ### 2026-07-31 restart-stable Perk timeline catch-up
 
 - Commit `07efc5a` atomically checkpoints Perk timeline progress beside the
