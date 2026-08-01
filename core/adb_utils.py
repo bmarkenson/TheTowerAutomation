@@ -4,6 +4,7 @@ Utility functions for interacting with Android devices or emulators via ADB.
 
 This module provides:
 - adb_shell(): Run arbitrary shell commands on a connected device/emulator.
+- read_device_file(): Read one device file through ADB without modifying it.
 - screencap_png(): Capture a raw PNG screenshot from a connected device/emulator.
 - screencap_raw(): Capture the Android raw framebuffer.
 - input_tap()/input_swipe(): Map canonical UI coordinates to the observed
@@ -23,6 +24,7 @@ Dependencies:
 """
 
 import os
+import re
 import shlex
 import subprocess
 from typing import List, Optional, Union
@@ -108,6 +110,49 @@ def adb_shell(
         return None
     except Exception as e:
         print(f"[ERROR] Unexpected ADB exception: {e}")
+        return None
+
+
+def read_device_file(
+    path: str,
+    *,
+    device_id: Optional[str] = None,
+    check: bool = True,
+    timeout_s: float = 10.0,
+    report_errors: bool = True,
+) -> Optional[bytes]:
+    """Read one absolute device path with ``adb exec-out cat``.
+
+    ADB executes the command through the device shell, so the path is limited
+    to a shell-inert Android path grammar before it is passed to ``cat``.  This
+    is a read-only transport primitive; callers remain responsible for
+    validating the returned format and obtaining a stable copy when the device
+    may be writing the file.
+    """
+
+    normalized = str(path or "").strip()
+    if (
+        re.fullmatch(r"/[A-Za-z0-9._+/-]+", normalized) is None
+        or ".." in normalized.split("/")
+    ):
+        raise ValueError("device file path must be absolute and shell-inert")
+    target = resolve_adb_device(device_id)
+    command = ["adb"]
+    if target:
+        command += ["-s", target]
+    command += ["exec-out", "cat", normalized]
+    try:
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=check,
+            timeout=max(0.1, float(timeout_s)),
+        )
+        return result.stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        if report_errors:
+            print(f"[ERROR] ADB device-file read failed: {exc}")
         return None
 
 
@@ -265,6 +310,7 @@ __all__ = [
     "adb_shell",
     "input_swipe",
     "input_tap",
+    "read_device_file",
     "resolve_adb_device",
     "screencap_png",
     "screencap_raw",

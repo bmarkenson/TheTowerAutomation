@@ -88,6 +88,32 @@ exposes the plan's resolved `run_configuration` generically, and Game Over
 records copy that snapshot into the versioned battle JSON. Runtime code does
 not inherit configuration or branch on a Farm strategy name.
 
+### Player-save observation channel
+
+`playerInfo.dat` is a read-only configuration observation channel, not action
+authority. A decoder is selected only by an exact `(dataVersion,
+versionNumber)` tuple and must also pass that mapping's root-class, required
+field, and array-length signature. Unknown tuples, changed signatures,
+incomplete mappings, stale snapshots, and save/profile differences all route
+the affected setting through its existing UI check.
+
+Mappings have an explicit `candidate` or `validated` maturity. Candidate
+mappings always require a full UI audit, even when the save agrees with the
+profile. Promotion to `validated` requires comparison with authoritative UI
+evidence from the same game version. A validated exact save match may
+eventually avoid that check's navigation, but scheduled UI audits remain
+available and the UI implementation is retained as the permanent fallback.
+Any automation repair is still verified through fresh UI evidence; a save does
+not authorize a tap or prove the immediate result of one.
+
+ADB acquisition requires two identical consecutive reads before decoding. The
+container size, gzip integrity, NRBF root, exact version identity, and
+structural signature are validated before mapped values are published. Reports
+retain only the source hash, version metadata, mapped configuration, and a
+redacted profile summary; account identifiers and the raw save are not copied
+into runtime evidence. The component contract and version-update procedure are
+in [`../modules/player_save_import.md`](../modules/player_save_import.md).
+
 Game speed is a global battle-only invariant with persistent operator intent
 independent of strategy and ADB target. Numeric selections from `x0.0` through
 `x6.0` are exact targets. `x6.3` has `maximum_available` semantics because the

@@ -8,6 +8,14 @@ checked-item detail remains in the
 
 ## Current validation gates
 
+- [ ] Cross-validate the `data-9-game-1073` player-save mapping against fresh
+  UI inventory from the same version, and add a new exact candidate mapping if
+  the current game reports a different identity. Integrate save reconciliation
+  into preflight in audit-only mode first. Promote only fully cross-validated
+  fields; retain scheduled audits and every existing UI checker as the fallback
+  for unknown versions, shape changes, stale data, mismatches, and unmapped
+  settings. Follow
+  [`../modules/player_save_import.md`](../modules/player_save_import.md).
 - [ ] Capture the numeric level of every equipped Module from authoritative
   overview evidence, retain it with preflight and completed-run records, and
   surface threshold violations without confusing an intentional Tournament
