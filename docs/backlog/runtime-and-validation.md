@@ -8,6 +8,14 @@ checked-item detail remains in the
 
 ## Current validation gates
 
+- [ ] Repair the successful Tournament attachment path recorded in
+  [`../observed_issues.md`](../observed_issues.md#tournament-attachment-preflight-stranded-the-enabled-ad-gem-handler).
+  Reconcile the attached-only read-only validation action with Tournament's
+  Damage Slider and Orb Distance completion assertions so the deferred gate
+  reaches a terminal state without authorizing configuration changes that the
+  attachment policy forbids. Add an end-to-end runtime-loop regression that
+  starts from a real attachment context and proves a subsequently visible ad
+  gem is dispatched after validation completes.
 - [ ] Cross-validate the `data-9-game-1073` player-save mapping against fresh
   UI inventory from the same version, and add a new exact candidate mapping if
   the current game reports a different identity. Integrate save reconciliation
