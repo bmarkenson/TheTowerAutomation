@@ -37,6 +37,23 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-01 restart-stable session configuration checks
+
+- Commit `f5b137b` records a completed session-preflight receipt in the
+  Current-run scope, bound to the selected strategy and an exact fingerprint
+  of its session assertions, requirements, fallbacks, and generated gate
+  rules.
+- A replacement process reuses that receipt only after the Battle History
+  continuity compare proves the persisted scope still represents the same
+  battle. Missing or mismatched receipts, a later completed battle, unreadable
+  History, or a failed scope compare retains the declared attachment checks.
+  Reuse suppresses attached gate rules without fabricating volatile completion
+  variables.
+- Focused logger, continuity, startup-gate, and Tournament validation passed
+  151 tests, and the complete repository suite passed all 1,002 tests.
+  Validation was repository-local and did not inspect or change the live
+  process, control state, ADB target, emulator, or battle.
+
 ### 2026-08-01 Tournament attachment gate release
 
 - Commit `a8dda82` preserves the attached Tournament inventory pass as the
