@@ -72,6 +72,31 @@ def test_capture_scroll_to_edge_retains_each_distinct_viewport():
     assert [int(frame[0, 0, 0]) for frame in result.screenshots] == [10, 20, 30]
 
 
+def test_capture_scroll_to_edge_stops_at_caller_proven_boundary():
+    captures = iter((_frame(20), _frame(30), _frame(40)))
+    result = capture_scroll_to_edge(
+        "gesture.edge",
+        source_label="indicators.expected",
+        screenshot=_frame(10),
+        max_swipes=5,
+        stable_threshold=0.0,
+        capture_fn=lambda: next(captures),
+        visible_fn=lambda _label, **_kwargs: True,
+        swipe_fn=lambda _key: True,
+        sleep_fn=lambda _seconds: None,
+        stop_fn=lambda frame: (
+            "unchanged_timeline_row"
+            if int(frame[0, 0, 0]) == 30
+            else None
+        ),
+    )
+
+    assert result.success
+    assert result.reason == "unchanged_timeline_row"
+    assert result.swipes == 2
+    assert [int(frame[0, 0, 0]) for frame in result.screenshots] == [10, 20, 30]
+
+
 def test_scroll_until_visible_returns_when_target_appears():
     captures = iter((_frame(2), _frame(3)))
 

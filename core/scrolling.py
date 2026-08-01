@@ -150,12 +150,14 @@ def capture_scroll_to_edge(
     visible_fn: Callable[..., bool] = is_visible,
     swipe_fn: Callable[[str], bool] = swipe_now,
     sleep_fn: Callable[[float], None] = time.sleep,
+    stop_fn: Optional[StopFn] = None,
 ) -> ScrollCaptureResult:
-    """Capture each distinct viewport while guarded scrolling reaches an edge.
+    """Capture distinct viewports until a proven stop condition or an edge.
 
     Unlike :func:`scroll_to_edge`, this helper retains the overlapping frames
     encountered along the way.  Callers can therefore reconstruct long pages
-    without writing routine screenshots to disk.
+    without writing routine screenshots to disk. A caller-supplied stop reason
+    is a successful, bounded completion whose final proving frame is retained.
     """
 
     current = screenshot if screenshot is not None else capture_fn()
@@ -167,6 +169,9 @@ def capture_scroll_to_edge(
             "DEBUG",
         )
         return ScrollCaptureResult(False, (current,), 0, "wrong_source_screen")
+    stop_reason = stop_fn(current) if stop_fn is not None else None
+    if stop_reason:
+        return ScrollCaptureResult(True, (current,), 0, stop_reason)
 
     screenshots = [current]
     total_swipes = 0
@@ -188,6 +193,15 @@ def capture_scroll_to_edge(
                 tuple(screenshots),
                 total_swipes,
                 step.reason,
+            )
+        stop_reason = stop_fn(step.screenshot) if stop_fn is not None else None
+        if stop_reason:
+            screenshots.append(step.screenshot)
+            return ScrollCaptureResult(
+                True,
+                tuple(screenshots),
+                total_swipes,
+                stop_reason,
             )
 
         difference = _mean_abs_difference(current, step.screenshot, progress_region)

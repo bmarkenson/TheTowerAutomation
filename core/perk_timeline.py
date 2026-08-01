@@ -6,7 +6,10 @@ import copy
 from dataclasses import dataclass, replace
 from datetime import datetime
 import json
+import os
+from pathlib import Path
 import re
+import tempfile
 import time
 from typing import Any, Callable, Mapping, Optional, Sequence
 
@@ -14,7 +17,8 @@ import cv2
 import numpy as np
 
 from core.battle_perks import (
-    ocr_latest_selected_perk,
+    DEFAULT_CONFIDENCE_THRESHOLD,
+    ocr_perk_rows,
     ocr_selected_perks,
 )
 from core.input import safe_tap, swipe_now, tap_if_visible
@@ -24,6 +28,7 @@ from core.scrolling import capture_scroll_to_edge, scroll_to_edge
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
 from utils.logger import (
+    get_activity_scope,
     log,
     log_action_intent,
     log_result,
@@ -43,6 +48,10 @@ PERK_PROGRESS_TEXT_REGION = (400, 25, 340, 71)
 MAX_PERK_SCHEDULE_LEAD_WAVES = 250
 INVALID_PROGRESS_WARNING_FRAMES = 3
 PWR_FAMILY = "perk_wave_requirement"
+BOUNDARY_COVERAGE_COMPLETE = "complete"
+BOUNDARY_COVERAGE_VISIBILITY_GAP = "incomplete_visibility_gap"
+SELECTION_SCAN_MODE = "until_first_unchanged"
+PERK_TIMELINE_CHECKPOINT_SCHEMA_VERSION = 1
 PERKS_CLOSE_DESTINATIONS = {
     "RUNNING",
     "GAME_OVER",
@@ -208,6 +217,7 @@ class PerkCaptureRequest:
     snapshot_mode: str
     scheduled_waves: tuple[int, ...] = ()
     observed_wave_end: Optional[int] = None
+    boundary_coverage: str = BOUNDARY_COVERAGE_COMPLETE
 
 
 @dataclass(frozen=True)
@@ -244,6 +254,7 @@ class PerkTimelineTracker:
         self._candidate_count = 0
         self._armed_next_wave: Optional[int] = None
         self._pending: Optional[PerkCaptureRequest] = None
+        self._last_completed_request: Optional[PerkCaptureRequest] = None
 
     @property
     def pending(self) -> Optional[PerkCaptureRequest]:
@@ -257,11 +268,16 @@ class PerkTimelineTracker:
     def latest_batch(self) -> Optional[dict[str, Any]]:
         return copy.deepcopy(self._batches[-1]) if self._batches else None
 
+    @property
+    def last_completed_request(self) -> Optional[PerkCaptureRequest]:
+        return self._last_completed_request
+
     def observe(
         self,
         progress: PerkProgress,
         *,
         wave: Optional[int],
+        boundary_observation_complete: bool = True,
     ) -> Optional[PerkCaptureRequest]:
         """Observe progress and return a request after its token stabilizes."""
 
@@ -278,7 +294,11 @@ class PerkTimelineTracker:
         if self._candidate_count < self._confirmation_frames:
             return self._pending
         if self._pending is not None:
-            self._refresh_pending(progress, wave=wave)
+            self._refresh_pending(
+                progress,
+                wave=wave,
+                boundary_observation_complete=boundary_observation_complete,
+            )
             return self._pending
 
         if not self._snapshot_known:
@@ -329,11 +349,77 @@ class PerkTimelineTracker:
             scheduled_wave=self._armed_next_wave,
             observed_wave=wave,
             progress_after=progress,
-            snapshot_mode="latest" if self._pwr_maxed else "full",
+            snapshot_mode=SELECTION_SCAN_MODE,
             scheduled_waves=(self._armed_next_wave,),
             observed_wave_end=wave,
+            boundary_coverage=(
+                BOUNDARY_COVERAGE_COMPLETE
+                if boundary_observation_complete
+                else BOUNDARY_COVERAGE_VISIBILITY_GAP
+            ),
         )
         return self._pending
+
+    def confirmed_progress_resolves_visibility_gap(
+        self,
+        progress: PerkProgress,
+    ) -> bool:
+        """Return whether stable progress accounts for an unseen-screen gap."""
+
+        token = progress.token
+        if (
+            token is None
+            or token != self._candidate_token
+            or self._candidate_count < self._confirmation_frames
+        ):
+            return False
+        if self._pending is not None:
+            return self._pending.progress_after.token == token
+        if progress.status == "scheduled":
+            return self._armed_next_wave == progress.next_wave
+        return progress.status == "complete"
+
+    def checkpoint(self) -> dict[str, Any]:
+        """Return the internal state needed to continue the same battle."""
+
+        pending = self._pending
+        return {
+            "schema_version": PERK_TIMELINE_CHECKPOINT_SCHEMA_VERSION,
+            "fresh_battle": self._fresh_battle,
+            "baseline_status": self._baseline_status,
+            "snapshot_known": self._snapshot_known,
+            "selected_by_family": copy.deepcopy(self._selected_by_family),
+            "pwr_maxed": self._pwr_maxed,
+            "batches": copy.deepcopy(self._batches),
+            "warnings": list(self._warnings),
+            "armed_next_wave": self._armed_next_wave,
+            "pending": (
+                _capture_request_checkpoint(pending)
+                if pending is not None
+                else None
+            ),
+        }
+
+    def restore_checkpoint(self, payload: Mapping[str, Any]) -> bool:
+        """Restore one validated checkpoint without accepting partial state."""
+
+        try:
+            restored = _validated_tracker_checkpoint(payload)
+        except (TypeError, ValueError):
+            return False
+        self._fresh_battle = restored["fresh_battle"]
+        self._baseline_status = restored["baseline_status"]
+        self._snapshot_known = restored["snapshot_known"]
+        self._selected_by_family = restored["selected_by_family"]
+        self._pwr_maxed = restored["pwr_maxed"]
+        self._batches = restored["batches"]
+        self._warnings = restored["warnings"]
+        self._armed_next_wave = restored["armed_next_wave"]
+        self._pending = restored["pending"]
+        self._last_completed_request = None
+        self._candidate_token = None
+        self._candidate_count = 0
+        return True
 
     def record_full_snapshot(
         self,
@@ -344,7 +430,10 @@ class PerkTimelineTracker:
         """Accept a complete selected-list capture for a baseline or batch."""
 
         request = self._pending
-        if request is None or request.snapshot_mode != "full":
+        if request is None or request.snapshot_mode not in {
+            "full",
+            SELECTION_SCAN_MODE,
+        }:
             return False
         quality = capture.get("quality")
         selected = capture.get("selected")
@@ -376,75 +465,157 @@ class PerkTimelineTracker:
                 "the pending timeline event will be retried"
             )
             return False
-        if (
-            self._pwr_maxed
-            and len(request.scheduled_waves) > 1
-            and len(changes) == len(request.scheduled_waves)
-        ):
-            self._append_ordered_post_pwr_batches(
-                request,
-                changes,
-                observed_at=observed_at,
-            )
-        else:
-            self._append_batch(
-                request,
-                changes,
-                observed_at=observed_at,
-            )
-            if len(request.scheduled_waves) > 1:
-                detail = (
-                    "because the number of distinct changes did not match "
-                    "the number of scheduled boundaries"
-                    if self._pwr_maxed
-                    else "because the interval includes pre-max PWR cascades"
-                )
-                self._warn_once(
-                    "Perk panel capture was deferred across multiple selection "
-                    "boundaries; changes are recorded as an interval aggregate "
-                    f"without per-wave attribution {detail}"
-                )
+        request = self._record_observed_changes(
+            request,
+            changes,
+            observed_at=observed_at,
+        )
         self._selected_by_family = after
         if _snapshot_has_max_pwr(after):
             self._pwr_maxed = True
         self._advance_after_capture(request)
         return True
 
-    def record_latest(
+    def selection_is_unchanged(self, perk: Mapping[str, Any]) -> bool:
+        """Return whether one visible row matches the persisted family state."""
+
+        try:
+            confidence = float(perk.get("confidence"))
+        except (TypeError, ValueError):
+            return False
+        if confidence < DEFAULT_CONFIDENCE_THRESHOLD:
+            return False
+        normalized = _timeline_entry(perk)
+        if normalized is None:
+            return False
+        previous = self._selected_by_family.get(normalized["family"])
+        return bool(previous and _same_display(previous, normalized))
+
+    def record_snapshot_to_unchanged(
         self,
-        perk: Mapping[str, Any],
+        capture: Mapping[str, Any],
         *,
         observed_at: Optional[datetime] = None,
     ) -> bool:
-        """Accept the newest top row once PWR was already maxed."""
+        """Accept a newest-first prefix ending at the first unchanged row."""
 
         request = self._pending
         if (
             request is None
-            or request.snapshot_mode != "latest"
-            or not self._pwr_maxed
+            or request.snapshot_mode != SELECTION_SCAN_MODE
+            or not self._selected_by_family
         ):
             return False
-        normalized = _timeline_entry(perk)
-        if normalized is None:
+        quality = capture.get("quality")
+        selected = capture.get("selected")
+        if (
+            not isinstance(quality, Mapping)
+            or not quality.get("source_complete")
+            or not isinstance(selected, Sequence)
+            or isinstance(selected, (str, bytes))
+        ):
+            return False
+        normalized = [
+            entry
+            for raw in selected
+            if isinstance(raw, Mapping)
+            for entry in [_timeline_entry(raw)]
+            if entry is not None
+        ]
+        unchanged_index = next(
+            (
+                index
+                for index, entry in enumerate(normalized)
+                if self.selection_is_unchanged(entry)
+            ),
+            None,
+        )
+        if unchanged_index is None:
+            return False
+        changed_prefix = normalized[:unchanged_index]
+        if not changed_prefix:
             self._warn_once(
-                "The latest selected Perk row could not be read; "
+                "The Perks panel did not yet show a selection newer than the "
+                "persisted timeline marker; the pending event will be retried"
+            )
+            return False
+
+        after = copy.deepcopy(self._selected_by_family)
+        changes = []
+        for entry in changed_prefix:
+            previous = self._selected_by_family.get(entry["family"])
+            if previous is None or not _same_display(previous, entry):
+                changes.append(_selection_change(previous, entry))
+            after[entry["family"]] = entry
+        if not changes:
+            self._warn_once(
+                "The Perks catch-up rows did not change the persisted snapshot; "
                 "the pending timeline event will be retried"
             )
             return False
-        family = normalized["family"]
-        before = self._selected_by_family.get(family)
-        if before is not None and _same_display(before, normalized):
-            self._warn_once(
-                "The latest selected Perk row had not changed yet; "
-                "the pending timeline event will be retried"
-            )
-            return False
-        change = _selection_change(before, normalized)
-        self._append_batch(request, [change], observed_at=observed_at)
-        self._selected_by_family[family] = normalized
+        request = self._record_observed_changes(
+            request,
+            changes,
+            observed_at=observed_at,
+        )
+        self._selected_by_family = after
+        if _snapshot_has_max_pwr(after):
+            self._pwr_maxed = True
         self._advance_after_capture(request)
         return True
+
+    def _record_observed_changes(
+        self,
+        request: PerkCaptureRequest,
+        changes: Sequence[Mapping[str, Any]],
+        *,
+        observed_at: Optional[datetime],
+    ) -> PerkCaptureRequest:
+        """Record a complete changed prefix with honest boundary semantics."""
+
+        if (
+            self._pwr_maxed
+            and request.boundary_coverage == BOUNDARY_COVERAGE_COMPLETE
+            and len(changes) > len(request.scheduled_waves)
+        ):
+            request = replace(
+                request,
+                boundary_coverage=BOUNDARY_COVERAGE_VISIBILITY_GAP,
+            )
+            self._pending = request
+        if (
+            self._pwr_maxed
+            and len(request.scheduled_waves) > 1
+            and len(changes) == len(request.scheduled_waves)
+            and request.boundary_coverage == BOUNDARY_COVERAGE_COMPLETE
+        ):
+            self._append_ordered_post_pwr_batches(
+                request,
+                changes,
+                observed_at=observed_at,
+            )
+            return request
+
+        self._append_batch(request, changes, observed_at=observed_at)
+        if request.boundary_coverage != BOUNDARY_COVERAGE_COMPLETE:
+            self._warn_once(
+                "Perk panel capture followed an interval when the top-bar "
+                "schedule was not observable; net changes are recorded as an "
+                "interval aggregate without per-wave attribution"
+            )
+        elif len(request.scheduled_waves) > 1:
+            detail = (
+                "because the number of distinct changes did not match the "
+                "number of scheduled boundaries"
+                if self._pwr_maxed
+                else "because the interval includes pre-max PWR cascades"
+            )
+            self._warn_once(
+                "Perk panel capture was deferred across multiple selection "
+                "boundaries; changes are recorded as an interval aggregate "
+                f"without per-wave attribution {detail}"
+            )
+        return request
 
     def snapshot(self) -> dict[str, Any]:
         """Return a detached battle-record payload."""
@@ -458,6 +629,10 @@ class PerkTimelineTracker:
                 "latest_selected_first_reconstructed_when_one_distinct_"
                 "change_matches_each_scheduled_boundary"
             ),
+            "selection_scan_semantics": (
+                "newest_first_until_first_unchanged_row_with_full_edge_"
+                "fallback"
+            ),
             "baseline_status": self._baseline_status,
             "pwr_maxed_observed": self._pwr_maxed,
             "batches": copy.deepcopy(self._batches),
@@ -470,6 +645,11 @@ class PerkTimelineTracker:
                 if self._pending is not None
                 else []
             ),
+            "pending_boundary_coverage": (
+                self._pending.boundary_coverage
+                if self._pending is not None
+                else None
+            ),
         }
 
     def _append_batch(
@@ -481,7 +661,10 @@ class PerkTimelineTracker:
         selection_model: Optional[str] = None,
     ) -> None:
         when = observed_at or datetime.now().astimezone()
-        interval_aggregate = len(request.scheduled_waves) > 1
+        interval_aggregate = bool(
+            len(request.scheduled_waves) > 1
+            or request.boundary_coverage != BOUNDARY_COVERAGE_COMPLETE
+        )
         self._batches.append(
             {
                 "sequence": len(self._batches) + 1,
@@ -489,6 +672,7 @@ class PerkTimelineTracker:
                 "scheduled_waves": list(request.scheduled_waves),
                 "observed_wave": request.observed_wave,
                 "observed_wave_end": request.observed_wave_end,
+                "boundary_coverage": request.boundary_coverage,
                 "observed_at": when.isoformat(),
                 "selection_model": (
                     selection_model
@@ -497,7 +681,7 @@ class PerkTimelineTracker:
                         if interval_aggregate
                         else (
                             "singleton_after_pwr_max"
-                            if request.snapshot_mode == "latest"
+                            if self._pwr_maxed and len(changes) == 1
                             else "simultaneous_batch"
                         )
                     )
@@ -544,6 +728,7 @@ class PerkTimelineTracker:
             self._armed_next_wave = request.progress_after.next_wave
         else:
             self._armed_next_wave = None
+        self._last_completed_request = request
         self._pending = None
 
     def _refresh_pending(
@@ -551,6 +736,7 @@ class PerkTimelineTracker:
         progress: PerkProgress,
         *,
         wave: Optional[int],
+        boundary_observation_complete: bool,
     ) -> None:
         """Advance deferred capture authority to the newest stable token."""
 
@@ -582,36 +768,406 @@ class PerkTimelineTracker:
         scheduled_waves = list(request.scheduled_waves)
         if previous_next is not None and previous_next not in scheduled_waves:
             scheduled_waves.append(previous_next)
-        aggregate = len(scheduled_waves) > 1
+        boundary_coverage = (
+            request.boundary_coverage
+            if boundary_observation_complete
+            else BOUNDARY_COVERAGE_VISIBILITY_GAP
+        )
         self._pending = replace(
             request,
             progress_after=progress,
-            snapshot_mode="full" if aggregate else request.snapshot_mode,
             scheduled_waves=tuple(scheduled_waves),
             observed_wave_end=wave,
+            boundary_coverage=boundary_coverage,
         )
+
     def _warn_once(self, message: str) -> None:
         if message not in self._warnings:
             self._warnings.append(message)
 
 
+def _capture_request_checkpoint(request: PerkCaptureRequest) -> dict[str, Any]:
+    progress = request.progress_after
+    return {
+        "kind": request.kind,
+        "scheduled_wave": request.scheduled_wave,
+        "observed_wave": request.observed_wave,
+        "progress_after": {
+            "status": progress.status,
+            "current_wave": progress.current_wave,
+            "next_wave": progress.next_wave,
+            "text_raw": progress.text_raw,
+            "confidence": progress.confidence,
+        },
+        "snapshot_mode": request.snapshot_mode,
+        "scheduled_waves": list(request.scheduled_waves),
+        "observed_wave_end": request.observed_wave_end,
+        "boundary_coverage": request.boundary_coverage,
+    }
+
+
+def _validated_tracker_checkpoint(payload: Mapping[str, Any]) -> dict[str, Any]:
+    if payload.get("schema_version") != PERK_TIMELINE_CHECKPOINT_SCHEMA_VERSION:
+        raise ValueError("unsupported tracker checkpoint schema")
+    fresh_battle = _required_bool(payload.get("fresh_battle"))
+    snapshot_known = _required_bool(payload.get("snapshot_known"))
+    pwr_maxed = _required_bool(payload.get("pwr_maxed"))
+    baseline_status = str(payload.get("baseline_status") or "")
+    if baseline_status not in {
+        "new_battle_empty",
+        "not_observed",
+        "observed_mid_battle",
+    }:
+        raise ValueError("invalid tracker baseline status")
+    if baseline_status == "new_battle_empty" and not snapshot_known:
+        raise ValueError("fresh-battle checkpoint lacks a known snapshot")
+    if baseline_status == "not_observed" and snapshot_known:
+        raise ValueError("unknown baseline cannot have a known snapshot")
+
+    selected_raw = payload.get("selected_by_family")
+    if not isinstance(selected_raw, Mapping):
+        raise ValueError("selected Perks checkpoint must be a mapping")
+    selected_by_family: dict[str, dict[str, Any]] = {}
+    for raw_family, raw_entry in selected_raw.items():
+        family = str(raw_family or "").strip()
+        if not family or not isinstance(raw_entry, Mapping):
+            raise ValueError("invalid selected Perk checkpoint entry")
+        entry = _timeline_entry(raw_entry)
+        if entry is None or entry["family"] != family:
+            raise ValueError("selected Perk checkpoint family mismatch")
+        selected_by_family[family] = entry
+
+    raw_batches = payload.get("batches")
+    if (
+        not isinstance(raw_batches, Sequence)
+        or isinstance(raw_batches, (str, bytes))
+        or not all(isinstance(batch, Mapping) for batch in raw_batches)
+    ):
+        raise ValueError("invalid tracker batch checkpoint")
+    batches = [copy.deepcopy(dict(batch)) for batch in raw_batches]
+
+    raw_warnings = payload.get("warnings")
+    if (
+        not isinstance(raw_warnings, Sequence)
+        or isinstance(raw_warnings, (str, bytes))
+        or not all(isinstance(warning, str) for warning in raw_warnings)
+    ):
+        raise ValueError("invalid tracker warning checkpoint")
+    warnings = [str(warning) for warning in raw_warnings]
+    armed_next_wave = _optional_positive_int(payload.get("armed_next_wave"))
+    pending = _validated_capture_request_checkpoint(payload.get("pending"))
+    return {
+        "fresh_battle": fresh_battle,
+        "baseline_status": baseline_status,
+        "snapshot_known": snapshot_known,
+        "selected_by_family": selected_by_family,
+        "pwr_maxed": pwr_maxed,
+        "batches": batches,
+        "warnings": warnings,
+        "armed_next_wave": armed_next_wave,
+        "pending": pending,
+    }
+
+
+def _validated_capture_request_checkpoint(
+    payload: Any,
+) -> Optional[PerkCaptureRequest]:
+    if payload is None:
+        return None
+    if not isinstance(payload, Mapping):
+        raise ValueError("invalid pending Perk checkpoint")
+    kind = str(payload.get("kind") or "")
+    snapshot_mode = str(payload.get("snapshot_mode") or "")
+    boundary_coverage = str(
+        payload.get("boundary_coverage") or BOUNDARY_COVERAGE_COMPLETE
+    )
+    if kind not in {"baseline", "selection"}:
+        raise ValueError("invalid pending Perk request kind")
+    if snapshot_mode not in {"full", SELECTION_SCAN_MODE}:
+        raise ValueError("invalid pending Perk snapshot mode")
+    if boundary_coverage not in {
+        BOUNDARY_COVERAGE_COMPLETE,
+        BOUNDARY_COVERAGE_VISIBILITY_GAP,
+    }:
+        raise ValueError("invalid pending Perk boundary coverage")
+    progress_raw = payload.get("progress_after")
+    if not isinstance(progress_raw, Mapping):
+        raise ValueError("pending Perk progress is missing")
+    status = str(progress_raw.get("status") or "")
+    current_wave = _optional_positive_int(progress_raw.get("current_wave"))
+    next_wave = _optional_positive_int(progress_raw.get("next_wave"))
+    if status not in {"scheduled", "complete"}:
+        raise ValueError("pending Perk progress is not authoritative")
+    progress = PerkProgress(
+        status=status,
+        current_wave=current_wave,
+        next_wave=next_wave,
+        text_raw=str(progress_raw.get("text_raw") or ""),
+        confidence=float(progress_raw.get("confidence")),
+    )
+    if progress.token is None:
+        raise ValueError("pending Perk progress is implausible")
+
+    scheduled_wave = _optional_positive_int(payload.get("scheduled_wave"))
+    observed_wave = _optional_positive_int(payload.get("observed_wave"))
+    observed_wave_end = _optional_positive_int(payload.get("observed_wave_end"))
+    raw_scheduled_waves = payload.get("scheduled_waves")
+    if (
+        not isinstance(raw_scheduled_waves, Sequence)
+        or isinstance(raw_scheduled_waves, (str, bytes))
+    ):
+        raise ValueError("invalid pending scheduled waves")
+    scheduled_waves = tuple(
+        _required_positive_int(value) for value in raw_scheduled_waves
+    )
+    if kind == "baseline":
+        if snapshot_mode != "full":
+            raise ValueError("baseline checkpoint must use a full snapshot")
+        if scheduled_wave is not None or scheduled_waves:
+            raise ValueError("baseline checkpoint has scheduled selections")
+    else:
+        if snapshot_mode != SELECTION_SCAN_MODE:
+            raise ValueError("selection checkpoint must use bounded scanning")
+        if scheduled_wave is None or not scheduled_waves:
+            raise ValueError("selection checkpoint lacks a scheduled wave")
+        if scheduled_waves[0] != scheduled_wave:
+            raise ValueError(
+                "selection checkpoint has inconsistent scheduled waves"
+            )
+
+    return PerkCaptureRequest(
+        kind=kind,
+        scheduled_wave=scheduled_wave,
+        observed_wave=observed_wave,
+        progress_after=progress,
+        snapshot_mode=snapshot_mode,
+        scheduled_waves=scheduled_waves,
+        observed_wave_end=observed_wave_end,
+        boundary_coverage=boundary_coverage,
+    )
+
+
+def _required_bool(value: Any) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError("checkpoint boolean is invalid")
+    return value
+
+
+def _required_positive_int(value: Any) -> int:
+    parsed = _optional_positive_int(value)
+    if parsed is None:
+        raise ValueError("checkpoint wave must be positive")
+    return parsed
+
+
+def _optional_positive_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError("checkpoint wave cannot be boolean")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise ValueError("checkpoint wave is invalid") from None
+    if parsed <= 0:
+        raise ValueError("checkpoint wave must be positive")
+    return parsed
+
+
+def _current_activity_scope_id() -> Optional[str]:
+    scope = get_activity_scope()
+    if not isinstance(scope, Mapping):
+        return None
+    run_id = str(scope.get("run_id") or "").strip()
+    return run_id or None
+
+
+def _load_perk_timeline_checkpoint(path: Path) -> Optional[dict[str, Any]]:
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except FileNotFoundError:
+        return None
+    if not isinstance(payload, dict):
+        raise ValueError("checkpoint root must be an object")
+    return payload
+
+
+def _write_perk_timeline_checkpoint(
+    path: Path,
+    payload: Mapping[str, Any],
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        delete=False,
+    ) as temporary:
+        json.dump(payload, temporary, indent=2, sort_keys=True)
+        temporary.write("\n")
+        temporary.flush()
+        os.fsync(temporary.fileno())
+        temporary_path = Path(temporary.name)
+    try:
+        os.replace(temporary_path, path)
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
+
+
 class PerkTimelineObserver:
     """Own the bounded Perks-panel route needed by a timeline tracker."""
 
-    def __init__(self, tracker: Optional[PerkTimelineTracker] = None) -> None:
+    def __init__(
+        self,
+        tracker: Optional[PerkTimelineTracker] = None,
+        *,
+        state_path: Optional[str | Path] = None,
+        scope_id_fn: Callable[[], Optional[str]] = (
+            lambda: _current_activity_scope_id()
+        ),
+    ) -> None:
         self.tracker = tracker or PerkTimelineTracker()
         self._route_open = False
         self._invalid_progress_count = 0
         self._invalid_progress_warned = False
+        self._progress_visibility_interrupted = False
+        self._state_path = Path(state_path) if state_path is not None else None
+        self._scope_id_fn = scope_id_fn
+        self._active_scope_id: Optional[str] = None
+        self._last_persisted_payload: Optional[dict[str, Any]] = None
+        self._persistence_warning_active = False
+        if self._state_path is not None:
+            self._sync_persistence_scope(restore=True)
 
     def reset(self, *, fresh_battle: bool = True) -> None:
+        self._activate_current_scope()
         self.tracker.reset(fresh_battle=fresh_battle)
         self._route_open = False
         self._invalid_progress_count = 0
         self._invalid_progress_warned = False
+        self._progress_visibility_interrupted = False
+        self._persist_state()
 
     def snapshot(self) -> dict[str, Any]:
+        self._sync_persistence_scope(restore=True)
         return self.tracker.snapshot()
+
+    def _current_scope_id(self) -> Optional[str]:
+        if self._state_path is None:
+            return None
+        try:
+            raw_scope_id = self._scope_id_fn()
+        except Exception as exc:
+            if not self._persistence_warning_active:
+                log(
+                    "[PERK_TIMELINE] Could not read the current-run identity "
+                    f"for checkpointing: {exc}",
+                    "WARN",
+                )
+                self._persistence_warning_active = True
+            return None
+        normalized = str(raw_scope_id or "").strip()
+        return normalized or None
+
+    def _activate_current_scope(self) -> None:
+        if self._state_path is None:
+            return
+        self._active_scope_id = self._current_scope_id()
+        self._last_persisted_payload = None
+
+    def _sync_persistence_scope(self, *, restore: bool) -> None:
+        if self._state_path is None:
+            return
+        scope_id = self._current_scope_id()
+        if scope_id == self._active_scope_id:
+            return
+        previous_scope_id = self._active_scope_id
+        self._active_scope_id = scope_id
+        self._last_persisted_payload = None
+        self.tracker.reset(fresh_battle=False)
+        self._route_open = False
+        self._invalid_progress_count = 0
+        self._invalid_progress_warned = False
+        self._progress_visibility_interrupted = False
+        if scope_id is None:
+            return
+
+        payload: Optional[dict[str, Any]] = None
+        if restore:
+            try:
+                payload = _load_perk_timeline_checkpoint(self._state_path)
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                log(
+                    "[PERK_TIMELINE] Ignoring unreadable persisted tracker "
+                    f"state: {exc}",
+                    "WARN",
+                )
+        tracker_payload = payload.get("tracker") if payload is not None else None
+        restored = bool(
+            payload is not None
+            and payload.get("schema_version")
+            == PERK_TIMELINE_CHECKPOINT_SCHEMA_VERSION
+            and str(payload.get("activity_scope_run_id") or "") == scope_id
+            and isinstance(payload.get("route_open"), bool)
+            and isinstance(tracker_payload, Mapping)
+            and self.tracker.restore_checkpoint(tracker_payload)
+        )
+        if restored and payload is not None:
+            self._route_open = bool(payload["route_open"])
+            # Even a clean process replacement leaves an interval during which
+            # top-bar schedule changes could not be observed.
+            self._progress_visibility_interrupted = True
+            self._last_persisted_payload = copy.deepcopy(payload)
+            log(
+                "[PERK_TIMELINE] Restored same-run checkpoint "
+                f"scope_id={scope_id} batches="
+                f"{len(self.tracker.snapshot().get('batches', []))} "
+                f"route_open={self._route_open}",
+                "INFO",
+            )
+            return
+
+        if previous_scope_id is not None and previous_scope_id != scope_id:
+            log(
+                "[PERK_TIMELINE] Current-run identity changed; starting an "
+                f"unknown mid-battle baseline scope_id={scope_id}",
+                "INFO",
+            )
+        self._persist_state()
+
+    def _persist_state(self) -> None:
+        if self._state_path is None or self._active_scope_id is None:
+            return
+        payload = {
+            "schema_version": PERK_TIMELINE_CHECKPOINT_SCHEMA_VERSION,
+            "activity_scope_run_id": self._active_scope_id,
+            "route_open": self._route_open,
+            "tracker": self.tracker.checkpoint(),
+        }
+        if payload == self._last_persisted_payload:
+            return
+        try:
+            _write_perk_timeline_checkpoint(self._state_path, payload)
+        except OSError as exc:
+            if not self._persistence_warning_active:
+                log(
+                    "[PERK_TIMELINE] Could not persist same-run tracker state: "
+                    f"{exc}",
+                    "WARN",
+                )
+                self._persistence_warning_active = True
+            return
+        if self._persistence_warning_active:
+            log(
+                "[PERK_TIMELINE] Same-run tracker checkpoint persistence recovered",
+                "INFO",
+            )
+            self._persistence_warning_active = False
+        self._last_persisted_payload = copy.deepcopy(payload)
 
     def handle(
         self,
@@ -631,8 +1187,8 @@ class PerkTimelineObserver:
         visible_fn: Callable[..., bool] = is_visible,
         swipe_fn: Callable[[str], bool] = swipe_now,
         full_ocr_fn: Callable[..., Mapping[str, Any]] = ocr_selected_perks,
-        latest_ocr_fn: Callable[[Frame], Optional[Mapping[str, Any]]] = (
-            ocr_latest_selected_perk
+        rows_ocr_fn: Callable[[Frame], Sequence[Mapping[str, Any]]] = (
+            ocr_perk_rows
         ),
         sleep_fn: Callable[[float], None] = time.sleep,
     ) -> bool:
@@ -642,17 +1198,35 @@ class PerkTimelineObserver:
         pre-route screenshot.
         """
 
+        self._sync_persistence_scope(restore=True)
         state = str(detection.get("state") or "UNKNOWN")
         if state == "RUNNING":
             progress = progress_fn(screenshot)
             self._record_progress_health(progress)
-            self.tracker.observe(progress, wave=wave)
+            self.tracker.observe(
+                progress,
+                wave=wave,
+                boundary_observation_complete=(
+                    not self._progress_visibility_interrupted
+                ),
+            )
+            if (
+                self._progress_visibility_interrupted
+                and self.tracker.confirmed_progress_resolves_visibility_gap(
+                    progress
+                )
+            ):
+                self._progress_visibility_interrupted = False
+            self._persist_state()
+        elif not (state == "PERKS" and self._route_open):
+            self._progress_visibility_interrupted = True
         request = self.tracker.pending
         if request is None:
             if not self._route_open:
                 return False
             if state != "PERKS":
                 self._route_open = False
+                self._persist_state()
                 return False
             if not actions_allowed:
                 return False
@@ -689,6 +1263,7 @@ class PerkTimelineObserver:
                 )
                 return close_result.dispatched
             self._route_open = False
+            self._persist_state()
             log_result(
                 "Battle view restored after perk timeline capture",
                 detail=(
@@ -709,12 +1284,22 @@ class PerkTimelineObserver:
             "establish a mid-battle selected-Perks baseline"
             if request.kind == "baseline"
             else (
-                "record perk selections deferred across scheduled waves "
-                + ", ".join(str(value) for value in request.scheduled_waves)
-                if len(request.scheduled_waves) > 1
+                (
+                    "catch up perk selections after the top-bar schedule was "
+                    f"unobservable from wave {request.scheduled_wave}"
+                )
+                if request.boundary_coverage
+                != BOUNDARY_COVERAGE_COMPLETE
                 else (
-                    f"record the perk selection scheduled for wave "
-                    f"{request.scheduled_wave}"
+                    "record perk selections deferred across scheduled waves "
+                    + ", ".join(
+                        str(value) for value in request.scheduled_waves
+                    )
+                    if len(request.scheduled_waves) > 1
+                    else (
+                        f"record the perk selection scheduled for wave "
+                        f"{request.scheduled_wave}"
+                    )
                 )
             )
         )
@@ -724,7 +1309,8 @@ class PerkTimelineObserver:
             reason=reason,
             detail=(
                 f"[PERK_TIMELINE] mode={request.snapshot_mode} "
-                f"observed_wave={request.observed_wave}"
+                f"observed_wave={request.observed_wave} "
+                f"boundary_coverage={request.boundary_coverage}"
             ),
             operation_id=operation_id,
         )
@@ -744,6 +1330,7 @@ class PerkTimelineObserver:
                 ):
                     raise _RouteFailed("verified Perks control was unavailable")
                 self._route_open = True
+                self._persist_state()
                 navigated = True
                 current = _wait_for_perks(
                     capture_fn=capture_fn,
@@ -759,7 +1346,7 @@ class PerkTimelineObserver:
                 visible_fn=visible_fn,
                 swipe_fn=swipe_fn,
                 full_ocr_fn=full_ocr_fn,
-                latest_ocr_fn=latest_ocr_fn,
+                rows_ocr_fn=rows_ocr_fn,
                 sleep_fn=sleep_fn,
             )
             refreshed = capture_fn()
@@ -781,6 +1368,7 @@ class PerkTimelineObserver:
                     "Perks panel remained visible after the verified close input"
                 )
             self._route_open = False
+            self._persist_state()
             latest_batch = self.tracker.latest_batch if capture_ok else None
             selections = (
                 latest_batch.get("selections", [])
@@ -794,6 +1382,20 @@ class PerkTimelineObserver:
             ]
             if capture_ok and completed_request.kind == "baseline":
                 summary = "Perk timeline baseline recorded"
+            elif (
+                capture_ok
+                and completed_request.boundary_coverage
+                != BOUNDARY_COVERAGE_COMPLETE
+            ):
+                summary = (
+                    "Perk timeline interval recorded after an unobserved "
+                    f"schedule gap from wave {completed_request.scheduled_wave}"
+                    + (
+                        " — " + ", ".join(selection_labels)
+                        if selection_labels
+                        else ""
+                    )
+                )
             elif capture_ok:
                 summary = _recorded_selection_summary(
                     selection_labels,
@@ -812,6 +1414,8 @@ class PerkTimelineObserver:
                     f"scheduled_wave={completed_request.scheduled_wave} "
                     f"scheduled_waves="
                     f"{list(completed_request.scheduled_waves)} "
+                    f"boundary_coverage="
+                    f"{completed_request.boundary_coverage} "
                     f"selection_count={len(selection_labels)} "
                     f"close_state={close_result.observed_state}"
                     f"{_perk_activity_data(selection_labels) if capture_ok else ''}"
@@ -889,7 +1493,7 @@ class PerkTimelineObserver:
         visible_fn: Callable[..., bool],
         swipe_fn: Callable[[str], bool],
         full_ocr_fn: Callable[..., Mapping[str, Any]],
-        latest_ocr_fn: Callable[[Frame], Optional[Mapping[str, Any]]],
+        rows_ocr_fn: Callable[[Frame], Sequence[Mapping[str, Any]]],
         sleep_fn: Callable[[float], None],
     ) -> tuple[bool, PerkCaptureRequest]:
         def guarded_swipe_fn(key: str) -> bool:
@@ -922,16 +1526,23 @@ class PerkTimelineObserver:
         if request is None:
             raise _RouteFailed("Perk timeline request disappeared during capture")
 
-        if request.snapshot_mode == "latest":
-            latest = latest_ocr_fn(top_frame)
-            return bool(self.tracker.record_latest(latest or {})), request
-
         for capture_attempt in range(2):
             request_before = self.tracker.pending
             if request_before is None:
                 raise _RouteFailed(
                     "Perk timeline request disappeared during full capture"
                 )
+            stop_fn = None
+            if request_before.kind == "selection":
+                def stop_at_unchanged(frame: Frame) -> Optional[str]:
+                    if any(
+                        self.tracker.selection_is_unchanged(row)
+                        for row in rows_ocr_fn(frame)
+                    ):
+                        return "unchanged_timeline_row"
+                    return None
+
+                stop_fn = stop_at_unchanged
             capture = capture_scroll_to_edge(
                 "gesture_targets.goto_next:perks",
                 source_label=PERKS_INDICATOR,
@@ -943,6 +1554,7 @@ class PerkTimelineObserver:
                 visible_fn=visible_fn,
                 swipe_fn=guarded_swipe_fn,
                 sleep_fn=sleep_fn,
+                stop_fn=stop_fn,
             )
             progress_frame = (
                 capture.screenshots[-1]
@@ -996,10 +1608,55 @@ class PerkTimelineObserver:
                 source_complete=capture.success,
                 source_reason=capture.reason,
             )
-            return (
-                bool(self.tracker.record_full_snapshot(full)),
-                request_after,
-            )
+            if capture.reason == "unchanged_timeline_row":
+                recorded = self.tracker.record_snapshot_to_unchanged(full)
+                self._persist_state()
+                if recorded:
+                    return (
+                        True,
+                        self.tracker.last_completed_request or request_after,
+                    )
+                selected_rows = full.get("selected")
+                if (
+                    isinstance(selected_rows, Sequence)
+                    and not isinstance(selected_rows, (str, bytes))
+                    and any(
+                        isinstance(row, Mapping)
+                        and self.tracker.selection_is_unchanged(row)
+                        for row in selected_rows
+                    )
+                ):
+                    return False, request_after
+                fallback = capture_scroll_to_edge(
+                    "gesture_targets.goto_next:perks",
+                    source_label=PERKS_INDICATOR,
+                    screenshot=(
+                        capture.screenshots[-1]
+                        if capture.screenshots
+                        else settled_frame
+                    ),
+                    progress_region=PERKS_CONTENT_REGION,
+                    max_swipes=20,
+                    settle_s=0.8,
+                    capture_fn=capture_fn,
+                    visible_fn=visible_fn,
+                    swipe_fn=guarded_swipe_fn,
+                    sleep_fn=sleep_fn,
+                )
+                combined = list(capture.screenshots)
+                if fallback.screenshots:
+                    combined.extend(fallback.screenshots[1:])
+                full = full_ocr_fn(
+                    combined,
+                    source_complete=fallback.success,
+                    source_reason=fallback.reason,
+                )
+            recorded = bool(self.tracker.record_full_snapshot(full))
+            self._persist_state()
+            completed_request = request_after
+            if recorded and self.tracker.last_completed_request is not None:
+                completed_request = self.tracker.last_completed_request
+            return recorded, completed_request
 
         raise _RouteFailed("Perk timeline full capture retry was exhausted")
 
@@ -1018,7 +1675,18 @@ class PerkTimelineObserver:
         self.tracker.observe(
             progress,
             wave=progress.current_wave,
+            boundary_observation_complete=(
+                not self._progress_visibility_interrupted
+            ),
         )
+        if (
+            self._progress_visibility_interrupted
+            and self.tracker.confirmed_progress_resolves_visibility_gap(
+                progress
+            )
+        ):
+            self._progress_visibility_interrupted = False
+        self._persist_state()
         for _ in range(2):
             sleep_fn(0.25)
             refreshed = capture_fn()
@@ -1029,7 +1697,18 @@ class PerkTimelineObserver:
             self.tracker.observe(
                 progress,
                 wave=progress.current_wave,
+                boundary_observation_complete=(
+                    not self._progress_visibility_interrupted
+                ),
             )
+            if (
+                self._progress_visibility_interrupted
+                and self.tracker.confirmed_progress_resolves_visibility_gap(
+                    progress
+                )
+            ):
+                self._progress_visibility_interrupted = False
+            self._persist_state()
         return current
 
 

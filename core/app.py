@@ -203,7 +203,13 @@ class App:
         self._last_wave_conf: float = -1.0
         self._last_wave_ts: float = 0.0
         self._battle_activation_tracker = BattleActivationTracker()
-        self._perk_timeline_observer = PerkTimelineObserver()
+        control_path = Path(config.control_file)
+        perk_timeline_state = control_path.with_name(
+            f"{control_path.stem}.perk_timeline_state.json"
+        )
+        self._perk_timeline_observer = PerkTimelineObserver(
+            state_path=perk_timeline_state
+        )
         self._blind_tapper_suspended = False
         self._tournament_results_captured = False
         self._no_strategy_observer = NoStrategyRunObserver()

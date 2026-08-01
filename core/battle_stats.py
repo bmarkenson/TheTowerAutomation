@@ -1328,10 +1328,13 @@ def render_perk_selection_timeline_markdown(timeline: Any) -> list[str]:
             "their internal order is intentionally unspecified."
         ),
         (
-            "Pause-spanning post-PWR snapshots use the selected list's "
+            "Deferred post-PWR snapshots with complete boundary observations "
+            "use the selected list's "
             "newest-first order to reconstruct one distinct change per "
             "scheduled boundary. Ambiguous diffs remain interval aggregates "
-            "without per-wave attribution."
+            "without per-wave attribution. UI or process visibility gaps scan "
+            "newest-first to the first unchanged row and never invent skipped "
+            "boundary waves."
         ),
         "",
     ]
@@ -1363,6 +1366,15 @@ def render_perk_selection_timeline_markdown(timeline: Any) -> list[str]:
                 )
             scheduled_waves = batch.get("scheduled_waves")
             if (
+                batch.get("selection_model") == "interval_aggregate"
+                and batch.get("boundary_coverage")
+                == "incomplete_visibility_gap"
+            ):
+                scheduled = (
+                    f"from {batch.get('scheduled_wave') or 'unknown'}; "
+                    "intermediate boundaries unobserved (interval aggregate)"
+                )
+            elif (
                 batch.get("selection_model") == "interval_aggregate"
                 and isinstance(scheduled_waves, Sequence)
                 and not isinstance(scheduled_waves, (str, bytes))

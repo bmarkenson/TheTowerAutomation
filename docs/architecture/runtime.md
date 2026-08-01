@@ -115,14 +115,26 @@ warning, while the next valid pair records recovery. A previously armed value
 that is now implausibly far ahead is discarded and re-armed from stable valid
 evidence instead of holding the observer indefinitely.
 
-Before Perk Wave Requirement reaches `-75%`, a transition captures a complete
-selected list and treats its diff as one simultaneous unordered cascade. After
-`-75%`, one normal boundary reads only the newest complete row. If Pause or
-manual work spans multiple post-PWR boundaries, the observer captures the
-complete list and uses its authoritative newest-first order to reconstruct
-chronological singleton batches when there is exactly one distinct change per
-boundary. A repeated leveled family or any other count mismatch remains an
-explicit interval aggregate without invented per-wave attribution. Pause
+Every selection check scans the selected list newest-first until the first row
+whose family and displayed value still match the persisted snapshot. Rows
+above that unchanged boundary are the complete changed prefix; the usual
+single-selection case therefore finishes in the top viewport. If no unchanged
+row remains because every prior row changed, the same guarded traversal
+continues to the bottom and uses a complete-list diff. Before Perk Wave
+Requirement reaches `-75%`, one boundary's changed prefix remains a
+simultaneous unordered cascade. After `-75%`, complete boundary observations
+can use newest-first order to reconstruct chronological singleton batches when
+there is exactly one distinct change per boundary. A repeated leveled family,
+an unseen boundary, or any other count mismatch remains an explicit interval
+aggregate without invented per-wave attribution.
+
+The tracker atomically checkpoints its selected-family snapshot, batches,
+armed progress, pending capture, and owned Perks-panel route beside the active
+control file. The checkpoint is keyed to the durable Current-run activity
+identity. A process replacement restores state only when that identity still
+matches and treats the outage as an unobserved top-bar interval until stable
+progress is confirmed. A different or unreadable identity starts an unknown
+mid-battle baseline instead of importing another battle's Perks. Pause
 continues to block every panel input while stable top-bar observations update
 the pending boundary set.
 

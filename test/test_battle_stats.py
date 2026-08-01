@@ -422,6 +422,36 @@ def test_render_perk_selection_timeline_marks_pause_interval_aggregates():
     assert "Ambiguous diffs remain interval aggregates" in rendered
 
 
+def test_render_perk_timeline_marks_unobserved_boundary_interval():
+    lines = render_perk_selection_timeline_markdown(
+        {
+            "baseline_status": "new_battle_empty",
+            "pwr_maxed_observed": True,
+            "batches": [
+                {
+                    "sequence": 1,
+                    "scheduled_wave": 142,
+                    "scheduled_waves": [142],
+                    "observed_wave": 184,
+                    "observed_wave_end": 184,
+                    "selection_model": "interval_aggregate",
+                    "boundary_coverage": "incomplete_visibility_gap",
+                    "selections": [
+                        {"display_text": "Defense percent +5.00%"},
+                        {"display_text": "x1.15 all coins bonuses"},
+                    ],
+                }
+            ],
+            "warnings": [],
+            "pending_scheduled_wave": None,
+        }
+    )
+
+    rendered = "\n".join(lines)
+    assert "from 142; intermediate boundaries unobserved" in rendered
+    assert "UI or process visibility gaps" in rendered
+
+
 def test_render_perk_selection_timeline_marks_reconstructed_post_pwr_rows():
     lines = render_perk_selection_timeline_markdown(
         {

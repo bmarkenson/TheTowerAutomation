@@ -297,7 +297,7 @@ def test_tracker_records_pwr_cascades_as_atomic_batches_then_singletons():
     first = _stabilize(tracker, _progress(100, 142), wave=101)
     assert first is not None
     assert first.scheduled_wave == 100
-    assert first.snapshot_mode == "full"
+    assert first.snapshot_mode == "until_first_unchanged"
     assert tracker.record_full_snapshot(
         _full(
             _perk("Perk wave requirement -50.00%"),
@@ -320,9 +320,12 @@ def test_tracker_records_pwr_cascades_as_atomic_batches_then_singletons():
 
     third = _stabilize(tracker, _progress(184, 226), wave=185)
     assert third is not None
-    assert third.snapshot_mode == "latest"
-    assert tracker.record_latest(
-        _perk("Defense percent +10.00%"),
+    assert third.snapshot_mode == "until_first_unchanged"
+    assert tracker.record_snapshot_to_unchanged(
+        _full(
+            _perk("Defense percent +10.00%"),
+            _perk("Perk wave requirement -75.00%"),
+        ),
         observed_at=observed_at,
     )
 
@@ -375,7 +378,7 @@ def test_paused_observer_coalesces_boundaries_and_arms_latest_progress():
     assert request.progress_after.next_wave == 226
     assert request.observed_wave == 101
     assert request.observed_wave_end == 185
-    assert request.snapshot_mode == "full"
+    assert request.snapshot_mode == "until_first_unchanged"
 
     assert tracker.record_full_snapshot(
         _full(
@@ -409,14 +412,14 @@ def test_deferred_post_pwr_snapshot_reconstructs_newest_first_singletons():
 
     request = _stabilize(tracker, _progress(142, 184), wave=143)
     assert request is not None
-    assert request.snapshot_mode == "latest"
+    assert request.snapshot_mode == "until_first_unchanged"
     _stabilize(tracker, _progress(184, 226), wave=185)
 
     request = tracker.pending
     assert request is not None
     assert request.scheduled_waves == (142, 184)
-    assert request.snapshot_mode == "full"
-    assert tracker.record_full_snapshot(
+    assert request.snapshot_mode == "until_first_unchanged"
+    assert tracker.record_snapshot_to_unchanged(
         _full(
             _perk("x1.15 all coins bonuses"),
             _perk("Defense percent +5.00%"),
@@ -460,6 +463,237 @@ def test_deferred_post_pwr_repeated_family_remains_interval_aggregate():
 
     assert tracker.latest_batch["selection_model"] == "interval_aggregate"
     assert "distinct changes did not match" in tracker.snapshot()["warnings"][0]
+
+
+def test_hidden_ui_gap_forces_full_interval_snapshot_without_false_wave():
+    tracker = PerkTimelineTracker()
+    tracker.reset(fresh_battle=True)
+    _stabilize(tracker, _progress(80, 100), wave=80)
+    _stabilize(tracker, _progress(100, 142), wave=101)
+    assert tracker.record_full_snapshot(
+        _full(_perk("Perk wave requirement -75.00%"))
+    )
+    observer = PerkTimelineObserver(tracker)
+    running = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+    assert observer.handle(
+        running,
+        {"state": "CARDS"},
+        wave=120,
+        actions_allowed=False,
+        action_guard_fn=lambda: False,
+    ) is False
+    for _ in range(2):
+        assert observer.handle(
+            running,
+            {"state": "RUNNING"},
+            wave=184,
+            actions_allowed=False,
+            action_guard_fn=lambda: False,
+            progress_fn=lambda frame: _progress(184, 226),
+        ) is False
+
+    request = tracker.pending
+    assert request is not None
+    assert request.scheduled_wave == 142
+    assert request.scheduled_waves == (142,)
+    assert request.snapshot_mode == "until_first_unchanged"
+    assert request.boundary_coverage == "incomplete_visibility_gap"
+    assert tracker.record_full_snapshot(
+        _full(
+            _perk("x1.15 all coins bonuses"),
+            _perk("Defense percent +5.00%"),
+            _perk("Perk wave requirement -75.00%"),
+        )
+    )
+
+    batch = tracker.latest_batch
+    assert batch is not None
+    assert batch["scheduled_wave"] == 142
+    assert batch["selection_model"] == "interval_aggregate"
+    assert batch["boundary_coverage"] == "incomplete_visibility_gap"
+    assert {
+        selection["family"] for selection in batch["selections"]
+    } == {"all_coins_bonuses", "defense_percent"}
+    assert "top-bar schedule was not observable" in tracker.snapshot()[
+        "warnings"
+    ][0]
+
+
+def test_catch_up_scans_past_changed_latest_row_to_first_unchanged_row():
+    tracker = PerkTimelineTracker()
+    tracker.reset(fresh_battle=True)
+    _stabilize(tracker, _progress(80, 100), wave=80)
+    _stabilize(tracker, _progress(100, 142), wave=101)
+    assert tracker.record_full_snapshot(
+        _full(
+            _perk("Defense percent +5.00%"),
+            _perk("Perk wave requirement -75.00%"),
+            _perk("x1.15 all coins bonuses"),
+        )
+    )
+
+    tracker.observe(
+        _progress(310, 352),
+        wave=310,
+        boundary_observation_complete=False,
+    )
+    request = tracker.observe(
+        _progress(310, 352),
+        wave=310,
+        boundary_observation_complete=False,
+    )
+    assert request is not None
+    assert request.scheduled_wave == 142
+
+    assert tracker.record_snapshot_to_unchanged(
+        _full(
+            _perk("Defense percent +15.00%"),
+            _perk("Orbs +1", color="green"),
+            _perk("Increase max game speed by +1.00"),
+            _perk("Perk wave requirement -75.00%"),
+        )
+    )
+
+    batch = tracker.latest_batch
+    assert batch is not None
+    assert batch["selection_model"] == "interval_aggregate"
+    assert {
+        selection["family"] for selection in batch["selections"]
+    } == {"defense_percent", "orbs", "max_game_speed"}
+    checkpoint = tracker.checkpoint()
+    assert "all_coins_bonuses" in checkpoint["selected_by_family"]
+    assert checkpoint["selected_by_family"]["defense_percent"][
+        "display_text"
+    ] == "Defense percent +15.00%"
+
+
+def test_short_hidden_ui_gap_clears_after_same_schedule_is_confirmed():
+    tracker = PerkTimelineTracker()
+    tracker.reset(fresh_battle=True)
+    _stabilize(tracker, _progress(80, 100), wave=80)
+    _stabilize(tracker, _progress(100, 142), wave=101)
+    assert tracker.record_full_snapshot(
+        _full(_perk("Perk wave requirement -75.00%"))
+    )
+    observer = PerkTimelineObserver(tracker)
+    running = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+    observer.handle(
+        running,
+        {"state": "CARDS"},
+        wave=120,
+        actions_allowed=False,
+        action_guard_fn=lambda: False,
+    )
+    for _ in range(2):
+        observer.handle(
+            running,
+            {"state": "RUNNING"},
+            wave=120,
+            actions_allowed=False,
+            action_guard_fn=lambda: False,
+            progress_fn=lambda frame: _progress(120, 142),
+        )
+
+    request = _stabilize(tracker, _progress(142, 184), wave=143)
+    assert request is not None
+    assert request.snapshot_mode == "until_first_unchanged"
+    assert request.boundary_coverage == "complete"
+
+
+def test_same_scope_checkpoint_restores_timeline_and_owned_panel(tmp_path):
+    state_path = tmp_path / "perk-timeline.json"
+    scope = {"run_id": "same-battle"}
+    observer = PerkTimelineObserver(
+        state_path=state_path,
+        scope_id_fn=lambda: scope["run_id"],
+    )
+    observer.reset(fresh_battle=True)
+    _stabilize(observer.tracker, _progress(80, 100), wave=80)
+    _stabilize(observer.tracker, _progress(100, 142), wave=101)
+    assert observer.tracker.record_full_snapshot(
+        _full(_perk("Perk wave requirement -75.00%"))
+    )
+    observer._route_open = True
+    observer._persist_state()
+
+    restarted = PerkTimelineObserver(
+        state_path=state_path,
+        scope_id_fn=lambda: scope["run_id"],
+    )
+
+    assert restarted.snapshot() == observer.snapshot()
+    assert restarted.tracker.pwr_maxed is True
+    assert restarted.tracker.pending is None
+    assert restarted._route_open is True
+    assert restarted._progress_visibility_interrupted is True
+
+
+def test_same_scope_restart_catches_up_across_unobserved_selections(tmp_path):
+    state_path = tmp_path / "perk-timeline.json"
+    observer = PerkTimelineObserver(
+        state_path=state_path,
+        scope_id_fn=lambda: "same-battle",
+    )
+    observer.reset(fresh_battle=True)
+    _stabilize(observer.tracker, _progress(80, 100), wave=80)
+    _stabilize(observer.tracker, _progress(100, 142), wave=101)
+    assert observer.tracker.record_full_snapshot(
+        _full(
+            _perk("Defense percent +5.00%"),
+            _perk("Perk wave requirement -75.00%"),
+        )
+    )
+    observer._persist_state()
+
+    restarted = PerkTimelineObserver(
+        state_path=state_path,
+        scope_id_fn=lambda: "same-battle",
+    )
+    running = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    for _ in range(2):
+        restarted.handle(
+            running,
+            {"state": "RUNNING"},
+            wave=310,
+            actions_allowed=False,
+            action_guard_fn=lambda: False,
+            progress_fn=lambda frame: _progress(310, 352),
+        )
+
+    request = restarted.tracker.pending
+    assert request is not None
+    assert request.scheduled_wave == 142
+    assert request.snapshot_mode == "until_first_unchanged"
+    assert request.boundary_coverage == "incomplete_visibility_gap"
+
+
+def test_checkpoint_from_different_scope_is_not_restored(tmp_path):
+    state_path = tmp_path / "perk-timeline.json"
+    scope = {"run_id": "old-battle"}
+    observer = PerkTimelineObserver(
+        state_path=state_path,
+        scope_id_fn=lambda: scope["run_id"],
+    )
+    observer.reset(fresh_battle=True)
+    _stabilize(observer.tracker, _progress(80, 100), wave=80)
+    _stabilize(observer.tracker, _progress(100, 142), wave=101)
+    assert observer.tracker.record_full_snapshot(
+        _full(_perk("Perk wave requirement -75.00%"))
+    )
+    observer._persist_state()
+
+    scope["run_id"] = "new-battle"
+    restarted = PerkTimelineObserver(
+        state_path=state_path,
+        scope_id_fn=lambda: scope["run_id"],
+    )
+
+    snapshot = restarted.snapshot()
+    assert snapshot["baseline_status"] == "not_observed"
+    assert snapshot["batches"] == []
+    assert snapshot["pwr_maxed_observed"] is False
 
 
 def test_mid_battle_attachment_establishes_baseline_without_inventing_waves():
