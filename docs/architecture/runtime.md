@@ -29,6 +29,13 @@ conditionals or duplicated expanded YAML.
 
 ## Farm profiles and loadouts
 
+This section describes the current runtime inputs and compatibility format.
+The target GUI authoring model—including sparse versioned bases, explicit
+inherit/override/ignore semantics, reviewed rebasing, and self-contained
+publications—is defined in
+[`strategy_authoring.md`](strategy_authoring.md). Until that model is migrated,
+the baseline and complete-snapshot behavior below remains authoritative.
+
 `Farm` is the recurring automated run profile. Glass Cannon describes a
 gameplay style, not a runtime profile: it may also be used for tournaments,
 milestones, or some Dissonance runs, so it does not own Farm configuration.

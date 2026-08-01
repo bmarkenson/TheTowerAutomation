@@ -292,13 +292,30 @@ stages:
   - [x] Add durable custom-profile skips for Auto Pick enabled, Perk Bans, and
     Auto Pick priority; add managed Ban and ordered Auto Pick editors; and
     round-trip the complete Farm setup so unexposed settings are preserved.
-  - [ ] Extend strategy authoring only where operator use justifies it. Candidate
-    follow-ups are specialized controls for every remaining compact Farm
-    setting, profile-local module/Orb/Target contents instead of only shared
-    preset selection, profile duplication/retirement workflows, and an
-    explicitly advanced raw-rule mode. Preserve the fixed-path API,
-    generated-plan validation, immutable bundled templates, and separate
-    publish-versus-activate boundary.
+  - [ ] Implement the backend strategy-authoring model in
+    [`../architecture/strategy_authoring.md`](../architecture/strategy_authoring.md):
+    setting registry, immutable sparse base revisions, sparse strategy source,
+    generic resolution with provenance, embedded pinned base snapshots, and
+    conservative schema-version-1 conversion. Prove migrated bundled and
+    legacy examples retain their protected generated plans before changing
+    runtime behavior.
+  - [ ] Add the additive strategy-authoring API and WPF editor shell: separate
+    Base and Strategy catalogs, inherit/override/observe/ignore row states,
+    effective-value provenance, reviewed base rebasing, and publish review.
+    Keep the current fixed-path API as a compatibility facade and preserve the
+    separate publish-versus-activate boundary.
+  - [ ] Add specialized value editors for every registered setting, including
+    remaining compact Farm controls and profile-local structured values where
+    justified. Keep generated rules and executor actions protected rather than
+    exposing them as ordinary form data; treat any future raw-rule mode as a
+    separately reviewed advanced feature.
+  - [ ] Refine running-battle validation into an explicit strategy gate so
+    observation and allowlisted independent collectors can continue while
+    strategy and lifecycle actions are blocked. Validate this authority split
+    before newly editable settings rely on running-battle enforcement.
+  - [ ] Add profile duplication/retirement workflows after the source and base
+    revision model is stable, preserving immutable bundled templates and
+    atomic/stale-write publication protections.
   - [x] Show directive/acknowledgement separately from primary state, menu,
     overlays, run mode, pause status, runtime evidence, activity, and completed
     battle records.
