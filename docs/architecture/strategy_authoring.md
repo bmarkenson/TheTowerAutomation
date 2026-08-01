@@ -286,3 +286,12 @@ Delivery is split into independently reviewable slices:
 Each slice should be completed and validated in its own development thread.
 The actionable sequence is tracked in the
 [`runtime and validation backlog`](../backlog/runtime-and-validation.md).
+
+Backend slice 1 and additive API/editor slice 2 are implemented. Server
+revision 19 advertises `strategy_authoring_v1`; the original profile endpoint
+and capabilities remain as the older-client compatibility facade. The current
+native shell supports registry-driven source states, effective provenance,
+reviewed rebasing, validation, publication review, safe simple/Perk editors,
+and lossless read-only handling for complex values. Complete specialized value
+editors and the running-battle strategy-gate authority refinement remain the
+separate later slices above.

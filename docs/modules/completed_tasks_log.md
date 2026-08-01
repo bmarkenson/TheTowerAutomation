@@ -37,6 +37,32 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-01 additive strategy-authoring API and editor shell
+
+- This commit advances the Linux control surface and native client together to
+  revision 19 with `strategy_authoring_v1`. The additive endpoint exposes
+  separate Base and Strategy catalogs plus validate/publish operations for each
+  and backend-computed rebase previews, while the revision-18 profile facade
+  and its capabilities remain unchanged for older clients.
+- Base publication appends an immutable revision under optimistic fingerprint
+  protection. Strategy publication embeds the pinned Base snapshot but never
+  activates it. Semantic review reports Base additions/removals/changes,
+  inherited effective changes, stable local overrides and ignores, dependency
+  or builder errors, source/effective diffs, provenance, rule count, and
+  fingerprints without returning the expanded generated plan.
+- The WPF Strategy Authoring shell groups Bases and Strategies, uses registry
+  sections and capabilities for source-state rows, shows server-resolved values
+  and provenance, filters active/all settings, supports safe simple and Perk
+  controls, and preserves complex values through a read-only lossless fallback.
+  New Strategies can pin a latest compatible Base; changing a published pin
+  requires an explicit reviewed rebase. Review & Publish states that publication
+  does not activate a Strategy, and stale conflicts retain the open draft.
+- Focused authoring/profile/control-surface coverage passed 78 tests, the
+  complete repository suite passed all 1,043 tests, and the Linux cross-publish
+  produced the complete self-contained Windows package. Validation did not
+  inspect or change the live process, control state, ADB target, emulator, or
+  battle.
+
 ### 2026-08-01 card recharge save calibration
 
 - Commit `0aa4df7` maps `demonModeAutomateToggle` and

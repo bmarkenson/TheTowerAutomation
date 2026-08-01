@@ -44,6 +44,12 @@ public sealed class ControlSurfaceApi : IDisposable
             "/api/v1/strategy-profiles",
             cancellationToken);
 
+    public Task<StrategyAuthoringCatalogResponse> GetStrategyAuthoringAsync(
+        CancellationToken cancellationToken) =>
+        GetAsync<StrategyAuthoringCatalogResponse>(
+            "/api/v1/strategy-authoring",
+            cancellationToken);
+
     public Task<ActivityResponse> GetActivityAsync(
         IEnumerable<string> levels,
         string scope,
@@ -112,6 +118,14 @@ public sealed class ControlSurfaceApi : IDisposable
         CancellationToken cancellationToken) =>
         PostAsync<StrategyProfileMutationResponse>(
             "/api/v1/strategy-profiles",
+            payload,
+            cancellationToken);
+
+    public Task<StrategyAuthoringMutationResponse> PostStrategyAuthoringAsync(
+        object payload,
+        CancellationToken cancellationToken) =>
+        PostAsync<StrategyAuthoringMutationResponse>(
+            "/api/v1/strategy-authoring",
             payload,
             cancellationToken);
 

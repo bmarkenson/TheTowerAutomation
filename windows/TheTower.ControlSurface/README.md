@@ -227,35 +227,53 @@ opens automatically. Pause a live runtime before configuring it. Staged skips
 are displayed under the button, are consumed by the next applicable run, and
 are cleared if the selected strategy changes.
 
-**Strategy profiles...** opens the Farm Profile Builder. Linux server revision
-18 adds profile-owned permanent skips plus managed Perk editing. Bundled Farm
-profiles are read-only templates; clone one or create a new Farm profile, then
-choose its Tier and the policy plus allowlisted preset/value for Modules,
-Damage Slider, Orb Distance, and Target Priority. The editor can select up to
-six Perk Bans and add, remove, or reorder the Auto Pick priority. It can also
-permanently skip Auto Pick enabled, Perk Bans, or Auto Pick priority for that
-profile. A permanent skip is applied on every run and prevents corrective
-input; it is distinct from **Configure run...**, whose skips are consumed once.
+**Strategy profiles...** opens the shared Strategy Authoring shell. Linux
+server revision 19 and capability `strategy_authoring_v1` provide separate
+**Bases** and **Strategies** catalogs while retaining the revision-18 profile
+endpoint for older clients. A Base is a sparse reusable component and is never
+activatable. Editing one publishes the next immutable revision; Strategies
+already pinned to an earlier revision continue to use their embedded snapshot.
 
-The compact custom source retains the complete resolved Farm setup even where
-the native client does not yet provide a specialized control. Republishing a
-profile therefore preserves Cards, recharge modes, Workshop/Bots, Free Upgrade
-locks, Guardians, and Ultimate Weapon settings rather than silently replacing
-them with current defaults. **Validate draft** resolves the presets and builds
-the complete plan on Linux without writing a file. **Publish profile** repeats
-validation and atomically stores the compact source with its generated plan
-under the fixed custom-profile directory. Republishing requires the revision
-fingerprint that was loaded by the dialog, so a stale editor cannot overwrite a
-newer version.
+Settings are grouped by the server registry. **Show active only** keeps the
+normal view compact, while **Show all settings** exposes omitted settings.
+Every row shows its source state, effective policy/value, provenance, and the
+registry's observation and repair capabilities. Base rows offer **Not
+Included**, **Included Enforce**, and **Included Observe** where allowed.
+Strategy rows offer **Inherit**, **Override Enforce**, **Override Observe**,
+and explicit **Ignore** where allowed; each local Strategy directive also has
+**Reset to inherited**.
 
-Publishing does not select or activate the profile. After publishing, close the
-dialog and use the normal strategy dropdown plus **Use next battle**, **Switch
-this battle**, or a managed Start. Custom profiles appear dynamically in that
-dropdown. Managed controls for the remaining compact Farm settings and
-profile-local module, Orb Distance, and Target Priority contents remain future
-editor work. Tournament behavior, generated YAML rules, and executor actions
-remain outside the profile editor; they continue to be derived and validated
-by the shared builder.
+Preset, percentage, boolean, Perk Ban, and ordered Auto Pick values use safe
+managed controls. Complex registry values without a phase-two editor remain
+visible and read-only. Their original JSON value is retained in the typed model
+and round-trips unchanged through validation and publication; the GUI does not
+offer raw generated rules, executor actions, or a general raw-value editor.
+Unsupported Strategy families such as Tournament and No Strategy are clearly
+read-only.
+
+A new Strategy draft may initially pin a latest compatible Base. A published
+Strategy pinned behind that Base's latest revision shows an update banner; its
+pin cannot change directly. **Review Base update...** asks Linux to compute
+settings added/removed/changed, inherited effective changes, local overrides
+that remain unchanged, explicit ignores that remain ignored, and resulting
+dependency or builder errors. Accepting a valid review changes only the open
+draft and binds later publication to that exact reviewed source.
+
+**Validate draft** returns normalized source, resolution/provenance, rule count,
+and fingerprints without writing a file or returning the expanded generated
+plan. **Review & Publish...** repeats validation and summarizes source changes,
+effective changes, validation, fingerprints, and rule count before asking for
+confirmation. Base publication uses the latest Base fingerprint and Strategy
+publication uses the source fingerprint, so a stale editor retains its draft
+and must reload instead of overwriting newer work.
+
+Publishing never selects or activates a Strategy. After publication, use the
+normal strategy dropdown plus **Use next battle**, **Switch this battle**, or a
+managed Start. Existing schema-1 profiles are converted conservatively only in
+memory when opened and are not rewritten unless explicitly published. The
+remaining complex specialized value editors are a later phase; Tournament
+behavior, generated YAML rules, executor actions, runtime strategy gates, and
+activation behavior remain outside this editor.
 
 When a startup requirement fails, the runtime publishes the failed check,
 expected value, and allowed responses. The app opens **Startup check needs a

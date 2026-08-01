@@ -29,10 +29,17 @@ from core.strategy_authoring import (
     StrategyAuthoringConflictError,
     StrategyAuthoringError,
     StrategyBaseStore,
+    analyze_strategy_source,
+    describe_base_resolution,
+    diff_source_documents,
+    diff_strategy_resolutions,
     farm_source_from_resolution,
     fingerprint_document,
     legacy_farm_source_to_strategy_source,
+    normalize_base_source,
     normalize_strategy_source,
+    preview_strategy_rebase,
+    rebase_review_fingerprint,
     resolve_strategy_source,
     setting_registry_catalog,
 )
@@ -72,6 +79,14 @@ FARM_LOADOUT_KEYS = (
 )
 STRATEGY_PROFILE_SCHEMA_VERSION = 1
 STRATEGY_PUBLICATION_SCHEMA_VERSION = 2
+STRATEGY_AUTHORING_API_SCHEMA_VERSION = 1
+STRATEGY_AUTHORING_OPERATIONS = (
+    "validate_base",
+    "publish_base",
+    "validate_strategy",
+    "publish_strategy",
+    "preview_rebase",
+)
 MAX_PROFILE_FILE_BYTES = 4 * 1024 * 1024
 _STRATEGY_ID_RE = re.compile(r"[a-z][a-z0-9_]{2,47}")
 _RESERVED_STRATEGY_IDS = frozenset(
@@ -244,6 +259,371 @@ class StrategyProfileStore:
         """Return backend authoring metadata without exposing normalizers."""
 
         return setting_registry_catalog()
+
+    def authoring_catalog(self) -> dict[str, Any]:
+        """Return the additive Base/Strategy editor contract."""
+
+        base_catalog = self.base_store.catalog()
+        legacy_catalog = self.catalog()
+        strategy_items: list[dict[str, Any]] = []
+        strategy_errors = [
+            {"id": item["id"], "error": item["error"]}
+            for item in legacy_catalog["errors"]
+        ]
+        for summary in legacy_catalog["items"]:
+            try:
+                strategy_items.append(
+                    self._authoring_catalog_item(summary, base_catalog["items"])
+                )
+            except StrategyProfileError as exc:
+                strategy_errors.append(
+                    {"id": str(summary.get("id") or "unknown"), "error": str(exc)}
+                )
+
+        catalog_errors = [
+            {"catalog": "bases", **error} for error in base_catalog["errors"]
+        ] + [
+            {"catalog": "strategies", **error} for error in strategy_errors
+        ]
+        return {
+            "schema_version": STRATEGY_AUTHORING_API_SCHEMA_VERSION,
+            "setting_registry": self.setting_registry(),
+            "capabilities": {
+                "operations": list(STRATEGY_AUTHORING_OPERATIONS),
+                "base_source_states": [
+                    {
+                        "id": "not_included",
+                        "display_name": "Not Included",
+                        "policy": None,
+                    },
+                    {
+                        "id": "included_enforce",
+                        "display_name": "Included Enforce",
+                        "policy": "enforce",
+                    },
+                    {
+                        "id": "included_observe",
+                        "display_name": "Included Observe",
+                        "policy": "observe",
+                    },
+                ],
+                "strategy_source_states": [
+                    {
+                        "id": "inherit",
+                        "display_name": "Inherit",
+                        "policy": None,
+                    },
+                    {
+                        "id": "override_enforce",
+                        "display_name": "Override Enforce",
+                        "policy": "enforce",
+                    },
+                    {
+                        "id": "override_observe",
+                        "display_name": "Override Observe",
+                        "policy": "observe",
+                    },
+                    {
+                        "id": "ignore",
+                        "display_name": "Ignore",
+                        "policy": "ignore",
+                    },
+                ],
+                "publication_activates_strategy": False,
+                "expanded_plan_exposed": False,
+                "unknown_values_round_trip": True,
+                "reviewed_rebase_required": True,
+            },
+            "editor_options": {
+                "presets": legacy_catalog["presets"],
+                "perks": legacy_catalog["perks"],
+            },
+            "bases": base_catalog,
+            "strategies": {
+                "items": strategy_items,
+                "errors": strategy_errors,
+            },
+            "latest_compatible_base_revisions": [
+                {
+                    "id": item["id"],
+                    "display_name": item["display_name"],
+                    "family": item["family"],
+                    "revision": item["latest_revision"],
+                    "source_fingerprint": item["source_fingerprint"],
+                }
+                for item in base_catalog["items"]
+            ],
+            "catalog_errors": catalog_errors,
+        }
+
+    def validate_base(self, raw_base: object) -> dict[str, Any]:
+        """Normalize a prospective next immutable Base revision."""
+
+        try:
+            initial = normalize_base_source(raw_base, revision=1)
+            latest = self.base_store.latest(initial["id"])
+            revision = (
+                int(latest["snapshot"]["revision"]) + 1
+                if latest is not None
+                else 1
+            )
+            source = normalize_base_source(raw_base, revision=revision)
+        except StrategyAuthoringError as exc:
+            raise StrategyProfileError(str(exc)) from exc
+        before = (
+            _copy_mapping(latest["snapshot"])
+            if latest is not None
+            else {
+                **_copy_mapping(source),
+                "settings": {},
+            }
+        )
+        review = diff_source_documents(before, source)
+        review["created"] = latest is None
+        source_fingerprint = fingerprint_document(source)
+        return {
+            "valid": True,
+            "published": False,
+            "source": source,
+            "resolution": describe_base_resolution(source),
+            "source_fingerprint": source_fingerprint,
+            "expected_latest_fingerprint": (
+                latest["source_fingerprint"] if latest is not None else None
+            ),
+            "fingerprints": {"source_fingerprint": source_fingerprint},
+            "review": {
+                "source_changes": review,
+                "validation": {"valid": True, "errors": []},
+                "publication_activates_strategy": False,
+            },
+            "summary": [
+                f"Base {source['display_name']} revision {source['revision']}",
+                f"{len(source['settings'])} included setting(s)",
+                "Publishing creates a new immutable revision.",
+            ],
+        }
+
+    def publish_authoring_base(
+        self,
+        raw_base: object,
+        *,
+        expected_latest_fingerprint: object = None,
+    ) -> dict[str, Any]:
+        """Validate and atomically append one Base revision."""
+
+        validation = self.validate_base(raw_base)
+        publication = self.publish_base(
+            raw_base,
+            expected_latest_fingerprint=expected_latest_fingerprint,
+        )
+        validation.update(
+            {
+                "published": True,
+                "source": _copy_mapping(publication["snapshot"]),
+                "resolution": describe_base_resolution(
+                    publication["snapshot"]
+                ),
+                "source_fingerprint": publication["source_fingerprint"],
+                "published_at": publication["published_at"],
+                "fingerprints": {
+                    "source_fingerprint": publication["source_fingerprint"]
+                },
+            }
+        )
+        return validation
+
+    def validate_authoring_strategy(
+        self,
+        raw_strategy: object,
+    ) -> dict[str, Any]:
+        """Validate sparse Strategy source and return only authoring output."""
+
+        validation = self.validate(raw_strategy)
+        source = validation["source"]
+        resolution = validation["resolution"]
+        current = self._existing_authoring_state(source["id"])
+        if current is None:
+            before_source = {
+                **_copy_mapping(source),
+                "base": None,
+                "settings": {},
+            }
+            before_source.pop("base", None)
+            before_resolution = analyze_strategy_source(before_source)[
+                "resolution"
+            ]
+        else:
+            before_source = current["source"]
+            before_resolution = current["resolution"]
+        source_changes = diff_source_documents(before_source, source)
+        source_changes["created"] = current is None
+        effective_changes = diff_strategy_resolutions(
+            before_resolution,
+            resolution,
+        )
+        profile = _copy_mapping(validation["profile"])
+        return {
+            "valid": True,
+            "published": False,
+            "profile": profile,
+            "source": _copy_mapping(source),
+            "resolution": _copy_mapping(resolution),
+            "resolved_configuration": _copy_mapping(
+                validation["resolved_configuration"]
+            ),
+            "rule_count": validation["rule_count"],
+            "summary": list(validation["summary"]),
+            "fingerprints": {
+                "source_fingerprint": profile["source_fingerprint"],
+                "base_fingerprint": profile["base_fingerprint"],
+                "resolution_fingerprint": profile["resolution_fingerprint"],
+                "plan_fingerprint": profile["plan_fingerprint"],
+            },
+            "review": {
+                "source_changes": source_changes,
+                "effective_changes": effective_changes,
+                "validation": {"valid": True, "errors": []},
+                "rule_count": validation["rule_count"],
+                "fingerprints": {
+                    "source_fingerprint": profile["source_fingerprint"],
+                    "base_fingerprint": profile["base_fingerprint"],
+                    "resolution_fingerprint": profile[
+                        "resolution_fingerprint"
+                    ],
+                    "plan_fingerprint": profile["plan_fingerprint"],
+                },
+                "publication_activates_strategy": False,
+            },
+        }
+
+    def publish_authoring_strategy(
+        self,
+        raw_strategy: object,
+        *,
+        expected_source_fingerprint: object = None,
+        reviewed_rebase_fingerprint: object = None,
+    ) -> dict[str, Any]:
+        """Publish sparse Strategy source after any pin change was reviewed."""
+
+        identifier = _draft_identifier(raw_strategy)
+        if identifier in _RESERVED_STRATEGY_IDS:
+            raise StrategyProfileError(
+                f"{identifier!r} is a bundled or reserved strategy name; "
+                "clone it under a new id"
+            )
+        current = self._existing_authoring_state(identifier)
+        expected_publication = (
+            str(expected_source_fingerprint or "").strip() or None
+        )
+        if current is not None:
+            if expected_publication != current["source_fingerprint"]:
+                raise StrategyProfileConflictError(
+                    f"Profile {identifier!r} changed after it was opened; "
+                    "reload it before publishing"
+                )
+        elif expected_publication is not None:
+            raise StrategyProfileConflictError(
+                f"Profile {identifier!r} no longer exists; reload the catalog"
+            )
+        try:
+            proposed = normalize_strategy_source(raw_strategy)
+        except StrategyAuthoringError as exc:
+            raise StrategyProfileError(str(exc)) from exc
+        if current is not None and current["source"].get("base") != proposed.get(
+            "base"
+        ):
+            expected_review = rebase_review_fingerprint(proposed)
+            supplied_review = str(reviewed_rebase_fingerprint or "").strip()
+            if supplied_review != expected_review:
+                raise StrategyProfileError(
+                    "Changing a published Strategy's pinned Base requires a "
+                    "fresh reviewed rebase preview"
+                )
+
+        validation = self.validate_authoring_strategy(raw_strategy)
+        published = self.publish(
+            raw_strategy,
+            expected_source_fingerprint=expected_source_fingerprint,
+        )
+        validation["published"] = True
+        validation["profile"] = _copy_mapping(published["profile"])
+        return validation
+
+    def preview_rebase(
+        self,
+        raw_strategy: object,
+        target_base: object,
+    ) -> dict[str, Any]:
+        """Preview a Base pin update, including builder/dependency failures."""
+
+        try:
+            source = normalize_strategy_source(raw_strategy)
+            current_snapshot = self._base_snapshot_for_source(source)
+            if not isinstance(target_base, Mapping):
+                raise StrategyAuthoringError("target_base must be an object")
+            target_id = target_base.get("id")
+            target_revision = target_base.get("revision")
+            if target_revision is None:
+                latest = self.base_store.latest(target_id)
+                if latest is None:
+                    raise StrategyAuthoringError(
+                        f"base {target_id!r} has no available revisions"
+                    )
+                target_publication = latest
+            else:
+                target_publication = self.base_store.load(
+                    target_id,
+                    target_revision,
+                )
+            preview = preview_strategy_rebase(
+                source,
+                current_snapshot,
+                target_publication["snapshot"],
+            )
+        except StrategyAuthoringError as exc:
+            raise StrategyProfileError(str(exc)) from exc
+
+        errors = list(preview["validation_errors"])
+        validated: Optional[dict[str, Any]] = None
+        try:
+            validated = self.validate_authoring_strategy(preview["source"])
+        except StrategyProfileError as exc:
+            message = str(exc)
+            if not any(error.get("message") == message for error in errors):
+                errors.append(
+                    {
+                        "code": "strategy_validation",
+                        "message": message,
+                    }
+                )
+        preview["validation_errors"] = errors
+        preview["summary"]["validation_error_count"] = len(errors)
+        response: dict[str, Any] = {
+            "valid": not errors,
+            "published": False,
+            "source": _copy_mapping(preview["source"]),
+            "resolution": _copy_mapping(preview["resolution"]),
+            "rebase": preview,
+            "reviewed_rebase_fingerprint": preview["review_fingerprint"],
+            "review": {
+                "validation": {"valid": not errors, "errors": errors},
+                "publication_activates_strategy": False,
+            },
+        }
+        if validated is not None:
+            response.update(
+                {
+                    "source": validated["source"],
+                    "resolution": validated["resolution"],
+                    "profile": validated["profile"],
+                    "rule_count": validated["rule_count"],
+                    "fingerprints": validated["fingerprints"],
+                    "summary": validated["summary"],
+                }
+            )
+            response["rebase"]["source"] = validated["source"]
+            response["rebase"]["resolution"] = validated["resolution"]
+        return response
 
     def publish_base(
         self,
@@ -544,6 +924,144 @@ class StrategyProfileStore:
         except StrategyAuthoringError as exc:
             raise StrategyProfileError(str(exc)) from exc
         return _copy_mapping(publication["snapshot"])
+
+    def _base_snapshot_for_source(
+        self,
+        source: Mapping[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        base = source.get("base")
+        if not isinstance(base, Mapping):
+            return None
+        current = self._existing_authoring_state(str(source.get("id") or ""))
+        if (
+            current is not None
+            and current["source"].get("base") == base
+            and current["base_snapshot"] is not None
+        ):
+            return _copy_mapping(current["base_snapshot"])
+        return self._load_base_snapshot(source)
+
+    def _existing_authoring_state(
+        self,
+        strategy_id: object,
+    ) -> Optional[dict[str, Any]]:
+        identifier = normalize_strategy_id(strategy_id)
+        if identifier is None:
+            return None
+        if identifier in {"farm_t18", "farm_t19"}:
+            source = self.authoring_source(identifier)
+            if source is None:
+                return None
+            resolution = resolve_strategy_source(source)
+            return {
+                "source": source,
+                "base_snapshot": None,
+                "resolution": resolution,
+                "legacy_converted": True,
+                "source_fingerprint": None,
+            }
+        if identifier in _RESERVED_STRATEGY_IDS:
+            return None
+        path = _profile_path(self.profile_directory, identifier)
+        if not path.is_file() or path.is_symlink():
+            return None
+        publication = _load_publication(path, expected_id=identifier)
+        source = self.authoring_source(identifier)
+        if source is None:
+            return None
+        raw_base_snapshot = publication.get("base_snapshot")
+        base_snapshot = (
+            _copy_mapping(raw_base_snapshot)
+            if publication["schema_version"] == STRATEGY_PUBLICATION_SCHEMA_VERSION
+            and isinstance(raw_base_snapshot, Mapping)
+            else None
+        )
+        resolution = resolve_strategy_source(source, base_snapshot)
+        return {
+            "source": source,
+            "base_snapshot": base_snapshot,
+            "resolution": resolution,
+            "legacy_converted": (
+                publication["schema_version"] == STRATEGY_PROFILE_SCHEMA_VERSION
+            ),
+            "source_fingerprint": publication["source_fingerprint"],
+        }
+
+    def _authoring_catalog_item(
+        self,
+        summary: Mapping[str, Any],
+        base_items: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        item = _copy_mapping(summary)
+        identifier = str(summary.get("id") or "")
+        family = str(summary.get("family") or "").strip().lower()
+        if family != "farm" or identifier in {"tournament", "none"}:
+            item.update(
+                {
+                    "authoring_supported": False,
+                    "editable": False,
+                    "source": None,
+                    "resolution": None,
+                    "compatible_base_revisions": [],
+                    "base_update": None,
+                    "read_only_reason": (
+                        "Tournament uses a dedicated protected strategy family."
+                        if identifier == "tournament"
+                        else "No Strategy contains no authorable runtime plan."
+                    ),
+                }
+            )
+            return item
+
+        try:
+            state = self._existing_authoring_state(identifier)
+        except (StrategyAuthoringError, StrategyProfileError) as exc:
+            raise StrategyProfileError(str(exc)) from exc
+        if state is None:
+            raise StrategyProfileError("authoring source is unavailable")
+        source = state["source"]
+        compatible = [
+            {
+                "id": base["id"],
+                "display_name": base["display_name"],
+                "revision": base["latest_revision"],
+                "source_fingerprint": base["source_fingerprint"],
+            }
+            for base in base_items
+            if base["family"] == source["family"]
+        ]
+        base_update = None
+        pinned = source.get("base")
+        if isinstance(pinned, Mapping):
+            latest = next(
+                (base for base in compatible if base["id"] == pinned["id"]),
+                None,
+            )
+            if latest is not None and latest["revision"] > pinned["revision"]:
+                base_update = {
+                    "id": latest["id"],
+                    "display_name": latest["display_name"],
+                    "pinned_revision": pinned["revision"],
+                    "latest_revision": latest["revision"],
+                    "source_fingerprint": latest["source_fingerprint"],
+                }
+        item.update(
+            {
+                "authoring_supported": True,
+                "source": _copy_mapping(source),
+                "resolution": _copy_mapping(state["resolution"]),
+                "normalized_source_fingerprint": fingerprint_document(source),
+                "legacy_converted": state["legacy_converted"],
+                "compatible_base_revisions": compatible,
+                "base_update": base_update,
+                "read_only_reason": (
+                    "Bundled Strategies are immutable; clone this source to edit it."
+                    if summary.get("built_in")
+                    else None
+                ),
+            }
+        )
+        return item
 
     def _next_profile_version(self, identifier: str) -> int:
         path = _profile_path(self.profile_directory, identifier)
@@ -1080,6 +1598,8 @@ __all__ = [
     "BUILTIN_STRATEGY_IDS",
     "DEFAULT_CUSTOM_STRATEGY_DIR",
     "LEGACY_STRATEGY_ALIASES",
+    "STRATEGY_AUTHORING_API_SCHEMA_VERSION",
+    "STRATEGY_AUTHORING_OPERATIONS",
     "STRATEGY_PROFILE_DIRECTORY_ENVIRONMENT_VARIABLE",
     "StrategyProfileConflictError",
     "StrategyProfileError",

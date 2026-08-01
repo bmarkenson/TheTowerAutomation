@@ -50,7 +50,7 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 18
+CONTROL_SURFACE_REVISION = 19
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -65,6 +65,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "host_performance_telemetry_v1",
     "observed_game_speed",
     "selected_strategy_process_start",
+    "strategy_authoring_v1",
     "strategy_profile_catalog_v1",
     "strategy_profile_editor_v2",
     "tournament_launch_confirmation",
@@ -195,6 +196,91 @@ class ControlSurfaceService:
         """Return the constrained profile-editor catalog."""
 
         return self.profile_store.catalog()
+
+    def strategy_authoring(self) -> dict[str, Any]:
+        """Return the additive sparse Base/Strategy authoring catalog."""
+
+        try:
+            return self.profile_store.authoring_catalog()
+        except StrategyProfileError as exc:
+            raise ControlSurfaceRequestError(str(exc)) from exc
+
+    def apply_strategy_authoring(
+        self,
+        request: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Validate, publish, or preview one authoring operation."""
+
+        if not isinstance(request, Mapping):
+            raise ControlSurfaceRequestError("Request body must be a JSON object")
+        operation = str(request.get("operation") or "").strip().lower()
+        operations = {
+            "validate_base",
+            "publish_base",
+            "validate_strategy",
+            "publish_strategy",
+            "preview_rebase",
+        }
+        if operation not in operations:
+            raise ControlSurfaceRequestError(
+                "operation must be validate_base, publish_base, "
+                "validate_strategy, publish_strategy, or preview_rebase"
+            )
+        try:
+            if operation == "validate_base":
+                response = self.profile_store.validate_base(request.get("source"))
+            elif operation == "publish_base":
+                response = self.profile_store.publish_authoring_base(
+                    request.get("source"),
+                    expected_latest_fingerprint=request.get(
+                        "expected_latest_fingerprint"
+                    ),
+                )
+            elif operation == "validate_strategy":
+                response = self.profile_store.validate_authoring_strategy(
+                    request.get("source")
+                )
+            elif operation == "publish_strategy":
+                response = self.profile_store.publish_authoring_strategy(
+                    request.get("source"),
+                    expected_source_fingerprint=request.get(
+                        "expected_source_fingerprint"
+                    ),
+                    reviewed_rebase_fingerprint=request.get(
+                        "reviewed_rebase_fingerprint"
+                    ),
+                )
+            else:
+                response = self.profile_store.preview_rebase(
+                    request.get("source"),
+                    request.get("target_base"),
+                )
+        except StrategyProfileConflictError as exc:
+            raise ControlSurfaceRequestError(str(exc), status=409) from exc
+        except StrategyProfileError as exc:
+            raise ControlSurfaceRequestError(str(exc), status=400) from exc
+
+        response["operation"] = operation
+        if operation == "publish_base":
+            source = response.get("source") or {}
+            audit_warning = self._append_audit(
+                "Published strategy Base "
+                f"{source.get('id')} immutable revision {source.get('revision')}"
+            )
+            response["catalog"] = self.profile_store.authoring_catalog()
+            if audit_warning:
+                response["warning"] = audit_warning
+        elif operation == "publish_strategy":
+            profile = response.get("profile") or {}
+            audit_warning = self._append_audit(
+                "Published Strategy "
+                f"{profile.get('id')} version {profile.get('version')}; "
+                "activation unchanged"
+            )
+            response["catalog"] = self.profile_store.authoring_catalog()
+            if audit_warning:
+                response["warning"] = audit_warning
+        return response
 
     def apply_strategy_profile(
         self,

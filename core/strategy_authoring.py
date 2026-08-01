@@ -565,6 +565,25 @@ def resolve_strategy_source(
 ) -> dict[str, Any]:
     """Resolve one sparse source against zero or one exact base snapshot."""
 
+    analysis = analyze_strategy_source(strategy_source, base_snapshot)
+    errors = analysis["errors"]
+    if errors:
+        raise StrategyAuthoringError(str(errors[0]["message"]))
+    return copy.deepcopy(analysis["resolution"])
+
+
+def analyze_strategy_source(
+    strategy_source: object,
+    base_snapshot: object = None,
+) -> dict[str, Any]:
+    """Resolve source intent while retaining dependency errors for review.
+
+    Publication still uses :func:`resolve_strategy_source`, which raises on
+    every invalid dependency.  Authoring previews use this non-throwing view so
+    a reviewed rebase can show the exact resulting dependency failures without
+    reproducing resolution rules in the API layer.
+    """
+
     source = normalize_strategy_source(strategy_source)
     base_ref = source.get("base")
     base: Optional[dict[str, Any]] = None
@@ -632,6 +651,7 @@ def resolve_strategy_source(
             "provenance": {"kind": "unmanaged"},
         }
 
+    errors: list[dict[str, Any]] = []
     for setting_id, definition in FARM_SETTING_REGISTRY.items():
         if resolved[setting_id]["state"] != "effective":
             continue
@@ -641,16 +661,262 @@ def resolve_strategy_source(
             if resolved[dependency]["state"] != "effective"
         ]
         if missing:
-            raise StrategyAuthoringError(
+            message = (
                 f"setting {setting_id!r} requires effective setting(s): "
                 + ", ".join(missing)
             )
+            errors.append(
+                {
+                    "code": "missing_dependency",
+                    "setting_id": setting_id,
+                    "dependencies": missing,
+                    "message": message,
+                }
+            )
 
     return {
-        "schema_version": AUTHORING_SCHEMA_VERSION,
-        "family": source["family"],
-        "settings": resolved,
+        "source": source,
+        "base_snapshot": copy.deepcopy(base),
+        "resolution": {
+            "schema_version": AUTHORING_SCHEMA_VERSION,
+            "family": source["family"],
+            "settings": resolved,
+        },
+        "errors": errors,
     }
+
+
+def describe_base_resolution(base_source: object) -> dict[str, Any]:
+    """Project sparse Base entries through the authoritative resolver.
+
+    A Base is not runnable and may remain incomplete, so dependency errors do
+    not make this display projection invalid.  The synthetic empty Strategy is
+    used only to obtain the same effective-setting and provenance vocabulary
+    that a pinned Strategy receives.
+    """
+
+    base = normalize_base_source(base_source)
+    analysis = analyze_strategy_source(
+        {
+            "schema_version": AUTHORING_SCHEMA_VERSION,
+            "kind": "strategy",
+            "id": base["id"],
+            "display_name": base["display_name"],
+            "family": base["family"],
+            "tier": 1,
+            "version": 1,
+            "base": {
+                "id": base["id"],
+                "revision": base["revision"],
+            },
+            "settings": {},
+        },
+        base,
+    )
+    return copy.deepcopy(analysis["resolution"])
+
+
+def diff_source_documents(
+    before_source: object,
+    after_source: object,
+) -> dict[str, Any]:
+    """Return a stable semantic source diff for Base or Strategy review."""
+
+    before, after = _normalize_matching_sources(before_source, after_source)
+    before_settings = before["settings"]
+    after_settings = after["settings"]
+    setting_diff = _diff_setting_mappings(before_settings, after_settings)
+    metadata_fields = (
+        ("display_name", "Display name"),
+        ("family", "Family"),
+        ("tier", "Tier"),
+        ("base", "Pinned base"),
+    )
+    metadata_changes = []
+    for field, label in metadata_fields:
+        if before.get(field) == after.get(field):
+            continue
+        metadata_changes.append(
+            {
+                "field": field,
+                "label": label,
+                "before": copy.deepcopy(before.get(field)),
+                "after": copy.deepcopy(after.get(field)),
+            }
+        )
+    return {
+        **setting_diff,
+        "metadata_changes": metadata_changes,
+        "change_count": (
+            len(setting_diff["added"])
+            + len(setting_diff["removed"])
+            + len(setting_diff["changed"])
+            + len(metadata_changes)
+        ),
+    }
+
+
+def diff_strategy_resolutions(
+    before_resolution: object,
+    after_resolution: object,
+) -> dict[str, Any]:
+    """Compare effective values separately from provenance-only changes."""
+
+    before_settings = _resolution_settings(before_resolution)
+    after_settings = _resolution_settings(after_resolution)
+    changed = []
+    provenance_changed = []
+    for setting_id in FARM_SETTING_REGISTRY:
+        before_entry = before_settings[setting_id]
+        after_entry = after_settings[setting_id]
+        before_effective = _effective_resolution_view(before_entry)
+        after_effective = _effective_resolution_view(after_entry)
+        item = {
+            "setting_id": setting_id,
+            "display_name": FARM_SETTING_REGISTRY[setting_id].display_name,
+            "before": copy.deepcopy(before_entry),
+            "after": copy.deepcopy(after_entry),
+        }
+        if before_effective != after_effective:
+            changed.append(item)
+        elif before_entry.get("provenance") != after_entry.get("provenance"):
+            provenance_changed.append(item)
+    return {
+        "changed": changed,
+        "provenance_changed": provenance_changed,
+        "change_count": len(changed),
+    }
+
+
+def preview_strategy_rebase(
+    strategy_source: object,
+    current_base_snapshot: object,
+    target_base_snapshot: object,
+) -> dict[str, Any]:
+    """Compute the complete semantic review for an explicit Base rebase."""
+
+    source = normalize_strategy_source(strategy_source)
+    current_ref = source.get("base")
+    current: Optional[dict[str, Any]] = None
+    if current_ref is not None:
+        current = normalize_base_source(current_base_snapshot)
+        if (
+            current["id"] != current_ref["id"]
+            or current["revision"] != current_ref["revision"]
+        ):
+            raise StrategyAuthoringError(
+                "current base snapshot does not match the pinned revision"
+            )
+    elif current_base_snapshot is not None:
+        raise StrategyAuthoringError(
+            "a strategy without a pinned base cannot receive a current snapshot"
+        )
+
+    target = normalize_base_source(target_base_snapshot)
+    if target["family"] != source["family"]:
+        raise StrategyAuthoringError(
+            f"base family {target['family']!r} is incompatible with "
+            f"strategy family {source['family']!r}"
+        )
+    if current_ref is not None:
+        if target["id"] != current_ref["id"]:
+            raise StrategyAuthoringError(
+                "a rebase must keep the pinned base id unchanged"
+            )
+        if target["revision"] <= current_ref["revision"]:
+            raise StrategyAuthoringError(
+                "the reviewed base revision must be newer than the pinned revision"
+            )
+
+    current_analysis = analyze_strategy_source(source, current)
+    rebased_source = copy.deepcopy(source)
+    rebased_source["base"] = {
+        "id": target["id"],
+        "revision": target["revision"],
+    }
+    target_analysis = analyze_strategy_source(rebased_source, target)
+    current_resolution = current_analysis["resolution"]
+    target_resolution = target_analysis["resolution"]
+
+    base_changes = _diff_setting_mappings(
+        current["settings"] if current is not None else {},
+        target["settings"],
+    )
+    inherited_changes = []
+    local_overrides = []
+    explicit_ignores = []
+    local_settings = source["settings"]
+    for setting_id, definition in FARM_SETTING_REGISTRY.items():
+        local = local_settings.get(setting_id)
+        before_entry = current_resolution["settings"][setting_id]
+        after_entry = target_resolution["settings"][setting_id]
+        if local is None:
+            if _effective_resolution_view(before_entry) != _effective_resolution_view(
+                after_entry
+            ):
+                inherited_changes.append(
+                    {
+                        "setting_id": setting_id,
+                        "display_name": definition.display_name,
+                        "before": copy.deepcopy(before_entry),
+                        "after": copy.deepcopy(after_entry),
+                    }
+                )
+            continue
+        if local["policy"] == "ignore":
+            explicit_ignores.append(
+                {
+                    "setting_id": setting_id,
+                    "display_name": definition.display_name,
+                    "directive": copy.deepcopy(local),
+                    "result": copy.deepcopy(after_entry),
+                }
+            )
+            continue
+        local_overrides.append(
+            {
+                "setting_id": setting_id,
+                "display_name": definition.display_name,
+                "directive": copy.deepcopy(local),
+                "before": copy.deepcopy(before_entry),
+                "after": copy.deepcopy(after_entry),
+            }
+        )
+
+    errors = copy.deepcopy(target_analysis["errors"])
+    return {
+        "source": rebased_source,
+        "current_resolution": current_resolution,
+        "resolution": target_resolution,
+        "base_changes": base_changes,
+        "inherited_effective_changes": inherited_changes,
+        "local_overrides_unchanged": local_overrides,
+        "explicit_ignores_unchanged": explicit_ignores,
+        "validation_errors": errors,
+        "review_fingerprint": rebase_review_fingerprint(rebased_source),
+        "summary": {
+            "base_added": len(base_changes["added"]),
+            "base_removed": len(base_changes["removed"]),
+            "base_changed": len(base_changes["changed"]),
+            "inherited_effective_changed": len(inherited_changes),
+            "local_overrides_unchanged": len(local_overrides),
+            "explicit_ignores_unchanged": len(explicit_ignores),
+            "validation_error_count": len(errors),
+        },
+    }
+
+
+def rebase_review_fingerprint(strategy_source: object) -> str:
+    """Bind reviewed rebase approval to the complete proposed sparse source."""
+
+    source = normalize_strategy_source(strategy_source)
+    source.pop("version", None)
+    return fingerprint_document(
+        {
+            "kind": "strategy_rebase_review",
+            "source": source,
+        }
+    )
 
 
 def legacy_farm_source_to_strategy_source(
@@ -962,6 +1228,103 @@ class StrategyBaseStore:
                 revision_numbers.append(int(match.group(1)))
         return tuple(self.load(identifier, revision) for revision in sorted(revision_numbers))
 
+    def catalog(self) -> dict[str, Any]:
+        """Enumerate valid immutable revisions without following symlinks."""
+
+        items: list[dict[str, Any]] = []
+        errors: list[dict[str, str]] = []
+        if not self.base_directory.exists():
+            return {"items": items, "errors": errors}
+        if self.base_directory.is_symlink() or not self.base_directory.is_dir():
+            return {
+                "items": items,
+                "errors": [
+                    {
+                        "id": "bases",
+                        "error": "strategy base catalog is not a regular directory",
+                    }
+                ],
+            }
+
+        pattern = re.compile(
+            r"(?P<id>[a-z][a-z0-9_]{2,47})\.base\."
+            r"(?P<revision>[1-9][0-9]*)\.yaml"
+        )
+        grouped: dict[str, list[tuple[int, Path]]] = {}
+        try:
+            paths = sorted(self.base_directory.iterdir(), key=lambda path: path.name)
+        except OSError as exc:
+            return {
+                "items": items,
+                "errors": [{"id": "bases", "error": str(exc)}],
+            }
+        for path in paths:
+            if ".base." not in path.name or not path.name.endswith(".yaml"):
+                continue
+            match = pattern.fullmatch(path.name)
+            if match is None:
+                errors.append(
+                    {
+                        "id": path.name,
+                        "error": "invalid strategy base revision filename",
+                    }
+                )
+                continue
+            grouped.setdefault(match.group("id"), []).append(
+                (int(match.group("revision")), path)
+            )
+
+        for identifier, candidates in sorted(grouped.items()):
+            revisions: list[dict[str, Any]] = []
+            publications: list[dict[str, Any]] = []
+            for revision, path in sorted(candidates):
+                try:
+                    if path.is_symlink():
+                        raise StrategyAuthoringError(
+                            "symbolic-link base revisions are unsupported"
+                        )
+                    publication = self.load(identifier, revision)
+                except StrategyAuthoringError as exc:
+                    errors.append(
+                        {
+                            "id": f"{identifier}@{revision}",
+                            "error": str(exc),
+                        }
+                    )
+                    continue
+                publications.append(publication)
+                snapshot = publication["snapshot"]
+                revisions.append(
+                    {
+                        "revision": revision,
+                        "published_at": publication["published_at"],
+                        "source_fingerprint": publication[
+                            "source_fingerprint"
+                        ],
+                        "setting_count": len(snapshot["settings"]),
+                    }
+                )
+            if not publications:
+                continue
+            latest = publications[-1]
+            snapshot = latest["snapshot"]
+            items.append(
+                {
+                    "id": identifier,
+                    "display_name": snapshot["display_name"],
+                    "family": snapshot["family"],
+                    "built_in": False,
+                    "editable": True,
+                    "latest_revision": snapshot["revision"],
+                    "published_at": latest["published_at"],
+                    "source_fingerprint": latest["source_fingerprint"],
+                    "source": copy.deepcopy(snapshot),
+                    "resolution": describe_base_resolution(snapshot),
+                    "revisions": revisions,
+                }
+            )
+        return {"items": items, "errors": errors}
+
     def _prepare_directory(self) -> None:
         if self.base_directory.exists() and self.base_directory.is_symlink():
             raise StrategyAuthoringConflictError(
@@ -991,6 +1354,88 @@ def fingerprint_document(value: object) -> str:
         sort_keys=True,
     ).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
+
+
+def _normalize_matching_sources(
+    before_source: object,
+    after_source: object,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if not isinstance(before_source, Mapping) or not isinstance(
+        after_source, Mapping
+    ):
+        raise StrategyAuthoringError("source review requires two documents")
+    before_kind = str(before_source.get("kind") or "").strip().lower()
+    after_kind = str(after_source.get("kind") or "").strip().lower()
+    if before_kind == after_kind == "base":
+        before = normalize_base_source(before_source)
+        after = normalize_base_source(after_source)
+    elif before_kind == after_kind == "strategy":
+        before = normalize_strategy_source(before_source)
+        after = normalize_strategy_source(after_source)
+    else:
+        raise StrategyAuthoringError(
+            "source review requires two Base documents or two Strategy documents"
+        )
+    if before["id"] != after["id"]:
+        raise StrategyAuthoringError("source review cannot change the document id")
+    return before, after
+
+
+def _diff_setting_mappings(
+    before_settings: Mapping[str, Any],
+    after_settings: Mapping[str, Any],
+) -> dict[str, list[dict[str, Any]]]:
+    added: list[dict[str, Any]] = []
+    removed: list[dict[str, Any]] = []
+    changed: list[dict[str, Any]] = []
+    unchanged: list[dict[str, Any]] = []
+    for setting_id, definition in FARM_SETTING_REGISTRY.items():
+        before = before_settings.get(setting_id)
+        after = after_settings.get(setting_id)
+        if before is None and after is None:
+            continue
+        item = {
+            "setting_id": setting_id,
+            "display_name": definition.display_name,
+            "before": copy.deepcopy(before),
+            "after": copy.deepcopy(after),
+        }
+        if before is None:
+            added.append(item)
+        elif after is None:
+            removed.append(item)
+        elif before != after:
+            changed.append(item)
+        else:
+            unchanged.append(item)
+    return {
+        "added": added,
+        "removed": removed,
+        "changed": changed,
+        "unchanged": unchanged,
+    }
+
+
+def _resolution_settings(resolution: object) -> Mapping[str, Any]:
+    if not isinstance(resolution, Mapping):
+        raise StrategyAuthoringError("strategy resolution must be an object")
+    settings = resolution.get("settings")
+    if not isinstance(settings, Mapping):
+        raise StrategyAuthoringError("strategy resolution requires settings")
+    missing = [setting_id for setting_id in FARM_SETTING_REGISTRY if setting_id not in settings]
+    if missing:
+        raise StrategyAuthoringError(
+            "strategy resolution is missing setting(s): " + ", ".join(missing)
+        )
+    return settings
+
+
+def _effective_resolution_view(entry: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: copy.deepcopy(entry.get(key))
+        for key in ("state", "policy", "value")
+        if key in entry
+    }
 
 
 def _normalize_settings(raw_settings: object, *, base: bool) -> dict[str, Any]:
@@ -1182,11 +1627,17 @@ __all__ = [
     "StrategyAuthoringConflictError",
     "StrategyAuthoringError",
     "StrategyBaseStore",
+    "analyze_strategy_source",
+    "describe_base_resolution",
+    "diff_source_documents",
+    "diff_strategy_resolutions",
     "farm_source_from_resolution",
     "fingerprint_document",
     "legacy_farm_source_to_strategy_source",
     "normalize_base_source",
     "normalize_strategy_source",
+    "preview_strategy_rebase",
+    "rebase_review_fingerprint",
     "resolve_strategy_source",
     "setting_registry_catalog",
 ]

@@ -211,6 +211,8 @@ memory only. The API deliberately sends no CORS permission.
 | `POST` | `/api/v1/host-performance` | Bounded, idempotent batches of native Windows host/BlueStacks performance aggregates |
 | `GET` | `/api/v1/strategy-profiles` | Bundled/custom profile summaries plus the allowlisted Farm policy and preset catalogs |
 | `POST` | `/api/v1/strategy-profiles` | Validate a constrained Farm draft or atomically publish its source and generated plan |
+| `GET` | `/api/v1/strategy-authoring` | Registry metadata, separate Base/Strategy catalogs, editable source, effective resolution/provenance, compatible Base revisions, capabilities, and catalog errors |
+| `POST` | `/api/v1/strategy-authoring` | Validate or publish Base/Strategy source, or preview an explicit reviewed Base rebase, without activation |
 | `GET` | `/api/v1/battles?limit=N` | Newest Battle and Tournament summaries |
 | `GET` | `/api/v1/battles/{battle_id}` | One full structured battle record |
 | `GET` | `/api/v1/activity?limit=N&levels=ERROR,WARN&scope=current_run&after=CURSOR` | Recent structured action-log entries, optionally filtered by level, explicit run scope, and opaque clear-view cursor |
@@ -244,6 +246,42 @@ lowercase identifiers and cannot collide with bundled or legacy names. There is
 no API delete or arbitrary-path operation. Selecting or applying a published
 profile remains a separate explicit action through the existing process API and
 its normal next-boundary or active-battle semantics.
+
+## Sparse strategy authoring
+
+Server revision 19 advertises `strategy_authoring_v1`. The additive
+`/api/v1/strategy-authoring` endpoint implements the sparse Base/Strategy model
+without changing `/api/v1/strategy-profiles`, `strategy_profile_catalog_v1`, or
+`strategy_profile_editor_v2`. An older native client therefore keeps using the
+revision-18 facade, while the revision-19 client requires the new capability
+and fails compatibility clearly against an older resident service.
+
+The GET response carries the setting registry, safe editor catalogs, separate
+Base and Strategy collections, normalized source documents, effective
+resolution and provenance, latest compatible Base revisions, structured
+capabilities, and catalog errors. Unsupported Strategy families remain listed
+with a read-only reason. Existing schema-1 Farm publications are converted
+conservatively in memory and are not rewritten merely because the catalog was
+opened.
+
+POST accepts only `validate_base`, `publish_base`, `validate_strategy`,
+`publish_strategy`, and `preview_rebase`. Validation returns normalized source,
+effective resolution, source/effective review data, fingerprints, summary, and
+rule count where applicable. Responses never include the expanded generated
+plan. Base publication appends the next immutable revision under optimistic
+latest-fingerprint protection. Strategy publication uses the existing atomic
+fixed-name store, embeds its pinned Base snapshot, and remains separate from
+every strategy-selection or activation action. Stale writes are conflicts;
+invalid source is a bad request. Both publication paths append an
+operator-facing control-surface audit entry.
+
+Rebase preview is computed by the backend authoring resolver and shared diff
+helpers. It reports Base entries added, removed, or changed; inherited effective
+values that change; local overrides that remain unchanged; explicit ignores
+that remain ignored; and resulting dependency/builder errors. A deterministic
+review fingerprint binds any later changed Base pin to that exact reviewed
+sparse source. Accepting the preview changes only the native client's draft;
+normal Strategy validation and publication are still required.
 
 ## Activity log audiences
 

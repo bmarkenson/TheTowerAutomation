@@ -351,11 +351,6 @@ stages:
   - [x] Add durable custom-profile skips for Auto Pick enabled, Perk Bans, and
     Auto Pick priority; add managed Ban and ordered Auto Pick editors; and
     round-trip the complete Farm setup so unexposed settings are preserved.
-  - [ ] Add the additive strategy-authoring API and WPF editor shell: separate
-    Base and Strategy catalogs, inherit/override/observe/ignore row states,
-    effective-value provenance, reviewed base rebasing, and publish review.
-    Keep the current fixed-path API as a compatibility facade and preserve the
-    separate publish-versus-activate boundary.
   - [ ] Add specialized value editors for every registered setting, including
     remaining compact Farm controls and profile-local structured values where
     justified. Keep generated rules and executor actions protected rather than

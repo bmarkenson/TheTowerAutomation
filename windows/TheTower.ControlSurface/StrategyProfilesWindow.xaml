@@ -1,11 +1,15 @@
 <Window x:Class="TheTower.ControlSurface.StrategyProfilesWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Strategy Profiles"
-        Width="1180" Height="820" MinWidth="960" MinHeight="680"
+        Title="Strategy Authoring"
+        Width="1320" Height="880" MinWidth="1040" MinHeight="700"
         WindowStartupLocation="CenterOwner"
         Background="#0A0E16" Foreground="#EDF2F7"
         ShowInTaskbar="False">
+  <Window.Resources>
+    <BooleanToVisibilityConverter x:Key="BoolVisibility" />
+  </Window.Resources>
+
   <Grid Margin="18">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
@@ -15,14 +19,14 @@
     </Grid.RowDefinitions>
 
     <StackPanel>
-      <TextBlock Text="Strategy Profiles" FontSize="22" FontWeight="SemiBold" />
-      <TextBlock Text="Clone a Farm profile, validate its compact settings, and publish a generated plan. Publishing never activates the profile."
+      <TextBlock Text="Strategy Authoring" FontSize="22" FontWeight="SemiBold" />
+      <TextBlock Text="Edit sparse Base and Strategy source, review effective values and provenance, then publish without activating a Strategy."
                  Foreground="#93A4BB" TextWrapping="Wrap" Margin="0,5,0,0" />
     </StackPanel>
 
     <Grid Grid.Row="1" Margin="0,16,0,12">
       <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="310" />
+        <ColumnDefinition Width="315" />
         <ColumnDefinition Width="8" />
         <ColumnDefinition Width="*" />
       </Grid.ColumnDefinitions>
@@ -32,42 +36,60 @@
         <Grid>
           <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
+            <RowDefinition Height="2*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="3*" />
             <RowDefinition Height="Auto" />
           </Grid.RowDefinitions>
-          <TextBlock Text="AVAILABLE PROFILES" Foreground="#62D5FF"
-                     FontSize="10" FontWeight="Bold" Margin="4,2,4,8" />
-          <ListBox Grid.Row="1" x:Name="ProfilesList"
+
+          <TextBlock Text="BASES" Foreground="#62D5FF"
+                     FontSize="11" FontWeight="Bold" Margin="4,2,4,7" />
+          <ListBox Grid.Row="1" x:Name="BasesList"
+                   AutomationProperties.Name="Base catalog"
                    Background="#0D1420" BorderBrush="#263349"
                    Foreground="#EDF2F7"
-                   SelectionChanged="ProfilesList_SelectionChanged">
+                   SelectionChanged="BasesList_SelectionChanged">
             <ListBox.ItemTemplate>
               <DataTemplate>
                 <StackPanel Margin="7,6">
                   <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"
                              TextWrapping="Wrap" />
-                  <TextBlock Foreground="#93A4BB" FontSize="11">
-                    <Run Text="{Binding Id}" />
-                    <Run Text="  •  v" />
-                    <Run Text="{Binding Version}" />
-                  </TextBlock>
-                  <TextBlock Text="{Binding OriginLabel}" Foreground="#7890AC"
+                  <TextBlock Text="{Binding Id}" Foreground="#93A4BB" FontSize="11" />
+                  <TextBlock Text="{Binding RevisionLabel}" Foreground="#7890AC"
                              FontSize="10" />
                 </StackPanel>
               </DataTemplate>
             </ListBox.ItemTemplate>
           </ListBox>
-          <Grid Grid.Row="2" Margin="0,9,0,0">
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="*" />
-              <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-            <Button Grid.Column="0" Content="New Farm profile"
-                    Click="NewProfile_Click" />
-            <Button Grid.Column="1" x:Name="CloneButton"
-                    Content="Clone selected" Click="CloneProfile_Click"
-                    IsEnabled="False" />
-          </Grid>
+
+          <TextBlock Grid.Row="2" Text="STRATEGIES" Foreground="#62D5FF"
+                     FontSize="11" FontWeight="Bold" Margin="4,13,4,7" />
+          <ListBox Grid.Row="3" x:Name="StrategiesList"
+                   AutomationProperties.Name="Strategy catalog"
+                   Background="#0D1420" BorderBrush="#263349"
+                   Foreground="#EDF2F7"
+                   SelectionChanged="StrategiesList_SelectionChanged">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <StackPanel Margin="7,6">
+                  <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"
+                             TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding Id}" Foreground="#93A4BB" FontSize="11" />
+                  <TextBlock Text="{Binding VersionLabel}" Foreground="#7890AC"
+                             FontSize="10" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <WrapPanel Grid.Row="4" Margin="0,10,0,0">
+            <Button x:Name="NewBaseButton" Content="New Base"
+                    Click="NewBase_Click" />
+            <Button x:Name="NewStrategyButton" Content="New Strategy"
+                    Click="NewStrategy_Click" />
+            <Button x:Name="CloneButton" Content="Clone Strategy"
+                    Click="CloneStrategy_Click" IsEnabled="False" />
+          </WrapPanel>
         </Grid>
       </Border>
 
@@ -76,169 +98,197 @@
 
       <Border Grid.Column="2" Background="#111827" BorderBrush="#263349"
               BorderThickness="1" CornerRadius="8" Padding="15">
-        <ScrollViewer VerticalScrollBarVisibility="Auto">
-          <StackPanel x:Name="EditorPanel" IsEnabled="False">
-            <TextBlock x:Name="EditorTitle" Text="Select or create a Farm profile"
+        <Grid x:Name="EditorPanel" IsEnabled="False">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+
+          <StackPanel>
+            <TextBlock x:Name="EditorTitle" Text="Select a Base or Strategy"
                        FontSize="18" FontWeight="SemiBold" />
             <TextBlock x:Name="EditorHelpText"
-                       Text="Bundled profiles are read-only; clone one to create an editable custom profile."
-                       Foreground="#93A4BB" TextWrapping="Wrap" Margin="0,4,0,12" />
-
-            <Grid Margin="0,0,0,14">
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="155" />
-                <ColumnDefinition Width="*" />
-              </Grid.ColumnDefinitions>
-              <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-              </Grid.RowDefinitions>
-              <TextBlock Grid.Row="0" Text="Profile ID" VerticalAlignment="Center"
-                         Foreground="#C8D5E6" />
-              <TextBox Grid.Row="0" Grid.Column="1" x:Name="ProfileIdBox"
-                       Margin="4" ToolTip="Lowercase letters, digits, and underscores. The ID cannot be renamed after publication." />
-              <TextBlock Grid.Row="1" Text="Display name" VerticalAlignment="Center"
-                         Foreground="#C8D5E6" />
-              <TextBox Grid.Row="1" Grid.Column="1" x:Name="DisplayNameBox"
-                       Margin="4" />
-              <TextBlock Grid.Row="2" Text="Tier" VerticalAlignment="Center"
-                         Foreground="#C8D5E6" />
-              <TextBox Grid.Row="2" Grid.Column="1" x:Name="TierBox"
-                       Margin="4" MaxLength="3" />
-            </Grid>
-
-            <TextBlock Text="LOADOUT POLICIES" Foreground="#62D5FF"
-                       FontSize="10" FontWeight="Bold" Margin="0,2,0,6" />
-            <Grid>
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="155" />
-                <ColumnDefinition Width="145" />
-                <ColumnDefinition Width="*" />
-              </Grid.ColumnDefinitions>
-              <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-              </Grid.RowDefinitions>
-
-              <TextBlock Grid.Row="0" Text="Modules" VerticalAlignment="Center" />
-              <ComboBox Grid.Row="0" Grid.Column="1" x:Name="ModulesModeBox"
-                        Margin="4" SelectionChanged="PolicyMode_SelectionChanged" />
-              <ComboBox Grid.Row="0" Grid.Column="2" x:Name="ModulesPresetBox"
-                        Margin="4" DisplayMemberPath="DisplayName" SelectedValuePath="Id" />
-
-              <TextBlock Grid.Row="1" Text="Damage Slider" VerticalAlignment="Center" />
-              <ComboBox Grid.Row="1" Grid.Column="1" x:Name="DamageModeBox"
-                        Margin="4" SelectionChanged="PolicyMode_SelectionChanged" />
-              <TextBox Grid.Row="1" Grid.Column="2" x:Name="DamageValueBox"
-                       Margin="4" ToolTip="Examples: 100%, 1e-18, or 1E-22%." />
-
-              <TextBlock Grid.Row="2" Text="Orb Distance" VerticalAlignment="Center" />
-              <ComboBox Grid.Row="2" Grid.Column="1" x:Name="OrbModeBox"
-                        Margin="4" SelectionChanged="PolicyMode_SelectionChanged" />
-              <ComboBox Grid.Row="2" Grid.Column="2" x:Name="OrbPresetBox"
-                        Margin="4" DisplayMemberPath="DisplayName" SelectedValuePath="Id" />
-
-              <TextBlock Grid.Row="3" Text="Target Priority" VerticalAlignment="Center" />
-              <ComboBox Grid.Row="3" Grid.Column="1" x:Name="TargetModeBox"
-                        Margin="4" SelectionChanged="PolicyMode_SelectionChanged" />
-              <ComboBox Grid.Row="3" Grid.Column="2" x:Name="TargetPresetBox"
-                        Margin="4" DisplayMemberPath="DisplayName" SelectedValuePath="Id" />
-            </Grid>
-
-            <TextBlock Text="PERSISTENT SETUP" Foreground="#62D5FF"
-                       FontSize="10" FontWeight="Bold" Margin="0,18,0,6" />
-            <TextBlock Text="A permanent skip means this profile will neither enforce nor change that setting on any run. The saved value remains available if enforcement is restored later."
-                       Foreground="#93A4BB" TextWrapping="Wrap"
-                       Margin="0,0,0,7" />
-            <WrapPanel Margin="0,0,0,12">
-              <CheckBox x:Name="SkipAutoPickEnabledBox"
-                        Content="Skip Auto Pick enabled"
-                        Tag="auto_pick_perks" Margin="4,3,14,3"
-                        Checked="SetupSkip_Changed" Unchecked="SetupSkip_Changed" />
-              <CheckBox x:Name="SkipPerkBansBox"
-                        Content="Skip Perk Bans"
-                        Tag="perk_bans" Margin="4,3,14,3"
-                        Checked="SetupSkip_Changed" Unchecked="SetupSkip_Changed" />
-              <CheckBox x:Name="SkipAutoPickOrderBox"
-                        Content="Skip Auto Pick priority"
-                        Tag="perk_auto_pick_order" Margin="4,3,14,3"
-                        Checked="SetupSkip_Changed" Unchecked="SetupSkip_Changed" />
-            </WrapPanel>
-
-            <Grid>
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="14" />
-                <ColumnDefinition Width="*" />
-              </Grid.ColumnDefinitions>
-
-              <Border Grid.Column="0" x:Name="PerkBansEditor"
-                      Background="#0D1420" BorderBrush="#263349"
-                      BorderThickness="1" CornerRadius="7" Padding="10">
-                <StackPanel>
-                  <TextBlock Text="PERK BANS" FontWeight="SemiBold" />
-                  <TextBlock Text="Select up to six. Display order is retained but does not affect priority."
-                             Foreground="#93A4BB" FontSize="11"
-                             TextWrapping="Wrap" Margin="0,2,0,7" />
-                  <ListBox x:Name="PerkBansList" Height="150"
-                           DisplayMemberPath="DisplayName"
-                           SelectionChanged="PerkList_SelectionChanged" />
-                  <ComboBox x:Name="AvailableBanPerkBox" Margin="0,7,0,3"
-                            DisplayMemberPath="DisplayName"
-                            SelectedValuePath="Id" />
-                  <WrapPanel>
-                    <Button x:Name="AddBanButton" Content="Add ban"
-                            Click="AddBan_Click" />
-                    <Button x:Name="RemoveBanButton" Content="Remove selected"
-                            Click="RemoveBan_Click" IsEnabled="False" />
-                  </WrapPanel>
-                </StackPanel>
-              </Border>
-
-              <Border Grid.Column="2" x:Name="AutoPickOrderEditor"
-                      Background="#0D1420" BorderBrush="#263349"
-                      BorderThickness="1" CornerRadius="7" Padding="10">
-                <StackPanel>
-                  <TextBlock Text="AUTO PICK PRIORITY" FontWeight="SemiBold" />
-                  <TextBlock Text="Top to bottom priority. Add, remove, or move the selected perk."
-                             Foreground="#93A4BB" FontSize="11"
-                             TextWrapping="Wrap" Margin="0,2,0,7" />
-                  <ListBox x:Name="AutoPickOrderList" Height="150"
-                           DisplayMemberPath="DisplayName"
-                           SelectionChanged="PerkList_SelectionChanged" />
-                  <ComboBox x:Name="AvailableAutoPickPerkBox" Margin="0,7,0,3"
-                            DisplayMemberPath="DisplayName"
-                            SelectedValuePath="Id" />
-                  <WrapPanel>
-                    <Button x:Name="AddAutoPickButton" Content="Add"
-                            Click="AddAutoPick_Click" />
-                    <Button x:Name="RemoveAutoPickButton" Content="Remove"
-                            Click="RemoveAutoPick_Click" IsEnabled="False" />
-                    <Button x:Name="MoveAutoPickUpButton" Content="Move up"
-                            Click="MoveAutoPickUp_Click" IsEnabled="False" />
-                    <Button x:Name="MoveAutoPickDownButton" Content="Move down"
-                            Click="MoveAutoPickDown_Click" IsEnabled="False" />
-                  </WrapPanel>
-                </StackPanel>
-              </Border>
-            </Grid>
-
-            <Border Background="#0D1420" BorderBrush="#263349"
-                    BorderThickness="1" CornerRadius="7" Padding="11"
-                    Margin="0,16,0,0">
-              <TextBlock x:Name="ValidationSummaryText"
-                         Text="Validate the draft to preview its resolved generated plan."
-                         Foreground="#C8D5E6" TextWrapping="Wrap" />
-            </Border>
+                       Text="Bases and Strategies use the same setting registry but publish through separate operations."
+                       Foreground="#93A4BB" TextWrapping="Wrap" Margin="0,4,0,10" />
           </StackPanel>
-        </ScrollViewer>
+
+          <Border Grid.Row="1" x:Name="RebaseBanner" Visibility="Collapsed"
+                  Background="#3A2C11" BorderBrush="#D9A441" BorderThickness="1"
+                  CornerRadius="6" Padding="10" Margin="0,0,0,10">
+            <DockPanel>
+              <Button DockPanel.Dock="Right" x:Name="ReviewRebaseButton"
+                      Content="Review Base update..." Click="ReviewRebase_Click" />
+              <TextBlock x:Name="RebaseBannerText" Foreground="#F4D184"
+                         VerticalAlignment="Center" TextWrapping="Wrap" />
+            </DockPanel>
+          </Border>
+
+          <StackPanel Grid.Row="2" Margin="0,0,0,10">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="95" />
+                <ColumnDefinition Width="2*" />
+                <ColumnDefinition Width="85" />
+                <ColumnDefinition Width="2*" />
+                <ColumnDefinition Width="65" />
+                <ColumnDefinition Width="90" />
+              </Grid.ColumnDefinitions>
+              <TextBlock Text="ID" VerticalAlignment="Center" Foreground="#C8D5E6" />
+              <TextBox Grid.Column="1" x:Name="EntityIdBox" Margin="4"
+                       ToolTip="Published IDs are immutable. Clone to choose another ID." />
+              <TextBlock Grid.Column="2" Text="Display name" VerticalAlignment="Center"
+                         Foreground="#C8D5E6" />
+              <TextBox Grid.Column="3" x:Name="DisplayNameBox" Margin="4" />
+              <TextBlock Grid.Column="4" Text="Tier" VerticalAlignment="Center"
+                         Foreground="#C8D5E6" />
+              <TextBox Grid.Column="5" x:Name="TierBox" Margin="4" MaxLength="3" />
+            </Grid>
+            <DockPanel x:Name="BasePinPanel" Margin="0,4,0,0" Visibility="Collapsed">
+              <TextBlock DockPanel.Dock="Left" Text="Pinned Base" Width="95"
+                         VerticalAlignment="Center" Foreground="#C8D5E6" />
+              <TextBlock x:Name="BasePinHelpText" DockPanel.Dock="Right" Width="330"
+                         Margin="10,0,0,0" VerticalAlignment="Center"
+                         Foreground="#93A4BB" TextWrapping="Wrap" />
+              <ComboBox x:Name="BasePinBox" DisplayMemberPath="DisplayName"
+                        SelectionChanged="BasePin_SelectionChanged" Margin="4,0"
+                        MinWidth="230" />
+            </DockPanel>
+          </StackPanel>
+
+          <DockPanel Grid.Row="3" Margin="0,0,0,8">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+              <RadioButton x:Name="ShowActiveOnlyButton" Content="Show active only"
+                           GroupName="SettingFilter" IsChecked="True"
+                           Checked="SettingFilter_Changed" Margin="7,0" />
+              <RadioButton x:Name="ShowAllSettingsButton" Content="Show all settings"
+                           GroupName="SettingFilter" Checked="SettingFilter_Changed"
+                           Margin="7,0" />
+            </StackPanel>
+            <TextBlock Text="SETTINGS" Foreground="#62D5FF"
+                       FontSize="10" FontWeight="Bold" VerticalAlignment="Center" />
+          </DockPanel>
+
+          <ListView Grid.Row="4" x:Name="SettingsList"
+                    Background="#0D1420" BorderBrush="#263349"
+                    Foreground="#EDF2F7"
+                    ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListView.GroupStyle>
+              <GroupStyle>
+                <GroupStyle.HeaderTemplate>
+                  <DataTemplate>
+                    <Border Background="#172235" Padding="9,6" Margin="0,8,0,3">
+                      <TextBlock Text="{Binding Name}" Foreground="#62D5FF"
+                                 FontWeight="Bold" />
+                    </Border>
+                  </DataTemplate>
+                </GroupStyle.HeaderTemplate>
+              </GroupStyle>
+            </ListView.GroupStyle>
+            <ListView.ItemTemplate>
+              <DataTemplate>
+                <Border BorderBrush="#263349" BorderThickness="0,0,0,1"
+                        Padding="9,9" MinWidth="690">
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="185" />
+                      <ColumnDefinition Width="190" />
+                      <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                      <RowDefinition Height="Auto" />
+                      <RowDefinition Height="Auto" />
+                      <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Grid.RowSpan="3">
+                      <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"
+                                 TextWrapping="Wrap" />
+                      <TextBlock Text="{Binding Id}" Foreground="#7890AC" FontSize="10" />
+                      <TextBlock Text="{Binding CapabilityDisplay}" Foreground="#93A4BB"
+                                 FontSize="10" TextWrapping="Wrap" Margin="0,4,0,0" />
+                    </StackPanel>
+
+                    <ComboBox Grid.Column="1" ItemsSource="{Binding AvailableSourceStates}"
+                              DisplayMemberPath="DisplayName"
+                              SelectedItem="{Binding SelectedSourceState, Mode=TwoWay}"
+                              IsEnabled="{Binding SourceStateEnabled}" Margin="5,0" />
+                    <Button Grid.Row="1" Grid.Column="1" Content="Reset to inherited"
+                            Visibility="{Binding CanResetToInherited, Converter={StaticResource BoolVisibility}}"
+                            Click="ResetToInherited_Click" Margin="5,4" />
+
+                    <StackPanel Grid.Column="2" Margin="8,0,0,0">
+                      <TextBlock>
+                        <Run Text="Effective: " Foreground="#93A4BB" />
+                        <Run Text="{Binding EffectivePolicyDisplay}" FontWeight="SemiBold" />
+                        <Run Text=" • " Foreground="#7890AC" />
+                        <Run Text="{Binding EffectiveValueDisplay}" />
+                      </TextBlock>
+                      <TextBlock Text="{Binding ProvenanceDisplay}" Foreground="#93A4BB"
+                                 FontSize="11" TextWrapping="Wrap" />
+                      <TextBlock Text="{Binding PendingEffectiveDisplay}" Foreground="#F1BF5B"
+                                 FontSize="10" TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <Grid Grid.Row="1" Grid.RowSpan="2" Grid.Column="2" Margin="8,7,0,0">
+                      <ComboBox ItemsSource="{Binding PresetOptions}"
+                                DisplayMemberPath="DisplayName"
+                                SelectedItem="{Binding SelectedPreset, Mode=TwoWay}"
+                                IsEnabled="{Binding ValueEditorEnabled}"
+                                Visibility="{Binding UsesPresetEditor, Converter={StaticResource BoolVisibility}}" />
+                      <TextBox Text="{Binding ValueText, UpdateSourceTrigger=PropertyChanged}"
+                               IsEnabled="{Binding ValueEditorEnabled}"
+                               Visibility="{Binding UsesTextEditor, Converter={StaticResource BoolVisibility}}" />
+                      <CheckBox Content="Enabled" IsChecked="{Binding BooleanValue, Mode=TwoWay}"
+                                IsEnabled="{Binding ValueEditorEnabled}"
+                                Visibility="{Binding UsesBooleanEditor, Converter={StaticResource BoolVisibility}}" />
+
+                      <StackPanel IsEnabled="{Binding ValueEditorEnabled}"
+                                  Visibility="{Binding UsesPerkEditor, Converter={StaticResource BoolVisibility}}">
+                        <ListBox x:Name="PerkValueList" ItemsSource="{Binding PerkValues}"
+                                 DisplayMemberPath="DisplayName" Height="84" />
+                        <ComboBox ItemsSource="{Binding AvailablePerks}"
+                                  SelectedItem="{Binding SelectedPerk, Mode=TwoWay}"
+                                  DisplayMemberPath="DisplayName" Margin="0,4,0,2" />
+                        <WrapPanel>
+                          <Button Content="Add" Click="AddPerk_Click" />
+                          <Button Content="Remove" Click="RemovePerk_Click"
+                                  CommandParameter="{Binding SelectedItem, ElementName=PerkValueList}" />
+                          <Button Content="Move up" Click="MovePerkUp_Click"
+                                  CommandParameter="{Binding SelectedItem, ElementName=PerkValueList}"
+                                  Visibility="{Binding IsOrderedPerkEditor, Converter={StaticResource BoolVisibility}}" />
+                          <Button Content="Move down" Click="MovePerkDown_Click"
+                                  CommandParameter="{Binding SelectedItem, ElementName=PerkValueList}"
+                                  Visibility="{Binding IsOrderedPerkEditor, Converter={StaticResource BoolVisibility}}" />
+                        </WrapPanel>
+                      </StackPanel>
+
+                      <StackPanel Visibility="{Binding IsReadOnlyValue, Converter={StaticResource BoolVisibility}}">
+                        <TextBlock Text="{Binding EffectiveValueDisplay}" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding ValueEditorExplanation}" Foreground="#F1BF5B"
+                                   FontSize="10" TextWrapping="Wrap" Margin="0,3,0,0" />
+                      </StackPanel>
+                    </Grid>
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ListView.ItemTemplate>
+          </ListView>
+
+          <Border Grid.Row="5" Background="#0D1420" BorderBrush="#263349"
+                  BorderThickness="1" CornerRadius="7" Padding="10" Margin="0,10,0,0">
+            <TextBlock x:Name="ValidationSummaryText"
+                       Text="Validate to refresh effective values, provenance, fingerprints, and generated rule count."
+                       Foreground="#C8D5E6" TextWrapping="Wrap" />
+          </Border>
+        </Grid>
       </Border>
     </Grid>
 
-    <TextBlock Grid.Row="2" x:Name="StatusText" Text="Loading profile catalog..."
+    <TextBlock Grid.Row="2" x:Name="StatusText" Text="Loading authoring catalog..."
                Foreground="#93A4BB" TextWrapping="Wrap" Margin="2,0,2,10" />
 
     <Grid Grid.Row="3">
@@ -248,13 +298,13 @@
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
-      <TextBlock Text="Published profiles become selectable, but use the main Controls pane to activate one."
+      <TextBlock Text="Bases are never activatable. Publishing a Strategy also leaves the active Strategy unchanged."
                  Foreground="#93A4BB" FontSize="11" VerticalAlignment="Center"
                  TextWrapping="Wrap" />
       <Button Grid.Column="1" x:Name="ValidateButton" Content="Validate draft"
               Click="Validate_Click" IsEnabled="False" />
       <Button Grid.Column="2" Content="Close" Click="Close_Click" />
-      <Button Grid.Column="3" x:Name="PublishButton" Content="Publish profile"
+      <Button Grid.Column="3" x:Name="PublishButton" Content="Review &amp; Publish..."
               Click="Publish_Click" Style="{StaticResource PrimaryButton}"
               IsEnabled="False" />
     </Grid>

@@ -80,6 +80,7 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
         if parsed.path not in {
             "/api/v1/control",
             "/api/v1/process",
+            "/api/v1/strategy-authoring",
             "/api/v1/strategy-profiles",
             "/api/v1/host-performance",
         }:
@@ -118,6 +119,8 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
                 response = self.server.service.apply_process_action(payload)
             elif parsed.path == "/api/v1/strategy-profiles":
                 response = self.server.service.apply_strategy_profile(payload)
+            elif parsed.path == "/api/v1/strategy-authoring":
+                response = self.server.service.apply_strategy_authoring(payload)
             else:
                 response = self.server.service.publish_host_performance(payload)
         except UnicodeDecodeError:
@@ -167,6 +170,8 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
                 payload = self.server.service.battle(battle_id)
             elif path == "/api/v1/strategy-profiles":
                 payload = self.server.service.strategy_profiles()
+            elif path == "/api/v1/strategy-authoring":
+                payload = self.server.service.strategy_authoring()
             elif path == "/api/v1/activity":
                 payload = self.server.service.activity(
                     limit=_query_limit(query, default=80),
