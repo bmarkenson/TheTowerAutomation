@@ -67,6 +67,7 @@ from core.gc_no_battle_setup import (
 from core.game_speed import GameSpeedGuard
 from core.gate_decisions import (
     build_gate_decision_options,
+    merge_profile_skip_waivers,
     startup_gate_check_catalog,
 )
 from core.exclusive_validation import (
@@ -3047,7 +3048,10 @@ class App:
                         phase="home_setup",
                     ):
                         return
-                waivers = dict(getattr(self, "_startup_gate_waivers", {}))
+                waivers = merge_profile_skip_waivers(
+                    requirements,
+                    getattr(self, "_startup_gate_waivers", {}),
+                )
                 setup = self._run_home_setup_attempts(
                     requirements,
                     screenshot=img,
@@ -3100,8 +3104,9 @@ class App:
                     fresh = self._capture_frame()
                     if fresh is None:
                         return
-                    waivers = dict(
-                        getattr(self, "_startup_gate_waivers", {})
+                    waivers = merge_profile_skip_waivers(
+                        requirements,
+                        getattr(self, "_startup_gate_waivers", {}),
                     )
                     setup = self._run_home_setup_attempts(
                         requirements,

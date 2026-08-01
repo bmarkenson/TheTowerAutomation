@@ -8,6 +8,9 @@ from typing import Any, Mapping
 
 import yaml
 
+from core.gate_decisions import normalize_profile_skip_checks
+from core.perk_configuration import normalize_perk_configuration_requirements
+
 
 ROOT = Path(__file__).resolve().parents[2]
 FARM_PROFILE_PATH = ROOT / "config" / "run_profiles" / "farm.yaml"
@@ -22,6 +25,7 @@ POLICY_MODES = frozenset({"enforce", "observe", "preserve"})
 LOADOUT_KEYS = frozenset(
     {"modules", "damage_slider", "orb_distance", "target_priority"}
 )
+SETUP_KEYS = frozenset({"skipped_checks", "settings"})
 
 
 def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
@@ -85,7 +89,12 @@ def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
         loadout["orb_distance"]
     )
 
-    requirements = invariants
+    setup = _resolve_setup(source.get("setup"), invariants)
+    requirements = copy.deepcopy(setup["settings"])
+    if setup["skipped_checks"]:
+        requirements["profile_skips"] = copy.deepcopy(
+            setup["skipped_checks"]
+        )
     gate_fallbacks = _normalize_gate_fallbacks(
         profile.get("gate_fallbacks"),
         supported_checks=set(requirements) | {"modules", "target_priority"},
@@ -141,6 +150,10 @@ def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
         "gate_fallbacks": copy.deepcopy(gate_fallbacks),
         "session_preflight_recovery": copy.deepcopy(session_recovery),
     }
+    if setup["skipped_checks"]:
+        run_configuration["skipped_checks"] = copy.deepcopy(
+            setup["skipped_checks"]
+        )
 
     return {
         "meta": meta,
@@ -154,6 +167,56 @@ def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
         "session_preflight_recovery": session_recovery,
         "gate_fallbacks": gate_fallbacks,
         "run_configuration": run_configuration,
+    }
+
+
+def _resolve_setup(
+    raw: Any,
+    baseline: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Resolve profile-owned persistent setup over the Farm baseline."""
+
+    if raw is None:
+        configured: dict[str, Any] = {}
+    elif isinstance(raw, Mapping):
+        configured = copy.deepcopy(dict(raw))
+    else:
+        raise ValueError("farm profile setup must be a mapping")
+    unknown = sorted(set(configured) - SETUP_KEYS)
+    if unknown:
+        raise ValueError(
+            "farm profile setup has unsupported settings: "
+            + ", ".join(str(key) for key in unknown)
+        )
+    raw_settings = configured.get("settings")
+    if raw_settings is None:
+        raw_settings = {}
+    if not isinstance(raw_settings, Mapping):
+        raise ValueError("farm profile setup.settings must be a mapping")
+    unknown_settings = sorted(set(raw_settings) - set(baseline))
+    if unknown_settings:
+        raise ValueError(
+            "farm profile setup.settings has unsupported settings: "
+            + ", ".join(str(key) for key in unknown_settings)
+        )
+    requirements = copy.deepcopy(dict(baseline))
+    requirements.update(copy.deepcopy(dict(raw_settings)))
+    try:
+        bans, auto_pick_order = normalize_perk_configuration_requirements(
+            requirements
+        )
+        skipped = normalize_profile_skip_checks(
+            configured.get("skipped_checks")
+        )
+    except ValueError as exc:
+        raise ValueError(f"farm profile setup {exc}") from exc
+    return {
+        "skipped_checks": skipped,
+        "settings": {
+            **requirements,
+            "perk_bans": bans,
+            "perk_auto_pick_order": auto_pick_order,
+        },
     }
 
 

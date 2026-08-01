@@ -15,11 +15,21 @@ from typing import Any, Mapping, Optional
 
 import yaml
 
+from core.gate_decisions import (
+    PROFILE_SKIPPABLE_CHECKS,
+    STARTUP_GATE_CHECK_LABELS,
+    normalize_profile_skip_checks,
+)
+from core.perk_configuration import (
+    PERK_CONFIGURATION_LABELS,
+    normalize_perk_configuration_requirements,
+)
 from tools.strategy_builders.lib import build_strategy_yaml
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BUILTIN_STRATEGIES_DIR = PROJECT_ROOT / "config" / "strategies"
+FARM_RUN_PROFILE_PATH = PROJECT_ROOT / "config" / "run_profiles" / "farm.yaml"
 DEFAULT_CUSTOM_STRATEGY_DIR = BUILTIN_STRATEGIES_DIR / "custom"
 STRATEGY_PROFILE_DIRECTORY_ENVIRONMENT_VARIABLE = (
     "THETOWER_STRATEGY_PROFILE_DIR"
@@ -244,6 +254,17 @@ class StrategyProfileStore:
             "schema_version": STRATEGY_PROFILE_SCHEMA_VERSION,
             "policy_modes": list(POLICY_MODES),
             "presets": self._preset_catalogs(),
+            "setup_checks": [
+                {
+                    "id": check_id,
+                    "display_name": STARTUP_GATE_CHECK_LABELS[check_id],
+                }
+                for check_id in PROFILE_SKIPPABLE_CHECKS
+            ],
+            "perks": [
+                {"id": identifier, "display_name": display_name}
+                for identifier, display_name in PERK_CONFIGURATION_LABELS.items()
+            ],
             "items": items,
             "errors": errors,
         }
@@ -261,6 +282,7 @@ class StrategyProfileStore:
         rules = plan.get("rules")
         rule_count = len(rules) if isinstance(rules, list) else 0
         loadout = source["loadout"]
+        setup = source["setup"]
         return {
             "valid": True,
             "profile": {
@@ -275,6 +297,7 @@ class StrategyProfileStore:
                 "source_fingerprint": source_fingerprint,
                 "plan_fingerprint": plan_fingerprint,
                 "loadout": _copy_mapping(loadout),
+                "setup": _copy_mapping(setup),
             },
             "source": source,
             "plan": plan,
@@ -448,6 +471,7 @@ class StrategyProfileStore:
                 "target_priority", raw_loadout["target_priority"]
             ),
         }
+        setup = _normalize_farm_setup(raw_profile.get("setup"))
         source = {
             "meta": {
                 "name": identifier,
@@ -458,6 +482,7 @@ class StrategyProfileStore:
             "builder": "farm",
             "run_profile": "farm",
             "loadout": loadout,
+            "setup": setup,
         }
         return source, display_name
 
@@ -475,6 +500,7 @@ class StrategyProfileStore:
                 "source_fingerprint": None,
                 "plan_fingerprint": None,
                 "loadout": None,
+                "setup": None,
             }
         source_path = self.builtin_strategies_directory / f"{identifier}.source.yaml"
         plan_path = self.builtin_strategies_directory / f"{identifier}.strategy.yaml"
@@ -485,10 +511,11 @@ class StrategyProfileStore:
             raise StrategyProfileError(
                 f"Bundled source {source_path} has the wrong meta.name"
             )
+        family = str(meta.get("family") or identifier).strip().lower()
         return {
             "id": identifier,
             "display_name": _default_display_name(identifier),
-            "family": str(meta.get("family") or identifier).strip().lower(),
+            "family": family,
             "tier": meta.get("tier"),
             "version": int(meta.get("version") or 1),
             "built_in": True,
@@ -497,6 +524,11 @@ class StrategyProfileStore:
             "source_fingerprint": _fingerprint(source),
             "plan_fingerprint": _fingerprint(plan),
             "loadout": _copy_mapping(source.get("loadout") or {}) or None,
+            "setup": (
+                _normalize_farm_setup(source.get("setup"))
+                if family == "farm"
+                else None
+            ),
         }
 
     @staticmethod
@@ -515,6 +547,7 @@ class StrategyProfileStore:
             "source_fingerprint": publication["source_fingerprint"],
             "plan_fingerprint": publication["plan_fingerprint"],
             "loadout": _copy_mapping(source.get("loadout") or {}),
+            "setup": _normalize_farm_setup(source.get("setup")),
         }
 
     @staticmethod
@@ -727,6 +760,60 @@ def _copy_mapping(value: object) -> dict[str, Any]:
     return json.loads(json.dumps(value, ensure_ascii=False))
 
 
+def _normalize_farm_setup(raw: object) -> dict[str, Any]:
+    """Return the editable Farm setup, inheriting omitted legacy values."""
+
+    baseline = _load_yaml_mapping(FARM_RUN_PROFILE_PATH, "Farm run profile")
+    invariants = baseline.get("invariants")
+    if not isinstance(invariants, Mapping):
+        raise StrategyProfileError("Farm run profile invariants must be an object")
+    if raw is None:
+        configured: Mapping[str, Any] = {}
+    elif isinstance(raw, Mapping):
+        configured = raw
+    else:
+        raise StrategyProfileError("setup must be an object")
+    supported = {"skipped_checks", "settings"}
+    extra = sorted(set(configured) - supported)
+    if extra:
+        raise StrategyProfileError(
+            "setup has unsupported settings: "
+            + ", ".join(str(key) for key in extra)
+        )
+    raw_settings = configured.get("settings")
+    if raw_settings is None:
+        raw_settings = {}
+    if not isinstance(raw_settings, Mapping):
+        raise StrategyProfileError("setup.settings must be an object")
+    extra_settings = sorted(set(raw_settings) - set(invariants))
+    if extra_settings:
+        raise StrategyProfileError(
+            "setup.settings has unsupported settings: "
+            + ", ".join(str(key) for key in extra_settings)
+        )
+    requirements = json.loads(json.dumps(invariants, ensure_ascii=False))
+    requirements.update(
+        json.loads(json.dumps(dict(raw_settings), ensure_ascii=False))
+    )
+    try:
+        bans, auto_pick_order = normalize_perk_configuration_requirements(
+            requirements
+        )
+        skipped = normalize_profile_skip_checks(
+            configured.get("skipped_checks")
+        )
+    except ValueError as exc:
+        raise StrategyProfileError(f"setup {exc}") from exc
+    return {
+        "skipped_checks": skipped,
+        "settings": {
+            **requirements,
+            "perk_bans": bans,
+            "perk_auto_pick_order": auto_pick_order,
+        },
+    }
+
+
 def _default_display_name(identifier: str) -> str:
     special = {
         "farm_t18": "Farm T18",
@@ -741,6 +828,7 @@ def _default_display_name(identifier: str) -> str:
 
 def _profile_summary(source: Mapping[str, Any], rule_count: int) -> list[str]:
     loadout = source["loadout"]
+    setup = source["setup"]
     summary = [
         f"Farm Tier {source['meta']['tier']} • generated {rule_count} rules",
     ]
@@ -752,6 +840,20 @@ def _profile_summary(source: Mapping[str, Any], rule_count: int) -> list[str]:
             f"{label}: {policy['mode']}"
             + (f" • {detail}" if detail else "")
         )
+    skipped = setup["skipped_checks"]
+    summary.append(
+        "Permanent setup skips: "
+        + (
+            ", ".join(STARTUP_GATE_CHECK_LABELS[item] for item in skipped)
+            if skipped
+            else "none"
+        )
+    )
+    settings = setup["settings"]
+    summary.append(f"Perk Bans: {len(settings['perk_bans'])} selected")
+    summary.append(
+        f"Auto Pick priority: {len(settings['perk_auto_pick_order'])} ranked"
+    )
     return summary
 
 

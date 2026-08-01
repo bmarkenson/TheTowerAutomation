@@ -289,10 +289,15 @@ stages:
     bundled and custom profiles, clone/edit Farm Tier loadout policies, validate
     through the shared builder, atomically publish source plus generated plan,
     and keep activation as a separate existing strategy-lifecycle action.
+  - [x] Add durable custom-profile skips for Auto Pick enabled, Perk Bans, and
+    Auto Pick priority; add managed Ban and ordered Auto Pick editors; and
+    round-trip the complete Farm setup so unexposed settings are preserved.
   - [ ] Extend strategy authoring only where operator use justifies it. Candidate
-    follow-ups are managed preset-catalog editing, profile duplication/retirement
-    workflows, and an explicitly advanced raw-rule mode. Preserve the fixed-path
-    API, generated-plan validation, immutable bundled templates, and separate
+    follow-ups are specialized controls for every remaining compact Farm
+    setting, profile-local module/Orb/Target contents instead of only shared
+    preset selection, profile duplication/retirement workflows, and an
+    explicitly advanced raw-rule mode. Preserve the fixed-path API,
+    generated-plan validation, immutable bundled templates, and separate
     publish-versus-activate boundary.
   - [x] Show directive/acknowledgement separately from primary state, menu,
     overlays, run mode, pause status, runtime evidence, activity, and completed

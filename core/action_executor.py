@@ -49,6 +49,7 @@ from core.gc_preflight import (
     summarize_gc_preflight_mismatch,
     summarize_gc_preflight_variations,
 )
+from core.gate_decisions import merge_profile_skip_waivers
 from core.tournament_preflight import (
     validate_tournament_session_preflight_screens,
 )
@@ -387,10 +388,19 @@ def execute_actions(
                     mv["gc_session_preflight_blocked"] = False
                     mv["gc_session_preflight_restart_available"] = False
                 effective_requirements = dict(requirements)
-                if mv is not None:
-                    waivers = mv.get("gc_session_preflight_waivers")
-                    if isinstance(waivers, Mapping) and waivers:
-                        effective_requirements["_gate_waivers"] = dict(waivers)
+                runtime_waivers = (
+                    mv.get("gc_session_preflight_waivers")
+                    if mv is not None
+                    else None
+                )
+                waivers = merge_profile_skip_waivers(
+                    requirements,
+                    runtime_waivers
+                    if isinstance(runtime_waivers, Mapping)
+                    else None,
+                )
+                if waivers:
+                    effective_requirements["_gate_waivers"] = waivers
                 preflight_kwargs: Dict[str, Any] = {}
                 if mv is not None:
                     setup_evidence = mv.get("gc_no_battle_setup_evidence")

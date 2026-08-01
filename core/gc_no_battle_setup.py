@@ -440,64 +440,76 @@ def run_gc_no_battle_setup(
             "perk_bans" in requirements
             or "perk_auto_pick_order" in requirements
         ):
-            current_check = "perk_configuration"
-            perk_result = ensure_perk_configuration_fn(
-                requirements,
-                home_screenshot=current,
-                capture_fn=capture_fn,
-                detector=detector,
-                detect_home_control_fn=detect_home_control_fn,
-                safe_tap_fn=safe_tap_fn,
-                tap_visible_fn=tap_visible_fn,
-                swipe_fn=swipe_fn,
-                measure_selection_fn=measure_selection_fn,
-                waived_fields=tuple(
-                    check_id
-                    for check_id in (
-                        "perk_bans",
-                        "perk_auto_pick_order",
-                    )
-                    if check_id in active_waivers
-                ),
-                sleep_fn=sleep_fn,
-                operator_workflow=False,
-            )
-            for check_id in ("perk_bans", "perk_auto_pick_order"):
-                if check_id in active_waivers:
+            perk_fields = ("perk_bans", "perk_auto_pick_order")
+            if all(check_id in active_waivers for check_id in perk_fields):
+                for check_id in perk_fields:
                     field_evidence = _waived_evidence(
                         check_id,
                         requirements.get(check_id),
                         active_waivers[check_id],
                     )
-                else:
-                    field_evidence = dict(
-                        perk_result.evidence[check_id]
+                    evidence[check_id] = field_evidence
+                    _log_home_preflight_evidence(
+                        check_id,
+                        requirements.get(check_id),
+                        field_evidence,
                     )
-                    field_evidence.setdefault(
-                        "changed",
-                        perk_result.changed,
-                    )
-                evidence[check_id] = field_evidence
-                _log_home_preflight_evidence(
-                    check_id,
-                    requirements.get(check_id),
-                    field_evidence,
+            else:
+                current_check = "perk_configuration"
+                perk_result = ensure_perk_configuration_fn(
+                    requirements,
+                    home_screenshot=current,
+                    capture_fn=capture_fn,
+                    detector=detector,
+                    detect_home_control_fn=detect_home_control_fn,
+                    safe_tap_fn=safe_tap_fn,
+                    tap_visible_fn=tap_visible_fn,
+                    swipe_fn=swipe_fn,
+                    measure_selection_fn=measure_selection_fn,
+                    waived_fields=tuple(
+                        check_id
+                        for check_id in perk_fields
+                        if check_id in active_waivers
+                    ),
+                    sleep_fn=sleep_fn,
+                    operator_workflow=False,
                 )
-                if field_evidence.get("changed") is True:
-                    record_repair(
-                        {
-                            "perk_bans": "Ban Perks list restored",
-                            "perk_auto_pick_order": (
-                                "Auto Pick priority restored"
-                            ),
-                        }[check_id]
+                for check_id in perk_fields:
+                    if check_id in active_waivers:
+                        field_evidence = _waived_evidence(
+                            check_id,
+                            requirements.get(check_id),
+                            active_waivers[check_id],
+                        )
+                    else:
+                        field_evidence = dict(
+                            perk_result.evidence[check_id]
+                        )
+                        field_evidence.setdefault(
+                            "changed",
+                            perk_result.changed,
+                        )
+                    evidence[check_id] = field_evidence
+                    _log_home_preflight_evidence(
+                        check_id,
+                        requirements.get(check_id),
+                        field_evidence,
                     )
-            current = perk_result.home_screenshot
-            if not perk_result.valid:
-                current_check = (
-                    perk_result.failed_check or "perk_configuration"
-                )
-                raise _SetupFailure(perk_result.reason)
+                    if field_evidence.get("changed") is True:
+                        record_repair(
+                            {
+                                "perk_bans": "Ban Perks list restored",
+                                "perk_auto_pick_order": (
+                                    "Auto Pick priority restored"
+                                ),
+                            }[check_id]
+                        )
+                current = perk_result.home_screenshot
+                if not perk_result.valid:
+                    current_check = (
+                        perk_result.failed_check or "perk_configuration"
+                    )
+                    raise _SetupFailure(perk_result.reason)
 
         current_check = "workshop_preset"
         workshop = _open_static(

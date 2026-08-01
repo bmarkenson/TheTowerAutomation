@@ -671,6 +671,55 @@ def test_profile_without_perks_skips_perks_navigation_and_validation():
     assert validated["perks_screen"] is None
 
 
+def test_profile_auto_pick_skip_does_not_open_or_change_perks():
+    ui = _FakeUi()
+    boxes = [
+        UpgradeBox(
+            "left",
+            (0, 0, 1, 1),
+            text=label,
+            toggles={name: "on" for name in toggles if name != "stun"},
+        )
+        for label, toggles in ULTIMATE_REQUIREMENTS.items()
+    ]
+    validated = {}
+
+    def validate(**kwargs):
+        validated.update(kwargs)
+        return SimpleNamespace(valid=True)
+
+    result = run_read_only_gc_preflight(
+        {
+            **PREFLIGHT_REQUIREMENTS,
+            "_gate_waivers": {
+                "auto_pick_perks": {
+                    "source": "strategy_profile",
+                    "scope": "every_run",
+                }
+            },
+        },
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.safe_tap,
+        tap_visible_fn=ui.visible_tap,
+        go_home_fn=ui.go_home,
+        swipe_fn=ui.swipe,
+        event_swipe_fn=ui.event_swipe,
+        detect_boxes_fn=lambda _frame, **_kwargs: {"left": boxes, "right": []},
+        ensure_poison_swamp_stun_fn=lambda **_kwargs: _stun_off_result(ui),
+        detect_home_control_fn=lambda _frame: _home_evidence(),
+        sleep_fn=lambda _seconds: None,
+        validate_fn=validate,
+    )
+
+    assert result.status is GcPreflightNavigationStatus.COMPLETE
+    assert "navigation.open_perks" not in ui.static_taps
+    assert "buttons.perks:auto_pick" not in ui.static_taps
+    assert "buttons.close:perks" not in ui.visible_taps
+    assert validated["perks_screen"] is None
+    assert validated["waivers"]["auto_pick_perks"]["scope"] == "every_run"
+
+
 def test_new_battle_home_control_aborts_without_tapping_battle():
     ui = _FakeUi()
 

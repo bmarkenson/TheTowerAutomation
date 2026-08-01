@@ -797,7 +797,7 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert 'Text="PREVIOUS GAME SCREEN"' in native_xaml
     assert 'id="gameSpeedTargetSelect"' in html
     assert 'Content="x6.3 — Maximum available"' in native_xaml
-    assert "MinimumServerRevision = 17" in native_compatibility
+    assert "MinimumServerRevision = 18" in native_compatibility
     assert '"current_run_activity_scope"' in native_compatibility
     assert '"game_speed_target"' in native_compatibility
     assert '"host_performance_telemetry_v1"' in native_compatibility
@@ -813,6 +813,25 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert 'Content="Switch this battle"' in native_xaml
     assert 'Content="Strategy profiles..."' in native_xaml
     assert '"strategy_profile_catalog_v1"' in native_compatibility
+    assert '"strategy_profile_editor_v2"' in native_compatibility
+    profile_root = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+    )
+    profile_xaml = (profile_root / "StrategyProfilesWindow.xaml").read_text(
+        encoding="utf-8"
+    )
+    profile_code = (profile_root / "StrategyProfilesWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+    assert 'x:Name="SkipAutoPickEnabledBox"' in profile_xaml
+    assert 'x:Name="SkipPerkBansBox"' in profile_xaml
+    assert 'x:Name="SkipAutoPickOrderBox"' in profile_xaml
+    assert 'x:Name="PerkBansList"' in profile_xaml
+    assert 'x:Name="AutoPickOrderList"' in profile_xaml
+    assert 'setupSettings["perk_bans"]' in profile_code
+    assert 'setupSettings["perk_auto_pick_order"]' in profile_code
     assert 'Text="HOST HEALTH"' in native_xaml
     assert 'Text="BLUESTACKS CPU"' in native_xaml
     assert 'Text="OBSERVED SPEED"' in native_xaml

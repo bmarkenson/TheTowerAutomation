@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Strategy Profiles"
-        Width="1040" Height="740" MinWidth="880" MinHeight="620"
+        Width="1180" Height="820" MinWidth="960" MinHeight="680"
         WindowStartupLocation="CenterOwner"
         Background="#0A0E16" Foreground="#EDF2F7"
         ShowInTaskbar="False">
@@ -146,6 +146,84 @@
                         Margin="4" SelectionChanged="PolicyMode_SelectionChanged" />
               <ComboBox Grid.Row="3" Grid.Column="2" x:Name="TargetPresetBox"
                         Margin="4" DisplayMemberPath="DisplayName" SelectedValuePath="Id" />
+            </Grid>
+
+            <TextBlock Text="PERSISTENT SETUP" Foreground="#62D5FF"
+                       FontSize="10" FontWeight="Bold" Margin="0,18,0,6" />
+            <TextBlock Text="A permanent skip means this profile will neither enforce nor change that setting on any run. The saved value remains available if enforcement is restored later."
+                       Foreground="#93A4BB" TextWrapping="Wrap"
+                       Margin="0,0,0,7" />
+            <WrapPanel Margin="0,0,0,12">
+              <CheckBox x:Name="SkipAutoPickEnabledBox"
+                        Content="Skip Auto Pick enabled"
+                        Tag="auto_pick_perks" Margin="4,3,14,3"
+                        Checked="SetupSkip_Changed" Unchecked="SetupSkip_Changed" />
+              <CheckBox x:Name="SkipPerkBansBox"
+                        Content="Skip Perk Bans"
+                        Tag="perk_bans" Margin="4,3,14,3"
+                        Checked="SetupSkip_Changed" Unchecked="SetupSkip_Changed" />
+              <CheckBox x:Name="SkipAutoPickOrderBox"
+                        Content="Skip Auto Pick priority"
+                        Tag="perk_auto_pick_order" Margin="4,3,14,3"
+                        Checked="SetupSkip_Changed" Unchecked="SetupSkip_Changed" />
+            </WrapPanel>
+
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="14" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+
+              <Border Grid.Column="0" x:Name="PerkBansEditor"
+                      Background="#0D1420" BorderBrush="#263349"
+                      BorderThickness="1" CornerRadius="7" Padding="10">
+                <StackPanel>
+                  <TextBlock Text="PERK BANS" FontWeight="SemiBold" />
+                  <TextBlock Text="Select up to six. Display order is retained but does not affect priority."
+                             Foreground="#93A4BB" FontSize="11"
+                             TextWrapping="Wrap" Margin="0,2,0,7" />
+                  <ListBox x:Name="PerkBansList" Height="150"
+                           DisplayMemberPath="DisplayName"
+                           SelectionChanged="PerkList_SelectionChanged" />
+                  <ComboBox x:Name="AvailableBanPerkBox" Margin="0,7,0,3"
+                            DisplayMemberPath="DisplayName"
+                            SelectedValuePath="Id" />
+                  <WrapPanel>
+                    <Button x:Name="AddBanButton" Content="Add ban"
+                            Click="AddBan_Click" />
+                    <Button x:Name="RemoveBanButton" Content="Remove selected"
+                            Click="RemoveBan_Click" IsEnabled="False" />
+                  </WrapPanel>
+                </StackPanel>
+              </Border>
+
+              <Border Grid.Column="2" x:Name="AutoPickOrderEditor"
+                      Background="#0D1420" BorderBrush="#263349"
+                      BorderThickness="1" CornerRadius="7" Padding="10">
+                <StackPanel>
+                  <TextBlock Text="AUTO PICK PRIORITY" FontWeight="SemiBold" />
+                  <TextBlock Text="Top to bottom priority. Add, remove, or move the selected perk."
+                             Foreground="#93A4BB" FontSize="11"
+                             TextWrapping="Wrap" Margin="0,2,0,7" />
+                  <ListBox x:Name="AutoPickOrderList" Height="150"
+                           DisplayMemberPath="DisplayName"
+                           SelectionChanged="PerkList_SelectionChanged" />
+                  <ComboBox x:Name="AvailableAutoPickPerkBox" Margin="0,7,0,3"
+                            DisplayMemberPath="DisplayName"
+                            SelectedValuePath="Id" />
+                  <WrapPanel>
+                    <Button x:Name="AddAutoPickButton" Content="Add"
+                            Click="AddAutoPick_Click" />
+                    <Button x:Name="RemoveAutoPickButton" Content="Remove"
+                            Click="RemoveAutoPick_Click" IsEnabled="False" />
+                    <Button x:Name="MoveAutoPickUpButton" Content="Move up"
+                            Click="MoveAutoPickUp_Click" IsEnabled="False" />
+                    <Button x:Name="MoveAutoPickDownButton" Content="Move down"
+                            Click="MoveAutoPickDown_Click" IsEnabled="False" />
+                  </WrapPanel>
+                </StackPanel>
+              </Border>
             </Grid>
 
             <Border Background="#0D1420" BorderBrush="#263349"

@@ -617,6 +617,35 @@ def test_no_battle_setup_applies_strategy_owned_perk_configuration():
     assert result.evidence["perk_auto_pick_order"]["changed"] is True
 
 
+def test_no_battle_setup_permanent_perk_skips_do_not_open_configuration():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+    requirements = {
+        **REQUIREMENTS,
+        "perk_bans": list(FARM_PERK_BANS),
+        "perk_auto_pick_order": list(FARM_AUTO_PICK_ORDER),
+    }
+    ensure = Mock()
+    waivers = {
+        check_id: {
+            "source": "strategy_profile",
+            "scope": "every_run",
+        }
+        for check_id in ("perk_bans", "perk_auto_pick_order")
+    }
+
+    result = _run(
+        router,
+        requirements,
+        waivers=waivers,
+        ensure_perk_configuration_fn=ensure,
+    )
+
+    assert result.complete
+    ensure.assert_not_called()
+    assert result.evidence["perk_bans"]["status"] == "waived"
+    assert result.evidence["perk_auto_pick_order"]["status"] == "waived"
+
+
 def test_invalid_strategy_perk_configuration_blocks_before_workshop():
     router = _NoBattleRouter(selected=True, correct_guardians=True)
     requirements = {

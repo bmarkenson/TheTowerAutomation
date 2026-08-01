@@ -765,8 +765,13 @@ def run_read_only_gc_preflight(
             raise _NavigationFailure(
                 "profile supplied an invalid Auto Pick Perks requirement"
             )
+        gate_waivers = requirements.get("_gate_waivers")
+        auto_pick_skipped = (
+            isinstance(gate_waivers, Mapping)
+            and "auto_pick_perks" in gate_waivers
+        )
         perks = None
-        if auto_pick_perks:
+        if auto_pick_perks and not auto_pick_skipped:
             _guarded_static_tap(
                 "navigation.open_perks",
                 allowed_states={"RUNNING"},

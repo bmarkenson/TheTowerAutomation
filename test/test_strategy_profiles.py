@@ -12,6 +12,11 @@ from automation.strategies import get_strategy
 from core.automation_process import SystemdAutomationManager
 from core.control_directives import ControlDirectiveStore
 from core.control_surface import ControlSurfaceRequestError, ControlSurfaceService
+from core.gate_decisions import (
+    merge_profile_skip_waivers,
+    startup_gate_check_catalog,
+)
+from core.perk_configuration import FARM_AUTO_PICK_ORDER, FARM_PERK_BANS
 from core.strategy_profiles import (
     StrategyProfileConflictError,
     StrategyProfileError,
@@ -26,11 +31,21 @@ def _draft(
     identifier: str = "farm_t19_custom",
     *,
     damage_value: str = "1e-19",
+    skipped_checks: tuple[str, ...] = (),
+    perk_bans: tuple[str, ...] = FARM_PERK_BANS,
+    perk_auto_pick_order: tuple[str, ...] = FARM_AUTO_PICK_ORDER,
 ) -> dict[str, object]:
     return {
         "id": identifier,
         "display_name": "Farm T19 Custom",
         "tier": 19,
+        "setup": {
+            "skipped_checks": list(skipped_checks),
+            "settings": {
+                "perk_bans": list(perk_bans),
+                "perk_auto_pick_order": list(perk_auto_pick_order),
+            },
+        },
         "loadout": {
             "modules": {"mode": "enforce", "preset": "farm_standard"},
             "damage_slider": {
@@ -56,6 +71,12 @@ def test_strategy_profile_catalog_exposes_bundled_profiles_and_presets(
 
     assert catalog["schema_version"] == 1
     assert catalog["policy_modes"] == ["enforce", "observe", "preserve"]
+    assert [item["id"] for item in catalog["setup_checks"]] == [
+        "auto_pick_perks",
+        "perk_bans",
+        "perk_auto_pick_order",
+    ]
+    assert any(item["id"] == "coin_tradeoff" for item in catalog["perks"])
     assert [item["id"] for item in catalog["items"]] == [
         "farm_t18",
         "farm_t19",
@@ -66,6 +87,9 @@ def test_strategy_profile_catalog_exposes_bundled_profiles_and_presets(
         "mode": "enforce",
         "preset": "farm_standard",
     }
+    assert catalog["items"][0]["setup"]["settings"]["perk_bans"] == list(
+        FARM_PERK_BANS
+    )
     assert [item["id"] for item in catalog["presets"]["modules"]] == [
         "farm_standard",
         "tournament_standard",
@@ -132,6 +156,83 @@ def test_strategy_profile_publish_requires_current_revision(tmp_path):
         "source_fingerprint"
     ]
     assert current["version"] == 1
+
+
+def test_strategy_profile_edits_complete_setup_and_persists_permanent_skips(
+    tmp_path,
+):
+    store = StrategyProfileStore(profile_directory=tmp_path)
+    draft = _draft(
+        skipped_checks=(
+            "auto_pick_perks",
+            "perk_bans",
+            "perk_auto_pick_order",
+        ),
+        perk_bans=("cash_tradeoff", "interest"),
+        perk_auto_pick_order=("coin_tradeoff", "game_speed", "damage"),
+    )
+    # The complete settings object can already carry non-perk edits even
+    # before each setting has a specialized native control.
+    draft["setup"]["settings"]["card_recharge_modes"] = {
+        "Demon Mode": "ready_after_recharge",
+        "Nuke": "ready_after_recharge",
+    }
+
+    validated = store.validate(draft)
+
+    setup = validated["profile"]["setup"]
+    assert setup["skipped_checks"] == [
+        "auto_pick_perks",
+        "perk_bans",
+        "perk_auto_pick_order",
+    ]
+    assert setup["settings"]["perk_bans"] == ["cash_tradeoff", "interest"]
+    assert setup["settings"]["perk_auto_pick_order"] == [
+        "coin_tradeoff",
+        "game_speed",
+        "damage",
+    ]
+    assert setup["settings"]["card_recharge_modes"]["Demon Mode"] == (
+        "ready_after_recharge"
+    )
+    requirements = validated["plan"]["session_preflight"]["requirements"]
+    assert requirements["profile_skips"] == setup["skipped_checks"]
+    assert validated["resolved_configuration"]["skipped_checks"] == (
+        setup["skipped_checks"]
+    )
+
+    published = store.publish(draft)
+    catalog_item = store.catalog()["items"][-1]
+    assert catalog_item["setup"] == published["profile"]["setup"]
+
+    gate_ids = {
+        item["id"] for item in startup_gate_check_catalog(requirements)
+    }
+    assert not {
+        "auto_pick_perks",
+        "perk_bans",
+        "perk_auto_pick_order",
+    } & gate_ids
+    waivers = merge_profile_skip_waivers(
+        requirements,
+        {"bots_preset": {"source": "test"}},
+    )
+    assert waivers["perk_bans"]["scope"] == "every_run"
+    assert waivers["bots_preset"] == {"source": "test"}
+
+
+def test_strategy_profile_rejects_invalid_setup_edits(tmp_path):
+    store = StrategyProfileStore(profile_directory=tmp_path)
+    invalid_skip = _draft(skipped_checks=("damage_slider",))
+    with pytest.raises(StrategyProfileError, match="unsupported checks"):
+        store.validate(invalid_skip)
+
+    duplicate_ban = _draft(perk_bans=("interest", "interest"))
+    with pytest.raises(StrategyProfileError, match="cannot repeat"):
+        store.validate(duplicate_ban)
+
+    no_bans = store.validate(_draft(perk_bans=()))
+    assert no_bans["profile"]["setup"]["settings"]["perk_bans"] == []
 
 
 def test_strategy_profile_rejects_bundled_names_and_inconsistent_policies(

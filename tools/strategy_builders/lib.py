@@ -589,6 +589,18 @@ def _normalize_gc_session_preflight(raw: Any) -> Dict[str, Any]:
         raise ValueError("gc_farm session_preflight must be a mapping")
 
     requirements = copy.deepcopy(raw)
+    from core.gate_decisions import normalize_profile_skip_checks
+
+    try:
+        profile_skips = normalize_profile_skip_checks(
+            requirements.get("profile_skips")
+        )
+    except ValueError as exc:
+        raise ValueError(f"gc_farm session_preflight.{exc}") from exc
+    if profile_skips:
+        requirements["profile_skips"] = profile_skips
+    else:
+        requirements.pop("profile_skips", None)
     fixed_values = {
         "cards_deck": "Farm",
         "workshop_preset": "Farm",

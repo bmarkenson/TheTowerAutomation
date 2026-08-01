@@ -114,6 +114,7 @@ def normalize_perk_configuration_requirements(
     bans = _normalize_perk_key_list(
         requirements.get("perk_bans"),
         field="perk_bans",
+        allow_empty=True,
     )
     auto_pick = _normalize_perk_key_list(
         requirements.get("perk_auto_pick_order"),
@@ -585,9 +586,15 @@ def _find_duplicate(
     return None
 
 
-def _normalize_perk_key_list(raw: Any, *, field: str) -> list[str]:
-    if not isinstance(raw, list) or not raw:
-        raise ValueError(f"{field} must be a non-empty list")
+def _normalize_perk_key_list(
+    raw: Any,
+    *,
+    field: str,
+    allow_empty: bool = False,
+) -> list[str]:
+    if not isinstance(raw, list) or (not raw and not allow_empty):
+        requirement = "a list" if allow_empty else "a non-empty list"
+        raise ValueError(f"{field} must be {requirement}")
     normalized = [str(item or "").strip().lower() for item in raw]
     if any(not item for item in normalized):
         raise ValueError(f"{field} cannot contain empty perk keys")

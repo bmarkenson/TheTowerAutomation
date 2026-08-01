@@ -34,16 +34,29 @@ gameplay style, not a runtime profile: it may also be used for tournaments,
 milestones, or some Dissonance runs, so it does not own Farm configuration.
 Legacy `gc*` strategy names remain aliases during migration.
 
-The Farm baseline owns settings that must be true for every Farm run: the
-`Farm` Cards, Workshop, and Bots presets; Demon Mode automatic recharge
-activation and Nuke manual-after-recharge activation; Shockwave Size, Bounce
-Shot Targets, and Bounce Shot Range Free Upgrade locks; Guardian chips; Auto
-Pick Perks; and Ultimate Weapon controls. Compact Tier profiles cannot override
-those invariants.
+The Farm baseline supplies the defaults for every Farm run: the `Farm` Cards,
+Workshop, and Bots presets; Demon Mode automatic recharge activation and Nuke
+manual-after-recharge activation; Shockwave Size, Bounce Shot Targets, and
+Bounce Shot Range Free Upgrade locks; Guardian chips; Auto Pick Perks; Perk
+Bans and priority; and Ultimate Weapon controls. A custom compact profile
+publishes a complete `setup.settings` snapshot over those defaults so edits do
+not depend on a later baseline change. The shared builder still validates each
+value against implemented runtime authority before it can publish a generated
+plan.
 
-Only Modules, Damage Slider, Orb Distance, and Target Priority vary by Tier or
-experiment. Every compact Farm profile names all four and assigns one of these
-policies:
+Custom profiles may also declare profile-owned `setup.skipped_checks`. Unlike
+an operator's one-run waiver, this is durable policy, participates in the
+strategy fingerprint, is re-applied at every boundary, and is retained in the
+resolved run configuration. The initial allowlist is deliberately limited to
+`auto_pick_perks`, `perk_bans`, and `perk_auto_pick_order`. A skipped Perk
+control receives no corrective input; skipping both semantic lists also avoids
+opening the Home Perks configuration screen. The configured values remain in
+the profile so removing the skip restores enforcement without reconstructing
+the lists.
+
+Tier loadout variation is expressed through Modules, Damage Slider, Orb
+Distance, and Target Priority. Every compact Farm profile names all four and
+assigns one of these policies:
 
 | Policy | Runtime contract |
 | --- | --- |
@@ -475,7 +488,8 @@ evidence is attached.
   authoritative checkbox state, changes only a mismatched checkbox, rechecks
   the requested state, and returns to the Cards inventory. Missing cards and
   ambiguous details fail closed. Perk configuration is changed only when the
-  selected strategy declares both semantic lists. Ban repair completes before
+  selected strategy declares both semantic lists and their profile policy does
+  not skip them. Ban repair completes before
   Auto Pick: extra selections are removed from the fixed Selected Perks block,
   while only missing required bans search the Available list. Each Ban toggle
   and Auto Pick move recaptures the panel immediately before input, uniquely

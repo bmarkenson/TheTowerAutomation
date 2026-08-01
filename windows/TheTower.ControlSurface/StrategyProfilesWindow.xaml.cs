@@ -1,4 +1,6 @@
+using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -13,11 +15,16 @@ public partial class StrategyProfilesWindow : Window
     private string? _expectedSourceFingerprint;
     private bool _busy;
     private bool _draftIsNew;
+    private Dictionary<string, JsonElement> _setupSettings = [];
+    private readonly ObservableCollection<StrategyPresetOption> _perkBans = [];
+    private readonly ObservableCollection<StrategyPresetOption> _autoPickOrder = [];
 
     public StrategyProfilesWindow(ControlSurfaceApi api)
     {
         InitializeComponent();
         _api = api;
+        PerkBansList.ItemsSource = _perkBans;
+        AutoPickOrderList.ItemsSource = _autoPickOrder;
         Loaded += async (_, _) => await LoadCatalogAsync();
     }
 
@@ -109,7 +116,9 @@ public partial class StrategyProfilesWindow : Window
         _expectedSourceFingerprint = profile.SourceFingerprint;
         CloneButton.IsEnabled = IsFarmProfile(profile) && !_busy;
 
-        if (!IsFarmProfile(profile) || profile.Loadout is null)
+        if (!IsFarmProfile(profile)
+            || profile.Loadout is null
+            || profile.Setup is null)
         {
             EditorTitle.Text = profile.DisplayName;
             EditorHelpText.Text = profile.Id == "tournament"
@@ -135,6 +144,8 @@ public partial class StrategyProfilesWindow : Window
     {
         var loadout = profile.Loadout
             ?? throw new InvalidOperationException("Farm profile has no loadout.");
+        var setup = profile.Setup
+            ?? throw new InvalidOperationException("Farm profile has no setup.");
         ProfileIdBox.Text = profile.Id;
         DisplayNameBox.Text = profile.DisplayName;
         TierBox.Text = profile.Tier?.ToString(CultureInfo.InvariantCulture) ?? "";
@@ -152,7 +163,20 @@ public partial class StrategyProfilesWindow : Window
             TargetModeBox,
             TargetPresetBox,
             loadout.TargetPriority);
+        _setupSettings = setup.Settings.ToDictionary(
+            pair => pair.Key,
+            pair => pair.Value.Clone(),
+            StringComparer.Ordinal);
+        SetSkippedChecks(setup.SkippedChecks);
+        ReplacePerks(
+            _perkBans,
+            SetupSettingList(setup, "perk_bans"));
+        ReplacePerks(
+            _autoPickOrder,
+            SetupSettingList(setup, "perk_auto_pick_order"));
+        RefreshAvailablePerks();
         UpdatePolicyInputs();
+        UpdateSetupInputs();
     }
 
     private static void SetPolicy(
@@ -162,6 +186,87 @@ public partial class StrategyProfilesWindow : Window
     {
         modeBox.SelectedItem = policy.Mode;
         presetBox.SelectedValue = policy.Preset;
+    }
+
+    private static List<string> SetupSettingList(
+        StrategyProfileSetup setup,
+        string setting)
+    {
+        if (!setup.Settings.TryGetValue(setting, out var value)
+            || value.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidOperationException(
+                $"Farm profile setup is missing {setting}.");
+        }
+        return value.EnumerateArray()
+            .Select(item => item.GetString()?.Trim() ?? "")
+            .Where(item => item.Length > 0)
+            .ToList();
+    }
+
+    private void ReplacePerks(
+        ObservableCollection<StrategyPresetOption> destination,
+        IEnumerable<string> identifiers)
+    {
+        var catalog = (_catalog?.Perks ?? []).ToDictionary(
+            option => option.Id,
+            StringComparer.Ordinal);
+        destination.Clear();
+        foreach (var identifier in identifiers)
+        {
+            if (!catalog.TryGetValue(identifier, out var option))
+            {
+                throw new InvalidOperationException(
+                    $"Profile references unsupported perk {identifier}.");
+            }
+            destination.Add(option);
+        }
+    }
+
+    private void SetSkippedChecks(IEnumerable<string> skippedChecks)
+    {
+        var skipped = skippedChecks.ToHashSet(StringComparer.Ordinal);
+        SkipAutoPickEnabledBox.IsChecked = skipped.Contains("auto_pick_perks");
+        SkipPerkBansBox.IsChecked = skipped.Contains("perk_bans");
+        SkipAutoPickOrderBox.IsChecked = skipped.Contains("perk_auto_pick_order");
+    }
+
+    private List<string> SkippedChecks()
+    {
+        var selected = new List<string>();
+        if (SkipAutoPickEnabledBox.IsChecked == true)
+        {
+            selected.Add("auto_pick_perks");
+        }
+        if (SkipPerkBansBox.IsChecked == true)
+        {
+            selected.Add("perk_bans");
+        }
+        if (SkipAutoPickOrderBox.IsChecked == true)
+        {
+            selected.Add("perk_auto_pick_order");
+        }
+        return selected;
+    }
+
+    private void RefreshAvailablePerks()
+    {
+        var perks = _catalog?.Perks ?? [];
+        var banned = _perkBans.Select(option => option.Id).ToHashSet(
+            StringComparer.Ordinal);
+        var ranked = _autoPickOrder.Select(option => option.Id).ToHashSet(
+            StringComparer.Ordinal);
+        AvailableBanPerkBox.ItemsSource = perks
+            .Where(option => !banned.Contains(option.Id))
+            .ToList();
+        AvailableAutoPickPerkBox.ItemsSource = perks
+            .Where(option => !ranked.Contains(option.Id))
+            .ToList();
+        AvailableBanPerkBox.SelectedIndex =
+            AvailableBanPerkBox.Items.Count > 0 ? 0 : -1;
+        AvailableAutoPickPerkBox.SelectedIndex =
+            AvailableAutoPickPerkBox.Items.Count > 0 ? 0 : -1;
+        UpdatePerkButtons();
     }
 
     private void ClearEditor()
@@ -177,6 +282,11 @@ public partial class StrategyProfilesWindow : Window
         OrbPresetBox.SelectedItem = null;
         TargetPresetBox.SelectedItem = null;
         DamageValueBox.Text = "";
+        _setupSettings = [];
+        _perkBans.Clear();
+        _autoPickOrder.Clear();
+        SetSkippedChecks([]);
+        RefreshAvailablePerks();
         ValidationSummaryText.Text =
             "This profile type is outside the constrained Farm editor.";
     }
@@ -187,13 +297,14 @@ public partial class StrategyProfilesWindow : Window
         ProfileIdBox.IsEnabled = enabled && _draftIsNew;
         ValidateButton.IsEnabled = enabled && !_busy;
         PublishButton.IsEnabled = enabled && !_busy;
+        UpdateSetupInputs();
     }
 
     private void NewProfile_Click(object sender, RoutedEventArgs e)
     {
         var template = _catalog?.Items.FirstOrDefault(profile =>
             profile.Id == "farm_t18");
-        if (template is null || template.Loadout is null)
+        if (template is null || template.Loadout is null || template.Setup is null)
         {
             StatusText.Text = "The bundled Farm T18 template is unavailable.";
             return;
@@ -226,10 +337,11 @@ public partial class StrategyProfilesWindow : Window
             Version = 1,
             Editable = true,
             Loadout = template.Loadout,
+            Setup = template.Setup,
         });
         EditorTitle.Text = "New custom Farm profile";
         EditorHelpText.Text =
-            "Choose a unique ID and loadout policies. Validation resolves every preset and generates the complete runtime plan on Linux.";
+            "Choose a unique ID, loadout policies, persistent skips, and profile settings. Validation resolves every preset and generates the complete runtime plan on Linux.";
         ValidationSummaryText.Text =
             "Draft not yet validated. Publishing will create version 1 without activating it.";
         CloneButton.IsEnabled = false;
@@ -353,11 +465,26 @@ public partial class StrategyProfilesWindow : Window
         {
             throw new InvalidOperationException("Tier must be an integer.");
         }
+        var setupSettings = _setupSettings.ToDictionary(
+            pair => pair.Key,
+            pair => (object?)pair.Value.Clone(),
+            StringComparer.Ordinal);
+        setupSettings["perk_bans"] = _perkBans
+            .Select(option => option.Id)
+            .ToArray();
+        setupSettings["perk_auto_pick_order"] = _autoPickOrder
+            .Select(option => option.Id)
+            .ToArray();
         return new
         {
             id = ProfileIdBox.Text.Trim(),
             display_name = DisplayNameBox.Text.Trim(),
             tier,
+            setup = new
+            {
+                skipped_checks = SkippedChecks(),
+                settings = setupSettings,
+            },
             loadout = new
             {
                 modules = PresetPolicy(
@@ -418,6 +545,91 @@ public partial class StrategyProfilesWindow : Window
         box.SelectedItem?.ToString()
         ?? throw new InvalidOperationException("Every loadout policy requires a mode.");
 
+    private void SetupSkip_Changed(object sender, RoutedEventArgs e)
+    {
+        if (IsInitialized)
+        {
+            UpdateSetupInputs();
+        }
+    }
+
+    private void AddBan_Click(object sender, RoutedEventArgs e)
+    {
+        if (_perkBans.Count >= 6)
+        {
+            ShowEditorMessage("Perk Bans supports at most six selected perks.");
+            return;
+        }
+        if (AvailableBanPerkBox.SelectedItem is StrategyPresetOption option)
+        {
+            _perkBans.Add(option);
+            RefreshAvailablePerks();
+        }
+    }
+
+    private void RemoveBan_Click(object sender, RoutedEventArgs e)
+    {
+        if (PerkBansList.SelectedItem is StrategyPresetOption option)
+        {
+            _perkBans.Remove(option);
+            RefreshAvailablePerks();
+        }
+    }
+
+    private void AddAutoPick_Click(object sender, RoutedEventArgs e)
+    {
+        if (AvailableAutoPickPerkBox.SelectedItem is StrategyPresetOption option)
+        {
+            _autoPickOrder.Add(option);
+            AutoPickOrderList.SelectedItem = option;
+            AutoPickOrderList.ScrollIntoView(option);
+            RefreshAvailablePerks();
+        }
+    }
+
+    private void RemoveAutoPick_Click(object sender, RoutedEventArgs e)
+    {
+        if (AutoPickOrderList.SelectedItem is not StrategyPresetOption option)
+        {
+            return;
+        }
+        if (_autoPickOrder.Count == 1)
+        {
+            ShowEditorMessage("Auto Pick priority must retain at least one perk.");
+            return;
+        }
+        var index = _autoPickOrder.IndexOf(option);
+        _autoPickOrder.Remove(option);
+        AutoPickOrderList.SelectedIndex = Math.Min(
+            index,
+            _autoPickOrder.Count - 1);
+        RefreshAvailablePerks();
+    }
+
+    private void MoveAutoPickUp_Click(object sender, RoutedEventArgs e) =>
+        MoveSelectedAutoPick(-1);
+
+    private void MoveAutoPickDown_Click(object sender, RoutedEventArgs e) =>
+        MoveSelectedAutoPick(1);
+
+    private void MoveSelectedAutoPick(int offset)
+    {
+        var index = AutoPickOrderList.SelectedIndex;
+        var destination = index + offset;
+        if (index < 0 || destination < 0 || destination >= _autoPickOrder.Count)
+        {
+            return;
+        }
+        _autoPickOrder.Move(index, destination);
+        AutoPickOrderList.SelectedIndex = destination;
+        AutoPickOrderList.ScrollIntoView(_autoPickOrder[destination]);
+        UpdatePerkButtons();
+    }
+
+    private void PerkList_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e) => UpdatePerkButtons();
+
     private void PolicyMode_SelectionChanged(
         object sender,
         SelectionChangedEventArgs e)
@@ -434,6 +646,41 @@ public partial class StrategyProfilesWindow : Window
         DamageValueBox.IsEnabled = IsPolicyValueEnabled(DamageModeBox);
         OrbPresetBox.IsEnabled = IsPolicyValueEnabled(OrbModeBox);
         TargetPresetBox.IsEnabled = IsPolicyValueEnabled(TargetModeBox);
+    }
+
+    private void UpdateSetupInputs()
+    {
+        PerkBansEditor.IsEnabled =
+            EditorPanel.IsEnabled && SkipPerkBansBox.IsChecked != true;
+        AutoPickOrderEditor.IsEnabled =
+            EditorPanel.IsEnabled && SkipAutoPickOrderBox.IsChecked != true;
+        UpdatePerkButtons();
+    }
+
+    private void UpdatePerkButtons()
+    {
+        AddBanButton.IsEnabled = !_busy
+            && PerkBansEditor.IsEnabled
+            && _perkBans.Count < 6
+            && AvailableBanPerkBox.SelectedItem is not null;
+        RemoveBanButton.IsEnabled = !_busy
+            && PerkBansEditor.IsEnabled
+            && PerkBansList.SelectedItem is not null;
+        AddAutoPickButton.IsEnabled = !_busy
+            && AutoPickOrderEditor.IsEnabled
+            && AvailableAutoPickPerkBox.SelectedItem is not null;
+        var selectedIndex = AutoPickOrderList.SelectedIndex;
+        RemoveAutoPickButton.IsEnabled = !_busy
+            && AutoPickOrderEditor.IsEnabled
+            && selectedIndex >= 0
+            && _autoPickOrder.Count > 1;
+        MoveAutoPickUpButton.IsEnabled = !_busy
+            && AutoPickOrderEditor.IsEnabled
+            && selectedIndex > 0;
+        MoveAutoPickDownButton.IsEnabled = !_busy
+            && AutoPickOrderEditor.IsEnabled
+            && selectedIndex >= 0
+            && selectedIndex < _autoPickOrder.Count - 1;
     }
 
     private static bool IsPolicyValueEnabled(ComboBox modeBox) =>
@@ -454,6 +701,7 @@ public partial class StrategyProfilesWindow : Window
             && IsFarmProfile(_selectedProfile);
         ValidateButton.IsEnabled = !busy && EditorPanel.IsEnabled;
         PublishButton.IsEnabled = !busy && EditorPanel.IsEnabled;
+        UpdatePerkButtons();
         if (!string.IsNullOrWhiteSpace(message))
         {
             StatusText.Text = message;
@@ -469,6 +717,13 @@ public partial class StrategyProfilesWindow : Window
         ValidationSummaryText.Text = "Validation failed; nothing was published.";
         ValidationSummaryText.Foreground = new SolidColorBrush(
             Color.FromRgb(255, 113, 135));
+    }
+
+    private void ShowEditorMessage(string message)
+    {
+        StatusText.Text = message;
+        StatusText.Foreground = new SolidColorBrush(
+            Color.FromRgb(241, 191, 91));
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();

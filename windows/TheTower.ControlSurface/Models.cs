@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace TheTower.ControlSurface;
@@ -469,6 +470,12 @@ public sealed class StrategyProfileCatalogResponse
     [JsonPropertyName("presets")]
     public Dictionary<string, List<StrategyPresetOption>> Presets { get; set; } = [];
 
+    [JsonPropertyName("setup_checks")]
+    public List<StrategyPresetOption> SetupChecks { get; set; } = [];
+
+    [JsonPropertyName("perks")]
+    public List<StrategyPresetOption> Perks { get; set; } = [];
+
     [JsonPropertyName("items")]
     public List<StrategyProfileItem> Items { get; set; } = [];
 
@@ -529,8 +536,20 @@ public sealed class StrategyProfileItem
     [JsonPropertyName("loadout")]
     public StrategyProfileLoadout? Loadout { get; set; }
 
+    [JsonPropertyName("setup")]
+    public StrategyProfileSetup? Setup { get; set; }
+
     [JsonIgnore]
     public string OriginLabel => BuiltIn ? "Bundled • read-only" : "Custom • editable";
+}
+
+public sealed class StrategyProfileSetup
+{
+    [JsonPropertyName("skipped_checks")]
+    public List<string> SkippedChecks { get; set; } = [];
+
+    [JsonPropertyName("settings")]
+    public Dictionary<string, JsonElement> Settings { get; set; } = [];
 }
 
 public sealed class StrategyProfileLoadout

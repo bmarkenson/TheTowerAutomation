@@ -23,6 +23,76 @@ STARTUP_GATE_CHECK_LABELS = {
     "perk_auto_pick_order": "Auto Pick priority",
     "ultimate_weapons": "Ultimate Weapons",
 }
+PROFILE_SKIPPABLE_CHECKS = (
+    "auto_pick_perks",
+    "perk_bans",
+    "perk_auto_pick_order",
+)
+
+
+def normalize_profile_skip_checks(raw: object) -> list[str]:
+    """Validate ordered profile-owned permanent startup-check skips."""
+
+    if raw is None:
+        return []
+    if not isinstance(raw, (list, tuple)):
+        raise ValueError("skipped_checks must be a list")
+    normalized = [str(check_id or "").strip() for check_id in raw]
+    if any(not check_id for check_id in normalized):
+        raise ValueError("skipped_checks cannot contain an empty check id")
+    unknown = sorted(set(normalized) - set(PROFILE_SKIPPABLE_CHECKS))
+    if unknown:
+        raise ValueError(
+            "skipped_checks contains unsupported checks: "
+            + ", ".join(unknown)
+        )
+    if len(set(normalized)) != len(normalized):
+        raise ValueError("skipped_checks cannot repeat a check")
+    selected = set(normalized)
+    return [
+        check_id
+        for check_id in PROFILE_SKIPPABLE_CHECKS
+        if check_id in selected
+    ]
+
+
+def profile_skip_waivers(
+    requirements: Mapping[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    """Return durable waiver-shaped evidence for profile-owned skips."""
+
+    configured = dict(requirements or {})
+    skipped = normalize_profile_skip_checks(
+        configured.get("profile_skips")
+    )
+    return {
+        check_id: {
+            "check_id": check_id,
+            "label": STARTUP_GATE_CHECK_LABELS[check_id],
+            "source": "strategy_profile",
+            "scope": "every_run",
+            "reason": "permanently skipped by the selected strategy profile",
+        }
+        for check_id in skipped
+    }
+
+
+def merge_profile_skip_waivers(
+    requirements: Mapping[str, Any] | None,
+    waivers: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Combine durable profile skips with narrower runtime waivers."""
+
+    merged: dict[str, Any] = profile_skip_waivers(requirements)
+    merged.update(
+        {
+            str(check_id): dict(value)
+            if isinstance(value, Mapping)
+            else value
+            for check_id, value in (waivers or {}).items()
+        }
+    )
+    return merged
 
 
 def startup_gate_check_catalog(
@@ -35,6 +105,9 @@ def startup_gate_check_catalog(
         included = set(STARTUP_GATE_CHECK_LABELS)
     else:
         included = set(configured) & set(STARTUP_GATE_CHECK_LABELS)
+        included.difference_update(
+            normalize_profile_skip_checks(configured.get("profile_skips"))
+        )
         policies = configured.get("loadout_policies")
         module_mode = (
             str(policies.get("modules") or "").strip().lower()
