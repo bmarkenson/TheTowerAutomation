@@ -45,6 +45,7 @@ from core.gc_preflight_navigation import (
     GcPreflightNavigationStatus,
     run_read_only_gc_preflight,
 )
+from core.gc_preflight import summarize_gc_preflight_mismatch
 from core.tournament_preflight import (
     validate_tournament_session_preflight_screens,
 )
@@ -460,6 +461,9 @@ def execute_actions(
                     failed_checks = list(
                         getattr(result.evidence, "failed_checks", ())
                     )
+                    mismatch_summary = summarize_gc_preflight_mismatch(
+                        evidence_payload
+                    )
                     repair_requested = repairable
                     retry_attempt = 0
                     retry_limit = _repair_mismatch_attempt_limit(act)
@@ -516,35 +520,39 @@ def execute_actions(
                     if repairable and not repair_requested:
                         log_mission(
                             "[SESSION_PREFLIGHT] Transient no-battle "
-                            "configuration mismatch; read-only validation will "
-                            f"retry after cooldown (attempt {retry_attempt} of "
-                            f"{retry_limit}): "
-                            + json.dumps(evidence_payload, sort_keys=True),
+                            "configuration mismatch "
+                            f"(attempt {retry_attempt} of {retry_limit}) — "
+                            f"{mismatch_summary}. Read-only validation will "
+                            "retry after cooldown.",
                             "INFO",
                         )
                     elif repair_requested:
                         log_mission(
                             "[SESSION_PREFLIGHT] No-battle configuration mismatch; "
-                            "guarded stop/repair/restart requested after "
-                            f"{retry_attempt} matching attempts: "
-                            + json.dumps(evidence_payload, sort_keys=True),
+                            f"{retry_attempt} matching attempts exhausted — "
+                            f"{mismatch_summary}. Guarded stop/repair/restart "
+                            "requested.",
                             "WARN",
                         )
                     elif observation_only:
                         log_mission(
                             "[SESSION_PREFLIGHT] Read-only observer mismatch "
-                            "recorded; observation and terminal capture continue "
-                            "without operator action: "
-                            + json.dumps(evidence_payload, sort_keys=True),
+                            f"recorded — {mismatch_summary}. Observation and "
+                            "terminal capture continue without operator action.",
                             "WARN",
                         )
                     else:
                         log_mission(
                             "[SESSION_PREFLIGHT] Configuration mismatch is not "
-                            "repairable at Home; automation remains blocked: "
-                            + json.dumps(evidence_payload, sort_keys=True),
+                            f"repairable at Home — {mismatch_summary}. Automation "
+                            "remains blocked.",
                             "WARN",
                         )
+                    log_mission(
+                        "[SESSION_PREFLIGHT] mismatch_evidence="
+                        + json.dumps(evidence_payload, sort_keys=True),
+                        "DEBUG",
+                    )
                 else:
                     if mv is not None:
                         mv["gc_session_preflight_completed"] = False

@@ -28,6 +28,126 @@ Detection = Mapping[str, Any]
 Detector = Callable[[Any], Detection]
 
 
+_CHECK_LABELS = {
+    "cards_deck": "Cards deck",
+    "workshop_preset": "Workshop preset",
+    "bots_preset": "Bot preset",
+    "guardian_chips": "Guardian Chips",
+    "modules": "Modules",
+    "auto_pick_perks": "Auto Pick Perks",
+    "ultimate_weapons": "Ultimate Weapons",
+}
+
+
+def summarize_gc_preflight_mismatch(
+    evidence: Mapping[str, Any],
+    *,
+    max_details: int = 4,
+) -> str:
+    """Return concise expected-versus-observed preflight failure details."""
+
+    if not isinstance(evidence, Mapping):
+        return "configuration mismatch"
+    raw_failed_checks = evidence.get("failed_checks")
+    failed_checks = [
+        str(check).strip()
+        for check in (
+            raw_failed_checks
+            if isinstance(raw_failed_checks, (list, tuple))
+            else ()
+        )
+        if str(check).strip()
+    ]
+    details: list[str] = []
+    detailed_checks: set[str] = set()
+
+    if "modules" in failed_checks:
+        modules = evidence.get("modules")
+        slots = modules.get("slots") if isinstance(modules, Mapping) else None
+        if isinstance(slots, (list, tuple)):
+            for slot in slots:
+                if not isinstance(slot, Mapping) or slot.get("valid") is not False:
+                    continue
+                slot_label = str(slot.get("slot_key") or "slot").replace("_", " ")
+                expected = str(slot.get("expected") or "unknown")
+                actual = slot.get("actual")
+                if actual is None:
+                    actual = str(slot.get("match_status") or "unknown")
+                details.append(
+                    f"Modules {slot_label}: expected {expected}, observed {actual}"
+                )
+                detailed_checks.add("modules")
+
+    configuration = evidence.get("configuration")
+    section_fields = {
+        "cards_deck": "cards",
+        "workshop_preset": "workshop",
+        "bots_preset": "bots",
+        "guardian_chips": "guardians",
+    }
+    if isinstance(configuration, Mapping):
+        for check_id, field in section_fields.items():
+            if check_id not in failed_checks:
+                continue
+            section = configuration.get(field)
+            if not isinstance(section, Mapping):
+                continue
+            missing = [str(item) for item in section.get("missing_secondary") or ()]
+            label = _CHECK_LABELS[check_id]
+            if missing:
+                details.append(f"{label}: missing evidence {', '.join(missing)}")
+            else:
+                observed = str(section.get("detected_state") or "unknown")
+                details.append(f"{label}: observed state {observed}")
+            detailed_checks.add(check_id)
+
+    if "auto_pick_perks" in failed_checks:
+        auto_pick = evidence.get("auto_pick_perks")
+        if isinstance(auto_pick, Mapping):
+            observed = "disabled" if auto_pick.get("valid_region") else "uncertain"
+            details.append(
+                "Auto Pick Perks: expected enabled, "
+                f"observed {observed}"
+            )
+            detailed_checks.add("auto_pick_perks")
+
+    if "ultimate_weapons" in failed_checks:
+        ultimate_weapons = evidence.get("ultimate_weapons")
+        weapons = (
+            ultimate_weapons.get("weapons")
+            if isinstance(ultimate_weapons, Mapping)
+            else None
+        )
+        if isinstance(weapons, (list, tuple)):
+            for weapon in weapons:
+                if not isinstance(weapon, Mapping) or weapon.get("valid") is not False:
+                    continue
+                label = str(weapon.get("label") or "unknown")
+                mismatches = [
+                    str(item) for item in weapon.get("mismatched_toggles") or ()
+                ]
+                observed = (
+                    ", ".join(mismatches)
+                    if mismatches
+                    else "required controls were not observed"
+                )
+                details.append(f"Ultimate Weapons {label}: {observed}")
+                detailed_checks.add("ultimate_weapons")
+
+    for check_id in failed_checks:
+        if check_id not in detailed_checks:
+            details.append(_CHECK_LABELS.get(check_id, check_id.replace("_", " ")))
+
+    if not details:
+        return "configuration mismatch"
+    limit = max(1, int(max_details))
+    omitted = len(details) - limit
+    summary = "; ".join(details[:limit])
+    if omitted > 0:
+        summary += f"; +{omitted} more mismatch{'es' if omitted != 1 else ''}"
+    return summary
+
+
 @dataclass(frozen=True)
 class GcSectionSpec:
     name: str

@@ -10,6 +10,7 @@ from core.gc_preflight_navigation import (
     _ensure_auto_pick_perks_enabled,
     _guarded_visible_tap,
     _home_ultimate_weapon_observations,
+    _log_gc_preflight_workflow,
     _select_running_menu,
     run_read_only_gc_preflight,
 )
@@ -180,6 +181,50 @@ def test_game_over_observation_aborts_without_sending_input():
     result_log.assert_called_once()
     assert result_log.call_args.args[0] == (
         "Session configuration check interrupted — the battle ended during inspection"
+    )
+
+
+def test_mismatch_result_names_the_wrong_module_in_operator_summary():
+    evidence_payload = {
+        "failed_checks": ["modules"],
+        "modules": {
+            "slots": [
+                {
+                    "slot_key": "generator_assist",
+                    "expected": "Singularity Harness",
+                    "actual": "Galaxy Compressor",
+                    "match_status": "matched",
+                    "valid": False,
+                }
+            ]
+        },
+    }
+    evidence = SimpleNamespace(
+        valid=False,
+        deferred_checks=(),
+        as_dict=lambda: evidence_payload,
+    )
+
+    @_log_gc_preflight_workflow
+    def mismatch(_requirements):
+        return SimpleNamespace(
+            status=GcPreflightNavigationStatus.MISMATCH,
+            reason="configuration mismatch",
+            evidence=evidence,
+            valid=False,
+        )
+
+    with (
+        patch("core.gc_preflight_navigation.log_action_intent"),
+        patch("core.gc_preflight_navigation.log_result") as result_log,
+    ):
+        mismatch({})
+
+    result_log.assert_called_once()
+    assert result_log.call_args.args[0] == (
+        "Session configuration check complete — mismatch found; "
+        "Modules generator assist: expected Singularity Harness, observed "
+        "Galaxy Compressor"
     )
 
 

@@ -14,6 +14,7 @@ from core.auto_pick_perks import measure_auto_pick_perks
 from core.gc_preflight import (
     GcSessionPreflightEvidence,
     merge_ultimate_weapon_observations,
+    summarize_gc_preflight_mismatch,
     validate_gc_session_preflight_screens,
 )
 from core.battle_lifecycle import HomeBattleControl
@@ -103,7 +104,13 @@ def _log_gc_preflight_workflow(func):
                     "verified"
                 )
         elif result.status is GcPreflightNavigationStatus.MISMATCH:
-            summary = "Session configuration check complete — mismatch found"
+            mismatch_summary = summarize_gc_preflight_mismatch(
+                result.evidence.as_dict() if result.evidence is not None else {}
+            )
+            summary = (
+                "Session configuration check complete — mismatch found; "
+                f"{mismatch_summary}"
+            )
         elif result.status is GcPreflightNavigationStatus.BATTLE_ENDED:
             summary = (
                 "Session configuration check interrupted — the battle ended "

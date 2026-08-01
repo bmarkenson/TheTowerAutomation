@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -214,8 +215,23 @@ def test_tournament_mismatch_is_recorded_without_requesting_repair():
             }
         }
     )
+    evidence_payload = {
+        "valid": False,
+        "failed_checks": ["modules"],
+        "modules": {
+            "slots": [
+                {
+                    "slot_key": "generator_assist",
+                    "expected": "Singularity Harness",
+                    "actual": "Galaxy Compressor",
+                    "match_status": "matched",
+                    "valid": False,
+                }
+            ]
+        },
+    }
     evidence = SimpleNamespace(
-        as_dict=lambda: {"valid": False},
+        as_dict=lambda: evidence_payload,
         requires_no_battle_repair=True,
         failed_checks=("modules",),
     )
@@ -225,10 +241,13 @@ def test_tournament_mismatch_is_recorded_without_requesting_repair():
         evidence,
     )
 
-    with patch(
-        "core.action_executor.run_read_only_gc_preflight",
-        return_value=result,
-    ) as run_preflight:
+    with (
+        patch(
+            "core.action_executor.run_read_only_gc_preflight",
+            return_value=result,
+        ) as run_preflight,
+        patch("core.action_executor.log_mission") as mission_log,
+    ):
         execute_actions(object(), [{**action, "_strategy": True}], ctx)
 
     run_preflight.assert_called_once_with(
@@ -243,6 +262,18 @@ def test_tournament_mismatch_is_recorded_without_requesting_repair():
     assert variables["gc_session_preflight_failed_checks"] == ["modules"]
     assert strategy.is_session_preflight_complete(ctx)
     assert not strategy.tick(ctx, object(), {"state": "RUNNING"})
+    mission_log.assert_any_call(
+        "[SESSION_PREFLIGHT] Read-only observer mismatch recorded — "
+        "Modules generator assist: expected Singularity Harness, observed "
+        "Galaxy Compressor. Observation and terminal capture continue without "
+        "operator action.",
+        "WARN",
+    )
+    mission_log.assert_any_call(
+        "[SESSION_PREFLIGHT] mismatch_evidence="
+        + json.dumps(evidence_payload, sort_keys=True),
+        "DEBUG",
+    )
 
 
 def test_tournament_attachment_enforces_battle_loadout_before_preflight():
