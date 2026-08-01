@@ -175,11 +175,15 @@ schedule with bounded backoff. Once disconnection is known, capture commands
 and per-attempt failure entries are suppressed; the initial persistent warning
 still appears after three actual reconnect attempts, reminders remain limited
 to once every five minutes, and one `RESULT` records recovery after a supported
-fresh frame. Connected malformed or incomplete frames retain their capture
-diagnostics. An intentional custom exact game-speed target is different: warn
-immediately when it becomes active and every 15 minutes until the
-maximum-available target is restored so an experimental setting cannot be
-forgotten.
+fresh frame. Connection authority requires the exact target to report `device`,
+including after `adb connect`; command text such as `already connected` is not
+authority. An `offline`, `unauthorized`, or absent target follows the same quiet
+outage path. Each due TCP retry refreshes only that target with a bounded
+disconnect/connect before rechecking its state. Connected malformed or
+incomplete frames retain their capture diagnostics. An intentional custom exact
+game-speed target is different: warn immediately when it becomes active and
+every 15 minutes until the maximum-available target is restored so an
+experimental setting cannot be forgotten.
 
 ## Pause, resume, and process replacement
 

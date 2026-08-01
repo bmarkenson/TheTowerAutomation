@@ -37,6 +37,22 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-01 stale offline ADB transport classification
+
+- Commit `0346a1b` closes the stopped-BlueStacks case where a still-open SSH
+  reverse listener left `localhost:5555 offline` and `adb connect` misleadingly
+  reported `already connected`.
+- A reconnect attempt now refreshes only the selected TCP transport and must be
+  followed by an exact-target `device` observation. Offline, unauthorized, and
+  absent targets use the shared bounded outage schedule; recovery remains
+  gated on a supported fresh screenshot.
+- Regression coverage reproduces the success-hint/offline-state conflict,
+  constrains disconnect/reconnect to one target, and verifies long paused
+  outages suppress capture noise. The focused suite passed 24 tests, the
+  broader runtime/control suite passed 214, and all 995 repository tests passed.
+  The live operator-owned runtime remained paused and was not reloaded while
+  its target was offline.
+
 ### 2026-08-01 game-speed OCR transition hardening
 
 - Commit `852febf` requires two agreeing, directionally consistent readings

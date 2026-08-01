@@ -134,7 +134,35 @@ and actionable work lives in
   `test/test_watchdog.py` retains paused action-authority coverage.
 - **Validation:** All 946 repository tests passed. Validation was repository-
   local; the live paused runtime and unavailable emulator were not changed.
-- **Fixed by:** `5548835`.
+- **Recurrence:** On 2026-08-01 the operator again requested indefinite Pause
+  and intentionally stopped BlueStacks, this time while the GUI-owned SSH
+  reverse listener remained open on Linux `localhost:5555`. ADB retained both
+  `emulator-5554 offline` and `localhost:5555 offline`. Beginning immediately
+  after the 01:34:15 Pause acknowledgement, the runtime again emitted two empty-
+  capture `ERROR` entries and one terminal `FAIL` approximately every three
+  seconds. A direct exact-target `get-state` returned `device offline`; no input
+  followed Pause.
+- **Recurrence cause:** The strict device-list check correctly rejected the
+  `offline` row, but the fallback `adb connect` returned an `already connected`
+  hint for that stale transport. The coordinator accepted the command text as
+  success without rechecking target state, so it misrouted an ordinary outage
+  through the intentionally diagnostic connected-capture-corruption path.
+- **Follow-up resolution:** Commit `0346a1b` refreshes only the selected TCP
+  transport with target-specific `adb disconnect`/`adb connect`, then requires
+  a fresh exact-target `device` observation regardless of command output.
+  Offline, unauthorized, and absent targets now enter the existing bounded,
+  quiet outage schedule. Recovery still requires a supported fresh frame.
+- **Follow-up regression:**
+  `test/test_adb_connection.py::test_reported_connect_success_requires_post_connect_device_state`
+  covers the misleading success hint and
+  `test/test_adb_connection.py::test_tcp_reconnect_refreshes_only_the_selected_target`
+  constrains refresh scope. The long paused-outage integration test in
+  `test/test_app_control_sync.py` now uses that exact stale-transport shape.
+- **Follow-up validation:** The focused outage suite passed 24 tests, the
+  broader runtime/control suite passed 214 tests, and all 995 repository tests
+  passed. The operator-owned runtime remained paused and was not reloaded while
+  its target was offline.
+- **Fixed by:** `5548835`, follow-up `0346a1b`.
 
 ### Demon Mode tracker falsely treated its disabled Intro Sprint button as absent
 

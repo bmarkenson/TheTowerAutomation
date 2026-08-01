@@ -524,8 +524,12 @@ evidence is attached.
   and repeated low-level failure entries while reconnect attempts follow a
   bounded schedule; the main loop continues its short control-poll cadence.
   Persistent degradation produces transition/reminder warnings, and recovery
-  is complete only after a supported fresh frame succeeds. Malformed captures
-  while transport remains connected retain their normal diagnostics.
+  is complete only after a supported fresh frame succeeds. An ADB command's
+  `connected` or `already connected` text is not transport authority: the exact
+  target must freshly report state `device`. Offline and unauthorized rows are
+  outages; a due retry refreshes only the selected TCP transport before
+  rechecking it. Malformed captures while transport remains connected retain
+  their normal diagnostics.
 - The native Windows control surface owns API local forwarding and ADB reverse
   forwarding as separate OpenSSH processes. The ADB process requests only
   `127.0.0.1:<linux-port>` and targets the independently configured Windows
