@@ -24,8 +24,10 @@ and actionable work lives in
   Tournament completion also required `damage_slider_checked` and
   `orb_distance_checked`.
 - **Safety response:** Diagnosis used control, owner/lock, ADB-state, action-log,
-  source, and one read-only screenshot inspection. The active Tournament was
-  not paused, tapped, restarted, exited, or Surrendered.
+  source, and one read-only screenshot inspection. Before rollout, the active
+  Tournament was not manually tapped, exited, or Surrendered. Activation used
+  the guarded current-battle reload, which paused the old owner, verified the
+  attached replacement, and restored `RUNNING` without restarting the battle.
 - **Cause:** While startup gates were deferred and
   `attached_validation_requested` was true, `YamlStrategy.tick` admitted only
   the generated `attached_validation_only` rule. Its conclusive inventory
@@ -48,8 +50,13 @@ and actionable work lives in
   `test/test_home_ad_gem.py` coverage retains the bounded sweep contract.
 - **Validation:** The focused Tournament, initialization, validation, Orb
   Distance, Damage Slider, ad-gem, and builder suites passed 182 tests. The
-  complete repository suite passed all 997 tests. Post-fix live activation was
-  not part of this commit.
+  complete repository suite passed all 997 tests. A guarded live reload then
+  replaced PID `3470028` with `3509151` in the same Tournament. The replacement
+  verified Damage Slider `100%`, changed and verified Orb Distance to Extra
+  `87.16m` / Workshop `80.37m` for Attack Range `98.38m`, completed the session
+  inventory pass, collected the visible ad gem, and ended its floating-gem
+  sweep after exactly 20 taps in 20 seconds. Control remained `RUNNING`; no
+  Surrender or battle restart occurred.
 - **Fixed by:** `a8dda82`.
 
 ### Game-speed verification trusted inconsistent OCR and forgot a proven ceiling

@@ -50,6 +50,12 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Regressions cover the staged attachment plan and the main-loop transition
   from blocked validation to visible ad-gem dispatch. Focused validation passed
   182 tests, and the complete repository suite passed all 997 tests.
+- A guarded live rollout replaced PID `3470028` with `3509151` in the same
+  Tournament. The replacement verified Damage Slider `100%`, corrected and
+  verified Orb Distance, completed session validation, collected the visible
+  ad gem, and terminated the Farm-compatible floating-gem scan after its
+  bounded 20 taps. The Tournament remained active and `RUNNING` throughout the
+  completed handoff; it was not Surrendered or restarted.
 
 ### 2026-08-01 stale offline ADB transport classification
 
