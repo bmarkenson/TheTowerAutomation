@@ -23,7 +23,7 @@ from typing import Any, Optional
 ROOT = Path(__file__).resolve().parents[1]
 PLAYER_SAVE_MAPPING_DIR = ROOT / "config" / "player_save_versions"
 PLAYER_SAVE_DEVICE_PATH = (
-    "/storage/emulated/0/Android/data/"
+    "/sdcard/Android/data/"
     "com.TechTreeGames.TheTower/files/playerInfo.dat"
 )
 MAX_PLAYER_SAVE_BYTES = 512 * 1024

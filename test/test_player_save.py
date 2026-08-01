@@ -11,6 +11,7 @@ import pytest
 
 from core.adb_utils import read_device_file
 from core.player_save import (
+    PLAYER_SAVE_DEVICE_PATH,
     PlayerSavePullError,
     decode_player_save_bytes,
     pull_player_save_bytes,
@@ -19,6 +20,13 @@ from core.player_save import (
 
 
 CAPTURED_AT = datetime(2026, 7, 31, 20, 0, tzinfo=timezone.utc)
+
+
+def test_default_device_path_matches_operator_adb_pull():
+    assert PLAYER_SAVE_DEVICE_PATH == (
+        "/sdcard/Android/data/"
+        "com.TechTreeGames.TheTower/files/playerInfo.dat"
+    )
 
 
 def _decoded_save() -> dict:

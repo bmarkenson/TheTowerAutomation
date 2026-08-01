@@ -51,10 +51,12 @@ than deleting it.
 ## Acquisition and privacy
 
 The local reader never modifies the input file. A device pull reads the default
-path through ADB and accepts a payload only after two consecutive reads are
-byte-identical. Decode then applies compressed and decompressed size limits,
-checks gzip integrity, parses the NRBF root, selects the exact version mapping,
-and validates its structural signature.
+operator-confirmed path
+`/sdcard/Android/data/com.TechTreeGames.TheTower/files/playerInfo.dat` through
+ADB and accepts a payload only after two consecutive reads are byte-identical.
+Decode then applies compressed and decompressed size limits, checks gzip
+integrity, parses the NRBF root, selects the exact version mapping, and
+validates its structural signature.
 
 The normalized report deliberately omits `playerID`, `userName`, and every
 unmapped raw field. It includes a SHA-256 source fingerprint so two observations
