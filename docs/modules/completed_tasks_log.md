@@ -201,6 +201,30 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   28-slot card-preset records; no process, device, control, or battle state was
   inspected or changed.
 
+### 2026-08-01 incremental player-save trust and serialization boundary
+
+- Commit `1fca2a8` replaces the all-or-nothing mapping maturity gate with an
+  exact per-check validation allowlist. Candidate mappings may now supply an
+  authoritative match only for an allowlisted check with complete evidence
+  and an explicitly verified save-serialization boundary; every mismatch,
+  incomplete value, unvalidated check, unverified-freshness pull, and forced
+  audit still names the existing UI checker as its fallback.
+- The first mapping validates Cards, Workshop, and Bots preset selection;
+  First Perk; Ban Perks; and equipped Guardians. The overall mapping remains
+  candidate. Auto Pick's unranked tail, Target Priority, all possible Free
+  Upgrade locks, and the combined Ultimate Weapon check remain UI-required;
+  confirmed Poison Swamp Stun polarity does not authorize the unresolved
+  values in that combined check.
+- Bounded live mutation established that visible Cards slots are stored as
+  zero-based `currentPreset` indices and that Poison Swamp Stun uses the
+  inverted `poisonSwampStunOff` boolean. Waiting and returning Home did not
+  serialize the Cards change; an Android app pause did, without force-stop.
+  Both settings were restored through the same flush boundary, and final
+  evidence showed no-battle Home with Stun on and Tournament Cards selected.
+- Focused player-save validation passed 18 tests, and the complete repository
+  suite passed all 1,028 tests. The operator-owned raw save remained untracked
+  and was not copied into repository evidence.
+
 ### 2026-07-31 constrained GUI Strategy Profile Builder
 
 - Commit `f22d85d` adds a versioned custom-profile catalog shared by the Linux
