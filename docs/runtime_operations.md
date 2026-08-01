@@ -766,6 +766,16 @@ PowerShell before using either non-interactive app tunnel:
 ssh <linux-user>@<linux-host>
 ```
 
+The top bar reports the Linux control API service, HTTP reachability, API SSH
+forward, and ADB SSH forward separately. API service state comes from a bounded
+SSH query of the fixed `thetower-control-surface.service` user unit, so **Start
+API**, **Stop API**, and **Restart API service** remain available even when HTTP
+is down. Those controls cannot select another unit or command and do not affect
+`thetower-automation.service`. **Restart SSH...** restarts either forward
+without cycling the other one. A stopped API service is reported as an expected
+HTTP-unavailable state; failed SSH status queries retain their diagnostic in
+the service-status tooltip.
+
 The application uses the same persistent control file as
 `tools/automation_ctl.py`. The selected state, Game Over mode, and
 numeric game-speed target are visibly highlighted; amber indicates that a live

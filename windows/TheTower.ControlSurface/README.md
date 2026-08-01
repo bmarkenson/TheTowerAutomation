@@ -142,6 +142,15 @@ Setup tab, which scrolls when its independent API and ADB tunnel controls do
 not fit; the optional bearer token remains memory-only. Detailed lock and
 runtime evidence is on Details.
 
+The top bar keeps four different health signals visible: the fixed Linux API
+service's systemd state, HTTP reachability, the Windows-local API SSH tunnel,
+and the ADB reverse-forward SSH tunnel. **Start API**/**Stop API** and
+**Restart API service** affect only
+`thetower-control-surface.service`. **Restart SSH...** offers separate API- and
+ADB-tunnel actions so an ADB bind conflict cannot disturb API control. The
+Process tab's automation-service state remains separately labelled
+**Automation service**.
+
 Drag the main vertical divider and the latest-battle divider to resize those
 panes. Their positions persist locally. Previous Game Screen, Host Health, and
 the latest-battle summary can be collapsed independently. The battle-history
@@ -390,16 +399,18 @@ first exposed the stale service problem. A future Windows feature that depends
 on new Linux behavior must advance the server revision and the client's
 minimum revision together.
 
-Opening or connecting the Windows app never restarts Linux automatically. For
-an incompatible service, the full-width banner displays **Restart Linux API
-service**. After confirmation, that button runs only the fixed
-`systemctl --user restart thetower-control-surface.service` command against the
-validated SSH destination, waits for the API to return, and verifies the full
-compatibility contract before reporting success. It reloads the installed code
-but does not install an update, choose another command or service, restart main
-automation, or alter the active battle. Wait for the banner to disappear, then
-retry **Start paused** or **Start running**. If the banner remains, update the
-Linux checkout and restart the API service again.
+Opening or connecting the Windows app never restarts Linux automatically. It
+queries the fixed API unit over SSH on a bounded interval, independently of the
+HTTP endpoint, so a deliberately stopped service is reported as stopped rather
+than as an unexplained HTTP failure. The always-visible controls run only fixed
+`systemctl --user start|stop|restart thetower-control-surface.service`
+operations against the validated SSH destination. Stop and restart require
+confirmation. Starting or restarting waits for the HTTP API to return and
+verifies the complete compatibility contract; an incompatible service still
+shows the full-width recovery banner. These operations do not install an
+update, choose another command or service, restart main automation, alter the
+active battle, or change either SSH tunnel. If the compatibility banner
+remains, update the Linux checkout and restart the API service again.
 
 The Linux API and fixed systemd user units must be installed first; see
 [`../../deploy/systemd/README.md`](../../deploy/systemd/README.md).

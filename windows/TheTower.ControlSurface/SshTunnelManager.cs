@@ -205,9 +205,81 @@ public sealed class SshTunnelManager : IDisposable
         }
     }
 
-    public async Task RestartControlSurfaceServiceAsync(
+    public Task RestartControlSurfaceServiceAsync(
+        string destination,
+        CancellationToken cancellationToken) =>
+        ChangeControlSurfaceServiceAsync(
+            destination,
+            ControlSurfaceServiceAction.Restart,
+            cancellationToken);
+
+    public async Task ChangeControlSurfaceServiceAsync(
+        string destination,
+        ControlSurfaceServiceAction action,
+        CancellationToken cancellationToken)
+    {
+        var verb = action switch
+        {
+            ControlSurfaceServiceAction.Start => "start",
+            ControlSurfaceServiceAction.Stop => "stop",
+            ControlSurfaceServiceAction.Restart => "restart",
+            _ => throw new ArgumentOutOfRangeException(nameof(action)),
+        };
+        await RunControlSurfaceSshCommandAsync(
+            destination,
+            $"Linux control-surface {verb}",
+            cancellationToken,
+            "systemctl", "--user", verb, ControlSurfaceService);
+    }
+
+    public async Task<ControlSurfaceServiceState> GetControlSurfaceServiceStateAsync(
         string destination,
         CancellationToken cancellationToken)
+    {
+        var result = await RunControlSurfaceSshCommandAsync(
+            destination,
+            "Linux control-surface status query",
+            cancellationToken,
+            "systemctl", "--user", "show", "--no-pager",
+            "--property=LoadState",
+            "--property=ActiveState",
+            "--property=SubState",
+            "--property=Result",
+            "--property=ExecMainStatus",
+            ControlSurfaceService);
+        var properties = result.Stdout
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Trim().Split('=', 2))
+            .Where(parts => parts.Length == 2)
+            .ToDictionary(
+                parts => parts[0],
+                parts => parts[1],
+                StringComparer.Ordinal);
+
+        string Required(string name) => properties.TryGetValue(name, out var value)
+            && !string.IsNullOrWhiteSpace(value)
+                ? value
+                : throw new InvalidOperationException(
+                    $"Linux control-surface status omitted {name}.");
+
+        var exitStatus = int.TryParse(
+            Required("ExecMainStatus"),
+            out var parsedExitStatus)
+                ? parsedExitStatus
+                : (int?)null;
+        return new ControlSurfaceServiceState(
+            Required("LoadState"),
+            Required("ActiveState"),
+            Required("SubState"),
+            Required("Result"),
+            exitStatus);
+    }
+
+    private static async Task<SshCommandResult> RunControlSurfaceSshCommandAsync(
+        string destination,
+        string operation,
+        CancellationToken cancellationToken,
+        params string[] commandArguments)
     {
         destination = destination.Trim();
         if (!IsValidDestination(destination))
@@ -230,8 +302,7 @@ public sealed class SshTunnelManager : IDisposable
                      "-o", "StrictHostKeyChecking=yes",
                      "-o", "ConnectTimeout=10",
                      destination,
-                     "systemctl", "--user", "restart", ControlSurfaceService,
-                 })
+                 }.Concat(commandArguments))
         {
             startInfo.ArgumentList.Add(argument);
         }
@@ -272,7 +343,7 @@ public sealed class SshTunnelManager : IDisposable
         var stderr = (await stderrTask).Trim();
         if (process.ExitCode == 0)
         {
-            return;
+            return new SshCommandResult(stdout, stderr);
         }
         var detail = string.IsNullOrWhiteSpace(stderr) ? stdout : stderr;
         if (detail.Length > 2000)
@@ -281,8 +352,8 @@ public sealed class SshTunnelManager : IDisposable
         }
         throw new InvalidOperationException(
             string.IsNullOrWhiteSpace(detail)
-                ? $"Linux control-surface restart failed with SSH exit code {process.ExitCode}."
-                : $"Linux control-surface restart failed with SSH exit code {process.ExitCode}: {detail}");
+                ? $"{operation} failed with SSH exit code {process.ExitCode}."
+                : $"{operation} failed with SSH exit code {process.ExitCode}: {detail}");
     }
 
     public static bool IsValidDestination(string destination) =>
@@ -403,6 +474,28 @@ public sealed class SshTunnelManager : IDisposable
     private sealed record TunnelExitState(
         string Message,
         bool ForwardSetupFailed);
+
+    private sealed record SshCommandResult(string Stdout, string Stderr);
+}
+
+public enum ControlSurfaceServiceAction
+{
+    Start,
+    Stop,
+    Restart,
+}
+
+public sealed record ControlSurfaceServiceState(
+    string LoadState,
+    string ActiveState,
+    string SubState,
+    string Result,
+    int? ExecMainStatus)
+{
+    public bool IsActive => string.Equals(
+        ActiveState,
+        "active",
+        StringComparison.Ordinal);
 }
 
 public sealed record TunnelExitedEventArgs(

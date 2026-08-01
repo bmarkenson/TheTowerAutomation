@@ -21,23 +21,93 @@
           <ColumnDefinition Width="Auto" />
           <ColumnDefinition Width="Auto" />
           <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
         <StackPanel Grid.Column="0" Margin="0,0,24,0">
           <TextBlock Text="THETOWER" FontSize="18" FontWeight="Bold" Foreground="#62D5FF" />
           <TextBlock Text="Native control surface" Foreground="{StaticResource MutedBrush}" FontSize="11" />
         </StackPanel>
-        <TextBlock Grid.Column="1" x:Name="ConnectionText" Text="Not connected" VerticalAlignment="Center" Foreground="#F1BF5B" FontWeight="SemiBold" />
+        <Grid Grid.Column="1" VerticalAlignment="Center" Margin="0,0,10,0">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" MinWidth="82" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" MinWidth="82" />
+          </Grid.ColumnDefinitions>
+          <TextBlock Text="LINUX API" Foreground="{StaticResource MutedBrush}" FontSize="9" FontWeight="Bold" VerticalAlignment="Center" />
+          <TextBlock Grid.Column="1" x:Name="LinuxApiServiceStatusText" Text="Unknown" Margin="6,0,14,0" Foreground="#F1BF5B" FontSize="11" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+          <TextBlock Grid.Column="2" Text="HTTP" Foreground="{StaticResource MutedBrush}" FontSize="9" FontWeight="Bold" VerticalAlignment="Center" />
+          <TextBlock Grid.Column="3" x:Name="ConnectionText" Text="Not connected" Margin="6,0,0,0" Foreground="#F1BF5B" FontSize="11" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+          <TextBlock Grid.Row="1" Text="API SSH" Foreground="{StaticResource MutedBrush}" FontSize="9" FontWeight="Bold" VerticalAlignment="Center" />
+          <TextBlock Grid.Row="1" Grid.Column="1" x:Name="ApiTunnelTopStatusText" Text="Stopped" Margin="6,0,14,0" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+          <TextBlock Grid.Row="1" Grid.Column="2" Text="ADB SSH" Foreground="{StaticResource MutedBrush}" FontSize="9" FontWeight="Bold" VerticalAlignment="Center" />
+          <TextBlock Grid.Row="1" Grid.Column="3" x:Name="AdbTunnelTopStatusText" Text="Stopped" Margin="6,0,0,0" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+        </Grid>
         <Button Grid.Column="2"
+                x:Name="ToggleControlSurfaceServiceButton"
+                Content="Start API"
+                Click="ToggleControlSurfaceService_Click"
+                Padding="8,6"
+                Margin="2"
+                FontSize="10"
+                IsEnabled="False"
+                ToolTipService.ShowOnDisabled="True"
+                ToolTip="Start or stop only the fixed Linux control API service." />
+        <Button Grid.Column="3"
+                x:Name="RestartControlSurfaceTopButton"
+                Content="Restart API service"
+                Click="RestartControlSurface_Click"
+                Padding="8,6"
+                Margin="2"
+                FontSize="10"
+                IsEnabled="False"
+                ToolTipService.ShowOnDisabled="True"
+                ToolTip="Restart only the fixed Linux control API service; automation is unchanged." />
+        <Button Grid.Column="4"
+                x:Name="RestartSshButton"
+                Content="Restart SSH…"
+                Click="RestartSshMenu_Click"
+                Padding="8,6"
+                Margin="2"
+                FontSize="10"
+                ToolTip="Restart the API or ADB SSH tunnel independently.">
+          <Button.ContextMenu>
+            <ContextMenu x:Name="RestartSshMenu">
+              <MenuItem x:Name="RestartApiTunnelMenuItem"
+                        Header="Restart API tunnel"
+                        Click="RestartApiTunnel_Click" />
+              <MenuItem x:Name="RestartAdbTunnelMenuItem"
+                        Header="Restart ADB tunnel"
+                        Click="RestartAdbTunnel_Click" />
+            </ContextMenu>
+          </Button.ContextMenu>
+        </Button>
+        <Button Grid.Column="5"
                 Content="Controls"
                 Click="ShowControls_Click"
+                Padding="8,6"
+                Margin="2"
+                FontSize="10"
                 ToolTip="Open the everyday automation controls." />
-        <Button Grid.Column="3"
+        <Button Grid.Column="6"
                 Content="Connection setup"
                 Click="ShowSetup_Click"
+                Padding="8,6"
+                Margin="2"
+                FontSize="10"
                 ToolTip="Open API and SSH tunnel settings." />
-        <Button Grid.Column="4"
+        <Button Grid.Column="7"
                 Content="Reset layout"
                 Click="ResetLayout_Click"
+                Padding="8,6"
+                Margin="2"
+                FontSize="10"
                 ToolTip="Restore the default pane sizes and expanded sections." />
       </Grid>
     </Border>
@@ -410,7 +480,7 @@
                   <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <StackPanel>
-                  <TextBlock Text="SERVICE" Foreground="{StaticResource MutedBrush}" FontSize="10" />
+                  <TextBlock Text="AUTOMATION SERVICE" Foreground="{StaticResource MutedBrush}" FontSize="10" />
                   <TextBlock x:Name="ServiceText" Text="-" FontSize="15" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
                 </StackPanel>
                 <StackPanel Grid.Column="1">

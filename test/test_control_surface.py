@@ -904,6 +904,41 @@ def test_native_control_surface_manages_adb_reverse_forward_independently():
     assert "The API tunnel is unchanged" in window_code
 
 
+def test_native_control_surface_exposes_independent_api_service_and_tunnel_health():
+    native_root = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+    )
+    tunnel_manager = (native_root / "SshTunnelManager.cs").read_text(
+        encoding="utf-8"
+    )
+    window = (native_root / "MainWindow.xaml").read_text(encoding="utf-8")
+    window_code = (native_root / "MainWindow.xaml.cs").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'x:Name="LinuxApiServiceStatusText"' in window
+    assert 'x:Name="ConnectionText"' in window
+    assert 'x:Name="ApiTunnelTopStatusText"' in window
+    assert 'x:Name="AdbTunnelTopStatusText"' in window
+    assert 'x:Name="ToggleControlSurfaceServiceButton"' in window
+    assert 'Content="Restart API service"' in window
+    assert 'Header="Restart API tunnel"' in window
+    assert 'Header="Restart ADB tunnel"' in window
+    assert 'Text="AUTOMATION SERVICE"' in window
+    assert "ControlSurfaceServiceAction.Start" in tunnel_manager
+    assert "ControlSurfaceServiceAction.Stop" in tunnel_manager
+    assert "ControlSurfaceServiceAction.Restart" in tunnel_manager
+    assert '"systemctl", "--user", verb, ControlSurfaceService' in tunnel_manager
+    assert "GetControlSurfaceServiceStateAsync" in tunnel_manager
+    assert '"--property=ActiveState"' in tunnel_manager
+    assert "RefreshControlSurfaceServiceStatusAsync" in window_code
+    assert "RestartApiTunnel_Click" in window_code
+    assert "RestartAdbTunnel_Click" in window_code
+    assert "Unavailable — service stopped" in window_code
+
+
 def test_control_surface_configures_run_from_selected_strategy_checks(tmp_path):
     service = _service(tmp_path)
     initial = service.status()["control"]

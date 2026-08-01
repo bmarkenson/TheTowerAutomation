@@ -285,6 +285,12 @@ stages:
     adapter over the same authoritative controls used by the CLI.
   - [x] Add a self-contained native WPF client that can own the passwordless
     OpenSSH tunnel.
+  - [ ] Move SSH ownership into a single-instance per-user companion host so
+    independently controlled API and ADB forwards can survive GUI exit. Use a
+    current-user-only versioned named pipe for control/status and retain full
+    reconnect, conflict, and last-exit diagnostics; do not detach unmanaged
+    `ssh.exe` children. Start on demand first, with start-at-login and tray UI as
+    later optional decisions.
   - [x] Add the first constrained Strategy Profile Builder: dynamically list
     bundled and custom profiles, clone/edit Farm Tier loadout policies, validate
     through the shared builder, atomically publish source plus generated plan,

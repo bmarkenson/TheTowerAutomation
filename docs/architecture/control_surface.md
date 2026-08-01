@@ -8,7 +8,7 @@ served by that same API.
 ```text
 Native Windows app
       │ starts/stops passwordless Windows OpenSSH
-      │ confirmed fixed SSH restart ──► thetower-control-surface.service
+      │ fixed SSH query/start/stop/restart ► thetower-control-surface.service
       │ local-forward (recommended)
       ▼
 Linux loopback HTTP server
@@ -130,12 +130,13 @@ agnostic.
 - Connecting the Windows client remains read-only. An incompatible API,
   insufficient server revision, or missing required capability disables the
   dependent action and shows one generic client/server compatibility warning.
-  With confirmation, the client may use its validated SSH destination to run
-  only the fixed `systemctl --user restart thetower-control-surface.service`
-  command, then must reconnect and verify the complete compatibility contract.
-  Restart reloads the installed Linux code but does not deploy an update. This
-  path cannot select another unit or command and never restarts main
-  automation.
+  Independently of HTTP, the client may use its validated SSH destination to
+  query and start, stop, or restart only the fixed
+  `thetower-control-surface.service` user unit. Stop and restart require
+  confirmation; start and restart must reconnect and verify the complete
+  compatibility contract. Restart reloads the installed Linux code but does
+  not deploy an update. This path cannot select another unit or command and
+  never restarts main automation.
 
 Control writers use a companion advisory lock and atomic replacement. Timed
 pause expiry revalidates its exact deadline while holding that writer lock, so
@@ -163,6 +164,30 @@ listeners. The independent process boundary keeps an ADB bind conflict or
 reconnect cycle from interrupting API control. Accepted forwarding, local
 Windows-listener detection, conflicts, and bounded automatic reconnect are
 reported separately in the GUI.
+
+The always-visible UI treats systemd API-service state, HTTP reachability, API
+forward state, and ADB-forward state as four different signals. A fixed
+`systemctl --user show` query supplies API-service state even while that service
+is stopped. Service control uses bounded one-shot SSH commands; forwarding
+continues to use the two independently owned long-running processes.
+
+### Proposed persistent tunnel host
+
+The current Windows app still owns and closes both `ssh.exe` children. Keeping
+forwards alive after the WPF window exits should not be implemented by merely
+detaching those children: a later GUI could not reliably establish process
+ownership, configuration currency, reconnect policy, or safe termination.
+
+The proposed follow-up is one per-user companion host, started on demand by the
+GUI, that owns both tunnel processes while keeping them independently
+controllable. A versioned, current-user-only named pipe would expose desired and
+observed state, last SSH diagnostics, reconnect/conflict state, and fixed API
+service query/actions. A single-instance mutex would prevent competing hosts.
+Configuration would remain per Windows user and retain separate per-PC Linux
+ADB ports. The first version should be headless and persist only after an
+explicit GUI start; optional start-at-login and tray UI can be later choices.
+A Windows service is not preferred because OpenSSH keys and `known_hosts` are
+already scoped to the interactive user's profile.
 
 SSH provides host authentication and encryption while the HTTP listener remains
 unreachable from the LAN. Host-key trust must already exist in the Windows
