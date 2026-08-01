@@ -37,6 +37,27 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-31 restart-stable Perk timeline catch-up
+
+- Commit `07efc5a` atomically checkpoints Perk timeline progress beside the
+  runtime control file and restores it only when the Current-run activity
+  scope still identifies the same battle. A different scope establishes a
+  fresh, non-attributing mid-battle baseline.
+- Every scheduled observation now scans the Perk list newest-first until it
+  reaches the first persisted family/value that has not changed. This captures
+  an arbitrary number of distinct skipped selections, with a proven-bottom
+  full-diff fallback when no unchanged row remains. Visibility or process gaps
+  stay interval aggregates rather than receiving invented wave attribution;
+  repeated upgrades to one leveled family are recoverable only as their net
+  change.
+- Regression coverage exercises same-scope restoration, persisted route
+  ownership, scope-mismatch rejection, restart catch-up, arbitrary jumps,
+  scanning past a changed former newest row, early scroll termination, and
+  report rendering. The complete repository suite passed 958 tests; after the
+  final review fixes, the focused timeline, scrolling, reporting, and run-
+  initialization suite passed 149 tests. Validation was repository-local and
+  changed no process, control, ADB, emulator, or battle state.
+
 ### 2026-07-31 automatic-Retry activity continuity
 
 - Commit `2ce357d` starts the next Current-run scope immediately after a

@@ -8,6 +8,46 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Perk timeline restart and hidden-UI gaps lost or misattributed selections
+
+- **Observed:** 2026-07-31 during repository-local review of same-battle
+  reattachment and deferred Perk-selection checks.
+- **Symptom:** Replacing the process discarded the in-memory Perk baseline and
+  batches. Separately, when another UI hid the top-bar progress across several
+  selections, the next visible token could arm only the oldest inferred
+  boundary while the newest-row optimization attributed the latest changed
+  Perk to that wave without recording the missing interval.
+- **Evidence:** A deterministic tracker simulation advanced directly from an
+  armed wave 142 boundary to the wave 184/next-226 progress token. The old
+  request retained scheduled wave 142, captured only the newest row, and
+  emitted no incomplete-interval warning. Source inspection also confirmed
+  that application construction always created a new observer with no durable
+  baseline or batch state.
+- **Safety response:** Diagnosis and validation were repository-local. No
+  runtime process, control directive, ADB target, emulator, or battle was
+  inspected or changed.
+- **Cause:** Perk progress was process-scoped, and the latest-row capture
+  contract assumed at most one selection unless the tracker had observed every
+  intermediate top-bar token while the battle UI was visible.
+- **Resolution:** Commit `07efc5a` adds an atomic, schema-validated checkpoint
+  keyed to the existing Current-run activity scope, including pending capture
+  and owned-route state. Every selection check now scans newest-first to the
+  first confidently recognized persisted family/value that is unchanged and
+  falls back to the proven list bottom if none exists. Process and visibility
+  gaps remain explicitly incomplete interval aggregates; exact per-wave
+  reconstruction is allowed only when all boundaries were observed and each
+  post-PWR change is distinct. Repeated upgrades to one family retain only
+  their final net level and are not assigned invented waves.
+- **Regression:** `test/test_perk_timeline.py` covers scanning past a changed
+  former newest row, arbitrary hidden selections, repeated-family ambiguity,
+  same-scope restart, route ownership, restart catch-up, and scope mismatch.
+  `test/test_scrolling.py` covers caller-proven early termination, and
+  `test/test_battle_stats.py` covers incomplete-interval rendering.
+- **Validation:** All 958 repository tests passed during the change. After
+  final review fixes, the focused timeline, scrolling, reporting, and run-
+  initialization suite passed all 149 tests.
+- **Fixed by:** `07efc5a`.
+
 ### Known ADB outage flooded the complete action log
 
 - **Observed:** 2026-07-31 after the operator requested indefinite Pause at
