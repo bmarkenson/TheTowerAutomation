@@ -890,6 +890,28 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void StrategyProfiles_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var dialog = new StrategyProfilesWindow(_api) { Owner = this };
+            dialog.ShowDialog();
+            await RefreshStatusAsync(force: true);
+            if (!string.IsNullOrWhiteSpace(dialog.PublishedStrategyId))
+            {
+                SelectStrategy(dialog.PublishedStrategyId);
+                _strategySelectionDirty = true;
+                _strategyRequestMessage =
+                    $"Published {StrategyDisplayName(dialog.PublishedStrategyId)}; select an activation action when ready.";
+                UpdateStrategyActionAvailability();
+            }
+        }
+        catch (Exception exc)
+        {
+            ShowError(exc);
+        }
+    }
+
     private async void GateDecision_Click(object sender, RoutedEventArgs e)
     {
         if (_currentGateDecision is not { Status: "pending" } decision)
@@ -1651,6 +1673,11 @@ public partial class MainWindow : Window
         var runtime = status.Runtime.Instances.FirstOrDefault(instance => instance.Active)
             ?? status.Runtime.Instances.FirstOrDefault();
         var service = status.ProcessService;
+        UpdateStrategyOptions(
+            service?.StrategyOptions,
+            service?.Strategy,
+            status.Control.Strategy,
+            status.Acknowledgements.Strategy?.Value);
         _hostPerformance.UpdateServerContext(
             status.Control.AdbPort ?? service?.AdbPort,
             status.CurrentRun?.RunId,
@@ -2247,6 +2274,63 @@ public partial class MainWindow : Window
             ? NormalizeStrategy(item.Tag?.ToString())
             : null;
 
+    private void UpdateStrategyOptions(
+        IEnumerable<string>? options,
+        params string?[] retainedValues)
+    {
+        var desired = (options ?? [])
+            .Concat(retainedValues.Where(value => !string.IsNullOrWhiteSpace(value))!)
+            .Select(NormalizeStrategy)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Cast<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (desired.Count == 0)
+        {
+            desired.AddRange(["farm_t18", "farm_t19", "tournament", "none"]);
+        }
+        var existing = StrategySelectionBox.Items
+            .OfType<ComboBoxItem>()
+            .Select(item => NormalizeStrategy(item.Tag?.ToString()))
+            .Where(value => value is not null)
+            .Cast<string>()
+            .ToList();
+        if (existing.SequenceEqual(desired, StringComparer.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var selected = SelectedStrategy();
+        _updatingStrategySelection = true;
+        try
+        {
+            StrategySelectionBox.Items.Clear();
+            foreach (var identifier in desired)
+            {
+                StrategySelectionBox.Items.Add(new ComboBoxItem
+                {
+                    Content = StrategyDisplayName(identifier),
+                    Tag = identifier,
+                });
+            }
+            var selection = desired.FirstOrDefault(identifier => string.Equals(
+                    identifier,
+                    selected,
+                    StringComparison.OrdinalIgnoreCase))
+                ?? desired[0];
+            StrategySelectionBox.SelectedItem = StrategySelectionBox.Items
+                .OfType<ComboBoxItem>()
+                .First(item => string.Equals(
+                    NormalizeStrategy(item.Tag?.ToString()),
+                    selection,
+                    StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            _updatingStrategySelection = false;
+        }
+    }
+
     private void SelectGameSpeedTarget(double target)
     {
         var item = GameSpeedTargetBox.Items
@@ -2334,6 +2418,8 @@ public partial class MainWindow : Window
 
         StrategySelectionBox.IsEnabled =
             _strategyLifecycleAvailable && !_strategyRequestInFlight;
+        StrategyProfilesButton.IsEnabled =
+            _serverCompatibility?.IsCompatible == true;
         QueueStrategyButton.Content = _strategyProcessActive
             ? "Use next battle"
             : "Save startup default";
@@ -2517,7 +2603,7 @@ public partial class MainWindow : Window
             "farm_t19_experiment" => "farm_t19",
             "tournament" => "tournament",
             "none" => "none",
-            _ => strategy,
+            _ => strategy?.Trim().ToLowerInvariant(),
         };
 
     private static string FormatExclusiveValidation(
@@ -2607,7 +2693,14 @@ public partial class MainWindow : Window
             "tournament" => "Tournament",
             "none" => "No strategy",
             null => "none",
-            var value => value,
+            var value => string.Join(
+                " ",
+                value.Split('_', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(part => part.Length > 1
+                        && part[0] == 't'
+                        && part[1..].All(char.IsDigit)
+                            ? part.ToUpperInvariant()
+                            : CultureInfo.InvariantCulture.TextInfo.ToTitleCase(part))),
         };
 
     private static string YesNo(bool? value) => value switch

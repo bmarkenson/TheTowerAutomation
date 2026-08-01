@@ -439,6 +439,9 @@ public sealed class ProcessServiceStatus
     [JsonPropertyName("strategy_error")]
     public string? StrategyError { get; set; }
 
+    [JsonPropertyName("strategy_options")]
+    public List<string> StrategyOptions { get; set; } = [];
+
     [JsonPropertyName("startup_gate_policy")]
     public string? StartupGatePolicy { get; set; }
 
@@ -453,6 +456,135 @@ public sealed class ProcessServiceStatus
 
     [JsonPropertyName("error")]
     public string? Error { get; set; }
+}
+
+public sealed class StrategyProfileCatalogResponse
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("policy_modes")]
+    public List<string> PolicyModes { get; set; } = [];
+
+    [JsonPropertyName("presets")]
+    public Dictionary<string, List<StrategyPresetOption>> Presets { get; set; } = [];
+
+    [JsonPropertyName("items")]
+    public List<StrategyProfileItem> Items { get; set; } = [];
+
+    [JsonPropertyName("errors")]
+    public List<StrategyProfileCatalogError> Errors { get; set; } = [];
+}
+
+public sealed class StrategyPresetOption
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("display_name")]
+    public string DisplayName { get; set; } = "";
+}
+
+public sealed class StrategyProfileCatalogError
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("error")]
+    public string Error { get; set; } = "";
+}
+
+public sealed class StrategyProfileItem
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("display_name")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("family")]
+    public string Family { get; set; } = "";
+
+    [JsonPropertyName("tier")]
+    public int? Tier { get; set; }
+
+    [JsonPropertyName("version")]
+    public int Version { get; set; }
+
+    [JsonPropertyName("built_in")]
+    public bool BuiltIn { get; set; }
+
+    [JsonPropertyName("editable")]
+    public bool Editable { get; set; }
+
+    [JsonPropertyName("published_at")]
+    public string? PublishedAt { get; set; }
+
+    [JsonPropertyName("source_fingerprint")]
+    public string? SourceFingerprint { get; set; }
+
+    [JsonPropertyName("plan_fingerprint")]
+    public string? PlanFingerprint { get; set; }
+
+    [JsonPropertyName("loadout")]
+    public StrategyProfileLoadout? Loadout { get; set; }
+
+    [JsonIgnore]
+    public string OriginLabel => BuiltIn ? "Bundled • read-only" : "Custom • editable";
+}
+
+public sealed class StrategyProfileLoadout
+{
+    [JsonPropertyName("modules")]
+    public StrategyProfilePolicy Modules { get; set; } = new();
+
+    [JsonPropertyName("damage_slider")]
+    public StrategyProfilePolicy DamageSlider { get; set; } = new();
+
+    [JsonPropertyName("orb_distance")]
+    public StrategyProfilePolicy OrbDistance { get; set; } = new();
+
+    [JsonPropertyName("target_priority")]
+    public StrategyProfilePolicy TargetPriority { get; set; } = new();
+}
+
+public sealed class StrategyProfilePolicy
+{
+    [JsonPropertyName("mode")]
+    public string Mode { get; set; } = "preserve";
+
+    [JsonPropertyName("preset")]
+    public string? Preset { get; set; }
+
+    [JsonPropertyName("value")]
+    public string? Value { get; set; }
+}
+
+public sealed class StrategyProfileMutationResponse
+{
+    [JsonPropertyName("action")]
+    public string Action { get; set; } = "";
+
+    [JsonPropertyName("valid")]
+    public bool Valid { get; set; }
+
+    [JsonPropertyName("published")]
+    public bool Published { get; set; }
+
+    [JsonPropertyName("profile")]
+    public StrategyProfileItem Profile { get; set; } = new();
+
+    [JsonPropertyName("rule_count")]
+    public int RuleCount { get; set; }
+
+    [JsonPropertyName("summary")]
+    public List<string> Summary { get; set; } = [];
+
+    [JsonPropertyName("catalog")]
+    public StrategyProfileCatalogResponse? Catalog { get; set; }
+
+    [JsonPropertyName("warning")]
+    public string? Warning { get; set; }
 }
 
 public sealed class BattleListResponse

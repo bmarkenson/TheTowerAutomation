@@ -25,14 +25,6 @@ STARTUP_GATE_POLICIES = (
     "immediate",
     "next_run",
 )
-CONFIGURABLE_STRATEGIES = (
-    "farm_t18",
-    "farm_t19",
-    "tournament",
-    "none",
-)
-
-
 @dataclass
 class AppConfig:
     """Configuration values consumed by the runtime `App`."""
@@ -116,7 +108,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=os.getenv(STRATEGY_ENVIRONMENT_VARIABLE, DEFAULT_STRATEGY),
         help=(
             "Runtime strategy: farm (Tier 18 default), farm_t18, "
-            "farm_t19, tournament observer, or none. "
+            "farm_t19, tournament observer, none, or a published custom profile. "
             "Legacy experiment and gc names remain aliases. "
             "Use none for the regular "
             "handler loop with no strategy actions or startup gates; "
@@ -187,7 +179,6 @@ def config_from_args(args: argparse.Namespace) -> AppConfig:
 __all__ = [
     "ADB_PORT_ENVIRONMENT_VARIABLE",
     "AppConfig",
-    "CONFIGURABLE_STRATEGIES",
     "DEFAULT_ADB_PORT",
     "DEFAULT_STRATEGY",
     "DEFAULT_STARTUP_GATE_POLICY",

@@ -35,6 +35,9 @@ logs/
 # tmp
 tmp/
 
+# Operator-published strategy profiles and their advisory writer lock
+config/strategies/custom/
+
 # Native Windows build output
 windows/**/bin/
 windows/**/obj/

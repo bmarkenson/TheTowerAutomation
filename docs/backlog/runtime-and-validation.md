@@ -277,6 +277,15 @@ stages:
     adapter over the same authoritative controls used by the CLI.
   - [x] Add a self-contained native WPF client that can own the passwordless
     OpenSSH tunnel.
+  - [x] Add the first constrained Strategy Profile Builder: dynamically list
+    bundled and custom profiles, clone/edit Farm Tier loadout policies, validate
+    through the shared builder, atomically publish source plus generated plan,
+    and keep activation as a separate existing strategy-lifecycle action.
+  - [ ] Extend strategy authoring only where operator use justifies it. Candidate
+    follow-ups are managed preset-catalog editing, profile duplication/retirement
+    workflows, and an explicitly advanced raw-rule mode. Preserve the fixed-path
+    API, generated-plan validation, immutable bundled templates, and separate
+    publish-versus-activate boundary.
   - [x] Show directive/acknowledgement separately from primary state, menu,
     overlays, run mode, pause status, runtime evidence, activity, and completed
     battle records.

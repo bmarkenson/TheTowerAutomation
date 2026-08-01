@@ -38,6 +38,12 @@ public sealed class ControlSurfaceApi : IDisposable
     public Task<BattleListResponse> GetBattlesAsync(CancellationToken cancellationToken) =>
         GetAsync<BattleListResponse>("/api/v1/battles?limit=100", cancellationToken);
 
+    public Task<StrategyProfileCatalogResponse> GetStrategyProfilesAsync(
+        CancellationToken cancellationToken) =>
+        GetAsync<StrategyProfileCatalogResponse>(
+            "/api/v1/strategy-profiles",
+            cancellationToken);
+
     public Task<ActivityResponse> GetActivityAsync(
         IEnumerable<string> levels,
         string scope,
@@ -100,6 +106,14 @@ public sealed class ControlSurfaceApi : IDisposable
         object payload,
         CancellationToken cancellationToken) =>
         PostAsync<StatusResponse>("/api/v1/process", payload, cancellationToken);
+
+    public Task<StrategyProfileMutationResponse> PostStrategyProfileAsync(
+        object payload,
+        CancellationToken cancellationToken) =>
+        PostAsync<StrategyProfileMutationResponse>(
+            "/api/v1/strategy-profiles",
+            payload,
+            cancellationToken);
 
     public Task<HostPerformancePublishResponse> PostHostPerformanceAsync(
         HostPerformanceBatch payload,

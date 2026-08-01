@@ -54,11 +54,15 @@ agnostic.
   persistent numeric game-speed target selection,
   resolution of a runtime-published startup-gate decision,
   optional strategy-scoped one-run check configuration,
-  bundled-strategy selection, stopped or
+  bundled or validated custom-strategy selection, constrained custom Farm
+  profile publication, stopped or
   acknowledged-paused ADB-port
   configuration, fixed managed-service start/stop, and one guarded active-
   battle automation reload. Active strategy
   requests are declarative runtime configuration, not direct tap authority.
+  Profile publication writes only a fixed-name file beneath
+  `config/strategies/custom`; it does not select, queue, adopt, start, restart,
+  stop, pause, resume, or otherwise apply that profile.
   There is no arbitrary tap, shell command, process kill, direct Surrender,
   file-path, or ADB endpoint.
 - Complete stop persists `STOPPED` before asking the fixed systemd user service
@@ -174,11 +178,43 @@ memory only. The API deliberately sends no CORS permission.
 | --- | --- | --- |
 | `GET` | `/api/v1/status` | Server revision/capabilities, control intent, acknowledgement, current-run identity, latest observation, and runtime evidence |
 | `POST` | `/api/v1/control` | Allowlisted control mutation |
-| `POST` | `/api/v1/process` | Start/stop or guarded-reload the fixed systemd automation unit, select its startup-gate policy, save/queue/adopt a bundled strategy, or configure/safely hand off its ADB port |
+| `POST` | `/api/v1/process` | Start/stop or guarded-reload the fixed systemd automation unit, select its startup-gate policy, save/queue/adopt a bundled or published custom strategy, or configure/safely hand off its ADB port |
 | `POST` | `/api/v1/host-performance` | Bounded, idempotent batches of native Windows host/BlueStacks performance aggregates |
+| `GET` | `/api/v1/strategy-profiles` | Bundled/custom profile summaries plus the allowlisted Farm policy and preset catalogs |
+| `POST` | `/api/v1/strategy-profiles` | Validate a constrained Farm draft or atomically publish its source and generated plan |
 | `GET` | `/api/v1/battles?limit=N` | Newest Battle and Tournament summaries |
 | `GET` | `/api/v1/battles/{battle_id}` | One full structured battle record |
 | `GET` | `/api/v1/activity?limit=N&levels=ERROR,WARN&scope=current_run&after=CURSOR` | Recent structured action-log entries, optionally filtered by level, explicit run scope, and opaque clear-view cursor |
+
+## Strategy profile publication
+
+Server revision 17 advertises `strategy_profile_catalog_v1`. The native client
+uses that catalog to populate strategy selection dynamically and to provide a
+constrained Farm Profile Builder. Bundled profiles are immutable templates.
+The editor can clone a Farm profile, choose its Tier, and assign `enforce`,
+`observe`, or `preserve` to Modules, Damage Slider, Orb Distance, and Target
+Priority. Preset choices come from the server's existing loadout catalogs; the
+client never invents or submits a filesystem path, expanded rule, or executor
+action.
+
+Linux normalizes and validates the compact source through the same builder used
+for checked-in profiles. A publication is one versioned YAML document containing
+both that source and the exact generated plan, with independent SHA-256
+fingerprints. The server re-generates the plan when reading a publication and
+excludes a missing, malformed, tampered, or inconsistent file from selectable
+strategy IDs. The single document is written through a same-directory temporary
+file, `fsync`, and atomic replacement while a companion advisory writer lock
+serializes concurrent server requests. Updating an existing custom profile also
+requires the source fingerprint that was current when the editor loaded it, so
+concurrent or stale edits fail with a conflict rather than overwriting a newer
+revision.
+
+Custom publications live under `config/strategies/custom` and are ignored by
+Git as operator-owned configuration. Profile IDs are restricted to fixed-name
+lowercase identifiers and cannot collide with bundled or legacy names. There is
+no API delete or arbitrary-path operation. Selecting or applying a published
+profile remains a separate explicit action through the existing process API and
+its normal next-boundary or active-battle semantics.
 
 ## Activity log audiences
 

@@ -333,12 +333,13 @@
                 <ComboBox x:Name="StrategySelectionBox"
                           SelectionChanged="StrategySelectionBox_SelectionChanged"
                           IsEnabled="False"
-                          Margin="4">
-                  <ComboBoxItem Content="Farm T18" Tag="farm_t18" />
-                  <ComboBoxItem Content="Farm T19" Tag="farm_t19" />
-                  <ComboBoxItem Content="Tournament" Tag="tournament" />
-                  <ComboBoxItem Content="No strategy" Tag="none" />
-                </ComboBox>
+                          Margin="4" />
+                <Button x:Name="StrategyProfilesButton"
+                        Content="Strategy profiles..."
+                        Click="StrategyProfiles_Click"
+                        IsEnabled="False"
+                        ToolTip="Clone, validate, and publish compact Farm strategy profiles without activating them."
+                        Margin="4,2,4,6" />
                 <Grid>
                   <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />

@@ -13,13 +13,19 @@ import tempfile
 from typing import Any, Callable, Iterator, Mapping, Optional, Sequence
 from uuid import uuid4
 
-from core.app_setup import CONFIGURABLE_STRATEGIES
 from core.gate_decisions import (
     STARTUP_GATE_CHECK_LABELS,
     VALID_GATE_DECISION_ACTIONS,
 )
 from core.exclusive_validation import (
     exclusive_validation_definition_for_strategy,
+)
+from core.strategy_profiles import (
+    BUILTIN_STRATEGY_IDS,
+    configurable_strategy_ids,
+    is_configurable_strategy,
+    normalize_strategy_id,
+    strategy_profile_directory,
 )
 
 
@@ -59,9 +65,17 @@ class ControlDirectiveStore:
     file remains the sole authority consumed by the automation runtime.
     """
 
-    def __init__(self, path: Path | str) -> None:
+    def __init__(
+        self,
+        path: Path | str,
+        *,
+        strategy_profile_dir: Path | str | None = None,
+    ) -> None:
         self.path = Path(path)
         self.lock_path = self.path.with_name(f".{self.path.name}.write.lock")
+        self.strategy_profile_dir = strategy_profile_directory(
+            strategy_profile_dir
+        )
 
     def read(self) -> dict[str, Any]:
         """Return a copy of the current mapping; a missing file is empty."""
@@ -101,7 +115,7 @@ class ControlDirectiveStore:
                 "game_speed_target_request_id"
             ),
             "adb_port_updated_at": data.get("adb_port_updated_at"),
-            "strategy": _valid_strategy(data.get("strategy")),
+            "strategy": self._valid_strategy(data.get("strategy")),
             "strategy_apply_mode": _valid_strategy_apply_mode(
                 data.get("strategy_apply_mode")
             ),
@@ -231,9 +245,16 @@ class ControlDirectiveStore:
         """Persist a validated runtime strategy request."""
 
         normalized = str(strategy).strip().lower()
-        if normalized not in CONFIGURABLE_STRATEGIES:
+        if not is_configurable_strategy(
+            normalized,
+            self.strategy_profile_dir,
+            allow_legacy_aliases=False,
+        ):
             raise ValueError(
-                "Strategy must be one of: " + ", ".join(CONFIGURABLE_STRATEGIES)
+                "Strategy must be one of: "
+                + ", ".join(
+                    configurable_strategy_ids(self.strategy_profile_dir)
+                )
             )
         normalized_apply_mode = str(apply_mode or "").strip().lower()
         if normalized_apply_mode not in STRATEGY_APPLY_MODES:
@@ -241,13 +262,21 @@ class ControlDirectiveStore:
                 "Strategy apply mode must be one of: "
                 + ", ".join(sorted(STRATEGY_APPLY_MODES))
             )
-        validation_definition = (
-            exclusive_validation_definition_for_strategy(normalized)
-        )
+        try:
+            validation_definition = (
+                exclusive_validation_definition_for_strategy(normalized)
+            )
+        except ValueError:
+            if normalized in BUILTIN_STRATEGY_IDS:
+                raise
+            # Constrained custom Farm profiles do not declare an exclusive
+            # validation battle. Their plan has already been validated at
+            # publication time, possibly through an injected test directory.
+            validation_definition = None
 
         def mutate(data: dict[str, Any]) -> dict[str, Any]:
             timestamp = _updated_at()
-            previous = _valid_strategy(data.get("strategy"))
+            previous = self._valid_strategy(data.get("strategy"))
             strategy_request_id = uuid4().hex
             data["strategy"] = normalized
             data["strategy_apply_mode"] = normalized_apply_mode
@@ -338,6 +367,14 @@ class ControlDirectiveStore:
             return data
 
         return self.update(mutate)
+
+    def _valid_strategy(self, value: object) -> Optional[str]:
+        normalized = str(value or "").strip().lower()
+        return normalized if is_configurable_strategy(
+            normalized,
+            self.strategy_profile_dir,
+            allow_legacy_aliases=False,
+        ) else None
 
     def claim_exclusive_validation(
         self,
@@ -1400,8 +1437,7 @@ def _valid_port(value: object) -> Optional[int]:
 
 
 def _valid_strategy(value: object) -> Optional[str]:
-    normalized = str(value or "").strip().lower()
-    return normalized if normalized in CONFIGURABLE_STRATEGIES else None
+    return normalize_strategy_id(value)
 
 
 def normalize_game_speed_target(value: object) -> float:

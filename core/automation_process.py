@@ -12,13 +12,17 @@ from typing import Any, Callable, Optional, Sequence
 
 from core.app_setup import (
     ADB_PORT_ENVIRONMENT_VARIABLE,
-    CONFIGURABLE_STRATEGIES,
     DEFAULT_ADB_PORT,
     DEFAULT_STARTUP_GATE_POLICY,
     DEFAULT_STRATEGY,
     STARTUP_GATE_POLICIES,
     STARTUP_GATE_POLICY_ENVIRONMENT_VARIABLE,
     STRATEGY_ENVIRONMENT_VARIABLE,
+)
+from core.strategy_profiles import (
+    configurable_strategy_ids,
+    is_configurable_strategy,
+    strategy_profile_directory,
 )
 
 
@@ -46,6 +50,7 @@ class SystemdAutomationManager:
         service_name: str = DEFAULT_AUTOMATION_SERVICE,
         *,
         adb_environment_file: Path | str | None = DEFAULT_ADB_ENVIRONMENT_FILE,
+        strategy_profile_dir: Path | str | None = None,
         runner: CommandRunner = subprocess.run,
         timeout_seconds: float = 15.0,
     ) -> None:
@@ -59,6 +64,9 @@ class SystemdAutomationManager:
             Path(adb_environment_file).expanduser()
             if adb_environment_file is not None
             else None
+        )
+        self.strategy_profile_dir = strategy_profile_directory(
+            strategy_profile_dir
         )
         self._runner = runner
         self.timeout_seconds = max(1.0, float(timeout_seconds))
@@ -185,12 +193,17 @@ class SystemdAutomationManager:
         *,
         require_inactive: bool,
     ) -> dict[str, Any]:
-        """Persist and verify one allowlisted bundled strategy."""
+        """Persist and verify one bundled or published custom strategy."""
 
         normalized = str(strategy).strip().lower()
-        if normalized not in CONFIGURABLE_STRATEGIES:
+        strategy_options = self._strategy_options()
+        if not is_configurable_strategy(
+            normalized,
+            self.strategy_profile_dir,
+            allow_legacy_aliases=False,
+        ):
             raise AutomationProcessError(
-                "Strategy must be one of: " + ", ".join(CONFIGURABLE_STRATEGIES)
+                "Strategy must be one of: " + ", ".join(strategy_options)
             )
 
         with self._operation_lock:
@@ -371,7 +384,7 @@ class SystemdAutomationManager:
             "strategy_source": "default",
             "strategy_environment_file": str(path) if path is not None else None,
             "strategy_error": None,
-            "strategy_options": list(CONFIGURABLE_STRATEGIES),
+            "strategy_options": list(self._strategy_options()),
             "startup_gate_policy": DEFAULT_STARTUP_GATE_POLICY,
             "startup_gate_policy_source": "default",
             "startup_gate_policy_options": list(STARTUP_GATE_POLICIES),
@@ -449,10 +462,14 @@ class SystemdAutomationManager:
             )
         elif strategy_assignments:
             strategy = strategy_assignments[0]
-            if strategy not in {*CONFIGURABLE_STRATEGIES, DEFAULT_STRATEGY}:
+            if not is_configurable_strategy(
+                strategy,
+                self.strategy_profile_dir,
+                allow_legacy_aliases=True,
+            ):
                 status["strategy_error"] = (
                     f"{STRATEGY_ENVIRONMENT_VARIABLE} must be one of: "
-                    + ", ".join(CONFIGURABLE_STRATEGIES)
+                    + ", ".join(self._strategy_options())
                 )
             else:
                 status.update(
@@ -461,6 +478,7 @@ class SystemdAutomationManager:
                         "strategy_source": "environment-file",
                     }
                 )
+
         if len(startup_gate_assignments) > 1:
             status["startup_gate_policy_error"] = (
                 f"{path} must contain at most one "
@@ -481,6 +499,9 @@ class SystemdAutomationManager:
                     }
                 )
         return status
+
+    def _strategy_options(self) -> tuple[str, ...]:
+        return configurable_strategy_ids(self.strategy_profile_dir)
 
     def _write_automation_environment_file(
         self,

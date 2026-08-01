@@ -80,6 +80,7 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
         if parsed.path not in {
             "/api/v1/control",
             "/api/v1/process",
+            "/api/v1/strategy-profiles",
             "/api/v1/host-performance",
         }:
             self._json_error(HTTPStatus.NOT_FOUND, "Endpoint not found")
@@ -115,6 +116,8 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
                 response = self.server.service.apply_control(payload)
             elif parsed.path == "/api/v1/process":
                 response = self.server.service.apply_process_action(payload)
+            elif parsed.path == "/api/v1/strategy-profiles":
+                response = self.server.service.apply_strategy_profile(payload)
             else:
                 response = self.server.service.publish_host_performance(payload)
         except UnicodeDecodeError:
@@ -162,6 +165,8 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
             elif path.startswith("/api/v1/battles/"):
                 battle_id = unquote(path.removeprefix("/api/v1/battles/"))
                 payload = self.server.service.battle(battle_id)
+            elif path == "/api/v1/strategy-profiles":
+                payload = self.server.service.strategy_profiles()
             elif path == "/api/v1/activity":
                 payload = self.server.service.activity(
                     limit=_query_limit(query, default=80),
@@ -390,9 +395,16 @@ def main(argv: Optional[list[str]] = None) -> int:
         )
         return 2
 
+    strategy_profile_dir = (
+        Path(args.repository_root).expanduser()
+        / "config"
+        / "strategies"
+        / "custom"
+    )
     process_manager = SystemdAutomationManager(
         args.automation_service,
         adb_environment_file=args.automation_adb_environment_file,
+        strategy_profile_dir=strategy_profile_dir,
     )
     service = ControlSurfaceService(
         repository_root=args.repository_root,
@@ -406,6 +418,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         host_performance_retention_days=args.host_performance_retention_days,
         stale_after_seconds=args.stale_after_seconds,
         process_manager=process_manager,
+        strategy_profile_dir=strategy_profile_dir,
     )
     try:
         server = ControlSurfaceHTTPServer(

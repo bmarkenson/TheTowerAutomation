@@ -3318,7 +3318,7 @@ class App:
         strategy = get_strategy(config.strategy_name)
         if strategy:
             log(
-                f"[STRATEGY] Loaded bundled strategy profile {strategy.name}",
+                f"[STRATEGY] Loaded strategy profile {strategy.name}",
                 "INFO",
                 console=True,
             )

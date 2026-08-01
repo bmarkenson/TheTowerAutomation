@@ -3,28 +3,24 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+from core.strategy_profiles import (
+    LEGACY_STRATEGY_ALIASES,
+    load_published_strategy_plan,
+)
+
 from .base import BaseStrategy
 from .yaml_strategy import YamlStrategy
 
 UNKNOWN_STRATEGY_MSG = (
-    "Unknown strategy; use farm, farm_t18, farm_t19, tournament, none, or a "
+    "Unknown strategy; use a bundled or published custom profile, none, a "
     "legacy alias, or provide --strategy-config with a YAML plan."
 )
 
 _BUNDLED_STRATEGY_PROFILES = {
-    "farm": "farm_t18",
     "farm_t18": "farm_t18",
     "farm_t19": "farm_t19",
     "tournament": "tournament",
-    # Compatibility names all resolve to an explicit generated profile.
-    "farm_t19_experiment": "farm_t19",
-    "gc": "farm_t18",
-    "gc_farm_t18": "farm_t18",
-    "gc_farm_t19": "farm_t19",
-    "gc_farm_t19_experiment": "farm_t19",
-    "gc_skipper": "farm_t18",
-    "glass_cannon": "farm_t18",
-    "gc_manual_target_priority": "farm_t19",
+    **LEGACY_STRATEGY_ALIASES,
 }
 
 
@@ -45,4 +41,7 @@ def get_strategy(name: str) -> Optional[BaseStrategy]:
             / f"{profile_name}.strategy.yaml"
         )
         return YamlStrategy.from_file(str(path))
+    custom_plan = load_published_strategy_plan(nm)
+    if custom_plan is not None:
+        return YamlStrategy(custom_plan)
     raise ValueError(UNKNOWN_STRATEGY_MSG)

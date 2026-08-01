@@ -31,13 +31,13 @@ from uuid import uuid4
 import numpy as np
 from numpy.typing import NDArray
 
-from core.app_setup import CONFIGURABLE_STRATEGIES
 from core.control_directives import (
     ControlDirectiveError,
     ControlDirectiveStore,
     MAXIMUM_GAME_SPEED_TARGET,
     normalize_game_speed_target,
 )
+from core.strategy_profiles import is_configurable_strategy
 from utils.logger import log, log_action_intent, log_result
 from core.run_state import AUTOMATION
 from core.input import tap_if_visible
@@ -228,7 +228,7 @@ class AutomationSupervisor:
         directives: Dict[str, object],
     ) -> Optional[Tuple[str, object, str]]:
         strategy = str(directives.get("strategy") or "").strip().lower()
-        if strategy not in CONFIGURABLE_STRATEGIES:
+        if not is_configurable_strategy(strategy, allow_legacy_aliases=False):
             return None
         identity = directives.get("strategy_request_id") or directives.get(
             "strategy_updated_at"

@@ -15,7 +15,6 @@ import time
 from typing import Any, Mapping, Optional, Sequence
 
 from core.app_setup import (
-    CONFIGURABLE_STRATEGIES,
     DEFAULT_STARTUP_GATE_POLICY,
     STARTUP_GATE_POLICIES,
 )
@@ -39,6 +38,11 @@ from core.host_performance import (
     HostPerformanceStorageError,
     HostPerformanceStore,
 )
+from core.strategy_profiles import (
+    StrategyProfileConflictError,
+    StrategyProfileError,
+    StrategyProfileStore,
+)
 from utils.logger import DEFAULT_ACTIVITY_SCOPE_FILENAME
 
 
@@ -46,7 +50,7 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 16
+CONTROL_SURFACE_REVISION = 17
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -61,6 +65,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "host_performance_telemetry_v1",
     "observed_game_speed",
     "selected_strategy_process_start",
+    "strategy_profile_catalog_v1",
     "tournament_launch_confirmation",
 )
 ATTACHED_RESTART_TIMEOUT_SECONDS = 20.0
@@ -116,9 +121,8 @@ _ADB_TARGET_ACK_RE = re.compile(
     r"^\[CTRL] ADB target set to (?P<value>localhost:(?:[1-9]\d{0,4})) via control file$"
 )
 _STRATEGY_ACK_RE = re.compile(
-    r"^\[CTRL] Strategy set to (?P<value>"
-    + "|".join(re.escape(value) for value in CONFIGURABLE_STRATEGIES)
-    + r") via control file$"
+    r"^\[CTRL] Strategy set to "
+    r"(?P<value>[a-z][a-z0-9_]{2,47}) via control file$"
 )
 
 
@@ -152,6 +156,7 @@ class ControlSurfaceService:
         activity_scope_file: Path | str | None = None,
         stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS,
         process_manager: Optional[SystemdAutomationManager] = None,
+        strategy_profile_dir: Path | str = "config/strategies/custom",
     ) -> None:
         self.repository_root = Path(repository_root).resolve()
         self.control_path = self._resolve_path(control_file)
@@ -173,10 +178,64 @@ class ControlSurfaceService:
             retention_days=host_performance_retention_days,
         )
         self.stale_after_seconds = max(1, int(stale_after_seconds))
-        self.control_store = ControlDirectiveStore(self.control_path)
+        self.strategy_profile_dir = self._resolve_path(strategy_profile_dir)
+        self.profile_store = StrategyProfileStore(
+            profile_directory=self.strategy_profile_dir,
+        )
+        self.control_store = ControlDirectiveStore(
+            self.control_path,
+            strategy_profile_dir=self.strategy_profile_dir,
+        )
         self.process_manager = process_manager
         self._process_action_lock = threading.Lock()
         self._battle_mutation_lock = threading.RLock()
+
+    def strategy_profiles(self) -> dict[str, Any]:
+        """Return the constrained profile-editor catalog."""
+
+        return self.profile_store.catalog()
+
+    def apply_strategy_profile(
+        self,
+        request: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Validate or atomically publish one custom Farm profile."""
+
+        if not isinstance(request, Mapping):
+            raise ControlSurfaceRequestError("Request body must be a JSON object")
+        action = str(request.get("action") or "").strip().lower()
+        if action not in {"validate", "publish"}:
+            raise ControlSurfaceRequestError(
+                "action must be validate or publish"
+            )
+        try:
+            if action == "validate":
+                response = self.profile_store.validate(request.get("profile"))
+                response.pop("source", None)
+                response.pop("plan", None)
+            else:
+                response = self.profile_store.publish(
+                    request.get("profile"),
+                    expected_source_fingerprint=request.get(
+                        "expected_source_fingerprint"
+                    ),
+                )
+        except StrategyProfileConflictError as exc:
+            raise ControlSurfaceRequestError(str(exc), status=409) from exc
+        except StrategyProfileError as exc:
+            raise ControlSurfaceRequestError(str(exc)) from exc
+
+        response["action"] = action
+        if action == "publish":
+            profile = response.get("profile") or {}
+            audit_warning = self._append_audit(
+                "Published custom strategy profile "
+                f"{profile.get('id')} version {profile.get('version')}"
+            )
+            response["catalog"] = self.profile_store.catalog()
+            if audit_warning:
+                response["warning"] = audit_warning
+        return response
 
     def status(self, *, now: Optional[float] = None) -> dict[str, Any]:
         """Return operator intent, observed heartbeat, and process evidence."""
@@ -558,10 +617,10 @@ class ControlSurfaceService:
                         "strategy must be a non-empty string"
                     )
                 requested_strategy = strategy.strip().lower()
-                if requested_strategy not in CONFIGURABLE_STRATEGIES:
+                if not self.profile_store.has_strategy(requested_strategy):
                     raise ControlSurfaceRequestError(
                         "Strategy must be one of: "
-                        + ", ".join(CONFIGURABLE_STRATEGIES)
+                        + ", ".join(self.profile_store.strategy_ids())
                     )
             before = manager.status()
             if before.get("active") and requested_strategy is not None:
@@ -607,7 +666,7 @@ class ControlSurfaceService:
                             before.get("strategy") or ""
                         ).strip().lower()
                         if (
-                            effective_strategy in CONFIGURABLE_STRATEGIES
+                            self.profile_store.has_strategy(effective_strategy)
                             and exclusive_validation_definition_for_strategy(
                                 effective_strategy
                             )
@@ -722,6 +781,12 @@ class ControlSurfaceService:
                     raise ControlSurfaceRequestError(
                         "strategy must be a non-empty string"
                     )
+                strategy = strategy.strip().lower()
+                if not self.profile_store.has_strategy(strategy):
+                    raise ControlSurfaceRequestError(
+                        "Strategy must be one of: "
+                        + ", ".join(self.profile_store.strategy_ids())
+                    )
                 apply_to_active_run = request.get("apply_to_active_run", False)
                 if not isinstance(apply_to_active_run, bool):
                     raise ControlSurfaceRequestError(
@@ -741,7 +806,7 @@ class ControlSurfaceService:
                     else:
                         manager.set_strategy(strategy)
                     self.control_store.set_strategy(
-                        strategy.strip().lower(),
+                        strategy,
                         apply_mode=apply_mode,
                         source="control-surface-strategy",
                     )
@@ -752,7 +817,6 @@ class ControlSurfaceService:
                 ) as exc:
                     self._append_audit(f"Failed to configure strategy: {exc}")
                     raise ControlSurfaceRequestError(str(exc), status=409) from exc
-                strategy = strategy.strip().lower()
                 if apply_to_active_run:
                     audit = f"Requested strategy {strategy} for the active battle"
                 elif process_active:

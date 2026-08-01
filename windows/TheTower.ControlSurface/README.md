@@ -218,6 +218,22 @@ opens automatically. Pause a live runtime before configuring it. Staged skips
 are displayed under the button, are consumed by the next applicable run, and
 are cleared if the selected strategy changes.
 
+**Strategy profiles...** opens the constrained Farm Profile Builder introduced
+with Linux server revision 17. Bundled Farm profiles are read-only templates;
+clone one or create a new Farm profile, then choose its Tier and the policy plus
+allowlisted preset/value for Modules, Damage Slider, Orb Distance, and Target
+Priority. **Validate draft** resolves the presets and builds the complete plan
+on Linux without writing a file. **Publish profile** repeats validation and
+atomically stores the compact source with its generated plan under the fixed
+custom-profile directory. Republishing requires the revision fingerprint that
+was loaded by the dialog, so a stale editor cannot overwrite a newer version.
+
+Publishing does not select or activate the profile. After publishing, close the
+dialog and use the normal strategy dropdown plus **Use next battle**, **Switch
+this battle**, or a managed Start. Custom profiles appear dynamically in that
+dropdown. The first builder intentionally does not edit shared Farm invariants,
+preset catalogs, Tournament behavior, raw YAML rules, or executor actions.
+
 When a startup requirement fails, the runtime publishes the failed check,
 expected value, and allowed responses. The app opens **Startup check needs a
 decision** automatically; **Review preflight decision** reopens the current
