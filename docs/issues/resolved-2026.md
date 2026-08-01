@@ -614,6 +614,45 @@ and actionable work lives in
   `scope_preserved` for the repaired 07:23 scope.
 - **Fixed by:** `2ce357d`.
 
+### Tournament side rail placed Battle History outside its running match region
+
+- **Observed:** 2026-07-31 after attaching automation to an active Tournament
+  battle on `localhost:5555`.
+- **Symptom:** Attached-battle continuity opened the Tournament utility rail
+  but twice failed to find the visible Battle History control at confidence
+  `0.19`. It therefore recorded a conservative new activity scope with reason
+  `battle_history_unavailable_on_attachment` instead of reading the latest
+  completed battle.
+- **Evidence:** The live Tournament frame and retained fixture
+  `test/fixtures/running_menu_tournament_trophy_20260718.png` place Battle
+  History at `(909,696)` in the rail's left column. The unchanged template
+  matches that control at confidence `0.999998`, but the former bounded search
+  region began at `x=950` and excluded it.
+- **Safety response:** Diagnosis first used logs, read-only captures, and the
+  retained fixture. Rollout used the guarded attached-battle reload, preserved
+  `RUNNING`, the Tournament strategy, and the existing activity scope, and did
+  not Surrender or restart the battle. The live continuity route used only its
+  normal verified History navigation and returned to the active battle.
+- **Cause:** The running-battle clickmap assumed the ordinary battle rail's
+  right-column History placement. During a Tournament, the trophy control
+  changes the two-column rail layout and moves History left of that narrow
+  search band.
+- **Resolution:** The History row's bounded search region now spans both rail
+  columns while retaining the same vertical band, template, and confidence
+  threshold. This covers ordinary and Tournament layouts without widening
+  authority to unrelated rows.
+- **Regression:** `test/test_battle_history.py::
+  test_tournament_history_navigation_allows_the_left_rail_column` verifies the
+  retained Tournament rail and exact dynamic match center. Existing ordinary
+  running and Home navigation coverage remains unchanged.
+- **Validation:** All 28 focused Battle History, clickmap-access, and clickmap-
+  integrity tests passed, followed by all 959 repository tests. After the
+  guarded reload replaced PID 3112026 with PID 3121145, the live route matched
+  `(909,696)`, proved the History top, copied the latest completed Tier 19
+  wave-20 battle, recorded it in the existing scope
+  `aeaae687886148c496a99c3cd4bbe8db`, and restored the active Tournament.
+- **Fixed by:** `df25656`.
+
 ### Daily Gem claim drift escaped its match region and left battle in Store
 
 - **Observed:** 2026-07-28 during the active Tier 19 Farm battle's rollover

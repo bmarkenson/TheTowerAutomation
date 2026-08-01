@@ -77,6 +77,20 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   unchanged Tier 19 wave-4903 entry, returned to battle, and preserved the
   repaired scope.
 
+### 2026-07-31 Tournament Battle History rail matching
+
+- Commit `df25656` widens only the running Battle History row's horizontal
+  template region so it covers both the ordinary battle rail's right column
+  and the Tournament rail's left column.
+- A retained Tournament fixture now proves the exact `(909,696)` match center;
+  28 focused Battle History and clickmap checks passed, followed by all 959
+  repository tests.
+- A guarded attached-battle reload preserved `RUNNING`, the Tournament
+  strategy, and the existing activity scope. The live continuity pass matched
+  the corrected control, proved the list top, recorded the latest completed
+  Tier 19 wave-20 battle in that same scope, and returned to the active battle
+  without Surrendering or restarting it.
+
 ### 2026-07-31 GUI-managed reverse ADB forwarding
 
 - Commit `3ac1d88` preserves the Windows-local API forward and adds a separate
