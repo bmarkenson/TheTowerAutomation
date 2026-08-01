@@ -16,10 +16,16 @@ from core.input import tap_if_visible
 from core.label_tapper import is_visible
 from core.ss_capture import capture_adb_screenshot
 from core.tournament_results import (
+    attach_tournament_conditions,
     build_tournament_result,
     find_recent_tournament_result,
     make_tournament_id,
     persist_tournament_result,
+)
+from core.tournament_conditions import (
+    capture_current_tournament_conditions,
+    tournament_conditions_complete,
+    unavailable_tournament_conditions,
 )
 from utils.logger import log
 
@@ -49,6 +55,27 @@ def handle_tournament_results(
 
     existing = find_recent_tournament_result(summary, now=when)
     if existing is not None:
+        if not tournament_conditions_complete(existing.get("battle_conditions")):
+            conditions = _capture_battle_conditions(when)
+            if tournament_conditions_complete(conditions):
+                try:
+                    enriched = attach_tournament_conditions(existing, conditions)
+                    persist_tournament_result(enriched)
+                except Exception as exc:
+                    log(
+                        "[TOURNAMENT_RESULTS] Could not enrich recent result "
+                        f"with Battle Conditions: {exc}",
+                        "ERROR",
+                        console=True,
+                    )
+                else:
+                    existing = enriched
+                    log(
+                        "[TOURNAMENT_RESULTS] Attached Battle Conditions to recent "
+                        f"result {existing.get('tournament_id')}",
+                        "INFO",
+                        console=True,
+                    )
         log(
             "[TOURNAMENT_RESULTS] Current summary already matches recent result "
             f"{existing.get('tournament_id')}; skipping duplicate capture",
@@ -98,6 +125,9 @@ def handle_tournament_results(
     context = dict(battle_context or {})
     strategy_name = context.pop("strategy", None)
     run_configuration = context.pop("run_configuration", None)
+    battle_conditions = context.pop("battle_conditions", None)
+    if not tournament_conditions_complete(battle_conditions):
+        battle_conditions = _capture_battle_conditions(when)
     try:
         record = build_tournament_result(
             summary,
@@ -108,6 +138,7 @@ def handle_tournament_results(
             strategy_name=strategy_name,
             run_configuration=run_configuration,
             runtime_context=context,
+            battle_conditions=battle_conditions,
         )
         json_path, markdown_path = persist_tournament_result(record)
     except Exception as exc:
@@ -127,6 +158,21 @@ def handle_tournament_results(
     if record["quality"]["retain_source_images"]:
         _retain_evidence(result_id, summary, detailed_frame)
     return record
+
+
+def _capture_battle_conditions(when: datetime) -> dict[str, Any]:
+    """Keep optional save evidence from blocking terminal-result capture."""
+
+    try:
+        return capture_current_tournament_conditions(captured_at=when)
+    except Exception as exc:
+        log(
+            "[TOURNAMENT_RESULTS] Battle Condition save capture failed without "
+            f"blocking the result: {exc}",
+            "ERROR",
+            console=True,
+        )
+        return unavailable_tournament_conditions("condition_capture_failed")
 
 
 def _copy_detailed_report(frame: Frame) -> tuple[Optional[str], str]:

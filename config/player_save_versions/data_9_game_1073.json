@@ -9,7 +9,8 @@
     "bots_preset",
     "perk_first_choice",
     "perk_bans",
-    "guardian_chips"
+    "guardian_chips",
+    "tournament_conditions"
   ],
   "identity": {
     "data_version": 9,
@@ -33,7 +34,12 @@
     "targetPriorityList",
     "ultimateWeaponUnlocked",
     "ultimateWeaponOn",
-    "guardianChipSlot"
+    "guardianChipSlot",
+    "tourneyConditionsSeed",
+    "tournamentNumber",
+    "tournamentCheckedNumber",
+    "tournamentRecords",
+    "leagueID"
   ],
   "required_array_lengths": {
     "researchLevel": 250,
@@ -216,6 +222,17 @@
       null,
       null,
       null
+    ]
+  },
+  "tournament_conditions": {
+    "mapping_id": "data-9-game-1073-tournament-conditions-v1",
+    "seed_field": "tourneyConditionsSeed",
+    "active_number_field": "tournamentNumber",
+    "checked_number_field": "tournamentCheckedNumber",
+    "records_field": "tournamentRecords",
+    "league_field": "leagueID",
+    "validated_league_ids": [
+      5
     ]
   },
   "unmapped_checks": {

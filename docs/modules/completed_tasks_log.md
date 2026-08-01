@@ -37,6 +37,29 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-01 versioned Tournament conditions and record attachment
+
+- This commit adds the exact `data-9-game-1073` Legend Tournament generator.
+  It reproduces the game's seeded `System.Random` and condition pools, emits
+  stable IDs plus conventional aliases, and fails closed for unknown versions,
+  unvalidated leagues, stale registry dates, or conflicting save identities.
+  Tournaments 271–287 match all 16 operator-supplied historical rows and the
+  live Tournament 287 Heat/Overheat inspection without a condition mismatch.
+- Schema-version-2 Tournament records retain the complete normalized Heat and
+  fixed Overheat identity inventory, event number, source version, and
+  provenance. Terminal capture performs a bounded stable save read without UI
+  input; missing evidence remains explicit and cannot invalidate or block the
+  result. A duplicate result can be enriched without reopening detail controls.
+- A dry-run-first explicit-UTC-date tool backfilled all six existing canonical
+  Tournament JSON/Markdown pairs for events 283, 284, 285, and 287. The first
+  apply reported six updates and no conflicts; the second reported all six
+  unchanged. The operator-owned raw save remained untracked and was not copied
+  into tests, logs, or committed evidence.
+- Focused save, generator, result, and handler validation passed 52 tests. The
+  full shared-worktree suite passed 1,074 tests; its six failures were confined
+  to concurrently edited strategy-authoring/control-surface files outside this
+  change.
+
 ### 2026-08-01 persistent per-user Windows tunnel host
 
 - Commit `82ed42a` replaces GUI-owned OpenSSH processes with the on-demand,

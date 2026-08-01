@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import copy
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
@@ -22,13 +22,18 @@ from core.battle_stats import (
     render_perk_selection_timeline_markdown,
     render_survival_ability_activations_markdown,
 )
+from core.tournament_conditions import (
+    derive_tournament_conditions,
+    tournament_conditions_complete,
+    unavailable_tournament_conditions,
+)
 from utils.ocr_utils import ocr_text_and_conf
 
 
 Frame = np.ndarray
 SUMMARY_CROP = (100, 300, 880, 1380)
 DEFAULT_RECORDS_DIR = Path("logs/tournaments")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 _REQUIRED_SUMMARY_FIELDS = {
     "league",
     "wave",
@@ -124,6 +129,7 @@ def build_tournament_result(
     strategy_name: Optional[str] = None,
     run_configuration: Optional[Mapping[str, Any]] = None,
     runtime_context: Optional[Mapping[str, Any]] = None,
+    battle_conditions: Optional[Mapping[str, Any]] = None,
     summary_text_fn: Callable[..., tuple[str, float]] = ocr_text_and_conf,
 ) -> dict[str, Any]:
     """Build one Tournament result from its summary and optional copied report."""
@@ -175,6 +181,7 @@ def build_tournament_result(
         record_id=tournament_id,
         observed_tier=observed_tier,
     )
+    conditions = _conditions_for_summary(battle_conditions, summary)
     return {
         "schema_version": SCHEMA_VERSION,
         "tournament_id": tournament_id or make_tournament_id(when),
@@ -184,6 +191,7 @@ def build_tournament_result(
         "battle_type_analysis": classification,
         "run_configuration": copy.deepcopy(dict(run_configuration or {})),
         "runtime": runtime,
+        "battle_conditions": conditions,
         "summary": summary,
         "detailed_stats": detailed,
         "quality": {
@@ -193,6 +201,54 @@ def build_tournament_result(
             "identity": identity,
         },
     }
+
+
+def attach_tournament_conditions(
+    record: Mapping[str, Any],
+    evidence: Optional[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Return a record copy with normalized nonblocking condition evidence."""
+
+    result = copy.deepcopy(dict(record))
+    result["schema_version"] = max(
+        SCHEMA_VERSION,
+        int(result.get("schema_version") or 0),
+    )
+    result["battle_conditions"] = _conditions_for_summary(
+        evidence,
+        result.get("summary", {}),
+    )
+    return result
+
+
+def _conditions_for_summary(
+    evidence: Optional[Mapping[str, Any]],
+    summary: Mapping[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(evidence, Mapping):
+        return unavailable_tournament_conditions("not_captured")
+    candidate = copy.deepcopy(dict(evidence))
+    if not tournament_conditions_complete(candidate):
+        return candidate
+
+    summary_league = str(
+        summary.get("fields", {}).get("league", {}).get("value") or ""
+    ).strip()
+    evidence_league = str(candidate.get("league", {}).get("name") or "").strip()
+    if (
+        summary_league
+        and evidence_league
+        and summary_league.casefold() != evidence_league.casefold()
+    ):
+        return unavailable_tournament_conditions(
+            "summary_league_mismatch",
+            data_version=candidate.get("data_version"),
+            game_version=candidate.get("game_version"),
+            tournament_number=candidate.get("tournament_number"),
+            league_id=candidate.get("league", {}).get("id"),
+            source=candidate.get("source"),
+        )
+    return candidate
 
 
 def _compare_wave(
@@ -240,6 +296,132 @@ def persist_tournament_result(
     )
     _atomic_write(markdown_path, render_tournament_markdown(record))
     return json_path, markdown_path
+
+
+def backfill_tournament_conditions(
+    event_numbers_by_utc_date: Mapping[str, int],
+    *,
+    records_dir: Path | str = DEFAULT_RECORDS_DIR,
+    data_version: int = 9,
+    game_version: int = 1073,
+    league_id: int = 5,
+    write: bool = False,
+    attached_at: Optional[datetime] = None,
+) -> dict[str, Any]:
+    """Plan or apply an explicit-date condition backfill to Tournament records.
+
+    Dates are supplied by the caller rather than inferred indefinitely from a
+    calendar cadence. Existing complete evidence is never replaced when its
+    Tournament number differs from the requested event.
+    """
+
+    directory = Path(records_dir)
+    when = (attached_at or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    items: list[dict[str, Any]] = []
+    if not directory.exists():
+        return {
+            "schema_version": 1,
+            "write": bool(write),
+            "records_dir": str(directory),
+            "items": [],
+            "summary": {"total": 0, "updated": 0, "planned": 0, "skipped": 0},
+        }
+
+    for path in sorted(directory.glob("Tournament*.json")):
+        item: dict[str, Any] = {"file": path.name}
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(record, Mapping):
+                raise ValueError("record root is not an object")
+            if str(record.get("tournament_id") or "") != path.stem:
+                raise ValueError("Tournament id does not match filename")
+            captured = datetime.fromisoformat(str(record["captured_at"]))
+        except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+            item.update({"action": "skipped", "reason": f"unreadable:{exc}"})
+            items.append(item)
+            continue
+
+        event_date = captured.astimezone(timezone.utc).date().isoformat()
+        item["event_date"] = event_date
+        tournament_number = event_numbers_by_utc_date.get(event_date)
+        if tournament_number is None:
+            item.update({"action": "skipped", "reason": "event_date_unmapped"})
+            items.append(item)
+            continue
+
+        existing = record.get("battle_conditions")
+        if tournament_conditions_complete(existing):
+            existing_number = existing.get("tournament_number")
+            if existing_number != tournament_number:
+                item.update(
+                    {
+                        "action": "skipped",
+                        "reason": "existing_tournament_number_conflict",
+                        "tournament_number": tournament_number,
+                        "existing_tournament_number": existing_number,
+                    }
+                )
+            else:
+                item.update(
+                    {
+                        "action": "unchanged",
+                        "reason": "complete_evidence_already_present",
+                        "tournament_number": tournament_number,
+                        "codes": list(existing.get("summary_codes") or []),
+                    }
+                )
+            items.append(item)
+            continue
+
+        evidence = derive_tournament_conditions(
+            tournament_number,
+            league_id,
+            data_version=data_version,
+            game_version=game_version,
+            source={
+                "kind": "historical_calibration",
+                "method": "explicit_utc_event_date_mapping",
+                "event_date": event_date,
+                "attached_at": when.isoformat(),
+            },
+        )
+        updated = attach_tournament_conditions(record, evidence)
+        normalized = updated["battle_conditions"]
+        if not tournament_conditions_complete(normalized):
+            item.update(
+                {
+                    "action": "skipped",
+                    "reason": str(normalized.get("reason") or "evidence_incomplete"),
+                    "tournament_number": tournament_number,
+                }
+            )
+            items.append(item)
+            continue
+        if write:
+            persist_tournament_result(updated, records_dir=directory)
+        item.update(
+            {
+                "action": "updated" if write else "planned",
+                "reason": "",
+                "tournament_number": tournament_number,
+                "codes": list(normalized.get("summary_codes") or []),
+            }
+        )
+        items.append(item)
+
+    return {
+        "schema_version": 1,
+        "write": bool(write),
+        "records_dir": str(directory),
+        "items": items,
+        "summary": {
+            "total": len(items),
+            "updated": sum(item.get("action") == "updated" for item in items),
+            "planned": sum(item.get("action") == "planned" for item in items),
+            "unchanged": sum(item.get("action") == "unchanged" for item in items),
+            "skipped": sum(item.get("action") == "skipped" for item in items),
+        },
+    }
 
 
 def find_recent_tournament_result(
@@ -324,6 +506,52 @@ def render_tournament_markdown(record: Mapping[str, Any]) -> str:
         value = field.get("raw", field.get("value", ""))
         lines.append(f"- {label}: {value}")
 
+    conditions = record.get("battle_conditions", {})
+    lines.extend(["", "## Battle conditions", ""])
+    if tournament_conditions_complete(conditions):
+        lines.append(
+            f"- Tournament number: {conditions.get('tournament_number')}"
+        )
+        lines.append(
+            "- Codes: " + " / ".join(conditions.get("summary_codes", []))
+        )
+        source = conditions.get("source", {})
+        source_kind = source.get("kind") or "unknown"
+        source_method = source.get("method") or "unknown"
+        lines.append(f"- Provenance: {source_kind} ({source_method})")
+        lines.append(
+            "- UI fallback preserved: "
+            + (
+                "yes"
+                if conditions.get("ui_fallback", {}).get("preserved")
+                else "no"
+            )
+        )
+        lines.extend(
+            [
+                "",
+                "| Category | Code | Condition | Selection |",
+                "| --- | --- | --- | --- |",
+            ]
+        )
+        for item in conditions.get("heat", []) + conditions.get("overheat", []):
+            lines.append(
+                "| "
+                + " | ".join(
+                    (
+                        str(item.get("category") or ""),
+                        str(item.get("code") or "—"),
+                        str(item.get("name") or item.get("id") or ""),
+                        str(item.get("selection") or ""),
+                    )
+                )
+                + " |"
+            )
+    else:
+        lines.append(f"- Status: {conditions.get('status', 'unavailable')}")
+        lines.append(f"- Reason: {conditions.get('reason', 'not_captured')}")
+        lines.append("- UI fallback required: yes")
+
     sections = record.get("detailed_stats", {}).get("sections", [])
     for section in sections:
         lines.extend(["", f"## {section.get('name', 'Stats')}", ""])
@@ -369,6 +597,8 @@ def _atomic_write(path: Path, payload: str) -> None:
 
 
 __all__ = [
+    "attach_tournament_conditions",
+    "backfill_tournament_conditions",
     "build_tournament_result",
     "find_recent_tournament_result",
     "make_tournament_id",

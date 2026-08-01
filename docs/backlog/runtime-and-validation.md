@@ -125,30 +125,30 @@ checked-item detail remains in the
   record without depending on `thetower.lol`. Use the canonical alias mapping
   and source-precedence rules in
   [`../game_strategy.md`](../game_strategy.md#tournament-battle-condition-abbreviations).
-  - [ ] After the concurrent player-save calibration is complete, determine
-    whether `playerInfo.dat` contains the current Tournament's condition set.
-    Accept it only through an exact-version, structurally validated mapping
-    with condition IDs, polarity, and semantics cross-checked against the same
-    Tournament's UI and a verified save-serialization boundary. Do not retain
-    or log unmapped raw save fields.
+  - [x] Map current Legend Tournament identity through `playerInfo.dat`. On
+    exact version 1073, an active seed or a checked number bound to the matching
+    registry date and league drives the cross-channel-validated generator.
+    Tournaments 271–287 and the current UI set agree exactly; no raw save or
+    unmapped field is retained in record evidence.
   - [ ] Preserve a read-only UI fallback that inventories both Heat and
     Overheat tabs from a verified Tournament Heat panel, scrolls to both ends,
     deduplicates overlapping rows, and captures each displayed name, level,
     effective description, and activation wave where present. The retained
     `active_tournament_heat_20260718.png` fixture supplies initial positive
     evidence but is not a complete scroll sequence.
-  - [ ] Normalize known conditions to stable IDs while retaining the exact
-    display text and provenance (`player_save` or `tournament_heat_ui`), game
-    version, and capture time. Unknown conditions must remain losslessly
-    reportable instead of being dropped or guessed.
-  - [ ] Bind the observation to the matching Tournament run/session and merge
+  - [ ] Complete cross-source normalization. The versioned save path now emits
+    stable IDs, names, aliases, provenance, game version, capture time, and
+    explicit fallback state. The remaining UI reader must retain exact display
+    text and unknown conditions losslessly instead of dropping or guessing.
+  - [x] Bind versioned save evidence to the matching Tournament run and merge
     it into the eventual `Tournament*.json` record. A missing or incomplete
     condition inventory must remain explicit and nonblocking; it must not risk
     Tournament launch, interfere with an active run, or prevent terminal-result
     capture.
-  - [ ] Add retained-fixture and synthetic-record coverage for alias
-    normalization, complete-scroll merging, unknown conditions, provenance,
-    attached-run capture, and terminal-record merge behavior.
+  - [ ] Finish retained-fixture and synthetic-record coverage. Generator,
+    version/league failure, post-run identity, provenance, attached-run,
+    duplicate enrichment, terminal merge, and idempotent historical backfill
+    are covered; complete-scroll merging and unknown UI conditions remain.
 
 ## Strategy-driven Damage Slider schedule
 
@@ -345,11 +345,15 @@ stages:
   - [x] Add durable custom-profile skips for Auto Pick enabled, Perk Bans, and
     Auto Pick priority; add managed Ban and ordered Auto Pick editors; and
     round-trip the complete Farm setup so unexposed settings are preserved.
-  - [ ] Add specialized value editors for every registered setting, including
-    remaining compact Farm controls and profile-local structured values where
-    justified. Keep generated rules and executor actions protected rather than
-    exposing them as ordinary form data; treat any future raw-rule mode as a
-    separately reviewed advanced feature.
+  - [x] Add specialized value editors for every currently registered setting.
+    Keep generated rules and executor actions protected rather than exposing
+    them as ordinary form data; treat any future raw-rule mode as a separately
+    reviewed advanced feature.
+  - [ ] Add profile-local loadout definitions without removing shared presets:
+    Module and slot definitions, an ordered Target Priority list, and an Orb
+    Distance relationship derived from observed Attack Range, Extra Orb
+    distance, and Workshop distance. Published Strategies must embed resolved
+    local data and remain independent of later mutable preset changes.
   - [ ] Refine running-battle validation into an explicit strategy gate so
     observation and allowlisted independent collectors can continue while
     strategy and lifecycle actions are blocked. Validate this authority split

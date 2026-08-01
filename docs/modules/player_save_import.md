@@ -12,7 +12,8 @@ The first mapping is `data-9-game-1073`, selected by the exact save fields
 with an explicit per-check validation allowlist. It was derived from the
 repository-root operator sample and recognizes the sample's five 28-slot
 card-preset records, including the distinction between its stored base slot
-count and the effective preset width.
+count and the effective preset width. The same exact mapping now includes the
+validated Legend Tournament condition generator.
 
 Live cross-channel calibration on game `28.3.1` confirmed that
 `versionNumber: 1073` is the installed application's `versionCode`. At one
@@ -39,6 +40,20 @@ Home alone did not flush the tested preset change. These settings serialized
 when Android Home backgrounded the game, without force-stop, and each
 restoration was verified through both the UI and a second app-pause flush.
 
+Tournament calibration established a different persistence boundary. During
+an active Tournament the game stores the Tournament number as its condition
+seed, but after the run it clears `tourneyConditionsSeed` and
+`tournamentNumber` to zero. The post-run save still binds
+`tournamentCheckedNumber` to a same-number `tournamentRecords` entry with its
+UTC event date and Legend league. The installed version-1073 game code seeds
+the compatible `System.Random` algorithm with that Tournament number, chooses
+one of Energy Shields Down or Death Defy Down, chooses five distinct entries
+from the Legend pool, and adds the fixed Legend conditions. Tournaments
+271–287 reproduced all 16 operator-supplied historical rows plus the current
+Heat panel with no mismatch. Unsupported versions, unvalidated leagues,
+conflicting identities, and stale registry dates publish no conditions and
+require the retained UI path.
+
 This is deliberately a partial validation, not a global promotion. The exact
 mapping now marks Cards, Workshop, and Bots preset selection; First Perk; Ban
 Perks; equipped Guardians; and Demon Mode/Nuke recharge behavior as validated
@@ -63,7 +78,8 @@ The currently mapped profile checks are:
 - Guardian chips and Target Priority order;
 - Auto Pick Perks, bans, first choice, and the mapped Auto Pick priority
   prefix (the visible ranked block is distinct from the save's unranked tail);
-- Ultimate Weapon primary toggles, Poison Swamp Stun, and Spotlight Missiles.
+- Ultimate Weapon primary toggles, Poison Swamp Stun, and Spotlight Missiles;
+- current Legend Tournament identity and version-derived Battle Conditions.
 
 Card recharge modes are now mapped and validated. Damage Slider, Modules, and
 Orb Distance remain explicitly unmapped and always use the UI. More fields can
@@ -132,6 +148,7 @@ not yet adopted the navigation shortcut.
 | Free Upgrade locks | Three `*LockedFreeUpgrades` arrays | The three Farm locks agree; the full index-to-upgrade map is not validated. | Either validate every supported index and polarity or narrow the mapping to proven indices and fail closed whenever another bit is set. |
 | Target Priority | `targetPriorityList` plus `target_priority_ids` | Plausible ordered mapping, not allowlisted. | Compare a fresh in-battle list and use one reversible adjacent reorder/restore to prove index order and serialization. |
 | Ultimate Weapons | `ultimateWeaponUnlocked`, `ultimateWeaponOn`, `poisonSwampStunOff`, `spotlightSmartMissilesOff` | Weapon order and current values agree; Poison Swamp Stun polarity is causal. The combined check remains unvalidated. | Prove all nine primary-toggle booleans and Spotlight Missiles independently, or split the combined check into smaller atomic evidence before allowlisting. |
+| Tournament conditions | `tourneyConditionsSeed`, `tournamentNumber`, `tournamentCheckedNumber`, `tournamentRecords`, `leagueID` plus the exact-version generator | Shortcut-ready for Legend on version 1073. Seventeen consecutive event sets agree with historical and live UI evidence. | Retain scheduled Heat/Overheat UI audits; validate each additional league and every new exact game version independently. |
 | Modules | Module equipped/inventory records | Explicitly unmapped. | Map slot order, stable module identity, Primary/Assist roles, rarity, level ownership, and substats through read-only UI comparisons; do not swap modules solely for calibration. |
 | Damage Slider | Field not identified | Explicitly unmapped. | In an explicitly authorized test battle, correlate at least two distinct values and restoration, including percentage encoding and save timing. |
 | Orb Distance | Candidate distance/preset fields not accepted | Explicitly unmapped. | In an explicitly authorized battle, cycle known Extra/Workshop presets, prove units and selected-preset semantics, and restore the original pair. |
@@ -150,7 +167,7 @@ mapping ID, source fields, capture time, and validation status.
 | Ultimate Weapon progression | unlock and level arrays plus candidate cooldown/quantity fields | Prove weapon order and the three-level tuple layout for all nine weapons before reporting names or levels. |
 | Guardian and Bot progression | unlock/level arrays and candidate Bot fields | Map every stable ID, slot count, level tuple, and preset field through read-only UI evidence; keep cost-bearing changes outside calibration. |
 | Module inventory and equipped loadout | equipped and module-record structures | Decode stable IDs, uniqueness, slot/role, rarity, levels, ancestral stars, and substats; cross-check multiple naturally occurring loadouts. |
-| Tournament conditions | Field discovery pending | Follow the separate [Tournament condition plan](../backlog/runtime-and-validation.md#tournament-battle-condition-evidence); unknown conditions must remain lossless and nonblocking. |
+| Tournament conditions | Exact-version seeded generator plus current event identity fields | Legend condition identity is mapped for version 1073 and is attached to Tournament records. Complete UI inventory, effective descriptions, lower leagues, and unknown-version handling remain in the separate [Tournament condition plan](../backlog/runtime-and-validation.md#tournament-battle-condition-evidence). |
 
 ### Runtime rollout sequence
 
@@ -185,6 +202,12 @@ mapping ID, source fields, capture time, and validation status.
 | No verified serialization boundary | Treat the pull as potentially stale and use the existing UI check. |
 | Missing, incomplete, stale, or mismatched value | Use the existing UI check for that setting. |
 | UI automation changes a setting | Verify the result in the UI; do not treat the pre-action save as confirmation. |
+
+Tournament identity is not a recently changed profile setting. Its terminal
+record attachment may use a stable read without an app-pause flush only when an
+active seed is present or the checked number, same-number registry entry,
+league, and UTC event date all agree. That exception derives immutable event
+identity; it never confirms an input or suppresses a configuration repair.
 
 The save is suitable for persistent state that the game has finished writing.
 Fresh UI evidence remains authoritative for the current screen, temporary
@@ -239,6 +262,27 @@ validated mapping. `--freshness-verified` is an explicit caller assertion that
 the game completed a known serialization boundary before the pull; the tool
 does not infer that fact from a recent capture timestamp. `--output` writes
 only the normalized JSON report, never the raw save.
+
+## Tournament record attachment
+
+At `TOURNAMENT_RESULTS`, the terminal handler makes one bounded stable save
+read before persistence. Complete exact-version evidence becomes the
+schema-version-2 record's `battle_conditions` field and Markdown section.
+Failure remains explicit, does not invalidate the result, and leaves the UI
+fallback required. A duplicate terminal capture can enrich a recent record
+without reopening its detail controls.
+
+Historical records use explicit UTC event-date mappings rather than assuming
+the Tournament calendar continues forever. The backfill command is dry-run by
+default and refuses to replace conflicting complete evidence:
+
+```bash
+.venv/bin/python tools/backfill_tournament_conditions.py \
+  --event 2026-08-01=287
+```
+
+Add `--apply` only after reviewing the complete plan. JSON and Markdown are
+then regenerated atomically from the same normalized record.
 
 ## Version update and promotion procedure
 

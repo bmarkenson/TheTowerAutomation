@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 from pathlib import Path
 from unittest.mock import call, patch
 
@@ -6,7 +7,9 @@ import cv2
 
 from core.matcher import get_match
 from core.state_detector import detect_state_and_overlays
+from core.tournament_conditions import derive_tournament_conditions
 from core.tournament_results import (
+    backfill_tournament_conditions,
     build_tournament_result,
     find_recent_tournament_result,
     ocr_tournament_summary,
@@ -100,6 +103,16 @@ def test_tournament_result_persists_summary_and_exact_detailed_report(tmp_path):
                 "nuke_activations": [],
             },
         },
+        battle_conditions=derive_tournament_conditions(
+            283,
+            5,
+            data_version=9,
+            game_version=1073,
+            source={
+                "kind": "historical_calibration",
+                "method": "versioned_generator_cross_check",
+            },
+        ),
         summary_text_fn=summary_text,
     )
     json_path, markdown_path = persist_tournament_result(
@@ -111,6 +124,18 @@ def test_tournament_result_persists_summary_and_exact_detailed_report(tmp_path):
     assert record["battle_type"] == "tournament"
     assert record["runtime"]["observed_tier"] == 19
     assert record["battle_type_analysis"]["observed_tier"] == 19
+    assert record["battle_conditions"]["tournament_number"] == 283
+    assert record["battle_conditions"]["summary_codes"] == [
+        "DR",
+        "TR",
+        "AR",
+        "MB",
+        "DD",
+        "PU",
+        "MAE",
+        "SD",
+        "SRM",
+    ]
     assert record["quality"]["identity"] == {
         "summary_wave": 2558,
         "detailed_wave": 2558,
@@ -128,6 +153,8 @@ def test_tournament_result_persists_summary_and_exact_detailed_report(tmp_path):
     assert "## Survival ability activations" in markdown
     assert "| 1 | 2100 | 2500 | 2026-07-18T05:30:00-07:00 |" in markdown
     assert "Demon Mode first activation: approximately wave 2120" in markdown
+    assert "## Battle conditions" in markdown
+    assert "Codes: DR / TR / AR / MB / DD / PU / MAE / SD / SRM" in markdown
 
     matched = find_recent_tournament_result(
         frame,
@@ -188,6 +215,15 @@ def test_tournament_handler_uses_only_visible_detail_controls_and_never_ok():
             "handlers.tournament_result_handler.persist_tournament_result",
             return_value=(Path("result.json"), Path("result.md")),
         ),
+        patch(
+            "handlers.tournament_result_handler.capture_current_tournament_conditions",
+            return_value=derive_tournament_conditions(
+                283,
+                5,
+                data_version=9,
+                game_version=1073,
+            ),
+        ),
         patch("handlers.tournament_result_handler._retain_evidence"),
         patch("handlers.tournament_result_handler.time.sleep"),
     ):
@@ -212,3 +248,92 @@ def test_round_stats_copy_control_is_matched_not_static():
 
     assert point == (907, 1634)
     assert confidence >= 0.99
+
+
+def test_recent_result_is_enriched_without_reopening_detail_controls():
+    summary = _load("tournament_stats_20260718.png")
+    existing = build_tournament_result(
+        summary,
+        captured_at=datetime.fromisoformat("2026-07-18T06:20:00-07:00"),
+    )
+    conditions = derive_tournament_conditions(
+        283,
+        5,
+        data_version=9,
+        game_version=1073,
+    )
+
+    with (
+        patch(
+            "handlers.tournament_result_handler.is_visible",
+            return_value=True,
+        ),
+        patch(
+            "handlers.tournament_result_handler.find_recent_tournament_result",
+            return_value=existing,
+        ),
+        patch(
+            "handlers.tournament_result_handler.capture_current_tournament_conditions",
+            return_value=conditions,
+        ),
+        patch(
+            "handlers.tournament_result_handler.persist_tournament_result",
+            return_value=(Path("result.json"), Path("result.md")),
+        ) as persist,
+        patch("handlers.tournament_result_handler.tap_if_visible") as tap,
+    ):
+        result = handle_tournament_results(summary)
+
+    assert result is not None
+    assert result["battle_conditions"]["tournament_number"] == 283
+    persist.assert_called_once()
+    tap.assert_not_called()
+
+
+def test_explicit_utc_date_backfill_is_dry_run_then_atomic_update(tmp_path):
+    tournament_id = "Tournament20260731T201612-0700"
+    record = {
+        "schema_version": 1,
+        "tournament_id": tournament_id,
+        "captured_at": "2026-07-31T20:16:12-07:00",
+        "summary": {
+            "fields": {"league": {"value": "Legend League"}},
+        },
+        "detailed_stats": {"sections": []},
+        "runtime": {},
+        "quality": {"valid": True, "warnings": []},
+    }
+    persist_tournament_result(record, records_dir=tmp_path)
+
+    planned = backfill_tournament_conditions(
+        {"2026-08-01": 287},
+        records_dir=tmp_path,
+        write=False,
+        attached_at=datetime.fromisoformat("2026-08-02T00:00:00+00:00"),
+    )
+
+    assert planned["summary"]["planned"] == 1
+    stored = json.loads((tmp_path / f"{tournament_id}.json").read_text())
+    assert "battle_conditions" not in stored
+
+    applied = backfill_tournament_conditions(
+        {"2026-08-01": 287},
+        records_dir=tmp_path,
+        write=True,
+        attached_at=datetime.fromisoformat("2026-08-02T00:00:00+00:00"),
+    )
+
+    assert applied["summary"]["updated"] == 1
+    stored = json.loads((tmp_path / f"{tournament_id}.json").read_text())
+    assert stored["schema_version"] == 2
+    assert stored["battle_conditions"]["tournament_number"] == 287
+    assert stored["battle_conditions"]["source"]["event_date"] == "2026-08-01"
+    markdown = (tmp_path / f"{tournament_id}.md").read_text(encoding="utf-8")
+    assert "DR / SPD / MB / DD / UWD / BU / FU / SD / SRM" in markdown
+
+    unchanged = backfill_tournament_conditions(
+        {"2026-08-01": 287},
+        records_dir=tmp_path,
+        write=True,
+    )
+    assert unchanged["summary"]["unchanged"] == 1

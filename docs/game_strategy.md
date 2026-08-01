@@ -260,11 +260,14 @@ account-adjusted effect values.
 The repository can acquire stronger evidence directly. The retained
 [`active Tournament Heat fixture`](../test/fixtures/ui_state_20260714/active_tournament_heat_20260718.png)
 proves that the in-battle panel exposes full names, levels, and effective
-descriptions under separate Heat and Overheat tabs. A future exact-version
-`playerInfo.dat` mapping may provide the same current-Tournament identity more
-directly, but an unmapped save field is not semantic evidence. Until such a
-mapping is calibrated, a complete UI panel read is the authoritative
-repository-owned source and external tournament sites are supplemental.
+descriptions under separate Heat and Overheat tabs. The exact version-1073
+`playerInfo.dat` mapping now binds the current Legend Tournament number and
+league to the same-version deterministic generator. Its condition identities
+matched Tournaments 271–287 and the current live panel, so those normalized
+identities may be attached to Tournament records without navigating the panel.
+The UI remains authoritative for account-adjusted effects, levels, activation
+waves, unknown conditions, unvalidated leagues, and new versions; external
+tournament sites remain supplemental.
 
 The following table captures the material T18/T19 differences visible in the
 current game and public references. Condition levels describe the Tier rule.

@@ -77,6 +77,19 @@ def _decoded_save() -> dict:
         "guardianSlotsUnlocked": 2,
         "guardianChipUnlocked": [False] * 10,
         "guardianChipLevel": [0] * 30,
+        "tourneyConditionsSeed": 287,
+        "tournamentNumber": 287,
+        "tournamentCheckedNumber": 287,
+        "tournamentRecords": [
+            {
+                "tournamentNumber": 287,
+                "date": 0,
+                "leagueID": 5,
+                "wave": 1,
+                "rank": 0,
+            }
+        ],
+        "leagueID": 5,
         "researchLevel": [0] * 250,
         "upgradeWorkshopLevel": [0] * 20,
         "upgradeWorkshopDefenseLevel": [0] * 20,
@@ -123,6 +136,7 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
         "perk_first_choice",
         "perk_bans",
         "guardian_chips",
+        "tournament_conditions",
     )
     assert snapshot.shape_valid
     assert snapshot.source_name == "playerInfo.dat"
@@ -144,6 +158,17 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
     ]
     assert snapshot.checks["perk_auto_pick_order"].value[-1] == "damage"
     assert not snapshot.checks["perk_auto_pick_order"].complete
+    assert snapshot.checks["tournament_conditions"].value["summary_codes"] == [
+        "DR",
+        "SPD",
+        "MB",
+        "DD",
+        "UWD",
+        "BU",
+        "FU",
+        "SD",
+        "SRM",
+    ]
     assert snapshot.checks["modules"].status == "unmapped"
 
     rendered = json.dumps(snapshot.as_dict())

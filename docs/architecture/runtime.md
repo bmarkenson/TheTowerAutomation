@@ -404,6 +404,14 @@ evidence is attached.
   resolved configured intent, separately sourced observed run configuration,
   observed preflight/runtime evidence, and derived metrics. Consumers must read
   these fields instead of relying on a terminal screenshot.
+- Tournament records also retain a normalized `battle_conditions` inventory.
+  On exact version 1073, the terminal handler reads a stable save without UI
+  input, cross-checks current event number, registry date, and Legend league,
+  then applies the versioned seeded generator. Missing, conflicting, unknown-
+  version, or unvalidated-league evidence is explicit and nonblocking; it does
+  not weaken result capture, and the Heat/Overheat UI path remains the audit
+  and fallback source. Schema-version-2 Tournament records render the same
+  condition evidence in their Markdown view.
 - Periodic valid Coins/min readings are stored as bounded numeric samples with
   their timestamp, wave, and OCR confidence, then attached to the completed
   record. The runtime does not maintain a separate per-run Coins CSV or toggle

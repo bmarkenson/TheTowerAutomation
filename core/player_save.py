@@ -19,6 +19,8 @@ from pathlib import Path
 import time
 from typing import Any, Optional
 
+from core.tournament_conditions import derive_tournament_conditions_from_save
+
 
 ROOT = Path(__file__).resolve().parents[1]
 PLAYER_SAVE_MAPPING_DIR = ROOT / "config" / "player_save_versions"
@@ -218,7 +220,7 @@ def decode_player_save_bytes(
     checks: dict[str, SaveCheckEvidence] = {}
     profile_summary: dict[str, Any] = {}
     if shape_valid:
-        checks = _build_checks(decoded, mapping)
+        checks = _build_checks(decoded, mapping, captured_at=stamp)
         profile_summary = _build_profile_summary(decoded, mapping)
     else:
         warnings.append(
@@ -528,6 +530,8 @@ def _build_profile_summary(
 def _build_checks(
     decoded: Mapping[str, Any],
     mapping: Mapping[str, Any],
+    *,
+    captured_at: datetime,
 ) -> dict[str, SaveCheckEvidence]:
     checks: dict[str, SaveCheckEvidence] = {}
     for check_id, spec in (mapping.get("presets") or {}).items():
@@ -641,6 +645,32 @@ def _build_checks(
     )
 
     checks["ultimate_weapons"] = _ultimate_weapon_evidence(decoded, mapping)
+
+    tournament_conditions = derive_tournament_conditions_from_save(
+        decoded,
+        mapping,
+        captured_at=captured_at,
+    )
+    tournament_spec = mapping.get("tournament_conditions") or {}
+    tournament_source_fields = tuple(
+        str(tournament_spec.get(key) or fallback)
+        for key, fallback in (
+            ("seed_field", "tourneyConditionsSeed"),
+            ("active_number_field", "tournamentNumber"),
+            ("checked_number_field", "tournamentCheckedNumber"),
+            ("records_field", "tournamentRecords"),
+            ("league_field", "leagueID"),
+        )
+    )
+    tournament_complete = bool(tournament_conditions.get("complete"))
+    checks["tournament_conditions"] = SaveCheckEvidence(
+        check_id="tournament_conditions",
+        status="observed" if tournament_complete else "unmapped",
+        value=tournament_conditions if tournament_complete else None,
+        source_fields=tournament_source_fields,
+        complete=tournament_complete,
+        reason=str(tournament_conditions.get("reason") or ""),
+    )
     for check_id, reason in (mapping.get("unmapped_checks") or {}).items():
         checks[str(check_id)] = SaveCheckEvidence(
             check_id=str(check_id),
