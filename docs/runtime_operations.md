@@ -605,14 +605,16 @@ should be interpreted as since attachment. A raw `systemctl --user restart`
 also replaces `main.py`, but does not provide this Pause, attachment-policy,
 readiness, or state-restoration protocol.
 
-If attached Tournament preflight finds an authoritative mismatch in a setting
-that the pass only observes, it logs and retains that evidence, completes the
-one-shot observer pass, and continues without publishing a gate decision.
-Mismatched Modules, Workshop and Bot presets, Guardians, Cards, and retained
-Home-only lock evidence cannot trigger a repair, block natural Tournament
-Results/Game Over capture, or restart the inventory pass. Operators may still
-Pause explicitly through the normal controls when manual intervention is
-possible and desired.
+Tournament Modules use `tournament_standard` as an observed reference rather
+than an enforced invariant. A confidently identified variation is named in the
+successful preflight result and retained without changing Modules or emitting
+a mismatch warning. Missing or ambiguous identity evidence remains incomplete.
+An authoritative mismatch in an enforced Tournament setting is logged and
+retained, completes the one-shot observer pass, and continues without
+publishing a gate decision. No Tournament preflight result can trigger a
+repair, block natural Tournament Results/Game Over capture, or restart the
+inventory pass. Operators may still Pause explicitly through the normal
+controls when manual intervention is possible and desired.
 
 The ADB port can also move without replacing a live automation process or
 rerunning its in-memory startup/session gates:

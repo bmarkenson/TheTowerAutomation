@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -73,6 +74,13 @@ TOURNAMENT_SECTION_SPECS = {
 }
 
 
+@dataclass(frozen=True)
+class TournamentPreflightContract:
+    requirements: dict[str, Any]
+    module_mode: str
+    module_preset: str
+
+
 def _load_mapping(path: Path, description: str) -> dict[str, Any]:
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(data, dict):
@@ -80,12 +88,12 @@ def _load_mapping(path: Path, description: str) -> dict[str, Any]:
     return data
 
 
-def load_tournament_requirements(
+def load_tournament_contract(
     *,
     profile_path: Path = TOURNAMENT_PROFILE_PATH,
     modules_path: Path = MODULE_LOADOUTS_PATH,
     orb_distances_path: Path = ORB_DISTANCE_LOADOUTS_PATH,
-) -> dict[str, Any]:
+) -> TournamentPreflightContract:
     """Resolve and validate the compact Tournament preflight contract."""
 
     profile = _load_mapping(profile_path, "Tournament profile")
@@ -154,7 +162,22 @@ def load_tournament_requirements(
             "Tournament loadout must define exactly modules, damage_slider, "
             "and orb_distance"
         )
-    preset_name = str(loadout.get("modules") or "").strip()
+    raw_modules = loadout.get("modules")
+    if isinstance(raw_modules, Mapping):
+        if set(raw_modules) != {"mode", "preset"}:
+            raise ValueError(
+                "Tournament modules must define exactly mode and preset"
+            )
+        module_mode = str(raw_modules.get("mode") or "").strip().lower()
+        preset_name = str(raw_modules.get("preset") or "").strip()
+    else:
+        # Preserve compatibility with the original compact string form.
+        module_mode = "enforce"
+        preset_name = str(raw_modules or "").strip()
+    if module_mode not in {"enforce", "observe", "preserve"}:
+        raise ValueError(
+            "Tournament modules mode must be enforce, observe, or preserve"
+        )
     catalog = _load_mapping(modules_path, "Module loadout catalog")
     presets = catalog.get("presets")
     if not isinstance(presets, dict) or preset_name not in presets:
@@ -204,21 +227,40 @@ def load_tournament_requirements(
     except ValueError as exc:
         raise ValueError(f"Tournament Orb Distance {exc}") from exc
 
-    return {
-        **requirements,
-        "loadout_policies": {"modules": "enforce"},
-        "modules": copy.deepcopy(modules),
-        "damage_slider": {
-            "mode": "enforce",
-            "value": damage_value,
+    return TournamentPreflightContract(
+        requirements={
+            **requirements,
+            "loadout_policies": {"modules": module_mode},
+            "modules": copy.deepcopy(modules),
+            "damage_slider": {
+                "mode": "enforce",
+                "value": damage_value,
+            },
+            "orb_distance": {
+                "mode": "enforce",
+                "preset": orb_distance_name,
+                "resolved": orb_distance,
+                "range_presets": range_presets,
+            },
         },
-        "orb_distance": {
-            "mode": "enforce",
-            "preset": orb_distance_name,
-            "resolved": orb_distance,
-            "range_presets": range_presets,
-        },
-    }
+        module_mode=module_mode,
+        module_preset=preset_name,
+    )
+
+
+def load_tournament_requirements(
+    *,
+    profile_path: Path = TOURNAMENT_PROFILE_PATH,
+    modules_path: Path = MODULE_LOADOUTS_PATH,
+    orb_distances_path: Path = ORB_DISTANCE_LOADOUTS_PATH,
+) -> dict[str, Any]:
+    """Return the resolved requirements consumed by preflight callers."""
+
+    return load_tournament_contract(
+        profile_path=profile_path,
+        modules_path=modules_path,
+        orb_distances_path=orb_distances_path,
+    ).requirements
 
 
 def validate_tournament_session_preflight_screens(
@@ -264,6 +306,8 @@ def validate_tournament_session_preflight_screens(
 
 __all__ = [
     "TOURNAMENT_SECTION_SPECS",
+    "TournamentPreflightContract",
+    "load_tournament_contract",
     "load_tournament_requirements",
     "validate_tournament_session_preflight_screens",
 ]

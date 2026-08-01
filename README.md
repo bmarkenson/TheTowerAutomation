@@ -150,8 +150,9 @@ Unknown no-battle layouts fail closed.
 Modules, Damage Slider, Orb Distance, and Target Priority are the only per-Tier
 or experimental loadout fields. Each compact profile declares `enforce`,
 `observe`, or `preserve` for all four. `enforce` blocks on mismatch and may use
-an explicit safe repair path; `observe` records evidence without blocking or
-changing it; `preserve` neither inspects nor changes it. Modules, Orb Distance,
+an explicit safe repair path; `observe` requires authoritative evidence but
+accepts confident differences without blocking or changing the setting;
+`preserve` neither inspects nor changes it. Modules, Orb Distance,
 and Target Priority resolve named presets at build time. Orb Distance presets
 bind an Extra/Workshop pair to an expected Attack Range; automation refuses to
 apply the pair unless fresh Range OCR matches that basis. Tier 18 and the
@@ -182,10 +183,13 @@ speed immediately after `RUNNING` is verified.
 Select the `tournament` strategy while the game is at verified Home **New
 Battle** to run the pre-start Tournament setup. The Home route selects
 Tournament Cards, Tourney Workshop, Amplify Bots, Attack/Ally/Scout Guardians,
-and the Tournament module loadout. It retains that evidence, leaves Tournament
-entry manual, and never presses the normal Battle control. Once the Tournament
-starts, session preflight consumes the Home evidence and checks only all nine
-Ultimate Weapons plus Spotlight missiles. Tournaments have no Perks.
+and the Tournament module inventory. Modules are observed against the
+`tournament_standard` reference without being changed or blocking a confident
+variation; the other settings remain enforced. It retains that evidence,
+leaves Tournament entry manual, and never presses the normal Battle control.
+Once the Tournament starts, session preflight consumes the Home evidence and
+checks only all nine Ultimate Weapons plus Spotlight missiles. Tournaments
+have no Perks.
 
 The standalone Tournament validator remains a read-only live test for an
 already active Tournament. It checks the same contract without changing it.
@@ -204,7 +208,9 @@ and a fresh complete screenshot proves `RUNNING/TOURNAMENT`. It never selects a
 preset, equips a module, or Surrenders. Cards, Ultimate Weapons, Modules, Bots,
 and Guardians are inspected from the active battle. Only Workshop uses the
 guarded Exit Battle → Go Home route; the validator then requires verified
-Resume evidence and exits nonzero on any mismatch or incomplete evidence. Pass
+Resume evidence. A confidently identified Module variation is recorded against
+the reference and passes; an enforced-setting mismatch or incomplete Module
+identity evidence exits nonzero. Pass
 `--capture-only --output-dir PATH` to retain the same guarded screens without
 evaluating them.
 
@@ -216,7 +222,9 @@ To keep observing that Tournament after the check, start the passive profile:
 
 The Tournament profile attempts the same read-only validation once, records a
 conclusive pass or mismatch as session evidence, including when attaching to
-an already-running Tournament. An attached mismatch is logged and retained
+an already-running Tournament. A confident Module variation is named in the
+successful result and retained without warning. An attached invariant mismatch
+is logged and retained
 without publishing a gate decision, blocking observation, or repeating the
 inventory pass. The profile then limits runtime action authority to ad gems and
 the natural terminal handler. It does not buy upgrades, repair configuration,

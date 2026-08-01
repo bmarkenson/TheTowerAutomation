@@ -8,6 +8,13 @@ checked-item detail remains in the
 
 ## Current validation gates
 
+- [ ] Capture the numeric level of every equipped Module from authoritative
+  overview evidence, retain it with preflight and completed-run records, and
+  surface threshold violations without confusing an intentional Tournament
+  identity variation with a level problem. The current requirement is Primary
+  slots at level 201 or higher and Assist slots at level 195 or higher. Existing
+  level-transfer guards preserve slot-owned levels during replacement but do
+  not OCR or validate the numeric values.
 - [ ] Diagnose the transient Home Poison Swamp Stun verification timeout
   recorded in
   [`../observed_issues.md`](../observed_issues.md#home-poison-swamp-stun-verification-transiently-timed-out-after-its-source-tap).

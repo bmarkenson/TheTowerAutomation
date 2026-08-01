@@ -48,15 +48,24 @@ policies:
 | Policy | Runtime contract |
 | --- | --- |
 | `enforce` | Inspect and require the resolved value; a mismatch blocks unless an explicit safe repair contract owns the transition. |
-| `observe` | Inspect and record the resolved expectation and evidence without blocking or changing the setting. |
+| `observe` | Require authoritative observation and record the resolved reference and evidence; confident differences do not block or change the setting. |
 | `preserve` | Do not inspect or change the setting. |
+
+Tournament assigns `observe` to Modules with `tournament_standard` as its
+reference. A confidently identified difference is an experimental variation,
+not a failed invariant: it is named in the successful preflight result and
+retained with the run. Missing or ambiguous slot identity remains incomplete
+evidence. Tournament Cards, Workshop, Bots, Guardians, and Ultimate Weapon
+controls remain enforced settings.
 
 Named module, Orb Distance, and Target Priority presets are resolved at build
 time into an explicit self-contained strategy plan. Modules are checked from
-verified Home `NEW_BATTLE` before Battle may start. Module level is treated as
-slot-owned state: every occupied replacement requires a verified level
-transfer, and a Primary/Assist cycle is resolved through a verified level-1
-same-family intermediate instead of Unequip. Inventory candidates require an
+verified Home `NEW_BATTLE` before Battle may start. Module replacement treats
+level as slot-owned state: every occupied replacement requires a verified
+level transfer, and a Primary/Assist cycle is resolved through a verified
+level-1 same-family intermediate instead of Unequip. The numeric equipped
+levels visible on the overview are not currently OCRed, threshold-checked, or
+retained in preflight/battle evidence. Inventory candidates require an
 aligned icon match with configured confidence and margin plus exact detail
 name/action/level evidence; unexpected transfer prompts and unsettled
 overviews fail closed. Target Priority and Orb Distance are not Home controls:

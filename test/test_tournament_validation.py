@@ -593,15 +593,10 @@ def test_home_preflight_failure_consumes_request_without_waiver_or_battle(
     assert "guardian_chips" in result["reason"]
 
 
-def test_exclusive_validation_claims_configured_module_skip(tmp_path):
+def test_exclusive_validation_observes_modules_without_a_waiver(tmp_path):
     app, store, manager = _app_for_pending_validation(
         tmp_path,
         home_preflight_complete=False,
-    )
-    store.configure_startup_gate_waivers(
-        ["modules"],
-        strategy="tournament",
-        source="test",
     )
     app._auto_start_enabled = False
     app._startup_gate_waivers = {}
@@ -613,7 +608,9 @@ def test_exclusive_validation_claims_configured_module_skip(tmp_path):
             "interrupted": False,
             "failed_check": None,
             "reason": "ok",
-            "evidence": {"modules": {"status": "waived"}},
+            "evidence": {
+                "modules": {"mode": "observe", "checked": True}
+            },
         },
     )()
     frame = object()
@@ -642,21 +639,9 @@ def test_exclusive_validation_claims_configured_module_skip(tmp_path):
     ):
         app._handle_primary_states("HOME_SCREEN", set(), frame)
 
-    waiver = run_setup.call_args.kwargs["waivers"]["modules"]
-    assert waiver == {
-        "request_id": waiver["request_id"],
-        "decision_id": "proactive_skip",
-        "label": "Modules",
-        "kind": "proactive",
-        "value": "",
-        "reason": "configured before the run",
-    }
-    assert waiver["request_id"]
+    assert "waivers" not in run_setup.call_args.kwargs
     assert run_setup.call_args.kwargs["screenshot"] is frame
-    mark_complete.assert_called_once_with(
-        setup.evidence,
-        waivers={"modules": waiver},
-    )
+    mark_complete.assert_called_once_with(setup.evidence)
     assert store.status()["startup_gate_waivers"] == {}
 
 

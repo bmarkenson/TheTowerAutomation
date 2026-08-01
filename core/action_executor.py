@@ -45,7 +45,10 @@ from core.gc_preflight_navigation import (
     GcPreflightNavigationStatus,
     run_read_only_gc_preflight,
 )
-from core.gc_preflight import summarize_gc_preflight_mismatch
+from core.gc_preflight import (
+    summarize_gc_preflight_mismatch,
+    summarize_gc_preflight_variations,
+)
 from core.tournament_preflight import (
     validate_tournament_session_preflight_screens,
 )
@@ -435,10 +438,19 @@ def execute_actions(
                         mv["gc_session_preflight_repair_in_progress"] = False
                         mv["gc_session_preflight_restart_available"] = False
                         _reset_repair_mismatch_attempts(mv)
+                    variation_summary = summarize_gc_preflight_variations(
+                        evidence_payload
+                    )
+                    completion = "[SESSION_PREFLIGHT] Session validation completed"
+                    if variation_summary:
+                        completion += (
+                            "; module variation observed — " + variation_summary
+                        )
+                    log_mission(completion, "INFO")
                     log_mission(
-                        "[SESSION_PREFLIGHT] Session validation completed: "
+                        "[SESSION_PREFLIGHT] completed_evidence="
                         + json.dumps(evidence_payload, sort_keys=True),
-                        "INFO",
+                        "DEBUG",
                     )
                 elif result.status is GcPreflightNavigationStatus.MISMATCH:
                     mismatch_policy = str(

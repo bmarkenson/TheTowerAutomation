@@ -66,9 +66,19 @@ class GcModuleLoadoutEvidence:
             for slot in invalid
         )
 
+    @property
+    def fully_observed(self) -> bool:
+        """Whether every equipped slot has authoritative identity evidence."""
+
+        return bool(self.slots) and all(
+            slot.match_status == "matched" and slot.actual is not None
+            for slot in self.slots
+        )
+
     def as_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["valid"] = self.valid
+        payload["fully_observed"] = self.fully_observed
         return payload
 
 

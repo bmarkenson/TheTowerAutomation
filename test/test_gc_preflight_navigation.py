@@ -223,8 +223,54 @@ def test_mismatch_result_names_the_wrong_module_in_operator_summary():
     result_log.assert_called_once()
     assert result_log.call_args.args[0] == (
         "Session configuration check complete — mismatch found; "
-        "Modules generator assist: expected Singularity Harness, observed "
+        "Generator Assist module: expected Singularity Harness, observed "
         "Galaxy Compressor"
+    )
+
+
+def test_complete_result_surfaces_observed_module_variation():
+    evidence_payload = {
+        "module_mode": "observe",
+        "failed_checks": [],
+        "modules": {
+            "mode": "observe",
+            "slots": [
+                {
+                    "slot_key": "generator_assist",
+                    "expected": "Singularity Harness",
+                    "actual": "Galaxy Compressor",
+                    "match_status": "matched",
+                    "valid": False,
+                }
+            ],
+        },
+    }
+    evidence = SimpleNamespace(
+        valid=True,
+        deferred_checks=(),
+        as_dict=lambda: evidence_payload,
+    )
+
+    @_log_gc_preflight_workflow
+    def complete(_requirements):
+        return SimpleNamespace(
+            status=GcPreflightNavigationStatus.COMPLETE,
+            reason="all requirements verified",
+            evidence=evidence,
+            valid=True,
+        )
+
+    with (
+        patch("core.gc_preflight_navigation.log_action_intent"),
+        patch("core.gc_preflight_navigation.log_result") as result_log,
+    ):
+        complete({})
+
+    result_log.assert_called_once()
+    assert result_log.call_args.args[0] == (
+        "Session configuration check complete — required settings verified; "
+        "module variation observed — Generator Assist module: reference "
+        "Singularity Harness, observed Galaxy Compressor"
     )
 
 

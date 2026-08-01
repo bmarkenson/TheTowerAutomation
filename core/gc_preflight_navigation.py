@@ -15,6 +15,7 @@ from core.gc_preflight import (
     GcSessionPreflightEvidence,
     merge_ultimate_weapon_observations,
     summarize_gc_preflight_mismatch,
+    summarize_gc_preflight_variations,
     validate_gc_session_preflight_screens,
 )
 from core.battle_lifecycle import HomeBattleControl
@@ -92,8 +93,20 @@ def _log_gc_preflight_workflow(func):
             )
             raise
 
+        evidence = result.evidence
+        as_dict = getattr(evidence, "as_dict", None)
+        evidence_payload = as_dict() if callable(as_dict) else {}
+        variation_summary = summarize_gc_preflight_variations(evidence_payload)
         if result.status is GcPreflightNavigationStatus.COMPLETE:
-            if result.reason.endswith("boundary checks deferred"):
+            if variation_summary:
+                summary = (
+                    "Session configuration check complete — required settings "
+                    "verified; module variation observed — "
+                    f"{variation_summary}"
+                )
+                if result.reason.endswith("boundary checks deferred"):
+                    summary += "; boundary checks deferred"
+            elif result.reason.endswith("boundary checks deferred"):
                 summary = (
                     "Session configuration check complete — active requirements "
                     "verified; boundary checks deferred"
@@ -105,7 +118,7 @@ def _log_gc_preflight_workflow(func):
                 )
         elif result.status is GcPreflightNavigationStatus.MISMATCH:
             mismatch_summary = summarize_gc_preflight_mismatch(
-                result.evidence.as_dict() if result.evidence is not None else {}
+                evidence_payload
             )
             summary = (
                 "Session configuration check complete — mismatch found; "
@@ -118,7 +131,6 @@ def _log_gc_preflight_workflow(func):
             )
         else:
             summary = f"Session configuration check failed — {result.reason}"
-        evidence = result.evidence
         log_result(
             summary,
             detail=(

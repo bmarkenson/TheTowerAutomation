@@ -5,6 +5,7 @@ import cv2
 from core.matcher import get_match
 from core.tournament_preflight import (
     TOURNAMENT_SECTION_SPECS,
+    load_tournament_contract,
     load_tournament_requirements,
     validate_tournament_session_preflight_screens,
 )
@@ -56,6 +57,7 @@ def _validate(fixtures):
         guardians_screen=_load(fixtures["guardians"]),
         modules_screen=_load(fixtures["modules"]),
         module_requirements=requirements["modules"],
+        module_mode=requirements["loadout_policies"]["modules"],
         ultimate_requirements=requirements["ultimate_weapons"],
         ultimate_observations=_ultimate_observations(requirements),
     )
@@ -70,6 +72,18 @@ def test_complete_tournament_fixture_set_passes_every_requirement():
     assert not evidence.auto_pick_perks_required
     assert evidence.auto_pick_perks_valid
     assert evidence.ultimate_weapons.valid
+
+
+def test_confident_tournament_module_variation_is_observed_without_failing():
+    fixtures = {**TOURNAMENT_FIXTURES, "modules": FARM_FIXTURES["modules"]}
+    evidence = _validate(fixtures)
+
+    assert evidence.valid
+    assert evidence.modules is not None
+    assert evidence.modules.fully_observed
+    assert not evidence.modules.valid
+    assert evidence.modules_blocking_valid
+    assert evidence.failed_checks == ()
 
 
 def test_farm_setup_fails_the_tournament_contract():
@@ -109,8 +123,12 @@ def test_tournament_slot_identity_does_not_imply_selection():
 
 def test_tournament_profile_omits_non_applicable_auto_pick_perks():
     requirements = load_tournament_requirements()
+    contract = load_tournament_contract()
 
     assert "auto_pick_perks" not in requirements
+    assert requirements["loadout_policies"] == {"modules": "observe"}
+    assert contract.module_mode == "observe"
+    assert contract.module_preset == "tournament_standard"
     assert requirements["card_recharge_modes"] == {
         "Demon Mode": "auto_reactivate",
         "Nuke": "ready_after_recharge",

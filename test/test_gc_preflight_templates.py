@@ -545,10 +545,38 @@ def test_observed_module_mismatch_is_reported_without_blocking_preflight():
     payload = evidence.as_dict()
     assert evidence.valid
     assert evidence.modules is not None
+    assert evidence.modules.fully_observed
     assert not evidence.modules.valid
     assert not evidence.requires_no_battle_repair
     assert payload["modules"]["matches_expected"] is False
     assert payload["modules"]["blocking_valid"] is True
+
+
+def test_observed_modules_require_authoritative_identity_for_every_slot():
+    observed = {
+        label: dict(toggles)
+        for label, toggles in GC_ULTIMATE_REQUIREMENTS.items()
+    }
+
+    evidence = validate_gc_session_preflight_screens(
+        cards_screen=_load(FARM_ACTIVE_FIXTURE),
+        workshop_screen=_load(WORKSHOP_FIXTURE),
+        bots_screen=_load(BOT_FIXTURE),
+        guardians_screen=_load(GUARDIAN_FIXTURE),
+        modules_screen=np.zeros((1920, 1080, 3), dtype=np.uint8),
+        perks_screen=_load(AUTO_PICK_FIXTURE),
+        module_requirements=GC_MODULE_REQUIREMENTS,
+        module_mode="observe",
+        ultimate_requirements=GC_ULTIMATE_REQUIREMENTS,
+        ultimate_observations=observed,
+    )
+
+    assert not evidence.valid
+    assert evidence.modules is not None
+    assert not evidence.modules.fully_observed
+    assert not evidence.modules_blocking_valid
+    assert evidence.failed_checks == ("modules",)
+    assert not evidence.requires_no_battle_repair
 
 
 def test_preserved_modules_are_neither_opened_nor_required():

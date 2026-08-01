@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 from typing import Any, Mapping
 
-from core.tournament_preflight import load_tournament_requirements
+from core.tournament_preflight import load_tournament_contract
 
 
 TOURNAMENT_RUNTIME_POLICY = {
@@ -53,7 +53,8 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("tournament profile meta.family must be tournament")
     meta["family"] = "tournament"
 
-    requirements = load_tournament_requirements()
+    contract = load_tournament_contract()
+    requirements = contract.requirements
     damage_slider = copy.deepcopy(requirements["damage_slider"])
     orb_distance = copy.deepcopy(requirements["orb_distance"])
     orb_distance_values = copy.deepcopy(orb_distance["resolved"])
@@ -203,8 +204,8 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
             },
             "loadout": {
                 "modules": {
-                    "mode": "enforce",
-                    "preset": "tournament_standard",
+                    "mode": contract.module_mode,
+                    "preset": contract.module_preset,
                     "resolved": copy.deepcopy(requirements["modules"]),
                 },
                 "damage_slider": damage_slider,

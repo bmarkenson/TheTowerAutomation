@@ -152,6 +152,9 @@ def test_tournament_strategy_declares_exclusive_validation_then_observes():
     }
     assert action["allow_repair"] is False
     assert action["mismatch_policy"] == "notify"
+    assert action["requirements"]["loadout_policies"] == {
+        "modules": "observe"
+    }
     assert action["requirements"]["ultimate_weapons"]["Poison Swamp"]["stun"] == "on"
     assert session_rule["run_when_attached"] is True
     assert strategy._session_preflight_assertions == [
@@ -174,6 +177,9 @@ def test_tournament_strategy_declares_exclusive_validation_then_observes():
         "mode": "enforce",
         "value": "1E2%",
     }
+    assert strategy.run_configuration()["loadout"]["modules"]["mode"] == (
+        "observe"
+    )
     assert strategy.run_configuration()["loadout"]["orb_distance"] == {
         "mode": "enforce",
         "preset": "tournament_range_98_38",
@@ -197,7 +203,7 @@ def test_tournament_strategy_declares_exclusive_validation_then_observes():
     }
 
 
-def test_tournament_mismatch_is_recorded_without_requesting_repair():
+def test_tournament_module_variation_completes_and_is_logged_as_information():
     strategy = get_strategy("tournament")
     assert strategy is not None
     action = next(
@@ -216,9 +222,11 @@ def test_tournament_mismatch_is_recorded_without_requesting_repair():
         }
     )
     evidence_payload = {
-        "valid": False,
-        "failed_checks": ["modules"],
+        "valid": True,
+        "module_mode": "observe",
+        "failed_checks": [],
         "modules": {
+            "mode": "observe",
             "slots": [
                 {
                     "slot_key": "generator_assist",
@@ -232,12 +240,12 @@ def test_tournament_mismatch_is_recorded_without_requesting_repair():
     }
     evidence = SimpleNamespace(
         as_dict=lambda: evidence_payload,
-        requires_no_battle_repair=True,
-        failed_checks=("modules",),
+        requires_no_battle_repair=False,
+        failed_checks=(),
     )
     result = GcLivePreflightResult(
-        GcPreflightNavigationStatus.MISMATCH,
-        "configuration mismatch",
+        GcPreflightNavigationStatus.COMPLETE,
+        "all requirements verified",
         evidence,
     )
 
@@ -256,23 +264,80 @@ def test_tournament_mismatch_is_recorded_without_requesting_repair():
     )
     variables = ctx.data["mission_vars"]
     assert variables["gc_session_preflight_attempted"]
-    assert not variables["gc_session_preflight_completed"]
+    assert variables["gc_session_preflight_completed"]
     assert not variables["gc_session_preflight_blocked"]
     assert not variables["gc_session_preflight_repair_required"]
-    assert variables["gc_session_preflight_failed_checks"] == ["modules"]
+    assert variables["gc_session_preflight_failed_checks"] == []
     assert strategy.is_session_preflight_complete(ctx)
     assert not strategy.tick(ctx, object(), {"state": "RUNNING"})
     mission_log.assert_any_call(
-        "[SESSION_PREFLIGHT] Read-only observer mismatch recorded — "
-        "Modules generator assist: expected Singularity Harness, observed "
-        "Galaxy Compressor. Observation and terminal capture continue without "
-        "operator action.",
-        "WARN",
+        "[SESSION_PREFLIGHT] Session validation completed; module variation "
+        "observed — Generator Assist module: reference Singularity Harness, "
+        "observed Galaxy Compressor",
+        "INFO",
     )
     mission_log.assert_any_call(
-        "[SESSION_PREFLIGHT] mismatch_evidence="
+        "[SESSION_PREFLIGHT] completed_evidence="
         + json.dumps(evidence_payload, sort_keys=True),
         "DEBUG",
+    )
+
+
+def test_tournament_invariant_mismatch_is_nonblocking_but_warned():
+    strategy = get_strategy("tournament")
+    action = next(
+        rule
+        for rule in strategy.rules
+        if rule["name"] == "validate_tournament_session_preflight"
+    )["do"][0]
+    ctx = MissionContext(
+        data={"mission_vars": {"last_detection_state": "RUNNING"}}
+    )
+    evidence_payload = {
+        "valid": False,
+        "failed_checks": ["ultimate_weapons"],
+        "ultimate_weapons": {
+            "weapons": [
+                {
+                    "label": "Spotlight",
+                    "valid": False,
+                    "mismatched_toggles": ["missiles=on (actual=off)"],
+                }
+            ]
+        },
+    }
+    evidence = SimpleNamespace(
+        as_dict=lambda: evidence_payload,
+        requires_no_battle_repair=False,
+        failed_checks=("ultimate_weapons",),
+    )
+    result = GcLivePreflightResult(
+        GcPreflightNavigationStatus.MISMATCH,
+        "configuration mismatch",
+        evidence,
+    )
+
+    with (
+        patch(
+            "core.action_executor.run_read_only_gc_preflight",
+            return_value=result,
+        ),
+        patch("core.action_executor.log_mission") as mission_log,
+    ):
+        execute_actions(object(), [{**action, "_strategy": True}], ctx)
+
+    variables = ctx.data["mission_vars"]
+    assert variables["gc_session_preflight_attempted"]
+    assert not variables["gc_session_preflight_completed"]
+    assert not variables["gc_session_preflight_blocked"]
+    assert variables["gc_session_preflight_failed_checks"] == [
+        "ultimate_weapons"
+    ]
+    mission_log.assert_any_call(
+        "[SESSION_PREFLIGHT] Read-only observer mismatch recorded — Ultimate "
+        "Weapons Spotlight: missiles=on (actual=off). Observation and terminal "
+        "capture continue without operator action.",
+        "WARN",
     )
 
 

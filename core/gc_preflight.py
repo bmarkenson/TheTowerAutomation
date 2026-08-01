@@ -68,13 +68,15 @@ def summarize_gc_preflight_mismatch(
             for slot in slots:
                 if not isinstance(slot, Mapping) or slot.get("valid") is not False:
                     continue
-                slot_label = str(slot.get("slot_key") or "slot").replace("_", " ")
+                slot_label = str(slot.get("slot_key") or "slot").replace(
+                    "_", " "
+                ).title()
                 expected = str(slot.get("expected") or "unknown")
                 actual = slot.get("actual")
                 if actual is None:
                     actual = str(slot.get("match_status") or "unknown")
                 details.append(
-                    f"Modules {slot_label}: expected {expected}, observed {actual}"
+                    f"{slot_label} module: expected {expected}, observed {actual}"
                 )
                 detailed_checks.add("modules")
 
@@ -145,6 +147,54 @@ def summarize_gc_preflight_mismatch(
     summary = "; ".join(details[:limit])
     if omitted > 0:
         summary += f"; +{omitted} more mismatch{'es' if omitted != 1 else ''}"
+    return summary
+
+
+def summarize_gc_preflight_variations(
+    evidence: Mapping[str, Any],
+    *,
+    max_details: int = 4,
+) -> str:
+    """Return confident observe-mode differences from the module reference."""
+
+    if not isinstance(evidence, Mapping):
+        return ""
+    modules = evidence.get("modules")
+    if not isinstance(modules, Mapping):
+        return ""
+    module_mode = str(
+        modules.get("mode") or evidence.get("module_mode") or ""
+    ).strip().lower()
+    if module_mode != "observe":
+        return ""
+    slots = modules.get("slots")
+    if not isinstance(slots, (list, tuple)):
+        return ""
+    details = []
+    for slot in slots:
+        if not isinstance(slot, Mapping):
+            continue
+        expected = str(slot.get("expected") or "").strip()
+        actual = str(slot.get("actual") or "").strip()
+        if (
+            slot.get("match_status") == "matched"
+            and expected
+            and actual
+            and actual != expected
+        ):
+            slot_label = str(slot.get("slot_key") or "slot").replace(
+                "_", " "
+            ).title()
+            details.append(
+                f"{slot_label} module: reference {expected}, observed {actual}"
+            )
+    if not details:
+        return ""
+    limit = max(1, int(max_details))
+    omitted = len(details) - limit
+    summary = "; ".join(details[:limit])
+    if omitted > 0:
+        summary += f"; +{omitted} more variation{'s' if omitted != 1 else ''}"
     return summary
 
 
@@ -289,9 +339,13 @@ class GcSessionPreflightEvidence:
 
     @property
     def modules_blocking_valid(self) -> bool:
-        return self.is_waived("modules") or self.module_mode != "enforce" or bool(
-            self.modules is not None and self.modules.valid
-        )
+        if self.is_waived("modules") or self.module_mode == "preserve":
+            return True
+        if self.modules is None:
+            return False
+        if self.module_mode == "observe":
+            return self.modules.fully_observed
+        return self.modules.valid
 
     @property
     def auto_pick_perks_valid(self) -> bool:
@@ -789,6 +843,8 @@ __all__ = [
     "evaluate_ultimate_weapon_state",
     "merge_ultimate_weapon_observations",
     "gc_preflight_evidence_from_dict",
+    "summarize_gc_preflight_mismatch",
+    "summarize_gc_preflight_variations",
     "validate_gc_preflight_screens",
     "validate_gc_session_preflight_screens",
 ]

@@ -872,7 +872,8 @@ def test_no_battle_setup_corrects_tournament_home_configuration():
     assert router.state == "home"
     assert all(router.selected.values())
     assert router.guardians == {"attack", "ally", "scout"}
-    assert router.module_checks == [TOURNAMENT_REQUIREMENTS["modules"]]
+    assert router.module_checks == []
+    assert router.module_observations == [TOURNAMENT_REQUIREMENTS["modules"]]
     assert result.evidence["target_priority"] == {
         "mode": "preserve",
         "checked": False,

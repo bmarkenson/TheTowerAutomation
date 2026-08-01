@@ -35,7 +35,9 @@ invariants:
       missiles: on
 
 loadout:
-  modules: tournament_standard
+  modules:
+    mode: observe
+    preset: tournament_standard
   damage_slider:
     mode: enforce
     value: "100%"
