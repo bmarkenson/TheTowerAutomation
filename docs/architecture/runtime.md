@@ -247,22 +247,27 @@ while the offer is pending, the runtime consumes the offer as a manual start
 and continues observing normally.
 
 The genuine Tournament run performs the standard run-initialization route at
-its fresh boundary, maxing EHLS first and EALS second. It then retains the
-validation battle's session evidence and becomes passive except for game-speed
-maintenance, ad-gem collection, and terminal-result handling. An ad gem starts
-the same bounded floating-gem sweep used by normal battles; the profile does
+its fresh boundary, maxing EHLS first and EALS second. Its battle-only session
+rules enforce Damage Slider `100%` and the configured Orb Distance pair before
+the remaining observer check completes. It then becomes passive except for
+game-speed maintenance, ad-gem collection, and terminal-result handling. An ad
+gem starts the same bounded floating-gem sweep used by Farm; the profile does
 not run an independent or continuous floating-gem handler. No Tournament
 battle gains validation-battle Surrender authority.
 
-Automatic validation of an already-running Tournament remains observer-only
-and does not use the exclusive validation receipt. Without Home boundary
-evidence, it inspects Cards, Ultimate Weapons, Modules, Bots, and Guardians in
-battle. Workshop is the only check that takes resumable Exit Battle → Go Home.
-The automatic attachment path suppresses the profile's attachment-time
-configuration actions, never selects a Home preset or equips a loadout, and
-must verify that Resume returns to the same Tournament. The separate guarded
-process-reload workflow retains its explicit `next_run` compatibility policy;
-it is not the user-facing validation choice.
+Automatic validation of an already-running Tournament does not use the
+exclusive validation receipt. Without Home boundary evidence, it first
+inspects Cards, Ultimate Weapons, Modules, Bots, and Guardians in battle.
+Workshop is the only check that takes resumable Exit Battle → Go Home. Once
+that inventory pass reaches a conclusive result, the explicitly
+`run_when_attached` battle-only rules enforce Damage Slider `100%` and the
+configured Orb Distance for an authoritative configured Attack Range; a
+readable unconfigured Range is preserved without opening Distance Adjuster.
+The attachment path never selects a Home preset, equips a loadout, requests
+Home repair, or gains Surrender authority, and it must verify that Resume
+returns to the same Tournament. The separate guarded process-reload workflow
+retains its explicit `next_run` compatibility policy; it is not the user-facing
+validation choice.
 A mismatch is retained as session evidence but cannot request Home repair or
 block result capture. Observation-only mismatches complete the one-shot pass
 without an operator decision or run-scoped waiver; they cannot make the
@@ -550,8 +555,9 @@ evidence is attached.
   behavior in which the first observed active battle is a new-run boundary.
   `next_run` adopts the first active/resumable battle and structurally
   suppresses plan rules tagged `run_initialization` or `session_preflight`,
-  except an explicitly declared observer-only attachment check such as
-  Tournament preflight.
+  except explicitly declared `run_when_attached` checks. Tournament stages its
+  read-only inventory check first, then permits its guarded battle-only Damage
+  Slider and Orb Distance rules.
   It does not seed their completion variables. Game Over, Tournament Results,
   or Home `NEW_BATTLE` arms the gates, and the next `RUNNING` observation emits
   the normal run-start hooks. Home `RESUME_BATTLE` and transient Unknown states
@@ -576,9 +582,9 @@ evidence is attached.
   `RUNNING` or Home `RESUME_BATTLE` evidence may replace normal strategy
   behavior and report identity without a restart, but run initialization,
   session preflight, and Home-only checks stay deferred, except for an
-  explicitly declared observer-only attachment check such as Tournament
-  preflight. A request encountered at Home `NEW_BATTLE` follows normal boundary
-  replacement instead and runs the complete startup-gate sequence.
+  explicitly declared `run_when_attached` check. A request encountered at Home
+  `NEW_BATTLE` follows normal boundary replacement instead and runs the
+  complete startup-gate sequence.
 - Process replacement must verify the existing owner and safe UI boundary,
   then verify the replacement PID, refreshed lock, startup log, control
   consumption, and first state report.

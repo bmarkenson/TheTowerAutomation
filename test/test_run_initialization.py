@@ -620,7 +620,7 @@ class DeferredStartupGateTests(unittest.TestCase):
         self.assertFalse(manager.ctx.data["skip_attached_checks"])
         self.assertTrue(manager.run_initialization_pending())
 
-    def test_attached_tournament_validation_uses_observer_action_only(self):
+    def test_attached_tournament_validation_stages_observer_then_battle_controls(self):
         strategy = get_strategy("tournament")
         manager = MissionManager(
             None,
@@ -637,6 +637,34 @@ class DeferredStartupGateTests(unittest.TestCase):
         self.assertEqual(actions[0]["type"], "session_preflight")
         self.assertFalse(actions[0]["allow_repair"])
         self.assertEqual(actions[0]["mismatch_policy"], "notify")
+
+        mission_vars = manager.ctx.data["mission_vars"]
+        mission_vars["gc_session_preflight_attempted"] = True
+        mission_vars["gc_session_preflight_completed"] = True
+        actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
+
+        self.assertEqual(
+            actions,
+            [
+                {
+                    "type": "damage_slider_configure",
+                    "mode": "enforce",
+                    "value": "1E2%",
+                }
+            ],
+        )
+
+        mission_vars["damage_slider_checked"] = True
+        actions = strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
+
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]["type"], "orb_distance_configure")
+
+        mission_vars["orb_distance_checked"] = True
+        self.assertFalse(manager.session_preflight_pending())
+        self.assertIsNone(
+            strategy.tick(manager.ctx, object(), {"state": "RUNNING"})
+        )
 
     def test_new_battle_home_ignores_attached_battle_choice(self):
         manager = MissionManager(

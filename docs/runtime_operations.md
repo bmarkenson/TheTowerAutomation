@@ -561,21 +561,27 @@ pending is also supported and consumes the offer when the runtime observes the
 fresh Tournament boundary.
 
 The real Tournament's opening run-initialization gate maxes Enemy Health Level
-Skip and Enemy Attack Level Skip before normal observer handling; the
-disposable validation battle does not buy those upgrades or fabricate their
-completion. Automation never Surrenders the real Tournament battle.
+Skip and Enemy Attack Level Skip before enforcing Damage Slider `100%`, the
+configured Orb Distance for an authoritative configured Attack Range, and the
+remaining observer checks. The disposable validation battle does not buy the
+level-skip upgrades or fabricate their completion. Automation never Surrenders
+the real Tournament battle.
 
 Attachment is automatic when fresh evidence first shows an active battle or
 Home **Resume Battle**. Before Start, select **Validate current battle if
-attached** for one read-only strategy check, or **Skip checks for current
-battle** to suppress all strategy setup checks for that attached battle.
-Validation does not change configuration or restart the battle. If it finds a
-Home-repairable mismatch, the decision dialog may offer **Restart battle and
-repair setup**; only selecting that response authorizes the guarded repair
-route. At verified Home **New Battle**, the selection is ignored and normal
-pre-battle checks run without asking. Attachment state survives transient
-Unknown screens and Home `RESUME_BATTLE`. It ends at Game Over, Tournament
-Results, or verified Home `NEW_BATTLE`;
+attached** for the strategy's declared attachment checks, or **Skip checks for
+current battle** to suppress all strategy setup checks for that attached
+battle. Attachment checks are read-only unless the profile explicitly declares
+a guarded battle-only `run_when_attached` action. Tournament uses that contract
+to enforce Damage Slider `100%` and its configured Orb Distance after the
+read-only inventory pass; it does not select Home presets, equip loadouts,
+restart, or Surrender the battle. If another profile's read-only validation
+finds a Home-repairable mismatch, the decision dialog may offer **Restart
+battle and repair setup**; only selecting that response authorizes the guarded
+repair route. At verified Home **New Battle**, the selection is ignored and
+normal pre-battle checks run without asking. Attachment state survives
+transient Unknown screens and Home `RESUME_BATTLE`. It ends at Game Over,
+Tournament Results, or verified Home `NEW_BATTLE`;
 the following battle then performs the real gates. Do not select this for a
 process that is expected to configure a newly started battle immediately.
 

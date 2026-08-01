@@ -410,7 +410,7 @@ def test_tournament_policy_suppresses_unrelated_runtime_handlers():
     assert not app._handler_enabled("unknown_recovery")
 
 
-def test_tournament_does_not_start_floating_gem_tapper_without_ad_gem():
+def test_tournament_does_not_start_independent_floating_gem_tapper():
     app = App.__new__(App)
     app._mission_mgr = SimpleNamespace(strategy=get_strategy("tournament"))
     app._blind_tapper_suspended = False
@@ -496,6 +496,83 @@ def test_tournament_main_loop_keeps_status_and_recovery_read_only():
         allow_actions=False,
     )
     start_tapper.assert_not_called()
+
+
+def test_tournament_main_loop_collects_ad_gem_after_attached_gate_releases():
+    strategy = get_strategy("tournament")
+    assert strategy is not None
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    gate_complete = False
+
+    manager = MagicMock()
+    manager.strategy = strategy
+    manager.ctx = MissionContext(data={"mission_vars": {}})
+    manager.run_initialization_pending.return_value = False
+    manager.session_preflight_pending.side_effect = lambda: not gate_complete
+    manager.session_preflight_terminally_blocked.return_value = False
+    manager.session_preflight_repair_required.return_value = False
+
+    def complete_attached_gate(*_args, strategy_only=False, **_kwargs):
+        nonlocal gate_complete
+        if strategy_only:
+            gate_complete = True
+
+    manager.tick.side_effect = complete_attached_gate
+
+    app = App.__new__(App)
+    app._config = SimpleNamespace(wait_on_start=False)
+    app._supervisor = MagicMock(is_paused=False, auto_return_secs=900)
+    app._adb_connection_coordinator = MagicMock()
+    app._adb_connection_coordinator.ensure_connected.return_value = False
+    app._mission_mgr = manager
+    app._state_tracker = MagicMock()
+    app._status_reporter = MagicMock()
+    app._event_mission_tracker = MagicMock()
+    app._match_trace = False
+    app._last_wave_value = None
+    app._last_wave_conf = -1.0
+    app._last_wave_ts = 0.0
+    app._blind_tapper_suspended = False
+    app._run_initialization_gate_logged = False
+    app._session_preflight_gate_logged = False
+    app._session_preflight_terminal_blocked_logged = False
+    app._session_preflight_repair_denial_logged = False
+    app._steady_run_entry_pending = False
+    app._capture_frame = MagicMock(side_effect=[frame, frame, KeyboardInterrupt])
+    app._resolve_upgrade_detail_overlay = MagicMock()
+    app._run_perk_selector = MagicMock()
+    app._run_perk_selector.handle.return_value = False
+    app._battle_activation_tracker = MagicMock()
+    app._battle_activation_tracker.observe.return_value = []
+    app._battle_activation_tracker.drain_evidence_captures.return_value = []
+    app._advance_exclusive_validation = MagicMock(return_value=False)
+    app._advance_exclusive_validation_launch = MagicMock(return_value=False)
+    app._observe_strategy_request = MagicMock()
+    previous_mode = AUTOMATION.mode
+
+    try:
+        with (
+            patch("core.app.threading.Thread"),
+            patch(
+                "core.app.detect_state_and_overlays",
+                return_value={
+                    "state": "RUNNING",
+                    "menu": "UW_MENU",
+                    "secondary_states": ["TOURNAMENT"],
+                    "overlays": ["AD_GEMS_AVAILABLE", "MENU_OPEN"],
+                },
+            ),
+            patch("core.app.detect_wave_number_from_image", return_value=(900, 99.0)),
+            patch("core.app.stop_blind_gem_tapper", return_value=False),
+            patch("core.app.handle_ad_gem") as handle_ad_gem,
+            patch("core.app.time.sleep"),
+        ):
+            app.run()
+    finally:
+        AUTOMATION.mode = previous_mode
+
+    assert gate_complete
+    handle_ad_gem.assert_called_once_with()
 
 
 def test_tournament_running_handler_collects_only_visible_ad_gem():

@@ -294,6 +294,7 @@ class YamlStrategy(BaseStrategy):
     def tick(self, ctx, screen, detection: Dict[str, Any]):
         actions: List[Dict[str, Any]] = []
         last_fire: Dict[str, float] = ctx.data.setdefault("rule_last_fire", {})
+        mv = ctx.data.setdefault("mission_vars", {})
 
         for idx, rule in enumerate(self.rules):
             gate_phase = str(rule.get("gate_phase") or "").strip()
@@ -303,7 +304,15 @@ class YamlStrategy(BaseStrategy):
             ):
                 if ctx.data.get("skip_attached_checks"):
                     continue
-                if ctx.data.get("attached_validation_requested"):
+                if (
+                    ctx.data.get("attached_validation_requested")
+                    and not mv.get("gc_session_preflight_attempted")
+                ):
+                    # Give the attached inventory pass exclusive authority
+                    # until it reaches a conclusive result.  After that pass,
+                    # continue with any explicitly declared battle-only
+                    # attachment rules instead of stranding their completion
+                    # assertions behind the attached-only filter.
                     if not bool(rule.get("attached_validation_only")):
                         continue
                 if not bool(rule.get("run_when_attached")):
@@ -325,7 +334,6 @@ class YamlStrategy(BaseStrategy):
             for act in (rule.get("do") or []):
                 t = (act or {}).get("type")
                 if t == "set":
-                    mv = ctx.data.setdefault("mission_vars", {})
                     var = act.get("var")
                     if var:
                         mv[var] = act.get("value")
