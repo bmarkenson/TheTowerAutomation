@@ -574,6 +574,8 @@ def test_tournament_results_are_recorded_once_without_dismissing_dialog():
             return_value={"tournament_id": "Tournament20260718"},
         ) as tournament_results,
         patch("core.app.handle_game_over") as normal_game_over,
+        patch("core.app.log_action_intent") as action_log,
+        patch("core.app.log_result") as result_log,
     ):
         app._handle_primary_states("TOURNAMENT_RESULTS", set(), frame)
         app._handle_primary_states("TOURNAMENT_RESULTS", set(), frame)
@@ -590,3 +592,52 @@ def test_tournament_results_are_recorded_once_without_dismissing_dialog():
     normal_game_over.assert_not_called()
     manager.on_game_over.assert_called_once_with()
     app._status_reporter.reset_coin_rate_samples.assert_called_once_with()
+    action_log.assert_called_once()
+    operation_id = action_log.call_args.kwargs["operation_id"]
+    assert action_log.call_args.args == ("Capturing the finished Tournament",)
+    result_log.assert_called_once_with(
+        "Tournament finished — result saved; automation is waiting on the "
+        "Tournament Results screen (mode WAIT)",
+        detail=(
+            "[TOURNAMENT_RESULTS] result=completed "
+            "tournament_id=Tournament20260718 next_mode=WAIT"
+        ),
+        operation_id=operation_id,
+    )
+
+
+def test_tournament_result_capture_failure_reports_wait_and_retry():
+    strategy = get_strategy("tournament")
+    assert strategy is not None
+    manager = MagicMock()
+    manager.strategy = strategy
+    manager.ctx = MissionContext(data={"mission_vars": {}})
+    app = App.__new__(App)
+    app._mission_mgr = manager
+    app._supervisor = MagicMock()
+    app._status_reporter = MagicMock()
+    app._status_reporter.coin_rate_samples = []
+    app._last_wave_value = 2028
+    app._last_wave_conf = 99.0
+    app._tournament_results_captured = False
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+    with (
+        patch("core.app.handle_tournament_results", return_value=None),
+        patch("core.app.log_action_intent") as action_log,
+        patch("core.app.log_result") as result_log,
+    ):
+        app._handle_primary_states("TOURNAMENT_RESULTS", set(), frame)
+
+    operation_id = action_log.call_args.kwargs["operation_id"]
+    result_log.assert_called_once_with(
+        "Tournament result capture failed — automation remains on the "
+        "Tournament Results screen in WAIT and will retry",
+        detail=(
+            "[TOURNAMENT_RESULTS] result=failed next_mode=WAIT retry=true"
+        ),
+        operation_id=operation_id,
+    )
+    manager.on_game_over.assert_not_called()
+    app._status_reporter.reset_coin_rate_samples.assert_not_called()
+    assert app._tournament_results_captured is False

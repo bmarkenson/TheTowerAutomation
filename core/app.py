@@ -17,6 +17,7 @@ from utils.logger import (
     log,
     log_action_intent,
     log_result,
+    new_operation_id,
     set_mission_log_path,
     start_retry_activity_scope,
 )
@@ -2806,6 +2807,15 @@ class App:
         ):
             if getattr(self, "_tournament_results_captured", False):
                 return
+            operation_id = new_operation_id()
+            log_action_intent(
+                "Capturing the finished Tournament",
+                reason=(
+                    "preserve its result before waiting for operator direction"
+                ),
+                detail="[TOURNAMENT_RESULTS] result=pending next_mode=WAIT",
+                operation_id=operation_id,
+            )
             log(
                 "Detected TOURNAMENT_RESULTS. Capturing result without dismissing it.",
                 "INFO",
@@ -2851,6 +2861,26 @@ class App:
                 self._status_reporter.reset_coin_rate_samples()
                 self._strategy_boundary_confirmed = True
                 self._apply_pending_strategy()
+                log_result(
+                    "Tournament finished — result saved; automation is waiting "
+                    "on the Tournament Results screen (mode WAIT)",
+                    detail=(
+                        "[TOURNAMENT_RESULTS] result=completed "
+                        f"tournament_id={record.get('tournament_id')} "
+                        "next_mode=WAIT"
+                    ),
+                    operation_id=operation_id,
+                )
+            else:
+                log_result(
+                    "Tournament result capture failed — automation remains on "
+                    "the Tournament Results screen in WAIT and will retry",
+                    detail=(
+                        "[TOURNAMENT_RESULTS] result=failed next_mode=WAIT "
+                        "retry=true"
+                    ),
+                    operation_id=operation_id,
+                )
             return
 
         if (
