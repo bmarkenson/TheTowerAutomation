@@ -94,6 +94,7 @@ PERK_CONFIGURATION_LABELS = {
     "inner_land_mines": "Inner Land Mines",
     "smart_missiles": "Smart Missiles",
     "spotlight_damage": "Spotlight Damage",
+    "swamp_radius": "Swamp Radius",
     "damage": "Damage",
 }
 
@@ -209,6 +210,8 @@ def classify_perk_configuration_text(text: str) -> str | None:
         return "smart_missiles"
     if "spotlight damage" in normalized:
         return "spotlight_damage"
+    if normalized.startswith("swamp radius"):
+        return "swamp_radius"
     if "land mine damage" in normalized:
         return "land_mine_damage"
     if "defense absolute" in normalized:
@@ -498,6 +501,24 @@ def parse_perk_configuration_selection(
 
     if field not in ORDER_SEMANTICS:
         raise ValueError(f"unknown Perks configuration field {field!r}")
+    if field == "perk_bans":
+        return _parse_observed_ban_selection(
+            frames,
+            source_complete=source_complete,
+            source_reason=source_reason,
+            evidence_images=evidence_images,
+            confidence_threshold=confidence_threshold,
+            text_fn=text_fn,
+        )
+    if field == "perk_auto_pick_order":
+        return _parse_observed_auto_pick_order(
+            frames,
+            source_complete=source_complete,
+            source_reason=source_reason,
+            evidence_images=evidence_images,
+            confidence_threshold=confidence_threshold,
+            text_fn=text_fn,
+        )
     selected: list[dict[str, Any]] = []
     raw_pages = []
     for page, frame in enumerate(frames, start=1):
@@ -569,6 +590,198 @@ def parse_perk_configuration_selection(
             "confidence_threshold": float(confidence_threshold),
             "selected_count": len(selected),
             "low_confidence": low_confidence,
+            "warnings": warnings,
+        },
+    }
+
+
+def _parse_observed_ban_selection(
+    frames: Sequence[Frame],
+    *,
+    source_complete: bool,
+    source_reason: str,
+    evidence_images: Sequence[str],
+    confidence_threshold: float,
+    text_fn: Optional[RowTextFn],
+) -> dict[str, Any]:
+    """Read outlined rows from the Ban tab's Selected Perks section."""
+
+    selected: list[dict[str, Any]] = []
+    raw_pages = []
+    for page, frame in enumerate(frames, start=1):
+        rows = ocr_perk_configuration_rows(frame, text_fn=text_fn)
+        raw_pages.append({"page": page, "rows": rows})
+        for row in rows:
+            if row.get("selected_outline") is not True:
+                continue
+            entry = _semantic_entry(row)
+            existing = next(
+                (
+                    item
+                    for item in selected
+                    if perk_entries_match(item, entry)
+                ),
+                None,
+            )
+            observation = {
+                "page": page,
+                "top": entry["top"],
+                "confidence": entry["confidence"],
+            }
+            if existing is not None:
+                existing["observations"].append(observation)
+                if entry["confidence"] > existing["confidence"]:
+                    observations = existing["observations"]
+                    existing.update(entry)
+                    existing["observations"] = observations
+                continue
+            entry.update(
+                rank=len(selected) + 1,
+                page=page,
+                observations=[observation],
+            )
+            selected.append(entry)
+    return _observed_configuration_result(
+        field="perk_bans",
+        selected=selected,
+        raw_pages=raw_pages,
+        source_complete=source_complete,
+        source_reason=source_reason,
+        evidence_images=evidence_images,
+        confidence_threshold=confidence_threshold,
+        boundary_seen=True,
+    )
+
+
+def _parse_observed_auto_pick_order(
+    frames: Sequence[Frame],
+    *,
+    source_complete: bool,
+    source_reason: str,
+    evidence_images: Sequence[str],
+    confidence_threshold: float,
+    text_fn: Optional[RowTextFn],
+) -> dict[str, Any]:
+    """Read every ranked Auto Pick row above the Rankings Unlocked divider."""
+
+    selected: list[dict[str, Any]] = []
+    raw_pages = []
+    boundary_seen = False
+    for page, frame in enumerate(frames, start=1):
+        rows = ocr_perk_configuration_rows(frame, text_fn=text_fn)
+        boundary_y = detect_auto_pick_ranking_boundary(frame)
+        ranked_rows = (
+            [row for row in rows if int(row.get("bottom") or 0) < boundary_y]
+            if boundary_y is not None
+            else rows
+        )
+        raw_pages.append(
+            {
+                "page": page,
+                "rows": rows,
+                "ranking_boundary_y": boundary_y,
+            }
+        )
+        for row in ranked_rows:
+            entry = _semantic_entry(row)
+            existing = next(
+                (
+                    item
+                    for item in selected
+                    if perk_entries_match(item, entry)
+                ),
+                None,
+            )
+            observation = {
+                "page": page,
+                "top": entry["top"],
+                "confidence": entry["confidence"],
+            }
+            if existing is not None:
+                existing["observations"].append(observation)
+                if entry["confidence"] > existing["confidence"]:
+                    observations = existing["observations"]
+                    existing.update(entry)
+                    existing["observations"] = observations
+                continue
+            entry.update(
+                rank=len(selected) + 1,
+                page=page,
+                observations=[observation],
+            )
+            selected.append(entry)
+        if boundary_y is not None:
+            boundary_seen = True
+            break
+    return _observed_configuration_result(
+        field="perk_auto_pick_order",
+        selected=selected,
+        raw_pages=raw_pages,
+        source_complete=source_complete,
+        source_reason=source_reason,
+        evidence_images=evidence_images,
+        confidence_threshold=confidence_threshold,
+        boundary_seen=boundary_seen,
+    )
+
+
+def _observed_configuration_result(
+    *,
+    field: str,
+    selected: list[dict[str, Any]],
+    raw_pages: list[dict[str, Any]],
+    source_complete: bool,
+    source_reason: str,
+    evidence_images: Sequence[str],
+    confidence_threshold: float,
+    boundary_seen: bool,
+) -> dict[str, Any]:
+    low_confidence = [
+        str(item.get("key") or item.get("display_text") or "unknown")
+        for item in selected
+        if _semantic_entry_is_low_confidence(
+            item,
+            confidence_threshold=confidence_threshold,
+        )
+    ]
+    unrecognized = [
+        str(item.get("display_text") or "unknown")
+        for item in selected
+        if item.get("key") is None
+    ]
+    warnings = []
+    if not source_complete:
+        warnings.append(f"Perks configuration capture was incomplete: {source_reason}")
+    if field == "perk_auto_pick_order" and not boundary_seen:
+        warnings.append("Auto Pick ranking boundary was not recognized")
+    if field == "perk_auto_pick_order" and not selected:
+        warnings.append("Auto Pick capture contained no ranked priority rows")
+    if low_confidence:
+        warnings.append(
+            "Low-confidence configured perks: " + ", ".join(low_confidence)
+        )
+    if unrecognized:
+        warnings.append(
+            "Unrecognized configured perks: " + ", ".join(unrecognized)
+        )
+    return {
+        "source_method": "scrolling_screenshot_semantic_ocr",
+        "page_count": len(raw_pages),
+        "order_semantics": ORDER_SEMANTICS[field],
+        "selected": selected,
+        "evidence_images": list(evidence_images),
+        "raw_pages": raw_pages,
+        "quality": {
+            "valid": not warnings,
+            "source_complete": bool(source_complete),
+            "source_reason": source_reason,
+            "confidence_threshold": float(confidence_threshold),
+            "selected_count": len(selected),
+            "ranking_boundary_seen": (
+                boundary_seen if field == "perk_auto_pick_order" else None
+            ),
+            "low_confidence": low_confidence,
+            "unrecognized": unrecognized,
             "warnings": warnings,
         },
     }

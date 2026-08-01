@@ -35,6 +35,11 @@ CONFIGURATION_SCAN_TOP = 410
 CONFIGURATION_SCAN_BOTTOM = 1780
 CONFIGURATION_MIN_ROW_HEIGHT = 120
 CONFIGURATION_MIN_BACKGROUND_VALUE = 55
+CONFIGURATION_OUTLINE_X1 = 107
+CONFIGURATION_OUTLINE_X2 = 973
+CONFIGURATION_OUTLINE_MIN_VALUE = 180
+CONFIGURATION_OUTLINE_MIN_WIDTH_FRACTION = 0.55
+CONFIGURATION_OUTLINE_MAX_ROW_HEIGHT = 240
 
 
 def ocr_perk_rows(
@@ -154,6 +159,11 @@ def ocr_perk_configuration_rows(
                 "key": _slug(display_text),
                 "confidence": round(float(confidence), 1),
                 "background_value_median": float(np.median(background)),
+                "selected_outline": _perk_configuration_row_has_outline(
+                    frame,
+                    top,
+                    bottom,
+                ),
                 "text_candidates": text_candidates,
             }
         )
@@ -204,6 +214,11 @@ def ocr_perk_configuration_row_near(
         "key": _slug(display_text),
         "confidence": round(float(confidence), 1),
         "background_value_median": float(np.median(background)),
+        "selected_outline": _perk_configuration_row_has_outline(
+            frame,
+            top,
+            bottom,
+        ),
         "text_candidates": text_candidates,
     }
 
@@ -377,33 +392,120 @@ def _perk_configuration_row_regions(frame: Frame) -> list[tuple[int, int]]:
         roi > CONFIGURATION_MIN_BACKGROUND_VALUE
     ).mean(axis=1) > 0.70
     indices = np.flatnonzero(active)
-    if len(indices) == 0:
-        return []
-
     regions: list[tuple[int, int]] = []
-    start = previous = int(indices[0])
-    for raw_index in indices[1:]:
-        index = int(raw_index)
-        if index > previous + 1:
-            regions.append(
-                (
-                    start + CONFIGURATION_SCAN_TOP,
-                    previous + CONFIGURATION_SCAN_TOP,
+    if len(indices):
+        start = previous = int(indices[0])
+        for raw_index in indices[1:]:
+            index = int(raw_index)
+            if index > previous + 1:
+                regions.append(
+                    (
+                        start + CONFIGURATION_SCAN_TOP,
+                        previous + CONFIGURATION_SCAN_TOP,
+                    )
                 )
+                start = index
+            previous = index
+        regions.append(
+            (
+                start + CONFIGURATION_SCAN_TOP,
+                previous + CONFIGURATION_SCAN_TOP,
             )
-            start = index
-        previous = index
-    regions.append(
-        (
-            start + CONFIGURATION_SCAN_TOP,
-            previous + CONFIGURATION_SCAN_TOP,
         )
-    )
-    return [
+    ordinary = [
         (top, bottom)
         for top, bottom in regions
         if bottom - top + 1 >= CONFIGURATION_MIN_ROW_HEIGHT
     ]
+    return _merge_overlapping_regions(
+        [*ordinary, *_perk_configuration_outline_regions(frame)]
+    )
+
+
+def _perk_configuration_outline_regions(frame: Frame) -> list[tuple[int, int]]:
+    """Recover selected tiles whose deliberately dark fill hides the row."""
+
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    value = hsv[
+        CONFIGURATION_SCAN_TOP:CONFIGURATION_SCAN_BOTTOM,
+        CONFIGURATION_OUTLINE_X1:CONFIGURATION_OUTLINE_X2,
+        2,
+    ]
+    bright_fraction = (value >= CONFIGURATION_OUTLINE_MIN_VALUE).mean(axis=1)
+    indices = np.flatnonzero(
+        bright_fraction >= CONFIGURATION_OUTLINE_MIN_WIDTH_FRACTION
+    )
+    if len(indices) == 0:
+        return []
+    line_groups = np.split(
+        indices,
+        np.flatnonzero(np.diff(indices) > 1) + 1,
+    )
+    lines = [
+        (
+            int(group[0]) + CONFIGURATION_SCAN_TOP,
+            int(group[-1]) + CONFIGURATION_SCAN_TOP,
+        )
+        for group in line_groups
+        if len(group)
+    ]
+    regions: list[tuple[int, int]] = []
+    index = 0
+    while index + 1 < len(lines):
+        top = lines[index]
+        bottom = lines[index + 1]
+        height = bottom[1] - top[0] + 1
+        if (
+            CONFIGURATION_MIN_ROW_HEIGHT
+            <= height
+            <= CONFIGURATION_OUTLINE_MAX_ROW_HEIGHT
+        ):
+            regions.append((top[0], bottom[1]))
+            index += 2
+        else:
+            index += 1
+    return regions
+
+
+def _merge_overlapping_regions(
+    regions: Sequence[tuple[int, int]],
+) -> list[tuple[int, int]]:
+    merged: list[tuple[int, int]] = []
+    for top, bottom in sorted(regions):
+        if merged and top <= merged[-1][1]:
+            prior_top, prior_bottom = merged[-1]
+            merged[-1] = (prior_top, max(prior_bottom, bottom))
+        else:
+            merged.append((top, bottom))
+    return merged
+
+
+def _perk_configuration_row_has_outline(
+    frame: Frame,
+    top: int,
+    bottom: int,
+) -> bool:
+    """Return whether both horizontal selected-tile borders are visible."""
+
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    value = hsv[
+        max(CONFIGURATION_SCAN_TOP, top):min(CONFIGURATION_SCAN_BOTTOM, bottom + 1),
+        CONFIGURATION_OUTLINE_X1:CONFIGURATION_OUTLINE_X2,
+        2,
+    ]
+    if value.shape[0] < 2:
+        return False
+    edge_depth = min(25, max(1, value.shape[0] // 3))
+    top_peak = (value[:edge_depth] >= CONFIGURATION_OUTLINE_MIN_VALUE).mean(
+        axis=1
+    ).max()
+    bottom_peak = (value[-edge_depth:] >= CONFIGURATION_OUTLINE_MIN_VALUE).mean(
+        axis=1
+    ).max()
+    return bool(
+        top_peak >= CONFIGURATION_OUTLINE_MIN_WIDTH_FRACTION
+        and bottom_peak >= CONFIGURATION_OUTLINE_MIN_WIDTH_FRACTION
+    )
 
 
 def _recognize_configuration_text(

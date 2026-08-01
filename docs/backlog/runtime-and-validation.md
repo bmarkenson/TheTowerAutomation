@@ -16,6 +16,15 @@ checked-item detail remains in the
   for unknown versions, shape changes, stale data, mismatches, and unmapped
   settings. Follow
   [`../modules/player_save_import.md`](../modules/player_save_import.md).
+  - [x] On game `28.3.1` / version code `1073`, cross-validate Cards,
+    Workshop, Bots, First Perk, Ban Perks, the complete 18-row ranked Auto Pick
+    block, Guardians, and the three automation-managed Free Upgrade locks.
+    Correct the candidate perk-ID labels exposed by the same-boundary compare
+    and retain the mapping as `candidate`.
+  - [ ] Cross-validate Target Priority, every mapped Free Upgrade lock,
+    Ultimate Weapon primary/detail polarity, and the remaining unranked Auto
+    Pick IDs; then integrate save reconciliation into preflight in audit-only
+    mode before considering any per-check navigation shortcut.
 - [ ] Capture the numeric level of every equipped Module from authoritative
   overview evidence, retain it with preflight and completed-run records, and
   surface threshold violations without confusing an intentional Tournament

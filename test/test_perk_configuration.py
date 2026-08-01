@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import patch
 
 import cv2
 import numpy as np
@@ -47,40 +48,114 @@ def test_first_perk_fixture_separates_selected_row_from_available_rows():
     assert result["raw_pages"][0]["rows"][1]["background_value_median"] > 110
 
 
-def test_auto_pick_order_keeps_dark_selected_rows_and_deduplicates_pages():
-    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
-    dark = cv2.cvtColor(np.uint8([[[121, 157, 83]]]), cv2.COLOR_HSV2BGR)[0, 0]
-    bright = cv2.cvtColor(np.uint8([[[121, 123, 137]]]), cv2.COLOR_HSV2BGR)[0, 0]
-    frame[500:670, 107:973] = dark
-    frame[700:870, 107:973] = dark
-    frame[900:1070, 107:973] = bright
-    texts = iter(
+def test_auto_pick_observation_reads_all_category_colors_until_rank_boundary():
+    frames = [
+        np.zeros((1920, 1080, 3), dtype=np.uint8),
+        np.zeros((1920, 1080, 3), dtype=np.uint8),
+    ]
+    pages = [
         [
-            ("Perk Wave Requirement", 95.0),
-            ("Coins", 94.0),
-            ("Damage", 93.0),
-            ("Perk Wave Requirement", 95.0),
-            ("Coins", 94.0),
-            ("Damage", 93.0),
-        ]
-    )
+            _configuration_row("Perk wave requirement -25.00%", 500, 657, 137),
+            _configuration_row("Increase max game speed by +1.25", 700, 857, 96),
+        ],
+        [
+            _configuration_row("Increase max game speed by +1.25", 500, 657, 96),
+            _configuration_row(
+                "x1.98 coins, but tower max health -70.0%",
+                700,
+                857,
+                130,
+            ),
+            _configuration_row("x1.44 Damage", 1300, 1457, 137),
+        ],
+    ]
 
-    result = parse_perk_configuration_selection(
-        [frame, frame],
-        field="perk_auto_pick_order",
-        source_complete=True,
-        source_reason="edge_reached",
-        text_fn=lambda _crop: next(texts),
-    )
+    with (
+        patch(
+            "core.perk_configuration.ocr_perk_configuration_rows",
+            side_effect=pages,
+        ),
+        patch(
+            "core.perk_configuration.detect_auto_pick_ranking_boundary",
+            side_effect=[None, 1200],
+        ),
+    ):
+        result = parse_perk_configuration_selection(
+            frames,
+            field="perk_auto_pick_order",
+            source_complete=True,
+            source_reason="edge_reached",
+        )
 
     assert result["quality"]["valid"] is True
+    assert result["quality"]["ranking_boundary_seen"] is True
     assert result["order_semantics"] == "top_to_bottom_priority"
-    assert [item["display_text"] for item in result["selected"]] == [
-        "Perk Wave Requirement",
-        "Coins",
+    assert [item["key"] for item in result["selected"]] == [
+        "perk_wave_requirement",
+        "game_speed",
+        "coin_tradeoff",
     ]
-    assert [item["rank"] for item in result["selected"]] == [1, 2]
-    assert all(len(item["observations"]) == 2 for item in result["selected"])
+    assert [item["rank"] for item in result["selected"]] == [1, 2, 3]
+    assert len(result["selected"][1]["observations"]) == 2
+
+
+def test_ban_observation_uses_selected_outlines_not_category_brightness():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    rows = [
+        {
+            **_configuration_row(text, 500 + index * 100, 590 + index * 100, value),
+            "selected_outline": selected,
+        }
+        for index, (text, value, selected) in enumerate(
+            (
+                ("Lifesteal x2.75, but knockback force -70%", 82, True),
+                ("Enemies damage -55.0%, but tower damage -50%", 82, True),
+                ("x1.44 Defense Absolute", 83, True),
+                ("Interest x1.88", 83, True),
+                ("Land Mine Damage x4.38", 83, True),
+                ("Swamp radius x1.5", 32, True),
+                ("Boss health -73.5%, but boss speed +50%", 82, False),
+            )
+        )
+    ]
+
+    with patch(
+        "core.perk_configuration.ocr_perk_configuration_rows",
+        return_value=rows,
+    ):
+        result = parse_perk_configuration_selection(
+            [frame],
+            field="perk_bans",
+            source_complete=True,
+            source_reason="edge_reached",
+        )
+
+    assert result["quality"]["valid"] is True
+    assert [item["key"] for item in result["selected"]] == [
+        "lifesteal_knockback_tradeoff",
+        "enemies_damage_tradeoff",
+        "defense_absolute",
+        "interest",
+        "land_mine_damage",
+        "swamp_radius",
+    ]
+
+
+def test_configuration_row_scanner_recovers_dark_outlined_green_row():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    frame[500:680, 107:973] = (0, 32, 0)
+    frame[500:507, 107:973] = 255
+    frame[673:680, 107:973] = 255
+
+    rows = ocr_perk_configuration_rows(
+        frame,
+        text_fn=lambda _crop: ("Swamp radius x1.5", 95.0),
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["selected_outline"] is True
+    assert rows[0]["background_value_median"] < 55
+    assert semantic_perk_entry(rows[0])["key"] == "swamp_radius"
 
 
 def test_auto_pick_ranking_boundary_requires_paired_horizontal_rules():
@@ -262,12 +337,30 @@ def test_auto_pick_rows_have_value_independent_semantic_keys():
         ): "ranged_distance_tradeoff",
         "Land Mine Damage x4.38": "land_mine_damage",
         "x1.44 Cash Bonus": "cash_bonus",
+        "Swamp radius x1.5": "swamp_radius",
     }
 
     assert {
         text: classify_perk_configuration_text(text)
         for text in cases
     } == cases
+
+
+def _configuration_row(
+    text: str,
+    top: int,
+    bottom: int,
+    background_value: float,
+) -> dict:
+    return {
+        "top": top,
+        "bottom": bottom,
+        "display_text": text,
+        "text_raw": text,
+        "confidence": 95.0,
+        "background_value_median": background_value,
+        "selected_outline": False,
+    }
 
 
 def test_farm_auto_pick_post_economy_order_matches_17_slot_priority():

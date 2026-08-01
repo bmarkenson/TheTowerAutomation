@@ -13,6 +13,23 @@ derived from the repository-root operator sample and recognizes the sample's
 five 28-slot card-preset records, including the distinction between its stored
 base slot count and the effective preset width.
 
+Live cross-channel calibration on game `28.3.1` confirmed that
+`versionNumber: 1073` is the installed application's `versionCode`. At one
+verified new-battle Home boundary, stable save reads agreed with authoritative
+UI evidence for the selected Cards, Workshop, and Bots presets; First Perk;
+the six selected Ban Perks; all 18 ranked Auto Pick rows; equipped Guardians;
+and the three Free Upgrade locks managed by automation. That pass corrected
+the candidate perk IDs after Auto Pick rank 9 and identified perk ID `21` as
+Swamp Radius. The Home list reader now identifies selected Ban rows by their
+tile outlines and terminates Auto Pick ranks at the visible Rankings Unlocked
+divider, instead of interpreting perk-category fill colors as selection state.
+
+This is deliberately a partial validation, not a promotion. Target Priority,
+the complete set of possible Free Upgrade locks, Ultimate Weapon toggle
+polarities, and the unranked Auto Pick tail still need same-version UI
+calibration. The mapping therefore remains `candidate`, and every check still
+uses the existing UI path.
+
 Candidate status is fail-closed: every reconciliation decision still names the
 existing UI check as required. The mapping can expose agreements and likely
 drift now, but it cannot suppress navigation until it is validated against UI
@@ -24,7 +41,7 @@ The currently mapped profile checks are:
 - Free Upgrade locks;
 - Guardian chips and Target Priority order;
 - Auto Pick Perks, bans, first choice, and the mapped Auto Pick priority
-  prefix;
+  prefix (the visible ranked block is distinct from the save's unranked tail);
 - Ultimate Weapon primary toggles, Poison Swamp Stun, and Spotlight Missiles.
 
 Card recharge modes, Damage Slider, Modules, and Orb Distance are explicitly

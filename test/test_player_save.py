@@ -44,7 +44,26 @@ def _decoded_save() -> dict:
         "slotsUnlocked": 22,
         "autoPickPerk": True,
         "bannedPerksIndex": [49, 43, 14, 5, 6, 13, -1, -1],
-        "autoPickOrder": [10, 12, 41, 24, 27, 22, 3, 8, 7, 1, 42, 48, 45, 44, 40, 25, 23, 28],
+        "autoPickOrder": [
+            10,
+            12,
+            41,
+            24,
+            27,
+            22,
+            3,
+            8,
+            7,
+            42,
+            40,
+            45,
+            48,
+            44,
+            25,
+            23,
+            1,
+            4,
+        ],
         "firstPerkIndex": 10,
         "targetPriorityList": [0, 2, 9, 5, 8, 7, 6, 3, 4, 1],
         "ultimateWeaponUnlocked": [True] * 9,
@@ -116,6 +135,65 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
     assert "must-not-leak-player-id" not in rendered
     assert "must-not-leak-user-name" not in rendered
     assert "/private/path" not in rendered
+
+
+def test_live_calibrated_swamp_radius_perk_id_is_mapped(monkeypatch):
+    decoded = _decoded_save()
+    decoded["bannedPerksIndex"] = [21, -1, -1, -1, -1, -1, -1, -1]
+
+    snapshot = _snapshot(monkeypatch, decoded)
+
+    assert snapshot.checks["perk_bans"].status == "observed"
+    assert snapshot.checks["perk_bans"].value == ["swamp_radius"]
+
+
+def test_live_calibrated_auto_pick_ids_follow_the_ui_rank_order(monkeypatch):
+    decoded = _decoded_save()
+    decoded["autoPickOrder"] = [
+        10,
+        12,
+        41,
+        24,
+        27,
+        22,
+        3,
+        8,
+        7,
+        42,
+        40,
+        45,
+        48,
+        44,
+        25,
+        23,
+        28,
+        1,
+        4,
+    ]
+
+    snapshot = _snapshot(monkeypatch, decoded)
+
+    assert snapshot.checks["perk_auto_pick_order"].value == [
+        "perk_wave_requirement",
+        "game_speed",
+        "coin_tradeoff",
+        "golden_tower_bonus",
+        "black_hole_duration",
+        "death_wave_quantity",
+        "coins_bonus",
+        "free_upgrade_chance",
+        "orbs",
+        "enemy_health_tradeoff",
+        "tower_damage_boss_health_tradeoff",
+        "enemy_speed_tradeoff",
+        "boss_health_tradeoff",
+        "ranged_distance_tradeoff",
+        "chain_lightning_damage",
+        "inner_land_mines",
+        "spotlight_damage",
+        "damage",
+    ]
+    assert snapshot.checks["perk_auto_pick_order"].complete is False
 
 
 def test_unknown_game_version_decodes_metadata_but_requires_ui(monkeypatch):
