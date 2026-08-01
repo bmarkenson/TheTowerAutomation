@@ -8,6 +8,40 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Card recharge verification rejected a valid post-toggle checkbox
+
+- **Observed:** 2026-08-01 during an authorized no-battle calibration of Demon
+  Mode and Nuke save fields on game version code `1073`.
+- **Symptom:** After Demon Mode was unchecked, its verified detail remained
+  visible and the checkmark correctly disappeared, but the classifier reported
+  `unknown`. The bounded calibration failed closed. Its first recovery toggled
+  the visible checkbox back on, while the earlier unchecked value had already
+  reached the save during the timeout; an explicit recovery flush was needed
+  to bring the saved value back to the visible configuration.
+- **Evidence:** The action log recorded detail confidence `1.000`, zero
+  checkmark pixels, and 342 cyan outline pixels after unchecking, followed by
+  282 checkmark pixels and the same 342 outline pixels after rechecking. The
+  classifier required at least 350 outline pixels. Stable pulls showed the
+  isolated raw transition and the final restored `true/false` Demon/Nuke pair.
+- **Safety response:** Automation remained `STOPPED`, the calibration held the
+  exact ADB-target lock, and no battle control was touched. A separately logged
+  recovery visually verified both configured modes, forced the proven
+  app-pause serialization boundary, and returned to verified `NEW_BATTLE`
+  before testing resumed.
+- **Cause:** The checkbox-outline cutoff was tuned to the retained 462-pixel
+  fixtures and left no margin for the valid 342-pixel post-toggle rendering.
+- **Resolution:** The cutoff is 300 pixels, while authoritative card-detail
+  identity and the independent checkmark thresholds remain mandatory. The
+  causal run then completed Demon `true -> false -> true` and Nuke
+  `false -> true -> false`, with unrelated fields unchanged and both UI modes
+  restored.
+- **Regression:**
+  `test/test_card_recharge_modes.py::test_card_detail_accepts_live_post_toggle_outline_variance`
+  synthesizes the observed 342-pixel outline and requires authoritative
+  classification. The focused player-save/card suite passed 39 tests, and the
+  complete repository suite passed all 1,040 tests.
+- **Fixed by:** `0aa4df7`.
+
 ### Tournament attachment preflight stranded the enabled ad-gem handler
 
 - **Observed:** 2026-08-01 after the managed runtime attached to an active

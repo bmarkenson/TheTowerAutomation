@@ -37,6 +37,33 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-01 card recharge save calibration
+
+- Commit `0aa4df7` maps `demonModeAutomateToggle` and
+  `nukeAutomateToggle` into the version-1073 `card_recharge_modes` check and
+  adds that complete check to the candidate mapping's per-check validation
+  allowlist. A fresh, complete matching snapshot can now produce `save_match`;
+  changed types, mismatches, unverified freshness, and forced audits retain the
+  existing UI fallback.
+- Bounded no-battle testing independently produced Demon Mode
+  `true -> false -> true` and Nuke `false -> true -> false` across app-pause
+  serialization boundaries. `true` means auto-reactivate for both fields.
+  `currentPreset`, Missile Barrage, and the other card's boolean remained
+  unchanged during each mutation. Final UI evidence showed Demon Mode on
+  auto-reactivate, Nuke ready after recharge, and Home at `NEW_BATTLE`.
+- The live test exposed a valid 342-pixel post-toggle checkbox outline below
+  the old 350-pixel cutoff. The detector now accepts a 300-pixel outline only
+  when the card-detail identity and independent checkmark evidence also pass;
+  a synthetic regression reproduces the observed variance.
+- The complete remaining field matrix, evidence standard, profile-validation
+  scope, audit-only adoption, incremental navigation suppression, snapshot
+  invalidation, and scheduled-audit plan are maintained in
+  [`player_save_import.md`](player_save_import.md#complete-validation-program)
+  and the active runtime backlog. The focused player-save/card suite passed 39
+  tests, and the complete repository suite passed all 1,040 tests. The
+  operator-owned raw save remained untracked and was not copied into
+  repository evidence.
+
 ### 2026-08-01 backend strategy authoring model
 
 - This commit implements the backend slice of the sparse strategy-authoring

@@ -30,13 +30,19 @@ boundary. Changing the visible Cards preset from slot 2 to slot 1 and back
 produced raw `currentPreset` values `1 -> 0 -> 1`; the raw field is zero-based
 even though the UI labels slots from one. Changing Poison Swamp Stun from on to
 off and back produced `poisonSwampStunOff` values `false -> true -> false`.
-Neither setting reached `playerInfo.dat` merely by waiting or returning Home.
-Both serialized when Android Home backgrounded the game, without force-stop,
-and each restoration was verified after a second app-pause flush.
+Changing Demon Mode from auto-reactivate to ready-after-recharge and back
+produced `demonModeAutomateToggle` values `true -> false -> true`; changing
+Nuke in the opposite direction and back produced `nukeAutomateToggle` values
+`false -> true -> false`. The other card's flag, Missile Barrage, and the Cards
+preset remained stable during each isolated mutation. Waiting or returning
+Home alone did not flush the tested preset change. These settings serialized
+when Android Home backgrounded the game, without force-stop, and each
+restoration was verified through both the UI and a second app-pause flush.
 
 This is deliberately a partial validation, not a global promotion. The exact
 mapping now marks Cards, Workshop, and Bots preset selection; First Perk; Ban
-Perks; and equipped Guardians as validated checks. Target Priority,
+Perks; equipped Guardians; and Demon Mode/Nuke recharge behavior as validated
+checks. Target Priority,
 the complete set of possible Free Upgrade locks, Ultimate Weapon toggle
 polarities, and the unranked Auto Pick tail still need same-version UI
 calibration. Poison Swamp Stun polarity is confirmed, but the combined Ultimate
@@ -59,9 +65,114 @@ The currently mapped profile checks are:
   prefix (the visible ranked block is distinct from the save's unranked tail);
 - Ultimate Weapon primary toggles, Poison Swamp Stun, and Spotlight Missiles.
 
-Card recharge modes, Damage Slider, Modules, and Orb Distance are explicitly
-unmapped and always use the UI. More fields can be added only with semantic and
-polarity calibration, not merely because a plausible raw field exists.
+Card recharge modes are now mapped and validated. Damage Slider, Modules, and
+Orb Distance remain explicitly unmapped and always use the UI. More fields can
+be added only with semantic and polarity calibration, not merely because a
+plausible raw field exists.
+
+## Complete validation program
+
+The validation target is not every opaque counter in the save. It is every
+normalized claim that the importer publishes, every value used to compare a
+resolved profile, and every value that could suppress an existing UI check.
+For each exact game version, a field-disposition manifest must classify every
+raw field name without retaining its value as one of:
+
+- structural identity or shape;
+- automation-gating configuration;
+- profile observation;
+- private and always redacted;
+- deliberately ignored with a reason; or
+- unknown and therefore unpublished.
+
+This makes coverage auditable without copying a real save or leaking account,
+currency, history, or other private values. The current redacted
+`profile_summary` is diagnostic until each semantic count or level group below
+is separately validated; array length alone proves structure, not meaning.
+
+### Evidence and promotion standard
+
+A versioned claim progresses through four evidence levels:
+
+1. **Structural** — exact version, root class, field type, and complete array
+   dimensions are known.
+2. **Cross-channel** — one stable save and authoritative UI evidence agree at
+   the same configuration and serialization boundary.
+3. **Causal where needed** — boolean polarity, enum direction, units, and
+   write timing are proven by one isolated mutation and restoration. Costly or
+   destructive settings instead require independent known configurations; the
+   validation plan never spends medals or risks Module levels merely to create
+   evidence.
+4. **Shortcut-ready** — the entire normalized check is complete, every value
+   it could suppress has passed the required evidence, mismatch and malformed
+   cases fail to UI in tests, and the check is explicitly allowlisted for the
+   exact mapping.
+
+Every causal test must record the before, mutated, restored, and unrelated
+control fields; flush through a proven lifecycle boundary; visually verify the
+restoration; and finish at the original safe boundary. A new exact game
+version starts again at structural status even when its fields look unchanged.
+
+### Automation-gating matrix
+
+`Shortcut-ready` below describes the decoder/reconciler. Runtime preflight has
+not yet adopted the navigation shortcut.
+
+| Normalized check | Version-1073 source | Current evidence | Remaining work before runtime adoption |
+| --- | --- | --- | --- |
+| Cards preset | `presetName`, `currentPreset` | Shortcut-ready; UI slot 2/1/2 caused raw `1/0/1`. | Audit the runtime acquisition path, then retain scheduled UI samples. |
+| Card recharge modes | `demonModeAutomateToggle`, `nukeAutomateToggle` | Shortcut-ready; both booleans were independently flipped and restored. `true` means auto-reactivate. | Audit the runtime acquisition path, then retain scheduled UI samples. |
+| Workshop preset | `workshopPresetName`, `currentWorkshopPreset` | Shortcut-ready from exact selected-name/index agreement. | Do not manufacture a switch; force UI again on mapping/version audit. |
+| Bots preset | `botPresetName`, `currentBotPreset` | Shortcut-ready from exact selected-name/index agreement. | Never spend medals for causality; validate future values through naturally selected presets. |
+| First Perk | `firstPerkIndex` plus `perk_ids` | Shortcut-ready for mapped IDs; an unknown ID fails closed. | Extend only when a new ID is authoritatively visible. |
+| Ban Perks | `bannedPerksIndex` plus `perk_ids` | Shortcut-ready for a complete mapped selected set. | Validate any newly encountered ID; unknown selected IDs keep the whole check in UI. |
+| Guardian chips | `guardianChipSlot`, `guardianSlotsUnlocked`, `guardian_chip_ids` | Shortcut-ready for the mapped Farm/Tournament chips; unknown IDs fail closed. | Extend through read-only equipped evidence; never equip merely to identify an ID. |
+| Auto Pick enabled | `autoPickPerk` | Observed but not allowlisted. | Toggle off/on at a safe no-battle boundary, flush each state, restore, and prove polarity. |
+| Auto Pick order | `autoPickOrder` plus `perk_ids` | Ranked prefix agrees, but the save contains an unranked tail and unknown IDs; evidence is deliberately incomplete. | Map every reachable ID and encode ranked-count/tail semantics so only the visible ranked block is compared. |
+| Free Upgrade locks | Three `*LockedFreeUpgrades` arrays | The three Farm locks agree; the full index-to-upgrade map is not validated. | Either validate every supported index and polarity or narrow the mapping to proven indices and fail closed whenever another bit is set. |
+| Target Priority | `targetPriorityList` plus `target_priority_ids` | Plausible ordered mapping, not allowlisted. | Compare a fresh in-battle list and use one reversible adjacent reorder/restore to prove index order and serialization. |
+| Ultimate Weapons | `ultimateWeaponUnlocked`, `ultimateWeaponOn`, `poisonSwampStunOff`, `spotlightSmartMissilesOff` | Weapon order and current values agree; Poison Swamp Stun polarity is causal. The combined check remains unvalidated. | Prove all nine primary-toggle booleans and Spotlight Missiles independently, or split the combined check into smaller atomic evidence before allowlisting. |
+| Modules | Module equipped/inventory records | Explicitly unmapped. | Map slot order, stable module identity, Primary/Assist roles, rarity, level ownership, and substats through read-only UI comparisons; do not swap modules solely for calibration. |
+| Damage Slider | Field not identified | Explicitly unmapped. | In an explicitly authorized test battle, correlate at least two distinct values and restoration, including percentage encoding and save timing. |
+| Orb Distance | Candidate distance/preset fields not accepted | Explicitly unmapped. | In an explicitly authorized battle, cycle known Extra/Workshop presets, prove units and selected-preset semantics, and restore the original pair. |
+
+### Full-profile matrix
+
+These groups broaden the profile view but cannot influence automation until
+their own normalized evidence is validated. Each published group must carry
+mapping ID, source fields, capture time, and validation status.
+
+| Profile group | Candidate source | Required validation |
+| --- | --- | --- |
+| Card ownership, levels, and all five 28-slot decks | `cardUnlocked`, `cardLevel`, `slotPresetCardInt`, `slotPresetCardAssignedBool`, `slotsUnlocked` | Build the complete card-ID map, compare ownership/levels, inventory every preset membership, and distinguish base slots from the 28-entry stored width. |
+| Workshop and Enhancements | Attack/Defense/Utility workshop and enhancement arrays | Map every index to its UI label, verify representative zero, nonzero, maxed, and unlocked states, and account for special upgrades that do not share ordinary level semantics. |
+| Research and Labs | `researchLevel` plus candidate lab queue/timing fields | Map research IDs and levels first; treat active lab, duration, and completion timestamps as volatile observations with their own freshness rules. |
+| Ultimate Weapon progression | unlock and level arrays plus candidate cooldown/quantity fields | Prove weapon order and the three-level tuple layout for all nine weapons before reporting names or levels. |
+| Guardian and Bot progression | unlock/level arrays and candidate Bot fields | Map every stable ID, slot count, level tuple, and preset field through read-only UI evidence; keep cost-bearing changes outside calibration. |
+| Module inventory and equipped loadout | equipped and module-record structures | Decode stable IDs, uniqueness, slot/role, rarity, levels, ancestral stars, and substats; cross-check multiple naturally occurring loadouts. |
+| Tournament conditions | Field discovery pending | Follow the separate [Tournament condition plan](../backlog/runtime-and-validation.md#tournament-battle-condition-evidence); unknown conditions must remain lossless and nonblocking. |
+
+### Runtime rollout sequence
+
+1. Add the per-version field-disposition manifest and validation metadata for
+   profile groups. Unknown or unclassified fields remain unpublished.
+2. Integrate one audit-only snapshot acquisition at verified
+   `HOME_SCREEN / NEW_BATTLE`: perform the proven short app-pause flush, resume
+   to the same boundary, require two identical reads, then reconcile. Continue
+   running every UI check and record only normalized agreement/disagreement.
+3. Run one clean forced audit for each resolved Farm/Tournament configuration
+   fingerprint. Any discrepancy demotes only the affected check and keeps its
+   UI route active.
+4. Enable navigation suppression one allowlisted check at a time. A complete,
+   fresh exact match skips that check; mismatch, missing evidence, unknown
+   version, changed shape, or forced audit runs the existing UI implementation.
+5. The first UI repair invalidates the pre-action snapshot. Verify the repair
+   visually and either finish the remaining checks through UI or perform a new
+   bounded flush/pull; never use the old save to confirm an action.
+6. Force audits on first use of a new exact mapping, after a discrepancy or
+   repair, for the first use of a new configuration fingerprint, and on a
+   configurable periodic cadence. The UI implementations remain maintained and
+   tested even after most ordinary navigation is skipped.
 
 ## Authority and fallback
 

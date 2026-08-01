@@ -10,21 +10,34 @@ checked-item detail remains in the
 
 - [ ] Cross-validate the `data-9-game-1073` player-save mapping against fresh
   UI inventory from the same version, and add a new exact candidate mapping if
-  the current game reports a different identity. Integrate save reconciliation
-  into preflight in audit-only mode first. Promote only fully cross-validated
-  fields; retain scheduled audits and every existing UI checker as the fallback
-  for unknown versions, shape changes, stale data, mismatches, and unmapped
-  settings. Follow
-  [`../modules/player_save_import.md`](../modules/player_save_import.md).
+  the current game reports a different identity. Execute the complete
+  [field matrix and rollout sequence](../modules/player_save_import.md#complete-validation-program).
+  Promote only fully cross-validated fields; retain scheduled audits and every
+  existing UI checker as the fallback for unknown versions, shape changes,
+  stale data, mismatches, and unmapped settings.
   - [x] On game `28.3.1` / version code `1073`, cross-validate Cards,
     Workshop, Bots, First Perk, Ban Perks, the complete 18-row ranked Auto Pick
     block, Guardians, and the three automation-managed Free Upgrade locks.
     Correct the candidate perk-ID labels exposed by the same-boundary compare
     and retain the mapping as `candidate`.
-  - [ ] Cross-validate Target Priority, every mapped Free Upgrade lock,
-    Ultimate Weapon primary/detail polarity, and the remaining unranked Auto
-    Pick IDs; then integrate save reconciliation into preflight in audit-only
-    mode before considering any per-check navigation shortcut.
+  - [x] Causally validate `currentPreset`, Poison Swamp Stun, and both card
+    recharge booleans through isolated app-pause flushes and restorations.
+    Allowlist the complete Cards preset and recharge-mode checks while keeping
+    the overall mapping `candidate`.
+  - [ ] Add the versioned raw-field disposition manifest and explicit
+    validation status/provenance for every normalized profile group. Keep
+    private, ignored, and unknown fields unpublished.
+  - [ ] Cross-validate Auto Pick enabled and full ranked-order semantics,
+    Target Priority, every supported Free Upgrade lock, every Ultimate Weapon
+    primary/detail polarity, Modules, Damage Slider, and Orb Distance according
+    to the matrix. Do not manufacture cost-bearing Bot or Module changes.
+  - [ ] Integrate the proven flush plus stable pull into preflight in audit-only
+    mode, run a clean forced audit for each resolved Farm/Tournament
+    configuration fingerprint, and retain normalized discrepancy evidence.
+  - [ ] Enable per-check navigation suppression incrementally. Invalidate the
+    snapshot after the first UI repair, preserve visual post-action
+    verification, and force audits on version/fingerprint changes,
+    discrepancies, repairs, and a configurable periodic cadence.
 - [ ] Capture the numeric level of every equipped Module from authoritative
   overview evidence, retain it with preflight and completed-run records, and
   surface threshold violations without confusing an intentional Tournament

@@ -117,14 +117,31 @@ field, and array-length signature. Unknown tuples, changed signatures,
 incomplete mappings, stale snapshots, and save/profile differences all route
 the affected setting through its existing UI check.
 
-Mappings have an explicit `candidate` or `validated` maturity. Candidate
-mappings always require a full UI audit, even when the save agrees with the
-profile. Promotion to `validated` requires comparison with authoritative UI
-evidence from the same game version. A validated exact save match may
-eventually avoid that check's navigation, but scheduled UI audits remain
-available and the UI implementation is retained as the permanent fallback.
-Any automation repair is still verified through fresh UI evidence; a save does
-not authorize a tap or prove the immediate result of one.
+Mappings have an explicit `candidate` or `validated` maturity and an exact
+per-check validation allowlist. A candidate mapping may supply authority only
+for an allowlisted check whose complete evidence matches the profile after an
+explicitly proven save-serialization boundary. Unvalidated checks remain in
+full UI audit even when their candidate values happen to agree. Whole-mapping
+promotion requires every published complete check to meet the same standard.
+Scheduled UI audits remain available, and every UI implementation is retained
+as the permanent fallback.
+
+The intended preflight decision is per check:
+
+```text
+verified NEW_BATTLE -> proven app-pause flush -> stable exact-version pull
+    complete + allowlisted + matching -> accept the saved state; skip that UI route
+    otherwise                         -> run the existing UI check
+                                           |-- match: continue
+                                           `-- repair: verify in UI and invalidate the snapshot
+```
+
+The decoder and reconciler implement this decision contract; runtime snapshot
+acquisition and incremental navigation suppression remain active backlog work.
+A pre-action snapshot never confirms the result of an input. Any automation
+repair is still verified through fresh UI evidence, and subsequent save use
+requires a new serialization receipt and pull. A save does not authorize a tap
+or prove a transient screen state.
 
 ADB acquisition requires two identical consecutive reads before decoding. The
 container size, gzip integrity, NRBF root, exact version identity, and
