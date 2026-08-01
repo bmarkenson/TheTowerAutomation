@@ -49,7 +49,9 @@ def test_control_is_synchronized_before_each_capture_attempt():
 def test_long_paused_outage_skips_known_disconnected_capture_noise():
     now = {"value": 0.0}
     is_connected = Mock(return_value=False)
-    connect = Mock(return_value=False)
+    # A stale TCP transport can claim "already connected" while ADB still
+    # reports the exact target as offline.
+    connect = Mock(return_value=True)
     coordinator = AdbConnectionCoordinator(
         clock=lambda: now["value"],
         is_connected=is_connected,
@@ -83,7 +85,7 @@ def test_long_paused_outage_skips_known_disconnected_capture_noise():
         report_adb_errors=False,
     )
     assert connect.call_count < 130
-    assert is_connected.call_count == connect.call_count
+    assert is_connected.call_count == connect.call_count * 2
     app_log.assert_not_called()
     assert 10 <= len(connection_log.call_args_list) <= 13
     assert all(

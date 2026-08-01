@@ -60,9 +60,23 @@ def _adb_is_connected(target: str) -> bool:
 
 
 def _adb_connect(target: str) -> bool:
+    """Refresh one TCP transport and report only the connect command's hint.
+
+    The caller must verify the resulting target state independently.  ADB can
+    say ``already connected`` while retaining an ``offline`` transport after
+    the emulator behind a still-open SSH forward has stopped.
+    """
+
     if not target or ":" not in target:
         return False
     try:
+        subprocess.run(
+            ["adb", "disconnect", target],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=ADB_CONNECTION_COMMAND_TIMEOUT_S,
+        )
         result = subprocess.run(
             ["adb", "connect", target],
             capture_output=True,
@@ -141,7 +155,16 @@ class AdbConnectionCoordinator:
             ):
                 return False
 
-            if self._is_connected(selected) or self._connect(selected):
+            if self._is_connected(selected):
+                state.connected = True
+                state.next_attempt_at = 0.0
+                return True
+
+            # Command output is not connection authority: ADB may report
+            # "already connected" for an offline/stale TCP transport.  Judge
+            # every refresh by a new exact-target ``device`` observation.
+            self._connect(selected)
+            if self._is_connected(selected):
                 state.connected = True
                 state.next_attempt_at = 0.0
                 return True

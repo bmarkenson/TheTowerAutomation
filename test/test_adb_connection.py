@@ -1,8 +1,9 @@
 from concurrent.futures import ThreadPoolExecutor
+import subprocess
 import threading
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
-from core.adb_connection import AdbConnectionCoordinator
+from core.adb_connection import AdbConnectionCoordinator, _adb_connect
 
 
 def test_long_outage_uses_bounded_backoff_and_rate_limited_warnings():
@@ -27,7 +28,7 @@ def test_long_outage_uses_bounded_backoff_and_rate_limited_warnings():
             assert not coordinator.ensure_connected(target="localhost:5555")
 
     assert connect.call_count < 30
-    assert is_connected.call_count == connect.call_count
+    assert is_connected.call_count == connect.call_count * 2
     warnings = [
         call.args[0]
         for call in runtime_log.call_args_list
@@ -64,8 +65,58 @@ def test_concurrent_callers_share_one_due_connection_attempt():
         results = list(executor.map(lambda _index: ensure(), range(8)))
 
     assert results == [False] * 8
-    assert is_connected.call_count == 1
+    assert is_connected.call_count == 2
     assert connect.call_count == 1
+
+
+def test_reported_connect_success_requires_post_connect_device_state():
+    is_connected = Mock(side_effect=[False, False])
+    connect = Mock(return_value=True)
+    coordinator = AdbConnectionCoordinator(
+        clock=lambda: 10.0,
+        is_connected=is_connected,
+        connect=connect,
+        reconnect_delays_s=(30.0,),
+    )
+
+    with patch("core.adb_connection.log"):
+        assert not coordinator.ensure_connected(target="localhost:5555")
+
+    connect.assert_called_once_with("localhost:5555")
+    assert is_connected.call_args_list == [
+        call("localhost:5555"),
+        call("localhost:5555"),
+    ]
+    snapshot = coordinator.snapshot(target="localhost:5555")
+    assert snapshot.connected is False
+    assert snapshot.failures == 1
+    assert snapshot.retry_in_s == 30.0
+
+
+def test_tcp_reconnect_refreshes_only_the_selected_target():
+    disconnect_result = subprocess.CompletedProcess(
+        ["adb", "disconnect", "localhost:5555"],
+        0,
+        stdout="disconnected localhost:5555\n",
+        stderr="",
+    )
+    connect_result = subprocess.CompletedProcess(
+        ["adb", "connect", "localhost:5555"],
+        0,
+        stdout="already connected to localhost:5555\n",
+        stderr="",
+    )
+
+    with patch(
+        "core.adb_connection.subprocess.run",
+        side_effect=[disconnect_result, connect_result],
+    ) as run:
+        assert _adb_connect("localhost:5555")
+
+    assert [call.args[0] for call in run.call_args_list] == [
+        ["adb", "disconnect", "localhost:5555"],
+        ["adb", "connect", "localhost:5555"],
+    ]
 
 
 def test_persistent_outage_records_one_recovery_after_supported_capture():
