@@ -217,6 +217,55 @@ In this project, **Heat** refers to the Tier's Battle Conditions. **Overheat**
 refers to conditions that activate or intensify at a later wave. Tier alone is
 therefore insufficient context for a battle comparison.
 
+### Tournament Battle Condition abbreviations
+
+The game UI displays complete Battle Condition names, levels, and effective
+descriptions. External tournament summaries may instead use the following
+shorthand. Treat these codes as import aliases, not as a replacement for the
+game-facing name:
+
+| Code | Battle Condition |
+| --- | --- |
+| `AR` | Armored Enemies |
+| `BOU` | Boss's Ultimate |
+| `BU` | Basic's Ultimate |
+| `DD` | Death Defy Down |
+| `DR` | Death Ray Resistance |
+| `EAS` | Enemy Attack Speed |
+| `ES` | Energy Shields Down |
+| `FU` | Fast's Ultimate |
+| `KB` | Knockback Resistance |
+| `MAE` | Mass Enforcement |
+| `MB` | More Bosses |
+| `ME` | More Enemies |
+| `OR` | Orb Resistance |
+| `PC` | Plasma Cannon Resistance |
+| `PU` | Protector's Ultimate |
+| `RU` | Ranged Ultimate |
+| `SD` | Enemy Level Skip Decay |
+| `SPD` | Enemy Speed |
+| `SRM` | Enemy Level Skip Reduction - Multiply |
+| `TR` | Thorns Resistance |
+| `TU` | Tank's Ultimate |
+| `UWD` | Ultimate Weapon Durations |
+
+The aliases are context-sensitive. In particular, `FU` means Fast's Ultimate
+here rather than Free Upgrades, and `SD` means Enemy Level Skip Decay rather
+than the Space Displacer module. In the patch `0.28.0` Legend history supplied
+by the operator, each row contains `MB`, either `DD` or `ES`, `SD`, `SRM`, and
+five variable conditions. That nine-code list identifies the base Tournament
+conditions; it does not encode the separate Overheat panel or the live
+account-adjusted effect values.
+
+The repository can acquire stronger evidence directly. The retained
+[`active Tournament Heat fixture`](../test/fixtures/ui_state_20260714/active_tournament_heat_20260718.png)
+proves that the in-battle panel exposes full names, levels, and effective
+descriptions under separate Heat and Overheat tabs. A future exact-version
+`playerInfo.dat` mapping may provide the same current-Tournament identity more
+directly, but an unmapped save field is not semantic evidence. Until such a
+mapping is calibrated, a complete UI panel read is the authoritative
+repository-owned source and external tournament sites are supplemental.
+
 The following table captures the material T18/T19 differences visible in the
 current game and public references. Condition levels describe the Tier rule.
 Displayed effect percentages or durations can be softened by this account's
@@ -459,6 +508,7 @@ current live game after a release:
 
 - [Tower Knowledge Hub: Damage Cap Slider](https://the-tower.notion.site/Damage-Cap-Slider-1dc91383b93f80d7a9aff56dac0c7e3d)
 - [Tower Knowledge Hub: Battle Conditions](https://the-tower.notion.site/Battle-Conditions-1dd91383b93f80d0b7c7f8c0f88ca89b)
+- [Community Legend Battle Condition abbreviation table](https://www.reddit.com/r/TheTowerGame/comments/1tqz8bm/probability_of_legends_battle_conditions/)
 - [Tower Knowledge Hub: overall build guide](https://the-tower.notion.site/Guide-to-Overall-Builds-Strategies-24791383b93f80a6a157c6367c9bb6e5)
 - [Tower Knowledge Hub: Effective Health](https://the-tower.notion.site/Effective-Health-eHP-1d291383b93f8095bef7e94b9b89cd03)
 - [Tech Tree Games: version 28.3 patch notes](https://www.techtreegames.com/post/v28-3-patch-notes)

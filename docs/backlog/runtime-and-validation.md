@@ -106,6 +106,37 @@ checked-item detail remains in the
   produced `182T`; the resulting split disagreed with the copied `2.72T` total,
   correctly invalidated record quality, and retained source screenshots.
 
+## Tournament Battle Condition evidence
+
+- [ ] Capture each Tournament's Battle Conditions into its structured run
+  record without depending on `thetower.lol`. Use the canonical alias mapping
+  and source-precedence rules in
+  [`../game_strategy.md`](../game_strategy.md#tournament-battle-condition-abbreviations).
+  - [ ] After the concurrent player-save calibration is complete, determine
+    whether `playerInfo.dat` contains the current Tournament's condition set.
+    Accept it only through an exact-version, structurally validated mapping
+    with condition IDs, polarity, and semantics cross-checked against the same
+    Tournament's UI and a verified save-serialization boundary. Do not retain
+    or log unmapped raw save fields.
+  - [ ] Preserve a read-only UI fallback that inventories both Heat and
+    Overheat tabs from a verified Tournament Heat panel, scrolls to both ends,
+    deduplicates overlapping rows, and captures each displayed name, level,
+    effective description, and activation wave where present. The retained
+    `active_tournament_heat_20260718.png` fixture supplies initial positive
+    evidence but is not a complete scroll sequence.
+  - [ ] Normalize known conditions to stable IDs while retaining the exact
+    display text and provenance (`player_save` or `tournament_heat_ui`), game
+    version, and capture time. Unknown conditions must remain losslessly
+    reportable instead of being dropped or guessed.
+  - [ ] Bind the observation to the matching Tournament run/session and merge
+    it into the eventual `Tournament*.json` record. A missing or incomplete
+    condition inventory must remain explicit and nonblocking; it must not risk
+    Tournament launch, interfere with an active run, or prevent terminal-result
+    capture.
+  - [ ] Add retained-fixture and synthetic-record coverage for alias
+    normalization, complete-scroll merging, unknown conditions, provenance,
+    attached-run capture, and terminal-record merge behavior.
+
 ## Strategy-driven Damage Slider schedule
 
 - [ ] Add a generic, profile-declared Damage Slider schedule driven by
