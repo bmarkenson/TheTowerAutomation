@@ -11,35 +11,6 @@ for a matching recurrence or historical investigation.
 
 ## Open
 
-### Tournament attachment preflight stranded the enabled ad-gem handler
-
-- **Observed:** 2026-08-01 after the managed runtime attached to an active
-  Tier 17+ Tournament on `localhost:5555` with Tournament selected and attached
-  validation enabled.
-- **Symptom:** The Tournament inventory pass completed successfully, but a
-  visible five-gem claim remained on screen while repeated runtime observations
-  continued to report `AD_GEMS_AVAILABLE`. No ad-gem action or result followed.
-- **Evidence:** `logs/actions.log` records the successful attached validation at
-  02:19:56, then adds `AD_GEMS_AVAILABLE` at 02:26:51 and still reports it at
-  02:30:56. The expected final app-level `Validation complete` transition never
-  appears. Static tracing confirms that the generated attached-only rule sets
-  `gc_session_preflight_attempted` and `gc_session_preflight_completed`, while
-  Tournament completion also requires `damage_slider_checked` and
-  `orb_distance_checked`. With startup gates deferred and
-  `attached_validation_requested`, `YamlStrategy.tick` skips every rule not
-  marked `attached_validation_only`, including the otherwise
-  `run_when_attached` Damage Slider and Orb Distance rules. The session gate
-  therefore remains pending and `core.app.App.run` suppresses the enabled
-  ad-gem handler as though validation were still actively navigating.
-- **Safety response:** Diagnosis used control, owner/lock, ADB-state, action-log,
-  source, and one read-only screenshot inspection. The active Tournament was
-  not paused, tapped, restarted, exited, or Surrendered.
-- **Status:** Open and confirmed. Align attached-validation completion with the
-  checks that can actually run in the deferred attachment path, and add an
-  end-to-end regression proving that successful attached validation releases
-  bounded ad-gem handling. The active repair belongs in
-  [`backlog/runtime-and-validation.md`](backlog/runtime-and-validation.md#current-validation-gates).
-
 ### T19 Farm retained near-normal game-clock speed while entity throughput collapsed
 
 - **Observed:** 2026-07-29 during a main-PC Tier 19 Farm Retry sequence on

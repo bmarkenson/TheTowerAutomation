@@ -8,6 +8,50 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Tournament attachment preflight stranded the enabled ad-gem handler
+
+- **Observed:** 2026-08-01 after the managed runtime attached to an active
+  Tier 17+ Tournament on `localhost:5555` with Tournament selected and attached
+  validation enabled.
+- **Symptom:** The Tournament inventory pass completed successfully, but a
+  visible five-gem claim remained on screen while repeated runtime observations
+  continued to report `AD_GEMS_AVAILABLE`. No ad-gem action or result followed.
+- **Evidence:** `logs/actions.log` records the successful attached validation at
+  02:19:56, then adds `AD_GEMS_AVAILABLE` at 02:26:51 and still reports it at
+  02:30:56. The expected final app-level `Validation complete` transition never
+  appears. Static tracing confirmed that the generated attached-only rule set
+  `gc_session_preflight_attempted` and `gc_session_preflight_completed`, while
+  Tournament completion also required `damage_slider_checked` and
+  `orb_distance_checked`.
+- **Safety response:** Diagnosis used control, owner/lock, ADB-state, action-log,
+  source, and one read-only screenshot inspection. The active Tournament was
+  not paused, tapped, restarted, exited, or Surrendered.
+- **Cause:** While startup gates were deferred and
+  `attached_validation_requested` was true, `YamlStrategy.tick` admitted only
+  the generated `attached_validation_only` rule. Its conclusive inventory
+  result could not release the gate because the otherwise explicit
+  `run_when_attached` Damage Slider and Orb Distance rules were filtered out,
+  leaving the app to suppress normal handlers as though validation were still
+  navigating.
+- **Resolution:** The attached-only inventory pass keeps exclusive authority
+  until it reaches a conclusive result. The evaluator then admits explicitly
+  declared `run_when_attached` battle-only rules, allowing Tournament to enforce
+  Damage Slider `100%`, enforce or safely preserve Orb Distance according to
+  authoritative Attack Range, and close the session gate. Ad-gem collection
+  then uses the same handler as Farm, which starts one bounded 20-second
+  floating-gem sweep; Tournament still has no independent continuous tapper.
+- **Regression:**
+  `test/test_run_initialization.py::DeferredStartupGateTests::test_attached_tournament_validation_stages_observer_then_battle_controls`
+  covers the complete staged plan, and
+  `test/test_tournament_observer.py::test_tournament_main_loop_collects_ad_gem_after_attached_gate_releases`
+  proves the runtime releases the visible ad-gem handler. Existing
+  `test/test_home_ad_gem.py` coverage retains the bounded sweep contract.
+- **Validation:** The focused Tournament, initialization, validation, Orb
+  Distance, Damage Slider, ad-gem, and builder suites passed 182 tests. The
+  complete repository suite passed all 997 tests. Post-fix live activation was
+  not part of this commit.
+- **Fixed by:** `a8dda82`.
+
 ### Game-speed verification trusted inconsistent OCR and forgot a proven ceiling
 
 - **Observed:** 2026-07-31 during a Tier 17+ Tournament battle and again on

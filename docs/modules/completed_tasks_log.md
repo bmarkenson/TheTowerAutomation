@@ -37,6 +37,20 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-01 Tournament attachment gate release
+
+- Commit `a8dda82` preserves the attached Tournament inventory pass as the
+  first exclusive check, then admits the plan's explicit battle-only attached
+  rules. Damage Slider can now be enforced at `100%`, Orb Distance can be
+  enforced or safely preserved from authoritative Attack Range evidence, and
+  the completed session gate releases normal handlers.
+- Tournament ad-gem collection continues through the same handler as Farm. A
+  visible ad gem starts one bounded 20-second floating-gem sweep; no independent
+  continuous Tournament tapper was restored.
+- Regressions cover the staged attachment plan and the main-loop transition
+  from blocked validation to visible ad-gem dispatch. Focused validation passed
+  182 tests, and the complete repository suite passed all 997 tests.
+
 ### 2026-08-01 stale offline ADB transport classification
 
 - Commit `0346a1b` closes the stopped-BlueStacks case where a still-open SSH
