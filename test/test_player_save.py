@@ -41,6 +41,8 @@ def _decoded_save() -> dict:
         "currentPreset": 0,
         "currentWorkshopPreset": 0,
         "currentBotPreset": 0,
+        "demonModeAutomateToggle": True,
+        "nukeAutomateToggle": False,
         "slotsUnlocked": 22,
         "autoPickPerk": True,
         "bannedPerksIndex": [49, 43, 14, 5, 6, 13, -1, -1],
@@ -115,6 +117,7 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
     assert snapshot.mapping_maturity == "candidate"
     assert snapshot.validated_checks == (
         "cards_deck",
+        "card_recharge_modes",
         "workshop_preset",
         "bots_preset",
         "perk_first_choice",
@@ -130,6 +133,10 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
         "assigned_counts": [28, 0, 0, 0, 0],
     }
     assert snapshot.checks["cards_deck"].value == "Farm"
+    assert snapshot.checks["card_recharge_modes"].value == {
+        "Demon Mode": "auto_reactivate",
+        "Nuke": "ready_after_recharge",
+    }
     assert snapshot.checks["guardian_chips"].value == [
         "Fetch",
         "Summon",
@@ -143,6 +150,39 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
     assert "must-not-leak-player-id" not in rendered
     assert "must-not-leak-user-name" not in rendered
     assert "/private/path" not in rendered
+
+
+def test_live_calibrated_card_recharge_boolean_polarity(monkeypatch):
+    decoded = _decoded_save()
+    decoded["demonModeAutomateToggle"] = False
+    decoded["nukeAutomateToggle"] = True
+
+    snapshot = _snapshot(monkeypatch, decoded)
+
+    evidence = snapshot.checks["card_recharge_modes"]
+    assert evidence.status == "observed"
+    assert evidence.complete
+    assert evidence.value == {
+        "Demon Mode": "ready_after_recharge",
+        "Nuke": "auto_reactivate",
+    }
+    assert evidence.source_fields == (
+        "demonModeAutomateToggle",
+        "nukeAutomateToggle",
+    )
+
+
+def test_card_recharge_changed_field_type_fails_closed(monkeypatch):
+    decoded = _decoded_save()
+    decoded["demonModeAutomateToggle"] = 1
+
+    snapshot = _snapshot(monkeypatch, decoded)
+
+    evidence = snapshot.checks["card_recharge_modes"]
+    assert evidence.status == "unmapped"
+    assert not evidence.complete
+    assert evidence.value is None
+    assert "demonModeAutomateToggle" in evidence.reason
 
 
 def test_live_calibrated_swamp_radius_perk_id_is_mapped(monkeypatch):
@@ -284,6 +324,43 @@ def test_candidate_mapping_can_use_only_validated_complete_fresh_checks(monkeypa
         "save_evidence_incomplete"
     )
     assert plan["summary"]["save_matches"] == 1
+
+
+def test_validated_card_recharge_match_skips_ui_but_mismatch_does_not(
+    monkeypatch,
+):
+    snapshot = _snapshot(monkeypatch)
+    expected = {
+        "Demon Mode": "auto_reactivate",
+        "Nuke": "ready_after_recharge",
+    }
+
+    matching = reconcile_requirements(
+        snapshot,
+        {"card_recharge_modes": expected},
+        freshness_verified=True,
+    )
+    mismatching = reconcile_requirements(
+        snapshot,
+        {
+            "card_recharge_modes": {
+                **expected,
+                "Demon Mode": "ready_after_recharge",
+            }
+        },
+        freshness_verified=True,
+    )
+
+    assert matching["checks"]["card_recharge_modes"]["disposition"] == (
+        "save_match"
+    )
+    assert matching["checks"]["card_recharge_modes"][
+        "save_check_validated"
+    ]
+    assert mismatching["checks"]["card_recharge_modes"]["reason"] == (
+        "save_mismatch"
+    )
+    assert mismatching["checks"]["card_recharge_modes"]["ui_required"]
 
 
 def test_validated_mapping_can_skip_only_exact_complete_matches(monkeypatch):

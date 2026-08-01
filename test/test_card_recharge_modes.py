@@ -95,6 +95,32 @@ def test_card_detail_identity_is_required_for_checkbox_authority():
     assert not inventory.detail_visible
 
 
+def test_card_detail_accepts_live_post_toggle_outline_variance():
+    detail = _load(DEMON_DETAIL).copy()
+    x, y, width, height = recharge._CHECKBOX_REGION
+    crop = detail[y : y + height, x : x + width]
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    outline = (
+        (hsv[:, :, 0] >= 75)
+        & (hsv[:, :, 0] <= 105)
+        & (hsv[:, :, 1] > 50)
+        & (hsv[:, :, 2] > 150)
+    )
+    outline_points = np.argwhere(outline)
+    for row, column in outline_points[342:]:
+        crop[row, column] = 0
+
+    observed = measure_card_recharge_mode(
+        detail,
+        "Demon Mode",
+        required="auto_reactivate",
+    )
+
+    assert observed.checkbox_outline_pixels == 342
+    assert observed.observed is CardRechargeMode.AUTO_REACTIVATE
+    assert observed.valid
+
+
 @pytest.mark.parametrize(
     "raw",
     (

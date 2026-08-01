@@ -4,6 +4,7 @@
   "maturity": "candidate",
   "validated_checks": [
     "cards_deck",
+    "card_recharge_modes",
     "workshop_preset",
     "bots_preset",
     "perk_first_choice",
@@ -22,6 +23,8 @@
     "currentPreset",
     "currentWorkshopPreset",
     "currentBotPreset",
+    "demonModeAutomateToggle",
+    "nukeAutomateToggle",
     "slotsUnlocked",
     "autoPickPerk",
     "bannedPerksIndex",
@@ -76,6 +79,18 @@
     "preset_count": 5,
     "slots_per_preset": 28,
     "assigned_field": "slotPresetCardAssignedBool"
+  },
+  "card_recharge_modes": {
+    "Demon Mode": {
+      "field": "demonModeAutomateToggle",
+      "true_value": "auto_reactivate",
+      "false_value": "ready_after_recharge"
+    },
+    "Nuke": {
+      "field": "nukeAutomateToggle",
+      "true_value": "auto_reactivate",
+      "false_value": "ready_after_recharge"
+    }
   },
   "perk_ids": {
     "1": "damage",
@@ -204,7 +219,6 @@
     ]
   },
   "unmapped_checks": {
-    "card_recharge_modes": "The raw automate toggles need UI calibration before their polarity is authoritative.",
     "damage_slider": "No authoritative current Damage Slider field has been mapped.",
     "modules": "Primary, assist, rarity, and substat mappings are not yet complete for this version.",
     "orb_distance": "The raw orb-distance fields need unit and selected-preset calibration."

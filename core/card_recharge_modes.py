@@ -38,7 +38,10 @@ _DETAIL_TEMPLATE_KEYS = {
 _CHECKBOX_REGION = (855, 1448, 82, 84)
 _CHECKMARK_REGION = (871, 1464, 50, 52)
 _CHECKBOX_POINT = (895, 1490)
-_MIN_CHECKBOX_OUTLINE_PIXELS = 350
+# A freshly toggled live checkbox can render 342 cyan outline pixels while the
+# detail identity and checkmark evidence remain stable.  Keep enough margin
+# below that observed state for minor anti-aliasing differences.
+_MIN_CHECKBOX_OUTLINE_PIXELS = 300
 _MIN_CHECKMARK_PIXELS = 100
 _MAX_EMPTY_CHECKMARK_PIXELS = 30
 _MAX_TOP_SWIPES = 8

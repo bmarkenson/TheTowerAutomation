@@ -552,6 +552,11 @@ def _build_checks(
         source_fields=("autoPickPerk",),
     )
 
+    checks["card_recharge_modes"] = _card_recharge_mode_evidence(
+        decoded,
+        mapping,
+    )
+
     perk_ids = mapping.get("perk_ids") or {}
     first_id = _optional_int(decoded.get("firstPerkIndex"))
     first_name = perk_ids.get(str(first_id)) if first_id is not None else None
@@ -646,6 +651,47 @@ def _build_checks(
             reason=str(reason),
         )
     return checks
+
+
+def _card_recharge_mode_evidence(
+    decoded: Mapping[str, Any],
+    mapping: Mapping[str, Any],
+) -> SaveCheckEvidence:
+    specs = mapping.get("card_recharge_modes") or {}
+    values: dict[str, str] = {}
+    source_fields: list[str] = []
+    invalid: list[str] = []
+    for label, raw_spec in specs.items():
+        spec = raw_spec if isinstance(raw_spec, Mapping) else {}
+        field = str(spec.get("field") or "")
+        source_fields.append(field)
+        raw_value = decoded.get(field)
+        if not field or not isinstance(raw_value, bool):
+            invalid.append(field or str(label))
+            continue
+        key = "true_value" if raw_value else "false_value"
+        normalized = str(spec.get(key) or "").strip()
+        if not normalized:
+            invalid.append(field)
+            continue
+        values[str(label)] = normalized
+
+    complete = bool(values) and not invalid and len(values) == len(specs)
+    return SaveCheckEvidence(
+        check_id="card_recharge_modes",
+        status="observed" if complete else "unmapped",
+        value=values if complete else None,
+        source_fields=tuple(source_fields),
+        complete=complete,
+        reason=(
+            "card recharge fields are missing or changed type: "
+            + ", ".join(invalid)
+            if invalid
+            else "card recharge mapping is empty"
+            if not specs
+            else ""
+        ),
+    )
 
 
 def _selected_preset(
