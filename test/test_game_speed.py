@@ -41,6 +41,10 @@ def _reading(value: float) -> GameSpeedReading:
     )
 
 
+def _invalid_reading(reason: str = "speed_ocr_failed") -> GameSpeedReading:
+    return GameSpeedReading(False, None, "", -1.0, True, reason, True)
+
+
 def test_retained_battle_fixtures_read_normal_and_perk_raised_maximum():
     normal = cv2.imread(
         str(FIXTURES / "running_menu_tournament_trophy_20260718.png")
@@ -126,6 +130,105 @@ def test_maximize_probes_x5_and_accepts_a_no_perk_ceiling():
         0,
         "maximum_available_confirmed",
     )
+
+
+def test_maximize_ignores_one_impossible_lower_reading_after_plus():
+    frame = _complete_frame()
+
+    with (
+        patch(
+            "core.game_speed.measure_game_speed",
+            return_value=_reading(5.0),
+        ),
+        patch(
+            "core.game_speed.read_game_speed_control",
+            side_effect=(_reading(3.0), _reading(5.0), _reading(5.0)),
+        ),
+    ):
+        result = maximize_game_speed(
+            screenshot=frame,
+            capture_fn=lambda: frame,
+            tap_fn=lambda *_args, **_kwargs: True,
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert result == GameSpeedResult(
+        True,
+        5.0,
+        5.0,
+        1,
+        0,
+        "maximum_available_confirmed",
+    )
+
+
+def test_exact_increase_accepts_matching_readings_across_ocr_gaps():
+    frame = _complete_frame()
+
+    with (
+        patch(
+            "core.game_speed.measure_game_speed",
+            return_value=_reading(4.0),
+        ),
+        patch(
+            "core.game_speed.read_game_speed_control",
+            side_effect=(
+                _invalid_reading(),
+                _reading(4.5),
+                _invalid_reading(),
+                _reading(4.5),
+            ),
+        ),
+    ):
+        result = enforce_game_speed(
+            target=4.5,
+            screenshot=frame,
+            capture_fn=lambda: frame,
+            tap_fn=lambda *_args, **_kwargs: True,
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert result == GameSpeedResult(
+        True,
+        4.0,
+        4.5,
+        1,
+        1,
+        "target_reached",
+        target=4.5,
+    )
+
+
+def test_post_tap_ocr_failure_is_logged_as_deferred():
+    frame = _complete_frame()
+
+    with (
+        patch(
+            "core.game_speed.measure_game_speed",
+            return_value=_reading(4.0),
+        ),
+        patch(
+            "core.game_speed.read_game_speed_control",
+            return_value=_invalid_reading(),
+        ),
+        patch("core.game_speed.log_action_intent"),
+        patch("core.game_speed.log_result") as result_log,
+    ):
+        result = enforce_game_speed(
+            target=6.3,
+            screenshot=frame,
+            capture_fn=lambda: frame,
+            tap_fn=lambda *_args, **_kwargs: True,
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert result.success is False
+    assert result.reason == "speed_ocr_failed"
+    assert result.final == 4.0
+    assert result_log.call_args.args[0] == (
+        "Game speed adjustment deferred — visible speed could not be verified"
+    )
+    assert "result=deferred" in result_log.call_args.kwargs["detail"]
 
 
 def test_maximize_does_not_assume_x5_is_maximum_when_perk_is_active():
@@ -425,6 +528,60 @@ def test_maximum_ceiling_proof_is_retained_without_repeated_taps():
 
     assert result.success is True
     assert result.reason == "maximum_available_retained"
+
+
+def test_guard_retains_maximum_ceiling_proof_across_ocr_failure():
+    now = {"value": 100.0}
+    guard = GameSpeedGuard(
+        clock=lambda: now["value"],
+        check_interval_s=30.0,
+        retry_interval_s=5.0,
+    )
+    frame = _complete_frame()
+    results = iter(
+        (
+            GameSpeedResult(
+                True,
+                5.0,
+                5.0,
+                1,
+                0,
+                "maximum_available_confirmed",
+            ),
+            GameSpeedResult(
+                False,
+                None,
+                None,
+                0,
+                0,
+                "speed_ocr_failed",
+            ),
+            GameSpeedResult(
+                True,
+                5.0,
+                5.0,
+                0,
+                0,
+                "maximum_available_retained",
+            ),
+        )
+    )
+    ceiling_arguments = []
+
+    def maximize(**kwargs):
+        ceiling_arguments.append(kwargs["maximum_ceiling_confirmed"])
+        return next(results)
+
+    for timestamp in (100.0, 131.0, 137.0):
+        now["value"] = timestamp
+        guard.handle(
+            frame,
+            {"state": "RUNNING"},
+            action_guard_fn=lambda: True,
+            maximize_fn=maximize,
+        )
+
+    assert ceiling_arguments == [False, True, True]
 
 
 def test_guard_checks_only_running_battles_and_resets_at_home():

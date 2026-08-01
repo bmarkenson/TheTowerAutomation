@@ -244,11 +244,16 @@ def measure_game_speed(
 def _wait_for_settled_speed(
     previous: float,
     *,
+    direction: str,
     capture_fn: CaptureFn,
     sleep_fn: SleepFn,
     attempts: int = 4,
 ) -> tuple[Optional[Frame], GameSpeedReading]:
-    equal_frames = 0
+    candidate_counts: dict[float, int] = {}
+    candidate_evidence: dict[
+        float, tuple[Optional[Frame], GameSpeedReading]
+    ] = {}
+    rejected_values: list[float] = []
     last_frame: Optional[Frame] = None
     last_reading = GameSpeedReading(
         False, None, "", -1.0, False, "capture_unavailable"
@@ -258,15 +263,70 @@ def _wait_for_settled_speed(
         last_frame = capture_fn()
         last_reading = read_game_speed_control(last_frame)
         if not last_reading.valid or last_reading.value is None:
-            equal_frames = 0
             continue
-        if last_reading.value > previous:
+
+        value = last_reading.value
+        directionally_impossible = (
+            direction == "increase" and value < previous
+        ) or (
+            direction == "decrease" and value > previous
+        )
+        if directionally_impossible:
+            rejected_values.append(value)
+            log(
+                "[GAME_SPEED] Ignoring directionally impossible post-tap "
+                f"reading previous={previous:.1f} direction={direction} "
+                f"observed={value:.1f} raw={last_reading.raw_text!r} "
+                f"confidence={last_reading.confidence:.1f}",
+                "DEBUG",
+            )
+            continue
+
+        candidate_counts[value] = candidate_counts.get(value, 0) + 1
+        candidate_evidence[value] = (last_frame, last_reading)
+        if candidate_counts[value] >= 2:
             return last_frame, last_reading
-        if last_reading.value < previous:
-            return last_frame, last_reading
-        equal_frames += 1
-        if equal_frames >= 2:
-            return last_frame, last_reading
+
+    if candidate_counts or rejected_values:
+        candidates = ",".join(
+            f"x{value:.1f}:{count}"
+            for value, count in sorted(candidate_counts.items())
+        ) or "none"
+        rejected = ",".join(f"x{value:.1f}" for value in rejected_values)
+        log(
+            "[GAME_SPEED] Post-tap speed verification did not reach "
+            f"consensus previous={previous:.1f} direction={direction} "
+            f"candidates={candidates} rejected={rejected or 'none'} "
+            f"last_reason={last_reading.reason} "
+            f"last_raw={last_reading.raw_text!r} "
+            f"last_confidence={last_reading.confidence:.1f}",
+            "DEBUG",
+        )
+        best_value = max(
+            candidate_counts,
+            key=lambda value: candidate_counts[value],
+            default=None,
+        )
+        if best_value is not None:
+            last_frame, evidence = candidate_evidence[best_value]
+            return last_frame, GameSpeedReading(
+                False,
+                None,
+                evidence.raw_text,
+                evidence.confidence,
+                evidence.plus_visible,
+                "speed_verification_unstable",
+                evidence.minus_visible,
+            )
+        return last_frame, GameSpeedReading(
+            False,
+            None,
+            last_reading.raw_text,
+            last_reading.confidence,
+            last_reading.plus_visible,
+            "speed_verification_unstable",
+            last_reading.minus_visible,
+        )
     return last_frame, last_reading
 
 
@@ -323,6 +383,30 @@ def enforce_game_speed(
         final: Optional[float],
         reason: str,
     ) -> GameSpeedResult:
+        verification_deferred = taps_sent > 0 and reason in {
+            "capture_unavailable",
+            "incomplete_screenshot",
+            "missing_region",
+            "plus_control_not_visible",
+            "speed_ocr_failed",
+            "speed_verification_unstable",
+        }
+        if success:
+            disposition = "completed"
+            summary = (
+                f"Game speed adjustment complete — x{final:.1f}"
+                if final is not None
+                else "Game speed adjustment complete"
+            )
+        elif verification_deferred:
+            disposition = "deferred"
+            summary = (
+                "Game speed adjustment deferred — visible speed could not "
+                "be verified"
+            )
+        else:
+            disposition = "failed"
+            summary = "Game speed adjustment failed"
         result = GameSpeedResult(
             success,
             initial,
@@ -335,16 +419,12 @@ def enforce_game_speed(
         )
         if action_started:
             log_result(
-                (
-                    f"Game speed adjustment complete — x{final:.1f}"
-                    if success and final is not None
-                    else "Game speed adjustment failed"
-                ),
+                summary,
                 detail=(
                     f"[GAME_SPEED] target={normalized_target:.1f} "
                     f"initial={initial:.1f} final={final} taps={taps_sent} "
                     f"increases={increases} decreases={decreases} "
-                    f"result={'completed' if success else 'failed'} "
+                    f"result={disposition} "
                     f"reason={reason}"
                 ),
             )
@@ -439,6 +519,7 @@ def enforce_game_speed(
         taps_sent += 1
         frame, reading = _wait_for_settled_speed(
             current,
+            direction=direction,
             capture_fn=capture_fn,
             sleep_fn=sleep_fn,
         )
@@ -537,6 +618,7 @@ class GameSpeedGuard:
         self._warning_active = False
         self._last_warning_at: Optional[float] = None
         self._target = MAXIMUM_GAME_SPEED_TARGET
+        self._maximum_ceiling_confirmed = False
         self._next_custom_reminder_at: Optional[float] = None
         self._target_timeline: list[dict[str, Any]] = []
         self.last_result: Optional[GameSpeedResult] = None
@@ -558,6 +640,7 @@ class GameSpeedGuard:
         self._warning_active = False
         self._last_warning_at = None
         self.last_result = None
+        self._maximum_ceiling_confirmed = False
         self._record_target_event(source="operator_control", wave=wave)
         if normalized < MAXIMUM_GAME_SPEED_TARGET:
             self._next_custom_reminder_at = (
@@ -588,6 +671,7 @@ class GameSpeedGuard:
         self._warning_active = False
         self._last_warning_at = None
         self.last_result = None
+        self._maximum_ceiling_confirmed = False
 
     def snapshot(self) -> dict[str, Any]:
         """Return serializable experiment metadata for the completed record."""
@@ -663,6 +747,7 @@ class GameSpeedGuard:
             self._warning_active = False
             self._last_warning_at = None
             self.last_result = None
+            self._maximum_ceiling_confirmed = False
             return False
         if state != "RUNNING":
             return False
@@ -674,17 +759,19 @@ class GameSpeedGuard:
             target=self._target,
             screenshot=screenshot,
             action_guard_fn=action_guard_fn,
-            maximum_ceiling_confirmed=bool(
-                previous_result is not None
-                and previous_result.success
-                and previous_result.reason
-                in {
-                    "maximum_available_confirmed",
-                    "maximum_available_retained",
-                }
-            ),
+            maximum_ceiling_confirmed=self._maximum_ceiling_confirmed,
         )
         self.last_result = result
+        if (
+            self._target == MAXIMUM_GAME_SPEED_TARGET
+            and result.success
+            and result.reason
+            in {
+                "maximum_available_confirmed",
+                "maximum_available_retained",
+            }
+        ):
+            self._maximum_ceiling_confirmed = True
         self._next_check_at = now + (
             self._check_interval_s if result.success else self._retry_interval_s
         )
