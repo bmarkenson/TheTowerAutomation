@@ -113,6 +113,14 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
 
     assert snapshot.mapping_id == "data-9-game-1073"
     assert snapshot.mapping_maturity == "candidate"
+    assert snapshot.validated_checks == (
+        "cards_deck",
+        "workshop_preset",
+        "bots_preset",
+        "perk_first_choice",
+        "perk_bans",
+        "guardian_chips",
+    )
     assert snapshot.shape_valid
     assert snapshot.source_name == "playerInfo.dat"
     assert snapshot.profile_summary["cards"] == {
@@ -241,12 +249,44 @@ def test_candidate_mapping_keeps_ui_for_matching_checks(monkeypatch):
     assert plan["summary"]["matching_observations"] == 3
     assert plan["summary"]["save_matches"] == 0
     assert plan["summary"]["ui_required"] == 3
-    assert {
-        decision["reason"] for decision in plan["checks"].values()
-    } == {"mapping_candidate_audit"}
+    assert plan["checks"]["cards_deck"]["reason"] == (
+        "save_freshness_unverified"
+    )
+    assert plan["checks"]["auto_pick_perks"]["reason"] == (
+        "mapping_candidate_audit"
+    )
+    assert plan["checks"]["guardian_chips"]["reason"] == (
+        "save_freshness_unverified"
+    )
 
 
-def test_validated_mapping_can_skip_only_exact_matches(monkeypatch):
+def test_candidate_mapping_can_use_only_validated_complete_fresh_checks(monkeypatch):
+    snapshot = _snapshot(monkeypatch)
+    plan = reconcile_requirements(
+        snapshot,
+        {
+            "cards_deck": "Farm",
+            "auto_pick_perks": True,
+            "perk_auto_pick_order": [
+                "perk_wave_requirement",
+                "game_speed",
+            ],
+        },
+        freshness_verified=True,
+    )
+
+    assert plan["checks"]["cards_deck"]["disposition"] == "save_match"
+    assert plan["checks"]["cards_deck"]["save_check_validated"]
+    assert plan["checks"]["auto_pick_perks"]["reason"] == (
+        "mapping_candidate_audit"
+    )
+    assert plan["checks"]["perk_auto_pick_order"]["reason"] == (
+        "save_evidence_incomplete"
+    )
+    assert plan["summary"]["save_matches"] == 1
+
+
+def test_validated_mapping_can_skip_only_exact_complete_matches(monkeypatch):
     snapshot = replace(_snapshot(monkeypatch), mapping_maturity="validated")
     plan = reconcile_requirements(
         snapshot,
@@ -263,10 +303,13 @@ def test_validated_mapping_can_skip_only_exact_matches(monkeypatch):
             },
             "modules": {"cannon_primary": "Amplifying Strike"},
         },
+        freshness_verified=True,
     )
 
     assert plan["checks"]["cards_deck"]["disposition"] == "save_match"
-    assert plan["checks"]["perk_auto_pick_order"]["disposition"] == "save_match"
+    assert plan["checks"]["perk_auto_pick_order"]["reason"] == (
+        "save_evidence_incomplete"
+    )
     assert plan["checks"]["ultimate_weapons"]["disposition"] == "save_match"
     assert plan["checks"]["modules"]["disposition"] == "ui_required"
     assert plan["checks"]["modules"]["fallback"] == "existing_ui_check"

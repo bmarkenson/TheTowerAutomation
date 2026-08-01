@@ -61,6 +61,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="require the existing UI check even for a validated save match",
     )
     parser.add_argument(
+        "--freshness-verified",
+        action="store_true",
+        help=(
+            "assert that the game completed a known serialization boundary "
+            "before this pull; capture time alone is not sufficient"
+        ),
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         help="optional destination for the privacy-safe JSON report",
@@ -93,6 +101,7 @@ def main(argv: list[str] | None = None) -> int:
                 snapshot,
                 _load_requirements(args.requirements),
                 force_ui_audit=bool(args.force_ui_audit),
+                freshness_verified=bool(args.freshness_verified),
             )
     except (OSError, ValueError, PlayerSaveError, yaml.YAMLError) as exc:
         print(f"player-save import failed: {exc}", file=sys.stderr)

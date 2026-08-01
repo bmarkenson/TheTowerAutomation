@@ -81,6 +81,7 @@ class PlayerSaveSnapshot:
     save_revision: Optional[int]
     mapping_id: Optional[str]
     mapping_maturity: Optional[str]
+    validated_checks: tuple[str, ...]
     shape_valid: bool
     warnings: tuple[str, ...]
     profile_summary: Mapping[str, Any]
@@ -112,6 +113,7 @@ class PlayerSaveSnapshot:
                 "supported": self.mapping_supported,
                 "id": self.mapping_id,
                 "maturity": self.mapping_maturity,
+                "validated_checks": list(self.validated_checks),
                 "shape_valid": self.shape_valid,
             },
             "warnings": list(self.warnings),
@@ -203,6 +205,7 @@ def decode_player_save_bytes(
             save_revision=save_revision,
             mapping_id=None,
             mapping_maturity=None,
+            validated_checks=(),
             shape_valid=False,
             warnings=tuple(warnings),
             profile_summary={},
@@ -224,10 +227,14 @@ def decode_player_save_bytes(
         )
 
     maturity = str(mapping.get("maturity") or "candidate")
+    validated_checks = tuple(
+        str(check_id) for check_id in mapping.get("validated_checks") or ()
+    )
     if maturity != "validated":
         warnings.append(
-            f"Mapping {mapping['mapping_id']} is {maturity}; matching save "
-            "values still require a full UI audit."
+            f"Mapping {mapping['mapping_id']} is {maturity}; only explicitly "
+            "validated checks may use fresh save evidence without a full UI "
+            "audit."
         )
     return PlayerSaveSnapshot(
         captured_at=stamp.isoformat(),
@@ -243,6 +250,7 @@ def decode_player_save_bytes(
         save_revision=save_revision,
         mapping_id=str(mapping["mapping_id"]),
         mapping_maturity=maturity,
+        validated_checks=validated_checks,
         shape_valid=shape_valid,
         warnings=tuple(warnings),
         profile_summary=profile_summary,
@@ -293,12 +301,16 @@ def reconcile_requirements(
     requirements: Mapping[str, Any],
     *,
     force_ui_audit: bool = False,
+    freshness_verified: bool = False,
     max_snapshot_age_s: Optional[float] = None,
     now: Optional[datetime] = None,
 ) -> dict[str, Any]:
     """Plan which configured checks may use save evidence or require the UI.
 
-    This function never changes configuration.  Every UI-required result names
+    This function never changes configuration.  ``freshness_verified`` is an
+    explicit assertion that the game completed a known serialization boundary
+    before this snapshot was pulled; capture time alone does not prove that the
+    application flushed recent UI changes.  Every UI-required result names
     ``existing_ui_check`` as its fallback so save import cannot weaken the
     current preflight path.
     """
@@ -318,6 +330,10 @@ def reconcile_requirements(
             if evidence is not None and evidence.status == "observed"
             else None
         )
+        check_validated = bool(
+            snapshot.mapping_maturity == "validated"
+            or str(check_id) in snapshot.validated_checks
+        )
 
         if not snapshot.mapping_supported:
             disposition = "ui_required"
@@ -334,12 +350,18 @@ def reconcile_requirements(
         elif matches is not True:
             disposition = "ui_required"
             reason = "save_mismatch"
-        elif snapshot.mapping_maturity != "validated":
+        elif not evidence.complete:
+            disposition = "ui_required"
+            reason = "save_evidence_incomplete"
+        elif not check_validated:
             disposition = "ui_required"
             reason = "mapping_candidate_audit"
         elif force_ui_audit:
             disposition = "ui_required"
             reason = "scheduled_ui_audit"
+        elif not freshness_verified:
+            disposition = "ui_required"
+            reason = "save_freshness_unverified"
         else:
             disposition = "save_match"
             reason = "exact_version_save_match"
@@ -353,6 +375,7 @@ def reconcile_requirements(
             "save_evidence_complete": (
                 evidence.complete if evidence is not None else False
             ),
+            "save_check_validated": check_validated,
             "ui_required": disposition == "ui_required",
             "fallback": "existing_ui_check",
         }
@@ -366,6 +389,8 @@ def reconcile_requirements(
         "schema_version": 1,
         "mapping_id": snapshot.mapping_id,
         "mapping_maturity": snapshot.mapping_maturity,
+        "validated_checks": list(snapshot.validated_checks),
+        "freshness_verified": bool(freshness_verified),
         "save_revision": snapshot.save_revision,
         "ui_backup_preserved": True,
         "checks": decisions,

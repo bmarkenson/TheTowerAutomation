@@ -2,6 +2,14 @@
   "schema_version": 1,
   "mapping_id": "data-9-game-1073",
   "maturity": "candidate",
+  "validated_checks": [
+    "cards_deck",
+    "workshop_preset",
+    "bots_preset",
+    "perk_first_choice",
+    "perk_bans",
+    "guardian_chips"
+  ],
   "identity": {
     "data_version": 9,
     "game_version": 1073,

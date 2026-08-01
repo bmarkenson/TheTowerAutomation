@@ -8,10 +8,11 @@ versions.
 ## Current status
 
 The first mapping is `data-9-game-1073`, selected by the exact save fields
-`dataVersion: 9` and `versionNumber: 1073`. Its maturity is `candidate`. It was
-derived from the repository-root operator sample and recognizes the sample's
-five 28-slot card-preset records, including the distinction between its stored
-base slot count and the effective preset width.
+`dataVersion: 9` and `versionNumber: 1073`. Its overall maturity is `candidate`,
+with an explicit per-check validation allowlist. It was derived from the
+repository-root operator sample and recognizes the sample's five 28-slot
+card-preset records, including the distinction between its stored base slot
+count and the effective preset width.
 
 Live cross-channel calibration on game `28.3.1` confirmed that
 `versionNumber: 1073` is the installed application's `versionCode`. At one
@@ -24,16 +25,30 @@ Swamp Radius. The Home list reader now identifies selected Ban rows by their
 tile outlines and terminates Auto Pick ranks at the visible Rankings Unlocked
 divider, instead of interpreting perk-category fill colors as selection state.
 
-This is deliberately a partial validation, not a promotion. Target Priority,
+Bounded mutation testing then established direct causality and the save-write
+boundary. Changing the visible Cards preset from slot 2 to slot 1 and back
+produced raw `currentPreset` values `1 -> 0 -> 1`; the raw field is zero-based
+even though the UI labels slots from one. Changing Poison Swamp Stun from on to
+off and back produced `poisonSwampStunOff` values `false -> true -> false`.
+Neither setting reached `playerInfo.dat` merely by waiting or returning Home.
+Both serialized when Android Home backgrounded the game, without force-stop,
+and each restoration was verified after a second app-pause flush.
+
+This is deliberately a partial validation, not a global promotion. The exact
+mapping now marks Cards, Workshop, and Bots preset selection; First Perk; Ban
+Perks; and equipped Guardians as validated checks. Target Priority,
 the complete set of possible Free Upgrade locks, Ultimate Weapon toggle
 polarities, and the unranked Auto Pick tail still need same-version UI
-calibration. The mapping therefore remains `candidate`, and every check still
-uses the existing UI path.
+calibration. Poison Swamp Stun polarity is confirmed, but the combined Ultimate
+Weapon check remains UI-required until every value that check could suppress
+has been calibrated.
 
-Candidate status is fail-closed: every reconciliation decision still names the
-existing UI check as required. The mapping can expose agreements and likely
-drift now, but it cannot suppress navigation until it is validated against UI
-evidence from the same game version.
+Candidate status remains fail-closed per check. A matching check can become
+save-authoritative only when it is explicitly validated, its evidence is
+complete, and the caller certifies a known save-serialization boundary for the
+snapshot. Every other result still names the existing UI checker as its
+fallback. Capture time and two identical reads prove transport stability, not
+that recent in-app changes were flushed.
 
 The currently mapped profile checks are:
 
@@ -54,8 +69,9 @@ polarity calibration, not merely because a plausible raw field exists.
 | --- | --- |
 | Unknown exact version | Decode only safe identity metadata; use UI for every check. |
 | Exact version but changed structure | Reject all mapped values; use UI for every check. |
-| Candidate mapping | Report comparison results and run the complete UI audit. |
-| Validated mapping and exact value match | The caller may accept save evidence for that check unless an audit is due. |
+| Candidate mapping, check not explicitly validated | Report comparison results and run the existing UI check. |
+| Explicitly validated check, complete exact match, and verified serialization boundary | The caller may accept save evidence for that check unless an audit is due. |
+| No verified serialization boundary | Treat the pull as potentially stale and use the existing UI check. |
 | Missing, incomplete, stale, or mismatched value | Use the existing UI check for that setting. |
 | UI automation changes a setting | Verify the result in the UI; do not treat the pre-action save as confirmation. |
 
@@ -108,8 +124,10 @@ configured device:
 ```
 
 `--force-ui-audit` is available to make the audit requirement explicit for a
-validated mapping. `--output` writes only the normalized JSON report, never the
-raw save.
+validated mapping. `--freshness-verified` is an explicit caller assertion that
+the game completed a known serialization boundary before the pull; the tool
+does not infer that fact from a recent capture timestamp. `--output` writes
+only the normalized JSON report, never the raw save.
 
 ## Version update and promotion procedure
 
@@ -125,9 +143,11 @@ For every released game version that changes either identity field:
 4. Compare each mapped value with authoritative UI evidence from the same
    profile and game version. Record agreements, differences, and fields that
    remain unmapped.
-5. Promote only that exact mapping to `validated` after every value it can
-   suppress has passed cross-channel validation. A partial mapping leaves its
-   unsupported checks explicitly unmapped.
+5. Add a check to the mapping's per-check validation allowlist only after every
+   value that check can suppress has passed cross-channel validation. Promote
+   the whole exact mapping to `validated` only when all observed complete
+   checks meet that standard. A partial mapping leaves unsupported or
+   incomplete checks explicitly UI-required.
 6. Run a forced UI audit after promotion and retain periodic or release-boundary
    audits. Any later discrepancy demotes the mapping or the affected field and
    immediately restores UI navigation.
