@@ -37,6 +37,22 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-01 native GUI API-service and SSH health controls
+
+- Commit `6660ac8` adds always-visible, independent status for the fixed Linux
+  control API service, HTTP reachability, the Windows-local API SSH forward,
+  and the ADB reverse-forward SSH process.
+- The GUI can query, start, stop, or restart only
+  `thetower-control-surface.service` through fixed bounded SSH commands. Stop
+  and restart require confirmation, and neither action changes main automation,
+  the emulator, or either SSH tunnel. API and ADB tunnels also have independent
+  top-bar restart actions.
+- Focused control-surface validation passed 40 tests and the Linux cross-publish
+  produced the self-contained `win-x64` application. Validation did not inspect
+  or change the live process, control state, ADB target, emulator, or battle.
+- A per-user companion tunnel host remains an explicit follow-up; the current
+  GUI still owns and closes both `ssh.exe` children.
+
 ### 2026-08-01 expanded GUI strategy profile editing
 
 - Commit `f942a5d` advances the Linux control surface to revision 18 and adds
