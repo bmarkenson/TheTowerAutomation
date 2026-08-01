@@ -37,6 +37,23 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-07-31 versioned player-save observation channel
+
+- Commit `174ce10` adds bounded gzip/NRBF decoding, exact
+  `(dataVersion, versionNumber)` mapping selection, structural signatures, a
+  redacted normalized profile snapshot, and per-check reconciliation that
+  always names the existing UI implementation as its fallback.
+- The first `data-9-game-1073` mapping remains `candidate`; even matching save
+  values require the full UI audit. Unknown versions, shape changes, stale
+  snapshots, mismatches, and explicitly unmapped settings fail closed to UI.
+  Stable ADB acquisition requires two identical consecutive reads, and the raw
+  operator save is never copied into repository evidence.
+- Focused decoder, ADB transport, and capture validation passed 30 tests. The
+  complete repository suite passed 988 tests. A read-only local inspection of
+  the untracked operator sample confirmed the exact mapping and its five
+  28-slot card-preset records; no process, device, control, or battle state was
+  inspected or changed.
+
 ### 2026-07-31 constrained GUI Strategy Profile Builder
 
 - Commit `f22d85d` adds a versioned custom-profile catalog shared by the Linux
