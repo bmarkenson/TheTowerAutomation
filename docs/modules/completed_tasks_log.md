@@ -37,6 +37,32 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-01 persistent per-user Windows tunnel host
+
+- Commit `82ed42a` replaces GUI-owned OpenSSH processes with the on-demand,
+  headless `TheTower.TunnelHost.exe`. A current-user SID-derived singleton and
+  versioned `PipeOptions.CurrentUserOnly` named pipe let a reopened GUI recover
+  desired and observed state, child PID, endpoint, retry/conflict state, and raw
+  SSH diagnostics while desired API and ADB forwards survive GUI closure.
+- The host keeps API and loopback-only ADB forwarding in independent
+  supervisors, owns only the fixed `thetower-control-surface.service` SSH
+  status/actions, persists validated configuration without desired state, and
+  exits after a bounded idle period when no tunnel or GUI requires it. A
+  kill-on-close Windows Job Object owns every SSH child; arbitrary pre-existing
+  SSH processes are neither discovered nor adopted.
+- The GUI handles protocol mismatch and confirmed companion replacement
+  explicitly, without replaying tunnels. Publishing now stages and validates a
+  complete two-executable package. There is no Windows service, login startup,
+  tray UI, combined forward, BlueStacks control, or broader remote-command
+  authority.
+- All 17 protocol/core lifecycle tests, all 41 control-surface regressions, and
+  the complete 1,043-test repository suite passed. Linux cross-publishing
+  produced only `TheTower.ControlSurface.exe` and `TheTower.TunnelHost.exe`.
+  Validation was code-only and did not inspect or change live process, control,
+  service, ADB, emulator, or battle state; the documented WPF, Windows
+  OpenSSH, access-token, Job Object, forced-exit, and logoff checks remain
+  required on Windows.
+
 ### 2026-08-01 additive strategy-authoring API and editor shell
 
 - This commit advances the Linux control surface and native client together to
