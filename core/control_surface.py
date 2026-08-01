@@ -50,7 +50,7 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 19
+CONTROL_SURFACE_REVISION = 20
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -65,6 +65,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "host_performance_telemetry_v1",
     "observed_game_speed",
     "selected_strategy_process_start",
+    "strategy_authoring_specialized_editors_v1",
     "strategy_authoring_v1",
     "strategy_profile_catalog_v1",
     "strategy_profile_editor_v2",

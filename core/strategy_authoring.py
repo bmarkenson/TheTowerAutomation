@@ -23,15 +23,29 @@ from typing import Any, Callable, Mapping, Optional
 
 import yaml
 
-from core.card_recharge_modes import normalize_card_recharge_modes
+from core.card_recharge_modes import (
+    CARD_RECHARGE_LABELS,
+    CardRechargeMode,
+    normalize_card_recharge_modes,
+)
 from core.damage_adjuster import normalize_damage_percentage
-from core.free_upgrade_locks import normalize_free_upgrade_lock_requirements
+from core.free_upgrade_locks import (
+    FARM_FREE_UPGRADE_LOCKS,
+    normalize_free_upgrade_lock_requirements,
+)
 from core.gate_decisions import PROFILE_SKIPPABLE_CHECKS, normalize_profile_skip_checks
-from core.perk_configuration import normalize_perk_configuration_requirements
+from core.perk_configuration import (
+    PERK_BAN_CAPACITY,
+    PERK_CONFIGURATION_LABELS,
+    normalize_perk_configuration_requirements,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FARM_RUN_PROFILE_PATH = PROJECT_ROOT / "config" / "run_profiles" / "farm.yaml"
+FARM_DEFAULT_STRATEGY_SOURCE_PATH = (
+    PROJECT_ROOT / "config" / "strategies" / "farm_t18.source.yaml"
+)
 MODULE_PRESETS_PATH = PROJECT_ROOT / "config" / "loadouts" / "modules.yaml"
 ORB_DISTANCE_PRESETS_PATH = (
     PROJECT_ROOT / "config" / "loadouts" / "orb_distances.yaml"
@@ -44,6 +58,7 @@ AUTHORING_SCHEMA_VERSION = 2
 BASE_PUBLICATION_SCHEMA_VERSION = 1
 MAX_AUTHORING_FILE_BYTES = 4 * 1024 * 1024
 AUTHORING_POLICIES = ("enforce", "observe", "ignore")
+EDITOR_METADATA_SCHEMA_VERSION = 1
 _SAFE_ID_RE = re.compile(r"[a-z][a-z0-9_]{2,47}")
 
 
@@ -56,6 +71,8 @@ class StrategyAuthoringConflictError(StrategyAuthoringError):
 
 
 Normalizer = Callable[[object], Any]
+InitialValueFactory = Callable[[], Any]
+EditorMetadataFactory = Callable[[Any], Mapping[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -68,6 +85,8 @@ class SettingDefinition:
     editor_type: str
     allowed_policies: tuple[str, ...]
     normalizer: Normalizer
+    initial_value_factory: InitialValueFactory
+    editor_metadata_factory: EditorMetadataFactory
     dependencies: tuple[str, ...]
     runtime_destination: str
     adapter: str
@@ -75,6 +94,17 @@ class SettingDefinition:
     repair_supported: bool
 
     def catalog_item(self) -> dict[str, Any]:
+        try:
+            initial_value = self.normalizer(self.initial_value_factory())
+            editor = _validate_editor_metadata(
+                self,
+                initial_value,
+                self.editor_metadata_factory(copy.deepcopy(initial_value)),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise StrategyAuthoringError(
+                f"setting {self.id!r} has invalid editor metadata: {exc}"
+            ) from exc
         return {
             "id": self.id,
             "display_name": self.display_name,
@@ -82,9 +112,15 @@ class SettingDefinition:
             "editor_type": self.editor_type,
             "allowed_policies": list(self.allowed_policies),
             "dependencies": list(self.dependencies),
+            "dependency_display_names": [
+                FARM_SETTING_REGISTRY[dependency].display_name
+                for dependency in self.dependencies
+            ],
             "runtime_destination": self.runtime_destination,
             "observation_supported": self.observation_supported,
             "repair_supported": self.repair_supported,
+            "initial_value": copy.deepcopy(initial_value),
+            "editor": editor,
         }
 
 
@@ -199,6 +235,263 @@ def _damage_slider(value: object) -> str:
     return normalize_damage_percentage(value)
 
 
+def _farm_setup_initial(setting_id: str) -> InitialValueFactory:
+    def load() -> Any:
+        baseline = _farm_baseline_settings()
+        if setting_id not in baseline:
+            raise ValueError(f"Farm baseline is missing {setting_id!r}")
+        return copy.deepcopy(baseline[setting_id])
+
+    return load
+
+
+def _farm_loadout_initial(setting_id: str, *, preset: bool) -> InitialValueFactory:
+    def load() -> Any:
+        source = _load_yaml_mapping(
+            FARM_DEFAULT_STRATEGY_SOURCE_PATH,
+            "default Farm authoring source",
+        )
+        loadout = source.get("loadout")
+        if not isinstance(loadout, Mapping):
+            raise ValueError("default Farm authoring source requires loadout")
+        policy = loadout.get(setting_id)
+        if not isinstance(policy, Mapping):
+            raise ValueError(
+                f"default Farm authoring source is missing {setting_id!r}"
+            )
+        return (
+            {"preset": copy.deepcopy(policy.get("preset"))}
+            if preset
+            else copy.deepcopy(policy.get("value"))
+        )
+
+    return load
+
+
+def _editor_option(value: object, display_name: str) -> dict[str, Any]:
+    return {
+        "value": copy.deepcopy(value),
+        "display_name": str(display_name),
+    }
+
+
+def _title_identifier(value: object) -> str:
+    return " ".join(
+        word.capitalize() for word in str(value or "").replace("_", " ").split()
+    )
+
+
+def _fixed_editor(initial_value: Any) -> Mapping[str, Any]:
+    return {
+        "schema_version": EDITOR_METADATA_SCHEMA_VERSION,
+        "value_kind": "string",
+        "fixed": True,
+        "help_text": "This setting has one runtime-supported value.",
+        "options": [_editor_option(initial_value, str(initial_value))],
+    }
+
+
+def _boolean_editor(initial_value: Any) -> Mapping[str, Any]:
+    return {
+        "schema_version": EDITOR_METADATA_SCHEMA_VERSION,
+        "value_kind": "boolean",
+        "fixed": True,
+        "help_text": "Auto Pick Perks is currently required to be enabled when managed.",
+        "options": [_editor_option(True, "Enabled")],
+    }
+
+
+def _card_recharge_editor(initial_value: Any) -> Mapping[str, Any]:
+    display_names = {
+        CardRechargeMode.AUTO_REACTIVATE.value: "Auto-reactivate",
+        CardRechargeMode.READY_AFTER_RECHARGE.value: "Ready after recharge",
+    }
+    options = [
+        _editor_option(mode.value, display_names[mode.value])
+        for mode in CardRechargeMode
+        if mode is not CardRechargeMode.UNKNOWN
+    ]
+    return {
+        "schema_version": EDITOR_METADATA_SCHEMA_VERSION,
+        "value_kind": "object",
+        "fixed": False,
+        "help_text": (
+            "Choose one recharge behavior for every server-declared Card; "
+            "the complete mapping is validated on Linux."
+        ),
+        "preserve_unknown_fields": False,
+        "fields": [
+            {
+                "key": label,
+                "display_name": label,
+                "required": True,
+                "fixed": False,
+                "initial_value": initial_value[label],
+                "options": copy.deepcopy(options),
+            }
+            for label in CARD_RECHARGE_LABELS
+        ],
+    }
+
+
+def _ordered_list_editor(
+    *,
+    options: tuple[str, ...],
+    allow_reorder: bool,
+    order_significant: bool,
+    help_text: str,
+) -> EditorMetadataFactory:
+    def metadata(initial_value: Any) -> Mapping[str, Any]:
+        return {
+            "schema_version": EDITOR_METADATA_SCHEMA_VERSION,
+            "value_kind": "array",
+            "fixed": not allow_reorder,
+            "help_text": help_text,
+            "options": [
+                _editor_option(option, option) for option in options
+            ],
+            "list_constraints": {
+                "minimum_items": len(options),
+                "maximum_items": len(options),
+                "unique_items": True,
+                "allow_add": False,
+                "allow_remove": False,
+                "allow_reorder": allow_reorder,
+                "order_significant": order_significant,
+                "exact_items": list(options),
+            },
+        }
+
+    return metadata
+
+
+def _perk_list_editor(
+    *,
+    maximum_items: int,
+    allow_empty: bool,
+    allow_reorder: bool,
+    order_significant: bool,
+    help_text: str,
+) -> EditorMetadataFactory:
+    def metadata(initial_value: Any) -> Mapping[str, Any]:
+        return {
+            "schema_version": EDITOR_METADATA_SCHEMA_VERSION,
+            "value_kind": "array",
+            "fixed": False,
+            "help_text": help_text,
+            "options": [
+                _editor_option(identifier, display_name)
+                for identifier, display_name in PERK_CONFIGURATION_LABELS.items()
+            ],
+            "list_constraints": {
+                "minimum_items": 0 if allow_empty else 1,
+                "maximum_items": maximum_items,
+                "unique_items": True,
+                "allow_add": True,
+                "allow_remove": True,
+                "allow_reorder": allow_reorder,
+                "order_significant": order_significant,
+                "exact_items": [],
+            },
+        }
+
+    return metadata
+
+
+def _ultimate_weapon_editor(initial_value: Any) -> Mapping[str, Any]:
+    groups = []
+    for label, toggles in initial_value.items():
+        fields = []
+        for toggle, initial_state in toggles.items():
+            options = []
+            for state in ("on", "off"):
+                candidate = copy.deepcopy(initial_value)
+                candidate[label][toggle] = state
+                try:
+                    _ultimate_weapons(candidate)
+                except (TypeError, ValueError):
+                    continue
+                options.append(_editor_option(state, _title_identifier(state)))
+            fields.append(
+                {
+                    "key": toggle,
+                    "display_name": _title_identifier(toggle),
+                    "required": False,
+                    "fixed": len(options) == 1,
+                    "initial_value": initial_state,
+                    "options": options,
+                }
+            )
+        groups.append(
+            {
+                "key": label,
+                "display_name": label,
+                "initially_included": True,
+                "allow_selection": True,
+                "minimum_selected_fields": 1,
+                "preserve_unknown_fields": True,
+                "fields": fields,
+            }
+        )
+    return {
+        "schema_version": EDITOR_METADATA_SCHEMA_VERSION,
+        "value_kind": "object",
+        "fixed": False,
+        "help_text": (
+            "Manage only server-declared toggles. Unrecognized retained weapons "
+            "and toggle fields remain embedded unchanged."
+        ),
+        "preserve_unknown_fields": True,
+        "allow_group_selection": True,
+        "minimum_selected_groups": 1,
+        "groups": groups,
+    }
+
+
+def _preset_editor(path: Path, setting_id: str) -> EditorMetadataFactory:
+    def metadata(initial_value: Any) -> Mapping[str, Any]:
+        catalog = _load_yaml_mapping(path, f"{setting_id} preset catalog")
+        presets = catalog.get("presets")
+        if not isinstance(presets, Mapping) or not presets:
+            raise ValueError(f"{setting_id} preset catalog requires presets")
+        options = [
+            _editor_option(identifier, _title_identifier(identifier))
+            for identifier in presets
+        ]
+        return {
+            "schema_version": EDITOR_METADATA_SCHEMA_VERSION,
+            "value_kind": "object",
+            "fixed": len(options) == 1,
+            "help_text": "Choices come from the current server preset catalog.",
+            "preserve_unknown_fields": False,
+            "fields": [
+                {
+                    "key": "preset",
+                    "display_name": "Preset",
+                    "required": True,
+                    "fixed": len(options) == 1,
+                    "initial_value": initial_value["preset"],
+                    "options": options,
+                }
+            ],
+        }
+
+    return metadata
+
+
+def _damage_percentage_editor(initial_value: Any) -> Mapping[str, Any]:
+    return {
+        "schema_version": EDITOR_METADATA_SCHEMA_VERSION,
+        "value_kind": "string",
+        "fixed": False,
+        "help_text": (
+            "Enter a positive percentage such as 1E-22%. Linux remains the "
+            "only parser and canonicalizer."
+        ),
+        "server_normalized_text": True,
+    }
+
+
 def _definition(
     setting_id: str,
     display_name: str,
@@ -206,6 +499,8 @@ def _definition(
     editor_type: str,
     allowed_policies: tuple[str, ...],
     normalizer: Normalizer,
+    initial_value_factory: InitialValueFactory,
+    editor_metadata_factory: EditorMetadataFactory,
     runtime_destination: str,
     adapter: str,
     *,
@@ -220,6 +515,8 @@ def _definition(
         editor_type=editor_type,
         allowed_policies=allowed_policies,
         normalizer=normalizer,
+        initial_value_factory=initial_value_factory,
+        editor_metadata_factory=editor_metadata_factory,
         dependencies=dependencies,
         runtime_destination=runtime_destination,
         adapter=adapter,
@@ -240,6 +537,8 @@ _SETTING_DEFINITIONS = (
         "fixed_value",
         _ENFORCE,
         _fixed_value("cards_deck", "Farm"),
+        _farm_setup_initial("cards_deck"),
+        _fixed_editor,
         "session_preflight.requirements.cards_deck",
         "setup_setting",
     ),
@@ -250,6 +549,8 @@ _SETTING_DEFINITIONS = (
         "card_recharge_modes",
         _ENFORCE,
         _card_recharge_modes,
+        _farm_setup_initial("card_recharge_modes"),
+        _card_recharge_editor,
         "session_preflight.requirements.card_recharge_modes",
         "setup_setting",
         dependencies=("cards_deck",),
@@ -261,6 +562,8 @@ _SETTING_DEFINITIONS = (
         "fixed_value",
         _ENFORCE,
         _fixed_value("workshop_preset", "Farm"),
+        _farm_setup_initial("workshop_preset"),
+        _fixed_editor,
         "session_preflight.requirements.workshop_preset",
         "setup_setting",
     ),
@@ -271,6 +574,16 @@ _SETTING_DEFINITIONS = (
         "ordered_list",
         _ENFORCE,
         _free_upgrade_locks,
+        _farm_setup_initial("free_upgrade_locks"),
+        _ordered_list_editor(
+            options=FARM_FREE_UPGRADE_LOCKS,
+            allow_reorder=True,
+            order_significant=True,
+            help_text=(
+                "Farm requires this exact three-lock set. Membership is fixed; "
+                "the supported inspection order may be rearranged."
+            ),
+        ),
         "session_preflight.requirements.free_upgrade_locks",
         "setup_setting",
         dependencies=("workshop_preset",),
@@ -282,6 +595,8 @@ _SETTING_DEFINITIONS = (
         "fixed_value",
         _ENFORCE,
         _fixed_value("bots_preset", "Farm"),
+        _farm_setup_initial("bots_preset"),
+        _fixed_editor,
         "session_preflight.requirements.bots_preset",
         "setup_setting",
     ),
@@ -292,6 +607,16 @@ _SETTING_DEFINITIONS = (
         "ordered_list",
         _ENFORCE,
         _guardian_chips,
+        _farm_setup_initial("guardian_chips"),
+        _ordered_list_editor(
+            options=("Fetch", "Summon", "Scout"),
+            allow_reorder=False,
+            order_significant=False,
+            help_text=(
+                "Farm currently supports exactly Fetch, Summon, and Scout. "
+                "Runtime behavior treats their source order as equivalent."
+            ),
+        ),
         "session_preflight.requirements.guardian_chips",
         "setup_setting",
     ),
@@ -302,6 +627,8 @@ _SETTING_DEFINITIONS = (
         "boolean",
         _ENFORCE_IGNORE,
         _enabled_auto_pick,
+        _farm_setup_initial("auto_pick_perks"),
+        _boolean_editor,
         "session_preflight.requirements.auto_pick_perks",
         "setup_setting",
     ),
@@ -312,6 +639,17 @@ _SETTING_DEFINITIONS = (
         "perk_multiselect",
         _ENFORCE_IGNORE,
         _perk_bans,
+        _farm_setup_initial("perk_bans"),
+        _perk_list_editor(
+            maximum_items=PERK_BAN_CAPACITY,
+            allow_empty=True,
+            allow_reorder=False,
+            order_significant=False,
+            help_text=(
+                f"Choose at most {PERK_BAN_CAPACITY} unique Perks. Ban order "
+                "does not affect runtime comparison."
+            ),
+        ),
         "session_preflight.requirements.perk_bans",
         "setup_setting",
         dependencies=("auto_pick_perks",),
@@ -323,6 +661,16 @@ _SETTING_DEFINITIONS = (
         "perk_order",
         _ENFORCE_IGNORE,
         _perk_auto_pick_order,
+        _farm_setup_initial("perk_auto_pick_order"),
+        _perk_list_editor(
+            maximum_items=len(PERK_CONFIGURATION_LABELS),
+            allow_empty=False,
+            allow_reorder=True,
+            order_significant=True,
+            help_text=(
+                "Choose unique Perks in exact top-to-bottom Auto Pick priority."
+            ),
+        ),
         "session_preflight.requirements.perk_auto_pick_order",
         "setup_setting",
         dependencies=("auto_pick_perks",),
@@ -334,6 +682,8 @@ _SETTING_DEFINITIONS = (
         "ultimate_weapon_toggles",
         _ENFORCE,
         _ultimate_weapons,
+        _farm_setup_initial("ultimate_weapons"),
+        _ultimate_weapon_editor,
         "session_preflight.requirements.ultimate_weapons",
         "setup_setting",
     ),
@@ -344,6 +694,8 @@ _SETTING_DEFINITIONS = (
         "preset",
         _LOADOUT_POLICIES,
         _preset_value("modules", MODULE_PRESETS_PATH),
+        _farm_loadout_initial("modules", preset=True),
+        _preset_editor(MODULE_PRESETS_PATH, "modules"),
         "run_configuration.loadout.modules",
         "loadout_preset",
     ),
@@ -354,6 +706,8 @@ _SETTING_DEFINITIONS = (
         "damage_percentage",
         _LOADOUT_POLICIES,
         _damage_slider,
+        _farm_loadout_initial("damage_slider", preset=False),
+        _damage_percentage_editor,
         "run_configuration.loadout.damage_slider",
         "loadout_value",
     ),
@@ -364,6 +718,8 @@ _SETTING_DEFINITIONS = (
         "preset",
         _LOADOUT_POLICIES,
         _preset_value("orb_distance", ORB_DISTANCE_PRESETS_PATH),
+        _farm_loadout_initial("orb_distance", preset=True),
+        _preset_editor(ORB_DISTANCE_PRESETS_PATH, "orb_distance"),
         "run_configuration.loadout.orb_distance",
         "loadout_preset",
     ),
@@ -374,6 +730,8 @@ _SETTING_DEFINITIONS = (
         "preset",
         _LOADOUT_POLICIES,
         _preset_value("target_priority", TARGET_PRIORITY_PRESETS_PATH),
+        _farm_loadout_initial("target_priority", preset=True),
+        _preset_editor(TARGET_PRIORITY_PRESETS_PATH, "target_priority"),
         "run_configuration.loadout.target_priority",
         "loadout_preset",
     ),
@@ -397,6 +755,529 @@ _IGNORED_SETUP_PLACEHOLDERS = {
     "perk_bans": [],
     "perk_auto_pick_order": ["damage"],
 }
+
+
+def _metadata_value_key(value: object) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def _validated_editor_options(raw: object, path: str) -> list[dict[str, Any]]:
+    if not isinstance(raw, list) or not raw:
+        raise ValueError(f"{path} must be a non-empty list")
+    options: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, raw_option in enumerate(raw):
+        option_path = f"{path}[{index}]"
+        if not isinstance(raw_option, Mapping):
+            raise ValueError(f"{option_path} must be an object")
+        unknown = sorted(set(raw_option) - {"value", "display_name"})
+        if unknown or "value" not in raw_option:
+            raise ValueError(
+                f"{option_path} has invalid fields: {', '.join(unknown) or 'value'}"
+            )
+        display_name = str(raw_option.get("display_name") or "").strip()
+        if not display_name:
+            raise ValueError(f"{option_path}.display_name is required")
+        value = copy.deepcopy(raw_option["value"])
+        key = _metadata_value_key(value)
+        if key in seen:
+            raise ValueError(f"{path} cannot repeat option values")
+        seen.add(key)
+        options.append({"value": value, "display_name": display_name})
+    return options
+
+
+def _metadata_option_contains(
+    options: list[dict[str, Any]],
+    value: object,
+) -> bool:
+    key = _metadata_value_key(value)
+    return any(_metadata_value_key(option["value"]) == key for option in options)
+
+
+def _validate_editor_metadata(
+    definition: SettingDefinition,
+    initial_value: Any,
+    raw_metadata: object,
+) -> dict[str, Any]:
+    """Validate the complete behavior-free editor contract before exposure."""
+
+    if not isinstance(raw_metadata, Mapping):
+        raise ValueError("editor metadata must be an object")
+    allowed_top_fields = {
+        "schema_version",
+        "value_kind",
+        "fixed",
+        "help_text",
+        "options",
+        "preserve_unknown_fields",
+        "fields",
+        "list_constraints",
+        "allow_group_selection",
+        "minimum_selected_groups",
+        "groups",
+        "server_normalized_text",
+    }
+    unknown_top = sorted(set(raw_metadata) - allowed_top_fields)
+    if unknown_top:
+        raise ValueError(
+            "editor metadata has unsupported fields: " + ", ".join(unknown_top)
+        )
+    metadata = copy.deepcopy(dict(raw_metadata))
+    if metadata.get("schema_version") != EDITOR_METADATA_SCHEMA_VERSION:
+        raise ValueError("editor metadata has an unsupported schema version")
+    expected_kinds = {
+        "fixed_value": "string",
+        "boolean": "boolean",
+        "damage_percentage": "string",
+        "card_recharge_modes": "object",
+        "preset": "object",
+        "ordered_list": "array",
+        "perk_multiselect": "array",
+        "perk_order": "array",
+        "ultimate_weapon_toggles": "object",
+    }
+    expected_kind = expected_kinds.get(definition.editor_type)
+    if expected_kind is None:
+        raise ValueError(f"unsupported editor type {definition.editor_type!r}")
+    if metadata.get("value_kind") != expected_kind:
+        raise ValueError(
+            f"{definition.editor_type} editor must declare value_kind={expected_kind!r}"
+        )
+    if not isinstance(metadata.get("fixed"), bool):
+        raise ValueError("editor metadata fixed must be boolean")
+    if not isinstance(metadata.get("help_text"), str) or not metadata[
+        "help_text"
+    ].strip():
+        raise ValueError("editor metadata help_text is required")
+    if definition.normalizer(copy.deepcopy(initial_value)) != initial_value:
+        raise ValueError("initial_value is not in canonical normalized form")
+
+    if definition.editor_type in {"fixed_value", "boolean"}:
+        options = _validated_editor_options(
+            metadata.get("options"),
+            "editor.options",
+        )
+        expected_type = str if definition.editor_type == "fixed_value" else bool
+        if any(type(option["value"]) is not expected_type for option in options):
+            raise ValueError(
+                f"{definition.editor_type} options have the wrong value type"
+            )
+        if not _metadata_option_contains(options, initial_value):
+            raise ValueError("initial_value is absent from editor options")
+        if metadata["fixed"] != (len(options) == 1):
+            raise ValueError("fixed scalar metadata must expose exactly one option")
+        for option in options:
+            definition.normalizer(copy.deepcopy(option["value"]))
+        metadata["options"] = options
+
+    elif definition.editor_type == "damage_percentage":
+        if metadata["fixed"] is not False:
+            raise ValueError("damage_percentage editor cannot be fixed")
+        if metadata.get("server_normalized_text") is not True:
+            raise ValueError(
+                "damage_percentage must remain explicitly server-normalized text"
+            )
+        if not isinstance(initial_value, str):
+            raise ValueError("damage_percentage initial_value must be a string")
+
+    elif definition.editor_type in {"card_recharge_modes", "preset"}:
+        if not isinstance(initial_value, Mapping):
+            raise ValueError("object editor initial_value must be an object")
+        if not isinstance(metadata.get("preserve_unknown_fields"), bool):
+            raise ValueError("object editor must declare preserve_unknown_fields")
+        raw_fields = metadata.get("fields")
+        if not isinstance(raw_fields, list) or not raw_fields:
+            raise ValueError("object editor fields must be a non-empty list")
+        fields: list[dict[str, Any]] = []
+        keys: set[str] = set()
+        for index, raw_field in enumerate(raw_fields):
+            path = f"editor.fields[{index}]"
+            if not isinstance(raw_field, Mapping):
+                raise ValueError(f"{path} must be an object")
+            unknown = sorted(
+                set(raw_field)
+                - {
+                    "key",
+                    "display_name",
+                    "required",
+                    "fixed",
+                    "initial_value",
+                    "options",
+                }
+            )
+            if unknown:
+                raise ValueError(
+                    f"{path} has unsupported fields: {', '.join(unknown)}"
+                )
+            key = str(raw_field.get("key") or "").strip()
+            display_name = str(raw_field.get("display_name") or "").strip()
+            if not key or not display_name or key in keys:
+                raise ValueError(f"{path} requires a unique key and display_name")
+            keys.add(key)
+            if raw_field.get("required") is not True:
+                raise ValueError(f"{path} must be required")
+            if not isinstance(raw_field.get("fixed"), bool):
+                raise ValueError(f"{path}.fixed must be boolean")
+            if key not in initial_value:
+                raise ValueError(f"initial_value is missing object field {key!r}")
+            field_initial = copy.deepcopy(raw_field.get("initial_value"))
+            if field_initial != initial_value[key]:
+                raise ValueError(f"{path}.initial_value does not match the setting")
+            options = _validated_editor_options(
+                raw_field.get("options"),
+                f"{path}.options",
+            )
+            if not _metadata_option_contains(options, field_initial):
+                raise ValueError(f"{path}.initial_value is absent from options")
+            if raw_field["fixed"] != (len(options) == 1):
+                raise ValueError(f"{path}.fixed does not match its options")
+            for option in options:
+                candidate = copy.deepcopy(dict(initial_value))
+                candidate[key] = copy.deepcopy(option["value"])
+                definition.normalizer(candidate)
+            fields.append(
+                {
+                    "key": key,
+                    "display_name": display_name,
+                    "required": True,
+                    "fixed": raw_field["fixed"],
+                    "initial_value": field_initial,
+                    "options": options,
+                }
+            )
+        if keys != set(initial_value):
+            raise ValueError("object editor fields must cover the complete initial value")
+        if metadata["fixed"] != all(field["fixed"] for field in fields):
+            raise ValueError("object editor fixed does not match its fields")
+        if metadata["preserve_unknown_fields"] is False:
+            unknown_candidate = copy.deepcopy(dict(initial_value))
+            unknown_candidate["__unsupported_editor_field__"] = "off"
+            try:
+                definition.normalizer(unknown_candidate)
+            except (TypeError, ValueError):
+                pass
+            else:
+                raise ValueError(
+                    "object editor claims unknown fields are rejected, but its "
+                    "normalizer accepted one"
+                )
+        metadata["fields"] = fields
+
+    elif definition.editor_type in {
+        "ordered_list",
+        "perk_multiselect",
+        "perk_order",
+    }:
+        if not isinstance(initial_value, list):
+            raise ValueError("list editor initial_value must be an array")
+        options = _validated_editor_options(
+            metadata.get("options"),
+            "editor.options",
+        )
+        if any(not isinstance(option["value"], str) for option in options):
+            raise ValueError("list editor options must be strings")
+        raw_constraints = metadata.get("list_constraints")
+        if not isinstance(raw_constraints, Mapping):
+            raise ValueError("list editor requires list_constraints")
+        constraint_fields = {
+            "minimum_items",
+            "maximum_items",
+            "unique_items",
+            "allow_add",
+            "allow_remove",
+            "allow_reorder",
+            "order_significant",
+            "exact_items",
+        }
+        unknown = sorted(set(raw_constraints) - constraint_fields)
+        if unknown or set(raw_constraints) != constraint_fields:
+            raise ValueError(
+                "list_constraints must define the complete constraint contract"
+            )
+        minimum = raw_constraints.get("minimum_items")
+        maximum = raw_constraints.get("maximum_items")
+        if (
+            isinstance(minimum, bool)
+            or isinstance(maximum, bool)
+            or not isinstance(minimum, int)
+            or not isinstance(maximum, int)
+            or minimum < 0
+            or maximum < minimum
+        ):
+            raise ValueError("list item bounds are invalid")
+        for flag in constraint_fields - {
+            "minimum_items",
+            "maximum_items",
+            "exact_items",
+        }:
+            if not isinstance(raw_constraints.get(flag), bool):
+                raise ValueError(f"list_constraints.{flag} must be boolean")
+        exact_items = raw_constraints.get("exact_items")
+        if not isinstance(exact_items, list) or any(
+            not isinstance(item, str) or not item for item in exact_items
+        ):
+            raise ValueError("list_constraints.exact_items must be an array")
+        if len(set(exact_items)) != len(exact_items):
+            raise ValueError("list_constraints.exact_items must be unique")
+        if maximum > len(options):
+            raise ValueError("list maximum_items exceeds its unique options")
+        if not minimum <= len(initial_value) <= maximum:
+            raise ValueError("initial list violates its item bounds")
+        if raw_constraints["unique_items"] and len(set(initial_value)) != len(
+            initial_value
+        ):
+            raise ValueError("initial list violates unique_items")
+        if any(not _metadata_option_contains(options, item) for item in initial_value):
+            raise ValueError("initial list contains a value absent from options")
+        if exact_items:
+            if set(exact_items) != set(initial_value):
+                raise ValueError("exact_items must match initial list membership")
+            if minimum != len(exact_items) or maximum != len(exact_items):
+                raise ValueError("exact_items must match the fixed item bounds")
+            if raw_constraints["allow_add"] or raw_constraints["allow_remove"]:
+                raise ValueError("an exact list cannot allow add or remove")
+            try:
+                definition.normalizer(initial_value[:-1])
+            except (TypeError, ValueError):
+                pass
+            else:
+                raise ValueError(
+                    "exact_items metadata requires membership the normalizer accepts "
+                    "without"
+                )
+        expected_fixed = not any(
+            raw_constraints[action]
+            for action in ("allow_add", "allow_remove", "allow_reorder")
+        )
+        if metadata["fixed"] != expected_fixed:
+            raise ValueError("list editor fixed does not match its allowed actions")
+        if raw_constraints["unique_items"] and initial_value:
+            try:
+                definition.normalizer([initial_value[0], initial_value[0]])
+            except (TypeError, ValueError):
+                pass
+            else:
+                raise ValueError(
+                    "unique_items metadata is not enforced by the normalizer"
+                )
+        if raw_constraints["allow_reorder"] and len(initial_value) > 1:
+            reversed_value = list(reversed(initial_value))
+            if definition.normalizer(reversed_value) != reversed_value:
+                raise ValueError("list normalizer does not preserve allowed ordering")
+        if raw_constraints["allow_remove"] and len(initial_value) > minimum:
+            definition.normalizer(initial_value[:-1])
+        if raw_constraints["allow_add"]:
+            starting_value = (
+                initial_value
+                if len(initial_value) < maximum
+                else initial_value[:-1]
+            )
+            additional = next(
+                (
+                    option["value"]
+                    for option in options
+                    if option["value"] not in starting_value
+                ),
+                None,
+            )
+            if additional is not None:
+                definition.normalizer([*starting_value, additional])
+        metadata["options"] = options
+        metadata["list_constraints"] = copy.deepcopy(dict(raw_constraints))
+
+    else:
+        if metadata["fixed"] is not False:
+            raise ValueError("ultimate_weapon_toggles editor cannot be fixed")
+        if metadata.get("preserve_unknown_fields") is not True:
+            raise ValueError(
+                "ultimate_weapon_toggles must preserve unknown fields"
+            )
+        if metadata.get("allow_group_selection") is not True:
+            raise ValueError("Ultimate Weapon groups must be selectable")
+        minimum_groups = metadata.get("minimum_selected_groups")
+        if isinstance(minimum_groups, bool) or not isinstance(minimum_groups, int):
+            raise ValueError("minimum_selected_groups must be an integer")
+        if minimum_groups < 1:
+            raise ValueError("minimum_selected_groups must be positive")
+        if not isinstance(initial_value, Mapping) or not initial_value:
+            raise ValueError("Ultimate Weapon initial_value must be an object")
+        raw_groups = metadata.get("groups")
+        if not isinstance(raw_groups, list) or not raw_groups:
+            raise ValueError("Ultimate Weapon editor requires groups")
+        group_keys: set[str] = set()
+        groups: list[dict[str, Any]] = []
+        for group_index, raw_group in enumerate(raw_groups):
+            path = f"editor.groups[{group_index}]"
+            if not isinstance(raw_group, Mapping):
+                raise ValueError(f"{path} must be an object")
+            unknown = sorted(
+                set(raw_group)
+                - {
+                    "key",
+                    "display_name",
+                    "initially_included",
+                    "allow_selection",
+                    "minimum_selected_fields",
+                    "preserve_unknown_fields",
+                    "fields",
+                }
+            )
+            if unknown:
+                raise ValueError(
+                    f"{path} has unsupported fields: {', '.join(unknown)}"
+                )
+            group_key = str(raw_group.get("key") or "").strip()
+            display_name = str(raw_group.get("display_name") or "").strip()
+            if not group_key or not display_name or group_key in group_keys:
+                raise ValueError(f"{path} requires a unique key and display_name")
+            group_keys.add(group_key)
+            if group_key not in initial_value or not isinstance(
+                initial_value[group_key], Mapping
+            ):
+                raise ValueError(f"{path} is absent from initial_value")
+            if (
+                raw_group.get("initially_included") is not True
+                or raw_group.get("allow_selection") is not True
+                or raw_group.get("preserve_unknown_fields") is not True
+            ):
+                raise ValueError(f"{path} has invalid selection/preservation flags")
+            minimum_fields = raw_group.get("minimum_selected_fields")
+            if (
+                isinstance(minimum_fields, bool)
+                or not isinstance(minimum_fields, int)
+                or minimum_fields < 1
+            ):
+                raise ValueError(f"{path}.minimum_selected_fields is invalid")
+            raw_fields = raw_group.get("fields")
+            if not isinstance(raw_fields, list) or not raw_fields:
+                raise ValueError(f"{path}.fields must be a non-empty list")
+            fields: list[dict[str, Any]] = []
+            field_keys: set[str] = set()
+            for field_index, raw_field in enumerate(raw_fields):
+                field_path = f"{path}.fields[{field_index}]"
+                if not isinstance(raw_field, Mapping):
+                    raise ValueError(f"{field_path} must be an object")
+                unknown = sorted(
+                    set(raw_field)
+                    - {
+                        "key",
+                        "display_name",
+                        "required",
+                        "fixed",
+                        "initial_value",
+                        "options",
+                    }
+                )
+                if unknown:
+                    raise ValueError(
+                        f"{field_path} has unsupported fields: {', '.join(unknown)}"
+                    )
+                field_key = str(raw_field.get("key") or "").strip()
+                field_display = str(raw_field.get("display_name") or "").strip()
+                if not field_key or not field_display or field_key in field_keys:
+                    raise ValueError(
+                        f"{field_path} requires a unique key and display_name"
+                    )
+                field_keys.add(field_key)
+                if raw_field.get("required") is not False:
+                    raise ValueError(f"{field_path}.required must be false")
+                if not isinstance(raw_field.get("fixed"), bool):
+                    raise ValueError(f"{field_path}.fixed must be boolean")
+                group_initial = initial_value[group_key]
+                if field_key not in group_initial:
+                    raise ValueError(f"{field_path} is absent from initial_value")
+                field_initial = copy.deepcopy(raw_field.get("initial_value"))
+                if field_initial != group_initial[field_key]:
+                    raise ValueError(
+                        f"{field_path}.initial_value does not match the setting"
+                    )
+                options = _validated_editor_options(
+                    raw_field.get("options"),
+                    f"{field_path}.options",
+                )
+                if not _metadata_option_contains(options, field_initial):
+                    raise ValueError(
+                        f"{field_path}.initial_value is absent from options"
+                    )
+                if raw_field["fixed"] != (len(options) == 1):
+                    raise ValueError(f"{field_path}.fixed does not match options")
+                for option in options:
+                    candidate = copy.deepcopy(dict(initial_value))
+                    candidate[group_key] = copy.deepcopy(dict(group_initial))
+                    candidate[group_key][field_key] = copy.deepcopy(
+                        option["value"]
+                    )
+                    definition.normalizer(candidate)
+                fields.append(
+                    {
+                        "key": field_key,
+                        "display_name": field_display,
+                        "required": False,
+                        "fixed": raw_field["fixed"],
+                        "initial_value": field_initial,
+                        "options": options,
+                    }
+                )
+            if field_keys != set(initial_value[group_key]):
+                raise ValueError(
+                    f"{path}.fields must cover the complete initial group"
+                )
+            if minimum_fields > len(fields):
+                raise ValueError(f"{path}.minimum_selected_fields is too large")
+            groups.append(
+                {
+                    "key": group_key,
+                    "display_name": display_name,
+                    "initially_included": True,
+                    "allow_selection": True,
+                    "minimum_selected_fields": minimum_fields,
+                    "preserve_unknown_fields": True,
+                    "fields": fields,
+                }
+            )
+        if group_keys != set(initial_value):
+            raise ValueError("Ultimate Weapon groups must cover initial_value")
+        if minimum_groups > len(groups):
+            raise ValueError("minimum_selected_groups is too large")
+        for group in groups:
+            if len(initial_value) > minimum_groups:
+                candidate = copy.deepcopy(dict(initial_value))
+                candidate.pop(group["key"])
+                definition.normalizer(candidate)
+            group_initial = initial_value[group["key"]]
+            if len(group_initial) > group["minimum_selected_fields"]:
+                candidate = copy.deepcopy(dict(initial_value))
+                candidate[group["key"]] = copy.deepcopy(dict(group_initial))
+                candidate[group["key"]].pop(next(iter(group_initial)))
+                definition.normalizer(candidate)
+        unknown_candidate = copy.deepcopy(dict(initial_value))
+        first_group = next(iter(unknown_candidate))
+        unknown_candidate[first_group] = copy.deepcopy(
+            dict(unknown_candidate[first_group])
+        )
+        unknown_candidate[first_group]["__retained_toggle__"] = "off"
+        unknown_candidate["__Retained Weapon__"] = {"primary": "on"}
+        normalized_unknown = definition.normalizer(unknown_candidate)
+        if normalized_unknown != unknown_candidate:
+            raise ValueError(
+                "ultimate_weapon_toggles normalizer does not preserve unknown fields"
+            )
+        metadata["groups"] = groups
+
+    # This is an API contract; fail before serving a non-JSON-safe value.
+    json.dumps(
+        {"initial_value": initial_value, "editor": metadata},
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+    return copy.deepcopy(metadata)
 
 
 def setting_registry_catalog() -> list[dict[str, Any]]:
@@ -1620,6 +2501,7 @@ def _load_yaml_mapping_limited(path: Path, description: str) -> dict[str, Any]:
 __all__ = [
     "AUTHORING_POLICIES",
     "AUTHORING_SCHEMA_VERSION",
+    "EDITOR_METADATA_SCHEMA_VERSION",
     "FARM_LOADOUT_SETTING_IDS",
     "FARM_SETTING_REGISTRY",
     "FARM_SETUP_SETTING_IDS",

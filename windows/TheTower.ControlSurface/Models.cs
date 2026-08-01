@@ -698,6 +698,9 @@ public sealed class StrategySettingDefinition
     [JsonPropertyName("dependencies")]
     public List<string> Dependencies { get; set; } = [];
 
+    [JsonPropertyName("dependency_display_names")]
+    public List<string> DependencyDisplayNames { get; set; } = [];
+
     [JsonPropertyName("runtime_destination")]
     public string RuntimeDestination { get; set; } = "";
 
@@ -706,6 +709,135 @@ public sealed class StrategySettingDefinition
 
     [JsonPropertyName("repair_supported")]
     public bool RepairSupported { get; set; }
+
+    [JsonPropertyName("initial_value")]
+    public JsonElement? InitialValue { get; set; }
+
+    [JsonPropertyName("editor")]
+    public StrategyEditorMetadata Editor { get; set; } = new();
+}
+
+public sealed class StrategyEditorMetadata
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("value_kind")]
+    public string ValueKind { get; set; } = "";
+
+    [JsonPropertyName("fixed")]
+    public bool Fixed { get; set; }
+
+    [JsonPropertyName("help_text")]
+    public string HelpText { get; set; } = "";
+
+    [JsonPropertyName("server_normalized_text")]
+    public bool ServerNormalizedText { get; set; }
+
+    [JsonPropertyName("preserve_unknown_fields")]
+    public bool PreserveUnknownFields { get; set; }
+
+    [JsonPropertyName("allow_group_selection")]
+    public bool AllowGroupSelection { get; set; }
+
+    [JsonPropertyName("minimum_selected_groups")]
+    public int MinimumSelectedGroups { get; set; }
+
+    [JsonPropertyName("options")]
+    public List<StrategyEditorOption> Options { get; set; } = [];
+
+    [JsonPropertyName("fields")]
+    public List<StrategyEditorField> Fields { get; set; } = [];
+
+    [JsonPropertyName("list_constraints")]
+    public StrategyListConstraints? ListConstraints { get; set; }
+
+    [JsonPropertyName("groups")]
+    public List<StrategyEditorGroup> Groups { get; set; } = [];
+}
+
+public sealed class StrategyEditorOption
+{
+    [JsonPropertyName("value")]
+    public JsonElement Value { get; set; }
+
+    [JsonPropertyName("display_name")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonIgnore]
+    public string ValueKey => Value.GetRawText();
+}
+
+public sealed class StrategyEditorField
+{
+    [JsonPropertyName("key")]
+    public string Key { get; set; } = "";
+
+    [JsonPropertyName("display_name")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("required")]
+    public bool Required { get; set; }
+
+    [JsonPropertyName("fixed")]
+    public bool Fixed { get; set; }
+
+    [JsonPropertyName("initial_value")]
+    public JsonElement InitialValue { get; set; }
+
+    [JsonPropertyName("options")]
+    public List<StrategyEditorOption> Options { get; set; } = [];
+}
+
+public sealed class StrategyListConstraints
+{
+    [JsonPropertyName("minimum_items")]
+    public int MinimumItems { get; set; }
+
+    [JsonPropertyName("maximum_items")]
+    public int MaximumItems { get; set; }
+
+    [JsonPropertyName("unique_items")]
+    public bool UniqueItems { get; set; }
+
+    [JsonPropertyName("allow_add")]
+    public bool AllowAdd { get; set; }
+
+    [JsonPropertyName("allow_remove")]
+    public bool AllowRemove { get; set; }
+
+    [JsonPropertyName("allow_reorder")]
+    public bool AllowReorder { get; set; }
+
+    [JsonPropertyName("order_significant")]
+    public bool OrderSignificant { get; set; }
+
+    [JsonPropertyName("exact_items")]
+    public List<string> ExactItems { get; set; } = [];
+}
+
+public sealed class StrategyEditorGroup
+{
+    [JsonPropertyName("key")]
+    public string Key { get; set; } = "";
+
+    [JsonPropertyName("display_name")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("initially_included")]
+    public bool InitiallyIncluded { get; set; }
+
+    [JsonPropertyName("allow_selection")]
+    public bool AllowSelection { get; set; }
+
+    [JsonPropertyName("minimum_selected_fields")]
+    public int MinimumSelectedFields { get; set; }
+
+    [JsonPropertyName("preserve_unknown_fields")]
+    public bool PreserveUnknownFields { get; set; }
+
+    [JsonPropertyName("fields")]
+    public List<StrategyEditorField> Fields { get; set; } = [];
 }
 
 public sealed class StrategyBaseCatalog

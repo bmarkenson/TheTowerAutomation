@@ -3,6 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WPF = ROOT / "windows" / "TheTower.ControlSurface"
+WPF_TESTS = ROOT / "windows" / "TheTower.ControlSurface.Authoring.Tests"
 
 
 def _text(name: str) -> str:
@@ -21,42 +22,163 @@ def test_wpf_authoring_shell_groups_catalogs_and_registry_sections():
     assert 'x:Name="BasePinBox"' in xaml
     assert "BasePinBox.IsEnabled = editable && _isNew" in code
     assert "LatestCompatibleBaseRevisions" in code
-    assert "PropertyGroupDescription(nameof(AuthoringSettingRowViewModel.Section))" in code
+    assert (
+        "PropertyGroupDescription(nameof(AuthoringSettingRowViewModel.Section))"
+        in code
+    )
     assert 'x:Name="SettingsList"' in xaml
-    assert 'Text="{Binding CapabilityDisplay}"' in xaml
-    assert 'Text="{Binding ProvenanceDisplay}"' in xaml
-    assert 'Text="{Binding EffectivePolicyDisplay}"' in xaml
-    assert 'Text="{Binding EffectiveValueDisplay}"' in xaml
+    assert 'Text="{Binding CapabilityDisplay, Mode=OneWay}"' in xaml
+    assert 'Text="{Binding ProvenanceDisplay, Mode=OneWay}"' in xaml
+    assert 'Text="{Binding EffectivePolicyDisplay, Mode=OneWay}"' in xaml
+    assert 'Text="{Binding EffectiveValueDisplay, Mode=OneWay}"' in xaml
     assert 'JsonPropertyName("observation_supported")' in models
     assert 'JsonPropertyName("repair_supported")' in models
+    assert 'JsonPropertyName("initial_value")' in models
+    assert 'JsonPropertyName("editor")' in models
     assert 'public StrategyAuthoringResolution Resolution { get; set; }' in models
     assert "resolution: item.Resolution" in code
     assert "Bases are never activatable" in xaml
     assert "Activate" not in xaml
 
 
-def test_wpf_rows_support_source_states_filtering_and_lossless_fallback():
+def test_wpf_rows_cover_every_registered_editor_family_without_raw_json():
+    xaml = _text("StrategyProfilesWindow.xaml")
+    view_models = _text("StrategyAuthoringViewModels.cs")
+    structured = _text("StrategyStructuredEditorViewModels.cs")
+
+    expected_checks = {
+        'EditorType == "fixed_value"',
+        'EditorType == "boolean"',
+        'EditorType == "preset"',
+        'EditorType == "damage_percentage"',
+        'EditorType == "card_recharge_modes"',
+        '"ordered_list" or "perk_multiselect" or "perk_order"',
+        'EditorType == "ultimate_weapon_toggles"',
+    }
+    assert all(check in view_models for check in expected_checks)
+    for binding in (
+        "UsesFixedValueEditor",
+        "UsesPresetEditor",
+        "UsesBooleanEditor",
+        "UsesTextEditor",
+        "UsesKeyedChoiceEditor",
+        "UsesListEditor",
+        "UsesUltimateWeaponEditor",
+    ):
+        assert f"{{Binding {binding}, Mode=OneWay" in xaml
+    assert 'ItemsSource="{Binding ChoiceFields, Mode=OneWay}"' in xaml
+    assert 'ItemsSource="{Binding ListValues, Mode=OneWay}"' in xaml
+    assert 'ItemsSource="{Binding UltimateGroups, Mode=OneWay}"' in xaml
+    assert "AddSelectedListItem" in view_models
+    assert "RemoveListItem" in view_models
+    assert "MoveListItem" in view_models
+    assert "preserved value" in view_models
+    assert "Retained unrecognized weapons" in view_models
+    assert "Retained fields" in structured
+    assert "complex value is read-only" not in xaml.lower()
+    assert "phase has no safe value editor" not in view_models.lower()
+    assert "raw json" not in xaml.lower()
+
+
+def test_wpf_constraints_and_dormant_values_are_metadata_driven():
     xaml = _text("StrategyProfilesWindow.xaml")
     code = _text("StrategyProfilesWindow.xaml.cs")
     view_models = _text("StrategyAuthoringViewModels.cs")
+    models = _text("Models.cs")
 
-    assert 'DisplayMemberPath="DisplayName"' in xaml
-    assert 'SelectedItem="{Binding SelectedSourceState, Mode=TwoWay}"' in xaml
-    assert 'Content="Reset to inherited"' in xaml
-    assert 'Content="Show active only"' in xaml
-    assert 'Content="Show all settings"' in xaml
-    assert "item is AuthoringSettingRowViewModel { IsActive: true }" in code
-    assert "capabilities.BaseSourceStates" in view_models
-    assert "capabilities.StrategySourceStates" in view_models
-    assert '"base" =>' in view_models
-    assert '"local" => "Local Strategy override"' in view_models
-    assert '"local_ignore" => "Explicit local Ignore"' in view_models
-    assert 'EditorType is "perk_multiselect" or "perk_order"' in view_models
-    assert 'EditorType == "preset"' in view_models
-    assert 'EditorType is "fixed_value" or "damage_percentage"' in view_models
-    assert "The value remains visible and round-trips unchanged" in view_models
-    assert "return _retainedValue?.Clone();" in view_models
-    assert "preserved unknown value" in view_models
+    for metadata_property in (
+        'JsonPropertyName("options")',
+        'JsonPropertyName("fields")',
+        'JsonPropertyName("list_constraints")',
+        'JsonPropertyName("groups")',
+        'JsonPropertyName("minimum_selected_groups")',
+        'JsonPropertyName("preserve_unknown_fields")',
+    ):
+        assert metadata_property in models
+    assert "definition.InitialValue" in view_models
+    assert "_definition.Editor.ListConstraints" in view_models
+    assert "_definition.Editor.Groups" in view_models
+    assert "_definition.Editor.Options" in view_models
+    assert "CaptureDormantValue" in view_models
+    assert "CaptureDormantValues" in code
+    assert "dormantValues" in code
+    assert "_hasDormantValue ? CurrentValue()?.Clone() : null" in view_models
+    assert 'IsEnabled="{Binding BooleanControlEnabled, Mode=OneWay}"' in xaml
+    assert 'IsEnabled="{Binding CanAddListItem, Mode=OneWay}"' in xaml
+    assert 'IsEnabled="{Binding CanRemoveListItem, Mode=OneWay}"' in xaml
+    assert 'IsEnabled="{Binding CanReorderListItems, Mode=OneWay}"' in xaml
+
+
+def test_wpf_authoring_code_does_not_hardcode_setting_specific_contracts():
+    production = "\n".join(
+        _text(name)
+        for name in (
+            "StrategyAuthoringViewModels.cs",
+            "StrategyStructuredEditorViewModels.cs",
+            "StrategyProfilesWindow.xaml",
+            "StrategyProfilesWindow.xaml.cs",
+        )
+    )
+
+    for server_owned_value in (
+        "cards_deck",
+        "free_upgrade_locks",
+        "guardian_chips",
+        "auto_pick_perks",
+        "perk_bans",
+        "perk_auto_pick_order",
+        "ultimate_weapons",
+        "Poison Swamp",
+        "Demon Mode",
+        "farm_standard",
+    ):
+        assert server_owned_value not in production
+    assert "_catalog.EditorOptions" not in production
+
+
+def test_computed_display_bindings_are_explicitly_one_way_regression():
+    xaml = _text("StrategyProfilesWindow.xaml")
+    view_models = _text("StrategyAuthoringViewModels.cs")
+
+    for property_name in (
+        "EffectivePolicyDisplay",
+        "EffectiveValueDisplay",
+        "ProvenanceDisplay",
+        "PendingEffectiveDisplay",
+        "CapabilityDisplay",
+        "FixedValueDisplay",
+        "ListConstraintDisplay",
+        "UnknownRetainedDisplay",
+        "ValueEditorExplanation",
+    ):
+        assert f"{{Binding {property_name}, Mode=OneWay}}" in xaml
+    assert '<Run Text="{Binding EffectivePolicyDisplay, Mode=OneWay}"' in xaml
+    assert '<Run Text="{Binding EffectiveValueDisplay, Mode=OneWay}"' in xaml
+    assert 'Text="{Binding EffectivePolicyDisplay}"' not in xaml
+    assert 'Text="{Binding EffectiveValueDisplay}"' not in xaml
+    assert "public string EffectivePolicyDisplay =>" in view_models
+    assert "public string EffectiveValueDisplay =>" in view_models
+    assert "public string ProvenanceDisplay =>" in view_models
+    assert "public string PendingEffectiveDisplay =>" in view_models
+
+
+def test_portable_view_model_suite_covers_editors_states_and_round_trips():
+    project = (WPF_TESTS / "TheTower.ControlSurface.Authoring.Tests.csproj").read_text(
+        encoding="utf-8"
+    )
+    tests = (WPF_TESTS / "StrategyAuthoringViewModelTests.cs").read_text(
+        encoding="utf-8"
+    )
+
+    assert "StrategyAuthoringViewModels.cs" in project
+    assert "StrategyStructuredEditorViewModels.cs" in project
+    assert "EveryEditorSupportsEveryBaseSourceStateTransition" in tests
+    assert "EveryEditorSupportsEveryStrategySourceStateTransition" in tests
+    assert "CardRechargeEditorSerializesOneServerChoicePerCard" in tests
+    assert "OrderedListActionsFollowTheServerConstraintContract" in tests
+    assert "UltimateWeaponEditorPreservesUnknownValuesAndConstrainsStun" in tests
+    assert "DormantIgnoreValueSurvivesInheritedAndReconstructedRows" in tests
+    assert "ComputedDisplayPropertiesRemainReadOnly" in tests
 
 
 def test_wpf_rebase_and_publish_reviews_keep_activation_separate():
@@ -78,5 +200,6 @@ def test_wpf_rebase_and_publish_reviews_keep_activation_separate():
     assert "Publishing will not activate this Strategy" in view_models
     assert "Bases cannot be activated" in view_models
     assert '"/api/v1/strategy-authoring"' in api_client
-    assert "MinimumServerRevision = 19" in compatibility
+    assert "MinimumServerRevision = 20" in compatibility
+    assert '"strategy_authoring_specialized_editors_v1"' in compatibility
     assert '"strategy_authoring_v1"' in compatibility

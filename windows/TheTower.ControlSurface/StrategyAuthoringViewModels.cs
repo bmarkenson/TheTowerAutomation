@@ -12,6 +12,8 @@ public sealed class StrategyBasePinChoice
     public StrategyBaseReference? Reference { get; init; }
 }
 
+public sealed record AuthoringDormantValue(JsonElement Value, bool Materialized);
+
 public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
 {
     private readonly StrategySettingDefinition _definition;
@@ -19,12 +21,15 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
     private readonly bool _entityEditable;
     private readonly JsonElement? _retainedValue;
     private AuthoringSourceStateDefinition? _selectedSourceState;
-    private StrategyPresetOption? _selectedPreset;
-    private StrategyPresetOption? _selectedPerk;
+    private StrategyEditorOption? _selectedPreset;
+    private StrategyEditorOption? _selectedListOption;
+    private StrategyEditorOption? _selectedScalarOption;
     private string _valueText = "";
-    private bool _booleanValue;
+    private bool _hasDormantValue;
+    private bool _configuring;
     private bool _dirty;
     private StrategyResolvedSetting? _resolution;
+    private readonly Dictionary<string, JsonElement> _ultimateUnknownGroups = [];
 
     public AuthoringSettingRowViewModel(
         StrategySettingDefinition definition,
@@ -33,27 +38,35 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         StrategyAuthoringDirective? directive,
         StrategyResolvedSetting? resolution,
         StrategyAuthoringCapabilities capabilities,
-        StrategyAuthoringEditorOptions editorOptions)
+        AuthoringDormantValue? dormantValue = null)
     {
         _definition = definition;
         _isBase = isBase;
         _entityEditable = entityEditable;
         _resolution = resolution;
-        _retainedValue = directive?.Value?.Clone();
-        PresetOptions = editorOptions.Presets.TryGetValue(
-            definition.Id,
-            out var presets)
-            ? presets
-            : [];
-        AllPerks = editorOptions.Perks;
-        PerkValues.CollectionChanged += (_, _) =>
+        var suppliedValue = directive?.Value
+            ?? dormantValue?.Value
+            ?? definition.InitialValue;
+        _retainedValue = suppliedValue?.Clone();
+        _hasDormantValue = directive?.Value.HasValue == true
+            || dormantValue?.Materialized == true;
+        PresetOptions = definition.Editor.Fields.FirstOrDefault()?.Options ?? [];
+        AllListOptions = definition.Editor.Options;
+        ListValues.CollectionChanged += (_, _) =>
         {
-            Dirty = true;
-            RefreshAvailablePerks();
+            if (!_configuring)
+            {
+                MarkValueChanged();
+            }
+            RefreshAvailableListOptions();
             Notify(nameof(EffectiveValueDisplay));
+            Notify(nameof(CanAddListItem));
+            Notify(nameof(CanRemoveListItem));
         };
 
-        ConfigureValue(directive?.Value);
+        _configuring = true;
+        ConfigureValue(_retainedValue);
+        _configuring = false;
         var states = isBase
             ? capabilities.BaseSourceStates
             : capabilities.StrategySourceStates;
@@ -64,7 +77,8 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         _selectedSourceState = AvailableSourceStates.FirstOrDefault(
             state => state.Id == selectedId)
             ?? AvailableSourceStates.FirstOrDefault();
-        RefreshAvailablePerks();
+        RefreshAvailableListOptions();
+        _dirty = false;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -74,24 +88,37 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
     public string Section => _definition.Section;
     public string EditorType => _definition.EditorType;
     public IReadOnlyList<AuthoringSourceStateDefinition> AvailableSourceStates { get; }
-    public IReadOnlyList<StrategyPresetOption> PresetOptions { get; }
-    public IReadOnlyList<StrategyPresetOption> AllPerks { get; }
-    public ObservableCollection<StrategyPresetOption> PerkValues { get; } = [];
-    public ObservableCollection<StrategyPresetOption> AvailablePerks { get; } = [];
+    public IReadOnlyList<StrategyEditorOption> PresetOptions { get; }
+    public IReadOnlyList<StrategyEditorOption> AllListOptions { get; }
+    public ObservableCollection<StrategyEditorOption> ListValues { get; } = [];
+    public ObservableCollection<StrategyEditorOption> AvailableListOptions { get; } = [];
+    public ObservableCollection<AuthoringChoiceFieldViewModel> ChoiceFields { get; } = [];
+    public ObservableCollection<AuthoringToggleGroupViewModel> UltimateGroups { get; } = [];
 
     public AuthoringSourceStateDefinition? SelectedSourceState
     {
         get => _selectedSourceState;
         set
         {
-            if (ReferenceEquals(_selectedSourceState, value))
+            if (ReferenceEquals(_selectedSourceState, value)
+                || value is null
+                || !AvailableSourceStates.Contains(value))
             {
                 return;
             }
             _selectedSourceState = value;
+            if (value?.Policy is "enforce" or "observe")
+            {
+                _hasDormantValue = true;
+            }
             Dirty = true;
             Notify();
             Notify(nameof(ValueEditorEnabled));
+            Notify(nameof(BooleanControlEnabled));
+            Notify(nameof(PresetControlEnabled));
+            Notify(nameof(CanAddListItem));
+            Notify(nameof(CanRemoveListItem));
+            Notify(nameof(CanReorderListItems));
             Notify(nameof(IsActive));
             Notify(nameof(CanResetToInherited));
             Notify(nameof(PendingEffectiveDisplay));
@@ -101,29 +128,36 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         }
     }
 
-    public StrategyPresetOption? SelectedPreset
+    public StrategyEditorOption? SelectedPreset
     {
         get => _selectedPreset;
         set
         {
-            if (ReferenceEquals(_selectedPreset, value))
+            if (ReferenceEquals(_selectedPreset, value)
+                || value is null
+                || !PresetOptions.Contains(value))
             {
                 return;
             }
             _selectedPreset = value;
-            Dirty = true;
+            MarkValueChanged();
             Notify();
             Notify(nameof(EffectiveValueDisplay));
         }
     }
 
-    public StrategyPresetOption? SelectedPerk
+    public StrategyEditorOption? SelectedListOption
     {
-        get => _selectedPerk;
+        get => _selectedListOption;
         set
         {
-            _selectedPerk = value;
+            if (value is not null && !AvailableListOptions.Contains(value))
+            {
+                return;
+            }
+            _selectedListOption = value;
             Notify();
+            Notify(nameof(CanAddListItem));
         }
     }
 
@@ -137,7 +171,7 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
                 return;
             }
             _valueText = value;
-            Dirty = true;
+            MarkValueChanged();
             Notify();
             Notify(nameof(EffectiveValueDisplay));
         }
@@ -145,15 +179,17 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
 
     public bool BooleanValue
     {
-        get => _booleanValue;
+        get => _selectedScalarOption?.Value.ValueKind == JsonValueKind.True;
         set
         {
-            if (_booleanValue == value)
+            var desired = JsonSerializer.SerializeToElement(value);
+            var option = EditorJson.FindOption(_definition.Editor.Options, desired);
+            if (option is null || ReferenceEquals(_selectedScalarOption, option))
             {
                 return;
             }
-            _booleanValue = value;
-            Dirty = true;
+            _selectedScalarOption = option;
+            MarkValueChanged();
             Notify();
             Notify(nameof(EffectiveValueDisplay));
         }
@@ -174,14 +210,82 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         }
     }
 
+    public bool UsesFixedValueEditor => EditorType == "fixed_value";
     public bool UsesPresetEditor => EditorType == "preset";
     public bool UsesBooleanEditor => EditorType == "boolean";
-    public bool UsesTextEditor => EditorType is "fixed_value" or "damage_percentage";
-    public bool UsesPerkEditor => EditorType is "perk_multiselect" or "perk_order";
-    public bool IsOrderedPerkEditor => EditorType == "perk_order";
+    public bool UsesTextEditor => EditorType == "damage_percentage";
+    public bool UsesKeyedChoiceEditor => EditorType == "card_recharge_modes";
+    public bool UsesListEditor => EditorType is
+        "ordered_list" or "perk_multiselect" or "perk_order";
+    public bool UsesUltimateWeaponEditor => EditorType == "ultimate_weapon_toggles";
     public bool HasSpecializedEditor =>
-        UsesPresetEditor || UsesBooleanEditor || UsesTextEditor || UsesPerkEditor;
+        UsesFixedValueEditor
+        || UsesPresetEditor
+        || UsesBooleanEditor
+        || UsesTextEditor
+        || UsesKeyedChoiceEditor
+        || UsesListEditor
+        || UsesUltimateWeaponEditor;
     public bool IsReadOnlyValue => !HasSpecializedEditor;
+    public bool BooleanControlEnabled =>
+        ValueEditorEnabled
+        && !_definition.Editor.Fixed
+        && _definition.Editor.Options.Count > 1;
+    public bool PresetControlEnabled =>
+        ValueEditorEnabled && !_definition.Editor.Fixed;
+    public bool IsFixedPresentation => _definition.Editor.Fixed;
+    public bool CanAddListItem =>
+        ValueEditorEnabled
+        && (_definition.Editor.ListConstraints?.AllowAdd ?? false)
+        && ListValues.Count < (_definition.Editor.ListConstraints?.MaximumItems ?? 0)
+        && SelectedListOption is not null;
+    public bool CanRemoveListItem =>
+        ValueEditorEnabled
+        && (_definition.Editor.ListConstraints?.AllowRemove ?? false)
+        && ListValues.Count > (_definition.Editor.ListConstraints?.MinimumItems ?? 0);
+    public bool CanReorderListItems =>
+        ValueEditorEnabled
+        && (_definition.Editor.ListConstraints?.AllowReorder ?? false);
+    public bool ListMembershipEditable =>
+        (_definition.Editor.ListConstraints?.AllowAdd ?? false)
+        || (_definition.Editor.ListConstraints?.AllowRemove ?? false);
+    public bool ListReorderAvailable =>
+        _definition.Editor.ListConstraints?.AllowReorder ?? false;
+    public bool ListOrderSignificant =>
+        _definition.Editor.ListConstraints?.OrderSignificant ?? false;
+    public string FixedValueDisplay => _selectedScalarOption?.DisplayName
+        ?? FormatJson(_definition.InitialValue);
+    public string ListConstraintDisplay
+    {
+        get
+        {
+            var constraints = _definition.Editor.ListConstraints;
+            if (constraints is null)
+            {
+                return "";
+            }
+            if (constraints.ExactItems.Count > 0)
+            {
+                return constraints.AllowReorder
+                    ? $"Exact {constraints.ExactItems.Count}-item membership; order may be changed."
+                    : $"Fixed exact {constraints.ExactItems.Count}-item value.";
+            }
+            var order = constraints.OrderSignificant
+                ? "Order is significant."
+                : "Order is not significant.";
+            return $"{constraints.MinimumItems}–{constraints.MaximumItems} unique item(s). {order}";
+        }
+    }
+    public string DependencyDisplay => _definition.DependencyDisplayNames.Count == 0
+        ? ""
+        : "Requires effective: "
+            + string.Join(", ", _definition.DependencyDisplayNames)
+            + ".";
+    public string UnknownRetainedDisplay => _ultimateUnknownGroups.Count == 0
+        ? ""
+        : "Retained unrecognized weapons: "
+            + string.Join(", ", _ultimateUnknownGroups.Keys.Order())
+            + ".";
 
     public bool SourceStateEnabled => _entityEditable && AvailableSourceStates.Count > 1;
 
@@ -236,9 +340,10 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         ? "Draft changed — validate to refresh effective value and provenance."
         : "";
 
-    public string ValueEditorExplanation => HasSpecializedEditor
-        ? ""
-        : "This phase has no safe value editor for this registry type. The value remains visible and round-trips unchanged; source transitions that require a new value are disabled.";
+    public string ValueEditorExplanation => string.Join(
+        " ",
+        new[] { _definition.Editor.HelpText, DependencyDisplay }
+            .Where(value => !string.IsNullOrWhiteSpace(value)));
 
     public void ResetToInherited()
     {
@@ -250,35 +355,35 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         }
     }
 
-    public void AddSelectedPerk()
+    public void AddSelectedListItem()
     {
-        if (SelectedPerk is null)
+        if (!CanAddListItem || SelectedListOption is null)
         {
             return;
         }
-        PerkValues.Add(SelectedPerk);
-        SelectedPerk = null;
+        ListValues.Add(SelectedListOption);
+        SelectedListOption = null;
     }
 
-    public void RemovePerk(StrategyPresetOption? option)
+    public void RemoveListItem(StrategyEditorOption? option)
     {
-        if (option is not null)
+        if (option is not null && CanRemoveListItem)
         {
-            PerkValues.Remove(option);
+            ListValues.Remove(option);
         }
     }
 
-    public void MovePerk(StrategyPresetOption? option, int offset)
+    public void MoveListItem(StrategyEditorOption? option, int offset)
     {
-        if (option is null)
+        if (option is null || !CanReorderListItems)
         {
             return;
         }
-        var index = PerkValues.IndexOf(option);
+        var index = ListValues.IndexOf(option);
         var destination = index + offset;
-        if (index >= 0 && destination >= 0 && destination < PerkValues.Count)
+        if (index >= 0 && destination >= 0 && destination < ListValues.Count)
         {
-            PerkValues.Move(index, destination);
+            ListValues.Move(index, destination);
             Dirty = true;
         }
     }
@@ -295,7 +400,7 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
             return new StrategyAuthoringDirective
             {
                 Policy = policy,
-                Value = CurrentValue()?.Clone(),
+                Value = _hasDormantValue ? CurrentValue()?.Clone() : null,
             };
         }
 
@@ -310,6 +415,19 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
             Policy = policy,
             Value = value.Value.Clone(),
         };
+    }
+
+    public AuthoringDormantValue CaptureDormantValue()
+    {
+        var value = CurrentValue() ?? _retainedValue ?? _definition.InitialValue;
+        if (!value.HasValue)
+        {
+            throw new InvalidOperationException(
+                $"{DisplayName} has no server-supplied initial value.");
+        }
+        return new AuthoringDormantValue(
+            value.Value.Clone(),
+            _hasDormantValue);
     }
 
     public void ApplyResolution(StrategyResolvedSetting? resolution)
@@ -364,17 +482,22 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
             return;
         }
         var element = value.Value;
-        if (UsesPresetEditor
-            && element.ValueKind == JsonValueKind.Object
-            && element.TryGetProperty("preset", out var preset))
+        if (UsesFixedValueEditor || UsesBooleanEditor)
         {
-            var id = preset.GetString();
-            _selectedPreset = PresetOptions.FirstOrDefault(option => option.Id == id);
+            _selectedScalarOption = EditorJson.FindOption(
+                    _definition.Editor.Options,
+                    element)
+                ?? _definition.Editor.Options.FirstOrDefault();
         }
-        else if (UsesBooleanEditor
-            && element.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        else if (UsesPresetEditor && element.ValueKind == JsonValueKind.Object)
         {
-            _booleanValue = element.GetBoolean();
+            var field = _definition.Editor.Fields.FirstOrDefault();
+            if (field is not null
+                && element.TryGetProperty(field.Key, out var preset))
+            {
+                _selectedPreset = EditorJson.FindOption(field.Options, preset)
+                    ?? field.Options.FirstOrDefault();
+            }
         }
         else if (UsesTextEditor)
         {
@@ -382,42 +505,55 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
                 ? element.GetString() ?? ""
                 : element.GetRawText();
         }
-        else if (UsesPerkEditor && element.ValueKind == JsonValueKind.Array)
+        else if (UsesListEditor && element.ValueKind == JsonValueKind.Array)
         {
             foreach (var raw in element.EnumerateArray())
             {
-                var id = raw.GetString();
-                if (string.IsNullOrWhiteSpace(id))
-                {
-                    continue;
-                }
-                PerkValues.Add(
-                    AllPerks.FirstOrDefault(option => option.Id == id)
-                    ?? new StrategyPresetOption
+                ListValues.Add(
+                    EditorJson.FindOption(AllListOptions, raw)
+                    ?? new StrategyEditorOption
                     {
-                        Id = id,
-                        DisplayName = $"{id} (preserved unknown value)",
+                        Value = raw.Clone(),
+                        DisplayName = $"{FormatJson(raw)} (preserved value)",
                     });
             }
-            _dirty = false;
+        }
+        else if (UsesKeyedChoiceEditor && element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var field in _definition.Editor.Fields)
+            {
+                JsonElement? current = element.TryGetProperty(field.Key, out var raw)
+                    ? raw
+                    : field.InitialValue;
+                ChoiceFields.Add(
+                    new AuthoringChoiceFieldViewModel(
+                        field,
+                        current,
+                        MarkValueChanged));
+            }
+        }
+        else if (UsesUltimateWeaponEditor && element.ValueKind == JsonValueKind.Object)
+        {
+            ConfigureUltimateWeapons(element);
         }
     }
 
     private JsonElement? CurrentValue()
     {
+        if (UsesFixedValueEditor || UsesBooleanEditor)
+        {
+            return _selectedScalarOption?.Value.Clone();
+        }
         if (UsesPresetEditor)
         {
-            return SelectedPreset is null
+            var field = _definition.Editor.Fields.FirstOrDefault();
+            return SelectedPreset is null || field is null
                 ? null
                 : JsonSerializer.SerializeToElement(
-                    new Dictionary<string, string>
+                    new Dictionary<string, JsonElement>
                     {
-                        ["preset"] = SelectedPreset.Id,
+                        [field.Key] = SelectedPreset.Value.Clone(),
                     });
-        }
-        if (UsesBooleanEditor)
-        {
-            return JsonSerializer.SerializeToElement(BooleanValue);
         }
         if (UsesTextEditor)
         {
@@ -425,24 +561,122 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
                 ? null
                 : JsonSerializer.SerializeToElement(ValueText.Trim());
         }
-        if (UsesPerkEditor)
+        if (UsesListEditor)
         {
             return JsonSerializer.SerializeToElement(
-                PerkValues.Select(option => option.Id).ToArray());
+                ListValues.Select(option => option.Value.Clone()).ToArray());
+        }
+        if (UsesKeyedChoiceEditor)
+        {
+            var fields = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+            foreach (var field in ChoiceFields)
+            {
+                if (field.CurrentValue is { } current)
+                {
+                    fields[field.Key] = current.Clone();
+                }
+            }
+            return JsonSerializer.SerializeToElement(fields);
+        }
+        if (UsesUltimateWeaponEditor)
+        {
+            return BuildUltimateWeaponValue();
         }
         return _retainedValue?.Clone();
     }
 
-    private void RefreshAvailablePerks()
+    private void ConfigureUltimateWeapons(JsonElement element)
     {
-        var selected = PerkValues.Select(option => option.Id).ToHashSet(
-            StringComparer.Ordinal);
-        AvailablePerks.Clear();
-        foreach (var option in AllPerks.Where(option => !selected.Contains(option.Id)))
+        var current = EditorJson.ObjectValues(element);
+        var knownGroups = _definition.Editor.Groups
+            .Select(group => group.Key)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var (key, retained) in current)
         {
-            AvailablePerks.Add(option);
+            if (!knownGroups.Contains(key))
+            {
+                _ultimateUnknownGroups[key] = retained.Clone();
+            }
         }
-        Notify(nameof(AvailablePerks));
+        foreach (var group in _definition.Editor.Groups)
+        {
+            current.TryGetValue(group.Key, out var rawGroup);
+            UltimateGroups.Add(
+                new AuthoringToggleGroupViewModel(
+                    group,
+                    current.ContainsKey(group.Key) ? rawGroup : null,
+                    UltimateValueChanged,
+                    CanExcludeUltimateGroup));
+        }
+        RefreshUltimateConstraints();
+    }
+
+    private JsonElement BuildUltimateWeaponValue()
+    {
+        var result = _ultimateUnknownGroups.ToDictionary(
+            item => item.Key,
+            item => item.Value.Clone(),
+            StringComparer.Ordinal);
+        foreach (var group in UltimateGroups)
+        {
+            var fields = group.BuildFields();
+            if (fields.Count > 0)
+            {
+                result[group.Key] = JsonSerializer.SerializeToElement(fields);
+            }
+        }
+        return JsonSerializer.SerializeToElement(result);
+    }
+
+    private bool CanExcludeUltimateGroup(AuthoringToggleGroupViewModel group)
+    {
+        var remaining = UltimateGroups.Count(candidate =>
+            !ReferenceEquals(candidate, group) && candidate.IsEffectivelyPresent);
+        if (group.HasUnknownFields)
+        {
+            remaining++;
+        }
+        return remaining >= _definition.Editor.MinimumSelectedGroups;
+    }
+
+    private void UltimateValueChanged()
+    {
+        MarkValueChanged();
+        RefreshUltimateConstraints();
+    }
+
+    private void RefreshUltimateConstraints()
+    {
+        foreach (var group in UltimateGroups)
+        {
+            group.RefreshConstraints();
+        }
+        Notify(nameof(UnknownRetainedDisplay));
+    }
+
+    private void RefreshAvailableListOptions()
+    {
+        var selected = ListValues.Select(option => option.ValueKey).ToHashSet(
+            StringComparer.Ordinal);
+        AvailableListOptions.Clear();
+        foreach (var option in AllListOptions.Where(option =>
+                     !selected.Contains(option.ValueKey)))
+        {
+            AvailableListOptions.Add(option);
+        }
+        Notify(nameof(AvailableListOptions));
+        Notify(nameof(CanAddListItem));
+        Notify(nameof(CanRemoveListItem));
+    }
+
+    private void MarkValueChanged()
+    {
+        if (_configuring)
+        {
+            return;
+        }
+        _hasDormantValue = true;
+        Dirty = true;
     }
 
     private static string FormatJson(JsonElement? value)
@@ -460,10 +694,18 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         {
             return string.Join(
                 ", ",
-                element.EnumerateArray().Select(item =>
-                    item.ValueKind == JsonValueKind.String
-                        ? item.GetString()
-                        : item.GetRawText()));
+                element.EnumerateArray().Select(item => FormatJson(item)));
+        }
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            return string.Join(
+                "; ",
+                element.EnumerateObject().Select(property =>
+                    $"{property.Name}: {FormatJson(property.Value)}"));
+        }
+        if (element.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            return element.GetBoolean() ? "Enabled" : "Disabled";
         }
         return element.GetRawText();
     }

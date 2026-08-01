@@ -291,20 +291,34 @@ its normal next-boundary or active-battle semantics.
 
 ## Sparse strategy authoring
 
-Server revision 19 advertises `strategy_authoring_v1`. The additive
+Server revision 20 preserves `strategy_authoring_v1` and advertises
+`strategy_authoring_specialized_editors_v1`. The additive
 `/api/v1/strategy-authoring` endpoint implements the sparse Base/Strategy model
 without changing `/api/v1/strategy-profiles`, `strategy_profile_catalog_v1`, or
-`strategy_profile_editor_v2`. An older native client therefore keeps using the
-revision-18 facade, while the revision-19 client requires the new capability
-and fails compatibility clearly against an older resident service.
+`strategy_profile_editor_v2`. Older native clients therefore keep using their
+existing facade, while the revision-20 client requires both authoring
+capabilities and fails compatibility clearly against an older resident
+service.
 
-The GET response carries the setting registry, safe editor catalogs, separate
-Base and Strategy collections, normalized source documents, effective
-resolution and provenance, latest compatible Base revisions, structured
-capabilities, and catalog errors. Unsupported Strategy families remain listed
-with a read-only reason. Existing schema-1 Farm publications are converted
+The GET response carries the setting registry, normalized initial values,
+behavior-free specialized-editor metadata, safe editor catalogs, separate Base
+and Strategy collections, normalized source documents, effective resolution
+and provenance, latest compatible Base revisions, structured capabilities, and
+catalog errors. Metadata declares choices, object fields, list constraints,
+dependencies, defaults, and toggle restrictions; Python normalizers and action
+generation remain private. Unsupported Strategy families remain listed with a
+read-only reason. Existing schema-1 Farm publications are converted
 conservatively in memory and are not rewritten merely because the catalog was
 opened.
+
+The WPF client provides managed controls for all registered editor types:
+fixed values, constrained booleans, server presets, server-normalized Damage
+percentage text, Card recharge mappings, exact or variable lists, Perk bans and
+order, and Ultimate Weapon groups/toggles. Unknown retained Ultimate Weapon
+groups and fields are merged back unchanged. Source-state changes keep dormant
+values, and a server-supplied initial value is used when an omitted setting is
+first included or overridden. The client does not implement a second
+normalizer or resolver.
 
 POST accepts only `validate_base`, `publish_base`, `validate_strategy`,
 `publish_strategy`, and `preview_rebase`. Validation returns normalized source,

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
+import json
 from pathlib import Path
 
 import pytest
@@ -8,6 +10,7 @@ import yaml
 
 import core.strategy_profiles as strategy_profiles_module
 from core.strategy_authoring import (
+    EDITOR_METADATA_SCHEMA_VERSION,
     FARM_SETTING_REGISTRY,
     StrategyAuthoringError,
     StrategyBaseStore,
@@ -113,6 +116,24 @@ def test_farm_setting_registry_covers_the_complete_compact_builder_contract():
         assert isinstance(item["dependencies"], list)
         assert isinstance(item["observation_supported"], bool)
         assert isinstance(item["repair_supported"], bool)
+        assert item["initial_value"] == FARM_SETTING_REGISTRY[item["id"]].normalizer(
+            copy.deepcopy(item["initial_value"])
+        )
+        assert item["editor"]["schema_version"] == EDITOR_METADATA_SCHEMA_VERSION
+        assert item["editor"]["help_text"]
+        assert item["dependency_display_names"] == [
+            FARM_SETTING_REGISTRY[dependency].display_name
+            for dependency in item["dependencies"]
+        ]
+        assert not {
+            "normalizer",
+            "adapter",
+            "initial_value_factory",
+            "editor_metadata_factory",
+            "generated_plan",
+            "actions",
+        } & set(item)
+        json.dumps(item, allow_nan=False)
 
     assert FARM_SETTING_REGISTRY["perk_auto_pick_order"].dependencies == (
         "auto_pick_perks",
@@ -122,6 +143,183 @@ def test_farm_setting_registry_covers_the_complete_compact_builder_contract():
         "observe",
         "ignore",
     )
+
+
+def test_registry_editor_metadata_declares_every_specialized_constraint():
+    catalog = {item["id"]: item for item in setting_registry_catalog()}
+
+    assert {
+        item["editor_type"] for item in catalog.values()
+    } == {
+        "fixed_value",
+        "boolean",
+        "preset",
+        "damage_percentage",
+        "card_recharge_modes",
+        "ordered_list",
+        "perk_multiselect",
+        "perk_order",
+        "ultimate_weapon_toggles",
+    }
+    recharge = catalog["card_recharge_modes"]["editor"]
+    assert [field["key"] for field in recharge["fields"]] == [
+        "Demon Mode",
+        "Nuke",
+    ]
+    assert {
+        option["value"]
+        for field in recharge["fields"]
+        for option in field["options"]
+    } == {"auto_reactivate", "ready_after_recharge"}
+
+    free_locks = catalog["free_upgrade_locks"]["editor"]["list_constraints"]
+    assert free_locks == {
+        "minimum_items": 3,
+        "maximum_items": 3,
+        "unique_items": True,
+        "allow_add": False,
+        "allow_remove": False,
+        "allow_reorder": True,
+        "order_significant": True,
+        "exact_items": [
+            "Shockwave Size",
+            "Bounce Shot Targets",
+            "Bounce Shot Range",
+        ],
+    }
+    guardians = catalog["guardian_chips"]["editor"]
+    assert guardians["fixed"] is True
+    assert guardians["list_constraints"]["allow_reorder"] is False
+    assert guardians["list_constraints"]["order_significant"] is False
+
+    auto_pick = catalog["auto_pick_perks"]["editor"]
+    assert auto_pick["fixed"] is True
+    assert auto_pick["options"] == [
+        {"value": True, "display_name": "Enabled"}
+    ]
+    perk_bans = catalog["perk_bans"]["editor"]
+    assert perk_bans["list_constraints"]["maximum_items"] == 6
+    assert perk_bans["list_constraints"]["allow_reorder"] is False
+    perk_order = catalog["perk_auto_pick_order"]["editor"]
+    assert perk_order["list_constraints"]["minimum_items"] == 1
+    assert perk_order["list_constraints"]["allow_reorder"] is True
+    assert len(perk_order["options"]) > len(
+        catalog["perk_auto_pick_order"]["initial_value"]
+    )
+
+    ultimate = catalog["ultimate_weapons"]["editor"]
+    assert ultimate["preserve_unknown_fields"] is True
+    assert ultimate["minimum_selected_groups"] == 1
+    poison = next(
+        group for group in ultimate["groups"] if group["key"] == "Poison Swamp"
+    )
+    stun = next(field for field in poison["fields"] if field["key"] == "stun")
+    assert stun["fixed"] is True
+    assert stun["options"] == [{"value": "off", "display_name": "Off"}]
+    assert all(group["preserve_unknown_fields"] for group in ultimate["groups"])
+
+    for setting_id in ("modules", "orb_distance", "target_priority"):
+        preset = catalog[setting_id]["editor"]
+        assert preset["fields"][0]["key"] == "preset"
+        assert preset["fields"][0]["options"]
+    damage = catalog["damage_slider"]["editor"]
+    assert damage["server_normalized_text"] is True
+
+
+@pytest.mark.parametrize(
+    ("setting_id", "mutate", "message"),
+    (
+        (
+            "cards_deck",
+            lambda metadata: metadata.update(schema_version=999),
+            "schema version",
+        ),
+        (
+            "auto_pick_perks",
+            lambda metadata: metadata["options"].append(
+                {"value": False, "display_name": "Disabled"}
+            ),
+            "auto_pick_perks",
+        ),
+        (
+            "card_recharge_modes",
+            lambda metadata: metadata["fields"].pop(),
+            "complete initial value",
+        ),
+        (
+            "free_upgrade_locks",
+            lambda metadata: metadata["list_constraints"].update(
+                allow_remove=True
+            ),
+            "exact list",
+        ),
+        (
+            "ultimate_weapons",
+            lambda metadata: metadata.update(preserve_unknown_fields=False),
+            "preserve unknown",
+        ),
+        (
+            "damage_slider",
+            lambda metadata: metadata.update(server_normalized_text=False),
+            "server-normalized",
+        ),
+    ),
+)
+def test_registry_rejects_invalid_serialized_editor_metadata(
+    setting_id,
+    mutate,
+    message,
+):
+    definition = FARM_SETTING_REGISTRY[setting_id]
+    initial = definition.normalizer(definition.initial_value_factory())
+    metadata = copy.deepcopy(definition.editor_metadata_factory(initial))
+    mutate(metadata)
+    invalid = replace(
+        definition,
+        editor_metadata_factory=lambda _initial: metadata,
+    )
+
+    with pytest.raises(StrategyAuthoringError, match=message):
+        invalid.catalog_item()
+
+
+def test_every_server_initial_value_constructs_valid_base_and_strategy_directives():
+    for item in setting_registry_catalog():
+        directive = {
+            "policy": "enforce",
+            "value": copy.deepcopy(item["initial_value"]),
+        }
+        base = normalize_base_source(
+            {
+                "id": "initial_base",
+                "display_name": "Initial Base",
+                "family": "farm",
+                "revision": 1,
+                "settings": {item["id"]: directive},
+            }
+        )
+        strategy = normalize_strategy_source(
+            _custom_source(
+                "initial_strategy",
+                settings={item["id"]: directive},
+            )
+        )
+
+        assert base["settings"][item["id"]]["value"] == item["initial_value"]
+        assert strategy["settings"][item["id"]]["value"] == item["initial_value"]
+
+
+def test_ultimate_weapon_unknown_values_are_normalized_losslessly():
+    value = {
+        "Poison Swamp": {
+            "primary": "on",
+            "stun": "off",
+            "future_toggle": "on",
+        },
+        "Future Beam": {"primary": "off", "future_mode": "on"},
+    }
+
+    assert FARM_SETTING_REGISTRY["ultimate_weapons"].normalizer(value) == value
 
 
 @pytest.mark.parametrize(

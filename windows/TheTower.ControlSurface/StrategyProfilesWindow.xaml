@@ -52,10 +52,10 @@
             <ListBox.ItemTemplate>
               <DataTemplate>
                 <StackPanel Margin="7,6">
-                  <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"
+                  <TextBlock Text="{Binding DisplayName, Mode=OneWay}" FontWeight="SemiBold"
                              TextWrapping="Wrap" />
-                  <TextBlock Text="{Binding Id}" Foreground="#93A4BB" FontSize="11" />
-                  <TextBlock Text="{Binding RevisionLabel}" Foreground="#7890AC"
+                  <TextBlock Text="{Binding Id, Mode=OneWay}" Foreground="#93A4BB" FontSize="11" />
+                  <TextBlock Text="{Binding RevisionLabel, Mode=OneWay}" Foreground="#7890AC"
                              FontSize="10" />
                 </StackPanel>
               </DataTemplate>
@@ -72,10 +72,10 @@
             <ListBox.ItemTemplate>
               <DataTemplate>
                 <StackPanel Margin="7,6">
-                  <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"
+                  <TextBlock Text="{Binding DisplayName, Mode=OneWay}" FontWeight="SemiBold"
                              TextWrapping="Wrap" />
-                  <TextBlock Text="{Binding Id}" Foreground="#93A4BB" FontSize="11" />
-                  <TextBlock Text="{Binding VersionLabel}" Foreground="#7890AC"
+                  <TextBlock Text="{Binding Id, Mode=OneWay}" Foreground="#93A4BB" FontSize="11" />
+                  <TextBlock Text="{Binding VersionLabel, Mode=OneWay}" Foreground="#7890AC"
                              FontSize="10" />
                 </StackPanel>
               </DataTemplate>
@@ -181,7 +181,7 @@
                 <GroupStyle.HeaderTemplate>
                   <DataTemplate>
                     <Border Background="#172235" Padding="9,6" Margin="0,8,0,3">
-                      <TextBlock Text="{Binding Name}" Foreground="#62D5FF"
+                      <TextBlock Text="{Binding Name, Mode=OneWay}" Foreground="#62D5FF"
                                  FontWeight="Bold" />
                     </Border>
                   </DataTemplate>
@@ -205,73 +205,154 @@
                     </Grid.RowDefinitions>
 
                     <StackPanel Grid.RowSpan="3">
-                      <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"
+                      <TextBlock Text="{Binding DisplayName, Mode=OneWay}" FontWeight="SemiBold"
                                  TextWrapping="Wrap" />
-                      <TextBlock Text="{Binding Id}" Foreground="#7890AC" FontSize="10" />
-                      <TextBlock Text="{Binding CapabilityDisplay}" Foreground="#93A4BB"
+                      <TextBlock Text="{Binding Id, Mode=OneWay}" Foreground="#7890AC" FontSize="10" />
+                      <TextBlock Text="{Binding CapabilityDisplay, Mode=OneWay}" Foreground="#93A4BB"
                                  FontSize="10" TextWrapping="Wrap" Margin="0,4,0,0" />
                     </StackPanel>
 
-                    <ComboBox Grid.Column="1" ItemsSource="{Binding AvailableSourceStates}"
+                    <ComboBox Grid.Column="1" ItemsSource="{Binding AvailableSourceStates, Mode=OneWay}"
                               DisplayMemberPath="DisplayName"
                               SelectedItem="{Binding SelectedSourceState, Mode=TwoWay}"
-                              IsEnabled="{Binding SourceStateEnabled}" Margin="5,0" />
+                              IsEnabled="{Binding SourceStateEnabled, Mode=OneWay}" Margin="5,0" />
                     <Button Grid.Row="1" Grid.Column="1" Content="Reset to inherited"
-                            Visibility="{Binding CanResetToInherited, Converter={StaticResource BoolVisibility}}"
+                            Visibility="{Binding CanResetToInherited, Mode=OneWay, Converter={StaticResource BoolVisibility}}"
                             Click="ResetToInherited_Click" Margin="5,4" />
 
                     <StackPanel Grid.Column="2" Margin="8,0,0,0">
                       <TextBlock>
                         <Run Text="Effective: " Foreground="#93A4BB" />
-                        <Run Text="{Binding EffectivePolicyDisplay}" FontWeight="SemiBold" />
+                        <Run Text="{Binding EffectivePolicyDisplay, Mode=OneWay}" FontWeight="SemiBold" />
                         <Run Text=" • " Foreground="#7890AC" />
-                        <Run Text="{Binding EffectiveValueDisplay}" />
+                        <Run Text="{Binding EffectiveValueDisplay, Mode=OneWay}" />
                       </TextBlock>
-                      <TextBlock Text="{Binding ProvenanceDisplay}" Foreground="#93A4BB"
+                      <TextBlock Text="{Binding ProvenanceDisplay, Mode=OneWay}" Foreground="#93A4BB"
                                  FontSize="11" TextWrapping="Wrap" />
-                      <TextBlock Text="{Binding PendingEffectiveDisplay}" Foreground="#F1BF5B"
+                      <TextBlock Text="{Binding PendingEffectiveDisplay, Mode=OneWay}" Foreground="#F1BF5B"
                                  FontSize="10" TextWrapping="Wrap" />
                     </StackPanel>
 
-                    <Grid Grid.Row="1" Grid.RowSpan="2" Grid.Column="2" Margin="8,7,0,0">
-                      <ComboBox ItemsSource="{Binding PresetOptions}"
+                    <StackPanel Grid.Row="1" Grid.RowSpan="2" Grid.Column="2" Margin="8,7,0,0">
+                      <TextBlock Text="{Binding FixedValueDisplay, Mode=OneWay}"
+                                 FontWeight="SemiBold" TextWrapping="Wrap"
+                                 Visibility="{Binding UsesFixedValueEditor, Mode=OneWay, Converter={StaticResource BoolVisibility}}" />
+
+                      <ComboBox ItemsSource="{Binding PresetOptions, Mode=OneWay}"
                                 DisplayMemberPath="DisplayName"
                                 SelectedItem="{Binding SelectedPreset, Mode=TwoWay}"
-                                IsEnabled="{Binding ValueEditorEnabled}"
-                                Visibility="{Binding UsesPresetEditor, Converter={StaticResource BoolVisibility}}" />
-                      <TextBox Text="{Binding ValueText, UpdateSourceTrigger=PropertyChanged}"
-                               IsEnabled="{Binding ValueEditorEnabled}"
-                               Visibility="{Binding UsesTextEditor, Converter={StaticResource BoolVisibility}}" />
+                                IsEnabled="{Binding PresetControlEnabled, Mode=OneWay}"
+                                Visibility="{Binding UsesPresetEditor, Mode=OneWay, Converter={StaticResource BoolVisibility}}" />
+                      <TextBox Text="{Binding ValueText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                               IsEnabled="{Binding ValueEditorEnabled, Mode=OneWay}"
+                               Visibility="{Binding UsesTextEditor, Mode=OneWay, Converter={StaticResource BoolVisibility}}" />
                       <CheckBox Content="Enabled" IsChecked="{Binding BooleanValue, Mode=TwoWay}"
-                                IsEnabled="{Binding ValueEditorEnabled}"
-                                Visibility="{Binding UsesBooleanEditor, Converter={StaticResource BoolVisibility}}" />
+                                IsEnabled="{Binding BooleanControlEnabled, Mode=OneWay}"
+                                Visibility="{Binding UsesBooleanEditor, Mode=OneWay, Converter={StaticResource BoolVisibility}}" />
 
-                      <StackPanel IsEnabled="{Binding ValueEditorEnabled}"
-                                  Visibility="{Binding UsesPerkEditor, Converter={StaticResource BoolVisibility}}">
-                        <ListBox x:Name="PerkValueList" ItemsSource="{Binding PerkValues}"
+                      <ItemsControl ItemsSource="{Binding ChoiceFields, Mode=OneWay}"
+                                    IsEnabled="{Binding ValueEditorEnabled, Mode=OneWay}"
+                                    Visibility="{Binding UsesKeyedChoiceEditor, Mode=OneWay, Converter={StaticResource BoolVisibility}}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate>
+                            <Grid Margin="0,0,0,4">
+                              <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="180" />
+                                <ColumnDefinition Width="*" />
+                              </Grid.ColumnDefinitions>
+                              <TextBlock Text="{Binding DisplayName, Mode=OneWay}"
+                                         VerticalAlignment="Center" />
+                              <ComboBox Grid.Column="1"
+                                        ItemsSource="{Binding Options, Mode=OneWay}"
+                                        DisplayMemberPath="DisplayName"
+                                        SelectedItem="{Binding SelectedOption, Mode=TwoWay}"
+                                        IsEnabled="{Binding SelectionEnabled, Mode=OneWay}" />
+                            </Grid>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+
+                      <StackPanel IsEnabled="{Binding ValueEditorEnabled, Mode=OneWay}"
+                                  Visibility="{Binding UsesListEditor, Mode=OneWay, Converter={StaticResource BoolVisibility}}">
+                        <ListBox x:Name="ManagedListValueList" ItemsSource="{Binding ListValues, Mode=OneWay}"
                                  DisplayMemberPath="DisplayName" Height="84" />
-                        <ComboBox ItemsSource="{Binding AvailablePerks}"
-                                  SelectedItem="{Binding SelectedPerk, Mode=TwoWay}"
-                                  DisplayMemberPath="DisplayName" Margin="0,4,0,2" />
+                        <ComboBox ItemsSource="{Binding AvailableListOptions, Mode=OneWay}"
+                                  SelectedItem="{Binding SelectedListOption, Mode=TwoWay}"
+                                  DisplayMemberPath="DisplayName" Margin="0,4,0,2"
+                                  Visibility="{Binding ListMembershipEditable, Mode=OneWay, Converter={StaticResource BoolVisibility}}" />
                         <WrapPanel>
-                          <Button Content="Add" Click="AddPerk_Click" />
-                          <Button Content="Remove" Click="RemovePerk_Click"
-                                  CommandParameter="{Binding SelectedItem, ElementName=PerkValueList}" />
-                          <Button Content="Move up" Click="MovePerkUp_Click"
-                                  CommandParameter="{Binding SelectedItem, ElementName=PerkValueList}"
-                                  Visibility="{Binding IsOrderedPerkEditor, Converter={StaticResource BoolVisibility}}" />
-                          <Button Content="Move down" Click="MovePerkDown_Click"
-                                  CommandParameter="{Binding SelectedItem, ElementName=PerkValueList}"
-                                  Visibility="{Binding IsOrderedPerkEditor, Converter={StaticResource BoolVisibility}}" />
+                          <Button Content="Add" Click="AddListItem_Click"
+                                  IsEnabled="{Binding CanAddListItem, Mode=OneWay}"
+                                  Visibility="{Binding ListMembershipEditable, Mode=OneWay, Converter={StaticResource BoolVisibility}}" />
+                          <Button Content="Remove" Click="RemoveListItem_Click"
+                                  IsEnabled="{Binding CanRemoveListItem, Mode=OneWay}"
+                                  Visibility="{Binding ListMembershipEditable, Mode=OneWay, Converter={StaticResource BoolVisibility}}"
+                                  CommandParameter="{Binding SelectedItem, ElementName=ManagedListValueList}" />
+                          <Button Content="Move up" Click="MoveListItemUp_Click"
+                                  IsEnabled="{Binding CanReorderListItems, Mode=OneWay}"
+                                  Visibility="{Binding ListReorderAvailable, Mode=OneWay, Converter={StaticResource BoolVisibility}}"
+                                  CommandParameter="{Binding SelectedItem, ElementName=ManagedListValueList}" />
+                          <Button Content="Move down" Click="MoveListItemDown_Click"
+                                  IsEnabled="{Binding CanReorderListItems, Mode=OneWay}"
+                                  Visibility="{Binding ListReorderAvailable, Mode=OneWay, Converter={StaticResource BoolVisibility}}"
+                                  CommandParameter="{Binding SelectedItem, ElementName=ManagedListValueList}" />
                         </WrapPanel>
+                        <TextBlock Text="{Binding ListConstraintDisplay, Mode=OneWay}"
+                                   Foreground="#93A4BB" FontSize="10" TextWrapping="Wrap" />
                       </StackPanel>
 
-                      <StackPanel Visibility="{Binding IsReadOnlyValue, Converter={StaticResource BoolVisibility}}">
-                        <TextBlock Text="{Binding EffectiveValueDisplay}" TextWrapping="Wrap" />
-                        <TextBlock Text="{Binding ValueEditorExplanation}" Foreground="#F1BF5B"
-                                   FontSize="10" TextWrapping="Wrap" Margin="0,3,0,0" />
+                      <StackPanel IsEnabled="{Binding ValueEditorEnabled, Mode=OneWay}"
+                                  Visibility="{Binding UsesUltimateWeaponEditor, Mode=OneWay, Converter={StaticResource BoolVisibility}}">
+                        <ItemsControl ItemsSource="{Binding UltimateGroups, Mode=OneWay}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                              <Border BorderBrush="#263349" BorderThickness="1" CornerRadius="4"
+                                      Padding="6" Margin="0,0,0,5">
+                                <StackPanel>
+                                  <CheckBox Content="{Binding DisplayName, Mode=OneWay}"
+                                            IsChecked="{Binding IsIncluded, Mode=TwoWay}"
+                                            IsEnabled="{Binding InclusionEnabled, Mode=OneWay}"
+                                            FontWeight="SemiBold" />
+                                  <ItemsControl ItemsSource="{Binding Fields, Mode=OneWay}" Margin="18,3,0,0">
+                                    <ItemsControl.ItemTemplate>
+                                      <DataTemplate>
+                                        <Grid Margin="0,0,0,3">
+                                          <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="150" />
+                                            <ColumnDefinition Width="*" />
+                                          </Grid.ColumnDefinitions>
+                                          <CheckBox Content="{Binding DisplayName, Mode=OneWay}"
+                                                    IsChecked="{Binding IsIncluded, Mode=TwoWay}"
+                                                    IsEnabled="{Binding InclusionEnabled, Mode=OneWay}" />
+                                          <ComboBox Grid.Column="1"
+                                                    ItemsSource="{Binding Options, Mode=OneWay}"
+                                                    DisplayMemberPath="DisplayName"
+                                                    SelectedItem="{Binding SelectedOption, Mode=TwoWay}"
+                                                    IsEnabled="{Binding SelectionEnabled, Mode=OneWay}" />
+                                        </Grid>
+                                      </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                  </ItemsControl>
+                                  <TextBlock Text="{Binding UnknownRetainedDisplay, Mode=OneWay}"
+                                             Foreground="#93A4BB" FontSize="10" TextWrapping="Wrap" />
+                                </StackPanel>
+                              </Border>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Text="{Binding UnknownRetainedDisplay, Mode=OneWay}"
+                                   Foreground="#93A4BB" FontSize="10" TextWrapping="Wrap" />
                       </StackPanel>
-                    </Grid>
+
+                      <StackPanel Visibility="{Binding IsReadOnlyValue, Mode=OneWay, Converter={StaticResource BoolVisibility}}">
+                        <TextBlock Text="This server declared an editor type this client does not recognize. Its retained value is not exposed or modified."
+                                   Foreground="#F1BF5B" FontSize="10" TextWrapping="Wrap" />
+                      </StackPanel>
+
+                      <TextBlock Text="{Binding ValueEditorExplanation, Mode=OneWay}"
+                                 Foreground="#93A4BB" FontSize="10"
+                                 TextWrapping="Wrap" Margin="0,4,0,0" />
+                    </StackPanel>
                   </Grid>
                 </Border>
               </DataTemplate>

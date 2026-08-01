@@ -37,6 +37,31 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-01 specialized Strategy Authoring editors
+
+- This commit advances Linux and the native client together to revision 20 and
+  adds `strategy_authoring_specialized_editors_v1` without removing any prior
+  capability or endpoint. Registry entries now serialize validated,
+  behavior-free editor metadata and a normalized initial value; normalizers,
+  resolution, generated-plan ownership, and runtime actions remain in Python.
+- WPF now provides managed or explicitly fixed presentations for all nine
+  registered editor families. Card mappings, exact and variable lists, Perk
+  limits/order/dependencies, presets, constrained booleans, server-normalized
+  percentages, and Ultimate Weapon toggles are metadata-driven. Dormant Ignore
+  values and unknown retained Ultimate Weapon groups/fields round-trip without
+  exposing raw JSON. Computed display bindings are explicitly `OneWay`, fixing
+  the native runtime failure that occurred while opening Strategy Authoring;
+  the view-model properties remain read-only.
+- Focused Python authoring/profile/control-surface coverage passed 93 tests;
+  the portable native view-model suite passed 50 tests across every editor and
+  Base/Strategy source-state transition; the native project built with zero
+  warnings; and the complete shared suite passed all 1,084 tests. Linux
+  cross-publishing produced `TheTower.ControlSurface.exe` and
+  `TheTower.TunnelHost.exe`. No Windows runtime was available, so the README's
+  disposable-catalog smoke checklist—including actually opening Strategy
+  Authoring—remains required. Validation did not inspect or change live
+  process, control, ADB, emulator, battle, or operator profile state.
+
 ### 2026-08-01 versioned Tournament conditions and record attachment
 
 - This commit adds the exact `data-9-game-1073` Legend Tournament generator.

@@ -131,6 +131,25 @@ def test_authoring_catalog_separates_bases_strategies_and_registry(tmp_path):
         "observation_supported" in item and "repair_supported" in item
         for item in catalog["setting_registry"]
     )
+    assert all(
+        "initial_value" in item
+        and item["editor"]["schema_version"] == 1
+        and item["editor"]["help_text"]
+        for item in catalog["setting_registry"]
+    )
+    assert {
+        item["editor_type"] for item in catalog["setting_registry"]
+    } == {
+        "fixed_value",
+        "boolean",
+        "preset",
+        "damage_percentage",
+        "card_recharge_modes",
+        "ordered_list",
+        "perk_multiselect",
+        "perk_order",
+        "ultimate_weapon_toggles",
+    }
     _assert_no_expanded_plan(catalog)
 
 
@@ -366,6 +385,59 @@ def test_complex_values_survive_authoring_catalog_validation_and_publication(
     assert item["resolution"]["settings"]["ultimate_weapons"]["value"] == expected
 
 
+def test_unknown_ultimate_weapon_values_survive_validation_publication_and_reopen(
+    tmp_path,
+):
+    service = _service(tmp_path)
+    service.apply_strategy_authoring(
+        {
+            "operation": "publish_base",
+            "source": _base_source(_full_settings()),
+        }
+    )
+    unknown_value = {
+        "Poison Swamp": {
+            "primary": "off",
+            "stun": "off",
+            "future_toggle": "on",
+        },
+        "Future Beam": {"primary": "off", "future_mode": "on"},
+    }
+    strategy = _strategy_source()
+    strategy["settings"]["ultimate_weapons"] = {
+        "policy": "enforce",
+        "value": copy.deepcopy(unknown_value),
+    }
+
+    validated = service.apply_strategy_authoring(
+        {"operation": "validate_strategy", "source": strategy}
+    )
+    published = service.apply_strategy_authoring(
+        {"operation": "publish_strategy", "source": strategy}
+    )
+    reopened = next(
+        item
+        for item in service.strategy_authoring()["strategies"]["items"]
+        if item["id"] == "farm_authored"
+    )
+
+    for response in (validated, published):
+        assert response["source"]["settings"]["ultimate_weapons"]["value"] == (
+            unknown_value
+        )
+        assert response["resolution"]["settings"]["ultimate_weapons"][
+            "value"
+        ] == unknown_value
+        _assert_no_expanded_plan(response)
+    assert reopened["source"]["settings"]["ultimate_weapons"]["value"] == (
+        unknown_value
+    )
+    assert reopened["resolution"]["settings"]["ultimate_weapons"]["value"] == (
+        unknown_value
+    )
+    _assert_no_expanded_plan(reopened)
+
+
 def test_authoring_api_opens_schema_one_profile_without_rewriting_it(tmp_path):
     fixture = STRATEGIES / "custom" / "farm_t19_custom.profile.yaml"
     profile_directory = tmp_path / "profiles"
@@ -393,6 +465,41 @@ def test_authoring_api_opens_schema_one_profile_without_rewriting_it(tmp_path):
         "effective"
     )
     assert copied.read_bytes() == before
+
+
+def test_schema_one_profile_publishes_only_after_explicit_review_boundary(tmp_path):
+    fixture = STRATEGIES / "custom" / "farm_t19_custom.profile.yaml"
+    profile_directory = tmp_path / "profiles"
+    profile_directory.mkdir()
+    copied = profile_directory / fixture.name
+    copied.write_bytes(fixture.read_bytes())
+    legacy = _yaml(copied)
+    service = ControlSurfaceService(
+        repository_root=tmp_path,
+        strategy_profile_dir=profile_directory,
+    )
+    item = next(
+        candidate
+        for candidate in service.strategy_authoring()["strategies"]["items"]
+        if candidate["id"] == "farm_t19_custom"
+    )
+
+    published = service.apply_strategy_authoring(
+        {
+            "operation": "publish_strategy",
+            "source": item["source"],
+            "expected_source_fingerprint": item["source_fingerprint"],
+        }
+    )
+    stored = _yaml(copied)
+    expected_plan = copy.deepcopy(legacy["plan"])
+    expected_plan["meta"]["version"] = legacy["plan"]["meta"]["version"] + 1
+
+    assert stored["schema_version"] == 2
+    assert stored["plan"] == expected_plan
+    assert published["profile"]["version"] == legacy["plan"]["meta"]["version"] + 1
+    assert service.control_store.status()["strategy"] is None
+    _assert_no_expanded_plan(published)
 
 
 def test_base_catalog_and_publication_reject_symlink_storage(tmp_path):
@@ -483,7 +590,11 @@ def test_authoring_http_status_codes_auth_compatibility_and_no_plan(tmp_path):
 
         status, server_status = request("GET", "/api/v1/status")
         assert status == 200
-        assert server_status["server_revision"] == CONTROL_SURFACE_REVISION == 19
+        assert server_status["server_revision"] == CONTROL_SURFACE_REVISION == 20
+        assert (
+            "strategy_authoring_specialized_editors_v1"
+            in CONTROL_SURFACE_CAPABILITIES
+        )
         assert "strategy_authoring_v1" in CONTROL_SURFACE_CAPABILITIES
         assert "strategy_profile_catalog_v1" in CONTROL_SURFACE_CAPABILITIES
         assert "strategy_profile_editor_v2" in CONTROL_SURFACE_CAPABILITIES

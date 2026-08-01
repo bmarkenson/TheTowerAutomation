@@ -221,6 +221,12 @@ The authoring surface uses one editor framework for bases and strategies:
 - Value editors are selected from registry metadata. Specialized editors own
   ordered lists, bans, presets, numeric bounds, toggles, and structured values;
   the GUI does not construct raw executor actions.
+- The registry supplies each setting's normalized initial value plus complete
+  behavior-free editor metadata: managed options and fields, list limits and
+  ordering authority, fixed-value constraints, dependency labels, and
+  structured-toggle restrictions. Python normalizers and action adapters are
+  not serialized. The native client constrains drafts from that contract and
+  still asks the backend to validate and resolve them.
 - A strategy whose base has a newer revision shows an update banner and opens
   the reviewed rebase diff before changing anything.
 - Review & Publish displays source changes, resolved changes, validation
@@ -229,6 +235,23 @@ The authoring surface uses one editor framework for bases and strategies:
 
 The API returns the same source, policy, resolution, provenance, capability,
 and validation vocabulary so the WPF client does not duplicate resolver rules.
+
+### Future profile-local definitions
+
+Shared presets remain useful reusable inputs, but three loadout settings need a
+later additive local-data model:
+
+- Modules should support profile-local module and slot definitions as well as
+  selecting a shared preset.
+- Target Priority should support a profile-local ordered target list as well as
+  selecting a shared preset.
+- Orb Distance should model the relationship from observed Attack Range to
+  Extra Orb distance and Workshop distance instead of treating one isolated
+  distance as the complete authoring value.
+
+Published Strategies must embed the resolved local data so a later edit to a
+mutable shared preset cannot change an existing publication. This is a future
+schema/authoring phase; it is not part of the current specialized-editor work.
 
 ## Code ownership
 
@@ -278,7 +301,9 @@ Delivery is split into independently reviewable slices:
    validation, rebase review, and publish review while preserving the current
    client facade.
 3. Complete value editors: add specialized editors for every registered
-   setting, then perform Windows GUI smoke validation.
+   setting, then perform Windows GUI smoke validation. The implementation and
+   Linux cross-validation are complete; the documented native Windows runtime
+   smoke remains required on a Windows host.
 4. Runtime strategy-gate refinement: implement and validate the distinct
    observation, auxiliary-collector, and strategy-action authority classes
    before relying on running-battle enforcement from newly editable settings.
@@ -287,11 +312,12 @@ Each slice should be completed and validated in its own development thread.
 The actionable sequence is tracked in the
 [`runtime and validation backlog`](../backlog/runtime-and-validation.md).
 
-Backend slice 1 and additive API/editor slice 2 are implemented. Server
-revision 19 advertises `strategy_authoring_v1`; the original profile endpoint
-and capabilities remain as the older-client compatibility facade. The current
-native shell supports registry-driven source states, effective provenance,
-reviewed rebasing, validation, publication review, safe simple/Perk editors,
-and lossless read-only handling for complex values. Complete specialized value
-editors and the running-battle strategy-gate authority refinement remain the
-separate later slices above.
+Backend slice 1, additive API/editor slice 2, and specialized-editor slice 3
+are implemented. Server revision 20 preserves `strategy_authoring_v1` and adds
+`strategy_authoring_specialized_editors_v1`; the original profile endpoint and
+capabilities remain as the older-client compatibility facade. The native shell
+now handles every registered editor type with server-declared managed controls
+or an honest fixed presentation, retains dormant Ignore values and unknown
+Ultimate Weapon fields, and keeps validation, resolution, publication, and
+runtime authority in Python. The running-battle strategy-gate refinement and
+future profile-local definitions remain separate later slices above.

@@ -271,11 +271,13 @@ are displayed under the button, are consumed by the next applicable run, and
 are cleared if the selected strategy changes.
 
 **Strategy profiles...** opens the shared Strategy Authoring shell. Linux
-server revision 19 and capability `strategy_authoring_v1` provide separate
-**Bases** and **Strategies** catalogs while retaining the revision-18 profile
-endpoint for older clients. A Base is a sparse reusable component and is never
-activatable. Editing one publishes the next immutable revision; Strategies
-already pinned to an earlier revision continue to use their embedded snapshot.
+server revision 20 preserves `strategy_authoring_v1` and adds
+`strategy_authoring_specialized_editors_v1`. It provides separate **Bases** and
+**Strategies** catalogs while retaining the older profile endpoint and
+capabilities for older clients. A Base is a sparse reusable component and is
+never activatable. Editing one publishes the next immutable revision;
+Strategies already pinned to an earlier revision continue to use their
+embedded snapshot.
 
 Settings are grouped by the server registry. **Show active only** keeps the
 normal view compact, while **Show all settings** exposes omitted settings.
@@ -286,13 +288,32 @@ Strategy rows offer **Inherit**, **Override Enforce**, **Override Observe**,
 and explicit **Ignore** where allowed; each local Strategy directive also has
 **Reset to inherited**.
 
-Preset, percentage, boolean, Perk Ban, and ordered Auto Pick values use safe
-managed controls. Complex registry values without a phase-two editor remain
-visible and read-only. Their original JSON value is retained in the typed model
-and round-trips unchanged through validation and publication; the GUI does not
-offer raw generated rules, executor actions, or a general raw-value editor.
-Unsupported Strategy families such as Tournament and No Strategy are clearly
-read-only.
+Every currently registered value type has a managed editor or an explicit
+fixed presentation. Preset and Perk choices, initial values, structured fields,
+list limits, dependencies, and toggle restrictions all come from Linux. Damage
+Slider remains server-normalized percentage text. Card recharge mode rows
+require one managed mode per declared Card. Free Upgrade locks retain their
+exact three-item membership but allow the supported inspection order to move;
+Guardian chips are shown as the fixed exact set because their source order has
+no runtime meaning. Perk controls prevent duplicates, enforce declared limits,
+and expose ordering only where it matters.
+
+Ultimate Weapons use managed group, toggle, and on/off controls. Poison Swamp
+stun is intentionally fixed to **Off**, the only value currently accepted by
+runtime authority. Unknown retained weapons and toggle fields are named as
+retained and merged back unchanged rather than being silently deleted. Auto
+Pick Perks is intentionally fixed to **Enabled**, and the Farm deck, Workshop,
+and Bots values are fixed to **Farm**. No normalizer was widened to make a
+control more permissive. The GUI does not expose raw JSON, generated rules,
+executor actions, or arbitrary unchecked strings.
+
+Changing a source state keeps its dormant managed value. A previously omitted
+Base setting or Strategy override starts from the server-supplied valid initial
+value; a Strategy can reset to inherited or select explicit Ignore only where
+the registry allows it. Validation and resolution remain Linux-owned, and
+validation refreshes effective values without discarding retained draft data.
+Unsupported Strategy families such as Tournament and No Strategy remain
+clearly read-only.
 
 A new Strategy draft may initially pin a latest compatible Base. A published
 Strategy pinned behind that Base's latest revision shows an update banner; its
@@ -314,9 +335,44 @@ Publishing never selects or activates a Strategy. After publication, use the
 normal strategy dropdown plus **Use next battle**, **Switch this battle**, or a
 managed Start. Existing schema-1 profiles are converted conservatively only in
 memory when opened and are not rewritten unless explicitly published. The
-remaining complex specialized value editors are a later phase; Tournament
-behavior, generated YAML rules, executor actions, runtime strategy gates, and
-activation behavior remain outside this editor.
+future profile-local Module/slot, ordered Target Priority, and relational Orb
+Distance definitions are a later phase; shared presets remain available.
+Tournament behavior, generated YAML rules, executor actions, runtime strategy
+gates, and activation behavior remain outside this editor.
+
+### Manual Windows Strategy Authoring smoke
+
+The Linux build cannot detect all WPF runtime binding failures. Run this check
+on Windows against a disposable repository/profile catalog, never the
+operator's real `config/strategies/custom` directory:
+
+1. Copy the repository to a temporary test root, empty only that copy's custom
+   profile/Base catalog, and start the control-surface server with
+   `--repository-root` plus control, log, history, and telemetry paths inside
+   the same temporary root. Do not use process or activation endpoints.
+2. Connect the native client to that server and open **Strategy profiles...**.
+   Confirm the window renders immediately with no `TwoWay`/read-only-property
+   binding exception; compilation alone does not exercise this boundary.
+3. Create a disposable Base. With **Show all settings**, exercise fixed values,
+   the true-only boolean, Card recharge choices, Free Upgrade reorder,
+   fixed Guardian chips, Perk add/remove/limits/order, Ultimate Weapon
+   groups/toggles (including fixed Poison Swamp stun), all server presets, and
+   Damage percentage. Include each omitted setting, validate, publish, close,
+   reopen, and verify exact values and provenance.
+4. Create a disposable Strategy pinned to that Base. Exercise every applicable
+   editor again, plus Inherit, Override Enforce, Override Observe, explicit
+   Ignore, Reset to inherited, and dormant values across repeated state
+   changes. Validate, publish, close, reopen, and verify exact round trips.
+5. Seed one unknown Ultimate Weapon group and one unknown toggle field through
+   the disposable server fixture. Change a known toggle, validate, publish,
+   reopen, and verify both unknown values are unchanged and only described as
+   retained—not exposed as raw JSON.
+6. Publish a second disposable Base revision, open the Strategy's Base-update
+   review, verify the semantic diff, accept it into the draft, validate and
+   publish, then reopen and verify the reviewed pin and inherited values.
+7. Throughout the run, verify Validate writes nothing, publishing never changes
+   the selected/active Strategy, no activation prompt appears, and the real
+   operator profile catalog and control state remain byte-for-byte untouched.
 
 When a startup requirement fails, the runtime publishes the failed check,
 expected value, and allowed responses. The app opens **Startup check needs a

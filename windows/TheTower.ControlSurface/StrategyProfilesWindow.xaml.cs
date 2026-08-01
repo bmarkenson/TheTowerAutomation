@@ -258,7 +258,8 @@ public partial class StrategyProfilesWindow : Window
     private void PopulateRows(
         StrategyAuthoringSource source,
         StrategyAuthoringResolution? resolution,
-        bool editable)
+        bool editable,
+        IReadOnlyDictionary<string, AuthoringDormantValue>? dormantValues = null)
     {
         foreach (var row in _rows)
         {
@@ -284,7 +285,10 @@ public partial class StrategyProfilesWindow : Window
                 directive,
                 resolved,
                 _catalog.Capabilities,
-                _catalog.EditorOptions);
+                dormantValues is not null
+                    && dormantValues.TryGetValue(definition.Id, out var dormant)
+                        ? dormant
+                        : null);
             row.PropertyChanged += Row_PropertyChanged;
             _rows.Add(row);
         }
@@ -659,12 +663,17 @@ public partial class StrategyProfilesWindow : Window
             }
 
             _reviewedRebaseFingerprint = response.ReviewedRebaseFingerprint;
+            var dormantValues = CaptureDormantValues();
             _draftSource = CloneSource(response.Source);
             _loading = true;
             try
             {
                 ConfigureBasePin(_draftSource, editable: true);
-                PopulateRows(_draftSource, response.Resolution, editable: true);
+                PopulateRows(
+                    _draftSource,
+                    response.Resolution,
+                    editable: true,
+                    dormantValues);
                 RebaseBanner.Visibility = Visibility.Collapsed;
                 ValidationSummaryText.Text =
                     $"Reviewed rebase accepted for {_draftSource.Base?.Id} revision "
@@ -691,12 +700,17 @@ public partial class StrategyProfilesWindow : Window
 
     private void ApplyValidatedDraft(StrategyAuthoringMutationResponse response)
     {
+        var dormantValues = CaptureDormantValues();
         _draftSource = CloneSource(response.Source);
         _loading = true;
         try
         {
             ConfigureBasePin(_draftSource, editable: true);
-            PopulateRows(_draftSource, response.Resolution, editable: true);
+            PopulateRows(
+                _draftSource,
+                response.Resolution,
+                editable: true,
+                dormantValues);
             var summary = response.Summary.Count > 0
                 ? string.Join(Environment.NewLine, response.Summary)
                 : "Validation passed.";
@@ -766,6 +780,12 @@ public partial class StrategyProfilesWindow : Window
         }
         return source;
     }
+
+    private Dictionary<string, AuthoringDormantValue> CaptureDormantValues() =>
+        _rows.ToDictionary(
+            row => row.Id,
+            row => row.CaptureDormantValue(),
+            StringComparer.Ordinal);
 
     private void ShowBaseUpdate(StrategyBaseUpdate? update, bool editable)
     {
@@ -855,35 +875,35 @@ public partial class StrategyProfilesWindow : Window
         }
     }
 
-    private void AddPerk_Click(object sender, RoutedEventArgs e)
+    private void AddListItem_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.DataContext is AuthoringSettingRowViewModel row)
         {
-            row.AddSelectedPerk();
+            row.AddSelectedListItem();
         }
     }
 
-    private void RemovePerk_Click(object sender, RoutedEventArgs e)
+    private void RemoveListItem_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as Button) is { DataContext: AuthoringSettingRowViewModel row } button)
         {
-            row.RemovePerk(button.CommandParameter as StrategyPresetOption);
+            row.RemoveListItem(button.CommandParameter as StrategyEditorOption);
         }
     }
 
-    private void MovePerkUp_Click(object sender, RoutedEventArgs e)
+    private void MoveListItemUp_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as Button) is { DataContext: AuthoringSettingRowViewModel row } button)
         {
-            row.MovePerk(button.CommandParameter as StrategyPresetOption, -1);
+            row.MoveListItem(button.CommandParameter as StrategyEditorOption, -1);
         }
     }
 
-    private void MovePerkDown_Click(object sender, RoutedEventArgs e)
+    private void MoveListItemDown_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as Button) is { DataContext: AuthoringSettingRowViewModel row } button)
         {
-            row.MovePerk(button.CommandParameter as StrategyPresetOption, 1);
+            row.MoveListItem(button.CommandParameter as StrategyEditorOption, 1);
         }
     }
 
