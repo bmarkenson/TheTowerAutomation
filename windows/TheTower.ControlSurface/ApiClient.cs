@@ -50,6 +50,27 @@ public sealed class ControlSurfaceApi : IDisposable
             "/api/v1/strategy-authoring",
             cancellationToken);
 
+    public Task<StrategyHistoryCatalogResponse> GetStrategyHistoryAsync(
+        CancellationToken cancellationToken) =>
+        GetAsync<StrategyHistoryCatalogResponse>(
+            "/api/v1/strategy-authoring/history",
+            cancellationToken);
+
+    public Task<StrategyHistoryCatalogResponse> GetStrategyHistoryAsync(
+        string strategyId,
+        CancellationToken cancellationToken) =>
+        GetAsync<StrategyHistoryCatalogResponse>(
+            $"/api/v1/strategy-authoring/history/{Uri.EscapeDataString(strategyId)}",
+            cancellationToken);
+
+    public Task<StrategyRevisionDetailResponse> GetStrategyRevisionAsync(
+        string strategyId,
+        int logicalVersion,
+        CancellationToken cancellationToken) =>
+        GetAsync<StrategyRevisionDetailResponse>(
+            $"/api/v1/strategy-authoring/history/{Uri.EscapeDataString(strategyId)}/{logicalVersion}",
+            cancellationToken);
+
     public Task<ActivityResponse> GetActivityAsync(
         IEnumerable<string> levels,
         string scope,

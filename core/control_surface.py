@@ -52,7 +52,7 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 22
+CONTROL_SURFACE_REVISION = 23
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -73,6 +73,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "strategy_authoring_v1",
     "strategy_profile_catalog_v1",
     "strategy_profile_editor_v2",
+    "strategy_revision_history_v1",
     "tournament_launch_confirmation",
 )
 ATTACHED_RESTART_TIMEOUT_SECONDS = 20.0
@@ -194,6 +195,7 @@ class ControlSurfaceService:
         self.strategy_profile_dir = self._resolve_path(strategy_profile_dir)
         self.profile_store = StrategyProfileStore(
             profile_directory=self.strategy_profile_dir,
+            audit_callback=self._append_audit,
         )
         self.control_store = ControlDirectiveStore(
             self.control_path,
@@ -213,6 +215,36 @@ class ControlSurfaceService:
 
         try:
             return self.profile_store.authoring_catalog()
+        except StrategyProfileError as exc:
+            raise ControlSurfaceRequestError(str(exc)) from exc
+
+    def strategy_history(
+        self,
+        strategy_id: object = None,
+    ) -> dict[str, Any]:
+        """Return immutable custom-Strategy revision summaries."""
+
+        try:
+            return self.profile_store.history_catalog(strategy_id)
+        except StrategyProfileConflictError as exc:
+            raise ControlSurfaceRequestError(str(exc), status=409) from exc
+        except StrategyProfileError as exc:
+            raise ControlSurfaceRequestError(str(exc)) from exc
+
+    def strategy_revision(
+        self,
+        strategy_id: object,
+        logical_version: object,
+    ) -> dict[str, Any]:
+        """Return one retained Strategy revision without its generated plan."""
+
+        try:
+            return self.profile_store.history_revision(
+                strategy_id,
+                logical_version,
+            )
+        except StrategyProfileConflictError as exc:
+            raise ControlSurfaceRequestError(str(exc), status=409) from exc
         except StrategyProfileError as exc:
             raise ControlSurfaceRequestError(str(exc)) from exc
 
@@ -258,6 +290,54 @@ class ControlSurfaceService:
                 response = self.profile_store.preview_rebase(
                     request.get("source"),
                     request.get("target_base"),
+                )
+            elif operation == "compare_strategy_revision":
+                response = self.profile_store.compare_strategy_revision(
+                    request.get("strategy_id"),
+                    request.get("logical_version"),
+                )
+            elif operation == "preview_restore_strategy":
+                if "expected_revision_fingerprint" not in request or (
+                    "expected_latest_source_fingerprint" not in request
+                ):
+                    raise StrategyProfileError(
+                        "Restore review requires the selected revision fingerprint "
+                        "and the currently opened latest source fingerprint"
+                    )
+                response = self.profile_store.compare_strategy_revision(
+                    request.get("strategy_id"),
+                    request.get("logical_version"),
+                    expected_revision_fingerprint=request.get(
+                        "expected_revision_fingerprint"
+                    ),
+                    expected_latest_source_fingerprint=request.get(
+                        "expected_latest_source_fingerprint"
+                    ),
+                    require_optimistic_state=True,
+                )
+            elif operation == "publish_restore_strategy":
+                required = {
+                    "expected_revision_fingerprint",
+                    "expected_latest_source_fingerprint",
+                    "reviewed_restore_fingerprint",
+                }
+                if not required.issubset(request):
+                    raise StrategyProfileError(
+                        "Restore publication requires revision, latest, and "
+                        "review fingerprints"
+                    )
+                response = self.profile_store.publish_restore_strategy(
+                    request.get("strategy_id"),
+                    request.get("logical_version"),
+                    expected_revision_fingerprint=request.get(
+                        "expected_revision_fingerprint"
+                    ),
+                    expected_latest_source_fingerprint=request.get(
+                        "expected_latest_source_fingerprint"
+                    ),
+                    reviewed_restore_fingerprint=request.get(
+                        "reviewed_restore_fingerprint"
+                    ),
                 )
             else:
                 raw_identifier = request.get("strategy_id")
@@ -335,6 +415,29 @@ class ControlSurfaceService:
             response["catalog"] = self.profile_store.authoring_catalog()
             if audit_warning:
                 response["warning"] = audit_warning
+        elif operation == "publish_restore_strategy":
+            restored_from = response.get("restored_from") or {}
+            profile = response.get("profile") or {}
+            warnings = [
+                self._append_audit(
+                    "Accepted reviewed restore for Strategy "
+                    f"{profile.get('id')} from immutable version "
+                    f"{restored_from.get('logical_version')}; selection and "
+                    "activation unchanged"
+                ),
+                self._append_audit(
+                    "Published restored Strategy "
+                    f"{profile.get('id')} as new latest version "
+                    f"{profile.get('version')}; selection and activation unchanged"
+                ),
+            ]
+            response["catalog"] = self.profile_store.authoring_catalog()
+            response["history"] = self.profile_store.history_catalog(
+                profile.get("id")
+            )
+            audit_warnings = [item for item in warnings if item]
+            if audit_warnings:
+                response["warning"] = "; ".join(audit_warnings)
         return response
 
     def apply_strategy_profile(

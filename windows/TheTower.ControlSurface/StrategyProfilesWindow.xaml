@@ -89,13 +89,16 @@
                     Click="NewStrategy_Click" />
             <Button x:Name="CloneButton" Content="Clone Strategy"
                     Click="CloneStrategy_Click" IsEnabled="False" />
+            <Button x:Name="HistoryButton" Content="History..."
+                    Click="History_Click"
+                    ToolTip="Review immutable custom-Strategy revisions, including retired lineages, without selecting or activating a Strategy." />
             <Button x:Name="RenameStrategyButton" Content="Rename Strategy"
                     Click="RenameStrategy_Click" IsEnabled="False"
                     ToolTip="Edit the display name, then use the normal reviewed publication flow. The stable ID does not change." />
             <Button x:Name="DeleteStrategyButton" Content="Delete Strategy..."
                     Click="DeleteStrategy_Click" IsEnabled="False"
                     Style="{StaticResource DangerButton}"
-                    ToolTip="Remove a custom Strategy from active catalogs by moving its exact publication to the recoverable server archive." />
+                    ToolTip="Retire a custom Strategy from active catalogs while retaining its immutable lineage for reviewed restoration from History." />
           </WrapPanel>
         </Grid>
       </Border>

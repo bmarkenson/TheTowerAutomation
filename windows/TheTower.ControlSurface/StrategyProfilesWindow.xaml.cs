@@ -443,6 +443,25 @@ public partial class StrategyProfilesWindow : Window
         }
     }
 
+    private void History_Click(object sender, RoutedEventArgs e)
+    {
+        var selectedKind = _isBase ? "base" : "strategy";
+        var selectedId = _isBase ? _selectedBase?.Id : _selectedStrategy?.Id;
+        var history = new StrategyHistoryWindow(_api)
+        {
+            Owner = this,
+        };
+        history.StrategyRestored += async (_, args) =>
+        {
+            await LoadCatalogAsync(selectedKind, selectedId);
+            StatusText.Text =
+                $"Refreshed latest catalogs after restoring {args.StrategyId} "
+                + $"as version {args.LogicalVersion}. Runtime selection and activation are unchanged.";
+            StatusText.Foreground = new SolidColorBrush(Color.FromRgb(101, 230, 166));
+        };
+        history.ShowDialog();
+    }
+
     private void RenameStrategy_Click(object sender, RoutedEventArgs e)
     {
         if (!CanManageSelectedStrategy())
@@ -478,8 +497,9 @@ public partial class StrategyProfilesWindow : Window
         var confirmation =
             $"Delete {selected.DisplayName} ({selected.Id}), version {selected.Version}, "
             + "from the active Strategy catalog?\n\n"
-            + "Linux will move the exact publication into its recoverable retired "
-            + "archive; it will not be erased. Bundled Strategies cannot be deleted.\n\n"
+            + "Linux will remove the latest facade from active catalogs while "
+            + "retaining the complete immutable lineage. Restoration is available "
+            + "through History as a reviewed new revision. Bundled Strategies cannot be deleted.\n\n"
             + "Selection and activation will not be changed. If this Strategy is "
             + "currently selected, the server will refuse the deletion.";
         if (MessageBox.Show(
@@ -516,8 +536,8 @@ public partial class StrategyProfilesWindow : Window
 
             var successMessage =
                 $"Deleted Strategy {response.Retirement.DisplayName} "
-                + $"({response.Retirement.Id}) from active catalogs; its exact "
-                + "publication is recoverable and nothing was activated.";
+                + $"({response.Retirement.Id}) from active catalogs; its immutable "
+                + "lineage remains available in History and nothing was activated.";
             if (!string.IsNullOrWhiteSpace(response.Warning))
             {
                 successMessage += $" Audit warning: {response.Warning}";
@@ -1130,6 +1150,7 @@ public partial class StrategyProfilesWindow : Window
         NewStrategyButton.IsEnabled = !busy;
         CloneButton.IsEnabled = !busy
             && _selectedStrategy is { AuthoringSupported: true };
+        HistoryButton.IsEnabled = !busy;
         RefreshStrategyLifecycleButtons();
         RefreshAuthoringActionButtons();
         if (!string.IsNullOrWhiteSpace(message))

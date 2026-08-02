@@ -254,7 +254,10 @@ memory only. The API deliberately sends no CORS permission.
 | `GET` | `/api/v1/strategy-profiles` | Bundled/custom profile summaries plus the allowlisted Farm policy and preset catalogs |
 | `POST` | `/api/v1/strategy-profiles` | Validate a constrained Farm draft or atomically publish its source and generated plan |
 | `GET` | `/api/v1/strategy-authoring` | Registry metadata, separate Base/Strategy catalogs, editable source, effective resolution/provenance, compatible Base revisions, capabilities, and catalog errors |
-| `POST` | `/api/v1/strategy-authoring` | Validate or publish Base/Strategy source, or preview an explicit reviewed Base pin change, without activation |
+| `GET` | `/api/v1/strategy-authoring/history` | Newest-first immutable custom-Strategy lineage and revision summaries, including retired lineages, without expanded plans |
+| `GET` | `/api/v1/strategy-authoring/history/{id}` | One custom Strategy lineage and its ordered revision summaries |
+| `GET` | `/api/v1/strategy-authoring/history/{id}/{version}` | One retained revision's review-safe source, Base snapshot, resolution, fingerprints, audit identity, and validation state without its generated plan |
+| `POST` | `/api/v1/strategy-authoring` | Validate or publish Base/Strategy source, preview a Base pin, compare retained revisions, or review/confirm restore-as-new, without activation |
 | `GET` | `/api/v1/battles?limit=N` | Newest Battle and Tournament summaries |
 | `GET` | `/api/v1/battles/{battle_id}` | One full structured battle record |
 | `GET` | `/api/v1/activity?limit=N&levels=ERROR,WARN&scope=current_run&after=CURSOR` | Recent structured action-log entries, optionally filtered by level, explicit run scope, and opaque clear-view cursor |
@@ -293,9 +296,11 @@ for checked-in profiles. A publication is one versioned YAML document containing
 both that source and the exact generated plan, with independent SHA-256
 fingerprints. The server re-generates the plan when reading a publication and
 excludes a missing, malformed, tampered, or inconsistent file from selectable
-strategy IDs. The single document is written through a same-directory temporary
-file, `fsync`, and atomic replacement while a companion advisory writer lock
-serializes concurrent server requests. Updating an existing custom profile also
+strategy IDs. The latest facade is written through a same-directory staged
+document, `fsync`, and atomic replacement while a companion advisory writer
+lock serializes concurrent server requests. Every validated publication is
+also retained as an immutable history revision through the recoverable two-
+object transaction described below. Updating an existing custom profile still
 requires the source fingerprint that was current when the editor loaded it, so
 concurrent or stale edits fail with a conflict rather than overwriting a newer
 revision.
@@ -309,14 +314,15 @@ existing process API and its normal next-boundary or active-battle semantics.
 
 ## Sparse strategy authoring
 
-Server revision 22 preserves `strategy_authoring_v1` and
-`strategy_authoring_specialized_editors_v1`, and advertises
-`strategy_authoring_profile_lifecycle_v1` plus `strategy_action_gate_v1`. The additive
+Server revision 23 preserves `strategy_authoring_v1`,
+`strategy_authoring_specialized_editors_v1`,
+`strategy_authoring_profile_lifecycle_v1`, `strategy_action_gate_v1`, and every
+older capability, and advertises `strategy_revision_history_v1`. The additive
 `/api/v1/strategy-authoring` endpoint implements the sparse Base/Strategy model
 without changing `/api/v1/strategy-profiles`, `strategy_profile_catalog_v1`, or
 `strategy_profile_editor_v2`. Older native clients therefore keep using their
-existing facade. The revision-22 client requires the retained authoring
-capabilities and the structured Strategy Gate status it presents, and fails
+existing latest-only facade. The revision-23 client requires the retained
+authoring and Strategy Gate capabilities plus immutable history, and fails
 compatibility clearly against an older resident service.
 
 The GET response carries the setting registry, normalized initial values,
@@ -339,16 +345,18 @@ values, and a server-supplied initial value is used when an omitted setting is
 first included or overridden. The client does not implement a second
 normalizer or resolver.
 
-POST accepts only `validate_base`, `publish_base`, `validate_strategy`,
-`publish_strategy`, `preview_rebase`, and `retire_strategy`. Validation returns
-normalized source, effective resolution, source/effective review data,
-fingerprints, summary, and rule count where applicable. Responses never include
-the expanded generated plan. Base publication appends the next immutable
-revision under optimistic latest-fingerprint protection. Strategy publication
-uses the existing atomic fixed-name store, embeds its pinned Base snapshot, and
-remains separate from every strategy-selection or activation action. Stale
+POST accepts `validate_base`, `publish_base`, `validate_strategy`,
+`publish_strategy`, `preview_rebase`, `retire_strategy`,
+`compare_strategy_revision`, `preview_restore_strategy`, and
+`publish_restore_strategy`. Validation returns normalized source, effective
+resolution, source/effective review data, fingerprints, summary, and rule count
+where applicable. Responses never include the expanded generated plan. Base
+publication appends the next immutable revision under optimistic latest-
+fingerprint protection. Strategy publication embeds its pinned Base snapshot,
+appends the next immutable history revision, advances the fixed-name facade,
+and remains separate from every strategy-selection or activation action. Stale
 writes are conflicts; invalid source is a bad request. Publication paths append
-an operator-facing control-surface audit entry.
+operator-facing control-surface audit entries.
 
 The native **Rename Strategy** affordance focuses the existing display-name
 field and deliberately completes through normal Strategy review and
@@ -359,8 +367,8 @@ currently selected Strategies, and moves the complete fixed-name publication
 to a server-owned `retired` directory under the same advisory catalog lock.
 The response returns retirement metadata and refreshed catalogs, not source,
 generated plans, rules, executor actions, or a client-selected path. The
-operation changes neither the control directive nor activation. Restoration is
-not exposed in this revision.
+operation changes neither the control directive nor activation. Retirement
+removes the latest facade from active catalogs but preserves immutable history.
 
 Rebase preview is computed by the backend authoring resolver and shared diff
 helpers. It reports Base entries added, removed, or changed; inherited effective
@@ -376,6 +384,57 @@ that choice, restores the published no-Base source when requesting the preview,
 and blocks publication of the changed pin until the returned review fingerprint
 is present. The published Strategy keeps its ID and receives a new version;
 selection and activation remain unchanged.
+
+### Immutable Strategy history and restore
+
+The fixed custom Strategy directory contains a server-owned append-only
+`history` directory and a server-owned `transactions` directory. History names
+are derived only from validated IDs and monotonically increasing logical
+versions. Each retained envelope contains the complete self-contained
+publication—including its generated plan—and server-assigned publication
+origin and audit identity. The history APIs deliberately redact that expanded
+plan; runtime deliberately ignores history and continues loading only the exact
+latest `<id>.profile.yaml` facade.
+
+Publication uses one recoverable journal under the catalog writer lock. Linux
+first validates the complete proposal, durably creates the journal and stages,
+links the immutable revision into history and syncs that directory, then
+replaces and syncs the latest facade as the commit point. Cleanup follows the
+commit. Before that point, a handled failure restores the prior facade and
+removes an uncommitted history link. On reopen, a valid journal plus retained
+revision deterministically completes the exact facade; a journal without a
+retained revision aborts and restores the former facade. Fingerprint mismatch,
+symlink, duplicate version, unknown artifact, or external facade change fails
+closed without overwriting evidence. Recovery runs before new publication, so
+retries cannot create duplicate versions.
+
+Opening the catalog conservatively adopts exact existing schema-1 and schema-2
+latest publications without rewriting them. Unambiguous legacy retirement
+archives may be represented in the same lineage; uncertain archives stay
+unchanged and appear as catalog errors or warnings. History remains
+authoritative for the next version even when the current facade is retired,
+preventing an ID from silently restarting at version 1.
+
+History summaries are newest-first and review-safe. They include status,
+version/time, source/Base/resolution/plan/publication/revision fingerprints,
+pinned Base, family/Tier, origin/audit identity, rule count, and current
+validation/warnings. Linux computes comparisons for source directives,
+effective values/provenance, embedded Base pin/snapshot, local overrides,
+explicit Ignore entries, generated-plan fingerprint/rule count, metadata-only
+changes, and current validation. The native client does no resolution or
+semantic diffing.
+
+**History** is available for active and retired custom lineages. Selecting a
+historical revision requests a no-write restore preview bound to both that
+revision fingerprint and the latest source fingerprint the editor opened.
+Linux verifies the retained publication and rebuilds it with current trusted
+code using its embedded historical Base snapshot, then binds the semantic
+review to a third fingerprint. Only an explicit confirmation can publish that
+intent as the lineage's next version. A stale latest, changed history revision,
+or changed review returns HTTP 409; WPF preserves the open authoring draft and
+refreshes history/latest catalogs only after a successful restore. Restore
+never mutates history, selects or activates the Strategy, restarts automation,
+changes Pause, or changes any control directive.
 
 ## Activity log audiences
 
@@ -515,8 +574,15 @@ Process request examples:
   observation and safe collectors remain active.” and shows the reason, failed
   checks, and collectors that currently retain authority. The Automation field
   and Pause coloring continue to show only requested/acknowledged control
-  state; an active Strategy Gate is never labelled globally Paused. This
-  requires server revision 22 and capability `strategy_action_gate_v1`.
+  state; an active Strategy Gate is never labelled globally Paused. This gate
+  status was introduced in server revision 22 with capability
+  `strategy_action_gate_v1`.
+- A discoverable custom Strategy **History** window for active and retired
+  lineages. It shows immutable revision identity and current validation,
+  requests Linux-computed semantic restore reviews, and enables restore-as-new
+  only after a successful review and explicit confirmation. The current native
+  client requires server revision 23 and capability
+  `strategy_revision_history_v1`.
 - Persistent numeric game-speed selection from `x0.0` through `x6.0` in
   `x0.5` increments, plus `x6.3` for maximum available. Lower values are exact
   targets across live and future runs. Both clients keep the custom-target

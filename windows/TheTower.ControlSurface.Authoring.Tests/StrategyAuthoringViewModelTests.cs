@@ -372,6 +372,120 @@ public sealed class StrategyAuthoringViewModelTests
     }
 
     [Fact]
+    public void HistoryRevisionReviewShowsImmutableIdentityAndValidationState()
+    {
+        var review = StrategyHistoryReviewFormatter.FormatRevision(
+            new StrategyRevisionSummary
+            {
+                StrategyId = "night-farm",
+                DisplayName = "Night Farm",
+                LogicalVersion = 4,
+                Status = "historical",
+                PublishedAt = "2026-08-02T12:00:00Z",
+                Family = "farming",
+                Tier = 11,
+                PinnedBaseId = "farm-base",
+                PinnedBaseRevision = 3,
+                PublicationOrigin = "restore_as_new",
+                AuditIdentity = new StrategyAuditIdentity
+                {
+                    Authority = "control_surface",
+                    EventId = "evt-4",
+                },
+                PublicationSchemaVersion = 2,
+                RuleCount = 17,
+                SourceFingerprint = "source",
+                NormalizedSourceFingerprint = "normalized",
+                BaseFingerprint = "base",
+                ResolutionFingerprint = "resolution",
+                PlanFingerprint = "plan",
+                PublicationFingerprint = "publication",
+                RevisionFingerprint = "revision",
+                CurrentValidationValid = false,
+                ValidationErrors =
+                [
+                    new AuthoringValidationError { Message = "Current builder rejected it." },
+                ],
+                Warnings = ["Retained safely for review."],
+            });
+
+        Assert.Contains("Logical version: 4 — historical", review);
+        Assert.Contains("Pinned Base: farm-base@3", review);
+        Assert.Contains("Origin: restore_as_new", review);
+        Assert.Contains("control_surface / evt-4", review);
+        Assert.Contains("Plan: plan", review);
+        Assert.Contains("Current builder rejected it.", review);
+        Assert.Contains("Retained safely for review.", review);
+    }
+
+    [Fact]
+    public void RestoreReviewExplainsSemanticChangesAndNeverImpliesActivation()
+    {
+        var review = StrategyHistoryReviewFormatter.FormatComparison(
+            new StrategyRevisionSummary { LogicalVersion = 2 },
+            new StrategyAuthoringMutationResponse
+            {
+                NextLogicalVersion = 6,
+                Comparison = new StrategyRevisionComparison
+                {
+                    SourceChanges = new AuthoringSourceDiff
+                    {
+                        Added =
+                        [
+                            new AuthoringDiffItem { DisplayName = "Free Upgrades" },
+                        ],
+                    },
+                    EffectiveChanges = new AuthoringResolutionDiff
+                    {
+                        ChangeCount = 2,
+                        ProvenanceChanged = [new AuthoringResolutionChange()],
+                    },
+                    BaseSnapshotChanges = new StrategyBaseSnapshotDiff
+                    {
+                        Changed = true,
+                        BeforeReference = new StrategyBaseReference
+                        {
+                            Id = "farm-base",
+                            Revision = 1,
+                        },
+                        AfterReference = new StrategyBaseReference
+                        {
+                            Id = "farm-base",
+                            Revision = 3,
+                        },
+                    },
+                    LocalOverrideChanges = new StrategyDirectiveDiff
+                    {
+                        ChangeCount = 1,
+                    },
+                    ExplicitIgnoreChanges = new StrategyDirectiveDiff
+                    {
+                        ChangeCount = 1,
+                    },
+                    GeneratedPlanChanges = new StrategyGeneratedPlanDiff
+                    {
+                        Changed = true,
+                        BeforeRuleCount = 12,
+                        AfterRuleCount = 14,
+                        RuleCountChange = 2,
+                    },
+                    Validation = new AuthoringValidationResult { Valid = true },
+                },
+            });
+
+        Assert.Contains("RESTORE-AS-NEW REVIEW", review);
+        Assert.Contains("version 2; proposed new latest version 6", review);
+        Assert.Contains("Added: Free Upgrades", review);
+        Assert.Contains("farm-base@1 → farm-base@3", review);
+        Assert.Contains("explicit Ignore changes: 1", review);
+        Assert.Contains("rules 12 → 14 (+2)", review);
+        Assert.Contains("Current trusted validation: passed", review);
+        Assert.Contains("does not mutate the selected revision", review);
+        Assert.Contains("select or activate", review);
+        Assert.Contains("alter Pause/control state", review);
+    }
+
+    [Fact]
     public void ServerMetadataModelsRoundTripForEveryEditorFamily()
     {
         foreach (var editorType in EditorTypes)

@@ -12,7 +12,8 @@ from pathlib import Path
 import re
 import tempfile
 import threading
-from typing import Any, Iterator, Mapping, Optional
+from typing import Any, Callable, Iterator, Mapping, Optional
+import uuid
 
 import yaml
 
@@ -30,6 +31,7 @@ from core.strategy_authoring import (
     StrategyAuthoringConflictError,
     StrategyAuthoringError,
     StrategyBaseStore,
+    _atomic_create_immutable,
     analyze_strategy_source,
     describe_base_resolution,
     diff_source_documents,
@@ -88,9 +90,39 @@ STRATEGY_AUTHORING_OPERATIONS = (
     "publish_strategy",
     "preview_rebase",
     "retire_strategy",
+    "compare_strategy_revision",
+    "preview_restore_strategy",
+    "publish_restore_strategy",
 )
 MAX_PROFILE_FILE_BYTES = 4 * 1024 * 1024
+STRATEGY_REVISION_SCHEMA_VERSION = 1
+STRATEGY_HISTORY_API_SCHEMA_VERSION = 1
+STRATEGY_TRANSACTION_SCHEMA_VERSION = 1
+STRATEGY_HISTORY_DIRECTORY_NAME = "history"
+STRATEGY_TRANSACTION_DIRECTORY_NAME = "transactions"
+STRATEGY_PUBLICATION_ORIGINS = frozenset(
+    {
+        "authoring_publication",
+        "profile_facade_publication",
+        "conservative_adoption",
+        "restore_as_new",
+        "clone_from_revision",
+    }
+)
+_AUDIT_AUTHORITY = "thetower_control_surface"
 _STRATEGY_ID_RE = re.compile(r"[a-z][a-z0-9_]{2,47}")
+_AUDIT_EVENT_ID_RE = re.compile(r"[0-9a-f]{32}")
+_REVISION_FILENAME_RE = re.compile(
+    r"(?P<id>[a-z][a-z0-9_]{2,47})\.strategy\."
+    r"(?P<version>[1-9][0-9]*)\.yaml"
+)
+_TRANSACTION_FILENAME_RE = re.compile(
+    r"(?P<id>[a-z][a-z0-9_]{2,47})\.publication\.yaml"
+)
+_TRANSACTION_STAGE_FILENAME_RE = re.compile(
+    r"\.(?P<id>[a-z][a-z0-9_]{2,47})\."
+    r"(?:revision\.stage|latest\.stage|previous)\.yaml"
+)
 _RESERVED_STRATEGY_IDS = frozenset(
     {*BUILTIN_STRATEGY_IDS, *LEGACY_STRATEGY_ALIASES}
 )
@@ -237,6 +269,8 @@ class StrategyProfileStore:
         profile_directory: Path | str | None = None,
         builtin_strategies_directory: Path | str = BUILTIN_STRATEGIES_DIR,
         base_directory: Path | str | None = None,
+        audit_callback: Optional[Callable[[str], object]] = None,
+        transaction_fault_hook: Optional[Callable[[str], None]] = None,
     ) -> None:
         self.profile_directory = strategy_profile_directory(profile_directory)
         self.builtin_strategies_directory = Path(
@@ -245,7 +279,10 @@ class StrategyProfileStore:
         self.base_store = StrategyBaseStore(
             base_directory or self.profile_directory / "bases"
         )
-        self._publish_lock = threading.Lock()
+        self._audit_callback = audit_callback
+        self._transaction_fault_hook = transaction_fault_hook
+        self._publish_lock = threading.RLock()
+        self._reported_history_events: set[str] = set()
 
     def strategy_ids(self) -> tuple[str, ...]:
         return configurable_strategy_ids(self.profile_directory)
@@ -265,8 +302,9 @@ class StrategyProfileStore:
     def authoring_catalog(self) -> dict[str, Any]:
         """Return the additive Base/Strategy editor contract."""
 
+        history_errors = self._prepare_history()
         base_catalog = self.base_store.catalog()
-        legacy_catalog = self.catalog()
+        legacy_catalog = self.catalog(_history_prepared=True)
         strategy_items: list[dict[str, Any]] = []
         strategy_errors = [
             {"id": item["id"], "error": item["error"]}
@@ -286,6 +324,9 @@ class StrategyProfileStore:
             {"catalog": "bases", **error} for error in base_catalog["errors"]
         ] + [
             {"catalog": "strategies", **error} for error in strategy_errors
+        ] + [
+            {"catalog": "strategy_history", **error}
+            for error in history_errors
         ]
         return {
             "schema_version": STRATEGY_AUTHORING_API_SCHEMA_VERSION,
@@ -335,6 +376,8 @@ class StrategyProfileStore:
                 "expanded_plan_exposed": False,
                 "unknown_values_round_trip": True,
                 "reviewed_rebase_required": True,
+                "immutable_strategy_history": True,
+                "restore_as_new": True,
             },
             "editor_options": {
                 "presets": legacy_catalog["presets"],
@@ -357,6 +400,167 @@ class StrategyProfileStore:
             ],
             "catalog_errors": catalog_errors,
         }
+
+    def history_catalog(
+        self,
+        strategy_id: object = None,
+    ) -> dict[str, Any]:
+        """Return immutable custom-Strategy lineage summaries newest first."""
+
+        identifier: Optional[str] = None
+        if strategy_id is not None:
+            identifier = _draft_identifier({"id": strategy_id})
+            if identifier in _RESERVED_STRATEGY_IDS:
+                raise StrategyProfileError(
+                    f"{identifier!r} is a bundled or reserved strategy name"
+                )
+        with self._publish_lock:
+            with self._catalog_write_lock():
+                errors = self._prepare_history_under_file_lock()
+                return self._history_catalog_under_file_lock(
+                    identifier=identifier,
+                    preparation_errors=errors,
+                )
+
+    def history_revision(
+        self,
+        strategy_id: object,
+        logical_version: object,
+    ) -> dict[str, Any]:
+        """Return one retained revision without exposing its generated plan."""
+
+        identifier = _draft_identifier({"id": strategy_id})
+        version = _positive_version(logical_version, "logical_version")
+        if identifier in _RESERVED_STRATEGY_IDS:
+            raise StrategyProfileError(
+                f"{identifier!r} is a bundled or reserved strategy name"
+            )
+        with self._publish_lock:
+            with self._catalog_write_lock():
+                errors = self._prepare_history_under_file_lock()
+                self._raise_lineage_history_error(identifier, errors)
+                revision = self._load_revision(identifier, version)
+                latest = self._latest_publication(identifier)
+                summary = self._revision_summary(
+                    revision,
+                    latest=latest,
+                    lineage_retired=latest is None,
+                    lineage_latest_version=max(
+                        self._revision_versions(identifier),
+                        default=version,
+                    ),
+                )
+                return {
+                    "schema_version": STRATEGY_HISTORY_API_SCHEMA_VERSION,
+                    "revision": summary,
+                    "source": _copy_mapping(revision["source"]),
+                    "base_snapshot": _copy_optional_mapping(
+                        revision.get("base_snapshot")
+                    ),
+                    "resolution": _copy_mapping(revision["resolution"]),
+                    "expanded_plan_exposed": False,
+                }
+
+    def compare_strategy_revision(
+        self,
+        strategy_id: object,
+        logical_version: object,
+        *,
+        expected_revision_fingerprint: object = None,
+        expected_latest_source_fingerprint: object = None,
+        require_optimistic_state: bool = False,
+    ) -> dict[str, Any]:
+        """Compare a retained intent with the current latest publication."""
+
+        identifier = _draft_identifier({"id": strategy_id})
+        version = _positive_version(logical_version, "logical_version")
+        if identifier in _RESERVED_STRATEGY_IDS:
+            raise StrategyProfileError(
+                f"{identifier!r} is a bundled or reserved strategy name"
+            )
+        with self._publish_lock:
+            with self._catalog_write_lock():
+                errors = self._prepare_history_under_file_lock()
+                self._raise_lineage_history_error(identifier, errors)
+                response = self._restore_preview_under_file_lock(
+                    identifier,
+                    version,
+                    expected_revision_fingerprint=(
+                        expected_revision_fingerprint
+                    ),
+                    expected_latest_source_fingerprint=(
+                        expected_latest_source_fingerprint
+                    ),
+                    require_optimistic_state=require_optimistic_state,
+                )
+                response.pop("_candidate", None)
+                return response
+
+    def publish_restore_strategy(
+        self,
+        strategy_id: object,
+        logical_version: object,
+        *,
+        expected_revision_fingerprint: object,
+        expected_latest_source_fingerprint: object,
+        reviewed_restore_fingerprint: object,
+    ) -> dict[str, Any]:
+        """Publish historical intent as the next revision of the same lineage."""
+
+        identifier = _draft_identifier({"id": strategy_id})
+        version = _positive_version(logical_version, "logical_version")
+        if identifier in _RESERVED_STRATEGY_IDS:
+            raise StrategyProfileError(
+                f"{identifier!r} is a bundled or reserved strategy name"
+            )
+        with self._publish_lock:
+            with self._catalog_write_lock():
+                errors = self._prepare_history_under_file_lock()
+                self._raise_lineage_history_error(identifier, errors)
+                preview = self._restore_preview_under_file_lock(
+                    identifier,
+                    version,
+                    expected_revision_fingerprint=(
+                        expected_revision_fingerprint
+                    ),
+                    expected_latest_source_fingerprint=(
+                        expected_latest_source_fingerprint
+                    ),
+                    require_optimistic_state=True,
+                )
+                expected_review = preview["reviewed_restore_fingerprint"]
+                supplied_review = str(reviewed_restore_fingerprint or "").strip()
+                if supplied_review != expected_review:
+                    raise StrategyProfileConflictError(
+                        "The reviewed restore comparison is stale; review the "
+                        "historical revision again before publishing"
+                    )
+                candidate = preview["_candidate"]
+                result = self._publish_validated_under_file_lock(
+                    candidate["validation"],
+                    expected_source_fingerprint=(
+                        preview["current_latest_source_fingerprint"]
+                    ),
+                    origin="restore_as_new",
+                    allow_retired_lineage=True,
+                )
+                result["restored"] = True
+                result["restored_from"] = {
+                    "id": identifier,
+                    "logical_version": version,
+                    "revision_fingerprint": preview[
+                        "historical_revision_fingerprint"
+                    ],
+                }
+                result["comparison"] = preview["comparison"]
+                result["reviewed_restore_fingerprint"] = expected_review
+                result["source"] = _copy_mapping(
+                    candidate["validation"]["source"]
+                )
+                result["resolution"] = _copy_mapping(
+                    candidate["validation"]["resolution"]
+                )
+                return result
 
     def validate_base(self, raw_base: object) -> dict[str, Any]:
         """Normalize a prospective next immutable Base revision."""
@@ -546,6 +750,7 @@ class StrategyProfileStore:
         published = self.publish(
             raw_strategy,
             expected_source_fingerprint=expected_source_fingerprint,
+            origin="authoring_publication",
         )
         validation["published"] = True
         validation["profile"] = _copy_mapping(published["profile"])
@@ -673,11 +878,17 @@ class StrategyProfileStore:
             display_name=publication["display_name"],
         )
 
-    def catalog(self) -> dict[str, Any]:
+    def catalog(self, *, _history_prepared: bool = False) -> dict[str, Any]:
         """Return editor metadata without exposing expanded runtime plans."""
 
+        history_errors = (
+            [] if _history_prepared else self._prepare_history()
+        )
         items: list[dict[str, Any]] = []
-        errors: list[dict[str, str]] = []
+        errors: list[dict[str, str]] = [
+            {"id": item["id"], "error": item["error"]}
+            for item in history_errors
+        ]
         for identifier in BUILTIN_STRATEGY_IDS:
             try:
                 items.append(self._builtin_item(identifier))
@@ -725,11 +936,37 @@ class StrategyProfileStore:
         source, display_name = self._authoring_source_from_draft(raw_profile)
         try:
             base_snapshot = self._load_base_snapshot(source)
+            return self._validate_normalized_source(
+                source,
+                base_snapshot=base_snapshot,
+                display_name=display_name,
+            )
+        except StrategyProfileError:
+            raise
+        except Exception as exc:
+            raise StrategyProfileError(str(exc)) from exc
+
+    def _validate_normalized_source(
+        self,
+        raw_source: object,
+        *,
+        base_snapshot: object,
+        display_name: object = None,
+    ) -> dict[str, Any]:
+        """Build one normalized source against an exact embedded Base snapshot."""
+
+        try:
+            source = normalize_strategy_source(raw_source)
             resolution = resolve_strategy_source(source, base_snapshot)
             compact_source = farm_source_from_resolution(source, resolution)
             plan = build_strategy_yaml(compact_source)
         except Exception as exc:
             raise StrategyProfileError(str(exc)) from exc
+        normalized_display_name = str(display_name or source["display_name"]).strip()
+        if normalized_display_name != source["display_name"]:
+            raise StrategyProfileError(
+                "Strategy display name does not match its normalized source"
+            )
         source_fingerprint = fingerprint_document(source)
         base_fingerprint = fingerprint_document(base_snapshot or {})
         resolution_fingerprint = fingerprint_document(resolution)
@@ -742,7 +979,7 @@ class StrategyProfileStore:
             "valid": True,
             "profile": {
                 "id": source["id"],
-                "display_name": display_name,
+                "display_name": normalized_display_name,
                 "family": "farm",
                 "tier": source["tier"],
                 "version": source["version"],
@@ -772,14 +1009,21 @@ class StrategyProfileStore:
         raw_profile: object,
         *,
         expected_source_fingerprint: object = None,
+        origin: str = "profile_facade_publication",
     ) -> dict[str, Any]:
-        """Atomically publish source and generated plan as one fixed file."""
+        """Durably append a revision and advance the fixed latest facade."""
 
+        if origin not in STRATEGY_PUBLICATION_ORIGINS:
+            raise StrategyProfileError("Invalid server publication origin")
         with self._publish_lock:
             with self._catalog_write_lock():
+                errors = self._prepare_history_under_file_lock()
+                identifier = _draft_identifier(raw_profile)
+                self._raise_lineage_history_error(identifier, errors)
                 return self._publish_under_file_lock(
                     raw_profile,
                     expected_source_fingerprint=expected_source_fingerprint,
+                    origin=origin,
                 )
 
     def retire_strategy(
@@ -797,6 +1041,8 @@ class StrategyProfileStore:
             )
         with self._publish_lock:
             with self._catalog_write_lock():
+                errors = self._prepare_history_under_file_lock()
+                self._raise_lineage_history_error(identifier, errors)
                 return self._retire_under_file_lock(
                     identifier,
                     expected_source_fingerprint=expected_source_fingerprint,
@@ -929,26 +1175,37 @@ class StrategyProfileStore:
         raw_profile: object,
         *,
         expected_source_fingerprint: object,
+        origin: str,
     ) -> dict[str, Any]:
         identifier = _draft_identifier(raw_profile)
         if identifier in _RESERVED_STRATEGY_IDS:
             raise StrategyProfileError(
                 f"{identifier!r} is a bundled or reserved strategy name"
             )
-        path = _profile_path(self.profile_directory, identifier)
-        existing: Optional[dict[str, Any]] = None
-        if path.exists():
-            if path.is_symlink() or not path.is_file():
-                raise StrategyProfileConflictError(
-                    f"Existing profile path for {identifier!r} is not a regular file"
-                )
-            try:
-                existing = _load_publication(path, expected_id=identifier)
-            except StrategyProfileError as exc:
-                raise StrategyProfileConflictError(
-                    f"Existing profile {identifier!r} is invalid and was preserved: {exc}"
-                ) from exc
+        validation = self.validate(raw_profile)
+        return self._publish_validated_under_file_lock(
+            validation,
+            expected_source_fingerprint=expected_source_fingerprint,
+            origin=origin,
+            allow_retired_lineage=False,
+        )
 
+    def _publish_validated_under_file_lock(
+        self,
+        validation: Mapping[str, Any],
+        *,
+        expected_source_fingerprint: object,
+        origin: str,
+        allow_retired_lineage: bool,
+    ) -> dict[str, Any]:
+        if origin not in STRATEGY_PUBLICATION_ORIGINS:
+            raise StrategyProfileError("Invalid server publication origin")
+        raw_source = validation.get("source")
+        if not isinstance(raw_source, Mapping):
+            raise StrategyProfileError("Validated Strategy source is unavailable")
+        source = normalize_strategy_source(raw_source)
+        identifier = source["id"]
+        existing = self._latest_publication(identifier)
         expected = str(expected_source_fingerprint or "").strip() or None
         if existing is not None:
             current = str(existing["source_fingerprint"])
@@ -962,37 +1219,1370 @@ class StrategyProfileStore:
                 f"Profile {identifier!r} no longer exists; reload the catalog"
             )
 
-        validation = self.validate(raw_profile)
-        source = validation.pop("source")
-        base_snapshot = validation.pop("base_snapshot")
-        resolution = validation.pop("resolution")
-        plan = validation.pop("plan")
+        versions = self._revision_versions(identifier)
+        if existing is None and versions and not allow_retired_lineage:
+            raise StrategyProfileConflictError(
+                f"Strategy {identifier!r} has a retired immutable lineage; "
+                "review and restore a retained revision instead of reusing its ID"
+            )
+        next_version = max(versions, default=0) + 1
+        if source["version"] != next_version:
+            source["version"] = next_version
+        exact_base_snapshot = _copy_optional_mapping(
+            validation.get("base_snapshot")
+        )
+        rebuilt = self._validate_normalized_source(
+            source,
+            base_snapshot=exact_base_snapshot,
+            display_name=source["display_name"],
+        )
+        audit_identity = _new_audit_identity()
+        published_at = datetime.now().astimezone().isoformat(timespec="seconds")
         publication = {
             "schema_version": STRATEGY_PUBLICATION_SCHEMA_VERSION,
             "kind": "strategy_publication",
             "id": identifier,
-            "display_name": validation["profile"]["display_name"],
-            "published_at": datetime.now().astimezone().isoformat(
-                timespec="seconds"
-            ),
-            "source_fingerprint": validation["profile"][
-                "source_fingerprint"
-            ],
-            "base_fingerprint": validation["profile"]["base_fingerprint"],
-            "resolution_fingerprint": validation["profile"][
+            "display_name": rebuilt["profile"]["display_name"],
+            "published_at": published_at,
+            "publication_origin": origin,
+            "audit_identity": audit_identity,
+            "source_fingerprint": rebuilt["profile"]["source_fingerprint"],
+            "base_fingerprint": rebuilt["profile"]["base_fingerprint"],
+            "resolution_fingerprint": rebuilt["profile"][
                 "resolution_fingerprint"
             ],
-            "plan_fingerprint": validation["profile"]["plan_fingerprint"],
-            "source": source,
-            "base_snapshot": base_snapshot,
-            "resolution": resolution,
-            "plan": plan,
+            "plan_fingerprint": rebuilt["profile"]["plan_fingerprint"],
+            "source": rebuilt["source"],
+            "base_snapshot": rebuilt["base_snapshot"],
+            "resolution": rebuilt["resolution"],
+            "plan": rebuilt["plan"],
         }
-        self._atomic_write(path, publication)
-        stored = _load_publication(path, expected_id=identifier)
-        validation["profile"] = self._publication_item(stored)
-        validation["published"] = True
-        return validation
+        revision = _revision_envelope_from_publication(
+            publication,
+            origin=origin,
+            audit_identity=audit_identity,
+        )
+        self._commit_publication_transaction(
+            identifier,
+            publication=publication,
+            revision=revision,
+            previous=existing,
+        )
+
+        stored = self._latest_publication(identifier)
+        if stored is None:
+            raise StrategyProfileError(
+                f"Published Strategy {identifier!r} has no latest facade"
+            )
+        retained = self._load_revision(identifier, next_version)
+        if retained["publication_fingerprint"] != fingerprint_document(stored):
+            raise StrategyProfileError(
+                "Latest Strategy facade does not match its retained revision"
+            )
+        result = dict(rebuilt)
+        result.pop("source", None)
+        result.pop("base_snapshot", None)
+        result.pop("resolution", None)
+        result.pop("plan", None)
+        result["profile"] = self._publication_item(stored)
+        result["published"] = True
+        result["publication_origin"] = origin
+        result["revision_fingerprint"] = fingerprint_document(retained)
+        return result
+
+    def _commit_publication_transaction(
+        self,
+        identifier: str,
+        *,
+        publication: Mapping[str, Any],
+        revision: Mapping[str, Any],
+        previous: Optional[Mapping[str, Any]],
+    ) -> None:
+        history_directory, transaction_directory = self._prepare_history_directories(
+            create=True
+        )
+        version = _publication_version(publication)
+        final_revision = self._revision_path(identifier, version)
+        transaction_path = self._transaction_path(identifier)
+        revision_stage = transaction_directory / f".{identifier}.revision.stage.yaml"
+        latest_stage = transaction_directory / f".{identifier}.latest.stage.yaml"
+        previous_stage = transaction_directory / f".{identifier}.previous.yaml"
+        stage_paths = (revision_stage, latest_stage, previous_stage)
+        if final_revision.exists() or final_revision.is_symlink():
+            raise StrategyProfileConflictError(
+                f"Immutable Strategy revision already exists: {final_revision.name}"
+            )
+        if transaction_path.exists() or transaction_path.is_symlink():
+            raise StrategyProfileConflictError(
+                f"Strategy publication transaction already exists for {identifier!r}"
+            )
+        if any(path.exists() or path.is_symlink() for path in stage_paths):
+            raise StrategyProfileConflictError(
+                f"Unreconciled Strategy publication staging exists for {identifier!r}"
+            )
+
+        previous_fingerprint = (
+            fingerprint_document(previous) if previous is not None else None
+        )
+        transaction = {
+            "schema_version": STRATEGY_TRANSACTION_SCHEMA_VERSION,
+            "kind": "strategy_publication_transaction",
+            "id": identifier,
+            "logical_version": version,
+            "created_at": datetime.now().astimezone().isoformat(
+                timespec="seconds"
+            ),
+            "publication_fingerprint": fingerprint_document(publication),
+            "revision_fingerprint": fingerprint_document(revision),
+            "had_previous_latest": previous is not None,
+            "previous_publication_fingerprint": previous_fingerprint,
+        }
+        committed = False
+        try:
+            _atomic_create_immutable(
+                transaction_directory,
+                transaction_path,
+                transaction,
+                description="strategy publication transaction",
+            )
+            self._fault("transaction_record_durable")
+            _atomic_create_immutable(
+                transaction_directory,
+                revision_stage,
+                revision,
+                description="strategy revision stage",
+            )
+            self._fault("revision_stage_durable")
+            _atomic_create_immutable(
+                transaction_directory,
+                latest_stage,
+                publication,
+                description="strategy latest stage",
+            )
+            self._fault("latest_stage_durable")
+            if previous is not None:
+                _atomic_create_immutable(
+                    transaction_directory,
+                    previous_stage,
+                    previous,
+                    description="strategy previous-latest stage",
+                )
+            self._fault("previous_stage_durable")
+
+            try:
+                os.link(revision_stage, final_revision)
+            except FileExistsError as exc:
+                raise StrategyProfileConflictError(
+                    f"Immutable Strategy revision already exists: {final_revision.name}"
+                ) from exc
+            revision_stage.unlink()
+            self._fault("revision_linked")
+            self._fsync_directory(history_directory)
+            self._fault("history_fsynced")
+
+            os.replace(latest_stage, _profile_path(self.profile_directory, identifier))
+            self._fault("latest_replaced")
+            self._fsync_directory(self.profile_directory)
+            committed = True
+            self._fault("latest_directory_fsynced")
+        except Exception as exc:
+            if committed:
+                try:
+                    self._cleanup_transaction(
+                        transaction_path,
+                        revision_stage,
+                        latest_stage,
+                        previous_stage,
+                    )
+                except Exception:
+                    # History and latest are already durably consistent.  The
+                    # retained journal is reconciled idempotently on reopen.
+                    pass
+                return
+            try:
+                self._rollback_publication_transaction(
+                    identifier,
+                    publication=publication,
+                    revision=revision,
+                    previous=previous,
+                    transaction_path=transaction_path,
+                    revision_stage=revision_stage,
+                    latest_stage=latest_stage,
+                    previous_stage=previous_stage,
+                )
+            except Exception as rollback_exc:
+                raise StrategyProfileError(
+                    "Strategy publication was interrupted and could not be "
+                    f"rolled back deterministically: {rollback_exc}"
+                ) from exc
+            if isinstance(exc, StrategyProfileError):
+                raise
+            raise StrategyProfileError(
+                f"Unable to publish Strategy {identifier!r}: {exc}"
+            ) from exc
+
+        try:
+            self._cleanup_transaction(
+                transaction_path,
+                revision_stage,
+                latest_stage,
+                previous_stage,
+            )
+        except Exception:
+            # The history/facade pair is already durably committed.  Keep any
+            # surviving journal for deterministic reconciliation on reopen
+            # instead of reporting a failure that invites a duplicate retry.
+            pass
+        try:
+            self._fault("transaction_cleaned")
+        except Exception:
+            # Cleanup follows the durable commit point and cannot turn a
+            # committed publication back into a failed one.
+            pass
+        with _PROFILE_ID_CACHE_LOCK:
+            _PROFILE_ID_CACHE.pop(self.profile_directory, None)
+
+    def _rollback_publication_transaction(
+        self,
+        identifier: str,
+        *,
+        publication: Mapping[str, Any],
+        revision: Mapping[str, Any],
+        previous: Optional[Mapping[str, Any]],
+        transaction_path: Path,
+        revision_stage: Path,
+        latest_stage: Path,
+        previous_stage: Path,
+    ) -> None:
+        latest_path = _profile_path(self.profile_directory, identifier)
+        proposed_fingerprint = fingerprint_document(publication)
+        previous_fingerprint = (
+            fingerprint_document(previous) if previous is not None else None
+        )
+        if latest_path.exists() or latest_path.is_symlink():
+            current = self._latest_publication(identifier)
+            current_fingerprint = (
+                fingerprint_document(current) if current is not None else None
+            )
+            if current_fingerprint == proposed_fingerprint:
+                if previous is not None:
+                    staged_previous = _load_publication(
+                        previous_stage,
+                        expected_id=identifier,
+                    )
+                    if fingerprint_document(staged_previous) != previous_fingerprint:
+                        raise StrategyProfileConflictError(
+                            "The previous latest backup changed during rollback"
+                        )
+                    os.replace(previous_stage, latest_path)
+                else:
+                    latest_path.unlink()
+                self._fsync_directory(self.profile_directory)
+            elif current_fingerprint != previous_fingerprint:
+                raise StrategyProfileConflictError(
+                    "Latest facade changed outside the failed publication"
+                )
+        elif previous is not None:
+            staged_previous = _load_publication(
+                previous_stage,
+                expected_id=identifier,
+            )
+            if fingerprint_document(staged_previous) != previous_fingerprint:
+                raise StrategyProfileConflictError(
+                    "The previous latest backup changed during rollback"
+                )
+            os.replace(previous_stage, latest_path)
+            self._fsync_directory(self.profile_directory)
+
+        final_revision = self._revision_path(
+            identifier,
+            int(revision["logical_version"]),
+        )
+        if final_revision.exists() or final_revision.is_symlink():
+            if final_revision.is_symlink() or not final_revision.is_file():
+                raise StrategyProfileConflictError(
+                    "The uncommitted revision target became unsafe during rollback"
+                )
+            loaded = self._load_revision(
+                identifier,
+                int(revision["logical_version"]),
+            )
+            if fingerprint_document(loaded) != fingerprint_document(revision):
+                raise StrategyProfileConflictError(
+                    "The uncommitted revision target changed during rollback"
+                )
+            final_revision.unlink()
+            self._fsync_directory(final_revision.parent)
+        self._cleanup_transaction(
+            transaction_path,
+            revision_stage,
+            latest_stage,
+            previous_stage,
+        )
+
+    def _cleanup_transaction(self, *paths: Path) -> None:
+        changed = False
+        ordered = sorted(
+            paths,
+            key=lambda path: path.name.endswith(".publication.yaml"),
+        )
+        for path in ordered:
+            try:
+                if path.is_symlink():
+                    raise StrategyProfileConflictError(
+                        f"Symbolic-link transaction artifact is unsupported: {path.name}"
+                    )
+                if path.exists():
+                    path.unlink()
+                    changed = True
+            except FileNotFoundError:
+                continue
+        transaction_directory = self.profile_directory / (
+            STRATEGY_TRANSACTION_DIRECTORY_NAME
+        )
+        if changed and transaction_directory.is_dir():
+            self._fsync_directory(transaction_directory)
+
+    def _fault(self, transition: str) -> None:
+        if self._transaction_fault_hook is not None:
+            self._transaction_fault_hook(transition)
+
+    def _prepare_history(self) -> list[dict[str, str]]:
+        if not self.profile_directory.exists():
+            return []
+        with self._publish_lock:
+            try:
+                with self._catalog_write_lock():
+                    return self._prepare_history_under_file_lock()
+            except StrategyProfileError as exc:
+                self._audit_history_event(
+                    "history-catalog",
+                    f"Strategy history catalog error preserved: {exc}",
+                )
+                return [{"id": "history", "error": str(exc)}]
+
+    def _prepare_history_under_file_lock(self) -> list[dict[str, str]]:
+        errors: list[dict[str, str]] = []
+        try:
+            self._prepare_history_directories(create=False)
+        except StrategyProfileError as exc:
+            return [{"id": "history", "error": str(exc)}]
+        errors.extend(self._recover_transactions_under_file_lock())
+        errors.extend(self._adopt_existing_publications_under_file_lock())
+        _, scan_errors = self._history_records_and_errors()
+        errors.extend(scan_errors)
+        return _deduplicate_catalog_errors(errors)
+
+    def _prepare_history_directories(
+        self,
+        *,
+        create: bool,
+    ) -> tuple[Path, Path]:
+        history_directory = self.profile_directory / STRATEGY_HISTORY_DIRECTORY_NAME
+        transaction_directory = (
+            self.profile_directory / STRATEGY_TRANSACTION_DIRECTORY_NAME
+        )
+        for directory, description in (
+            (history_directory, "Strategy history"),
+            (transaction_directory, "Strategy transaction"),
+        ):
+            if directory.is_symlink() or (
+                directory.exists() and not directory.is_dir()
+            ):
+                raise StrategyProfileConflictError(
+                    f"{description} storage is not a regular directory"
+                )
+            existed = directory.exists()
+            if create:
+                try:
+                    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+                except OSError as exc:
+                    raise StrategyProfileError(
+                        f"Unable to create {description.lower()} storage: {exc}"
+                    ) from exc
+                if not existed:
+                    self._fsync_directory(self.profile_directory)
+        return history_directory, transaction_directory
+
+    def _recover_transactions_under_file_lock(self) -> list[dict[str, str]]:
+        _, transaction_directory = self._prepare_history_directories(create=False)
+        if not transaction_directory.exists():
+            return []
+        errors: list[dict[str, str]] = []
+        try:
+            paths = sorted(transaction_directory.iterdir(), key=lambda item: item.name)
+        except OSError as exc:
+            return [{"id": "transactions", "error": str(exc)}]
+        records: dict[str, Path] = {}
+        for path in paths:
+            match = _TRANSACTION_FILENAME_RE.fullmatch(path.name)
+            if match is not None:
+                records[match.group("id")] = path
+                continue
+            if _TRANSACTION_STAGE_FILENAME_RE.fullmatch(path.name) is not None:
+                continue
+            errors.append(
+                {
+                    "id": f"transactions/{path.name}",
+                    "error": (
+                        "symbolic-link Strategy transaction artifact is unsupported"
+                        if path.is_symlink()
+                        else "unrecognized Strategy transaction artifact"
+                    ),
+                }
+            )
+
+        for identifier, path in sorted(records.items()):
+            try:
+                if path.is_symlink() or not path.is_file():
+                    raise StrategyProfileConflictError(
+                        "symbolic-link or non-file transaction records are unsupported"
+                    )
+                raw = _load_yaml_mapping_limited_profile(
+                    path,
+                    "Strategy publication transaction",
+                )
+                transaction = _validate_transaction_record(
+                    raw,
+                    expected_id=identifier,
+                )
+                self._recover_transaction_under_file_lock(transaction)
+                self._audit_history_event(
+                    f"recovered-{identifier}-{transaction['logical_version']}",
+                    "Recovered interrupted Strategy publication "
+                    f"{identifier} version {transaction['logical_version']} "
+                    "without changing selection or activation",
+                )
+            except StrategyProfileError as exc:
+                error = {
+                    "id": f"{identifier}@transaction",
+                    "error": str(exc),
+                }
+                errors.append(error)
+                self._audit_history_event(
+                    f"transaction-conflict-{identifier}-{exc}",
+                    "Strategy publication recovery conflict preserved for "
+                    f"{identifier}: {exc}",
+                )
+
+        active_records = set(records)
+        for path in paths:
+            match = _TRANSACTION_STAGE_FILENAME_RE.fullmatch(path.name)
+            if match is None or match.group("id") in active_records:
+                continue
+            try:
+                if path.is_symlink() or not path.is_file():
+                    raise StrategyProfileConflictError(
+                        "unsafe orphan Strategy transaction artifact"
+                    )
+                path.unlink()
+                self._fsync_directory(transaction_directory)
+            except (OSError, StrategyProfileError) as exc:
+                errors.append(
+                    {
+                        "id": f"transactions/{path.name}",
+                        "error": str(exc),
+                    }
+                )
+        return errors
+
+    def _recover_transaction_under_file_lock(
+        self,
+        transaction: Mapping[str, Any],
+    ) -> None:
+        identifier = str(transaction["id"])
+        version = int(transaction["logical_version"])
+        history_directory, transaction_directory = self._prepare_history_directories(
+            create=True
+        )
+        transaction_path = self._transaction_path(identifier)
+        revision_stage = transaction_directory / f".{identifier}.revision.stage.yaml"
+        latest_stage = transaction_directory / f".{identifier}.latest.stage.yaml"
+        previous_stage = transaction_directory / f".{identifier}.previous.yaml"
+        final_revision = self._revision_path(identifier, version)
+        latest_path = _profile_path(self.profile_directory, identifier)
+        expected_publication_fingerprint = str(
+            transaction["publication_fingerprint"]
+        )
+
+        if final_revision.exists() or final_revision.is_symlink():
+            revision = self._load_revision(identifier, version)
+            if fingerprint_document(revision) != transaction["revision_fingerprint"]:
+                raise StrategyProfileConflictError(
+                    "Retained revision disagrees with its recovery transaction"
+                )
+            publication = revision["publication"]
+            if fingerprint_document(publication) != expected_publication_fingerprint:
+                raise StrategyProfileConflictError(
+                    "Retained publication disagrees with its recovery transaction"
+                )
+            current = self._latest_publication(identifier)
+            current_fingerprint = (
+                fingerprint_document(current) if current is not None else None
+            )
+            previous_fingerprint = transaction.get(
+                "previous_publication_fingerprint"
+            )
+            if current_fingerprint == expected_publication_fingerprint:
+                pass
+            elif current_fingerprint == previous_fingerprint or (
+                current is None
+                and not bool(transaction["had_previous_latest"])
+            ):
+                self._atomic_write(latest_path, publication)
+            else:
+                raise StrategyProfileConflictError(
+                    "Latest facade changed outside the interrupted transaction"
+                )
+            self._fsync_directory(history_directory)
+            self._fsync_directory(self.profile_directory)
+            self._cleanup_transaction(
+                transaction_path,
+                revision_stage,
+                latest_stage,
+                previous_stage,
+            )
+            with _PROFILE_ID_CACHE_LOCK:
+                _PROFILE_ID_CACHE.pop(self.profile_directory, None)
+            return
+
+        current = self._latest_publication(identifier)
+        current_fingerprint = (
+            fingerprint_document(current) if current is not None else None
+        )
+        previous_fingerprint = transaction.get("previous_publication_fingerprint")
+        if current_fingerprint == expected_publication_fingerprint:
+            if bool(transaction["had_previous_latest"]):
+                if previous_stage.is_symlink() or not previous_stage.is_file():
+                    raise StrategyProfileConflictError(
+                        "Interrupted transaction lost its previous latest backup"
+                    )
+                staged_previous = _load_publication(
+                    previous_stage,
+                    expected_id=identifier,
+                )
+                if fingerprint_document(staged_previous) != previous_fingerprint:
+                    raise StrategyProfileConflictError(
+                        "Interrupted transaction previous backup disagrees with "
+                        "its journal"
+                    )
+                os.replace(previous_stage, latest_path)
+            else:
+                latest_path.unlink()
+            self._fsync_directory(self.profile_directory)
+        elif current_fingerprint != previous_fingerprint or (
+            current is None and bool(transaction["had_previous_latest"])
+        ):
+            raise StrategyProfileConflictError(
+                "Latest facade changed outside the interrupted transaction"
+            )
+        self._cleanup_transaction(
+            transaction_path,
+            revision_stage,
+            latest_stage,
+            previous_stage,
+        )
+
+    def _adopt_existing_publications_under_file_lock(
+        self,
+    ) -> list[dict[str, str]]:
+        candidates, errors = self._adoption_candidates()
+        records, history_errors = self._history_records_and_errors()
+        errors.extend(history_errors)
+        if not candidates:
+            return errors
+        history_directory, _ = self._prepare_history_directories(create=True)
+        for (identifier, version), publications in sorted(candidates.items()):
+            fingerprints = {
+                fingerprint_document(candidate["publication"])
+                for candidate in publications
+            }
+            if len(fingerprints) != 1:
+                message = (
+                    f"conflicting retained evidence exists for {identifier} "
+                    f"version {version}"
+                )
+                errors.append({"id": f"{identifier}@{version}", "error": message})
+                self._audit_history_event(
+                    f"adoption-conflict-{identifier}-{version}",
+                    f"Strategy history adoption conflict preserved: {message}",
+                )
+                continue
+            publication = publications[0]["publication"]
+            existing = next(
+                (
+                    item
+                    for item in records.get(identifier, [])
+                    if int(item["logical_version"]) == version
+                ),
+                None,
+            )
+            if existing is not None:
+                if existing["publication_fingerprint"] != fingerprint_document(
+                    publication
+                ):
+                    message = (
+                        "history fingerprint disagrees with existing latest or "
+                        "retirement evidence"
+                    )
+                    errors.append(
+                        {"id": f"{identifier}@{version}", "error": message}
+                    )
+                    self._audit_history_event(
+                        f"adoption-disagreement-{identifier}-{version}",
+                        "Strategy history adoption disagreement preserved for "
+                        f"{identifier} version {version}",
+                    )
+                continue
+            identity = _new_audit_identity()
+            revision = _revision_envelope_from_publication(
+                publication,
+                origin="conservative_adoption",
+                audit_identity=identity,
+            )
+            path = self._revision_path(identifier, version)
+            if path.exists() or path.is_symlink():
+                errors.append(
+                    {
+                        "id": f"{identifier}@{version}",
+                        "error": (
+                            "existing Strategy revision is invalid or ambiguous "
+                            "and was preserved without adoption"
+                        ),
+                    }
+                )
+                continue
+            try:
+                _atomic_create_immutable(
+                    history_directory,
+                    path,
+                    revision,
+                    description="adopted Strategy revision",
+                )
+                records.setdefault(identifier, []).append(revision)
+                records[identifier].sort(
+                    key=lambda item: int(item["logical_version"])
+                )
+                self._audit_history_event(
+                    f"adopted-{identifier}-{version}",
+                    "Conservatively adopted existing Strategy publication "
+                    f"{identifier} version {version} into immutable history; "
+                    "the latest facade was not rewritten",
+                )
+            except (StrategyProfileError, StrategyAuthoringError) as exc:
+                errors.append(
+                    {"id": f"{identifier}@{version}", "error": str(exc)}
+                )
+
+        for identifier, lineage in records.items():
+            latest = self._latest_publication(identifier)
+            if latest is None or not lineage:
+                continue
+            latest_version = _publication_version(latest)
+            max_version = max(int(item["logical_version"]) for item in lineage)
+            matching = next(
+                (
+                    item
+                    for item in lineage
+                    if int(item["logical_version"]) == latest_version
+                ),
+                None,
+            )
+            if (
+                latest_version != max_version
+                or matching is None
+                or matching["publication_fingerprint"]
+                != fingerprint_document(latest)
+            ):
+                message = (
+                    "active latest facade is ambiguous with immutable lineage "
+                    f"history (facade version {latest_version}, history latest "
+                    f"{max_version})"
+                )
+                errors.append({"id": identifier, "error": message})
+                self._audit_history_event(
+                    f"lineage-ambiguity-{identifier}-{latest_version}-{max_version}",
+                    f"Strategy lineage ambiguity preserved for {identifier}: {message}",
+                )
+        return _deduplicate_catalog_errors(errors)
+
+    def _adoption_candidates(
+        self,
+    ) -> tuple[
+        dict[tuple[str, int], list[dict[str, Any]]],
+        list[dict[str, str]],
+    ]:
+        candidates: dict[tuple[str, int], list[dict[str, Any]]] = {}
+        errors: list[dict[str, str]] = []
+        if self.profile_directory.is_dir() and not self.profile_directory.is_symlink():
+            for path in sorted(self.profile_directory.glob("*.profile.yaml")):
+                identifier = path.name.removesuffix(".profile.yaml")
+                try:
+                    if path.is_symlink() or not path.is_file():
+                        raise StrategyProfileError(
+                            "symbolic-link publications are not supported"
+                        )
+                    publication = _load_publication(path, expected_id=identifier)
+                    version = _publication_version(publication)
+                    if version < 1:
+                        raise StrategyProfileError(
+                            "Profile publication has no positive logical version"
+                        )
+                    candidates.setdefault((identifier, version), []).append(
+                        {"publication": publication, "evidence": "latest"}
+                    )
+                except StrategyProfileError as exc:
+                    errors.append({"id": identifier, "error": str(exc)})
+
+        retired_directory = self.profile_directory / "retired"
+        if retired_directory.is_symlink() or (
+            retired_directory.exists() and not retired_directory.is_dir()
+        ):
+            errors.append(
+                {
+                    "id": "retired",
+                    "error": "The retired Strategy archive is not a regular directory",
+                }
+            )
+            return candidates, errors
+        if not retired_directory.exists():
+            return candidates, errors
+        try:
+            retired_paths = sorted(retired_directory.iterdir(), key=lambda item: item.name)
+        except OSError as exc:
+            errors.append({"id": "retired", "error": str(exc)})
+            return candidates, errors
+        for path in retired_paths:
+            if not path.name.endswith(".retired.yaml"):
+                continue
+            try:
+                if path.is_symlink() or not path.is_file():
+                    raise StrategyProfileError(
+                        "symbolic-link retirement evidence is not supported"
+                    )
+                publication = _load_publication_unknown_id(
+                    path,
+                    verify_builder=False,
+                )
+                identifier = str(publication["id"])
+                version = _publication_version(publication)
+                if version < 1:
+                    raise StrategyProfileError(
+                        "Retired publication has no positive logical version"
+                    )
+                candidates.setdefault((identifier, version), []).append(
+                    {"publication": publication, "evidence": "retired"}
+                )
+            except StrategyProfileError as exc:
+                errors.append(
+                    {"id": f"retired/{path.name}", "error": str(exc)}
+                )
+        return candidates, errors
+
+    def _history_records_and_errors(
+        self,
+    ) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
+        history_directory, _ = self._prepare_history_directories(create=False)
+        records: dict[str, list[dict[str, Any]]] = {}
+        errors: list[dict[str, str]] = []
+        if not history_directory.exists():
+            return records, errors
+        try:
+            paths = sorted(history_directory.iterdir(), key=lambda item: item.name)
+        except OSError as exc:
+            return records, [{"id": "history", "error": str(exc)}]
+        seen: set[tuple[str, int]] = set()
+        for path in paths:
+            if path.is_symlink():
+                errors.append(
+                    {
+                        "id": f"history/{path.name}",
+                        "error": "symbolic-link Strategy revision is unsupported",
+                    }
+                )
+                continue
+            if not path.is_file():
+                errors.append(
+                    {
+                        "id": f"history/{path.name}",
+                        "error": "non-file Strategy revision is unsupported",
+                    }
+                )
+                continue
+            match = _REVISION_FILENAME_RE.fullmatch(path.name)
+            if match is None:
+                errors.append(
+                    {
+                        "id": f"history/{path.name}",
+                        "error": "invalid Strategy revision filename",
+                    }
+                )
+                continue
+            identifier = match.group("id")
+            version = int(match.group("version"))
+            key = (identifier, version)
+            if key in seen:
+                errors.append(
+                    {
+                        "id": f"{identifier}@{version}",
+                        "error": "duplicate Strategy logical version",
+                    }
+                )
+                continue
+            seen.add(key)
+            try:
+                revision = self._load_revision(identifier, version)
+                records.setdefault(identifier, []).append(revision)
+            except StrategyProfileError as exc:
+                errors.append(
+                    {"id": f"{identifier}@{version}", "error": str(exc)}
+                )
+        for lineage in records.values():
+            lineage.sort(key=lambda item: int(item["logical_version"]))
+        return records, errors
+
+    def _history_catalog_under_file_lock(
+        self,
+        *,
+        identifier: Optional[str],
+        preparation_errors: list[dict[str, str]],
+    ) -> dict[str, Any]:
+        try:
+            records, scan_errors = self._history_records_and_errors()
+        except StrategyProfileError as exc:
+            records = {}
+            scan_errors = [{"id": "history", "error": str(exc)}]
+        errors = _deduplicate_catalog_errors(preparation_errors + scan_errors)
+        if identifier is not None:
+            records = (
+                {identifier: records[identifier]}
+                if identifier in records
+                else {}
+            )
+            errors = [
+                item
+                for item in errors
+                if _history_error_applies(identifier, item["id"])
+            ]
+        lineages: list[dict[str, Any]] = []
+        for lineage_id, revisions in sorted(records.items()):
+            latest: Optional[dict[str, Any]]
+            latest_error: Optional[str] = None
+            try:
+                latest = self._latest_publication(lineage_id)
+            except StrategyProfileError as exc:
+                latest = None
+                latest_error = str(exc)
+                errors.append({"id": lineage_id, "error": latest_error})
+            latest_fingerprint = (
+                fingerprint_document(latest) if latest is not None else None
+            )
+            retired = latest is None and latest_error is None
+            summaries = [
+                self._revision_summary(
+                    revision,
+                    latest=latest,
+                    lineage_retired=retired,
+                    lineage_latest_version=int(revisions[-1]["logical_version"]),
+                )
+                for revision in reversed(revisions)
+            ]
+            newest = revisions[-1]
+            source = newest["source"]
+            lineage_errors = [
+                item["error"]
+                for item in errors
+                if _history_error_applies(lineage_id, item["id"])
+            ]
+            lineages.append(
+                {
+                    "id": lineage_id,
+                    "display_name": (
+                        latest["display_name"]
+                        if latest is not None
+                        else newest["display_name"]
+                    ),
+                    "family": source["family"],
+                    "tier": source["tier"],
+                    "active_latest": latest is not None,
+                    "retired": retired,
+                    "latest_version": int(newest["logical_version"]),
+                    "current_latest_version": (
+                        _publication_version(latest)
+                        if latest is not None
+                        else None
+                    ),
+                    "latest_source_fingerprint": (
+                        latest["source_fingerprint"]
+                        if latest is not None
+                        else None
+                    ),
+                    "latest_publication_fingerprint": latest_fingerprint,
+                    "lineage_fingerprint": fingerprint_document(
+                        {
+                            "id": lineage_id,
+                            "revisions": [
+                                fingerprint_document(item) for item in revisions
+                            ],
+                            "latest": latest_fingerprint,
+                        }
+                    ),
+                    "revisions": summaries,
+                    "warnings": lineage_errors,
+                }
+            )
+        return {
+            "schema_version": STRATEGY_HISTORY_API_SCHEMA_VERSION,
+            "lineages": lineages,
+            "errors": errors,
+            "newest_first": True,
+            "expanded_plan_exposed": False,
+        }
+
+    def _revision_summary(
+        self,
+        revision: Mapping[str, Any],
+        *,
+        latest: Optional[Mapping[str, Any]],
+        lineage_retired: bool,
+        lineage_latest_version: int,
+    ) -> dict[str, Any]:
+        source = revision["source"]
+        base = source.get("base")
+        publication_fingerprint = str(revision["publication_fingerprint"])
+        latest_matches = (
+            latest is not None
+            and fingerprint_document(latest) == publication_fingerprint
+        )
+        current_validation = _current_revision_validation(revision)
+        warnings = list(current_validation["warnings"])
+        if revision["publication_schema_version"] == STRATEGY_PROFILE_SCHEMA_VERSION:
+            warnings.append(
+                "Schema-1 source was conservatively projected as explicit local intent; the exact publication and plan remain retained."
+            )
+        if revision["publication_origin"] == "conservative_adoption":
+            warnings.append(
+                "Conservatively adopted from an existing latest or retirement publication."
+            )
+        return {
+            "strategy_id": revision["id"],
+            "display_name": revision["display_name"],
+            "logical_version": revision["logical_version"],
+            "published_at": revision["published_at"],
+            "status": (
+                "active_latest"
+                if latest_matches
+                else "retired_latest"
+                if lineage_retired
+                and int(revision["logical_version"])
+                == lineage_latest_version
+                else "historical"
+            ),
+            "active_latest": latest_matches,
+            "retired_lineage": lineage_retired,
+            "source_fingerprint": revision["source_fingerprint"],
+            "normalized_source_fingerprint": revision[
+                "normalized_source_fingerprint"
+            ],
+            "base_fingerprint": revision["base_fingerprint"],
+            "resolution_fingerprint": revision["resolution_fingerprint"],
+            "plan_fingerprint": revision["plan_fingerprint"],
+            "publication_fingerprint": publication_fingerprint,
+            "revision_fingerprint": fingerprint_document(revision),
+            "pinned_base_id": base.get("id") if isinstance(base, Mapping) else None,
+            "pinned_base_revision": (
+                base.get("revision") if isinstance(base, Mapping) else None
+            ),
+            "tier": source["tier"],
+            "family": source["family"],
+            "publication_origin": revision["publication_origin"],
+            "audit_identity": _copy_mapping(revision["audit_identity"]),
+            "publication_schema_version": revision[
+                "publication_schema_version"
+            ],
+            "rule_count": revision["rule_count"],
+            "current_validation_valid": current_validation["valid"],
+            "validation_errors": current_validation["errors"],
+            "warnings": warnings,
+        }
+
+    def _revision_versions(self, identifier: str) -> list[int]:
+        records, errors = self._history_records_and_errors()
+        self._raise_lineage_history_error(identifier, errors)
+        return [
+            int(item["logical_version"])
+            for item in records.get(identifier, [])
+        ]
+
+    def _load_revision(
+        self,
+        identifier: str,
+        logical_version: int,
+    ) -> dict[str, Any]:
+        path = self._revision_path(identifier, logical_version)
+        if path.is_symlink():
+            raise StrategyProfileError(
+                "symbolic-link Strategy revisions are unsupported"
+            )
+        if not path.is_file():
+            raise StrategyProfileError(
+                f"Strategy revision {identifier}@{logical_version} is unavailable"
+            )
+        raw = _load_yaml_mapping_limited_profile(path, "Strategy revision")
+        return _validate_revision_envelope(
+            raw,
+            expected_id=identifier,
+            expected_version=logical_version,
+        )
+
+    def _latest_publication(
+        self,
+        identifier: str,
+    ) -> Optional[dict[str, Any]]:
+        path = _profile_path(self.profile_directory, identifier)
+        if not path.exists() and not path.is_symlink():
+            return None
+        if path.is_symlink() or not path.is_file():
+            raise StrategyProfileConflictError(
+                f"Existing profile path for {identifier!r} is not a regular file"
+            )
+        try:
+            return _load_publication(path, expected_id=identifier)
+        except StrategyProfileError as exc:
+            raise StrategyProfileConflictError(
+                f"Existing profile {identifier!r} is invalid and was preserved: {exc}"
+            ) from exc
+
+    def _revision_path(self, identifier: str, logical_version: int) -> Path:
+        history_directory = self.profile_directory / STRATEGY_HISTORY_DIRECTORY_NAME
+        path = history_directory / f"{identifier}.strategy.{logical_version}.yaml"
+        if path.parent != history_directory:
+            raise StrategyProfileError("Invalid Strategy revision path")
+        return path
+
+    def _transaction_path(self, identifier: str) -> Path:
+        transaction_directory = (
+            self.profile_directory / STRATEGY_TRANSACTION_DIRECTORY_NAME
+        )
+        path = transaction_directory / f"{identifier}.publication.yaml"
+        if path.parent != transaction_directory:
+            raise StrategyProfileError("Invalid Strategy transaction path")
+        return path
+
+    def _raise_lineage_history_error(
+        self,
+        identifier: str,
+        errors: list[dict[str, str]],
+    ) -> None:
+        relevant = [
+            item["error"]
+            for item in errors
+            if _history_error_applies(identifier, item["id"])
+        ]
+        if relevant:
+            raise StrategyProfileConflictError(
+                f"Strategy {identifier!r} history is ambiguous or corrupt: "
+                + "; ".join(relevant)
+            )
+
+    def _audit_history_event(self, key: str, message: str) -> None:
+        if key in self._reported_history_events:
+            return
+        self._reported_history_events.add(key)
+        if self._audit_callback is None:
+            return
+        try:
+            self._audit_callback(message)
+        except Exception:
+            # Audit failure cannot justify rewriting or discarding evidence.
+            return
+
+    def _restore_preview_under_file_lock(
+        self,
+        identifier: str,
+        logical_version: int,
+        *,
+        expected_revision_fingerprint: object,
+        expected_latest_source_fingerprint: object,
+        require_optimistic_state: bool,
+    ) -> dict[str, Any]:
+        revision = self._load_revision(identifier, logical_version)
+        revision_fingerprint = fingerprint_document(revision)
+        supplied_revision_fingerprint = str(
+            expected_revision_fingerprint or ""
+        ).strip()
+        if require_optimistic_state and (
+            not supplied_revision_fingerprint
+            or supplied_revision_fingerprint != revision_fingerprint
+        ):
+            raise StrategyProfileConflictError(
+                "The selected historical revision changed or no longer matches "
+                "the reviewed fingerprint"
+            )
+
+        latest = self._latest_publication(identifier)
+        latest_source_fingerprint = (
+            str(latest["source_fingerprint"]) if latest is not None else None
+        )
+        supplied_latest = (
+            str(expected_latest_source_fingerprint or "").strip() or None
+        )
+        if require_optimistic_state and supplied_latest != latest_source_fingerprint:
+            raise StrategyProfileConflictError(
+                f"Profile {identifier!r} latest state changed after history was "
+                "opened; refresh history before restoring"
+            )
+        if (
+            require_optimistic_state
+            and latest is not None
+            and fingerprint_document(latest)
+            == revision["publication_fingerprint"]
+        ):
+            raise StrategyProfileError(
+                "The selected revision is already the current latest publication"
+            )
+
+        validation_errors: list[dict[str, str]] = []
+        current_projection = None
+        if latest is not None:
+            current_projection = _publication_projection(latest)
+            try:
+                current_validation = self._validate_normalized_source(
+                    current_projection["source"],
+                    base_snapshot=current_projection["base_snapshot"],
+                )
+                if current_validation["plan"] != current_projection["plan"]:
+                    raise StrategyProfileError(
+                        "The current latest publication no longer rebuilds exactly "
+                        "under trusted builder code"
+                    )
+            except StrategyProfileError as exc:
+                if require_optimistic_state:
+                    raise
+                validation_errors.append(
+                    {
+                        "code": "current_latest_validation",
+                        "message": str(exc),
+                    }
+                )
+
+        historical_consistent = True
+        try:
+            historical_validation = self._validate_normalized_source(
+                revision["source"],
+                base_snapshot=revision.get("base_snapshot"),
+            )
+            if historical_validation["resolution"] != revision["resolution"]:
+                raise StrategyProfileError(
+                    "The selected revision resolution is inconsistent"
+                )
+            if historical_validation["plan"] != revision["plan"]:
+                raise StrategyProfileError(
+                    "The selected revision no longer rebuilds exactly under "
+                    "trusted builder code"
+                )
+        except StrategyProfileError as exc:
+            if require_optimistic_state:
+                raise
+            historical_consistent = False
+            validation_errors.append(
+                {
+                    "code": "historical_revision_validation",
+                    "message": str(exc),
+                }
+            )
+
+        versions = self._revision_versions(identifier)
+        next_version = max(versions, default=0) + 1
+        candidate_source = _copy_mapping(revision["source"])
+        candidate_source["version"] = next_version
+        candidate_validation: dict[str, Any]
+        if historical_consistent:
+            try:
+                candidate_validation = self._validate_normalized_source(
+                    candidate_source,
+                    base_snapshot=revision.get("base_snapshot"),
+                )
+            except StrategyProfileError as exc:
+                if require_optimistic_state:
+                    raise
+                validation_errors.append(
+                    {
+                        "code": "restore_candidate_validation",
+                        "message": str(exc),
+                    }
+                )
+                candidate_validation = _unvalidated_restore_candidate(
+                    revision,
+                    candidate_source,
+                )
+        else:
+            candidate_validation = _unvalidated_restore_candidate(
+                revision,
+                candidate_source,
+            )
+        comparison = self._semantic_restore_comparison(
+            identifier,
+            current_projection=current_projection,
+            historical_revision=revision,
+            candidate_validation=candidate_validation,
+            validation_errors=validation_errors,
+        )
+        review_fingerprint = fingerprint_document(
+            {
+                "kind": "strategy_restore_review",
+                "strategy_id": identifier,
+                "historical_logical_version": logical_version,
+                "historical_revision_fingerprint": revision_fingerprint,
+                "current_latest_source_fingerprint": latest_source_fingerprint,
+                "next_logical_version": next_version,
+                "candidate_fingerprints": candidate_validation["profile"],
+                "comparison": comparison,
+            }
+        )
+        return {
+            "valid": not validation_errors,
+            "published": False,
+            "strategy_id": identifier,
+            "historical_logical_version": logical_version,
+            "historical_revision_fingerprint": revision_fingerprint,
+            "current_latest_source_fingerprint": latest_source_fingerprint,
+            "next_logical_version": next_version,
+            "candidate": {
+                "source_fingerprint": candidate_validation["profile"][
+                    "source_fingerprint"
+                ],
+                "base_fingerprint": candidate_validation["profile"][
+                    "base_fingerprint"
+                ],
+                "resolution_fingerprint": candidate_validation["profile"][
+                    "resolution_fingerprint"
+                ],
+                "plan_fingerprint": candidate_validation["profile"][
+                    "plan_fingerprint"
+                ],
+                "rule_count": candidate_validation["rule_count"],
+            },
+            "comparison": comparison,
+            "reviewed_restore_fingerprint": review_fingerprint,
+            "restore_publishes_new_revision": True,
+            "publication_activates_strategy": False,
+            "expanded_plan_exposed": False,
+            "_candidate": {"validation": candidate_validation},
+        }
+
+    def _semantic_restore_comparison(
+        self,
+        identifier: str,
+        *,
+        current_projection: Optional[Mapping[str, Any]],
+        historical_revision: Mapping[str, Any],
+        candidate_validation: Mapping[str, Any],
+        validation_errors: list[dict[str, str]],
+    ) -> dict[str, Any]:
+        candidate_source = candidate_validation["source"]
+        candidate_resolution = candidate_validation["resolution"]
+        if current_projection is None:
+            before_source = {
+                "schema_version": AUTHORING_SCHEMA_VERSION,
+                "kind": "strategy",
+                "id": identifier,
+                "display_name": candidate_source["display_name"],
+                "family": candidate_source["family"],
+                "tier": candidate_source["tier"],
+                "version": 1,
+                "settings": {},
+            }
+            before_resolution = analyze_strategy_source(before_source)[
+                "resolution"
+            ]
+            before_base = None
+            before_plan = None
+            before_plan_fingerprint = None
+            before_rule_count = 0
+        else:
+            before_source = current_projection["source"]
+            before_resolution = current_projection["resolution"]
+            before_base = current_projection.get("base_snapshot")
+            before_plan = current_projection["plan"]
+            before_plan_fingerprint = current_projection["plan_fingerprint"]
+            before_rule_count = _plan_rule_count(before_plan)
+
+        source_changes = diff_source_documents(before_source, candidate_source)
+        effective_changes = diff_strategy_resolutions(
+            before_resolution,
+            candidate_resolution,
+        )
+        after_base = historical_revision.get("base_snapshot")
+        before_reference = before_source.get("base")
+        after_reference = candidate_source.get("base")
+        base_changes = {
+            "changed": (
+                before_reference != after_reference
+                or fingerprint_document(before_base or {})
+                != fingerprint_document(after_base or {})
+            ),
+            "before_reference": _copy_optional_mapping(before_reference),
+            "after_reference": _copy_optional_mapping(after_reference),
+            "before_fingerprint": fingerprint_document(before_base or {}),
+            "after_fingerprint": fingerprint_document(after_base or {}),
+            "embedded_snapshot_changed": fingerprint_document(before_base or {})
+            != fingerprint_document(after_base or {}),
+        }
+        local_override_changes = _filter_directive_changes(
+            source_changes,
+            policy="override",
+        )
+        explicit_ignore_changes = _filter_directive_changes(
+            source_changes,
+            policy="ignore",
+        )
+        candidate_plan = candidate_validation["plan"]
+        candidate_plan_fingerprint = candidate_validation["profile"][
+            "plan_fingerprint"
+        ]
+        plan_changes = {
+            "changed": before_plan_fingerprint != candidate_plan_fingerprint,
+            "before_fingerprint": before_plan_fingerprint,
+            "after_fingerprint": candidate_plan_fingerprint,
+            "before_rule_count": before_rule_count,
+            "after_rule_count": candidate_validation["rule_count"],
+            "rule_count_change": candidate_validation["rule_count"]
+            - before_rule_count,
+        }
+        directive_change_count = sum(
+            len(source_changes[name]) for name in ("added", "removed", "changed")
+        )
+        plans_metadata_equal = (
+            before_plan is not None
+            and _plans_equal_except_publication_metadata(
+                before_plan,
+                candidate_plan,
+            )
+        )
+        metadata_only = bool(
+            source_changes["metadata_changes"]
+            and directive_change_count == 0
+            and effective_changes["change_count"] == 0
+            and not base_changes["changed"]
+            and plans_metadata_equal
+        )
+        return {
+            "source_changes": source_changes,
+            "effective_changes": effective_changes,
+            "base_snapshot_changes": base_changes,
+            "local_override_changes": local_override_changes,
+            "explicit_ignore_changes": explicit_ignore_changes,
+            "generated_plan_changes": plan_changes,
+            "metadata_only": metadata_only,
+            "validation": {
+                "valid": not validation_errors,
+                "errors": validation_errors,
+            },
+            "historical_intent_preserved": not validation_errors,
+            "restore_publishes_new_revision": True,
+            "publication_activates_strategy": False,
+        }
 
     def _authoring_source_from_draft(
         self,
@@ -1183,14 +2773,30 @@ class StrategyProfileStore:
         return item
 
     def _next_profile_version(self, identifier: str) -> int:
-        path = _profile_path(self.profile_directory, identifier)
-        if not path.is_file() or path.is_symlink():
-            return 1
-        try:
-            publication = _load_publication(path, expected_id=identifier)
-            return _publication_version(publication) + 1
-        except (StrategyProfileError, TypeError, ValueError):
-            return 1
+        versions: list[int] = []
+        if self.profile_directory.exists():
+            records, errors = self._history_records_and_errors()
+            self._raise_lineage_history_error(identifier, errors)
+            versions.extend(
+                int(item["logical_version"])
+                for item in records.get(identifier, [])
+            )
+            candidates, candidate_errors = self._adoption_candidates()
+            self._raise_lineage_history_error(identifier, candidate_errors)
+            for (candidate_id, version), publications in candidates.items():
+                if candidate_id != identifier:
+                    continue
+                fingerprints = {
+                    fingerprint_document(item["publication"])
+                    for item in publications
+                }
+                if len(fingerprints) != 1:
+                    raise StrategyProfileConflictError(
+                        f"Strategy {identifier!r} has conflicting version "
+                        f"{version} lineage evidence"
+                    )
+                versions.append(version)
+        return max(versions, default=0) + 1
 
     def _normalize_draft(
         self,
@@ -1473,32 +3079,51 @@ def _profile_path(directory: Path, identifier: str) -> Path:
 
 
 def _load_publication(path: Path, *, expected_id: str) -> dict[str, Any]:
-    if not path.is_file():
+    if path.is_symlink() or not path.is_file():
         raise StrategyProfileError(f"Profile publication is missing: {path}")
-    try:
-        if path.stat().st_size > MAX_PROFILE_FILE_BYTES:
-            raise StrategyProfileError(
-                f"Profile publication exceeds {MAX_PROFILE_FILE_BYTES} bytes"
-            )
-        loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except (OSError, UnicodeError, yaml.YAMLError) as exc:
-        raise StrategyProfileError(f"Unable to read profile publication: {exc}") from exc
-    if not isinstance(loaded, dict):
+    loaded = _load_yaml_mapping_limited_profile(path, "Profile publication")
+    return _validate_publication_document(loaded, expected_id=expected_id)
+
+
+def _load_publication_unknown_id(
+    path: Path,
+    *,
+    verify_builder: bool = True,
+) -> dict[str, Any]:
+    loaded = _load_yaml_mapping_limited_profile(path, "Profile publication")
+    identifier = normalize_strategy_id(loaded.get("id"))
+    if identifier is None or identifier in _RESERVED_STRATEGY_IDS:
+        raise StrategyProfileError("Profile publication has an invalid Strategy id")
+    return _validate_publication_document(
+        loaded,
+        expected_id=identifier,
+        verify_builder=verify_builder,
+    )
+
+
+def _validate_publication_document(
+    loaded: Mapping[str, Any],
+    *,
+    expected_id: str,
+    verify_builder: bool = True,
+) -> dict[str, Any]:
+    if not isinstance(loaded, Mapping):
         raise StrategyProfileError("Profile publication must be an object")
-    schema_version = loaded.get("schema_version")
+    publication = _copy_mapping(loaded)
+    schema_version = publication.get("schema_version")
     if schema_version not in {
         STRATEGY_PROFILE_SCHEMA_VERSION,
         STRATEGY_PUBLICATION_SCHEMA_VERSION,
     }:
         raise StrategyProfileError("Unsupported profile publication schema")
-    identifier = normalize_strategy_id(loaded.get("id"))
+    identifier = normalize_strategy_id(publication.get("id"))
     if identifier != expected_id or identifier in _RESERVED_STRATEGY_IDS:
         raise StrategyProfileError("Profile publication id does not match its filename")
     if schema_version == STRATEGY_PUBLICATION_SCHEMA_VERSION:
-        return _load_authoring_publication(loaded, expected_id=expected_id)
+        return _load_authoring_publication(publication, expected_id=expected_id)
 
-    source = loaded.get("source")
-    plan = loaded.get("plan")
+    source = publication.get("source")
+    plan = publication.get("plan")
     if not isinstance(source, dict) or not isinstance(plan, dict):
         raise StrategyProfileError("Profile publication requires source and plan objects")
     meta = source.get("meta")
@@ -1510,19 +3135,19 @@ def _load_publication(path: Path, *, expected_id: str) -> dict[str, Any]:
         or source.get("run_profile") != "farm"
     ):
         raise StrategyProfileError("Profile publication contains an invalid Farm source")
-    source_fingerprint = str(loaded.get("source_fingerprint") or "")
-    plan_fingerprint = str(loaded.get("plan_fingerprint") or "")
+    source_fingerprint = str(publication.get("source_fingerprint") or "")
+    plan_fingerprint = str(publication.get("plan_fingerprint") or "")
     if source_fingerprint != _fingerprint(source):
         raise StrategyProfileError("Profile source fingerprint does not match")
     if plan_fingerprint != _fingerprint(plan):
         raise StrategyProfileError("Profile plan fingerprint does not match")
-    if build_strategy_yaml(source) != plan:
+    if verify_builder and build_strategy_yaml(source) != plan:
         raise StrategyProfileError("Profile plan is not the generated form of its source")
-    display_name = str(loaded.get("display_name") or "").strip()
-    published_at = str(loaded.get("published_at") or "").strip()
+    display_name = str(publication.get("display_name") or "").strip()
+    published_at = str(publication.get("published_at") or "").strip()
     if not display_name or len(display_name) > 80 or not published_at:
         raise StrategyProfileError("Profile publication metadata is incomplete")
-    return loaded
+    return publication
 
 
 def _load_authoring_publication(
@@ -1573,6 +3198,12 @@ def _load_authoring_publication(
         or not published_at
     ):
         raise StrategyProfileError("Profile publication metadata is incomplete")
+    origin = loaded.get("publication_origin")
+    audit_identity = loaded.get("audit_identity")
+    if origin is not None or audit_identity is not None:
+        if origin not in STRATEGY_PUBLICATION_ORIGINS:
+            raise StrategyProfileError("Profile publication origin is invalid")
+        _validate_audit_identity(audit_identity)
     return loaded
 
 
@@ -1584,6 +3215,394 @@ def _publication_version(publication: Mapping[str, Any]) -> int:
     if not isinstance(meta, Mapping):
         return 0
     return int(meta.get("version") or 0)
+
+
+def _positive_version(value: object, description: str) -> int:
+    if isinstance(value, bool):
+        raise StrategyProfileError(f"{description} must be a positive integer")
+    try:
+        version = int(value)
+    except (TypeError, ValueError) as exc:
+        raise StrategyProfileError(
+            f"{description} must be a positive integer"
+        ) from exc
+    if version < 1:
+        raise StrategyProfileError(f"{description} must be a positive integer")
+    return version
+
+
+def _new_audit_identity() -> dict[str, str]:
+    return {
+        "authority": _AUDIT_AUTHORITY,
+        "event_id": uuid.uuid4().hex,
+    }
+
+
+def _validate_audit_identity(value: object) -> dict[str, str]:
+    if not isinstance(value, Mapping):
+        raise StrategyProfileError("Strategy revision audit identity is invalid")
+    if set(value) != {"authority", "event_id"}:
+        raise StrategyProfileError("Strategy revision audit identity is invalid")
+    authority = str(value.get("authority") or "")
+    event_id = str(value.get("event_id") or "")
+    if authority != _AUDIT_AUTHORITY or not _AUDIT_EVENT_ID_RE.fullmatch(event_id):
+        raise StrategyProfileError("Strategy revision audit identity is invalid")
+    return {"authority": authority, "event_id": event_id}
+
+
+def _publication_projection(publication: Mapping[str, Any]) -> dict[str, Any]:
+    identifier = normalize_strategy_id(publication.get("id"))
+    if identifier is None:
+        raise StrategyProfileError("Profile publication has an invalid Strategy id")
+    validated = _validate_publication_document(
+        publication,
+        expected_id=identifier,
+        verify_builder=False,
+    )
+    if validated["schema_version"] == STRATEGY_PUBLICATION_SCHEMA_VERSION:
+        source = _copy_mapping(validated["source"])
+        base_snapshot = _copy_optional_mapping(validated.get("base_snapshot"))
+        resolution = _copy_mapping(validated["resolution"])
+    else:
+        try:
+            source = legacy_farm_source_to_strategy_source(
+                validated["source"],
+                display_name=validated["display_name"],
+            )
+            base_snapshot = None
+            resolution = resolve_strategy_source(source)
+        except StrategyAuthoringError as exc:
+            raise StrategyProfileError(
+                f"Unable to project legacy Strategy source: {exc}"
+            ) from exc
+    plan = _copy_mapping(validated["plan"])
+    return {
+        "source": source,
+        "base_snapshot": base_snapshot,
+        "resolution": resolution,
+        "plan": plan,
+        "source_fingerprint": str(validated["source_fingerprint"]),
+        "normalized_source_fingerprint": fingerprint_document(source),
+        "base_fingerprint": fingerprint_document(base_snapshot or {}),
+        "resolution_fingerprint": fingerprint_document(resolution),
+        "plan_fingerprint": str(validated["plan_fingerprint"]),
+        "rule_count": _plan_rule_count(plan),
+    }
+
+
+def _revision_envelope_from_publication(
+    publication: Mapping[str, Any],
+    *,
+    origin: str,
+    audit_identity: Mapping[str, Any],
+) -> dict[str, Any]:
+    if origin not in STRATEGY_PUBLICATION_ORIGINS:
+        raise StrategyProfileError("Invalid Strategy publication origin")
+    identity = _validate_audit_identity(audit_identity)
+    projection = _publication_projection(publication)
+    identifier = str(publication["id"])
+    version = _publication_version(publication)
+    if version < 1:
+        raise StrategyProfileError("Strategy publication has no logical version")
+    if _serialized_yaml_size(publication) > MAX_PROFILE_FILE_BYTES:
+        raise StrategyProfileError(
+            f"Profile publication exceeds {MAX_PROFILE_FILE_BYTES} bytes"
+        )
+    envelope = {
+        "schema_version": STRATEGY_REVISION_SCHEMA_VERSION,
+        "kind": "strategy_revision",
+        "id": identifier,
+        "display_name": str(publication["display_name"]),
+        "logical_version": version,
+        "published_at": str(publication["published_at"]),
+        "publication_origin": origin,
+        "audit_identity": identity,
+        "publication_schema_version": int(publication["schema_version"]),
+        "publication_fingerprint": fingerprint_document(publication),
+        "source_fingerprint": projection["source_fingerprint"],
+        "normalized_source_fingerprint": projection[
+            "normalized_source_fingerprint"
+        ],
+        "base_fingerprint": projection["base_fingerprint"],
+        "resolution_fingerprint": projection["resolution_fingerprint"],
+        "plan_fingerprint": projection["plan_fingerprint"],
+        "rule_count": projection["rule_count"],
+        "source": projection["source"],
+        "base_snapshot": projection["base_snapshot"],
+        "resolution": projection["resolution"],
+        "plan": projection["plan"],
+        "publication": _copy_mapping(publication),
+    }
+    if _serialized_yaml_size(envelope) > MAX_PROFILE_FILE_BYTES:
+        raise StrategyProfileError(
+            f"Strategy revision exceeds {MAX_PROFILE_FILE_BYTES} bytes"
+        )
+    return envelope
+
+
+def _validate_revision_envelope(
+    raw: Mapping[str, Any],
+    *,
+    expected_id: str,
+    expected_version: int,
+) -> dict[str, Any]:
+    revision = _copy_mapping(raw)
+    if revision.get("schema_version") != STRATEGY_REVISION_SCHEMA_VERSION:
+        raise StrategyProfileError("Unsupported Strategy revision schema")
+    if revision.get("kind") != "strategy_revision":
+        raise StrategyProfileError("Stored Strategy revision has the wrong kind")
+    if revision.get("id") != expected_id:
+        raise StrategyProfileError("Stored Strategy revision id is invalid")
+    if revision.get("logical_version") != expected_version:
+        raise StrategyProfileError(
+            "Stored Strategy logical version does not match its filename"
+        )
+    origin = revision.get("publication_origin")
+    if origin not in STRATEGY_PUBLICATION_ORIGINS:
+        raise StrategyProfileError("Stored Strategy publication origin is invalid")
+    identity = _validate_audit_identity(revision.get("audit_identity"))
+    publication = revision.get("publication")
+    if not isinstance(publication, Mapping):
+        raise StrategyProfileError("Strategy revision lacks its publication")
+    projection = _publication_projection(publication)
+    if publication.get("id") != expected_id:
+        raise StrategyProfileError("Revision publication identity is invalid")
+    if _publication_version(publication) != expected_version:
+        raise StrategyProfileError("Revision publication version is invalid")
+    if revision.get("display_name") != publication.get("display_name"):
+        raise StrategyProfileError("Revision display name disagrees with publication")
+    if revision.get("published_at") != publication.get("published_at"):
+        raise StrategyProfileError("Revision timestamp disagrees with publication")
+    if revision.get("publication_schema_version") != publication.get(
+        "schema_version"
+    ):
+        raise StrategyProfileError("Revision publication schema is inconsistent")
+    expected_fields = {
+        "publication_fingerprint": fingerprint_document(publication),
+        "source_fingerprint": projection["source_fingerprint"],
+        "normalized_source_fingerprint": projection[
+            "normalized_source_fingerprint"
+        ],
+        "base_fingerprint": projection["base_fingerprint"],
+        "resolution_fingerprint": projection["resolution_fingerprint"],
+        "plan_fingerprint": projection["plan_fingerprint"],
+        "rule_count": projection["rule_count"],
+        "source": projection["source"],
+        "base_snapshot": projection["base_snapshot"],
+        "resolution": projection["resolution"],
+        "plan": projection["plan"],
+    }
+    for field, expected in expected_fields.items():
+        if revision.get(field) != expected:
+            raise StrategyProfileError(
+                f"Strategy revision {field} disagrees with its publication"
+            )
+    publication_origin = publication.get("publication_origin")
+    publication_identity = publication.get("audit_identity")
+    if (
+        origin != "conservative_adoption"
+        and publication_origin is not None
+        and publication_origin != origin
+    ):
+        raise StrategyProfileError(
+            "Revision origin disagrees with its latest-compatible publication"
+        )
+    if (
+        origin != "conservative_adoption"
+        and publication_identity is not None
+        and publication_identity != identity
+    ):
+        raise StrategyProfileError(
+            "Revision audit identity disagrees with its publication"
+        )
+    return revision
+
+
+def _current_revision_validation(revision: Mapping[str, Any]) -> dict[str, Any]:
+    errors: list[dict[str, str]] = []
+    warnings: list[str] = []
+    try:
+        source = normalize_strategy_source(revision.get("source"))
+        base_snapshot = revision.get("base_snapshot")
+        resolution = resolve_strategy_source(source, base_snapshot)
+        if resolution != revision.get("resolution"):
+            raise StrategyProfileError(
+                "stored resolution differs from current resolver output"
+            )
+        compact = farm_source_from_resolution(source, resolution)
+        plan = build_strategy_yaml(compact)
+        if plan != revision.get("plan"):
+            raise StrategyProfileError(
+                "stored plan differs from current trusted builder output"
+            )
+    except Exception as exc:
+        errors.append({"code": "current_validation", "message": str(exc)})
+    return {"valid": not errors, "errors": errors, "warnings": warnings}
+
+
+def _unvalidated_restore_candidate(
+    revision: Mapping[str, Any],
+    candidate_source: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Project comparison data when current code cannot build a restore."""
+
+    source = _copy_mapping(candidate_source)
+    return {
+        "source": source,
+        "base_snapshot": _copy_optional_mapping(revision.get("base_snapshot")),
+        "resolution": _copy_mapping(revision.get("resolution")),
+        "plan": _copy_mapping(revision.get("plan")),
+        "profile": {
+            "source_fingerprint": fingerprint_document(source),
+            "base_fingerprint": str(revision.get("base_fingerprint") or ""),
+            "resolution_fingerprint": str(
+                revision.get("resolution_fingerprint") or ""
+            ),
+            "plan_fingerprint": str(revision.get("plan_fingerprint") or ""),
+        },
+        "rule_count": int(revision.get("rule_count") or 0),
+    }
+
+
+def _validate_transaction_record(
+    raw: Mapping[str, Any],
+    *,
+    expected_id: str,
+) -> dict[str, Any]:
+    transaction = _copy_mapping(raw)
+    if transaction.get("schema_version") != STRATEGY_TRANSACTION_SCHEMA_VERSION:
+        raise StrategyProfileError("Unsupported Strategy transaction schema")
+    if transaction.get("kind") != "strategy_publication_transaction":
+        raise StrategyProfileError("Strategy transaction has the wrong kind")
+    if transaction.get("id") != expected_id:
+        raise StrategyProfileError("Strategy transaction identity is invalid")
+    _positive_version(transaction.get("logical_version"), "logical_version")
+    for field in ("publication_fingerprint", "revision_fingerprint"):
+        if not _is_fingerprint(transaction.get(field)):
+            raise StrategyProfileError(
+                f"Strategy transaction {field} is invalid"
+            )
+    had_previous = transaction.get("had_previous_latest")
+    previous = transaction.get("previous_publication_fingerprint")
+    if not isinstance(had_previous, bool):
+        raise StrategyProfileError("Strategy transaction previous state is invalid")
+    if had_previous and not _is_fingerprint(previous):
+        raise StrategyProfileError(
+            "Strategy transaction previous fingerprint is invalid"
+        )
+    if not had_previous and previous is not None:
+        raise StrategyProfileError(
+            "Strategy transaction unexpectedly records a previous publication"
+        )
+    if not str(transaction.get("created_at") or "").strip():
+        raise StrategyProfileError("Strategy transaction timestamp is missing")
+    return transaction
+
+
+def _plan_rule_count(plan: object) -> int:
+    if not isinstance(plan, Mapping):
+        return 0
+    rules = plan.get("rules")
+    return len(rules) if isinstance(rules, list) else 0
+
+
+def _plans_equal_except_publication_metadata(
+    before: Mapping[str, Any],
+    after: Mapping[str, Any],
+) -> bool:
+    before_copy = _copy_mapping(before)
+    after_copy = _copy_mapping(after)
+    for plan in (before_copy, after_copy):
+        meta = plan.get("meta")
+        if isinstance(meta, dict):
+            meta.pop("version", None)
+    return before_copy == after_copy
+
+
+def _filter_directive_changes(
+    source_changes: Mapping[str, Any],
+    *,
+    policy: str,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {"added": [], "removed": [], "changed": []}
+
+    def applies(value: object) -> bool:
+        if not isinstance(value, Mapping):
+            return False
+        directive_policy = str(value.get("policy") or "")
+        return (
+            directive_policy == "ignore"
+            if policy == "ignore"
+            else bool(directive_policy and directive_policy != "ignore")
+        )
+
+    for category in result:
+        for item in source_changes.get(category, []):
+            if applies(item.get("before")) or applies(item.get("after")):
+                result[category].append(_copy_mapping(item))
+    result["change_count"] = sum(len(result[name]) for name in result)
+    return result
+
+
+def _copy_optional_mapping(value: object) -> Optional[dict[str, Any]]:
+    return _copy_mapping(value) if isinstance(value, Mapping) else None
+
+
+def _is_fingerprint(value: object) -> bool:
+    return bool(re.fullmatch(r"[0-9a-f]{64}", str(value or "")))
+
+
+def _serialized_yaml_size(value: Mapping[str, Any]) -> int:
+    return len(
+        yaml.safe_dump(
+            dict(value),
+            sort_keys=False,
+            allow_unicode=True,
+        ).encode("utf-8")
+    )
+
+
+def _deduplicate_catalog_errors(
+    errors: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    result: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in errors:
+        normalized = (str(item.get("id") or "history"), str(item.get("error") or ""))
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append({"id": normalized[0], "error": normalized[1]})
+    return result
+
+
+def _history_error_applies(identifier: str, error_id: str) -> bool:
+    if error_id in {"history", "transactions", "retired"}:
+        return True
+    if error_id.startswith(("history/", "transactions/", "retired/")):
+        return True
+    return error_id == identifier or error_id.startswith(f"{identifier}@")
+
+
+def _load_yaml_mapping_limited_profile(
+    path: Path,
+    description: str,
+) -> dict[str, Any]:
+    try:
+        if path.is_symlink() or not path.is_file():
+            raise StrategyProfileError(f"{description} is not a regular file")
+        if path.stat().st_size > MAX_PROFILE_FILE_BYTES:
+            raise StrategyProfileError(
+                f"{description} exceeds {MAX_PROFILE_FILE_BYTES} bytes"
+            )
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except StrategyProfileError:
+        raise
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        raise StrategyProfileError(f"Unable to read {description}: {exc}") from exc
+    if not isinstance(loaded, dict):
+        raise StrategyProfileError(f"{description} must be an object")
+    return loaded
 
 
 def _load_yaml_mapping(path: Path, description: str) -> dict[str, Any]:
@@ -1715,7 +3734,10 @@ __all__ = [
     "LEGACY_STRATEGY_ALIASES",
     "STRATEGY_AUTHORING_API_SCHEMA_VERSION",
     "STRATEGY_AUTHORING_OPERATIONS",
+    "STRATEGY_HISTORY_API_SCHEMA_VERSION",
     "STRATEGY_PROFILE_DIRECTORY_ENVIRONMENT_VARIABLE",
+    "STRATEGY_PUBLICATION_ORIGINS",
+    "STRATEGY_REVISION_SCHEMA_VERSION",
     "StrategyProfileConflictError",
     "StrategyProfileError",
     "StrategyProfileStore",

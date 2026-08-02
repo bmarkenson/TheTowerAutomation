@@ -423,25 +423,21 @@ stages:
     fresh runtime-owned status, revision-22 capability, and separate WPF banner
     are implemented with focused authority/runtime/control-surface/native
     regression coverage.
-  - [ ] Retain immutable Strategy publication history and add safe fallback.
-    - Append every validated publication as a durable revision containing its
-      sparse source, pinned Base snapshot, resolved values/provenance, generated
-      plan, fingerprints, version, timestamp, and audit identity; do not merely
-      increment the version while replacing the only recoverable file.
-    - Preserve the current latest-Strategy catalog and older-client endpoints,
-      while exposing ordered revision history and server-computed semantic diffs
-      without returning expanded generated plans.
-    - Restore a proven historical setup only by reviewing, validating, and
-      publishing it as a new latest revision under optimistic concurrency. Do
-      not mutate or delete history, change the selected Strategy, or activate a
-      restored revision automatically.
-    - Offer **Clone from revision** as an optional experimental branch, not as
-      the required backup or rollback mechanism. Conservatively adopt each
-      existing custom publication as its initial retained revision.
-    - Cover restart/reopen durability, embedded-Base independence, stale-write
-      conflicts, failed publication atomicity, legacy schema-1 migration,
-      rollback-as-new semantic fidelity, older-client compatibility, and
-      publication/activation separation.
+  - [x] Retain immutable Strategy publication history and add safe fallback.
+    Every validated custom publication is now an append-only, complete retained
+    revision plus the unchanged latest-file compatibility facade. A journaled,
+    directory-synced transaction has deterministic reopen recovery and prevents
+    phantom/duplicate revisions while preserving the former latest on
+    pre-commit failure. History owns lineage/version allocation across
+    retirement; schema-1/schema-2 latest files and unambiguous retirement
+    evidence are adopted conservatively without rewriting the source evidence.
+    Revision 23 adds redacted newest-first history, current-code validation,
+    server-computed semantic comparisons, and fingerprint-bound restore-as-new
+    under `strategy_revision_history_v1`. WPF exposes active and retired
+    lineages, review, confirmation, conflicts, and catalog refresh without
+    file paths, expanded plans, deletion, selection, activation, restart,
+    Pause, or control mutation. Optional clone-from-revision was deliberately
+    not required for the safe restore path.
   - [x] Add discoverable custom Strategy cloning and display-name renaming plus
     recoverable deletion/retirement. Stable IDs and immutable bundled templates
     remain protected; retirement requires the opened source fingerprint,

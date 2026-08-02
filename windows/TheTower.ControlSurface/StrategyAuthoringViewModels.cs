@@ -852,3 +852,114 @@ public static class StrategyAuthoringReviewFormatter
         }
     }
 }
+
+public static class StrategyHistoryReviewFormatter
+{
+    public static string FormatRevision(StrategyRevisionSummary revision)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine($"{revision.DisplayName} ({revision.StrategyId})");
+        builder.AppendLine(
+            $"Logical version: {revision.LogicalVersion} — {revision.Status.Replace('_', ' ')}");
+        builder.AppendLine($"Published: {revision.PublishedAt}");
+        builder.AppendLine($"Family / Tier: {revision.Family} / {revision.Tier}");
+        builder.AppendLine($"Pinned Base: {revision.BaseLabel}");
+        builder.AppendLine($"Origin: {revision.PublicationOrigin}");
+        builder.AppendLine(
+            $"Audit identity: {revision.AuditIdentity.Authority} / {revision.AuditIdentity.EventId}");
+        builder.AppendLine(
+            $"Schema: {revision.PublicationSchemaVersion}; generated rules: {revision.RuleCount}");
+        builder.AppendLine($"Current validation: {revision.ValidationLabel}");
+        builder.AppendLine();
+        builder.AppendLine("Fingerprints");
+        builder.AppendLine($"  Source: {revision.SourceFingerprint}");
+        builder.AppendLine($"  Normalized source: {revision.NormalizedSourceFingerprint}");
+        builder.AppendLine($"  Base: {revision.BaseFingerprint}");
+        builder.AppendLine($"  Resolution: {revision.ResolutionFingerprint}");
+        builder.AppendLine($"  Plan: {revision.PlanFingerprint}");
+        builder.AppendLine($"  Publication: {revision.PublicationFingerprint}");
+        builder.AppendLine($"  Revision: {revision.RevisionFingerprint}");
+        if (revision.ValidationErrors.Count > 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine("Validation errors:");
+            foreach (var error in revision.ValidationErrors)
+            {
+                builder.AppendLine($"  {error.Message}");
+            }
+        }
+        if (revision.Warnings.Count > 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine("Warnings:");
+            foreach (var warning in revision.Warnings)
+            {
+                builder.AppendLine($"  {warning}");
+            }
+        }
+        return builder.ToString().TrimEnd();
+    }
+
+    public static string FormatComparison(
+        StrategyRevisionSummary revision,
+        StrategyAuthoringMutationResponse response)
+    {
+        var comparison = response.Comparison
+            ?? throw new InvalidOperationException(
+                "Linux did not return a semantic revision comparison.");
+        var builder = new StringBuilder();
+        builder.AppendLine("RESTORE-AS-NEW REVIEW");
+        builder.AppendLine();
+        builder.AppendLine(
+            $"Selected immutable version {revision.LogicalVersion}; proposed new latest version {response.NextLogicalVersion}.");
+        builder.AppendLine(
+            $"Source directives: {comparison.SourceChanges.Added.Count} added, "
+            + $"{comparison.SourceChanges.Removed.Count} removed, "
+            + $"{comparison.SourceChanges.Changed.Count} changed.");
+        AppendNames(builder, "Added", comparison.SourceChanges.Added);
+        AppendNames(builder, "Removed", comparison.SourceChanges.Removed);
+        AppendNames(builder, "Changed", comparison.SourceChanges.Changed);
+        builder.AppendLine(
+            $"Inherited/effective values changed: {comparison.EffectiveChanges.ChangeCount}; "
+            + $"provenance-only: {comparison.EffectiveChanges.ProvenanceChanged.Count}.");
+        builder.AppendLine(
+            $"Base pin or embedded snapshot changed: {comparison.BaseSnapshotChanges.Changed} "
+            + $"({FormatBase(comparison.BaseSnapshotChanges.BeforeReference)} → "
+            + $"{FormatBase(comparison.BaseSnapshotChanges.AfterReference)}).");
+        builder.AppendLine(
+            $"Local override changes: {comparison.LocalOverrideChanges.ChangeCount}; "
+            + $"explicit Ignore changes: {comparison.ExplicitIgnoreChanges.ChangeCount}.");
+        builder.AppendLine(
+            $"Generated plan fingerprint changed: {comparison.GeneratedPlanChanges.Changed}; "
+            + $"rules {comparison.GeneratedPlanChanges.BeforeRuleCount} → "
+            + $"{comparison.GeneratedPlanChanges.AfterRuleCount} "
+            + $"({comparison.GeneratedPlanChanges.RuleCountChange:+#;-#;0}).");
+        builder.AppendLine($"Metadata-only semantic change: {comparison.MetadataOnly}.");
+        builder.AppendLine(
+            comparison.Validation.Valid
+                ? "Current trusted validation: passed."
+                : "Current trusted validation failed: "
+                    + string.Join(
+                        "; ",
+                        comparison.Validation.Errors.Select(item => item.Message)));
+        builder.AppendLine();
+        builder.AppendLine(
+            "Confirming publishes a new immutable latest revision. It does not mutate the selected revision, select or activate the Strategy, restart automation, or alter Pause/control state.");
+        return builder.ToString().TrimEnd();
+    }
+
+    private static void AppendNames(
+        StringBuilder builder,
+        string label,
+        IEnumerable<AuthoringDiffItem> items)
+    {
+        var names = items.Select(item => item.DisplayName).ToArray();
+        if (names.Length > 0)
+        {
+            builder.AppendLine($"  {label}: {string.Join(", ", names)}");
+        }
+    }
+
+    private static string FormatBase(StrategyBaseReference? reference) =>
+        reference is null ? "No Base" : $"{reference.Id}@{reference.Revision}";
+}

@@ -161,6 +161,9 @@ def test_authoring_catalog_separates_bases_strategies_and_registry(tmp_path):
         "publish_strategy",
         "preview_rebase",
         "retire_strategy",
+        "compare_strategy_revision",
+        "preview_restore_strategy",
+        "publish_restore_strategy",
     ]
     assert [state["id"] for state in catalog["capabilities"]["base_source_states"]] == [
         "not_included",
@@ -745,6 +748,187 @@ def test_base_catalog_and_publication_reject_symlink_storage(tmp_path):
     assert error.value.status == 409
 
 
+def test_history_api_comparison_restore_conflicts_audit_and_redaction(tmp_path):
+    service = _service(tmp_path)
+    service.apply_strategy_authoring(
+        {
+            "operation": "publish_base",
+            "source": _base_source(_full_settings()),
+        }
+    )
+    first = service.apply_strategy_authoring(
+        {"operation": "publish_strategy", "source": _strategy_source()}
+    )
+    changed = copy.deepcopy(first["source"])
+    changed["settings"]["target_priority"] = {
+        "policy": "enforce",
+        "value": {"preset": "farm_t18"},
+    }
+    second = service.apply_strategy_authoring(
+        {
+            "operation": "publish_strategy",
+            "source": changed,
+            "expected_source_fingerprint": first["profile"][
+                "source_fingerprint"
+            ],
+        }
+    )
+    history = service.strategy_history("farm_authored")
+    selected = history["lineages"][0]["revisions"][1]
+    detail = service.strategy_revision("farm_authored", 1)
+
+    assert [item["logical_version"] for item in history["lineages"][0]["revisions"]] == [2, 1]
+    assert selected["publication_origin"] == "authoring_publication"
+    assert detail["revision"]["logical_version"] == 1
+    _assert_no_expanded_plan(history)
+    _assert_no_expanded_plan(detail)
+
+    preview = service.apply_strategy_authoring(
+        {
+            "operation": "preview_restore_strategy",
+            "strategy_id": "farm_authored",
+            "logical_version": 1,
+            "expected_revision_fingerprint": selected[
+                "revision_fingerprint"
+            ],
+            "expected_latest_source_fingerprint": second["profile"][
+                "source_fingerprint"
+            ],
+        }
+    )
+    assert preview["published"] is False
+    assert preview["next_logical_version"] == 3
+    assert preview["comparison"]["source_changes"]["changed"]
+    assert preview["publication_activates_strategy"] is False
+    _assert_no_expanded_plan(preview)
+
+    with pytest.raises(ControlSurfaceRequestError) as stale:
+        service.apply_strategy_authoring(
+            {
+                "operation": "publish_restore_strategy",
+                "strategy_id": "farm_authored",
+                "logical_version": 1,
+                "expected_revision_fingerprint": selected[
+                    "revision_fingerprint"
+                ],
+                "expected_latest_source_fingerprint": "stale",
+                "reviewed_restore_fingerprint": preview[
+                    "reviewed_restore_fingerprint"
+                ],
+            }
+        )
+    assert stale.value.status == 409
+
+    restored = service.apply_strategy_authoring(
+        {
+            "operation": "publish_restore_strategy",
+            "strategy_id": "farm_authored",
+            "logical_version": 1,
+            "expected_revision_fingerprint": selected[
+                "revision_fingerprint"
+            ],
+            "expected_latest_source_fingerprint": second["profile"][
+                "source_fingerprint"
+            ],
+            "reviewed_restore_fingerprint": preview[
+                "reviewed_restore_fingerprint"
+            ],
+        }
+    )
+
+    assert restored["restored"] is True
+    assert restored["profile"]["version"] == 3
+    assert restored["history"]["lineages"][0]["revisions"][0][
+        "logical_version"
+    ] == 3
+    assert restored["history"]["lineages"][0]["revisions"][0][
+        "publication_origin"
+    ] == "restore_as_new"
+    assert service.control_store.status()["strategy"] is None
+    _assert_no_expanded_plan(restored)
+    audit = (tmp_path / "logs" / "actions.log").read_text(encoding="utf-8")
+    assert "Accepted reviewed restore for Strategy farm_authored" in audit
+    assert "Published restored Strategy farm_authored as new latest version 3" in audit
+
+
+def test_history_http_get_routes_return_summaries_without_plans(tmp_path):
+    service = _service(tmp_path)
+    service.apply_strategy_authoring(
+        {
+            "operation": "publish_base",
+            "source": _base_source(_full_settings()),
+        }
+    )
+    service.apply_strategy_authoring(
+        {"operation": "publish_strategy", "source": _strategy_source()}
+    )
+    server = ControlSurfaceHTTPServer(
+        ("127.0.0.1", 0),
+        service=service,
+        static_dir=STATIC_DIR,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    connection = http.client.HTTPConnection(
+        "127.0.0.1",
+        server.server_port,
+        timeout=5,
+    )
+    try:
+        for path in (
+            "/api/v1/strategy-authoring/history",
+            "/api/v1/strategy-authoring/history/farm_authored",
+            "/api/v1/strategy-authoring/history/farm_authored/1",
+        ):
+            connection.request("GET", path)
+            response = connection.getresponse()
+            payload = json.loads(response.read())
+            assert response.status == 200
+            _assert_no_expanded_plan(payload)
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+
+def test_adoption_conflict_is_preserved_reported_and_audited(tmp_path):
+    profile_directory = tmp_path / "profiles"
+    retired = profile_directory / "retired"
+    retired.mkdir(parents=True)
+    first_path = _write_schema_one_profile(tmp_path / "seed")
+    first = _yaml(first_path)
+    second = copy.deepcopy(first)
+    second["source"]["loadout"]["damage_slider"] = {
+        "mode": "enforce",
+        "value": "1E-18%",
+    }
+    second["plan"] = build_strategy_yaml(second["source"])
+    second["source_fingerprint"] = _fingerprint(second["source"])
+    second["plan_fingerprint"] = _fingerprint(second["plan"])
+    (retired / "first.retired.yaml").write_text(
+        yaml.safe_dump(first, sort_keys=False),
+        encoding="utf-8",
+    )
+    (retired / "second.retired.yaml").write_text(
+        yaml.safe_dump(second, sort_keys=False),
+        encoding="utf-8",
+    )
+    service = ControlSurfaceService(
+        repository_root=tmp_path,
+        strategy_profile_dir=profile_directory,
+    )
+
+    history = service.strategy_history()
+
+    assert history["lineages"] == []
+    assert any("conflicting retained evidence" in item["error"] for item in history["errors"])
+    audit = (tmp_path / "logs" / "actions.log").read_text(encoding="utf-8")
+    assert "Strategy history adoption conflict preserved" in audit
+    assert (retired / "first.retired.yaml").is_file()
+    assert (retired / "second.retired.yaml").is_file()
+
+
 def test_authoring_http_status_codes_auth_compatibility_and_no_plan(tmp_path):
     service = _service(tmp_path)
     server = ControlSurfaceHTTPServer(
@@ -792,7 +976,8 @@ def test_authoring_http_status_codes_auth_compatibility_and_no_plan(tmp_path):
 
         status, server_status = request("GET", "/api/v1/status")
         assert status == 200
-        assert server_status["server_revision"] == CONTROL_SURFACE_REVISION == 22
+        assert server_status["server_revision"] == CONTROL_SURFACE_REVISION == 23
+        assert "strategy_revision_history_v1" in CONTROL_SURFACE_CAPABILITIES
         assert (
             "strategy_authoring_profile_lifecycle_v1"
             in CONTROL_SURFACE_CAPABILITIES

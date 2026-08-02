@@ -37,6 +37,42 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-02 immutable Strategy history and safe fallback
+
+- Every validated custom Strategy publication now appends a complete immutable
+  logical revision while atomically advancing the fixed latest-file runtime and
+  older-client facade. A fingerprint-bound journal, immutable stages, history
+  and latest directory syncs, explicit commit point, pre-commit rollback, and
+  deterministic reopen reconciliation prevent truncation, phantom revisions,
+  duplicate retry history, and post-commit cleanup ambiguity. History remains
+  authoritative for version allocation after retirement, so a stable ID cannot
+  silently restart a different lineage.
+- Exact schema-1 and schema-2 latest publications and unambiguous retirement
+  evidence are adopted idempotently without rewriting source evidence or
+  inferring inheritance. Malformed, duplicate, conflicting, misnumbered,
+  symlinked, or unknown history/transaction evidence is preserved and reported
+  while a separately valid latest facade remains runtime-loadable.
+- Revision 23 adds `strategy_revision_history_v1` while retaining every older
+  endpoint and capability. New history endpoints return newest-first review
+  summaries and individual redacted revisions; Linux owns semantic source,
+  effective/provenance, Base snapshot, override/Ignore, generated-plan/rule-
+  count, metadata, and current-validation comparisons. Expanded plans and
+  filesystem paths never enter API responses.
+- WPF adds a discoverable **History** window for active and retired custom
+  lineages. Fingerprint-bound restore review uses the retained embedded Base and
+  current trusted builder; explicit confirmation publishes historical intent as
+  the next immutable revision. Preview/conflict writes nothing, the open draft
+  is preserved, and publication never selects or activates a Strategy, restarts
+  automation, changes Pause, or mutates runtime control.
+- Focused Strategy store, authoring API, control-surface, and WPF coverage passed
+  all 129 tests; the complete Python suite passed all 1,168 tests; and the
+  portable native authoring suite passed all 53 tests. Linux cross-publishing
+  produced both standalone Windows executables, with only the known read-only
+  NuGet vulnerability-cache warnings, and `git diff --check` passed. No live
+  process, control file, ADB target, emulator, or battle was inspected or
+  changed, and the untracked operator-owned `playerInfo.dat` was not modified or
+  staged.
+
 ### 2026-08-02 running-battle Strategy Action Gate
 
 - The runtime now owns one typed four-class action-authority matrix for passive

@@ -253,7 +253,8 @@ def test_wpf_rebase_and_publish_reviews_keep_activation_separate():
     assert "Publishing will not activate this Strategy" in view_models
     assert "Bases cannot be activated" in view_models
     assert '"/api/v1/strategy-authoring"' in api_client
-    assert "MinimumServerRevision = 22" in compatibility
+    assert "MinimumServerRevision = 23" in compatibility
+    assert '"strategy_revision_history_v1"' in compatibility
     assert '"strategy_authoring_profile_lifecycle_v1"' in compatibility
     assert '"strategy_authoring_specialized_editors_v1"' in compatibility
     assert '"strategy_authoring_v1"' in compatibility
@@ -280,3 +281,51 @@ def test_wpf_custom_strategy_rename_and_delete_are_explicit_and_guarded():
     assert 'JsonPropertyName("retired")' in models
     assert 'JsonPropertyName("retirement")' in models
     assert 'JsonPropertyName("recoverable")' in models
+
+
+def test_wpf_history_review_restore_conflict_and_retired_lineage_workflow():
+    authoring_xaml = _text("StrategyProfilesWindow.xaml")
+    authoring_code = _text("StrategyProfilesWindow.xaml.cs")
+    history_xaml = _text("StrategyHistoryWindow.xaml")
+    history_code = _text("StrategyHistoryWindow.xaml.cs")
+    api_client = _text("ApiClient.cs")
+    models = _text("Models.cs")
+    view_models = _text("StrategyAuthoringViewModels.cs")
+
+    assert 'x:Name="HistoryButton"' in authoring_xaml
+    assert 'Content="History..."' in authoring_xaml
+    assert "new StrategyHistoryWindow(_api)" in authoring_code
+    assert "history.StrategyRestored +=" in authoring_code
+    assert "await LoadCatalogAsync(selectedKind, selectedId)" in authoring_code
+    assert "Runtime selection and activation are unchanged" in authoring_code
+
+    assert 'Text="Immutable Strategy History"' in history_xaml
+    assert 'x:Name="LineagesList"' in history_xaml
+    assert 'x:Name="RevisionsList"' in history_xaml
+    assert 'Content="Compare with latest"' in history_xaml
+    assert 'Content="Restore as new revision..."' in history_xaml
+    assert "Retired lineage" in models
+    assert 'operation = "publish_restore_strategy"' in history_code
+    assert '"preview_restore_strategy"' in history_code
+    assert '"compare_strategy_revision"' in history_code
+    assert "expected_revision_fingerprint = _revision.RevisionFingerprint" in history_code
+    assert "expected_latest_source_fingerprint = _lineage.LatestSourceFingerprint" in history_code
+    assert "reviewed_restore_fingerprint = _review.ReviewedRestoreFingerprint" in history_code
+    assert "RestoreButton.IsEnabled = false" in history_code
+    assert "Any open Strategy draft remains unchanged" in history_code
+    assert "will not select or activate the Strategy" in history_code
+    assert "StrategyHistoryReviewFormatter.FormatComparison" in history_code
+    assert "Generated plan fingerprint changed" in view_models
+    assert "explicit Ignore changes" in view_models
+    assert "Base pin or embedded snapshot changed" in view_models
+    assert "Path" not in history_code
+    assert "Delete" not in history_xaml
+
+    assert '"/api/v1/strategy-authoring/history"' in api_client
+    assert "GetStrategyRevisionAsync" in api_client
+    assert 'JsonPropertyName("revision_fingerprint")' in models
+    assert 'JsonPropertyName("publication_origin")' in models
+    assert 'JsonPropertyName("current_validation_valid")' in models
+    assert 'JsonPropertyName("comparison")' in models
+    assert 'JsonPropertyName("generated_plan_changes")' in models
+    assert 'JsonPropertyName("expanded_plan_exposed")' in models

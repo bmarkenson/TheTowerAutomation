@@ -280,15 +280,15 @@ are displayed under the button, are consumed by the next applicable run, and
 are cleared if the selected strategy changes.
 
 **Strategy profiles...** opens the shared Strategy Authoring shell. Linux
-server revision 22 preserves `strategy_authoring_v1` and
-`strategy_authoring_specialized_editors_v1`, and adds
-`strategy_authoring_profile_lifecycle_v1` plus `strategy_action_gate_v1`. It
-provides separate **Bases** and **Strategies** catalogs while retaining the
-older profile endpoint and capabilities for older clients. A Base is a sparse
-reusable component and is never activatable. Editing one publishes the next
-immutable revision;
-Strategies already pinned to an earlier revision continue to use their
-embedded snapshot.
+server revision 23 preserves `strategy_authoring_v1`,
+`strategy_authoring_specialized_editors_v1`,
+`strategy_authoring_profile_lifecycle_v1`, `strategy_action_gate_v1`, and every
+older capability, and adds `strategy_revision_history_v1`. It provides separate
+**Bases** and **Strategies** catalogs plus immutable custom-Strategy History
+while retaining the older latest-only profile endpoint for older clients. A
+Base is a sparse reusable component and is never activatable. Editing one
+publishes the next immutable revision. Strategies already pinned to an earlier
+revision continue to use their embedded snapshot.
 
 Settings are grouped by the server registry. **Show active only** keeps the
 normal view compact, while **Show all settings** exposes omitted settings.
@@ -347,12 +347,33 @@ and must reload instead of overwriting newer work.
 
 Publishing never selects or activates a Strategy. After publication, use the
 normal strategy dropdown plus **Use next battle**, **Switch this battle**, or a
-managed Start. Existing schema-1 profiles are converted conservatively only in
-memory when opened and are not rewritten unless explicitly published. The
-future profile-local Module/slot, ordered Target Priority, and relational Orb
-Distance definitions are a later phase; shared presets remain available.
-Tournament behavior, generated YAML rules, executor actions, runtime strategy
-gates, and activation behavior remain outside this editor.
+managed Start. Existing schema-1 and schema-2 custom publications are adopted
+conservatively into immutable history without rewriting their latest facade;
+schema-1 authoring conversion still does not infer inheritance. The future
+profile-local Module/slot, ordered Target Priority, and relational Orb Distance
+definitions are a later phase; shared presets remain available. Tournament
+behavior, generated YAML rules, executor actions, runtime strategy gates, and
+activation behavior remain outside this editor.
+
+**History** opens a separate custom-Strategy lineage window. Active and retired
+lineages remain discoverable, with immutable versions newest first. The list
+shows publication time, current/historical/retired state, pinned Base, family
+and Tier, server-owned publication origin and audit identity, rule count,
+source/Base/resolution/plan/publication/revision fingerprints, and whether the
+retained publication still validates under current trusted code. It never
+shows a filesystem path, raw generated plan, or revision-delete action.
+
+Selecting a revision asks Linux for the semantic comparison with the current
+latest publication. The review covers source directives, inherited/effective
+values, Base pin and embedded snapshot, local overrides, explicit Ignore
+changes, generated-plan fingerprint/rule count, metadata-only changes, and
+current validation errors. **Restore as new revision** remains disabled until a
+successful review. Confirmation states that Linux will re-normalize and rebuild
+the exact historical intent through current trusted code and publish it as the
+lineage's next immutable latest version—not move or mutate the old revision.
+Restore never selects or activates the Strategy, restarts automation, changes
+Pause, or changes runtime control. A stale history/latest conflict preserves
+the open authoring draft; success refreshes both history and latest catalogs.
 
 For a custom Strategy, **Rename Strategy** selects the editable display-name
 field; **Review & Publish...** applies the rename through the same Linux
@@ -363,9 +384,9 @@ Linux moves its exact file into `config/strategies/custom/retired`, removes it
 from active catalogs, and records an audit entry. Bundled Strategies cannot be
 renamed or deleted. A stale editor or a Strategy still selected by the control
 directive is refused, and deletion never changes selection or activation.
-Restoring a retired publication is currently an operator/server maintenance
-action; a managed restore UI belongs with the future immutable Strategy-history
-workflow.
+Retirement preserves the complete immutable lineage. Managed restoration uses
+**History** and publishes a reviewed retained revision as the next version;
+the `retired` archive is evidence rather than a competing rollback interface.
 
 ### Manual Windows Strategy Authoring smoke
 
@@ -414,14 +435,26 @@ canonical coverage when the relevant environment and cases are available.
 7. Publish a second disposable Base revision, open the Strategy's Base-update
    review, verify the semantic diff, accept it into the draft, validate and
    publish, then reopen and verify the reviewed pin and inherited values.
-8. Clone a second disposable custom Strategy solely for deletion. Select it for
+8. Publish at least two revisions of a disposable Strategy, then open
+   **History**. Confirm newest-first ordering, exact fingerprints/Base pins,
+   origin/audit and validation state, and current versus historical status.
+   Review the older revision and verify the Linux-computed source, effective,
+   Base, Ignore/override, plan, rule-count, metadata, and validation comparison.
+   Cancel once and prove no catalog/control change. Reopen, confirm **Restore as
+   new revision**, and verify the next logical version appears while the old
+   revisions remain byte-for-byte retained. Confirm no Strategy was selected or
+   activated. Repeat discovery after retirement and verify the retired lineage
+   can be reviewed/restored. If a second client advances latest between review
+   and confirmation, verify the conflict preserves the first window's draft.
+9. Clone a second disposable custom Strategy solely for deletion. Select it for
    the next battle in the disposable control catalog without starting a
    process, then verify **Delete Strategy...** is refused and neither the file
    nor control directive changes. Select a bundled Strategy, retry deletion,
    decline once to prove cancellation, then confirm it. Verify the custom item
    leaves both new and legacy active catalogs, its exact publication appears in
    the disposable `retired` archive, and no process or Strategy was activated.
-9. Throughout the run, verify Validate writes nothing, publishing never changes
+10. Throughout the run, verify Validate and restore preview write nothing,
+   publishing/restoring never changes
    the selected/active Strategy, no activation prompt appears, and the real
    operator profile catalog and control state remain byte-for-byte untouched.
 
@@ -560,7 +593,10 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-banner reports the actual revision/capability mismatch and the exact recovery
+current history-capable build requires revision 23 and
+`strategy_revision_history_v1` while retaining all earlier required
+capabilities. The banner reports the actual revision/capability mismatch and
+the exact recovery
 sequence instead of relying on the smaller compatibility detail in the
 scrollable SSH panel. The decision is not tied to the strategy feature that
 first exposed the stale service problem. A future Windows feature that depends

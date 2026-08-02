@@ -172,6 +172,26 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
                 payload = self.server.service.strategy_profiles()
             elif path == "/api/v1/strategy-authoring":
                 payload = self.server.service.strategy_authoring()
+            elif path == "/api/v1/strategy-authoring/history":
+                payload = self.server.service.strategy_history()
+            elif path.startswith("/api/v1/strategy-authoring/history/"):
+                suffix = path.removeprefix(
+                    "/api/v1/strategy-authoring/history/"
+                )
+                parts = [unquote(item) for item in suffix.split("/")]
+                if len(parts) == 1 and parts[0]:
+                    payload = self.server.service.strategy_history(parts[0])
+                elif len(parts) == 2 and all(parts):
+                    payload = self.server.service.strategy_revision(
+                        parts[0],
+                        parts[1],
+                    )
+                else:
+                    self._json_error(
+                        HTTPStatus.NOT_FOUND,
+                        "Strategy history endpoint not found",
+                    )
+                    return
             elif path == "/api/v1/activity":
                 payload = self.server.service.activity(
                     limit=_query_limit(query, default=80),

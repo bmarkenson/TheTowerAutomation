@@ -1,9 +1,11 @@
 # Strategy Authoring Architecture
 
-This document defines the target contract for GUI-authored strategy bases and
-strategies. It is an architecture boundary, not a claim that every part is
-implemented. The current Farm profile format remains supported while this
-model is introduced incrementally.
+This document defines the contract for GUI-authored strategy bases and
+strategies. The sparse model, immutable Base revisions, immutable custom
+Strategy lineages, restore-as-new workflow, and current Farm editors are
+implemented. Profile-local Module, Target Priority, and Orb definitions remain
+future additive work. The original Farm profile format remains supported as a
+compatibility facade.
 
 The runtime architecture remains authoritative for action ownership and
 execution. This authoring layer resolves reusable, operator-friendly source
@@ -97,6 +99,108 @@ A strategy publication is the executable boundary. It contains:
 Runtime loading never follows a mutable base pointer. It consumes the
 self-contained generated plan and resolved run configuration from the
 publication.
+
+### Immutable custom-Strategy lineage
+
+Every validated custom Strategy publication is retained as one immutable
+logical revision while preserving one stable Strategy ID. The fixed
+`config/strategies/custom/<id>.profile.yaml` document remains the latest-
+publication compatibility facade used by runtime and older clients. Runtime
+loads only that self-contained facade; it never reads history or resolves a
+mutable Base while running.
+
+The server owns all history names beneath the fixed custom directory:
+
+- `history/<id>.strategy.<logical-version>.yaml` is the append-only revision;
+- `transactions/<id>.publication.yaml` is a recoverable publication journal;
+  and
+- dot-prefixed files in `transactions` are transaction-owned staging objects.
+
+Clients supply an allowlisted Strategy ID and logical version, never a path.
+The catalog writer lock, fixed safe-ID rules, no-symlink checks, request and
+file-size limits, and directory durability rules apply to the facade, history,
+and transaction directories. A revision envelope contains the complete exact
+publication: normalized sparse source, pinned Base reference and embedded
+snapshot, resolved values/provenance, generated plan, logical version,
+publication time, source/Base/resolution/plan/publication fingerprints, and a
+server-created audit identity and origin. Bundled Strategies and Base revisions
+remain immutable in their existing stores.
+
+History, not the presence of the current facade, is authoritative for the next
+logical version. Retirement removes the latest facade from active catalogs but
+retains the lineage. Ordinary publication cannot silently reuse that ID;
+managed restoration publishes the next version in the same lineage. The legacy
+`retired` archive remains unchanged evidence and is adopted only when identity,
+version, and fingerprints are unambiguous.
+
+#### Recoverable publication order
+
+Publication is an explicit recoverable transaction because the history object
+and latest facade cannot be replaced atomically together. Under the one catalog
+writer lock, Linux performs this order:
+
+1. normalize, resolve, build, and fully validate the proposed self-contained
+   publication, allocate the next history-derived logical version, and create
+   its revision envelope;
+2. durably create the journal, immutable revision and latest stages, and—when
+   replacing an existing facade—an exact previous-facade backup;
+3. hard-link the revision stage to its final immutable history name, remove the
+   stage name, and `fsync` the history directory;
+4. atomically replace the latest facade with the exact staged publication and
+   `fsync` the custom Strategy directory; this directory sync is the durable
+   commit point; and
+5. remove the stages and journal and `fsync` the transaction directory.
+
+A handled failure before the commit point restores the prior facade, removes
+the uncommitted final history link, and clears safe staging artifacts. An
+abrupt interruption is reconciled before catalog, history, or publication work:
+if the fingerprint-bound final revision exists, recovery verifies it and the
+journal, advances the facade to that exact publication when necessary, syncs
+both directories, and cleans up; if it does not exist, recovery restores the
+previous facade if needed and aborts the staging. Any mismatch, symlink,
+unexpected artifact, or external facade change fails closed as a catalog
+conflict without overwriting evidence. Reconciliation is deterministic and
+idempotent, so reopening or retrying an interrupted identical request cannot
+allocate a duplicate or conflicting revision.
+
+#### Conservative adoption
+
+On catalog open, Linux conservatively adopts an existing schema-1 or schema-2
+custom latest publication as its lineage's retained revision without rewriting
+the facade. The exact source, resolution, embedded Base state (when present),
+and generated-plan behavior are validated and preserved; schema-1 values are
+not reinterpreted as inheritance. Existing retirement archives are considered
+independently and adopted only when their identity and fingerprints agree.
+Repeated opens are idempotent. Duplicate versions, fingerprint disagreement,
+malformed documents, symlinks, and ambiguous lineage evidence produce catalog
+errors and audit entries while a separately usable latest facade remains
+available when safe.
+
+#### History review and restore as new
+
+History summaries are newest-first for clients and include stable identity,
+display name, logical version, publication time and status, all review
+fingerprints, Base pin, family/Tier, server-owned origin/audit identity, rule
+count, current validation state, and migration warnings. Expanded generated
+plans are never returned. Linux computes semantic comparisons using the same
+source and resolution vocabulary as authoring: directives, effective values
+and provenance, Base pin/snapshot, local overrides, explicit Ignore entries,
+generated-plan fingerprint/rule count, metadata-only changes, and current
+validation errors.
+
+Restore is reviewed publication, not file rollback. Preview requires both the
+selected immutable revision fingerprint and the source fingerprint of the
+latest facade the client opened (explicitly absent for a retired lineage).
+Linux loads the exact retained publication, verifies every embedded snapshot
+and fingerprint, re-normalizes and rebuilds with current trusted code using the
+historical embedded Base rather than current Base lookup, computes the semantic
+comparison, and returns a review fingerprint without writing. Confirmation
+rechecks all three fingerprints under optimistic concurrency and publishes the
+historical intent as the next immutable revision with origin
+`restore_as_new`. It never mutates the selected revision, selects or activates
+the Strategy, restarts automation, changes Pause, or changes runtime control.
+Ordinary authoring, older facade publication, adoption, and restore origins are
+assigned only by trusted server paths.
 
 ## Policy semantics
 
@@ -318,8 +422,10 @@ into the runtime evaluator:
 - `StrategyProfileStore` (or a narrowly separated authoring store behind it)
   owns strategy drafts and publications, embeds the pinned base snapshot, and
   retains the existing fixed-directory and fixed-filename safety boundary. It
-  also owns recoverable custom-Strategy retirement under the same catalog
-  writer lock; the client never supplies an archive path.
+  also owns immutable lineage/adoption, recoverable publication transactions,
+  semantic history comparison, restore-as-new, and custom-Strategy retirement
+  under the same catalog writer lock; the client never supplies a history,
+  transaction, or archive path.
 - The Farm authoring adapter feeds resolved settings into the existing shared
   strategy builder. Generated plans remain validated output, not user-authored
   input.
@@ -355,8 +461,10 @@ Delivery is split into independently reviewable slices:
    client facade.
 3. Complete value editors: add specialized editors for every registered
    setting, then perform Windows GUI smoke validation. The implementation and
-   Linux cross-validation are complete; the documented native Windows runtime
-   smoke remains required on a Windows host.
+   Linux cross-validation are complete. The operator completed the available
+   Windows runtime smoke checks on 2026-08-02 with no blocking issue reported;
+   that report is useful runtime evidence but is not exhaustive Windows
+   validation.
 4. Runtime Strategy Action Gate: implement and validate the typed observation,
    auxiliary-collection, strategy-action, and lifecycle-action matrix, guarded
    collector routes, structured status, and distinct native presentation before
@@ -366,11 +474,12 @@ Each slice should be completed and validated in its own development thread.
 The actionable sequence is tracked in the
 [`runtime and validation backlog`](../backlog/runtime-and-validation.md).
 
-All four slices are implemented. Server revision 22 retains
+All four original slices and the later immutable-history/safe-fallback slice
+are implemented. Server revision 23 retains
 `strategy_authoring_v1`, `strategy_authoring_specialized_editors_v1`, and
-`strategy_authoring_profile_lifecycle_v1`, and adds
-`strategy_action_gate_v1`; the original profile endpoint and every older
-capability remain as the compatibility facade. The native shell handles every
+`strategy_authoring_profile_lifecycle_v1`, `strategy_action_gate_v1`, and every
+older capability, and adds `strategy_revision_history_v1`; the original profile
+endpoint remains the compatibility facade. The native shell handles every
 registered editor type with server-declared managed controls or an honest fixed
 presentation, retains dormant Ignore values and unknown Ultimate Weapon
 fields, and keeps validation, resolution, publication, and runtime authority
@@ -385,7 +494,11 @@ fresh source fingerprint, refuses bundled/reserved or currently selected
 Strategies, and atomically moves the exact publication into the store-owned
 `retired` directory. It then refreshes both authoring and legacy active
 catalogs and audits the retirement without changing selection or activation.
-Managed restore and immutable publication history remain the explicit future
-fallback work; a retirement archive is not presented as revision history.
+The immutable history remains discoverable after retirement. **History** opens
+server-computed revision details and comparisons for active and retired
+lineages; a successful explicit restore review publishes the historical intent
+as the next version and refreshes history/latest catalogs without selecting or
+activating it. The retirement archive remains evidence rather than a competing
+editable rollback model.
 Future profile-local definitions remain the separate later authoring slice
 above.

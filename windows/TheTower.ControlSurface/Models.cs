@@ -1229,6 +1229,45 @@ public sealed class StrategyAuthoringMutationResponse
 
     [JsonPropertyName("warning")]
     public string? Warning { get; set; }
+
+    [JsonPropertyName("strategy_id")]
+    public string? StrategyId { get; set; }
+
+    [JsonPropertyName("historical_logical_version")]
+    public int HistoricalLogicalVersion { get; set; }
+
+    [JsonPropertyName("historical_revision_fingerprint")]
+    public string? HistoricalRevisionFingerprint { get; set; }
+
+    [JsonPropertyName("current_latest_source_fingerprint")]
+    public string? CurrentLatestSourceFingerprint { get; set; }
+
+    [JsonPropertyName("next_logical_version")]
+    public int NextLogicalVersion { get; set; }
+
+    [JsonPropertyName("candidate")]
+    public StrategyRestoreCandidate? Candidate { get; set; }
+
+    [JsonPropertyName("comparison")]
+    public StrategyRevisionComparison? Comparison { get; set; }
+
+    [JsonPropertyName("reviewed_restore_fingerprint")]
+    public string? ReviewedRestoreFingerprint { get; set; }
+
+    [JsonPropertyName("restore_publishes_new_revision")]
+    public bool RestorePublishesNewRevision { get; set; }
+
+    [JsonPropertyName("publication_activates_strategy")]
+    public bool PublicationActivatesStrategy { get; set; }
+
+    [JsonPropertyName("restored")]
+    public bool Restored { get; set; }
+
+    [JsonPropertyName("restored_from")]
+    public StrategyRestoredFrom? RestoredFrom { get; set; }
+
+    [JsonPropertyName("history")]
+    public StrategyHistoryCatalogResponse? History { get; set; }
 }
 
 public sealed class StrategyRetirement
@@ -1253,6 +1292,315 @@ public sealed class StrategyRetirement
 
     [JsonPropertyName("recoverable")]
     public bool Recoverable { get; set; }
+}
+
+public sealed class StrategyHistoryCatalogResponse
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("lineages")]
+    public List<StrategyHistoryLineage> Lineages { get; set; } = [];
+
+    [JsonPropertyName("errors")]
+    public List<StrategyProfileCatalogError> Errors { get; set; } = [];
+
+    [JsonPropertyName("newest_first")]
+    public bool NewestFirst { get; set; }
+
+    [JsonPropertyName("expanded_plan_exposed")]
+    public bool ExpandedPlanExposed { get; set; }
+}
+
+public sealed class StrategyHistoryLineage
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("display_name")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("family")]
+    public string Family { get; set; } = "";
+
+    [JsonPropertyName("tier")]
+    public int? Tier { get; set; }
+
+    [JsonPropertyName("active_latest")]
+    public bool ActiveLatest { get; set; }
+
+    [JsonPropertyName("retired")]
+    public bool Retired { get; set; }
+
+    [JsonPropertyName("latest_version")]
+    public int LatestVersion { get; set; }
+
+    [JsonPropertyName("current_latest_version")]
+    public int? CurrentLatestVersion { get; set; }
+
+    [JsonPropertyName("latest_source_fingerprint")]
+    public string? LatestSourceFingerprint { get; set; }
+
+    [JsonPropertyName("latest_publication_fingerprint")]
+    public string? LatestPublicationFingerprint { get; set; }
+
+    [JsonPropertyName("lineage_fingerprint")]
+    public string LineageFingerprint { get; set; } = "";
+
+    [JsonPropertyName("revisions")]
+    public List<StrategyRevisionSummary> Revisions { get; set; } = [];
+
+    [JsonPropertyName("warnings")]
+    public List<string> Warnings { get; set; } = [];
+
+    [JsonIgnore]
+    public string StatusLabel => Retired
+        ? $"Retired lineage • {Revisions.Count} revision(s)"
+        : $"Current version {CurrentLatestVersion} • {Revisions.Count} revision(s)";
+}
+
+public sealed class StrategyRevisionSummary
+{
+    [JsonPropertyName("strategy_id")]
+    public string StrategyId { get; set; } = "";
+
+    [JsonPropertyName("display_name")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("logical_version")]
+    public int LogicalVersion { get; set; }
+
+    [JsonPropertyName("published_at")]
+    public string PublishedAt { get; set; } = "";
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "historical";
+
+    [JsonPropertyName("active_latest")]
+    public bool ActiveLatest { get; set; }
+
+    [JsonPropertyName("retired_lineage")]
+    public bool RetiredLineage { get; set; }
+
+    [JsonPropertyName("source_fingerprint")]
+    public string SourceFingerprint { get; set; } = "";
+
+    [JsonPropertyName("normalized_source_fingerprint")]
+    public string NormalizedSourceFingerprint { get; set; } = "";
+
+    [JsonPropertyName("base_fingerprint")]
+    public string BaseFingerprint { get; set; } = "";
+
+    [JsonPropertyName("resolution_fingerprint")]
+    public string ResolutionFingerprint { get; set; } = "";
+
+    [JsonPropertyName("plan_fingerprint")]
+    public string PlanFingerprint { get; set; } = "";
+
+    [JsonPropertyName("publication_fingerprint")]
+    public string PublicationFingerprint { get; set; } = "";
+
+    [JsonPropertyName("revision_fingerprint")]
+    public string RevisionFingerprint { get; set; } = "";
+
+    [JsonPropertyName("pinned_base_id")]
+    public string? PinnedBaseId { get; set; }
+
+    [JsonPropertyName("pinned_base_revision")]
+    public int? PinnedBaseRevision { get; set; }
+
+    [JsonPropertyName("tier")]
+    public int Tier { get; set; }
+
+    [JsonPropertyName("family")]
+    public string Family { get; set; } = "";
+
+    [JsonPropertyName("publication_origin")]
+    public string PublicationOrigin { get; set; } = "";
+
+    [JsonPropertyName("audit_identity")]
+    public StrategyAuditIdentity AuditIdentity { get; set; } = new();
+
+    [JsonPropertyName("publication_schema_version")]
+    public int PublicationSchemaVersion { get; set; }
+
+    [JsonPropertyName("rule_count")]
+    public int RuleCount { get; set; }
+
+    [JsonPropertyName("current_validation_valid")]
+    public bool CurrentValidationValid { get; set; }
+
+    [JsonPropertyName("validation_errors")]
+    public List<AuthoringValidationError> ValidationErrors { get; set; } = [];
+
+    [JsonPropertyName("warnings")]
+    public List<string> Warnings { get; set; } = [];
+
+    [JsonIgnore]
+    public string VersionLabel => $"Version {LogicalVersion} • {Status.Replace('_', ' ')}";
+
+    [JsonIgnore]
+    public string BaseLabel => string.IsNullOrWhiteSpace(PinnedBaseId)
+        ? "No Base"
+        : $"{PinnedBaseId}@{PinnedBaseRevision}";
+
+    [JsonIgnore]
+    public string ValidationLabel => CurrentValidationValid
+        ? "Valid under current resolver/builder"
+        : "Current validation failed";
+}
+
+public sealed class StrategyAuditIdentity
+{
+    [JsonPropertyName("authority")]
+    public string Authority { get; set; } = "";
+
+    [JsonPropertyName("event_id")]
+    public string EventId { get; set; } = "";
+}
+
+public sealed class StrategyRevisionDetailResponse
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("revision")]
+    public StrategyRevisionSummary Revision { get; set; } = new();
+
+    [JsonPropertyName("source")]
+    public StrategyAuthoringSource Source { get; set; } = new();
+
+    [JsonPropertyName("base_snapshot")]
+    public StrategyAuthoringSource? BaseSnapshot { get; set; }
+
+    [JsonPropertyName("resolution")]
+    public StrategyAuthoringResolution Resolution { get; set; } = new();
+
+    [JsonPropertyName("expanded_plan_exposed")]
+    public bool ExpandedPlanExposed { get; set; }
+}
+
+public sealed class StrategyRestoreCandidate
+{
+    [JsonPropertyName("source_fingerprint")]
+    public string SourceFingerprint { get; set; } = "";
+
+    [JsonPropertyName("base_fingerprint")]
+    public string BaseFingerprint { get; set; } = "";
+
+    [JsonPropertyName("resolution_fingerprint")]
+    public string ResolutionFingerprint { get; set; } = "";
+
+    [JsonPropertyName("plan_fingerprint")]
+    public string PlanFingerprint { get; set; } = "";
+
+    [JsonPropertyName("rule_count")]
+    public int RuleCount { get; set; }
+}
+
+public sealed class StrategyRestoredFrom
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("logical_version")]
+    public int LogicalVersion { get; set; }
+
+    [JsonPropertyName("revision_fingerprint")]
+    public string RevisionFingerprint { get; set; } = "";
+}
+
+public sealed class StrategyRevisionComparison
+{
+    [JsonPropertyName("source_changes")]
+    public AuthoringSourceDiff SourceChanges { get; set; } = new();
+
+    [JsonPropertyName("effective_changes")]
+    public AuthoringResolutionDiff EffectiveChanges { get; set; } = new();
+
+    [JsonPropertyName("base_snapshot_changes")]
+    public StrategyBaseSnapshotDiff BaseSnapshotChanges { get; set; } = new();
+
+    [JsonPropertyName("local_override_changes")]
+    public StrategyDirectiveDiff LocalOverrideChanges { get; set; } = new();
+
+    [JsonPropertyName("explicit_ignore_changes")]
+    public StrategyDirectiveDiff ExplicitIgnoreChanges { get; set; } = new();
+
+    [JsonPropertyName("generated_plan_changes")]
+    public StrategyGeneratedPlanDiff GeneratedPlanChanges { get; set; } = new();
+
+    [JsonPropertyName("metadata_only")]
+    public bool MetadataOnly { get; set; }
+
+    [JsonPropertyName("validation")]
+    public AuthoringValidationResult Validation { get; set; } = new();
+
+    [JsonPropertyName("historical_intent_preserved")]
+    public bool HistoricalIntentPreserved { get; set; }
+
+    [JsonPropertyName("restore_publishes_new_revision")]
+    public bool RestorePublishesNewRevision { get; set; }
+
+    [JsonPropertyName("publication_activates_strategy")]
+    public bool PublicationActivatesStrategy { get; set; }
+}
+
+public sealed class StrategyBaseSnapshotDiff
+{
+    [JsonPropertyName("changed")]
+    public bool Changed { get; set; }
+
+    [JsonPropertyName("before_reference")]
+    public StrategyBaseReference? BeforeReference { get; set; }
+
+    [JsonPropertyName("after_reference")]
+    public StrategyBaseReference? AfterReference { get; set; }
+
+    [JsonPropertyName("before_fingerprint")]
+    public string BeforeFingerprint { get; set; } = "";
+
+    [JsonPropertyName("after_fingerprint")]
+    public string AfterFingerprint { get; set; } = "";
+
+    [JsonPropertyName("embedded_snapshot_changed")]
+    public bool EmbeddedSnapshotChanged { get; set; }
+}
+
+public sealed class StrategyDirectiveDiff
+{
+    [JsonPropertyName("added")]
+    public List<AuthoringDiffItem> Added { get; set; } = [];
+
+    [JsonPropertyName("removed")]
+    public List<AuthoringDiffItem> Removed { get; set; } = [];
+
+    [JsonPropertyName("changed")]
+    public List<AuthoringDiffItem> Changed { get; set; } = [];
+
+    [JsonPropertyName("change_count")]
+    public int ChangeCount { get; set; }
+}
+
+public sealed class StrategyGeneratedPlanDiff
+{
+    [JsonPropertyName("changed")]
+    public bool Changed { get; set; }
+
+    [JsonPropertyName("before_fingerprint")]
+    public string? BeforeFingerprint { get; set; }
+
+    [JsonPropertyName("after_fingerprint")]
+    public string AfterFingerprint { get; set; } = "";
+
+    [JsonPropertyName("before_rule_count")]
+    public int BeforeRuleCount { get; set; }
+
+    [JsonPropertyName("after_rule_count")]
+    public int AfterRuleCount { get; set; }
+
+    [JsonPropertyName("rule_count_change")]
+    public int RuleCountChange { get; set; }
 }
 
 public sealed class StrategyAuthoringReview
