@@ -3278,6 +3278,20 @@ def _load_authoring_publication(
             raise StrategyProfileError(
                 "Profile publication without a Base has Base resolution data"
             )
+        if source.get("base") is not None:
+            try:
+                canonical_base_resolution = describe_base_resolution(
+                    base_snapshot,
+                    base_resolution,
+                )
+            except StrategyAuthoringError as exc:
+                raise StrategyProfileError(
+                    f"Invalid embedded Base resolution: {exc}"
+                ) from exc
+            if canonical_base_resolution != base_resolution:
+                raise StrategyProfileError(
+                    "Profile Base resolution is not derived from its snapshot"
+                )
     elif base_resolution is not None:
         raise StrategyProfileError(
             "Schema-2 authoring publication has unexpected Base resolution data"

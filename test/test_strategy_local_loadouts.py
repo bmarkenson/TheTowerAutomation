@@ -11,10 +11,12 @@ from core.strategy_authoring import (
     AUTHORING_SCHEMA_VERSION,
     LEGACY_AUTHORING_SCHEMA_VERSION,
     StrategyAuthoringError,
+    describe_base_resolution,
     diff_strategy_resolutions,
     farm_source_from_resolution,
     fingerprint_document,
     legacy_farm_source_to_strategy_source,
+    normalize_base_source,
     normalize_strategy_source,
     resolve_strategy_source,
 )
@@ -80,6 +82,15 @@ def _contains_key(value: object, key: str) -> bool:
     if isinstance(value, list):
         return any(_contains_key(item, key) for item in value)
     return False
+
+
+def _refingerprint_definition_snapshot(snapshot: dict) -> None:
+    payload = {
+        key: copy.deepcopy(value)
+        for key, value in snapshot.items()
+        if key != "fingerprint"
+    }
+    snapshot["fingerprint"] = fingerprint_document(payload)
 
 
 def _install_mutable_loadout_catalogs(monkeypatch) -> dict[str, dict]:
@@ -337,6 +348,122 @@ def test_definition_snapshots_are_deterministic_and_semantically_compared():
     ] == changed["modules"]["after"]["definition_snapshot"]["definition"]
 
 
+@pytest.mark.parametrize(
+    ("setting_id", "replacement"),
+    (
+        (
+            "modules",
+            _yaml(LOADOUTS / "modules.yaml")["presets"]["tournament_standard"],
+        ),
+        (
+            "target_priority",
+            _yaml(LOADOUTS / "target_priorities.yaml")["presets"]["farm_t19"],
+        ),
+        (
+            "orb_distance",
+            _yaml(LOADOUTS / "orb_distances.yaml")["presets"][
+                "tournament_range_98_38"
+            ],
+        ),
+    ),
+)
+def test_retained_local_snapshot_must_equal_its_source_selector(
+    setting_id,
+    replacement,
+):
+    source = _source(f"local_snapshot_mismatch_{setting_id}")
+    source["settings"][setting_id]["value"] = {
+        "local": copy.deepcopy(_definitions()[setting_id])
+    }
+    source = normalize_strategy_source(source)
+    retained = resolve_strategy_source(source)
+    snapshot = retained["settings"][setting_id]["definition_snapshot"]
+    snapshot["definition"] = copy.deepcopy(replacement)
+    _refingerprint_definition_snapshot(snapshot)
+
+    with pytest.raises(StrategyAuthoringError, match="local definition disagrees"):
+        resolve_strategy_source(source, retained_resolution=retained)
+
+
+def test_inherited_retained_snapshot_must_equal_embedded_base_resolution(
+    tmp_path,
+):
+    store = StrategyProfileStore(profile_directory=tmp_path)
+    base = store.publish_base(
+        {
+            "id": "snapshot_authority_base",
+            "display_name": "Snapshot Authority Base",
+            "family": "farm",
+            "settings": copy.deepcopy(_source("base_template")["settings"]),
+        }
+    )
+    source = _source("snapshot_authority_strategy")
+    source["base"] = {"id": "snapshot_authority_base", "revision": 1}
+    source["settings"] = {}
+    retained = resolve_strategy_source(
+        source,
+        base["snapshot"],
+        base_resolution_snapshot=base["resolution"],
+        require_base_definition_snapshots=True,
+    )
+    snapshot = retained["settings"]["modules"]["definition_snapshot"]
+    snapshot["definition"] = copy.deepcopy(
+        _yaml(LOADOUTS / "modules.yaml")["presets"]["tournament_standard"]
+    )
+    _refingerprint_definition_snapshot(snapshot)
+
+    with pytest.raises(
+        StrategyAuthoringError,
+        match="disagrees with its embedded Base",
+    ):
+        resolve_strategy_source(
+            source,
+            base["snapshot"],
+            base_resolution_snapshot=base["resolution"],
+            retained_resolution=retained,
+            require_base_definition_snapshots=True,
+        )
+
+
+def test_publication_rejects_recomputed_fingerprint_for_tampered_base_resolution(
+    tmp_path,
+):
+    store = StrategyProfileStore(profile_directory=tmp_path)
+    base = store.publish_base(
+        {
+            "id": "tampered_resolution_base",
+            "display_name": "Tampered Resolution Base",
+            "family": "farm",
+            "settings": copy.deepcopy(_source("base_template")["settings"]),
+        }
+    )
+    source = _source("tampered_resolution_strategy")
+    source["base"] = {"id": "tampered_resolution_base", "revision": 1}
+    source["settings"] = {}
+    store.publish(source)
+
+    path = tmp_path / "tampered_resolution_strategy.profile.yaml"
+    publication = _yaml(path)
+    publication["base_resolution"]["settings"]["damage_slider"][
+        "policy"
+    ] = "observe"
+    publication["base_fingerprint"] = fingerprint_document(
+        {
+            "source": publication["base_snapshot"],
+            "resolution": publication["base_resolution"],
+        }
+    )
+    path.write_text(
+        yaml.safe_dump(publication, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    assert load_published_strategy_plan(
+        "tampered_resolution_strategy",
+        tmp_path,
+    ) is None
+
+
 def test_preset_backed_base_revision_retains_definition_for_later_inheritance(
     tmp_path,
     monkeypatch,
@@ -481,3 +608,43 @@ def test_schema_two_publication_reader_stays_exact_while_next_draft_upgrades(
             setting_id
         ]
     assert path.read_bytes() == exact_publication
+
+
+def test_schema_three_retained_strategy_accepts_schema_two_base_without_snapshots(
+    monkeypatch,
+):
+    catalogs = _install_mutable_loadout_catalogs(monkeypatch)
+    base_snapshot = normalize_base_source(
+        {
+            "schema_version": LEGACY_AUTHORING_SCHEMA_VERSION,
+            "kind": "base",
+            "id": "legacy_base",
+            "display_name": "Legacy Base",
+            "family": "farm",
+            "revision": 1,
+            "settings": copy.deepcopy(_source("base_template")["settings"]),
+        }
+    )
+    base_resolution = describe_base_resolution(base_snapshot)
+    assert not _contains_key(base_resolution, "definition_snapshot")
+
+    source = _source("schema_three_legacy_base")
+    source["base"] = {"id": "legacy_base", "revision": 1}
+    source["settings"] = {}
+    retained = resolve_strategy_source(
+        source,
+        base_snapshot,
+        base_resolution_snapshot=base_resolution,
+        require_base_definition_snapshots=True,
+    )
+
+    catalogs["modules"]["presets"].clear()
+    catalogs["target_priority"]["presets"].clear()
+    catalogs["orb_distance"]["presets"].clear()
+    assert resolve_strategy_source(
+        source,
+        base_snapshot,
+        base_resolution_snapshot=base_resolution,
+        retained_resolution=retained,
+        require_base_definition_snapshots=True,
+    ) == retained

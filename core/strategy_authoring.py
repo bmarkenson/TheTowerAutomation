@@ -1647,6 +1647,21 @@ def _normalize_retained_definition_snapshot(
         raise StrategyAuthoringError(
             f"setting {setting_id!r} retained definition is invalid: {exc}"
         ) from exc
+    if expected_source == "local":
+        try:
+            selector_definition = _normalize_loadout_definition(
+                setting_id,
+                selector.get("local"),
+            )
+        except (TypeError, ValueError) as exc:
+            raise StrategyAuthoringError(
+                f"setting {setting_id!r} local selector is invalid: {exc}"
+            ) from exc
+        if definition != selector_definition:
+            raise StrategyAuthoringError(
+                f"setting {setting_id!r} retained local definition disagrees "
+                "with its source selector"
+            )
     payload: dict[str, Any] = {
         "schema_version": LOADOUT_DEFINITION_SCHEMA_VERSION,
         "source": expected_source,
@@ -1829,7 +1844,7 @@ def analyze_strategy_source(
                 _current_definition_snapshot(setting_id, selector)
             continue
 
-        raw_snapshot = _resolution_definition_snapshot(
+        raw_retained_snapshot = _resolution_definition_snapshot(
             retained_resolution,
             setting_id,
         )
@@ -1838,13 +1853,14 @@ def analyze_strategy_source(
             isinstance(provenance, Mapping)
             and provenance.get("kind") == "base"
         )
-        if raw_snapshot is None and inherited:
-            raw_snapshot = _resolution_definition_snapshot(
+        raw_base_snapshot = None
+        if inherited:
+            raw_base_snapshot = _resolution_definition_snapshot(
                 base_resolution_snapshot,
                 setting_id,
             )
             if (
-                raw_snapshot is None
+                raw_base_snapshot is None
                 and base is not None
                 and base["schema_version"] == AUTHORING_SCHEMA_VERSION
                 and require_base_definition_snapshots
@@ -1853,14 +1869,40 @@ def analyze_strategy_source(
                     f"base setting {setting_id!r} lacks its immutable "
                     "definition snapshot"
                 )
-        if raw_snapshot is None:
-            snapshot = _current_definition_snapshot(setting_id, selector)
-        else:
-            snapshot = _normalize_retained_definition_snapshot(
+
+        retained_snapshot = (
+            _normalize_retained_definition_snapshot(
                 setting_id,
                 selector,
-                raw_snapshot,
+                raw_retained_snapshot,
             )
+            if raw_retained_snapshot is not None
+            else None
+        )
+        base_definition_snapshot = (
+            _normalize_retained_definition_snapshot(
+                setting_id,
+                selector,
+                raw_base_snapshot,
+            )
+            if raw_base_snapshot is not None
+            else None
+        )
+        if (
+            retained_snapshot is not None
+            and base_definition_snapshot is not None
+            and retained_snapshot != base_definition_snapshot
+        ):
+            raise StrategyAuthoringError(
+                f"setting {setting_id!r} retained definition snapshot "
+                "disagrees with its embedded Base"
+            )
+        if base_definition_snapshot is not None:
+            snapshot = base_definition_snapshot
+        elif retained_snapshot is not None:
+            snapshot = retained_snapshot
+        else:
+            snapshot = _current_definition_snapshot(setting_id, selector)
         entry["definition_snapshot"] = snapshot
 
     errors: list[dict[str, Any]] = []
