@@ -12,7 +12,11 @@ public sealed class StrategyBasePinChoice
     public StrategyBaseReference? Reference { get; init; }
 }
 
-public sealed record AuthoringDormantValue(JsonElement Value, bool Materialized);
+public sealed record AuthoringDormantValue(
+    JsonElement Value,
+    bool Materialized,
+    JsonElement? PresetValue = null,
+    JsonElement? LocalValue = null);
 
 public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
 {
@@ -21,6 +25,7 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
     private readonly bool _entityEditable;
     private readonly JsonElement? _retainedValue;
     private AuthoringSourceStateDefinition? _selectedSourceState;
+    private AuthoringDefinitionForm? _selectedDefinitionForm;
     private StrategyEditorOption? _selectedPreset;
     private StrategyEditorOption? _selectedListOption;
     private StrategyEditorOption? _selectedScalarOption;
@@ -51,6 +56,7 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         _hasDormantValue = directive?.Value.HasValue == true
             || dormantValue?.Materialized == true;
         PresetOptions = definition.Editor.Fields.FirstOrDefault()?.Options ?? [];
+        ConfigureDefinitionForms(suppliedValue, dormantValue);
         AllListOptions = definition.Editor.Options;
         ListValues.CollectionChanged += (_, _) =>
         {
@@ -89,11 +95,13 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
     public string EditorType => _definition.EditorType;
     public IReadOnlyList<AuthoringSourceStateDefinition> AvailableSourceStates { get; }
     public IReadOnlyList<StrategyEditorOption> PresetOptions { get; }
+    public IReadOnlyList<AuthoringDefinitionForm> DefinitionForms { get; private set; } = [];
     public IReadOnlyList<StrategyEditorOption> AllListOptions { get; }
     public ObservableCollection<StrategyEditorOption> ListValues { get; } = [];
     public ObservableCollection<StrategyEditorOption> AvailableListOptions { get; } = [];
     public ObservableCollection<AuthoringChoiceFieldViewModel> ChoiceFields { get; } = [];
     public ObservableCollection<AuthoringToggleGroupViewModel> UltimateGroups { get; } = [];
+    public AuthoringLocalDefinitionViewModel? LocalDefinitionEditor { get; private set; }
 
     public AuthoringSourceStateDefinition? SelectedSourceState
     {
@@ -116,6 +124,9 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
             Notify(nameof(ValueEditorEnabled));
             Notify(nameof(BooleanControlEnabled));
             Notify(nameof(PresetControlEnabled));
+            Notify(nameof(DefinitionFormControlEnabled));
+            Notify(nameof(DefinitionPresetControlEnabled));
+            Notify(nameof(LocalDefinitionControlEnabled));
             Notify(nameof(CanAddListItem));
             Notify(nameof(CanRemoveListItem));
             Notify(nameof(CanReorderListItems));
@@ -125,6 +136,28 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
             Notify(nameof(EffectivePolicyDisplay));
             Notify(nameof(EffectiveValueDisplay));
             Notify(nameof(ProvenanceDisplay));
+        }
+    }
+
+    public AuthoringDefinitionForm? SelectedDefinitionForm
+    {
+        get => _selectedDefinitionForm;
+        set
+        {
+            if (ReferenceEquals(_selectedDefinitionForm, value)
+                || value is null
+                || !DefinitionForms.Contains(value))
+            {
+                return;
+            }
+            _selectedDefinitionForm = value;
+            MarkValueChanged();
+            Notify();
+            Notify(nameof(IsPresetDefinitionSelected));
+            Notify(nameof(IsLocalDefinitionSelected));
+            Notify(nameof(DefinitionPresetControlEnabled));
+            Notify(nameof(LocalDefinitionControlEnabled));
+            Notify(nameof(EffectiveValueDisplay));
         }
     }
 
@@ -211,7 +244,10 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
     }
 
     public bool UsesFixedValueEditor => EditorType == "fixed_value";
-    public bool UsesPresetEditor => EditorType == "preset";
+    public bool UsesPresetOrLocalEditor =>
+        EditorType == "preset"
+        && _definition.Editor.LocalEditor is not null;
+    public bool UsesPresetEditor => EditorType == "preset" && !UsesPresetOrLocalEditor;
     public bool UsesBooleanEditor => EditorType == "boolean";
     public bool UsesTextEditor => EditorType == "damage_percentage";
     public bool UsesKeyedChoiceEditor => EditorType == "card_recharge_modes";
@@ -221,6 +257,7 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
     public bool HasSpecializedEditor =>
         UsesFixedValueEditor
         || UsesPresetEditor
+        || UsesPresetOrLocalEditor
         || UsesBooleanEditor
         || UsesTextEditor
         || UsesKeyedChoiceEditor
@@ -233,6 +270,21 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         && _definition.Editor.Options.Count > 1;
     public bool PresetControlEnabled =>
         ValueEditorEnabled && !_definition.Editor.Fixed;
+    public bool DefinitionFormControlEnabled =>
+        ValueEditorEnabled && DefinitionForms.Count > 1;
+    public bool IsPresetDefinitionSelected =>
+        UsesPresetOrLocalEditor
+        && SelectedDefinitionForm?.Key
+            == _definition.Editor.Fields.FirstOrDefault()?.Key;
+    public bool IsLocalDefinitionSelected =>
+        UsesPresetOrLocalEditor
+        && SelectedDefinitionForm?.Key == _definition.Editor.LocalEditor?.Key;
+    public bool DefinitionPresetControlEnabled =>
+        ValueEditorEnabled
+        && IsPresetDefinitionSelected
+        && !_definition.Editor.Fixed;
+    public bool LocalDefinitionControlEnabled =>
+        ValueEditorEnabled && IsLocalDefinitionSelected;
     public bool IsFixedPresentation => _definition.Editor.Fixed;
     public bool CanAddListItem =>
         ValueEditorEnabled
@@ -427,7 +479,13 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         }
         return new AuthoringDormantValue(
             value.Value.Clone(),
-            _hasDormantValue);
+            _hasDormantValue,
+            UsesPresetOrLocalEditor
+                ? SelectedPreset?.Value.Clone()
+                : null,
+            UsesPresetOrLocalEditor
+                ? LocalDefinitionEditor?.CurrentValue?.Clone()
+                : null);
     }
 
     public void ApplyResolution(StrategyResolvedSetting? resolution)
@@ -473,6 +531,60 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         return _isBase
             ? $"included_{directive.Policy}"
             : $"override_{directive.Policy}";
+    }
+
+    private void ConfigureDefinitionForms(
+        JsonElement? suppliedValue,
+        AuthoringDormantValue? dormantValue)
+    {
+        var localMetadata = _definition.Editor.LocalEditor;
+        var presetField = _definition.Editor.Fields.FirstOrDefault();
+        if (localMetadata is null || presetField is null)
+        {
+            return;
+        }
+
+        DefinitionForms =
+        [
+            new AuthoringDefinitionForm(presetField.Key, presetField.DisplayName),
+            new AuthoringDefinitionForm(localMetadata.Key, localMetadata.DisplayName),
+        ];
+
+        JsonElement? activePreset = null;
+        JsonElement? activeLocal = null;
+        if (suppliedValue is { ValueKind: JsonValueKind.Object } supplied)
+        {
+            if (supplied.TryGetProperty(presetField.Key, out var preset))
+            {
+                activePreset = preset.Clone();
+            }
+            if (supplied.TryGetProperty(localMetadata.Key, out var local))
+            {
+                activeLocal = local.Clone();
+            }
+        }
+
+        var presetDraft = activePreset
+            ?? dormantValue?.PresetValue
+            ?? presetField.InitialValue;
+        _selectedPreset = EditorJson.FindOption(presetField.Options, presetDraft)
+            ?? (activePreset.HasValue || dormantValue?.PresetValue.HasValue == true
+                ? null
+                : presetField.Options.FirstOrDefault());
+
+        var localDraft = activeLocal
+            ?? dormantValue?.LocalValue
+            ?? localMetadata.InitialValue;
+        LocalDefinitionEditor = new AuthoringLocalDefinitionViewModel(
+            localMetadata,
+            localDraft,
+            MarkValueChanged);
+
+        var selectedKey = activeLocal.HasValue
+            ? localMetadata.Key
+            : presetField.Key;
+        _selectedDefinitionForm = DefinitionForms.First(
+            form => form.Key == selectedKey);
     }
 
     private void ConfigureValue(JsonElement? value)
@@ -543,6 +655,23 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         if (UsesFixedValueEditor || UsesBooleanEditor)
         {
             return _selectedScalarOption?.Value.Clone();
+        }
+        if (UsesPresetOrLocalEditor)
+        {
+            if (SelectedDefinitionForm is null)
+            {
+                return null;
+            }
+            JsonElement? selectedValue = IsLocalDefinitionSelected
+                ? LocalDefinitionEditor?.CurrentValue
+                : SelectedPreset?.Value;
+            return selectedValue is not { } value
+                ? null
+                : JsonSerializer.SerializeToElement(
+                    new Dictionary<string, JsonElement>
+                    {
+                        [SelectedDefinitionForm.Key] = value.Clone(),
+                    });
         }
         if (UsesPresetEditor)
         {

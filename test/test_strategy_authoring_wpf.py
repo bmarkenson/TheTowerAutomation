@@ -61,6 +61,7 @@ def test_wpf_rows_cover_every_registered_editor_family_without_raw_json():
     for binding in (
         "UsesFixedValueEditor",
         "UsesPresetEditor",
+        "UsesPresetOrLocalEditor",
         "UsesBooleanEditor",
         "UsesTextEditor",
         "UsesKeyedChoiceEditor",
@@ -71,6 +72,15 @@ def test_wpf_rows_cover_every_registered_editor_family_without_raw_json():
     assert 'ItemsSource="{Binding ChoiceFields, Mode=OneWay}"' in xaml
     assert 'ItemsSource="{Binding ListValues, Mode=OneWay}"' in xaml
     assert 'ItemsSource="{Binding UltimateGroups, Mode=OneWay}"' in xaml
+    assert 'ItemsSource="{Binding DefinitionForms, Mode=OneWay}"' in xaml
+    assert (
+        'ItemsSource="{Binding LocalDefinitionEditor.Fields, Mode=OneWay}"'
+        in xaml
+    )
+    assert (
+        'ItemsSource="{Binding LocalDefinitionEditor.ListValues, Mode=OneWay}"'
+        in xaml
+    )
     assert "AddSelectedListItem" in view_models
     assert "RemoveListItem" in view_models
     assert "MoveListItem" in view_models
@@ -95,6 +105,8 @@ def test_wpf_constraints_and_dormant_values_are_metadata_driven():
         'JsonPropertyName("groups")',
         'JsonPropertyName("minimum_selected_groups")',
         'JsonPropertyName("preserve_unknown_fields")',
+        'JsonPropertyName("unique_field_values")',
+        'JsonPropertyName("local_editor")',
     ):
         assert metadata_property in models
     assert "definition.InitialValue" in view_models
@@ -133,6 +145,11 @@ def test_wpf_authoring_code_does_not_hardcode_setting_specific_contracts():
         "Poison Swamp",
         "Demon Mode",
         "farm_standard",
+        "target_priority",
+        "orb_distance",
+        "range_basis",
+        "cannon_primary",
+        "Being Annihilator",
     ):
         assert server_owned_value not in production
     assert "_catalog.EditorOptions" not in production
@@ -225,6 +242,14 @@ def test_portable_view_model_suite_covers_editors_states_and_round_trips():
     assert "OrderedListActionsFollowTheServerConstraintContract" in tests
     assert "UltimateWeaponEditorPreservesUnknownValuesAndConstrainsStun" in tests
     assert "DormantIgnoreValueSurvivesInheritedAndReconstructedRows" in tests
+    assert "PresetAndLocalDraftsSurviveFormAndSourceStateTransitions" in tests
+    assert "PresetAndLocalDraftsSurviveSparseBaseTransitions" in tests
+    assert "ModuleLocalEditorUsesEightFieldsAndPreventsRepeatedChoices" in tests
+    assert (
+        "TargetPriorityLocalEditorRetainsCompleteMembershipInChangedOrder"
+        in tests
+    )
+    assert "OrbLocalEditorEmitsExactlyThreeUnnormalizedTextFields" in tests
     assert "ComputedDisplayPropertiesRemainReadOnly" in tests
     assert "BasePinReviewCoversFirstAttachmentWithoutImplyingActivation" in tests
 
@@ -253,11 +278,42 @@ def test_wpf_rebase_and_publish_reviews_keep_activation_separate():
     assert "Publishing will not activate this Strategy" in view_models
     assert "Bases cannot be activated" in view_models
     assert '"/api/v1/strategy-authoring"' in api_client
-    assert "MinimumServerRevision = 23" in compatibility
+    assert "MinimumServerRevision = 24" in compatibility
+    assert '"strategy_authoring_local_loadout_editors_v1"' in compatibility
     assert '"strategy_revision_history_v1"' in compatibility
     assert '"strategy_authoring_profile_lifecycle_v1"' in compatibility
     assert '"strategy_authoring_specialized_editors_v1"' in compatibility
     assert '"strategy_authoring_v1"' in compatibility
+
+
+def test_wpf_profile_local_loadout_controls_use_only_nested_server_metadata():
+    xaml = _text("StrategyProfilesWindow.xaml")
+    code = _text("StrategyProfilesWindow.xaml.cs")
+    models = _text("Models.cs")
+    view_models = _text("StrategyAuthoringViewModels.cs")
+    structured = _text("StrategyStructuredEditorViewModels.cs")
+
+    assert 'JsonPropertyName("local_editor")' in models
+    assert 'JsonPropertyName("unique_field_values")' in models
+    assert 'JsonPropertyName("profile_local_loadout_editors")' in models
+    assert "public int SchemaVersion { get; set; } = 3;" in models
+    assert "_definition.Editor.LocalEditor is not null" in view_models
+    assert "presetField.Key" in view_models
+    assert "localMetadata.Key" in view_models
+    assert "SelectedDefinitionForm.Key" in view_models
+    assert "LocalDefinitionEditor?.CurrentValue" in view_models
+    assert "SelectedPreset?.Value.Clone()" in view_models
+    assert "dormantValue?.PresetValue" in view_models
+    assert "dormantValue?.LocalValue" in view_models
+    assert "UniqueFieldValues" in structured
+    assert "RefreshUniqueFieldOptions" in structured
+    assert "ServerNormalizedText" in structured
+    assert 'AutomationProperties.Name="Definition source"' in xaml
+    assert 'AutomationProperties.Name="Shared preset"' in xaml
+    assert "MoveLocalDefinitionListItemUp_Click" in xaml
+    assert "MoveLocalDefinitionListItemDown_Click" in xaml
+    assert "row.LocalDefinitionEditor?.MoveListItem" in code
+    assert "raw json" not in xaml.lower()
 
 
 def test_wpf_custom_strategy_rename_and_delete_are_explicit_and_guarded():

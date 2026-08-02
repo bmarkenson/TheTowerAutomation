@@ -17,6 +17,13 @@ public sealed class StrategyAuthoringViewModelTests
         "ultimate_weapon_toggles",
     };
 
+    public static TheoryData<string> LocalEditorKinds => new()
+    {
+        "modules",
+        "target_priority",
+        "orb_distance",
+    };
+
     [Theory]
     [MemberData(nameof(EditorTypes))]
     public void EveryEditorBuildsAnOmittedBaseDirectiveFromServerInitialValue(
@@ -317,6 +324,145 @@ public sealed class StrategyAuthoringViewModelTests
         var damage = ManagedRow(Definition("damage_percentage"));
         damage.ValueText = "2e-19%";
         Assert.Equal("2e-19%", damage.BuildDirective()?.Value?.GetString());
+    }
+
+    [Theory]
+    [MemberData(nameof(LocalEditorKinds))]
+    public void PresetAndLocalDraftsSurviveFormAndSourceStateTransitions(
+        string kind)
+    {
+        var definition = LocalDefinition(kind);
+        var row = ManagedRow(definition);
+        var presetForm = row.DefinitionForms[0];
+        var localForm = row.DefinitionForms[1];
+
+        row.SelectedDefinitionForm = localForm;
+        MutateLocalDefinition(row, kind);
+        var localDraft = row.BuildDirective()?.Value;
+
+        row.SelectedDefinitionForm = presetForm;
+        row.SelectedPreset = row.PresetOptions[1];
+        var presetDraft = row.BuildDirective()?.Value;
+        row.SelectedSourceState = State(row, "ignore");
+        AssertJson(presetDraft, row.BuildDirective()?.Value);
+        row.SelectedSourceState = State(row, "inherit");
+        Assert.Null(row.BuildDirective());
+
+        var dormant = row.CaptureDormantValue();
+        var reopened = Row(
+            definition,
+            isBase: false,
+            directive: null,
+            dormantValue: dormant);
+        reopened.SelectedSourceState = State(reopened, "override_observe");
+        AssertJson(presetDraft, reopened.BuildDirective()?.Value);
+        reopened.SelectedDefinitionForm = reopened.DefinitionForms[1];
+        AssertJson(localDraft, reopened.BuildDirective()?.Value);
+        reopened.SelectedSourceState = State(reopened, "ignore");
+        AssertJson(localDraft, reopened.BuildDirective()?.Value);
+    }
+
+    [Theory]
+    [MemberData(nameof(LocalEditorKinds))]
+    public void PresetAndLocalDraftsSurviveSparseBaseTransitions(string kind)
+    {
+        var definition = LocalDefinition(kind);
+        var row = Row(definition, isBase: true);
+        row.SelectedSourceState = State(row, "included_enforce");
+        row.SelectedDefinitionForm = row.DefinitionForms[1];
+        MutateLocalDefinition(row, kind);
+        var localDraft = row.BuildDirective()?.Value;
+
+        row.SelectedSourceState = State(row, "not_included");
+        Assert.Null(row.BuildDirective());
+        var dormant = row.CaptureDormantValue();
+        var reopened = Row(
+            definition,
+            isBase: true,
+            directive: null,
+            dormantValue: dormant);
+        reopened.SelectedSourceState = State(reopened, "included_observe");
+
+        AssertJson(localDraft, reopened.BuildDirective()?.Value);
+        reopened.SelectedDefinitionForm = reopened.DefinitionForms[0];
+        AssertJson(definition.InitialValue, reopened.BuildDirective()?.Value);
+    }
+
+    [Fact]
+    public void ModuleLocalEditorUsesEightFieldsAndPreventsRepeatedChoices()
+    {
+        var row = ManagedRow(LocalDefinition("modules"));
+        row.SelectedDefinitionForm = row.DefinitionForms[1];
+        var local = Assert.IsType<AuthoringLocalDefinitionViewModel>(
+            row.LocalDefinitionEditor);
+
+        Assert.Equal(8, local.Fields.Count);
+        var first = local.Fields[0];
+        var second = local.Fields[1];
+        var repeated = first.Definition.Options.Single(option =>
+            option.Value.GetString() == second.SelectedOption?.Value.GetString());
+        Assert.DoesNotContain(
+            first.AvailableOptions,
+            option => option.Value.GetString() == repeated.Value.GetString());
+
+        var original = first.SelectedOption;
+        first.SelectedOption = repeated;
+        Assert.Same(original, first.SelectedOption);
+        first.SelectedOption = first.AvailableOptions.Single(option =>
+            option.Value.GetString()?.EndsWith("3", StringComparison.Ordinal) == true);
+
+        var definition = row.BuildDirective()?.Value?.GetProperty("local");
+        Assert.True(definition.HasValue);
+        var values = definition.Value.EnumerateObject()
+            .Select(property => property.Value.GetString())
+            .ToArray();
+        Assert.Equal(8, values.Length);
+        Assert.Equal(8, values.Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Fact]
+    public void TargetPriorityLocalEditorRetainsCompleteMembershipInChangedOrder()
+    {
+        var definition = LocalDefinition("target_priority");
+        var row = ManagedRow(definition);
+        row.SelectedDefinitionForm = row.DefinitionForms[1];
+        var local = Assert.IsType<AuthoringLocalDefinitionViewModel>(
+            row.LocalDefinitionEditor);
+        var before = local.ListValues.Select(option => option.Value.GetString()).ToArray();
+
+        Assert.Equal(10, local.ListValues.Count);
+        Assert.False(local.CanAddListItem);
+        Assert.False(local.CanRemoveListItem);
+        Assert.True(local.CanReorderListItems);
+        local.MoveListItem(local.ListValues[^1], -1);
+
+        var after = row.BuildDirective()?.Value?.GetProperty("local")
+            .EnumerateArray()
+            .Select(item => item.GetString())
+            .ToArray();
+        Assert.NotNull(after);
+        Assert.Equal(before.Order(StringComparer.Ordinal), after!.Order(StringComparer.Ordinal));
+        Assert.NotEqual(before, after);
+    }
+
+    [Fact]
+    public void OrbLocalEditorEmitsExactlyThreeUnnormalizedTextFields()
+    {
+        var row = ManagedRow(LocalDefinition("orb_distance"));
+        row.SelectedDefinitionForm = row.DefinitionForms[1];
+        var local = Assert.IsType<AuthoringLocalDefinitionViewModel>(
+            row.LocalDefinitionEditor);
+
+        Assert.Equal(3, local.Fields.Count);
+        Assert.All(local.Fields, field => Assert.True(field.UsesTextEditor));
+        local.Fields[0].ValueText = "not a distance";
+
+        var value = row.BuildDirective()?.Value?.GetProperty("local");
+        Assert.True(value.HasValue);
+        Assert.Equal(
+            new[] { "range_basis", "extra", "workshop" },
+            value.Value.EnumerateObject().Select(property => property.Name));
+        Assert.Equal("not a distance", value.Value.GetProperty("range_basis").GetString());
     }
 
     [Fact]
@@ -685,6 +831,140 @@ public sealed class StrategyAuthoringViewModelTests
                 throw new ArgumentOutOfRangeException(nameof(editorType));
         }
         return definition;
+    }
+
+    private static StrategySettingDefinition LocalDefinition(string kind)
+    {
+        var definition = new StrategySettingDefinition
+        {
+            Id = kind,
+            DisplayName = kind,
+            EditorType = "preset",
+            AllowedPolicies = ["enforce", "observe", "ignore"],
+            InitialValue = Element(
+                new Dictionary<string, string> { ["preset"] = "shared_one" }),
+            Editor = Metadata(
+                fields:
+                [
+                    Field(
+                        "preset",
+                        "shared_one",
+                        Options("shared_one", "shared_two")),
+                ]),
+        };
+        definition.Editor.ValueKind = "object";
+        definition.Editor.LocalEditor = kind switch
+        {
+            "modules" => ModuleLocalMetadata(),
+            "target_priority" => TargetPriorityLocalMetadata(),
+            "orb_distance" => OrbDistanceLocalMetadata(),
+            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        };
+        return definition;
+    }
+
+    private static StrategyEditorMetadata ModuleLocalMetadata()
+    {
+        var fields = new List<StrategyEditorField>();
+        var initial = new Dictionary<string, string>(StringComparer.Ordinal);
+        for (var index = 0; index < 8; index++)
+        {
+            var family = index / 2;
+            var selected = $"family_{family}_module_{index % 2 + 1}";
+            initial[$"slot_{index + 1}"] = selected;
+            fields.Add(
+                Field(
+                    $"slot_{index + 1}",
+                    selected,
+                    Options(
+                        $"family_{family}_module_1",
+                        $"family_{family}_module_2",
+                        $"family_{family}_module_3")));
+        }
+        return new StrategyEditorMetadata
+        {
+            SchemaVersion = 1,
+            Key = "local",
+            DisplayName = "Profile-local definition",
+            ValueKind = "object",
+            HelpText = "Choose every slot.",
+            InitialValue = Element(initial),
+            UniqueFieldValues = true,
+            Fields = fields,
+        };
+    }
+
+    private static StrategyEditorMetadata TargetPriorityLocalMetadata()
+    {
+        var targets = Enumerable.Range(1, 10)
+            .Select(index => $"target_{index}")
+            .ToArray();
+        return new StrategyEditorMetadata
+        {
+            SchemaVersion = 1,
+            Key = "local",
+            DisplayName = "Profile-local definition",
+            ValueKind = "array",
+            HelpText = "Order every target.",
+            InitialValue = Element(targets),
+            Options = Options(targets),
+            ListConstraints = ExactList(
+                targets,
+                allowReorder: true,
+                orderSignificant: true),
+        };
+    }
+
+    private static StrategyEditorMetadata OrbDistanceLocalMetadata()
+    {
+        var initial = new Dictionary<string, string>
+        {
+            ["range_basis"] = "30.00m",
+            ["extra"] = "30.00m",
+            ["workshop"] = "39.00m",
+        };
+        return new StrategyEditorMetadata
+        {
+            SchemaVersion = 1,
+            Key = "local",
+            DisplayName = "Profile-local definition",
+            ValueKind = "object",
+            HelpText = "Linux normalizes these values.",
+            InitialValue = Element(initial),
+            ServerNormalizedText = true,
+            Fields = initial.Select(item => new StrategyEditorField
+            {
+                Key = item.Key,
+                DisplayName = item.Key,
+                Required = true,
+                InitialValue = Element(item.Value),
+            }).ToList(),
+        };
+    }
+
+    private static void MutateLocalDefinition(
+        AuthoringSettingRowViewModel row,
+        string kind)
+    {
+        var local = Assert.IsType<AuthoringLocalDefinitionViewModel>(
+            row.LocalDefinitionEditor);
+        switch (kind)
+        {
+            case "modules":
+                local.Fields[0].SelectedOption = local.Fields[0].AvailableOptions.Single(
+                    option => option.Value.GetString()?.EndsWith(
+                        "3",
+                        StringComparison.Ordinal) == true);
+                break;
+            case "target_priority":
+                local.MoveListItem(local.ListValues[^1], -1);
+                break;
+            case "orb_distance":
+                local.Fields[0].ValueText = "31m";
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(kind));
+        }
     }
 
     private static StrategyEditorMetadata Metadata(

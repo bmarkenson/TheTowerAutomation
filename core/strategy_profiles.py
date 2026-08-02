@@ -381,6 +381,7 @@ class StrategyProfileStore:
                 "reviewed_rebase_required": True,
                 "immutable_strategy_history": True,
                 "restore_as_new": True,
+                "profile_local_loadout_editors": True,
             },
             "editor_options": {
                 "presets": legacy_catalog["presets"],

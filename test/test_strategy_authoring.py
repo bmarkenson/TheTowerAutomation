@@ -260,8 +260,87 @@ def test_registry_editor_metadata_declares_every_specialized_constraint():
         preset = catalog[setting_id]["editor"]
         assert preset["fields"][0]["key"] == "preset"
         assert preset["fields"][0]["options"]
+        assert preset["local_editor"]["schema_version"] == 1
+        assert preset["local_editor"]["key"] == "local"
+        assert preset["local_editor"]["initial_value"]
+
+    modules = catalog["modules"]["editor"]["local_editor"]
+    assert modules["value_kind"] == "object"
+    assert modules["unique_field_values"] is True
+    assert len(modules["fields"]) == 8
+    assert set(modules["initial_value"]) == {
+        field["key"] for field in modules["fields"]
+    }
+    assert all(field["options"] for field in modules["fields"])
+
+    target_priority = catalog["target_priority"]["editor"]["local_editor"]
+    assert target_priority["value_kind"] == "array"
+    assert target_priority["list_constraints"] == {
+        "minimum_items": 10,
+        "maximum_items": 10,
+        "unique_items": True,
+        "allow_add": False,
+        "allow_remove": False,
+        "allow_reorder": True,
+        "order_significant": True,
+        "exact_items": target_priority["initial_value"],
+    }
+    assert {
+        option["value"] for option in target_priority["options"]
+    } == set(target_priority["initial_value"])
+
+    orb_distance = catalog["orb_distance"]["editor"]["local_editor"]
+    assert orb_distance["value_kind"] == "object"
+    assert orb_distance["server_normalized_text"] is True
+    assert [field["key"] for field in orb_distance["fields"]] == [
+        "range_basis",
+        "extra",
+        "workshop",
+    ]
+    assert all(field["options"] == [] for field in orb_distance["fields"])
     damage = catalog["damage_slider"]["editor"]
     assert damage["server_normalized_text"] is True
+
+
+def test_profile_local_metadata_is_additive_to_revision_23_preset_contract():
+    catalog = {item["id"]: item for item in setting_registry_catalog()}
+
+    for setting_id in ("modules", "target_priority", "orb_distance"):
+        item = catalog[setting_id]
+        assert item["editor_type"] == "preset"
+        assert set(item["initial_value"]) == {"preset"}
+        editor = copy.deepcopy(item["editor"])
+        local_editor = editor.pop("local_editor")
+
+        # This is the complete shape consumed by the revision-23 native client.
+        assert editor["value_kind"] == "object"
+        assert editor["preserve_unknown_fields"] is False
+        assert [field["key"] for field in editor["fields"]] == ["preset"]
+        assert editor["fields"][0]["initial_value"] == item["initial_value"][
+            "preset"
+        ]
+        assert any(
+            option["value"] == item["initial_value"]["preset"]
+            for option in editor["fields"][0]["options"]
+        )
+
+        # A revision-23 preset reader can still round-trip presets, while a local
+        # selector has no preset field for it to reinterpret or synthesize.
+        preset_value = item["initial_value"]
+        assert preset_value["preset"] in {
+            option["value"] for option in editor["fields"][0]["options"]
+        }
+        assert "preset" not in {"local": local_editor["initial_value"]}
+
+        serialized = json.dumps(local_editor, allow_nan=False)
+        for server_owned_name in (
+            "definition_snapshot",
+            "fingerprint",
+            "generated_plan",
+            "actions",
+            "template_path",
+        ):
+            assert server_owned_name not in serialized
 
 
 @pytest.mark.parametrize(
@@ -300,6 +379,41 @@ def test_registry_editor_metadata_declares_every_specialized_constraint():
             "damage_slider",
             lambda metadata: metadata.update(server_normalized_text=False),
             "server-normalized",
+        ),
+        (
+            "modules",
+            lambda metadata: metadata["local_editor"]["fields"].pop(),
+            "complete local initial value",
+        ),
+        (
+            "modules",
+            lambda metadata: metadata["local_editor"].update(
+                unique_field_values=False
+            ),
+            "does not declare",
+        ),
+        (
+            "modules",
+            lambda metadata: metadata["local_editor"]["fields"][0][
+                "options"
+            ].append(
+                copy.deepcopy(
+                    metadata["local_editor"]["fields"][2]["options"][0]
+                )
+            ),
+            "not cannon",
+        ),
+        (
+            "target_priority",
+            lambda metadata: metadata["local_editor"][
+                "list_constraints"
+            ].update(allow_remove=True),
+            "cannot add or remove",
+        ),
+        (
+            "orb_distance",
+            lambda metadata: metadata["local_editor"]["fields"].pop(),
+            "complete local initial value",
         ),
     ),
 )

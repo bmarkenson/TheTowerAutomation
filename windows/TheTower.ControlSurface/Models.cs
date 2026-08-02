@@ -721,6 +721,9 @@ public sealed class StrategyAuthoringCapabilities
 
     [JsonPropertyName("reviewed_rebase_required")]
     public bool ReviewedRebaseRequired { get; set; }
+
+    [JsonPropertyName("profile_local_loadout_editors")]
+    public bool ProfileLocalLoadoutEditors { get; set; }
 }
 
 public sealed class AuthoringSourceStateDefinition
@@ -797,11 +800,23 @@ public sealed class StrategyEditorMetadata
     [JsonPropertyName("help_text")]
     public string HelpText { get; set; } = "";
 
+    [JsonPropertyName("key")]
+    public string Key { get; set; } = "";
+
+    [JsonPropertyName("display_name")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("initial_value")]
+    public JsonElement? InitialValue { get; set; }
+
     [JsonPropertyName("server_normalized_text")]
     public bool ServerNormalizedText { get; set; }
 
     [JsonPropertyName("preserve_unknown_fields")]
     public bool PreserveUnknownFields { get; set; }
+
+    [JsonPropertyName("unique_field_values")]
+    public bool UniqueFieldValues { get; set; }
 
     [JsonPropertyName("allow_group_selection")]
     public bool AllowGroupSelection { get; set; }
@@ -820,6 +835,9 @@ public sealed class StrategyEditorMetadata
 
     [JsonPropertyName("groups")]
     public List<StrategyEditorGroup> Groups { get; set; } = [];
+
+    [JsonPropertyName("local_editor")]
+    public StrategyEditorMetadata? LocalEditor { get; set; }
 }
 
 public sealed class StrategyEditorOption
@@ -1076,7 +1094,7 @@ public sealed class StrategyBaseUpdate
 public sealed class StrategyAuthoringSource
 {
     [JsonPropertyName("schema_version")]
-    public int SchemaVersion { get; set; } = 2;
+    public int SchemaVersion { get; set; } = 3;
 
     [JsonPropertyName("kind")]
     public string Kind { get; set; } = "strategy";

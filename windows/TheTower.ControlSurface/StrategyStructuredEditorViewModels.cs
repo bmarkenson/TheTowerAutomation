@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Collections.ObjectModel;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 
@@ -279,6 +280,344 @@ public sealed class AuthoringToggleGroupViewModel : INotifyPropertyChanged
         }
         RefreshConstraints();
         _changed();
+    }
+
+    private void Notify([CallerMemberName] string? propertyName = null) =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+}
+
+public sealed record AuthoringDefinitionForm(string Key, string DisplayName);
+
+public sealed class AuthoringLocalFieldViewModel : INotifyPropertyChanged
+{
+    private readonly Action _changed;
+    private StrategyEditorOption? _selectedOption;
+    private string _valueText = "";
+
+    public AuthoringLocalFieldViewModel(
+        StrategyEditorField definition,
+        JsonElement? currentValue,
+        bool serverNormalizedText,
+        Action changed)
+    {
+        Definition = definition;
+        ServerNormalizedText = serverNormalizedText;
+        _changed = changed;
+        if (UsesChoiceEditor)
+        {
+            _selectedOption = EditorJson.FindOption(
+                    definition.Options,
+                    currentValue)
+                ?? EditorJson.FindOption(
+                    definition.Options,
+                    definition.InitialValue);
+            foreach (var option in definition.Options)
+            {
+                AvailableOptions.Add(option);
+            }
+        }
+        else
+        {
+            var value = currentValue ?? definition.InitialValue;
+            _valueText = value.ValueKind == JsonValueKind.String
+                ? value.GetString() ?? ""
+                : value.GetRawText();
+        }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    public StrategyEditorField Definition { get; }
+    public string Key => Definition.Key;
+    public string DisplayName => Definition.DisplayName;
+    public bool Fixed => Definition.Fixed;
+    public bool ServerNormalizedText { get; }
+    public bool UsesChoiceEditor => Definition.Options.Count > 0;
+    public bool UsesTextEditor => !UsesChoiceEditor && ServerNormalizedText;
+    public bool SelectionEnabled => !Fixed;
+    public ObservableCollection<StrategyEditorOption> AvailableOptions { get; } = [];
+
+    public StrategyEditorOption? SelectedOption
+    {
+        get => _selectedOption;
+        set
+        {
+            if (ReferenceEquals(_selectedOption, value)
+                || value is null
+                || !AvailableOptions.Contains(value))
+            {
+                return;
+            }
+            _selectedOption = value;
+            Notify();
+            _changed();
+        }
+    }
+
+    public string ValueText
+    {
+        get => _valueText;
+        set
+        {
+            if (_valueText == value)
+            {
+                return;
+            }
+            _valueText = value;
+            Notify();
+            _changed();
+        }
+    }
+
+    public JsonElement? CurrentValue => UsesChoiceEditor
+        ? SelectedOption?.Value.Clone()
+        : UsesTextEditor
+            ? JsonSerializer.SerializeToElement(ValueText)
+            : null;
+
+    internal void RefreshAvailableOptions(IReadOnlySet<string> selectedByOtherFields)
+    {
+        if (!UsesChoiceEditor)
+        {
+            return;
+        }
+        var currentKey = SelectedOption?.ValueKey;
+        AvailableOptions.Clear();
+        foreach (var option in Definition.Options.Where(option =>
+                     option.ValueKey == currentKey
+                     || !selectedByOtherFields.Contains(option.ValueKey)))
+        {
+            AvailableOptions.Add(option);
+        }
+        Notify(nameof(AvailableOptions));
+    }
+
+    private void Notify([CallerMemberName] string? propertyName = null) =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+}
+
+public sealed class AuthoringLocalDefinitionViewModel : INotifyPropertyChanged
+{
+    private readonly StrategyEditorMetadata _metadata;
+    private readonly Action _changed;
+    private StrategyEditorOption? _selectedListOption;
+    private bool _configuring;
+
+    public AuthoringLocalDefinitionViewModel(
+        StrategyEditorMetadata metadata,
+        JsonElement? currentValue,
+        Action changed)
+    {
+        _metadata = metadata;
+        _changed = changed;
+        _configuring = true;
+        var value = currentValue ?? metadata.InitialValue;
+        if (UsesObjectEditor)
+        {
+            var current = EditorJson.ObjectValues(value);
+            foreach (var field in metadata.Fields)
+            {
+                JsonElement? fieldValue = current.TryGetValue(field.Key, out var raw)
+                    ? raw
+                    : field.InitialValue;
+                Fields.Add(
+                    new AuthoringLocalFieldViewModel(
+                        field,
+                        fieldValue,
+                        metadata.ServerNormalizedText,
+                        FieldChanged));
+            }
+            RefreshUniqueFieldOptions();
+        }
+        else if (UsesListEditor && value is { ValueKind: JsonValueKind.Array })
+        {
+            foreach (var raw in value.Value.EnumerateArray())
+            {
+                ListValues.Add(
+                    EditorJson.FindOption(metadata.Options, raw)
+                    ?? new StrategyEditorOption
+                    {
+                        Value = raw.Clone(),
+                        DisplayName = $"{raw.GetRawText()} (preserved value)",
+                    });
+            }
+            ListValues.CollectionChanged += (_, _) => ListChanged();
+            RefreshAvailableListOptions();
+        }
+        _configuring = false;
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    public bool UsesObjectEditor => _metadata.ValueKind == "object";
+    public bool UsesListEditor => _metadata.ValueKind == "array";
+    public string HelpText => _metadata.HelpText;
+    public ObservableCollection<AuthoringLocalFieldViewModel> Fields { get; } = [];
+    public ObservableCollection<StrategyEditorOption> ListValues { get; } = [];
+    public ObservableCollection<StrategyEditorOption> AvailableListOptions { get; } = [];
+
+    public StrategyEditorOption? SelectedListOption
+    {
+        get => _selectedListOption;
+        set
+        {
+            if (ReferenceEquals(_selectedListOption, value)
+                || (value is not null && !AvailableListOptions.Contains(value)))
+            {
+                return;
+            }
+            _selectedListOption = value;
+            Notify();
+            Notify(nameof(CanAddListItem));
+        }
+    }
+
+    public bool CanAddListItem =>
+        (_metadata.ListConstraints?.AllowAdd ?? false)
+        && ListValues.Count < (_metadata.ListConstraints?.MaximumItems ?? 0)
+        && SelectedListOption is not null;
+    public bool CanRemoveListItem =>
+        (_metadata.ListConstraints?.AllowRemove ?? false)
+        && ListValues.Count > (_metadata.ListConstraints?.MinimumItems ?? 0);
+    public bool CanReorderListItems =>
+        _metadata.ListConstraints?.AllowReorder ?? false;
+    public bool ListMembershipEditable =>
+        (_metadata.ListConstraints?.AllowAdd ?? false)
+        || (_metadata.ListConstraints?.AllowRemove ?? false);
+    public bool ListReorderAvailable =>
+        _metadata.ListConstraints?.AllowReorder ?? false;
+
+    public string ListConstraintDisplay
+    {
+        get
+        {
+            var constraints = _metadata.ListConstraints;
+            if (constraints is null)
+            {
+                return "";
+            }
+            if (constraints.ExactItems.Count > 0)
+            {
+                return constraints.AllowReorder
+                    ? $"Exact {constraints.ExactItems.Count}-item membership; order may be changed."
+                    : $"Fixed exact {constraints.ExactItems.Count}-item value.";
+            }
+            var order = constraints.OrderSignificant
+                ? "Order is significant."
+                : "Order is not significant.";
+            return $"{constraints.MinimumItems}–{constraints.MaximumItems} unique item(s). {order}";
+        }
+    }
+
+    public JsonElement? CurrentValue
+    {
+        get
+        {
+            if (UsesObjectEditor)
+            {
+                var result = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+                foreach (var field in Fields)
+                {
+                    if (field.CurrentValue is not { } current)
+                    {
+                        return null;
+                    }
+                    result[field.Key] = current.Clone();
+                }
+                return JsonSerializer.SerializeToElement(result);
+            }
+            if (UsesListEditor)
+            {
+                return JsonSerializer.SerializeToElement(
+                    ListValues.Select(option => option.Value.Clone()).ToArray());
+            }
+            return null;
+        }
+    }
+
+    public void AddSelectedListItem()
+    {
+        if (!CanAddListItem || SelectedListOption is null)
+        {
+            return;
+        }
+        ListValues.Add(SelectedListOption);
+        SelectedListOption = null;
+    }
+
+    public void RemoveListItem(StrategyEditorOption? option)
+    {
+        if (option is not null && CanRemoveListItem)
+        {
+            ListValues.Remove(option);
+        }
+    }
+
+    public void MoveListItem(StrategyEditorOption? option, int offset)
+    {
+        if (option is null || !CanReorderListItems)
+        {
+            return;
+        }
+        var index = ListValues.IndexOf(option);
+        var destination = index + offset;
+        if (index >= 0 && destination >= 0 && destination < ListValues.Count)
+        {
+            ListValues.Move(index, destination);
+        }
+    }
+
+    private void FieldChanged()
+    {
+        RefreshUniqueFieldOptions();
+        ValueChanged();
+    }
+
+    private void RefreshUniqueFieldOptions()
+    {
+        if (!_metadata.UniqueFieldValues)
+        {
+            return;
+        }
+        foreach (var field in Fields)
+        {
+            var selectedByOthers = Fields
+                .Where(candidate => !ReferenceEquals(candidate, field))
+                .Select(candidate => candidate.SelectedOption?.ValueKey)
+                .Where(key => key is not null)
+                .Cast<string>()
+                .ToHashSet(StringComparer.Ordinal);
+            field.RefreshAvailableOptions(selectedByOthers);
+        }
+    }
+
+    private void ListChanged()
+    {
+        RefreshAvailableListOptions();
+        Notify(nameof(CanAddListItem));
+        Notify(nameof(CanRemoveListItem));
+        ValueChanged();
+    }
+
+    private void RefreshAvailableListOptions()
+    {
+        var selected = ListValues.Select(option => option.ValueKey).ToHashSet(
+            StringComparer.Ordinal);
+        AvailableListOptions.Clear();
+        foreach (var option in _metadata.Options.Where(option =>
+                     !selected.Contains(option.ValueKey)))
+        {
+            AvailableListOptions.Add(option);
+        }
+        Notify(nameof(AvailableListOptions));
+    }
+
+    private void ValueChanged()
+    {
+        if (!_configuring)
+        {
+            _changed();
+        }
     }
 
     private void Notify([CallerMemberName] string? propertyName = null) =>

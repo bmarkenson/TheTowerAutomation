@@ -254,6 +254,81 @@
                                 SelectedItem="{Binding SelectedPreset, Mode=TwoWay}"
                                 IsEnabled="{Binding PresetControlEnabled, Mode=OneWay}"
                                 Visibility="{Binding UsesPresetEditor, Mode=OneWay, Converter={StaticResource BoolVisibility}}" />
+
+                      <StackPanel Visibility="{Binding UsesPresetOrLocalEditor, Mode=OneWay, Converter={StaticResource BoolVisibility}}">
+                        <ComboBox ItemsSource="{Binding DefinitionForms, Mode=OneWay}"
+                                  DisplayMemberPath="DisplayName"
+                                  SelectedItem="{Binding SelectedDefinitionForm, Mode=TwoWay}"
+                                  IsEnabled="{Binding DefinitionFormControlEnabled, Mode=OneWay}"
+                                  AutomationProperties.Name="Definition source" />
+                        <ComboBox ItemsSource="{Binding PresetOptions, Mode=OneWay}"
+                                  DisplayMemberPath="DisplayName"
+                                  SelectedItem="{Binding SelectedPreset, Mode=TwoWay}"
+                                  IsEnabled="{Binding DefinitionPresetControlEnabled, Mode=OneWay}"
+                                  Visibility="{Binding IsPresetDefinitionSelected, Mode=OneWay, Converter={StaticResource BoolVisibility}}"
+                                  Margin="0,4,0,0"
+                                  AutomationProperties.Name="Shared preset" />
+                        <StackPanel IsEnabled="{Binding LocalDefinitionControlEnabled, Mode=OneWay}"
+                                    Visibility="{Binding IsLocalDefinitionSelected, Mode=OneWay, Converter={StaticResource BoolVisibility}}"
+                                    Margin="0,5,0,0">
+                          <ItemsControl ItemsSource="{Binding LocalDefinitionEditor.Fields, Mode=OneWay}"
+                                        Visibility="{Binding LocalDefinitionEditor.UsesObjectEditor, Mode=OneWay, Converter={StaticResource BoolVisibility}}">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate>
+                                <Grid Margin="0,0,0,4">
+                                  <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="180" />
+                                    <ColumnDefinition Width="*" />
+                                  </Grid.ColumnDefinitions>
+                                  <TextBlock Text="{Binding DisplayName, Mode=OneWay}"
+                                             VerticalAlignment="Center" />
+                                  <ComboBox Grid.Column="1"
+                                            ItemsSource="{Binding AvailableOptions, Mode=OneWay}"
+                                            DisplayMemberPath="DisplayName"
+                                            SelectedItem="{Binding SelectedOption, Mode=TwoWay}"
+                                            IsEnabled="{Binding SelectionEnabled, Mode=OneWay}"
+                                            Visibility="{Binding UsesChoiceEditor, Mode=OneWay, Converter={StaticResource BoolVisibility}}" />
+                                  <TextBox Grid.Column="1"
+                                           Text="{Binding ValueText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                           Visibility="{Binding UsesTextEditor, Mode=OneWay, Converter={StaticResource BoolVisibility}}" />
+                                </Grid>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+
+                          <StackPanel Visibility="{Binding LocalDefinitionEditor.UsesListEditor, Mode=OneWay, Converter={StaticResource BoolVisibility}}">
+                            <ListBox x:Name="LocalDefinitionList"
+                                     ItemsSource="{Binding LocalDefinitionEditor.ListValues, Mode=OneWay}"
+                                     DisplayMemberPath="DisplayName" Height="116" />
+                            <ComboBox ItemsSource="{Binding LocalDefinitionEditor.AvailableListOptions, Mode=OneWay}"
+                                      SelectedItem="{Binding LocalDefinitionEditor.SelectedListOption, Mode=TwoWay}"
+                                      DisplayMemberPath="DisplayName" Margin="0,4,0,2"
+                                      Visibility="{Binding LocalDefinitionEditor.ListMembershipEditable, Mode=OneWay, Converter={StaticResource BoolVisibility}}" />
+                            <WrapPanel>
+                              <Button Content="Add" Click="AddLocalDefinitionListItem_Click"
+                                      IsEnabled="{Binding LocalDefinitionEditor.CanAddListItem, Mode=OneWay}"
+                                      Visibility="{Binding LocalDefinitionEditor.ListMembershipEditable, Mode=OneWay, Converter={StaticResource BoolVisibility}}" />
+                              <Button Content="Remove" Click="RemoveLocalDefinitionListItem_Click"
+                                      IsEnabled="{Binding LocalDefinitionEditor.CanRemoveListItem, Mode=OneWay}"
+                                      Visibility="{Binding LocalDefinitionEditor.ListMembershipEditable, Mode=OneWay, Converter={StaticResource BoolVisibility}}"
+                                      CommandParameter="{Binding SelectedItem, ElementName=LocalDefinitionList}" />
+                              <Button Content="Move up" Click="MoveLocalDefinitionListItemUp_Click"
+                                      IsEnabled="{Binding LocalDefinitionEditor.CanReorderListItems, Mode=OneWay}"
+                                      Visibility="{Binding LocalDefinitionEditor.ListReorderAvailable, Mode=OneWay, Converter={StaticResource BoolVisibility}}"
+                                      CommandParameter="{Binding SelectedItem, ElementName=LocalDefinitionList}" />
+                              <Button Content="Move down" Click="MoveLocalDefinitionListItemDown_Click"
+                                      IsEnabled="{Binding LocalDefinitionEditor.CanReorderListItems, Mode=OneWay}"
+                                      Visibility="{Binding LocalDefinitionEditor.ListReorderAvailable, Mode=OneWay, Converter={StaticResource BoolVisibility}}"
+                                      CommandParameter="{Binding SelectedItem, ElementName=LocalDefinitionList}" />
+                            </WrapPanel>
+                            <TextBlock Text="{Binding LocalDefinitionEditor.ListConstraintDisplay, Mode=OneWay}"
+                                       Foreground="#93A4BB" FontSize="10" TextWrapping="Wrap" />
+                          </StackPanel>
+                          <TextBlock Text="{Binding LocalDefinitionEditor.HelpText, Mode=OneWay}"
+                                     Foreground="#93A4BB" FontSize="10"
+                                     TextWrapping="Wrap" Margin="0,4,0,0" />
+                        </StackPanel>
+                      </StackPanel>
                       <TextBox Text="{Binding ValueText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                IsEnabled="{Binding ValueEditorEnabled, Mode=OneWay}"
                                Visibility="{Binding UsesTextEditor, Mode=OneWay, Converter={StaticResource BoolVisibility}}" />

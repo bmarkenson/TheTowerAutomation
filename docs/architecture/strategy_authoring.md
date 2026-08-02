@@ -3,10 +3,10 @@
 This document defines the contract for GUI-authored strategy bases and
 strategies. The sparse model, immutable Base revisions, immutable custom
 Strategy lineages, restore-as-new workflow, and current Farm editors are
-implemented. Profile-local Module, Target Priority, and Orb definitions are now
-implemented in the backend; additive API discovery, native editors, and their
-Windows runtime smoke remain. The original Farm profile format remains
-supported as a compatibility facade.
+implemented. Profile-local Module, Target Priority, and Orb definitions now
+have additive API discovery and managed native editors; the disposable Windows
+runtime smoke remains. The original Farm profile format remains supported as a
+compatibility facade.
 
 The runtime architecture remains authoritative for action ownership and
 execution. This authoring layer resolves reusable, operator-friendly source
@@ -446,15 +446,29 @@ not eagerly rewrite them. Any prospective edit of a schema-1 compact profile
 or schema-2 sparse source crosses the explicit schema-3 boundary before it can
 publish, preventing a newly edited Strategy from remaining catalog-dependent.
 
-The control-surface API revision and capabilities remain at revision 23 in this
-backend slice, and the three registry entries still advertise the existing
-`preset` editor with `{preset: ...}` initial values. This keeps the installed
-native client safe for preset-only round trips. Existing authoring responses
-may additionally contain schema-3 source values, `definition_snapshot`, Base
-`resolution_fingerprint`, and `base_resolution`; clients must treat the latter
-three as server-owned review data. The next additive API/WPF slice must add an
-explicit capability and managed preset/local editors before the native client
-creates or edits local definitions.
+Server revision 24 advertises
+`strategy_authoring_local_loadout_editors_v1`, and the native client's minimum
+revision advances to 24 in the same change. The three registry entries retain
+their revision-23 `preset` editor type, `{preset: ...}` initial value, and
+top-level preset field. Each adds one schema-version-1 `local_editor` object
+whose key, label, initial value, value kind, fields/options, exact-list
+constraints, server-normalized-text flag, and cross-field uniqueness contract
+are validated before exposure. Revision-23 clients ignore this additive
+object and continue exact preset-only round trips. A schema-3 local selector
+has no `preset` field for such a client to select or synthesize, so the older
+editor fails closed instead of reinterpreting it.
+
+The managed native editor derives its preset/local form selector from those
+server keys and labels. Module rows are the exact server catalog slots with
+family-filtered choices and cross-row uniqueness; Target Priority is the exact
+server membership with operator-controlled ordering; Orb Distance is the
+three server-declared text fields. The client keeps independent dormant preset
+and local drafts while rows move through sparse Base states or Strategy
+Inherit/Override/Ignore states, including reconstruction after validation. It
+does not normalize Orb values or resolve definitions. Existing authoring
+responses may contain schema-3 source values, `definition_snapshot`, Base
+`resolution_fingerprint`, and `base_resolution`; clients continue treating
+the latter three as server-owned review evidence rather than editable data.
 
 ## Code ownership
 
@@ -523,11 +537,12 @@ The actionable sequence is tracked in the
 [`runtime and validation backlog`](../backlog/runtime-and-validation.md).
 
 All four original slices and the later immutable-history/safe-fallback slice
-are implemented. Server revision 23 retains
+are implemented. Server revision 24 retains
 `strategy_authoring_v1`, `strategy_authoring_specialized_editors_v1`, and
 `strategy_authoring_profile_lifecycle_v1`, `strategy_action_gate_v1`, and every
-older capability, and adds `strategy_revision_history_v1`; the original profile
-endpoint remains the compatibility facade. The native shell handles every
+older capability, retains revision-23 `strategy_revision_history_v1`, and adds
+`strategy_authoring_local_loadout_editors_v1`; the original profile endpoint
+remains the compatibility facade. The native shell handles every
 registered editor type with server-declared managed controls or an honest fixed
 presentation, retains dormant Ignore values and unknown Ultimate Weapon
 fields, and keeps validation, resolution, publication, and runtime authority
@@ -548,5 +563,6 @@ lineages; a successful explicit restore review publishes the historical intent
 as the next version and refreshes history/latest catalogs without selecting or
 activating it. The retirement archive remains evidence rather than a competing
 editable rollback model.
-The profile-local backend contract above is implemented. Additive API/WPF
-editing and Windows runtime smoke remain the separate follow-up slices.
+The profile-local backend contract and additive API/WPF editing above are
+implemented. The disposable-catalog Windows runtime smoke remains the separate
+follow-up slice.

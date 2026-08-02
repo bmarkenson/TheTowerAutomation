@@ -280,15 +280,16 @@ are displayed under the button, are consumed by the next applicable run, and
 are cleared if the selected strategy changes.
 
 **Strategy profiles...** opens the shared Strategy Authoring shell. Linux
-server revision 23 preserves `strategy_authoring_v1`,
+server revision 24 preserves `strategy_authoring_v1`,
 `strategy_authoring_specialized_editors_v1`,
 `strategy_authoring_profile_lifecycle_v1`, `strategy_action_gate_v1`, and every
-older capability, and adds `strategy_revision_history_v1`. It provides separate
-**Bases** and **Strategies** catalogs plus immutable custom-Strategy History
-while retaining the older latest-only profile endpoint for older clients. A
-Base is a sparse reusable component and is never activatable. Editing one
-publishes the next immutable revision. Strategies already pinned to an earlier
-revision continue to use their embedded snapshot.
+older capability, retains `strategy_revision_history_v1`, and adds
+`strategy_authoring_local_loadout_editors_v1`. It provides separate **Bases**
+and **Strategies** catalogs plus immutable custom-Strategy History while
+retaining the older latest-only profile endpoint for older clients. A Base is
+a sparse reusable component and is never activatable. Editing one publishes the
+next immutable revision. Strategies already pinned to an earlier revision
+continue to use their embedded snapshot.
 
 Settings are grouped by the server registry. **Show active only** keeps the
 normal view compact, while **Show all settings** exposes omitted settings.
@@ -308,6 +309,18 @@ exact three-item membership but allow the supported inspection order to move;
 Guardian chips are shown as the fixed exact set because their source order has
 no runtime meaning. Perk controls prevent duplicates, enforce declared limits,
 and expose ordering only where it matters.
+
+Modules, Target Priority, and Orb Distance can each use a shared preset or a
+profile-local definition. The registry retains its revision-23 preset field and
+adds one nested versioned local-editor contract. Modules renders every
+server-declared slot with only that slot family's server-declared module
+choices and prevents one module from occupying two slots. Target Priority
+renders the complete unique server membership and allows only reordering. Orb
+Distance renders exactly the server-declared Attack Range basis, Extra Orb,
+and Workshop text fields; the client submits their text to Linux without
+duplicating its distance parser or canonicalizer. The inactive preset and
+local drafts both survive form changes, Base omission/reinclusion, Strategy
+Inherit/Override/Ignore changes, and validation refreshes.
 
 Ultimate Weapons use managed group, toggle, and on/off controls. Poison Swamp
 stun is intentionally fixed to **Off**, the only value currently accepted by
@@ -349,11 +362,11 @@ Publishing never selects or activates a Strategy. After publication, use the
 normal strategy dropdown plus **Use next battle**, **Switch this battle**, or a
 managed Start. Existing schema-1 and schema-2 custom publications are adopted
 conservatively into immutable history without rewriting their latest facade;
-schema-1 authoring conversion still does not infer inheritance. The future
-profile-local Module/slot, ordered Target Priority, and relational Orb Distance
-definitions are a later phase; shared presets remain available. Tournament
-behavior, generated YAML rules, executor actions, runtime strategy gates, and
-activation behavior remain outside this editor.
+schema-1 authoring conversion still does not infer inheritance. Local
+definition snapshots, embedded Base resolution, and fingerprints remain
+Linux-owned review evidence rather than editable fields. Shared presets remain
+available. Tournament behavior, generated YAML rules, executor actions,
+runtime strategy gates, and activation behavior remain outside this editor.
 
 **History** opens a separate custom-Strategy lineage window. Active and retired
 lineages remain discoverable, with immutable versions newest first. The list
@@ -396,8 +409,10 @@ operator's real `config/strategies/custom` directory:
 
 Operator report, 2026-08-02: the available phase-three Windows runtime smoke
 checks were completed with no blocking issue reported. This was not exhaustive
-Windows validation; the bounded disposable-catalog checks below remain the
-canonical coverage when the relevant environment and cases are available.
+Windows validation and predates the profile-local loadout editors. The bounded
+disposable-catalog checks below, including the new preset/local cases, remain
+the next unchecked worker and canonical coverage when the relevant environment
+is available.
 
 1. Copy the repository to a temporary test root, empty only that copy's custom
    profile/Base catalog, and start the control-surface server with
@@ -414,14 +429,19 @@ canonical coverage when the relevant environment and cases are available.
 3. Create a disposable Base. With **Show all settings**, exercise fixed values,
    the true-only boolean, Card recharge choices, Free Upgrade reorder,
    fixed Guardian chips, Perk add/remove/limits/order, Ultimate Weapon
-   groups/toggles (including fixed Poison Swamp stun), all server presets, and
-   Damage percentage. Include each omitted setting, validate, publish, close,
-   reopen, and verify exact values and provenance.
+   groups/toggles (including fixed Poison Swamp stun), all shared presets,
+   profile-local Modules with all eight slots/no duplicate, complete reordered
+   Target Priority, all three Orb Distance fields, and Damage percentage.
+   Switch every loadout repeatedly between preset and local, omit/reinclude it,
+   include each omitted setting, validate, publish, close, reopen, and verify
+   exact active/dormant values and provenance. Submit one malformed local value
+   for each editor and verify Linux rejects it without a write.
 4. Create a disposable Strategy pinned to that Base. Exercise every applicable
    editor again, plus Inherit, Override Enforce, Override Observe, explicit
-   Ignore, Reset to inherited, and dormant values across repeated state
-   changes. Validate, publish, close, reopen, and verify exact round trips. Use
-   **Rename Strategy** to change its display name, review and publish, then
+   Ignore, Reset to inherited, preset/local switching, and both forms' dormant
+   values across repeated state changes. Validate, publish, close, reopen, and
+   verify exact round trips and Linux-owned definition snapshots in review.
+   Use **Rename Strategy** to change its display name, review and publish, then
    reopen and verify the name and version advanced while its stable ID did not.
 5. Open an editable disposable existing Strategy with **No Base** (including a
    copied schema-1 fixture). Select the disposable Base, confirm **Review Base
@@ -593,7 +613,8 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current history-capable build requires revision 23 and
+current profile-local-authoring build requires revision 24,
+`strategy_authoring_local_loadout_editors_v1`, and
 `strategy_revision_history_v1` while retaining all earlier required
 capabilities. The banner reports the actual revision/capability mismatch and
 the exact recovery

@@ -35,6 +35,7 @@ from core.free_upgrade_locks import (
 )
 from core.gate_decisions import PROFILE_SKIPPABLE_CHECKS, normalize_profile_skip_checks
 from core.gc_module_loadout import normalize_gc_module_requirements
+from core.module_icon_index import load_module_icon_catalog
 from core.orb_distance import (
     normalize_orb_distance_preset,
     normalize_orb_distance_presets,
@@ -44,7 +45,10 @@ from core.perk_configuration import (
     PERK_CONFIGURATION_LABELS,
     normalize_perk_configuration_requirements,
 )
-from core.target_priority_config import validate_target_priority_order
+from core.target_priority_config import (
+    TARGET_PRIORITY_TARGETS,
+    validate_target_priority_order,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -509,6 +513,144 @@ def _preset_editor(path: Path, setting_id: str) -> EditorMetadataFactory:
     return metadata
 
 
+def _local_definition_initial(setting_id: str, initial_value: Any) -> Any:
+    """Resolve the default preset into one canonical local-editor draft."""
+
+    if not isinstance(initial_value, Mapping) or set(initial_value) != {"preset"}:
+        raise ValueError(
+            f"{setting_id} local editor requires a preset initial value"
+        )
+    catalog = _load_yaml_mapping(
+        _LOADOUT_PRESET_PATHS[setting_id],
+        f"{setting_id} preset catalog",
+    )
+    presets = catalog.get("presets")
+    preset = initial_value.get("preset")
+    if not isinstance(presets, Mapping) or preset not in presets:
+        raise ValueError(
+            f"{setting_id} initial preset {preset!r} is absent from the catalog"
+        )
+    return _normalize_loadout_definition(
+        setting_id,
+        copy.deepcopy(presets[preset]),
+    )
+
+
+def _module_local_editor(initial_value: Any) -> Mapping[str, Any]:
+    local_initial = _local_definition_initial("modules", initial_value)
+    catalog = load_module_icon_catalog()
+    modules_by_family = {
+        family: [module for module in catalog.modules if module.family == family]
+        for family in {slot.family for slot in catalog.slots}
+    }
+    return {
+        "schema_version": EDITOR_METADATA_SCHEMA_VERSION,
+        "key": "local",
+        "display_name": "Profile-local definition",
+        "value_kind": "object",
+        "fixed": False,
+        "help_text": (
+            "Choose one family-valid Ancestral module for every server-declared "
+            "slot. A module cannot be selected more than once."
+        ),
+        "initial_value": local_initial,
+        "server_normalized_text": False,
+        "preserve_unknown_fields": False,
+        "unique_field_values": True,
+        "fields": [
+            {
+                "key": slot.key,
+                "display_name": _title_identifier(slot.key),
+                "required": True,
+                "fixed": len(modules_by_family[slot.family]) == 1,
+                "initial_value": local_initial[slot.key],
+                "options": [
+                    _editor_option(module.name, module.name)
+                    for module in modules_by_family[slot.family]
+                ],
+            }
+            for slot in catalog.slots
+        ],
+    }
+
+
+def _target_priority_local_editor(initial_value: Any) -> Mapping[str, Any]:
+    local_initial = _local_definition_initial("target_priority", initial_value)
+    return {
+        "schema_version": EDITOR_METADATA_SCHEMA_VERSION,
+        "key": "local",
+        "display_name": "Profile-local definition",
+        "value_kind": "array",
+        "fixed": False,
+        "help_text": (
+            "Arrange the complete server-declared target membership in exact "
+            "top-to-bottom priority order."
+        ),
+        "initial_value": local_initial,
+        "options": [
+            _editor_option(target, target) for target in TARGET_PRIORITY_TARGETS
+        ],
+        "list_constraints": {
+            "minimum_items": len(TARGET_PRIORITY_TARGETS),
+            "maximum_items": len(TARGET_PRIORITY_TARGETS),
+            "unique_items": True,
+            "allow_add": False,
+            "allow_remove": False,
+            "allow_reorder": True,
+            "order_significant": True,
+            "exact_items": list(TARGET_PRIORITY_TARGETS),
+        },
+    }
+
+
+def _orb_distance_local_editor(initial_value: Any) -> Mapping[str, Any]:
+    local_initial = _local_definition_initial("orb_distance", initial_value)
+    fields = ("range_basis", "extra", "workshop")
+    return {
+        "schema_version": EDITOR_METADATA_SCHEMA_VERSION,
+        "key": "local",
+        "display_name": "Profile-local definition",
+        "value_kind": "object",
+        "fixed": False,
+        "help_text": (
+            "Enter Attack Range, Extra Orb distance, and Workshop distance. "
+            "Linux validates and normalizes all three values."
+        ),
+        "initial_value": local_initial,
+        "server_normalized_text": True,
+        "preserve_unknown_fields": False,
+        "unique_field_values": False,
+        "fields": [
+            {
+                "key": key,
+                "display_name": _title_identifier(key),
+                "required": True,
+                "fixed": False,
+                "initial_value": local_initial[key],
+                "options": [],
+            }
+            for key in fields
+        ],
+    }
+
+
+def _preset_or_local_editor(
+    path: Path,
+    setting_id: str,
+    local_editor_factory: EditorMetadataFactory,
+) -> EditorMetadataFactory:
+    """Extend the revision-23 preset contract with ignorable local metadata."""
+
+    preset_factory = _preset_editor(path, setting_id)
+
+    def metadata(initial_value: Any) -> Mapping[str, Any]:
+        editor = dict(preset_factory(initial_value))
+        editor["local_editor"] = local_editor_factory(initial_value)
+        return editor
+
+    return metadata
+
+
 def _damage_percentage_editor(initial_value: Any) -> Mapping[str, Any]:
     return {
         "schema_version": EDITOR_METADATA_SCHEMA_VERSION,
@@ -725,7 +867,11 @@ _SETTING_DEFINITIONS = (
         _LOADOUT_POLICIES,
         _preset_or_local_value("modules"),
         _farm_loadout_initial("modules", preset=True),
-        _preset_editor(MODULE_PRESETS_PATH, "modules"),
+        _preset_or_local_editor(
+            MODULE_PRESETS_PATH,
+            "modules",
+            _module_local_editor,
+        ),
         "run_configuration.loadout.modules",
         "loadout_definition",
     ),
@@ -749,7 +895,11 @@ _SETTING_DEFINITIONS = (
         _LOADOUT_POLICIES,
         _preset_or_local_value("orb_distance"),
         _farm_loadout_initial("orb_distance", preset=True),
-        _preset_editor(ORB_DISTANCE_PRESETS_PATH, "orb_distance"),
+        _preset_or_local_editor(
+            ORB_DISTANCE_PRESETS_PATH,
+            "orb_distance",
+            _orb_distance_local_editor,
+        ),
         "run_configuration.loadout.orb_distance",
         "loadout_definition",
     ),
@@ -761,7 +911,11 @@ _SETTING_DEFINITIONS = (
         _LOADOUT_POLICIES,
         _preset_or_local_value("target_priority"),
         _farm_loadout_initial("target_priority", preset=True),
-        _preset_editor(TARGET_PRIORITY_PRESETS_PATH, "target_priority"),
+        _preset_or_local_editor(
+            TARGET_PRIORITY_PRESETS_PATH,
+            "target_priority",
+            _target_priority_local_editor,
+        ),
         "run_configuration.loadout.target_priority",
         "loadout_definition",
     ),
@@ -831,6 +985,388 @@ def _metadata_option_contains(
     return any(_metadata_value_key(option["value"]) == key for option in options)
 
 
+def _normalize_local_editor_candidate(
+    definition: SettingDefinition,
+    key: str,
+    value: Any,
+) -> Any:
+    return definition.normalizer({key: copy.deepcopy(value)})[key]
+
+
+def _validate_local_object_editor_metadata(
+    definition: SettingDefinition,
+    metadata: dict[str, Any],
+) -> None:
+    initial_value = metadata["initial_value"]
+    if not isinstance(initial_value, Mapping):
+        raise ValueError("editor.local_editor initial_value must be an object")
+    if metadata.get("preserve_unknown_fields") is not False:
+        raise ValueError(
+            "editor.local_editor must reject unknown object fields"
+        )
+    if not isinstance(metadata.get("unique_field_values"), bool):
+        raise ValueError(
+            "editor.local_editor.unique_field_values must be boolean"
+        )
+    if not isinstance(metadata.get("server_normalized_text"), bool):
+        raise ValueError(
+            "editor.local_editor.server_normalized_text must be boolean"
+        )
+    raw_fields = metadata.get("fields")
+    if not isinstance(raw_fields, list) or not raw_fields:
+        raise ValueError("editor.local_editor.fields must be a non-empty list")
+
+    fields: list[dict[str, Any]] = []
+    keys: set[str] = set()
+    for index, raw_field in enumerate(raw_fields):
+        path = f"editor.local_editor.fields[{index}]"
+        if not isinstance(raw_field, Mapping):
+            raise ValueError(f"{path} must be an object")
+        unknown = sorted(
+            set(raw_field)
+            - {
+                "key",
+                "display_name",
+                "required",
+                "fixed",
+                "initial_value",
+                "options",
+            }
+        )
+        if unknown:
+            raise ValueError(
+                f"{path} has unsupported fields: {', '.join(unknown)}"
+            )
+        key = str(raw_field.get("key") or "").strip()
+        display_name = str(raw_field.get("display_name") or "").strip()
+        if not key or not display_name or key in keys:
+            raise ValueError(f"{path} requires a unique key and display_name")
+        keys.add(key)
+        if raw_field.get("required") is not True:
+            raise ValueError(f"{path} must be required")
+        if not isinstance(raw_field.get("fixed"), bool):
+            raise ValueError(f"{path}.fixed must be boolean")
+        if key not in initial_value:
+            raise ValueError(
+                f"editor.local_editor initial_value is missing field {key!r}"
+            )
+        field_initial = copy.deepcopy(raw_field.get("initial_value"))
+        if field_initial != initial_value[key]:
+            raise ValueError(
+                f"{path}.initial_value does not match the local initial value"
+            )
+
+        if metadata["server_normalized_text"]:
+            if not isinstance(field_initial, str):
+                raise ValueError(
+                    f"{path}.initial_value must be text for Linux normalization"
+                )
+            if raw_field["fixed"] is not False:
+                raise ValueError(f"{path} server-normalized text cannot be fixed")
+            raw_options = raw_field.get("options")
+            if raw_options not in (None, []):
+                raise ValueError(
+                    f"{path} server-normalized text cannot declare choices"
+                )
+            options: list[dict[str, Any]] = []
+        else:
+            options = _validated_editor_options(
+                raw_field.get("options"),
+                f"{path}.options",
+            )
+            if not _metadata_option_contains(options, field_initial):
+                raise ValueError(f"{path}.initial_value is absent from options")
+            if raw_field["fixed"] != (len(options) == 1):
+                raise ValueError(f"{path}.fixed does not match its options")
+
+        fields.append(
+            {
+                "key": key,
+                "display_name": display_name,
+                "required": True,
+                "fixed": raw_field["fixed"],
+                "initial_value": field_initial,
+                "options": options,
+            }
+        )
+
+    if keys != set(initial_value):
+        raise ValueError(
+            "editor.local_editor.fields must cover the complete local initial value"
+        )
+
+    if metadata["unique_field_values"]:
+        values = list(initial_value.values())
+        if len({_metadata_value_key(value) for value in values}) != len(values):
+            raise ValueError(
+                "editor.local_editor initial object violates unique_field_values"
+            )
+
+    if not metadata["server_normalized_text"]:
+        for field in fields:
+            for option in field["options"]:
+                candidate = copy.deepcopy(dict(initial_value))
+                previous = candidate[field["key"]]
+                selected = copy.deepcopy(option["value"])
+                duplicate_key = next(
+                    (
+                        other_key
+                        for other_key, current in candidate.items()
+                        if other_key != field["key"]
+                        and _metadata_value_key(current)
+                        == _metadata_value_key(selected)
+                    ),
+                    None,
+                )
+                if duplicate_key is not None:
+                    candidate[duplicate_key] = previous
+                candidate[field["key"]] = selected
+                normalized = _normalize_local_editor_candidate(
+                    definition,
+                    metadata["key"],
+                    candidate,
+                )
+                if normalized != candidate:
+                    raise ValueError(
+                        f"{field['key']!r} local option is not canonical"
+                    )
+
+    if not metadata["server_normalized_text"]:
+        overlapping: tuple[str, str, Any] | None = None
+        for first_index, first in enumerate(fields):
+            first_keys = {
+                _metadata_value_key(option["value"]): option["value"]
+                for option in first["options"]
+            }
+            for second in fields[first_index + 1 :]:
+                common = next(
+                    (
+                        (key, value)
+                        for key, value in first_keys.items()
+                        if any(
+                            _metadata_value_key(option["value"]) == key
+                            for option in second["options"]
+                        )
+                    ),
+                    None,
+                )
+                if common is not None:
+                    overlapping = (first["key"], second["key"], common[1])
+                    break
+            if overlapping is not None:
+                break
+        if metadata["unique_field_values"] and overlapping is None:
+            raise ValueError(
+                "unique_field_values metadata has no overlapping choices to enforce"
+            )
+        if overlapping is not None:
+            first_key, second_key, repeated = overlapping
+            duplicate = copy.deepcopy(dict(initial_value))
+            duplicate[first_key] = copy.deepcopy(repeated)
+            duplicate[second_key] = copy.deepcopy(repeated)
+            try:
+                _normalize_local_editor_candidate(
+                    definition,
+                    metadata["key"],
+                    duplicate,
+                )
+            except (KeyError, TypeError, ValueError):
+                if not metadata["unique_field_values"]:
+                    raise ValueError(
+                        "setting normalizer enforces unique field values but "
+                        "editor.local_editor does not declare them"
+                    )
+            else:
+                if metadata["unique_field_values"]:
+                    raise ValueError(
+                        "unique_field_values is not enforced by the setting normalizer"
+                    )
+
+    metadata["initial_value"] = copy.deepcopy(dict(initial_value))
+    metadata["fields"] = fields
+
+
+def _validate_local_array_editor_metadata(
+    definition: SettingDefinition,
+    metadata: dict[str, Any],
+) -> None:
+    initial_value = metadata["initial_value"]
+    if not isinstance(initial_value, list):
+        raise ValueError("editor.local_editor initial_value must be an array")
+    options = _validated_editor_options(
+        metadata.get("options"),
+        "editor.local_editor.options",
+    )
+    if any(not isinstance(option["value"], str) for option in options):
+        raise ValueError("editor.local_editor array options must be strings")
+    raw_constraints = metadata.get("list_constraints")
+    if not isinstance(raw_constraints, Mapping):
+        raise ValueError("editor.local_editor requires list_constraints")
+    constraint_fields = {
+        "minimum_items",
+        "maximum_items",
+        "unique_items",
+        "allow_add",
+        "allow_remove",
+        "allow_reorder",
+        "order_significant",
+        "exact_items",
+    }
+    if set(raw_constraints) != constraint_fields:
+        raise ValueError(
+            "editor.local_editor list_constraints must define the complete contract"
+        )
+    minimum = raw_constraints.get("minimum_items")
+    maximum = raw_constraints.get("maximum_items")
+    if (
+        isinstance(minimum, bool)
+        or isinstance(maximum, bool)
+        or not isinstance(minimum, int)
+        or not isinstance(maximum, int)
+        or minimum < 0
+        or maximum < minimum
+    ):
+        raise ValueError("editor.local_editor list item bounds are invalid")
+    for flag in constraint_fields - {
+        "minimum_items",
+        "maximum_items",
+        "exact_items",
+    }:
+        if not isinstance(raw_constraints.get(flag), bool):
+            raise ValueError(
+                f"editor.local_editor.list_constraints.{flag} must be boolean"
+            )
+    exact_items = raw_constraints.get("exact_items")
+    if not isinstance(exact_items, list) or any(
+        not isinstance(item, str) or not item for item in exact_items
+    ):
+        raise ValueError(
+            "editor.local_editor.list_constraints.exact_items must be an array"
+        )
+    if len(set(exact_items)) != len(exact_items):
+        raise ValueError("editor.local_editor exact_items must be unique")
+    if maximum > len(options) or not minimum <= len(initial_value) <= maximum:
+        raise ValueError("editor.local_editor list bounds do not match its values")
+    if raw_constraints["unique_items"] and len(set(initial_value)) != len(
+        initial_value
+    ):
+        raise ValueError("editor.local_editor initial list must be unique")
+    if any(not _metadata_option_contains(options, item) for item in initial_value):
+        raise ValueError("editor.local_editor initial list has an unknown option")
+    if set(exact_items) != set(initial_value):
+        raise ValueError(
+            "editor.local_editor exact_items must match initial membership"
+        )
+    if minimum != len(exact_items) or maximum != len(exact_items):
+        raise ValueError("editor.local_editor exact_items must match fixed bounds")
+    if raw_constraints["allow_add"] or raw_constraints["allow_remove"]:
+        raise ValueError("editor.local_editor exact list cannot add or remove")
+    if not raw_constraints["allow_reorder"] or not raw_constraints[
+        "order_significant"
+    ]:
+        raise ValueError(
+            "editor.local_editor exact priority list must allow significant ordering"
+        )
+    expected_fixed = not any(
+        raw_constraints[action]
+        for action in ("allow_add", "allow_remove", "allow_reorder")
+    )
+    if metadata["fixed"] != expected_fixed:
+        raise ValueError("editor.local_editor fixed does not match list actions")
+    reversed_value = list(reversed(initial_value))
+    if (
+        _normalize_local_editor_candidate(
+            definition,
+            metadata["key"],
+            reversed_value,
+        )
+        != reversed_value
+    ):
+        raise ValueError("editor.local_editor normalizer does not preserve ordering")
+    if initial_value:
+        duplicate = [initial_value[0], initial_value[0], *initial_value[2:]]
+        try:
+            _normalize_local_editor_candidate(
+                definition,
+                metadata["key"],
+                duplicate,
+            )
+        except (KeyError, TypeError, ValueError):
+            pass
+        else:
+            raise ValueError(
+                "editor.local_editor unique_items is not enforced by the normalizer"
+            )
+    metadata["options"] = options
+    metadata["list_constraints"] = copy.deepcopy(dict(raw_constraints))
+
+
+def _validate_local_editor_metadata(
+    definition: SettingDefinition,
+    raw_metadata: object,
+) -> dict[str, Any]:
+    if not isinstance(raw_metadata, Mapping):
+        raise ValueError("editor.local_editor must be an object")
+    allowed_fields = {
+        "schema_version",
+        "key",
+        "display_name",
+        "value_kind",
+        "fixed",
+        "help_text",
+        "initial_value",
+        "server_normalized_text",
+        "preserve_unknown_fields",
+        "unique_field_values",
+        "options",
+        "fields",
+        "list_constraints",
+    }
+    unknown = sorted(set(raw_metadata) - allowed_fields)
+    if unknown:
+        raise ValueError(
+            "editor.local_editor has unsupported fields: " + ", ".join(unknown)
+        )
+    metadata = copy.deepcopy(dict(raw_metadata))
+    if metadata.get("schema_version") != EDITOR_METADATA_SCHEMA_VERSION:
+        raise ValueError("editor.local_editor has an unsupported schema version")
+    key = str(metadata.get("key") or "").strip()
+    display_name = str(metadata.get("display_name") or "").strip()
+    if not key or not display_name:
+        raise ValueError("editor.local_editor requires key and display_name")
+    metadata["key"] = key
+    metadata["display_name"] = display_name
+    if metadata.get("fixed") is not False:
+        raise ValueError("editor.local_editor cannot be fixed")
+    if not isinstance(metadata.get("help_text"), str) or not metadata[
+        "help_text"
+    ].strip():
+        raise ValueError("editor.local_editor help_text is required")
+    if "initial_value" not in metadata:
+        raise ValueError("editor.local_editor initial_value is required")
+    try:
+        normalized = _normalize_local_editor_candidate(
+            definition,
+            key,
+            metadata["initial_value"],
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"editor.local_editor initial_value is invalid: {exc}") from exc
+    if normalized != metadata["initial_value"]:
+        raise ValueError("editor.local_editor initial_value is not canonical")
+
+    value_kind = metadata.get("value_kind")
+    if value_kind == "object":
+        _validate_local_object_editor_metadata(definition, metadata)
+    elif value_kind == "array":
+        _validate_local_array_editor_metadata(definition, metadata)
+    else:
+        raise ValueError(
+            "editor.local_editor value_kind must be 'object' or 'array'"
+        )
+    return metadata
+
+
 def _validate_editor_metadata(
     definition: SettingDefinition,
     initial_value: Any,
@@ -853,6 +1389,7 @@ def _validate_editor_metadata(
         "minimum_selected_groups",
         "groups",
         "server_normalized_text",
+        "local_editor",
     }
     unknown_top = sorted(set(raw_metadata) - allowed_top_fields)
     if unknown_top:
@@ -888,6 +1425,8 @@ def _validate_editor_metadata(
         raise ValueError("editor metadata help_text is required")
     if definition.normalizer(copy.deepcopy(initial_value)) != initial_value:
         raise ValueError("initial_value is not in canonical normalized form")
+    if "local_editor" in metadata and definition.editor_type != "preset":
+        raise ValueError("local_editor metadata is supported only for preset editors")
 
     if definition.editor_type in {"fixed_value", "boolean"}:
         options = _validated_editor_options(
@@ -999,6 +1538,11 @@ def _validate_editor_metadata(
                     "normalizer accepted one"
                 )
         metadata["fields"] = fields
+        if "local_editor" in metadata:
+            metadata["local_editor"] = _validate_local_editor_metadata(
+                definition,
+                metadata["local_editor"],
+            )
 
     elif definition.editor_type in {
         "ordered_list",

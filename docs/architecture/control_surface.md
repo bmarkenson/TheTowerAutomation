@@ -314,16 +314,18 @@ existing process API and its normal next-boundary or active-battle semantics.
 
 ## Sparse strategy authoring
 
-Server revision 23 preserves `strategy_authoring_v1`,
+Server revision 24 preserves `strategy_authoring_v1`,
 `strategy_authoring_specialized_editors_v1`,
 `strategy_authoring_profile_lifecycle_v1`, `strategy_action_gate_v1`, and every
-older capability, and advertises `strategy_revision_history_v1`. The additive
+older capability, retains `strategy_revision_history_v1`, and advertises
+`strategy_authoring_local_loadout_editors_v1`. The additive
 `/api/v1/strategy-authoring` endpoint implements the sparse Base/Strategy model
 without changing `/api/v1/strategy-profiles`, `strategy_profile_catalog_v1`, or
-`strategy_profile_editor_v2`. Older native clients therefore keep using their
-existing latest-only facade. The revision-23 client requires the retained
-authoring and Strategy Gate capabilities plus immutable history, and fails
-compatibility clearly against an older resident service.
+`strategy_profile_editor_v2`. Pre-authoring native clients therefore keep using
+their existing latest-only facade. The revision-23 authoring client retains its exact
+preset-only metadata path against the newer service. The revision-24 client
+requires the retained authoring, Strategy Gate, history, and local-loadout
+capabilities and fails compatibility clearly against an older resident service.
 
 The GET response carries the setting registry, normalized initial values,
 behavior-free specialized-editor metadata, safe editor catalogs, separate Base
@@ -331,19 +333,28 @@ and Strategy collections, normalized source documents, effective resolution
 and provenance, latest compatible Base revisions, structured capabilities, and
 catalog errors. Metadata declares choices, object fields, list constraints,
 dependencies, defaults, and toggle restrictions; Python normalizers and action
-generation remain private. Unsupported Strategy families remain listed with a
-read-only reason. Existing schema-1 Farm publications are converted
-conservatively in memory and are not rewritten merely because the catalog was
-opened.
+generation remain private. Modules, Target Priority, and Orb Distance retain
+their top-level revision-23 `preset` editor contract and add a schema-versioned
+`local_editor` object. Its server-validated fields and choices describe exact
+Module slots/family candidates/uniqueness, complete Target membership/order,
+and the three server-normalized Orb text fields. A revision-23 client ignores
+that nested object; a local selector has no preset field for it to reinterpret.
+Unsupported Strategy families remain listed with a read-only reason. Existing
+schema-1 Farm publications are converted conservatively in memory and are not
+rewritten merely because the catalog was opened.
 
 The WPF client provides managed controls for all registered editor types:
 fixed values, constrained booleans, server presets, server-normalized Damage
 percentage text, Card recharge mappings, exact or variable lists, Perk bans and
-order, and Ultimate Weapon groups/toggles. Unknown retained Ultimate Weapon
-groups and fields are merged back unchanged. Source-state changes keep dormant
-values, and a server-supplied initial value is used when an omitted setting is
-first included or overridden. The client does not implement a second
-normalizer or resolver.
+order, Ultimate Weapon groups/toggles, and preset-or-local loadout definitions.
+Module choices exclude a module already selected in another declared slot;
+Target Priority exposes reorder only over the exact membership; Orb Distance
+submits the three text fields unchanged for Linux normalization. Unknown
+retained Ultimate Weapon groups and fields are merged back unchanged.
+Source-state changes keep dormant values, preset/local changes keep both form
+drafts, and validation-driven row reconstruction keeps those dormant values. A
+server-supplied initial value is used when an omitted setting or form is first
+materialized. The client does not implement a second normalizer or resolver.
 
 POST accepts `validate_base`, `publish_base`, `validate_strategy`,
 `publish_strategy`, `preview_rebase`, `retire_strategy`,
@@ -580,9 +591,16 @@ Process request examples:
 - A discoverable custom Strategy **History** window for active and retired
   lineages. It shows immutable revision identity and current validation,
   requests Linux-computed semantic restore reviews, and enables restore-as-new
-  only after a successful review and explicit confirmation. The current native
-  client requires server revision 23 and capability
+  only after a successful review and explicit confirmation. This history
+  feature requires server revision 23 and capability
   `strategy_revision_history_v1`.
+- Managed preset-or-local Strategy Authoring controls for the exact
+  server-declared Module slots and family choices, complete ordered Target
+  Priority membership, and three-field Orb Distance definition. Both forms'
+  dormant drafts survive sparse Base and Strategy source-state changes while
+  Linux remains normalization, resolution, review, history, and publication
+  authority. This requires server revision 24 and capability
+  `strategy_authoring_local_loadout_editors_v1`.
 - Persistent numeric game-speed selection from `x0.0` through `x6.0` in
   `x0.5` increments, plus `x6.3` for maximum available. Lower values are exact
   targets across live and future runs. Both clients keep the custom-target

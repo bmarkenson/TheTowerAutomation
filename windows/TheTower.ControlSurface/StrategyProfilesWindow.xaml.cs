@@ -1109,6 +1109,43 @@ public partial class StrategyProfilesWindow : Window
         }
     }
 
+    private void AddLocalDefinitionListItem_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is AuthoringSettingRowViewModel row)
+        {
+            row.LocalDefinitionEditor?.AddSelectedListItem();
+        }
+    }
+
+    private void RemoveLocalDefinitionListItem_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as Button) is { DataContext: AuthoringSettingRowViewModel row } button)
+        {
+            row.LocalDefinitionEditor?.RemoveListItem(
+                button.CommandParameter as StrategyEditorOption);
+        }
+    }
+
+    private void MoveLocalDefinitionListItemUp_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as Button) is { DataContext: AuthoringSettingRowViewModel row } button)
+        {
+            row.LocalDefinitionEditor?.MoveListItem(
+                button.CommandParameter as StrategyEditorOption,
+                -1);
+        }
+    }
+
+    private void MoveLocalDefinitionListItemDown_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as Button) is { DataContext: AuthoringSettingRowViewModel row } button)
+        {
+            row.LocalDefinitionEditor?.MoveListItem(
+                button.CommandParameter as StrategyEditorOption,
+                1);
+        }
+    }
+
     private void RefreshAuthoringActionButtons()
     {
         var canEdit = !_busy

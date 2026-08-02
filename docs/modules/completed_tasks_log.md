@@ -60,6 +60,32 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   changed. The first explicitly enabled ordinary-battle receipt pass remains a
   master-owned live follow-up.
 
+### 2026-08-02 profile-local loadout API and native editors
+
+- Control-surface revision 24 adds the versioned
+  `strategy_authoring_local_loadout_editors_v1` capability and validated,
+  behavior-free nested metadata for schema-3 Modules, Target Priority, and Orb
+  Distance local definitions. The pre-existing top-level preset metadata is
+  unchanged, so revision-23 clients retain preset-only behavior and do not
+  construct or reinterpret local definitions.
+- The native WPF Strategy Authoring client now builds managed preset/local
+  editors from server metadata: eight family-valid unique Module slots,
+  complete unique ordered Target Priority membership, and exactly the three
+  server-declared Orb Distance fields. Preset and local drafts survive form and
+  Inherit/Override/Ignore transitions; Bases remain sparse and non-activatable,
+  and Strategies retain their existing source semantics.
+- Linux remains authoritative for normalization, validation, resolution,
+  generated plans, retained definition and Base evidence, fingerprints,
+  history comparison, restore-as-new, and publication. The GUI does not expose
+  raw JSON, generated rules, paths, fingerprints, or executor actions, and
+  publication remains separate from strategy selection and activation.
+- Focused Python validation passed all 161 tests, the complete Python suite
+  passed all 1,228 tests, the portable native authoring suite passed all 62
+  tests, and the Linux WPF cross-publish completed successfully. No process,
+  control state, ADB target, emulator, game, or Windows runtime was inspected
+  or changed. The disposable-catalog Windows runtime smoke remains the next
+  unchecked worker.
+
 ### 2026-08-02 profile-local loadout definition backend
 
 - Sparse authoring schema 3 now gives Modules, Target Priority, and Orb

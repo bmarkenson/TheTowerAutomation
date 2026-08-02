@@ -154,6 +154,7 @@ def test_authoring_catalog_separates_bases_strategies_and_registry(tmp_path):
     ]["provenance"] == {"kind": "local"}
     assert catalog["strategies"]["items"][2]["authoring_supported"] is False
     assert catalog["capabilities"]["publication_activates_strategy"] is False
+    assert catalog["capabilities"]["profile_local_loadout_editors"] is True
     assert catalog["capabilities"]["operations"] == [
         "validate_base",
         "publish_base",
@@ -202,7 +203,119 @@ def test_authoring_catalog_separates_bases_strategies_and_registry(tmp_path):
         "perk_order",
         "ultimate_weapon_toggles",
     }
+    local_editors = {
+        item["id"]: item["editor"]["local_editor"]
+        for item in catalog["setting_registry"]
+        if "local_editor" in item["editor"]
+    }
+    assert set(local_editors) == {"modules", "target_priority", "orb_distance"}
+    assert len(local_editors["modules"]["fields"]) == 8
+    assert local_editors["modules"]["unique_field_values"] is True
+    assert local_editors["target_priority"]["list_constraints"][
+        "exact_items"
+    ] == local_editors["target_priority"]["initial_value"]
+    assert [
+        field["key"] for field in local_editors["orb_distance"]["fields"]
+    ] == ["range_basis", "extra", "workshop"]
     _assert_no_expanded_plan(catalog)
+
+
+def test_api_local_editor_initial_values_validate_exactly_without_control_mutation(
+    tmp_path,
+):
+    service = _service(tmp_path)
+    before_control = service.control_store.status()
+    catalog = service.strategy_authoring()
+    registry = {item["id"]: item for item in catalog["setting_registry"]}
+    settings = {
+        setting_id: {
+            "policy": "enforce",
+            "value": {
+                "local": copy.deepcopy(
+                    registry[setting_id]["editor"]["local_editor"][
+                        "initial_value"
+                    ]
+                )
+            },
+        }
+        for setting_id in ("modules", "target_priority", "orb_distance")
+    }
+    source = _base_source(settings)
+    source["schema_version"] = 3
+
+    response = service.apply_strategy_authoring(
+        {"operation": "validate_base", "source": source}
+    )
+
+    assert response["published"] is False
+    for setting_id, directive in settings.items():
+        assert response["source"]["settings"][setting_id]["value"] == directive[
+            "value"
+        ]
+        snapshot = response["resolution"]["settings"][setting_id][
+            "definition_snapshot"
+        ]
+        assert snapshot["source"] == "local"
+        assert snapshot["definition"] == directive["value"]["local"]
+    assert service.control_store.status() == before_control
+    assert not (tmp_path / "profiles" / "bases").exists()
+    _assert_no_expanded_plan(response)
+
+
+@pytest.mark.parametrize(
+    ("setting_id", "mutate", "message"),
+    (
+        (
+            "modules",
+            lambda value: value.update(
+                cannon_primary=value["cannon_assist"]
+            ),
+            "cannot repeat a module",
+        ),
+        (
+            "target_priority",
+            lambda value: value.pop(),
+            "every target exactly once",
+        ),
+        (
+            "orb_distance",
+            lambda value: value.update(extra="not-a-distance"),
+            "invalid Orb Distance",
+        ),
+    ),
+)
+def test_api_rejects_malformed_local_editor_values_without_writes(
+    tmp_path,
+    setting_id,
+    mutate,
+    message,
+):
+    service = _service(tmp_path)
+    before_control = service.control_store.status()
+    registry = {
+        item["id"]: item for item in service.strategy_authoring()["setting_registry"]
+    }
+    value = copy.deepcopy(
+        registry[setting_id]["editor"]["local_editor"]["initial_value"]
+    )
+    mutate(value)
+    source = _base_source(
+        {
+            setting_id: {
+                "policy": "enforce",
+                "value": {"local": value},
+            }
+        }
+    )
+    source["schema_version"] = 3
+
+    with pytest.raises(ControlSurfaceRequestError, match=message):
+        service.apply_strategy_authoring(
+            {"operation": "validate_base", "source": source}
+        )
+
+    assert service.control_store.status() == before_control
+    assert not (tmp_path / "profiles" / "bases").exists()
 
 
 def test_every_authoring_mutation_and_rebase_semantic_diff(tmp_path):
@@ -976,7 +1089,11 @@ def test_authoring_http_status_codes_auth_compatibility_and_no_plan(tmp_path):
 
         status, server_status = request("GET", "/api/v1/status")
         assert status == 200
-        assert server_status["server_revision"] == CONTROL_SURFACE_REVISION == 23
+        assert server_status["server_revision"] == CONTROL_SURFACE_REVISION == 24
+        assert (
+            "strategy_authoring_local_loadout_editors_v1"
+            in CONTROL_SURFACE_CAPABILITIES
+        )
         assert "strategy_revision_history_v1" in CONTROL_SURFACE_CAPABILITIES
         assert (
             "strategy_authoring_profile_lifecycle_v1"

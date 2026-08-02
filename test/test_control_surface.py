@@ -959,7 +959,8 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert 'Text="PREVIOUS GAME SCREEN"' in native_xaml
     assert 'id="gameSpeedTargetSelect"' in html
     assert 'Content="x6.3 — Maximum available"' in native_xaml
-    assert "MinimumServerRevision = 23" in native_compatibility
+    assert "MinimumServerRevision = 24" in native_compatibility
+    assert '"strategy_authoring_local_loadout_editors_v1"' in native_compatibility
     assert '"strategy_revision_history_v1"' in native_compatibility
     assert '"strategy_action_gate_v1"' in native_compatibility
     assert 'x:Name="StrategyActionGateBanner"' in native_xaml
