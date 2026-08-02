@@ -37,6 +37,33 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-02 save-first history-tail contract correction
+
+- Runtime-save schema 2 now separates a privacy-safe structural identity and
+  fingerprint for the newest source-ordered Battle History entry from the
+  optional semantic 144-row completed-battle projection. Future unknown
+  `killedBy` values preserve tail-change evidence while blocking semantic
+  publication; malformed newest entries still fail both components closed.
+- DateTime values retain their individual UTC/local kind and clock basis. The
+  decoder no longer compares masked ticks across kinds, and exact newest-entry
+  validation plus 30-entry rollover handling replaces the invalid whole-list
+  chronology assumption.
+- Version-1073 mappings now include cross-channel-proven `3=Boss`,
+  `6=Vampire`, and `99=Surrender`. Surrender describes the terminal cause only
+  and does not attribute its initiating actor. The revision-2 audit matrix does
+  not promote terminal attachment, record publication, final-Perk authority,
+  polling, or navigation suppression.
+- The next slice is designed as an explicitly enabled, read-only
+  natural-boundary audit collector. Its allowlisted receipts may capture stable
+  identity/Perk/tail transitions, but cannot attach a completed entry, update a
+  battle record, decide Perks navigation, send input, or suppress UI behavior.
+- Synthetic player-save regressions and the focused battle-stats/Game Over
+  suite passed all 82 tests; the complete repository suite passed all 1,106
+  tests. Read-only diagnostics accepted the mixed-kind operator save and all
+  three retained capped active snapshots. No raw save was copied, modified,
+  staged, or committed, and no process, ADB target, emulator, or battle was
+  inspected or changed.
+
 ### 2026-08-01 save-first runtime normalization foundation
 
 - This commit adds snapshot-schema-2 runtime evidence for exact mapping

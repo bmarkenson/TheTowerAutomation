@@ -86,20 +86,31 @@ Orb Distance remain explicitly unmapped and always use the UI. More fields can
 be added only with semantic and polarity calibration, not merely because a
 plausible raw field exists.
 
-Snapshot schema 2 now contains the first repository-local save-first runtime
-foundation. For the exact version-1073 mapping it publishes capture metadata,
-`saveRevision`, `roundActiveBool`, `currentWave`, the active identity tuple,
-and independent normalized Perk and Battle History tail components. Perk ID
-`0` is `max_health` (Max Health). Perks are emitted only when every ordered
-pick, count, and level agrees. A complete history tail is emitted only when all
-30-or-fewer entries retain the exact 148-field shape and the newest entry has a
-validated `killedBy` value; its allowlisted projection contains all 144 current
-More Stats rows and a stable canonical fingerprint.
+Snapshot schema 2 contains the repository-local save-first runtime foundation;
+its runtime projection is schema 2. For the exact version-1073 mapping it
+publishes capture metadata, `saveRevision`, `roundActiveBool`, `currentWave`,
+the active identity tuple, and independent normalized Perk and Battle History
+tail components. Perk ID `0` is `max_health` (Max Health). Perks are emitted
+only when every ordered pick, count, and level agrees.
+
+The source-ordered `battleHistory` list may contain at most 30 entries. Only
+the newest entry is part of the tail contract, so it must retain the exact
+148-field shape and exact field types. Its privacy-safe structural identity and
+fingerprint use battle date kind/ticks, tier, wave, game/real time, numeric
+`killedBy`, and Tournament identity without interpreting the cause enum. A
+separate semantic projection is emitted only when the newest cause ID is
+mapped; it contains all 144 current More Stats rows and its own canonical
+fingerprint. An unknown future cause therefore blocks completed-record
+publication but does not erase tail-change evidence. UTC and local DateTime
+ticks are never ordered against each other; the game's established source list
+order owns which entry is newest.
 
 The foundation does not poll the save, retain a same-round cache, bind a
 process, suppress navigation, or build/persist a normal battle record. A
-component failure publishes an explicit UI fallback without exposing a partial
-entry. The authoritative ownership and later slice boundaries are in
+semantic failure publishes an explicit UI fallback without exposing a partial
+completed entry. A malformed newest entry publishes neither structural nor
+semantic tail evidence. The authoritative ownership and later slice boundaries
+are in
 [`runtime.md`](../architecture/runtime.md#save-first-active-round-and-terminal-evidence).
 
 ## Complete validation program
@@ -145,7 +156,7 @@ control fields; flush through a proven lifecycle boundary; visually verify the
 restoration; and finish at the original safe boundary. A new exact game
 version starts again at structural status even when its fields look unchanged.
 
-### Versioned audit matrix: `data-9-game-1073` / revision 1
+### Versioned audit matrix: `data-9-game-1073` / revision 2
 
 This is the single authoritative matrix for every normalized claim published
 or proposed for exact game version 1073. The evidence level names the highest
@@ -188,18 +199,20 @@ exact game version starts a new matrix at Structural level.
 | `V1073-RUNTIME-004` approximately five-minute save freshness | `saveRevision`, capture time, stable source hash, active identity/wave | **Structural.** The active save rewrote at two consecutive five-minute intervals. | Characterize jitter, unchanged intervals, pause/background effects, stable-read behavior during writes, and staleness thresholds. Polling/navigation decisions remain unimplemented. |
 | `V1073-RUNTIME-005` in-battle Perk inventory | `perkLevel[50]`, `perksPickedCount`, ordered `PerkPick(wave, perk)` list, versioned Perk IDs | **Cross-channel.** Three retained active snapshots have internally exact list/count/level agreement and ordered progression; ID `0` is Max Health. | The foundation may publish only a fully consistent exact-version snapshot. Unknown IDs, shape changes, count/list/level disagreement, or non-monotonic entries publish no Perk inventory and route strategy/UI evidence conservatively. |
 | `V1073-RUNTIME-006` post-run Perk clearing and same-round retention | Active Perk snapshots followed by the post-run zero/empty fields | **Structural.** Clearing is observed after the retained run, but boundary timing and final-write completeness are not causal. | At natural Game Over, prove the final same-round save timing and clearing transition. Runtime must retain the newest complete same-round snapshot before accepting a cleared post-run save. |
-| `V1073-RUNTIME-007` complete `BattleHistory` More Stats projection | Chronological capped `battleHistory[<=30]`; exact 148-field `BattleHistoryEntry` shape | **Cross-channel.** Across 21 retained UI-captured battles, all 144 More Stats rows were direct or derivable; all 3,003 numeric comparisons agreed within UI display precision. `adGemsThisRound` supplies Ad Gems. | The exact-version foundation may normalize a complete entry and fingerprint only its allowlisted fields. Raw decoded entries, arbitrary fields, and account data stay unpublished. Normal completed-record construction remains a later slice. |
+| `V1073-RUNTIME-007` structural tail identity and complete `BattleHistory` More Stats projection | Source-ordered capped `battleHistory[<=30]`; exact newest 148-field `BattleHistoryEntry` shape | **Cross-channel.** Retained version-1073 saves prove mixed UTC/local DateTime kinds and stable capped tails. Across 21 retained UI-captured battles, all 144 More Stats rows were direct or derivable; all 3,003 numeric comparisons agreed within UI display precision. `adGemsThisRound` supplies Ad Gems. | Publish a semantic-neutral newest-entry identity/fingerprint independently from the 144-row semantic projection. Trust source order rather than comparing cross-kind ticks. Raw decoded entries, arbitrary fields, and account data stay unpublished; malformed newest entries fail both components. Normal record construction remains later work. |
 | `V1073-RUNTIME-008` Game Over history serialization timing | Pre-run history tail, Game Over observation, post-run stable save | **Structural.** A post-run history entry exists; the exact Game Over write boundary is not proven. | At a natural Game Over, prove when the new entry becomes stable and how Retry/Home/Wait affect timing. Until then terminal capture stays on the UI path. |
-| `V1073-RUNTIME-009` terminal history-tail attachment | Pre-boundary tail fingerprint plus newest post-boundary entry tier/time/wave | **Structural.** History is chronological/capped, and `roundSeed` is not copied into entries. | Causally prove that this Game Over changed the previously bound tail, then require matching tier/time/wave evidence. Ambiguity, no tail change, or a malformed entry keeps the full UI path. |
-| `V1073-RUNTIME-010` complete `killedBy` enum | `BattleHistoryEntry.killedBy` | **Cross-channel** only for `1=Fast`, `2=Tank`, and `8=Scatter`; the whole enum claim is incomplete. | Validate every naturally observed value. Any unknown value makes that completed entry unavailable and requires UI evidence; never synthesize `Enemy N`. |
+| `V1073-RUNTIME-009` terminal history-tail attachment | Pre-boundary structural tail fingerprint plus newest post-boundary entry tier/time/wave | **Structural.** Source order and capped rollover now produce usable tail-change evidence independently from semantic cause mapping; `roundSeed` is not copied into entries. | Causally prove that this Game Over changed the previously bound tail, then require matching tier/time/wave evidence. A changed fingerprint is candidate evidence only. Ambiguity, no tail change, or a malformed newest entry keeps the full UI path. |
+| `V1073-RUNTIME-010` complete `killedBy` enum | `BattleHistoryEntry.killedBy` | **Cross-channel** only for `1=Fast`, `2=Tank`, `3=Boss`, `6=Vampire`, `8=Scatter`, and `99=Surrender`; the whole enum claim is incomplete. Surrender evidence identifies the terminal cause only and does not attribute who initiated it. | Validate every naturally observed value. Any future unknown value leaves structural tail evidence usable but makes the semantic completed entry unavailable and requires UI evidence; never synthesize `Enemy N`. |
 | `V1073-RUNTIME-011` passive base/ad coin split augmentation | Compact Game Stats screenshot/OCR; `battleHistory.coinsEarned` total | **Cross-channel.** `battleHistory` retains total coins but not the base/ad split; the existing compact UI reader supplies the optional split. | Retain one passive compact capture. Missing/invalid split is explicit optional augmentation and must not invalidate otherwise authoritative save-derived stats. |
 | `V1073-RUNTIME-012` forced terminal UI audit/fallback | Existing Game Stats, Perks, clipboard/OCR More Stats, and verified terminal controls | **Shortcut-ready** as maintained fallback behavior, not as a save shortcut. | Keep the complete path forced on audit, unknown version/shape/ID, incomplete final Perks, history-binding failure, or save-record mismatch. Wait/Retry/Home and mutation/transition confirmation always remain verified UI actions. |
+| `V1073-RUNTIME-013` natural-boundary audit collector | Stable privacy-safe runtime projections plus passive boundary observations | **Structural.** The observation schema and authority boundary are designed; no collector or runtime polling is implemented. | Implement an explicitly enabled read-only collector that records revision/identity/Perk/tail transitions at a natural new battle, periodic stable writes, and natural Game Over. It may emit audit candidates only: no attachment, record construction, Perks navigation decision, input, or navigation suppression. |
 | `V1073-TOURNEY-001` Tournament condition profile/history coverage | Exact-version generator, event identity fields, and Heat/Overheat UI | **Shortcut-ready** for Legend condition identity only. | Complete UI inventory, effective descriptions, lower leagues, and unknown-condition preservation in the separate [Tournament condition plan](../backlog/runtime-and-validation.md#tournament-battle-condition-evidence). |
 
 The overall version-1073 save adoption remains incomplete while any runtime
 row above is below its required level. Implementing the normalized foundation
 does not promote new-round identity, polling freshness, terminal attachment,
-Perk finality, the full `killedBy` enum, or runtime navigation suppression.
+Perk finality, the full `killedBy` enum, the audit collector, or runtime
+navigation suppression.
 
 Profile groups broaden the diagnostic view but cannot influence automation
 until their own row is Shortcut-ready. Every published group carries mapping

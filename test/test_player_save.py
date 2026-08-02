@@ -140,7 +140,13 @@ def _decoded_save() -> dict:
     return payload
 
 
-def _synthetic_battle_history_entry(*, day: int = 1) -> dict:
+def _synthetic_battle_history_entry(
+    *,
+    day: int = 1,
+    when: datetime | None = None,
+    date_kind: int = 2,
+    killed_by: int = 8,
+) -> dict:
     history_spec = VERSION_MAPPING["runtime_save"]["battle_history"]
     fields = set(history_spec["non_report_fields"])
     for section in history_spec["more_stats_sections"]:
@@ -164,7 +170,7 @@ def _synthetic_battle_history_entry(*, day: int = 1) -> dict:
         else:
             entry[field] = 1.0
 
-    when = datetime(2026, 1, day)
+    when = when or datetime(2026, 1, day)
     delta = when - datetime(1, 1, 1)
     ticks = (
         (delta.days * 86400 + delta.seconds) * 10_000_000
@@ -172,12 +178,12 @@ def _synthetic_battle_history_entry(*, day: int = 1) -> dict:
     )
     entry.update(
         {
-            "battleDate": ticks | (2 << 62),
+            "battleDate": ticks | (date_kind << 62),
             "tier": 19,
             "wave": 2558 + day,
             "gameTime": 20599.0 + day,
             "realTime": 4244.0 + day,
-            "killedBy": 8,
+            "killedBy": killed_by,
             "coinsEarned": 872_380_000_000_000_000.0,
             "cellsEarned": 204_600.0,
             "totalEnemies": 160_757.0,
@@ -247,7 +253,7 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
 
     runtime = snapshot.runtime_save
     assert runtime is not None
-    assert runtime.audit_matrix_id == "data-9-game-1073-runtime-audit-v1"
+    assert runtime.audit_matrix_id == "data-9-game-1073-runtime-audit-v2"
     assert runtime.save_revision == 1234
     assert runtime.round_active
     assert runtime.current_wave == 450
@@ -258,7 +264,9 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
     assert runtime.perks.picked_count == 4
     assert runtime.perks.levels[0] == (0, "max_health", 1)
     assert runtime.perks.picks[-1].perk_key == "max_health"
-    assert runtime.battle_history_tail.status == "observed"
+    assert runtime.battle_history_tail.structural_status == "observed"
+    assert runtime.battle_history_tail.identity is not None
+    assert runtime.battle_history_tail.completed_entry_status == "observed"
     assert runtime.battle_history_tail.entry is not None
     assert runtime.battle_history_tail.entry.row_count == 144
     assert len(runtime.battle_history_tail.entry.sections) == 16
@@ -276,6 +284,7 @@ def test_runtime_capture_and_history_projection_are_privacy_safe(monkeypatch):
     assert runtime is not None
 
     payload = runtime.as_dict()
+    assert payload["schema_version"] == 2
     assert payload["capture"] == {
         "captured_at": CAPTURED_AT.isoformat(),
         "source_name": "playerInfo.dat",
@@ -285,16 +294,20 @@ def test_runtime_capture_and_history_projection_are_privacy_safe(monkeypatch):
         "decompressed_size": len(b"synthetic-nrbf"),
     }
     history = payload["battle_history_tail"]
-    assert history["fingerprint"]
-    assert len(history["fingerprint"]) == 64
-    assert history["projection"]["more_stats"]["row_count"] == 144
+    structure = history["structure"]
+    completed = history["completed_entry"]
+    assert structure["fingerprint"]
+    assert len(structure["fingerprint"]) == 64
+    assert structure["identity"]["killed_by_id"] == 8
+    assert completed["status"] == "observed"
+    assert completed["projection"]["more_stats"]["row_count"] == 144
     assert "raw_text" not in json.dumps(history)
     assert "playerID" not in json.dumps(history)
     assert "damageTakenWhileBerserked" not in json.dumps(history)
 
     rows = {
         (section["key"], row["key"]): row
-        for section in history["projection"]["more_stats"]["sections"]
+        for section in completed["projection"]["more_stats"]["sections"]
         for row in section["rows"]
     }
     assert rows[("battle_report", "killed_by")]["value"] == "Scatter"
@@ -338,7 +351,7 @@ def test_history_projection_covers_the_ordered_144_row_more_stats_report(
     assert projected_rows == expected_rows
 
 
-def test_runtime_fingerprints_are_stable_and_projection_sensitive(monkeypatch):
+def test_runtime_fingerprints_separate_tail_identity_from_semantics(monkeypatch):
     first_decoded = _decoded_save()
     second_decoded = _decoded_save()
     second_decoded["saveRevision"] += 1
@@ -354,16 +367,22 @@ def test_runtime_fingerprints_are_stable_and_projection_sensitive(monkeypatch):
     )
     assert first.perks is not None and second.perks is not None
     assert first.perks.fingerprint == second.perks.fingerprint
-    assert first.battle_history_tail.fingerprint == (
-        second.battle_history_tail.fingerprint
+    assert first.battle_history_tail.structural_fingerprint == (
+        second.battle_history_tail.structural_fingerprint
+    )
+    assert first.battle_history_tail.completed_entry_fingerprint == (
+        second.battle_history_tail.completed_entry_fingerprint
     )
 
     changed_decoded = _decoded_save()
     changed_decoded["battleHistory"][-1]["coinsEarned"] *= 1.01
     changed = _snapshot(monkeypatch, changed_decoded).runtime_save
     assert changed is not None
-    assert changed.battle_history_tail.fingerprint != (
-        first.battle_history_tail.fingerprint
+    assert changed.battle_history_tail.structural_fingerprint == (
+        first.battle_history_tail.structural_fingerprint
+    )
+    assert changed.battle_history_tail.completed_entry_fingerprint != (
+        first.battle_history_tail.completed_entry_fingerprint
     )
 
 
@@ -405,7 +424,7 @@ def test_unknown_perk_id_fails_only_the_perk_component(monkeypatch):
     assert runtime.perks_status == "unavailable"
     assert runtime.perks_reason == "unmapped_perk_id:46"
     assert runtime.active_round_identity is not None
-    assert runtime.battle_history_tail.status == "observed"
+    assert runtime.battle_history_tail.structural_status == "observed"
 
 
 @pytest.mark.parametrize(
@@ -443,18 +462,50 @@ def test_inconsistent_perk_shapes_fail_closed(monkeypatch, mutation, reason):
     assert runtime.perks_reason == reason
 
 
-def test_unknown_killed_by_id_fails_only_the_history_component(monkeypatch):
+def test_unknown_killed_by_keeps_structural_tail_identity(monkeypatch):
     decoded = _decoded_save()
-    decoded["battleHistory"][-1]["killedBy"] = 99
+    decoded["battleHistory"][-1]["killedBy"] = 77
 
     runtime = _snapshot(monkeypatch, decoded).runtime_save
 
     assert runtime is not None
-    assert runtime.battle_history_tail.status == "unavailable"
-    assert runtime.battle_history_tail.reason == "unmapped_killed_by_id:99"
-    assert runtime.battle_history_tail.fingerprint is None
-    assert runtime.battle_history_tail.entry is None
+    tail = runtime.battle_history_tail
+    assert tail.structural_status == "observed"
+    assert tail.identity is not None
+    assert tail.identity.killed_by_id == 77
+    assert tail.structural_fingerprint is not None
+    assert tail.completed_entry_status == "unavailable"
+    assert tail.completed_entry_reason == "unmapped_killed_by_id:77"
+    assert tail.completed_entry_fingerprint is None
+    assert tail.entry is None
+    rendered_tail = tail.as_dict()
+    assert rendered_tail["structure"]["identity"]["killed_by_id"] == 77
+    assert rendered_tail["completed_entry"]["projection"] is None
+    assert rendered_tail["completed_entry"]["fallback"] == (
+        "existing_ui_game_stats_perks_more_stats"
+    )
     assert runtime.perks_status == "observed"
+
+
+@pytest.mark.parametrize(
+    ("killed_by_id", "label"),
+    ((3, "Boss"), (6, "Vampire"), (99, "Surrender")),
+)
+def test_cross_channel_killed_by_ids_are_semantically_mapped(
+    monkeypatch,
+    killed_by_id,
+    label,
+):
+    decoded = _decoded_save()
+    decoded["battleHistory"][-1]["killedBy"] = killed_by_id
+
+    tail = _snapshot(monkeypatch, decoded).runtime_save.battle_history_tail
+
+    assert tail.identity is not None
+    assert tail.identity.killed_by_id == killed_by_id
+    assert tail.completed_entry_status == "observed"
+    assert tail.entry is not None
+    assert tail.entry.killed_by == label
 
 
 @pytest.mark.parametrize(
@@ -475,24 +526,89 @@ def test_malformed_history_entry_never_publishes_partial_projection(
     runtime = _snapshot(monkeypatch, decoded).runtime_save
 
     assert runtime is not None
-    assert runtime.battle_history_tail.status == "unavailable"
-    assert runtime.battle_history_tail.fingerprint is None
-    assert runtime.battle_history_tail.entry is None
+    tail = runtime.battle_history_tail
+    assert tail.structural_status == "unavailable"
+    assert tail.structural_fingerprint is None
+    assert tail.identity is None
+    assert tail.completed_entry_status == "unavailable"
+    assert tail.entry is None
 
 
-def test_nonchronological_history_fails_closed(monkeypatch):
+def test_mixed_datetime_kinds_do_not_use_cross_kind_tick_ordering(monkeypatch):
     decoded = _decoded_save()
     decoded["battleHistory"] = [
-        _synthetic_battle_history_entry(day=2),
-        _synthetic_battle_history_entry(day=1),
+        _synthetic_battle_history_entry(
+            when=datetime(2026, 1, 2, 5),
+            date_kind=1,
+        ),
+        _synthetic_battle_history_entry(
+            when=datetime(2026, 1, 1, 22, 30),
+            date_kind=2,
+        ),
     ]
 
     runtime = _snapshot(monkeypatch, decoded).runtime_save
 
     assert runtime is not None
-    assert runtime.battle_history_tail.status == "unavailable"
-    assert runtime.battle_history_tail.reason == (
-        "battle_history_is_not_chronological"
+    tail = runtime.battle_history_tail
+    assert tail.structural_status == "observed"
+    assert tail.identity is not None
+    assert tail.identity.battle_date["kind"] == "local"
+    assert tail.identity.battle_date["clock_basis"] == (
+        "local_wall_clock_without_offset"
+    )
+    assert tail.completed_entry_status == "observed"
+
+
+def test_utc_tail_datetime_retains_its_clock_basis(monkeypatch):
+    decoded = _decoded_save()
+    decoded["battleHistory"] = [
+        _synthetic_battle_history_entry(date_kind=1),
+    ]
+
+    runtime = _snapshot(monkeypatch, decoded).runtime_save
+
+    assert runtime is not None
+    identity = runtime.battle_history_tail.identity
+    assert identity is not None
+    assert identity.battle_date["kind"] == "utc"
+    assert identity.battle_date["clock_basis"] == "utc"
+    assert identity.battle_date["clock_time"].endswith("+00:00")
+
+
+def test_capped_history_rollover_changes_only_the_newest_tail_identity(
+    monkeypatch,
+):
+    start = datetime(2026, 1, 1)
+    decoded = _decoded_save()
+    decoded["battleHistory"] = [
+        _synthetic_battle_history_entry(when=start + timedelta(days=offset))
+        for offset in range(30)
+    ]
+    before = _snapshot(monkeypatch, decoded).runtime_save
+
+    rolled = _decoded_save()
+    rolled["battleHistory"] = [
+        _synthetic_battle_history_entry(when=start + timedelta(days=offset))
+        for offset in range(1, 31)
+    ]
+    after = _snapshot(monkeypatch, rolled).runtime_save
+
+    assert before is not None and after is not None
+    before_tail = before.battle_history_tail
+    after_tail = after.battle_history_tail
+    assert before_tail.entry_count == after_tail.entry_count == 30
+    assert before_tail.as_dict()["structure"]["at_capacity"]
+    assert after_tail.as_dict()["structure"]["at_capacity"]
+    assert before_tail.structural_status == after_tail.structural_status == (
+        "observed"
+    )
+    assert before_tail.structural_fingerprint != (
+        after_tail.structural_fingerprint
+    )
+    assert before_tail.identity is not None and after_tail.identity is not None
+    assert before_tail.identity.battle_date["ticks"] != (
+        after_tail.identity.battle_date["ticks"]
     )
 
 

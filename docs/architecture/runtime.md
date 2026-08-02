@@ -155,11 +155,12 @@ in [`../modules/player_save_import.md`](../modules/player_save_import.md).
 
 The normalized runtime-save model is a second privacy boundary inside the
 exact-version decoder. Snapshot schema 2 exposes only the fields allowlisted by
-`data-9-game-1073-runtime-audit-v1`; it never publishes the decoded root or an
+`data-9-game-1073-runtime-audit-v2`; it never publishes the decoded root or an
 arbitrary `BattleHistoryEntry`. A root-level version or structural failure
 publishes no runtime model. Perks and the history tail fail independently so an
-unknown Perk or `killedBy` ID cannot leak a partial semantic record or silently
-invalidate an otherwise usable round identity.
+unknown Perk ID cannot leak a partial inventory, while an unknown `killedBy`
+ID blocks only the semantic completed entry and preserves structural
+tail-change evidence.
 
 For an active save, the guarded identity is exactly
 `(versionNumber, currentTier, roundsStartedThisTier[currentTier], roundSeed)`.
@@ -180,14 +181,23 @@ projection is explicitly `cleared`; later runtime ownership must retain the
 newest complete same-round snapshot rather than treating that cleared save as
 final-Perk evidence.
 
-The completed-history projection accepts a chronological list of at most 30
-exact 148-field `BattleHistoryEntry` objects. Its newest entry becomes a
-canonical 16-section, 144-row More Stats projection plus a fingerprint derived
-only from mapped battle evidence. The two hourly rows and effect-active
-percentages are explicit derivations. `adGemsThisRound` supplies Ad Gems;
-base/ad coins are absent. Only cross-channel-validated `killedBy` values are
-published (`1=Fast`, `2=Tank`, `8=Scatter`); every other value makes the whole
-entry unavailable and keeps terminal capture on UI evidence.
+The history component accepts the game's source-ordered list of at most 30
+entries and exact-shape-validates only its newest 148-field entry. UTC and local
+.NET DateTime ticks use different clock bases, so they are normalized
+individually and never compared across kinds; source order owns the tail. A
+privacy-safe structural identity/fingerprint uses battle date kind/ticks,
+tier, wave, game/real time, numeric `killedBy`, and Tournament identity. It is
+independent from the canonical 16-section, 144-row More Stats projection and
+its semantic fingerprint. The two hourly rows and effect-active percentages
+are explicit derivations. `adGemsThisRound` supplies Ad Gems; base/ad coins are
+absent.
+
+Cross-channel-validated cause values are `1=Fast`, `2=Tank`, `3=Boss`,
+`6=Vampire`, `8=Scatter`, and `99=Surrender`. Surrender is a display value for
+the terminal cause and carries no claim about whether the operator or
+authorized automation initiated it. A future unknown numeric value remains in
+structural tail identity so rollover/change detection works, but the semantic
+completed entry is unavailable and terminal capture stays on UI evidence.
 
 Runtime adoption proceeds in bounded vertical slices with these ownership
 rules:
@@ -201,8 +211,9 @@ rules:
    drive strategy.
 4. The observer retains same-round Perk snapshots across post-run clearing.
 5. Normal completed records may be built from a newly serialized history entry
-   only after the pre-boundary tail fingerprint changed at this Game Over and
-   tier/time/wave evidence matches the bound round.
+   only after the pre-boundary structural tail fingerprint changed at this Game
+   Over, the semantic entry is complete, and tier/time/wave evidence matches the
+   bound round.
 6. One passive compact Game Stats capture remains for optional base/ad coin
    split augmentation. Its absence never invalidates otherwise authoritative
    save-derived battle stats.
@@ -217,7 +228,39 @@ rules:
 The foundation model does not poll, cache, bind a process, build a persisted
 battle record, or alter `App`/Game Over dispatch. Those are later slices gated
 by the versioned audit matrix in
-[`player_save_import.md`](../modules/player_save_import.md#versioned-audit-matrix-data-9-game-1073--revision-1).
+[`player_save_import.md`](../modules/player_save_import.md#versioned-audit-matrix-data-9-game-1073--revision-2).
+
+##### Next bounded slice: natural-boundary audit collector
+
+The next slice is an explicitly enabled observation-only collector, not the
+normal runtime poller. It consumes stable exact-version reads and passive
+boundary observations without pausing the game, navigating, tapping, or
+changing handler dispatch. Its append-only evidence schema retains only:
+
+- audit/mapping schema IDs, capture time, revision, and source fingerprint;
+- active identity and wave, including the per-tier counter value;
+- complete Perk status/count/fingerprint and same-round progression facts;
+- structural tail status/identity/fingerprint, count/capacity, and semantic
+  completed-entry status/fingerprint; and
+- passive boundary labels and timing deltas needed to evaluate the audit rows.
+
+The collector begins with a pre-round structural-tail baseline, records the
+first naturally serialized active identity, samples only stable revision
+changes at the audit cadence, and observes the natural terminal transition. It
+records the last complete same-round Perks, the first inactive/cleared save,
+and any structural tail change—including 30-entry rollover—as candidates. It
+may calculate candidate tier/wave/time agreement, but it cannot call that entry
+attached, update a battle record, decide whether to open Perks, or suppress any
+UI route. Raw saves, decoded roots, account identifiers, arbitrary history
+fields, screenshots, and OCR text are outside its retained schema.
+The existing passive compact Game Stats capture remains a separate optional
+base/ad coin-split augmentation.
+
+Implementation is complete only after synthetic state-machine/privacy tests
+and one authorized natural-boundary audit capture the new-round seed/counter/
+first-write transition, periodic freshness, final Perk/clearing behavior, and
+Game Over tail serialization. Until those audits promote their individual
+matrix rows, the existing full UI terminal path remains authoritative.
 
 Game speed is a global battle-only invariant with persistent operator intent
 independent of strategy and ADB target. Numeric selections from `x0.0` through

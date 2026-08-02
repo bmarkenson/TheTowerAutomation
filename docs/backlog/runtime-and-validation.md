@@ -11,7 +11,7 @@ checked-item detail remains in the
 - [ ] Cross-validate the `data-9-game-1073` player-save mapping against fresh
   UI inventory from the same version, and add a new exact candidate mapping if
   the current game reports a different identity. Execute the complete
-  [versioned audit matrix and rollout sequence](../modules/player_save_import.md#versioned-audit-matrix-data-9-game-1073--revision-1).
+  [versioned audit matrix and rollout sequence](../modules/player_save_import.md#versioned-audit-matrix-data-9-game-1073--revision-2).
   Promote only fully cross-validated fields; retain scheduled audits and every
   existing UI checker as the fallback for unknown versions, shape changes,
   stale data, mismatches, and unmapped settings.
@@ -25,15 +25,29 @@ checked-item detail remains in the
     Allowlist the complete Cards preset and recharge-mode checks while keeping
     the overall mapping `candidate`.
   - [x] Consolidate every profile and runtime save claim into the authoritative
-    `data-9-game-1073` revision-1 audit matrix. Implement the repository-local
+    `data-9-game-1073` audit matrix. Implement the repository-local
     normalized runtime foundation: guarded round identity, exact consistent
     Perks (including ID `0` Max Health), and an exact 144-row completed-history
     projection/fingerprint. Keep `App` and Game Over navigation unchanged.
+  - [x] Correct the revision-2 history-tail contract using retained saves:
+    separate structural tail identity from semantic More Stats publication,
+    trust source order across mixed DateTime kinds, preserve capped-rollover
+    change detection for unknown future cause IDs, and map cross-channel-proven
+    `3=Boss`, `6=Vampire`, and `99=Surrender`. Surrender carries no initiator
+    attribution. Keep malformed newest entries and unknown semantic causes on
+    UI fallback.
   - [ ] Complete the natural-boundary runtime audits `V1073-RUNTIME-003` through
     `V1073-RUNTIME-011`: new-round seed/counter/first-write timing, five-minute
     freshness, final Perk serialization and clearing, Game Over history write
     timing and tail binding, the complete `killedBy` enum, and passive coin
     split augmentation. Every incomplete row remains routed to UI fallback.
+  - [ ] Implement `V1073-RUNTIME-013`, the explicitly enabled read-only
+    natural-boundary audit collector defined in the runtime architecture. Its
+    allowlisted append-only receipts may record stable revision, active
+    identity/wave, complete Perk progression/clearing, structural tail change,
+    semantic availability, and passive boundary timing. It must not attach an
+    entry, write a battle record, decide Perks navigation, send input, or
+    suppress any UI path.
   - [ ] Add the polling/same-round cache vertical slice only after its required
     matrix evidence is complete. Bind snapshots to the guarded identity, reject
     stale or different-round revisions, and retain the newest complete Perks

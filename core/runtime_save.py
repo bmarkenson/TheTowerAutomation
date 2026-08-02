@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, localcontext
 import hashlib
 import json
@@ -19,8 +19,9 @@ import re
 from typing import Any, Optional
 
 
-RUNTIME_SAVE_SCHEMA_VERSION = 1
+RUNTIME_SAVE_SCHEMA_VERSION = 2
 HISTORY_ENTRY_SCHEMA_VERSION = 1
+HISTORY_TAIL_IDENTITY_SCHEMA_VERSION = 1
 DOTNET_TICKS_MASK = 0x3FFFFFFFFFFFFFFF
 DOTNET_KIND_SHIFT = 62
 DOTNET_KIND_NAMES = {
@@ -218,29 +219,85 @@ class CompletedBattleHistoryEntry:
 
 
 @dataclass(frozen=True)
-class BattleHistoryTail:
-    """The newest chronological history entry, or an explicit UI fallback."""
+class BattleHistoryTailIdentity:
+    """Semantic-neutral identity for the newest source-ordered history entry."""
 
-    status: str
-    reason: str
+    mapping_id: str
+    battle_date: Mapping[str, Any]
+    tier: int
+    wave: int
+    game_time_seconds: float
+    real_time_seconds: float
+    killed_by_id: int
+    is_tournament: bool
+    fingerprint: str
+
+    def projection_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": HISTORY_TAIL_IDENTITY_SCHEMA_VERSION,
+            "mapping_id": self.mapping_id,
+            "battle_date": dict(self.battle_date),
+            "tier": self.tier,
+            "wave": self.wave,
+            "game_time_seconds": self.game_time_seconds,
+            "real_time_seconds": self.real_time_seconds,
+            "killed_by_id": self.killed_by_id,
+            "is_tournament": self.is_tournament,
+        }
+
+    def as_dict(self) -> dict[str, Any]:
+        payload = self.projection_dict()
+        payload["fingerprint"] = self.fingerprint
+        return payload
+
+
+@dataclass(frozen=True)
+class BattleHistoryTail:
+    """Structural newest-entry evidence plus an optional semantic projection."""
+
+    structural_status: str
+    structural_reason: str
     entry_count: int
     capacity: int
+    identity: Optional[BattleHistoryTailIdentity]
+    completed_entry_status: str
+    completed_entry_reason: str
     entry: Optional[CompletedBattleHistoryEntry]
 
     @property
-    def fingerprint(self) -> Optional[str]:
+    def structural_fingerprint(self) -> Optional[str]:
+        return self.identity.fingerprint if self.identity is not None else None
+
+    @property
+    def completed_entry_fingerprint(self) -> Optional[str]:
         return self.entry.fingerprint if self.entry is not None else None
 
     def as_dict(self) -> dict[str, Any]:
         return {
-            "status": self.status,
-            "reason": self.reason,
-            "fallback": "existing_ui_game_stats_perks_more_stats",
-            "entry_count": self.entry_count,
-            "capacity": self.capacity,
-            "order_semantics": "chronological_oldest_first",
-            "fingerprint": self.fingerprint,
-            "projection": self.entry.as_dict() if self.entry is not None else None,
+            "structure": {
+                "status": self.structural_status,
+                "reason": self.structural_reason,
+                "entry_count": self.entry_count,
+                "capacity": self.capacity,
+                "at_capacity": self.entry_count >= self.capacity,
+                "order_semantics": "source_order_oldest_first",
+                "chronology_validation": (
+                    "source_order_only_no_cross_kind_tick_comparison"
+                ),
+                "fingerprint": self.structural_fingerprint,
+                "identity": (
+                    self.identity.as_dict() if self.identity is not None else None
+                ),
+            },
+            "completed_entry": {
+                "status": self.completed_entry_status,
+                "reason": self.completed_entry_reason,
+                "fallback": "existing_ui_game_stats_perks_more_stats",
+                "fingerprint": self.completed_entry_fingerprint,
+                "projection": (
+                    self.entry.as_dict() if self.entry is not None else None
+                ),
+            },
         }
 
 
@@ -384,10 +441,13 @@ def normalize_runtime_save(
             else 0
         )
         history_tail = BattleHistoryTail(
-            status="unavailable",
-            reason=str(exc),
+            structural_status="unavailable",
+            structural_reason=str(exc),
             entry_count=history_count,
             capacity=capacity,
+            identity=None,
+            completed_entry_status="unavailable",
+            completed_entry_reason="structural_tail_unavailable",
             entry=None,
         )
 
@@ -536,34 +596,73 @@ def _normalize_history_tail(
         raise _ComponentUnavailable("battle_history_exceeds_capacity")
     if not raw_history:
         return BattleHistoryTail(
-            status="empty",
-            reason="battle_history_empty",
+            structural_status="empty",
+            structural_reason="battle_history_empty",
             entry_count=0,
             capacity=capacity,
+            identity=None,
+            completed_entry_status="not_applicable",
+            completed_entry_reason="battle_history_empty",
             entry=None,
         )
 
-    previous_ticks: Optional[int] = None
-    validated: list[Mapping[str, Any]] = []
-    for index, raw_entry in enumerate(raw_history):
-        entry = _validate_history_entry_shape(raw_entry, history_spec, index=index)
-        ticks = _dotnet_ticks(entry.get("battleDate"), index=index)
-        if previous_ticks is not None and ticks < previous_ticks:
-            raise _ComponentUnavailable("battle_history_is_not_chronological")
-        previous_ticks = ticks
-        validated.append(entry)
-
-    completed = _build_completed_history_entry(
-        validated[-1],
-        mapping,
+    latest_index = len(raw_history) - 1
+    latest = _validate_history_entry_shape(
+        raw_history[-1],
         history_spec,
+        index=latest_index,
     )
+    identity = _build_history_tail_identity(latest, mapping)
+    try:
+        completed = _build_completed_history_entry(
+            latest,
+            mapping,
+            history_spec,
+        )
+        completed_status = "observed"
+        completed_reason = ""
+    except _ComponentUnavailable as exc:
+        completed = None
+        completed_status = "unavailable"
+        completed_reason = str(exc)
     return BattleHistoryTail(
-        status="observed",
-        reason="",
-        entry_count=len(validated),
+        structural_status="observed",
+        structural_reason="",
+        entry_count=len(raw_history),
         capacity=capacity,
+        identity=identity,
+        completed_entry_status=completed_status,
+        completed_entry_reason=completed_reason,
         entry=completed,
+    )
+
+
+def _build_history_tail_identity(
+    entry: Mapping[str, Any],
+    mapping: Mapping[str, Any],
+) -> BattleHistoryTailIdentity:
+    battle_date = _normalized_dotnet_datetime(entry["battleDate"])
+    projection = {
+        "schema_version": HISTORY_TAIL_IDENTITY_SCHEMA_VERSION,
+        "mapping_id": str(mapping.get("mapping_id") or ""),
+        "battle_date": battle_date,
+        "tier": entry["tier"],
+        "wave": entry["wave"],
+        "game_time_seconds": entry["gameTime"],
+        "real_time_seconds": entry["realTime"],
+        "killed_by_id": entry["killedBy"],
+        "is_tournament": entry["isTournament"],
+    }
+    return BattleHistoryTailIdentity(
+        mapping_id=str(mapping.get("mapping_id") or ""),
+        battle_date=battle_date,
+        tier=int(entry["tier"]),
+        wave=int(entry["wave"]),
+        game_time_seconds=float(entry["gameTime"]),
+        real_time_seconds=float(entry["realTime"]),
+        killed_by_id=int(entry["killedBy"]),
+        is_tournament=bool(entry["isTournament"]),
+        fingerprint=_fingerprint(projection),
     )
 
 
@@ -847,27 +946,27 @@ def _normalized_dotnet_datetime(value: Any) -> dict[str, Any]:
     )
     ticks = binary & DOTNET_TICKS_MASK
     kind_id = binary >> DOTNET_KIND_SHIFT
-    if kind_id not in {2, 3}:
+    if kind_id not in DOTNET_KIND_NAMES:
         raise _ComponentUnavailable(f"unsupported_battle_date_kind:{kind_id}")
     try:
-        wall_time = datetime(1, 1, 1) + timedelta(microseconds=ticks // 10)
+        clock_time = datetime(1, 1, 1) + timedelta(microseconds=ticks // 10)
     except (OverflowError, ValueError) as exc:
         raise _ComponentUnavailable("malformed_battle_date") from exc
+    if kind_id == 1:
+        clock_time = clock_time.replace(tzinfo=timezone.utc)
+        clock_basis = "utc"
+    elif kind_id == 0:
+        clock_basis = "unspecified"
+    else:
+        clock_basis = "local_wall_clock_without_offset"
     return {
+        "kind_id": kind_id,
         "kind": DOTNET_KIND_NAMES[kind_id],
         "ticks": str(ticks),
-        "wall_time": wall_time.isoformat(timespec="microseconds"),
+        "clock_time": clock_time.isoformat(timespec="microseconds"),
+        "clock_basis": clock_basis,
         "submicrosecond_100ns": ticks % 10,
     }
-
-
-def _dotnet_ticks(value: Any, *, index: int) -> int:
-    binary = _exact_nonnegative_int(
-        value,
-        f"battleHistory[{index}].battleDate",
-        _ComponentUnavailable,
-    )
-    return binary & DOTNET_TICKS_MASK
 
 
 def _percentage_text(value: Any, total: Any) -> str:
@@ -1017,6 +1116,7 @@ def _is_sequence(value: Any) -> bool:
 __all__ = [
     "ActiveRoundIdentity",
     "BattleHistoryTail",
+    "BattleHistoryTailIdentity",
     "CompletedBattleHistoryEntry",
     "NormalizedRuntimeSave",
     "RuntimePerkPick",

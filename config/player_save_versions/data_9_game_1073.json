@@ -250,7 +250,7 @@
   },
   "runtime_save": {
     "schema_version": 1,
-    "audit_matrix_id": "data-9-game-1073-runtime-audit-v1",
+    "audit_matrix_id": "data-9-game-1073-runtime-audit-v2",
     "rounds_started_tier_count": 40,
     "perks": {
       "level_count": 50,
@@ -263,7 +263,10 @@
       "killed_by_ids": {
         "1": "Fast",
         "2": "Tank",
-        "8": "Scatter"
+        "3": "Boss",
+        "6": "Vampire",
+        "8": "Scatter",
+        "99": "Surrender"
       },
       "integer_fields": [
         "adGemsThisRound",
