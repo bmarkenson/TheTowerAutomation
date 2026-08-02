@@ -37,6 +37,29 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-02 observation-only natural-boundary save audit collector
+
+- `V1073-RUNTIME-013` now provides a default-disabled CLI/environment opt-in,
+  one nonblocking stable-read worker bound to the exact owned ADB target, and
+  versioned append-only JSONL receipts with fresh runtime/collector session
+  identities. The fail-closed state machine covers exact-Home baselines,
+  same-identity revision and Perk deltas, terminal clearing, capacity-30 tail
+  candidates, unknown semantic causes, duplicate suppression, and restart
+  isolation.
+- Receipt and pre-queue allowlists exclude raw saves/decoded roots, profile and
+  account data, arbitrary history and More Stats rows, pixels, OCR, and raw
+  exceptions. Confirmed visual events retain only approximate metadata and an
+  optional relative image reference. Survival save checkpoints remain
+  independently manifest-disabled under `V1073-RUNTIME-015`/`016`.
+- The collector grants no input, navigation, lifecycle, dispatch, Strategy,
+  attachment, record-construction, Perks-navigation, or UI-suppression
+  authority. Existing terminal and UI evidence paths are unchanged. Focused
+  validation passed 307 tests and the complete Python suite passed all 1,228
+  tests. Validation was repository-local; no process, control state, ADB
+  target, emulator, preserved terminal, or live battle was inspected or
+  changed. The first explicitly enabled ordinary-battle receipt pass remains a
+  master-owned live follow-up.
+
 ### 2026-08-02 profile-local loadout definition backend
 
 - Sparse authoring schema 3 now gives Modules, Target Priority, and Orb

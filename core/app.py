@@ -6,7 +6,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Callable, Dict, Any, Mapping, Set, Tuple
+from typing import Optional, Callable, Dict, Any, Mapping, Sequence, Set, Tuple
 
 import cv2
 import numpy as np
@@ -54,6 +54,7 @@ from core.battle_stats import (
     persist_battle_record,
 )
 from core.battle_activation_tracker import BattleActivationTracker
+from core.player_save_audit import PlayerSaveAuditCollector
 from core.perk_timeline import PerkTimelineObserver
 from core.no_strategy_inventory import (
     NoStrategyInventoryStatus,
@@ -228,6 +229,23 @@ class App:
         self._last_wave_conf: float = -1.0
         self._last_wave_ts: float = 0.0
         self._battle_activation_tracker = BattleActivationTracker()
+        self._player_save_audit_collector = None
+        try:
+            self._player_save_audit_collector = PlayerSaveAuditCollector(
+                enabled=config.player_save_audit_enabled,
+                interval_seconds=config.player_save_audit_interval_seconds,
+                target_snapshot_fn=(
+                    adb_target_session.snapshot
+                    if adb_target_session is not None
+                    else None
+                ),
+            )
+        except Exception:
+            log(
+                "[PLAYER_SAVE_AUDIT] Collector initialization failed; normal "
+                "automation is unaffected",
+                "DEBUG",
+            )
         # Process-local battle evidence is safe for a terminal record only
         # after this process has observed the active battle in the current
         # continuity scope.  A process starting directly on Game Over has no
@@ -295,6 +313,42 @@ class App:
             tracker = BattleActivationTracker()
             self._battle_activation_tracker = tracker
         return tracker
+
+    def _observe_player_save_audit_screen(
+        self,
+        detection: Mapping[str, Any],
+    ) -> None:
+        """Forward passive boundary evidence without affecting App dispatch."""
+
+        collector = getattr(self, "_player_save_audit_collector", None)
+        if collector is None:
+            return
+        try:
+            collector.observe_screen(detection)
+        except Exception:
+            log(
+                "[PLAYER_SAVE_AUDIT] Boundary observation was rejected; "
+                "normal automation is unaffected",
+                "DEBUG",
+            )
+
+    def _observe_player_save_audit_visual_events(
+        self,
+        events: Sequence[Mapping[str, Any]],
+    ) -> None:
+        """Forward only tracker-confirmed metadata to the passive sidecar."""
+
+        collector = getattr(self, "_player_save_audit_collector", None)
+        if collector is None or not events:
+            return
+        try:
+            collector.observe_visual_events(events)
+        except Exception:
+            log(
+                "[PLAYER_SAVE_AUDIT] Visual metadata was rejected; normal "
+                "automation is unaffected",
+                "DEBUG",
+            )
 
     def _perk_timeline(self) -> PerkTimelineObserver:
         """Return the run-scoped perk observer, including in partial test apps."""
@@ -2181,6 +2235,11 @@ class App:
                         "DEBUG",
                     )
 
+                # This passive sidecar sees exact Home NEW_BATTLE before any
+                # later setup or Home handler can dispatch an action. It never
+                # returns a control decision and remains active during Pause.
+                self._observe_player_save_audit_screen(detection)
+
                 self._mission_mgr.observe_detection(detection)
                 self._observe_no_strategy_frame(img, detection)
 
@@ -2656,6 +2715,7 @@ class App:
                         f"{display_name} activation #{sequence}: {evidence_path}",
                         "INFO",
                     )
+                self._observe_player_save_audit_visual_events(activation_events)
                 for event in activation_events:
                     name = {
                         "second_wind": "Second Wind",
@@ -2762,6 +2822,12 @@ class App:
             self._update_action_authority(shutting_down=True)
             stop_blind_gem_tapper()
             self._publish_action_authority(runtime_active=False)
+            collector = getattr(self, "_player_save_audit_collector", None)
+            if collector is not None:
+                try:
+                    collector.close(wait=False)
+                except Exception:
+                    pass
             log("Exited cleanly.", "INFO")
 
     def _capture_frame(self) -> Optional[Frame]:

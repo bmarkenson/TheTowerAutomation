@@ -19,12 +19,21 @@ DEFAULT_STRATEGY = "farm"
 STRATEGY_ENVIRONMENT_VARIABLE = "THETOWER_STRATEGY"
 DEFAULT_STARTUP_GATE_POLICY = "auto_validate"
 STARTUP_GATE_POLICY_ENVIRONMENT_VARIABLE = "THETOWER_STARTUP_GATES"
+PLAYER_SAVE_AUDIT_ENVIRONMENT_VARIABLE = "THETOWER_PLAYER_SAVE_AUDIT"
+PLAYER_SAVE_AUDIT_INTERVAL_ENVIRONMENT_VARIABLE = (
+    "THETOWER_PLAYER_SAVE_AUDIT_INTERVAL_SECONDS"
+)
+DEFAULT_PLAYER_SAVE_AUDIT_INTERVAL_SECONDS = 300
+MIN_PLAYER_SAVE_AUDIT_INTERVAL_SECONDS = 30
+MAX_PLAYER_SAVE_AUDIT_INTERVAL_SECONDS = 3600
 STARTUP_GATE_POLICIES = (
     "auto",
     "auto_validate",
     "immediate",
     "next_run",
 )
+
+
 @dataclass
 class AppConfig:
     """Configuration values consumed by the runtime `App`."""
@@ -51,6 +60,8 @@ class AppConfig:
     mission_log_path: Optional[str]
     adb_port: int
     startup_gate_policy: str
+    player_save_audit_enabled: bool
+    player_save_audit_interval_seconds: int
 
 
 def _adb_port(value: str) -> int:
@@ -62,6 +73,44 @@ def _adb_port(value: str) -> int:
     if not 1 <= port <= 65535:
         raise argparse.ArgumentTypeError("ADB port must be between 1 and 65535")
     return port
+
+
+def _player_save_audit_interval(value: str) -> int:
+    """Parse the bounded passive player-save audit cadence."""
+
+    try:
+        seconds = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "player-save audit interval must be an integer"
+        ) from exc
+    if not (
+        MIN_PLAYER_SAVE_AUDIT_INTERVAL_SECONDS
+        <= seconds
+        <= MAX_PLAYER_SAVE_AUDIT_INTERVAL_SECONDS
+    ):
+        raise argparse.ArgumentTypeError(
+            "player-save audit interval must be between "
+            f"{MIN_PLAYER_SAVE_AUDIT_INTERVAL_SECONDS} and "
+            f"{MAX_PLAYER_SAVE_AUDIT_INTERVAL_SECONDS} seconds"
+        )
+    return seconds
+
+
+def _player_save_audit_environment_enabled(value: Optional[str]) -> bool:
+    """Parse the explicit managed-environment opt-in without truthy guessing."""
+
+    if value is None:
+        return False
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(
+        f"{PLAYER_SAVE_AUDIT_ENVIRONMENT_VARIABLE} must be one of "
+        "1/0, true/false, yes/no, or on/off"
+    )
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -130,6 +179,39 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "attachment semantics"
         ),
     )
+    audit_group = parser.add_mutually_exclusive_group()
+    audit_group.add_argument(
+        "--player-save-audit",
+        dest="player_save_audit",
+        action="store_true",
+        default=None,
+        help=(
+            "Enable the observation-only natural-boundary player-save audit "
+            f"(default: disabled; environment: ${PLAYER_SAVE_AUDIT_ENVIRONMENT_VARIABLE})"
+        ),
+    )
+    audit_group.add_argument(
+        "--no-player-save-audit",
+        dest="player_save_audit",
+        action="store_false",
+        help="Explicitly disable the player-save audit, including an environment opt-in",
+    )
+    parser.add_argument(
+        "--player-save-audit-interval-seconds",
+        type=_player_save_audit_interval,
+        default=os.getenv(
+            PLAYER_SAVE_AUDIT_INTERVAL_ENVIRONMENT_VARIABLE,
+            str(DEFAULT_PLAYER_SAVE_AUDIT_INTERVAL_SECONDS),
+        ),
+        metavar="SECONDS",
+        help=(
+            "Stable-read audit cadence in seconds "
+            f"({MIN_PLAYER_SAVE_AUDIT_INTERVAL_SECONDS}-"
+            f"{MAX_PLAYER_SAVE_AUDIT_INTERVAL_SECONDS}; default: "
+            f"${PLAYER_SAVE_AUDIT_INTERVAL_ENVIRONMENT_VARIABLE} or "
+            f"{DEFAULT_PLAYER_SAVE_AUDIT_INTERVAL_SECONDS})"
+        ),
+    )
     parser.add_argument("--mission-log", default=None,
                         help="Optional path to write mission/strategy logs (always logs to actions.log as well)")
     parser.add_argument("--mission-config", default=None, help="Path to YAML mission config (overrides --mission)")
@@ -142,7 +224,15 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     """Parse CLI arguments into an argparse namespace."""
 
     parser = build_arg_parser()
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.player_save_audit is None:
+        try:
+            args.player_save_audit = _player_save_audit_environment_enabled(
+                os.getenv(PLAYER_SAVE_AUDIT_ENVIRONMENT_VARIABLE)
+            )
+        except argparse.ArgumentTypeError as exc:
+            parser.error(str(exc))
+    return args
 
 
 def config_from_args(args: argparse.Namespace) -> AppConfig:
@@ -173,6 +263,10 @@ def config_from_args(args: argparse.Namespace) -> AppConfig:
         mission_log_path=args.mission_log,
         adb_port=args.adb_port,
         startup_gate_policy=args.startup_gates,
+        player_save_audit_enabled=bool(args.player_save_audit),
+        player_save_audit_interval_seconds=int(
+            args.player_save_audit_interval_seconds
+        ),
     )
 
 
@@ -180,8 +274,13 @@ __all__ = [
     "ADB_PORT_ENVIRONMENT_VARIABLE",
     "AppConfig",
     "DEFAULT_ADB_PORT",
+    "DEFAULT_PLAYER_SAVE_AUDIT_INTERVAL_SECONDS",
     "DEFAULT_STRATEGY",
     "DEFAULT_STARTUP_GATE_POLICY",
+    "MAX_PLAYER_SAVE_AUDIT_INTERVAL_SECONDS",
+    "MIN_PLAYER_SAVE_AUDIT_INTERVAL_SECONDS",
+    "PLAYER_SAVE_AUDIT_ENVIRONMENT_VARIABLE",
+    "PLAYER_SAVE_AUDIT_INTERVAL_ENVIRONMENT_VARIABLE",
     "STARTUP_GATE_POLICIES",
     "STARTUP_GATE_POLICY_ENVIRONMENT_VARIABLE",
     "STRATEGY_ENVIRONMENT_VARIABLE",

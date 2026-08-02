@@ -30,6 +30,14 @@ managed start. When the file is absent, the runtime uses port `5555`, strategy
 --startup-gates immediate|next_run` arguments continue to override these
 defaults.
 
+The unit also reads the separate optional
+`~/.config/thetower/player-save-audit.env`. It is intentionally not rewritten
+by the control surface. The file can explicitly enable the observation-only
+player-save collector and set its bounded cadence; see
+[`docs/runtime_operations.md`](../../docs/runtime_operations.md#player-save-natural-boundary-audit-collector)
+for the exact interface, receipt path, and authority limits. Absence leaves the
+collector disabled.
+
 An API bearer token is optional on the loopback-only SSH transport. To require
 one, create `~/.config/thetower/control-surface.env` with permissions `0600`:
 

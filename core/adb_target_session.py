@@ -4,12 +4,22 @@ from __future__ import annotations
 
 import os
 import threading
+from dataclasses import dataclass
 from typing import Callable, Optional
 
 from core.single_instance import SingleInstanceLock
 
 
 ADB_TARGET_OPERATION_LOCK = threading.RLock()
+
+
+@dataclass(frozen=True)
+class AdbTargetSnapshot:
+    """One process-local exact-target ownership generation."""
+
+    target: str
+    generation: int
+    owned: bool
 
 
 class AdbTargetSession:
@@ -24,6 +34,7 @@ class AdbTargetSession:
         self.target = str(target)
         self._lock_factory = lock_factory
         self._instance_lock: Optional[SingleInstanceLock] = None
+        self._generation = 0
 
     def acquire(self) -> None:
         with ADB_TARGET_OPERATION_LOCK:
@@ -33,6 +44,7 @@ class AdbTargetSession:
             instance_lock.acquire()
             os.environ["ADB_DEVICE"] = self.target
             self._instance_lock = instance_lock
+            self._generation += 1
 
     def handoff(self, target: str, *, validate: Callable[[], bool]) -> bool:
         """Adopt ``target`` only after exclusive ownership and validation."""
@@ -65,7 +77,18 @@ class AdbTargetSession:
             current_lock.release()
             self._instance_lock = replacement
             self.target = requested
+            self._generation += 1
             return True
+
+    def snapshot(self) -> AdbTargetSnapshot:
+        """Return the exact target plus a handoff/release generation."""
+
+        with ADB_TARGET_OPERATION_LOCK:
+            return AdbTargetSnapshot(
+                target=self.target,
+                generation=self._generation,
+                owned=self._instance_lock is not None,
+            )
 
     def release(self) -> None:
         with ADB_TARGET_OPERATION_LOCK:
@@ -73,6 +96,7 @@ class AdbTargetSession:
             self._instance_lock = None
             if instance_lock is not None:
                 instance_lock.release()
+                self._generation += 1
 
     def __enter__(self) -> "AdbTargetSession":
         self.acquire()
@@ -82,4 +106,4 @@ class AdbTargetSession:
         self.release()
 
 
-__all__ = ["ADB_TARGET_OPERATION_LOCK", "AdbTargetSession"]
+__all__ = ["ADB_TARGET_OPERATION_LOCK", "AdbTargetSession", "AdbTargetSnapshot"]

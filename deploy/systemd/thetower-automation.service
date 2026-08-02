@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=%h/dev/python/TheTower
 EnvironmentFile=-%h/.config/thetower/automation-adb.env
+EnvironmentFile=-%h/.config/thetower/player-save-audit.env
 ExecStart=%h/dev/python/TheTower/.venv/bin/python %h/dev/python/TheTower/main.py
 KillSignal=SIGINT
 TimeoutStopSec=30

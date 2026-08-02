@@ -97,3 +97,41 @@ def test_adb_target_session_failed_validation_retains_old_target(
             tmp_path / "automation-5565.lock",
         ):
             pass
+
+
+def test_adb_target_snapshot_tracks_ownership_handoffs_and_release(
+    tmp_path,
+    monkeypatch,
+):
+    def lock_factory(target):
+        port = target.rsplit(":", 1)[-1]
+        return SingleInstanceLock(target, tmp_path / f"automation-{port}.lock")
+
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    session = AdbTargetSession("localhost:5555", lock_factory=lock_factory)
+    initial = session.snapshot()
+    assert (initial.target, initial.generation, initial.owned) == (
+        "localhost:5555",
+        0,
+        False,
+    )
+
+    session.acquire()
+    acquired = session.snapshot()
+    assert acquired.target == "localhost:5555"
+    assert acquired.generation == 1
+    assert acquired.owned is True
+
+    assert not session.handoff("localhost:5565", validate=lambda: False)
+    assert session.snapshot() == acquired
+    assert session.handoff("localhost:5565", validate=lambda: True)
+    handed_off = session.snapshot()
+    assert handed_off.target == "localhost:5565"
+    assert handed_off.generation == 2
+    assert handed_off.owned is True
+
+    session.release()
+    released = session.snapshot()
+    assert released.target == "localhost:5565"
+    assert released.generation == 3
+    assert released.owned is False

@@ -285,31 +285,48 @@ events, or other process-local evidence. A future save-derived attachment may
 identify the completed round only through its own guarded evidence; it cannot
 manufacture active-process continuity.
 
-The foundation model does not poll, cache, bind a process, build a persisted
-battle record, or alter `App`/Game Over dispatch. Those are later slices gated
-by the versioned audit matrix in
+The normalization foundation itself does not poll, cache, bind a process,
+build a persisted battle record, or alter `App`/Game Over dispatch. The
+implemented audit sidecar below polls and keeps only process-local audit state;
+it still does not bind a battle, construct or attach a record, or alter
+dispatch. Any normal-runtime consumer remains a later slice gated by the
+versioned audit matrix in
 [`player_save_import.md`](../modules/player_save_import.md#versioned-audit-matrix-data-9-game-1073--revision-2).
 
-##### Next bounded slice: natural-boundary audit collector
+##### Implemented natural-boundary audit collector
 
-The next slice is an explicitly enabled observation-only collector, not the
-normal runtime poller. It consumes stable exact-version reads and passive
-boundary observations without pausing the game, navigating, tapping, or
-changing handler dispatch. Its append-only evidence schema can retain only the
-following independently versioned components when enabled by its audit
-manifest:
+`V1073-RUNTIME-013` is implemented as an explicitly enabled,
+observation-only sidecar, not a normal-runtime evidence consumer. It consumes
+stable exact-version reads and passive boundary observations without pausing or
+backgrounding the game, navigating, tapping, dispatching a handler, changing a
+lifecycle decision, or suppressing UI. Its one daemon worker allows at most one
+bounded stable-read acquisition at a time, so a slow or failed read never
+delays the App heartbeat. It reads only the exact target owned by the current
+`AdbTargetSession`; a handoff/release generation change discards the result.
+Capture and detection continue to feed it while global Pause blocks actions.
 
-- audit/mapping schema IDs, capture time, revision, and source fingerprint;
+Each collector start creates new runtime and collector session identities and
+appends canonical JSONL records without reading or rewriting an earlier
+session. Its exact-version manifest and receipt schema retain only:
+
+- audit/mapping/schema/session IDs, safe reason codes, timestamps, revision,
+  and source fingerprint;
 - active identity and wave, including the per-tier counter value;
-- complete Perk status/count/fingerprint and same-round progression facts;
-- versioned upgrade-component status/fingerprint, current levels, baselines,
-  deltas, and only cap-backed `maxed` claims;
-- survival-component status/fingerprint, counts, calibrated recharge/active
-  state, and checkpoint-to-checkpoint event intervals;
+- complete Perk status/count/fingerprint, reconstructable same-identity pick
+  deltas, and the last complete checkpoint across terminal clearing;
 - structural tail status/identity/fingerprint, count/capacity, and semantic
   completed-entry status/fingerprint; and
-- passive boundary labels, confirmed visual-event metadata, and timing deltas
-  needed to evaluate the audit rows.
+- passive boundary labels, observation-latency bounds, and strict metadata from
+  already-confirmed visual activation events, with an optional relative
+  evidence-image reference.
+
+The optional normalized-component path is separately manifest-gated. The
+committed survival component remains disabled because
+`V1073-RUNTIME-015`/`016` have not promoted its polarity, counters, timers, or
+merge semantics; no survival state or exact activation wave is guessed. A
+disabled or rejected optional component cannot erase a valid core receipt.
+Visual waves are explicitly approximate observations, never exact activation
+waves.
 
 The collector begins with a pre-round structural-tail baseline, records the
 first naturally serialized active identity, samples only stable revision
@@ -326,15 +343,17 @@ receipt stores event metadata and an optional evidence reference, not the
 image. The passive compact Game Stats capture remains a separate optional
 base/ad coin-split augmentation.
 
-The authorized Tier 22 boundary now supplies the collector's core natural-round
+The authorized Tier 22 boundary supplies the collector's core natural-round
 evidence: new identity, ordinary-foreground revision progress, final
-Perk/clearing behavior, and Game Over tail serialization. The collector itself
-and its synthetic state-machine/privacy tests remain unimplemented under
-`V1073-RUNTIME-013`; no replacement purpose-built battle is required before
-that work begins. Upgrade, survival-ability, and other candidate components
-remain independently unavailable until their own matrix rows are promoted, but
-they do not gate the core collector. The existing full UI terminal path remains
-authoritative until an implemented consumer passes its own validation.
+Perk/clearing behavior, and Game Over tail serialization. The repository-local
+collector and its state-machine, privacy, target-handoff, Pause, and nonblocking
+tests are implemented; the first explicitly enabled ordinary-battle run remains
+a deployment validation owned by the master coordinator. No replacement
+purpose-built battle is required. Upgrade, survival-ability, and other
+candidate components remain independently unavailable until their own matrix
+rows are promoted, but they do not gate the core collector. The complete Game
+Stats, Perks, More Stats, continuity, terminal-binding, and terminal lifecycle
+paths remain authoritative and unchanged.
 
 Game speed is a global battle-only invariant with persistent operator intent
 independent of strategy and ADB target. Numeric selections from `x0.0` through

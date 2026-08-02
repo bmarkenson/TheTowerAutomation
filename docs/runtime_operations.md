@@ -970,6 +970,107 @@ the API, authority boundaries, and planned capabilities.
 - Open anomalies: `docs/observed_issues.md`
 - Resolved recurrence history: `docs/issues/`
 
+### Player-save natural-boundary audit collector
+
+`V1073-RUNTIME-013` is disabled by default. When disabled, it performs no save
+read and creates no receipt file. It is an observation-only audit sidecar: it
+does not pause/background the app, send input, navigate, dispatch handlers,
+change lifecycle or terminal decisions, create/attach a battle record, publish
+Strategy facts, decide whether to open Perks, or suppress any UI route.
+
+For a direct repository launch, opt in explicitly with:
+
+```bash
+.venv/bin/python main.py --player-save-audit
+```
+
+The default stable-read cadence is 300 seconds. Set a bounded cadence from 30
+through 3600 seconds with, for example:
+
+```bash
+.venv/bin/python main.py --player-save-audit \
+  --player-save-audit-interval-seconds 600
+```
+
+`--no-player-save-audit` explicitly disables an environment opt-in:
+
+```bash
+.venv/bin/python main.py --no-player-save-audit
+```
+
+For the managed systemd unit, enable the collector with the separate mode-0600
+environment file below. Restart only when the operator-authorized deployment
+boundary permits it:
+
+```bash
+install -d -m 700 ~/.config/thetower
+printf '%s\n' \
+  'THETOWER_PLAYER_SAVE_AUDIT=1' \
+  'THETOWER_PLAYER_SAVE_AUDIT_INTERVAL_SECONDS=300' \
+  > ~/.config/thetower/player-save-audit.env
+chmod 600 ~/.config/thetower/player-save-audit.env
+systemctl --user restart thetower-automation.service
+```
+
+Disable the managed collector at an authorized boundary with:
+
+```bash
+printf '%s\n' 'THETOWER_PLAYER_SAVE_AUDIT=0' \
+  > ~/.config/thetower/player-save-audit.env
+chmod 600 ~/.config/thetower/player-save-audit.env
+systemctl --user restart thetower-automation.service
+```
+
+Removing the optional file also restores the disabled default on the next
+authorized restart. The control surface intentionally does not rewrite this
+file. The CLI switch takes precedence over the environment value; invalid
+boolean values or intervals fail argument parsing rather than silently
+enabling an unintended mode.
+
+Receipts append to:
+
+```text
+logs/player_save_audit/receipts-v1.jsonl
+```
+
+The path is ignored runtime evidence. Inspect recent canonical records without
+modifying them:
+
+```bash
+tail -n 20 logs/player_save_audit/receipts-v1.jsonl | jq .
+```
+
+Each process start has new runtime and collector session IDs and never restores
+round continuity or a tail candidate from old JSONL lines. Core receipts retain
+only exact-version normalized identity/revision/Perk/tail evidence, safe timing
+bounds, and target fingerprints. Raw save bytes, decoded roots, profile/account
+data, arbitrary history, More Stats rows, exceptions, pixels, and OCR text are
+never receipts. Confirmed activation-tracker events may add allowlisted
+metadata and a relative evidence-image reference; their wave is explicitly an
+approximate visual observation, not an exact activation wave.
+
+The exact-version component gate is
+`config/player_save_audit/data_9_game_1073.json`. Treat it as code-reviewed
+policy: enabling a new normalized component requires its own promoted audit
+contract and allowlisted schema, not an ad hoc runtime field.
+
+The collector uses the already owned exact ADB target and never connects,
+starts, or kills an ADB server. One daemon worker performs the existing
+two-identical-read acquisition, so a slow/failing read cannot delay handler
+dispatch. A target ownership generation change discards an in-flight result.
+Passive boundary observation continues while globally Paused. Persistent
+acquisition warnings are rate-limited and any decoder, normalization, receipt,
+or optional-component failure leaves normal automation unchanged.
+
+The committed survival-checkpoint component is manifest-disabled.
+`V1073-RUNTIME-015`/`016` raw survival polarity, timer, exact-wave, and merge
+semantics remain unavailable rather than inferred. Audit tail changes are only
+candidates—even with a complete semantic fingerprint—and cannot make a
+terminal-only process bound or let it inherit Strategy, Perk history, tracker
+events, or any other process-local evidence. The existing complete Game Stats,
+Perks, More Stats, continuity, terminal-binding, and terminal-transition paths
+remain authoritative.
+
 `logs/` and `screenshots/` are ignored runtime evidence, not substitutes for a
 tracked issue entry. When an anomaly matters beyond the current thread, record
 its date, symptom, evidence, status, and fix/test linkage in the issue ledger.

@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "manifest_id": "data-9-game-1073-natural-boundary-audit-v1",
+  "mapping_id": "data-9-game-1073",
+  "audit_matrix_id": "data-9-game-1073-runtime-audit-v2",
+  "game_version": 1073,
+  "audit_ids": [
+    "V1073-RUNTIME-003",
+    "V1073-RUNTIME-004",
+    "V1073-RUNTIME-005",
+    "V1073-RUNTIME-006",
+    "V1073-RUNTIME-007",
+    "V1073-RUNTIME-008",
+    "V1073-RUNTIME-009",
+    "V1073-RUNTIME-010",
+    "V1073-RUNTIME-013"
+  ],
+  "receipt_schema_id": "thetower.player_save_natural_boundary_audit.v1",
+  "components": {
+    "core_runtime": {
+      "enabled": true,
+      "schema_version": 1,
+      "audit_ids": [
+        "V1073-RUNTIME-003",
+        "V1073-RUNTIME-004",
+        "V1073-RUNTIME-005",
+        "V1073-RUNTIME-006",
+        "V1073-RUNTIME-007",
+        "V1073-RUNTIME-008",
+        "V1073-RUNTIME-009",
+        "V1073-RUNTIME-010",
+        "V1073-RUNTIME-013"
+      ],
+      "fields": {},
+      "unavailable_reason": "not_applicable"
+    },
+    "visual_activation_events": {
+      "enabled": true,
+      "schema_version": 1,
+      "audit_ids": [
+        "V1073-RUNTIME-013"
+      ],
+      "fields": {},
+      "unavailable_reason": "not_applicable"
+    },
+    "survival_checkpoints": {
+      "enabled": false,
+      "schema_version": null,
+      "audit_ids": [
+        "V1073-RUNTIME-015",
+        "V1073-RUNTIME-016"
+      ],
+      "fields": {},
+      "unavailable_reason": "survival_checkpoint_manifest_disabled"
+    }
+  }
+}

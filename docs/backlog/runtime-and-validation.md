@@ -46,16 +46,24 @@ checked-item detail remains in the
     Retry/Home timing, runtime attachment, and survival repeated-event/timer
     semantics remain explicit independent extensions, not blockers for
     `V1073-RUNTIME-013`; incomplete runtime claims still use UI fallback.
-  - [ ] Implement `V1073-RUNTIME-013`, the explicitly enabled read-only
+  - [x] Implement `V1073-RUNTIME-013`, the explicitly enabled read-only
     natural-boundary audit collector defined in the runtime architecture. Its
     allowlisted append-only receipts may record stable revision, active
     identity/wave, complete Perk progression/clearing, structural tail change,
-    semantic availability, passive boundary timing, and independently enabled
-    upgrade/survival checkpoints plus visual-event metadata once their audit
-    manifests exist. It must not attach an entry, write a battle record, decide
-    Perks navigation, send input, or suppress any UI path. The completed Tier
-    22 core audit supplies its natural-boundary evidence prerequisite;
-    `V1073-RUNTIME-015`/`016` survival extensions do not gate this collector.
+    semantic availability, passive boundary timing, and strict confirmed
+    visual-event metadata. The collector is default-disabled, single-worker,
+    exact-target-bound, session-local, and fail-closed. It does not attach an
+    entry, write a battle record, decide Perks navigation, send input, change
+    lifecycle/dispatch, or suppress any UI path. The completed Tier 22 core
+    audit supplies its natural-boundary evidence prerequisite;
+    `V1073-RUNTIME-015`/`016` survival extensions remain manifest-disabled and
+    do not gate this collector.
+    - [ ] In the master-owned deployment, explicitly enable the collector for
+      the first ordinary natural battle and inspect the session receipts from
+      exact Home `NEW_BATTLE` through first `RUNNING`, multiple stable active
+      revisions, natural terminal clearing, and the tail candidate. Confirm
+      normal UI/terminal behavior remains unchanged, then disable it unless
+      continued passive collection is intended.
   - [ ] Extend the exact-version runtime projection with independently failing
     active-upgrade, survival-ability, and allowlisted live-tally components.
     For upgrades, map all three current-level arrays to their Workshop
@@ -83,11 +91,12 @@ checked-item detail remains in the
     cost and staleness tolerance, then validate and adopt one independent claim
     at a time. Enforcement, mutation confirmation, and transition authority
     remain visual.
-  - [ ] Add the polling/same-round cache vertical slice only after its required
-    matrix evidence is complete. Bind snapshots to the guarded identity, reject
-    stale or different-round revisions, retain each newest complete component
-    across post-run clearing, and preserve visual tail events without changing
-    terminal navigation.
+  - [ ] Add any normal-runtime consumer of the observation-only polling and
+    same-round audit cache only after its own matrix evidence is complete.
+    Attachment, record construction, Perks-navigation decisions, Strategy
+    facts, lifecycle changes, and UI suppression remain outside
+    `V1073-RUNTIME-013` and must preserve the current-process terminal-binding
+    rule.
   - [ ] Add save-derived normal completed records and conditional terminal
     Perks navigation only after history-tail attachment and final-Perk proofs
     are complete. Preserve passive compact Game Stats OCR, forced full UI audit,
@@ -427,11 +436,16 @@ stages:
       snapshots, immutable Base/Strategy publication evidence, history and
       restore reuse, conservative schema-2 reading, and protected Farm-builder
       support without changing bundled preset-only output.
-    - [ ] Add an explicit additive API capability and metadata contract, then
+    - [x] Add an explicit additive API capability and metadata contract, then
       implement managed WPF preset/local editors for Modules, complete ordered
       Target Priority, and the three-field Orb Distance relationship. Preserve
       preset-only round trips for revision-23 clients and treat definition
-      snapshots and fingerprints as server-owned review data.
+      snapshots and fingerprints as server-owned review data. Revision 24 and
+      `strategy_authoring_local_loadout_editors_v1` now expose validated nested
+      local-editor metadata while retaining the old top-level preset contract;
+      the portable native suite covers exact values, malformed drafts,
+      duplicate prevention, ordering, and dormant form/source-state round
+      trips. Linux cross-publish passes.
     - [ ] Run the disposable-catalog Windows runtime smoke for Base and Strategy
       preset/local editing, inheritance/override/Ignore, validation errors,
       review/publish, history comparison, and restore-as-new. Make only narrow
