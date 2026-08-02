@@ -270,6 +270,25 @@ The Game Over handler polls the same control file while waiting. `PAUSED`
 blocks Retry/Home, `STOPPED` exits without a terminal tap, and `WAIT` continues
 to wait for an explicit mode change.
 
+That wait is still the already-dispatched handler for the battle it captured;
+it does not return to the main detector. Do not manually leave that terminal,
+run another battle while the process is paused in the handler, and then expect
+Resume to attach the second battle to the selected Strategy. Resume would wake
+the earlier handler. Current runtimes fail closed if they start on, or otherwise
+reach, a terminal without having observed its active battle in the same settled
+activity scope: they preserve terminal Game Stats, Perks, and More Stats, but
+mark the record unbound and omit process-local Strategy, configuration,
+timeline, activation, and sampling evidence.
+
+To recover a preserved terminal after uncertain process continuity, keep the
+mode at `WAIT`, inspect the screen and current owner, stop that owner cleanly,
+and start the replacement in `PAUSED`. Confirm the new PID and target lock plus
+a fresh `GAME_OVER/PAUSED` or `TOURNAMENT_RESULTS/PAUSED` observation before
+resuming. Resume only after confirming `WAIT`; this permits terminal capture
+without granting Home, Retry, or Tournament-dialog dismissal. A Strategy-bound
+record requires that same process to have observed the active battle after
+continuity settled.
+
 ### Resolve a blocked startup gate
 
 Before starting a run, the native app's optional **Configure run...** button

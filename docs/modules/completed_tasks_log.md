@@ -37,6 +37,25 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-02 fail-closed terminal run binding
+
+- Commit `6a81605` prevents a terminal-only process restart from assigning the
+  selected Strategy or restored process-local evidence to a battle that the
+  current process never observed active in the settled activity scope.
+  Unbound terminal records retain valid Game Stats, Perks, and More Stats while
+  omitting configuration, wave/coin/speed samples, preflight evidence, Perk
+  timeline, and survival activations; restored trackers are cleared and the
+  warning plus versioned binding reason remain in JSON and Markdown.
+- Focused validation passed 157 tests and the complete Python suite passed all
+  1,171 tests. A bounded live replay on the preserved Tier 22 wave-751 Boss
+  Game Over screen captured 11 Perk rows and all 144 More Stats rows into a
+  valid `unknown` record with `strategy=null`, empty run configuration, and no
+  stale Tier 19 timeline. The 49-batch checkpoint reset to zero. Automation
+  remained active in `RUNNING / WAIT`; no Home, Retry, Surrender, or
+  Tournament input occurred. The contaminated record pair was recoverably
+  quarantined until 2026-09-01, the corrected record is the sole Battle History
+  entry for this boundary, and `playerInfo.dat` remained untouched.
+
 ### 2026-08-02 immutable Strategy history and safe fallback
 
 - Every validated custom Strategy publication now appends a complete immutable

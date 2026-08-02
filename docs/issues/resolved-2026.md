@@ -8,6 +8,64 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Terminal-only restart attached stale Strategy and Perk history to a manual battle
+
+- **Observed:** 2026-08-02 at the natural Game Over boundary of the authorized
+  save-first audit's manually started Tier 22 survivability run.
+- **Symptom:** A replacement runtime started on the preserved terminal and
+  recorded the Tier 22 wave-751 Boss result as Farm under `farm_t19_custom`.
+  It also attached the preceding Tier 19 run's 49-batch Perk timeline. The
+  terminal Game Stats, final Perks, and More Stats portions themselves were
+  valid.
+- **Evidence:** The persisted activity scope still described the prior Tier 19
+  run, whose restored checkpoint contained 49 batches through wave 3875. The
+  visible and save-backed terminal instead agreed on Tier 22, wave 751, and
+  Boss; the terminal UI supplied 11 collapsed Perk rows and all 144 exact More
+  Stats rows. The affected record was
+  `logs/battles/Battle20260802T134401-0700.json`.
+- **Safety response:** The Game Over screen was retained. The known owner was
+  stopped through the control surface and the fixed runtime was started in
+  acknowledged `PAUSED / WAIT`. Only after a fresh `GAME_OVER/PAUSED`
+  observation was it resumed for bounded Perks and More Stats capture. No
+  Home, Retry, Surrender, or Tournament input occurred, and the operator-owned
+  save was not modified.
+- **Cause:** Terminal serialization trusted the selected Strategy and restored
+  trackers whenever the activity-scope ID was readable. It did not require the
+  current process to have observed an active battle after continuity settled.
+  The old process had remained blocked in the prior Game Over `WAIT` handler
+  while the operator manually left it and completed the Tier 22 run during
+  Pause, so its detector never saw that intervening battle and the persisted
+  scope did not advance.
+- **Resolution:** Terminal context is now bound only after a current-process
+  active observation in the same settled activity scope. An unbound terminal
+  retains its valid UI result but omits Strategy, run configuration, and every
+  process-local wave, coin, speed, preflight, Perk-timeline, and survival field;
+  restored Perk and activation trackers are reset. Standard Game Over remains
+  `unknown` absent independent identity evidence, and records retain a
+  versioned `runtime.run_binding` reason plus an operator-visible warning.
+- **Regression:**
+  `test/test_run_initialization.py::GcFarmProfileTests::test_terminal_only_restart_omits_unbound_strategy_and_tracker_evidence`
+  covers the stale-scope terminal restart, and
+  `test_terminal_binding_waits_for_continuity_and_clears_at_new_battle` covers
+  continuity settlement, scope mismatch, and Home reset.
+  `test/test_battle_stats.py::test_unbound_terminal_record_is_valid_but_warns_about_omitted_run_evidence`
+  covers the retained terminal record and warning. Bound ordinary, No
+  Strategy, and Tournament paths remain covered by their existing suites.
+- **Validation:** The focused runtime/record suite passed all 157 tests and the
+  complete Python suite passed all 1,171 tests. Live replay on the retained
+  terminal produced `Battle20260802T141027-0700`: valid Tier 22, wave 751,
+  Boss, 11 Perk rows, and 144 More Stats rows; `strategy=null`, empty run
+  configuration, `battle_type=unknown`, and
+  `runtime.run_binding.status=unbound`. No stale timeline or survival fields
+  remained, the persisted Perk checkpoint was reset from 49 batches to zero,
+  the runtime stayed active in `RUNNING / WAIT`, and the Game Over screen was
+  preserved. The contaminated pre-fix JSON/Markdown pair was then moved through
+  the control surface's recoverable discard path to
+  `logs/discarded_battles/20260802T211326187501Z__Battle20260802T134401-0700`;
+  the corrected record is the only one exposed in completed Battle History,
+  and the quarantine remains restorable until its 2026-09-01 purge deadline.
+- **Fixed by:** `6a81605`.
+
 ### Existing no-Base Strategies could not attach their first Base
 
 - **Observed:** 2026-08-02 when the operator attempted to make the editable

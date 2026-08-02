@@ -498,6 +498,27 @@ copied or OCRed from terminal stats is stored as observed evidence independently
 of strategy identity. Thus an unconfigured standard Game Over can report its
 Tier while remaining `unknown` rather than fabricating Farm or Milestone type.
 
+Process-local run evidence has an additional terminal binding boundary. The
+current process must observe an active `RUNNING` battle after activity
+continuity has settled, and the activity-scope ID at the terminal must still
+match that observation. Starting directly on Game Over, or reaching a terminal
+after the scope changes without another active observation, is `unbound`.
+Terminal UI capture remains valid, but the record omits selected Strategy,
+resolved run configuration, last-wave and coin samples, game-speed history,
+session-preflight evidence, Perk timeline, and survival-ability observations.
+Any restored process-local Perk or activation state is reset so it cannot leak
+into a later record. The JSON and Markdown retain an explicit warning and a
+versioned `runtime.run_binding` reason.
+
+This boundary is independent of a readable activity-scope ID. A process can be
+blocked inside an earlier Game Over `WAIT` handler while an operator manually
+leaves that screen, runs another battle during Pause, and returns to Game Over;
+the detector did not observe that intervening run even if the persisted scope
+never changed. An unbound standard Game Over therefore remains `unknown`
+unless independent terminal evidence proves a more specific type. The distinct
+Tournament Results terminal state still supplies Tournament identity, while
+its process-local Strategy evidence is omitted under the same binding rule.
+
 ## No Strategy observation profile
 
 `No Strategy` supplies no configured run intent and owns no upgrade actions,
