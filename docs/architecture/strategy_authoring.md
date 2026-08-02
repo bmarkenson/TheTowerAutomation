@@ -197,21 +197,62 @@ advancing past the applicable configuration gate unless a verified repair
 owns and confirms the transition.
 
 If an enforced mismatch is discovered in an already running battle, the
-runtime must not express that condition as global Pause. It creates a strategy
-gate with three authority classes:
+runtime must not express that condition as global Pause. `RuntimeActionAuthority`
+creates a run-scoped Strategy Action Gate and answers every decision through
+four typed classes:
 
-1. Capture, detection, state interpretation, and evidence collection continue.
-2. Explicitly allowlisted independent auxiliary collectors, such as a safe Gem
-   collection whose preconditions do not depend on the invalid strategy
-   setting, may continue.
-3. Strategy-dependent and lifecycle actions remain blocked until the gate is
-   resolved or the operator changes strategy policy.
+1. **Observation** has no input authority. Capture, detection, OCR, state and
+   wave updates, activation tracking, passive evidence, and status publication
+   continue under every gate and under global Pause.
+2. **Auxiliary collection** covers only explicitly named independently safe
+   collectors. An active Strategy Gate may allow the in-battle ad gem and its
+   bounded floating-gem scan, Daily Gem Store, Daily and Weekly Mission
+   rewards, Event Mission rewards, and Guild chest rewards. Their schedulers,
+   badge checks, Sunday hold, claim bounds, eligibility, and cooldowns remain
+   authoritative; the gate never makes a reward due.
+3. **Strategy action** covers strategy and mission ticks, overlays,
+   configuration, Perks navigation, game-speed correction, upgrade-detail
+   handling, auto-return, and unknown-state recovery.
+4. **Lifecycle action** covers New Battle, Go Home, Surrender, Exit Battle,
+   restart, and every other transition that can alter the run boundary.
+
+Normal running retains its established policy. Global Pause is stronger than
+the Strategy Gate: observation continues, but every input and handler action,
+including auxiliary collection, is blocked. Activity continuity, run
+initialization, session preflight, exclusive validation, and other exclusive
+screen owners are also stronger and block all auxiliary collectors; the
+matching owner alone may execute its already-bounded internal validation or
+transition. Initialization is therefore not reclassified as a terminal
+Strategy Gate.
+
+The gate is bound to the authoritative run identity when one is available and
+survives temporary menus and overlays in that same battle. It changes only for
+successful validation, an accepted retry or run-scoped waiver, an explicit
+active-battle strategy/policy change, a separately authorized repair
+transition, a changed authoritative run identity, or a genuine natural battle
+boundary. An `observe`/notification-only mismatch records evidence without
+activating it. Natural Game Over releases the gate before ordinary terminal
+handling; the gate itself cannot create that boundary.
+
+Multi-screen auxiliary collectors claim an exclusive route from freshly
+verified `RUNNING` evidence before their first input. Every swipe or tap
+rechecks the control state, route and battle identity, expected screen, and
+typed auxiliary authority. Authority loss retains collector-owned cleanup for
+a later verified resume, while Game Over, Home boundary, identity change, or an
+unexpected screen abandons the route without cleanup input. No auxiliary route
+may invoke generic recovery or navigate through New Battle, Go Home, Exit
+Battle, Surrender, or restart. The floating-gem scan uses the same per-input
+authority check on every tap without capture/OCR work in its timing-critical
+loop, and its cadence is anchored to elapsed time so guard latency does not
+accumulate.
 
 The gate does not authorize Surrender, Exit Battle, restart, or a manufactured
-run boundary. The control surface should state the distinction directly, for
-example: “Strategy actions blocked — observation and safe collectors remain
-active.” Existing global Pause remains stronger and continues to block every
-handler action while allowing capture and detection.
+run boundary, and it neither writes `PAUSED` nor changes `AUTOMATION.state`.
+The separately guarded repair workflow still requires its profile/operator
+authority. The control surface states the distinction directly: “Strategy
+actions blocked — observation and safe collectors remain active.” The full
+matrix and structured status contract are documented in
+[`runtime.md`](runtime.md#typed-runtime-action-authority).
 
 ## GUI contract
 
@@ -316,23 +357,25 @@ Delivery is split into independently reviewable slices:
    setting, then perform Windows GUI smoke validation. The implementation and
    Linux cross-validation are complete; the documented native Windows runtime
    smoke remains required on a Windows host.
-4. Runtime strategy-gate refinement: implement and validate the distinct
-   observation, auxiliary-collector, and strategy-action authority classes
-   before relying on running-battle enforcement from newly editable settings.
+4. Runtime Strategy Action Gate: implement and validate the typed observation,
+   auxiliary-collection, strategy-action, and lifecycle-action matrix, guarded
+   collector routes, structured status, and distinct native presentation before
+   relying on running-battle enforcement from newly editable settings.
 
 Each slice should be completed and validated in its own development thread.
 The actionable sequence is tracked in the
 [`runtime and validation backlog`](../backlog/runtime-and-validation.md).
 
-Backend slice 1, additive API/editor slice 2, and specialized-editor slice 3
-are implemented. Server revision 21 preserves `strategy_authoring_v1` and
-`strategy_authoring_specialized_editors_v1`, and adds
-`strategy_authoring_profile_lifecycle_v1`; the original profile endpoint and
-capabilities remain as the older-client compatibility facade. The native shell
-handles every registered editor type with server-declared managed controls or
-an honest fixed presentation, retains dormant Ignore values and unknown
-Ultimate Weapon fields, and keeps validation, resolution, publication, and
-runtime authority in Python.
+All four slices are implemented. Server revision 22 retains
+`strategy_authoring_v1`, `strategy_authoring_specialized_editors_v1`, and
+`strategy_authoring_profile_lifecycle_v1`, and adds
+`strategy_action_gate_v1`; the original profile endpoint and every older
+capability remain as the compatibility facade. The native shell handles every
+registered editor type with server-declared managed controls or an honest fixed
+presentation, retains dormant Ignore values and unknown Ultimate Weapon
+fields, and keeps validation, resolution, publication, and runtime authority
+in Python. The runtime-owned Strategy Gate snapshot and native banner are
+separate from requested and acknowledged Pause.
 
 Custom Strategy display-name changes use ordinary reviewed publication, so the
 stable ID does not change and the next logical version is published under the
@@ -343,6 +386,6 @@ Strategies, and atomically moves the exact publication into the store-owned
 `retired` directory. It then refreshes both authoring and legacy active
 catalogs and audits the retirement without changing selection or activation.
 Managed restore and immutable publication history remain the explicit future
-fallback work; a retirement archive is not presented as revision history. The
-running-battle strategy-gate refinement and future profile-local definitions
-remain separate later slices above.
+fallback work; a retirement archive is not presented as revision history.
+Future profile-local definitions remain the separate later authoring slice
+above.

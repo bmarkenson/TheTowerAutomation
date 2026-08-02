@@ -3,7 +3,13 @@ from unittest.mock import Mock, patch
 
 import cv2
 import numpy as np
+import pytest
 
+from core.action_authority import (
+    AuxiliaryCollector,
+    RuntimeActionAuthority,
+    RuntimeActionClass,
+)
 from core.app import App
 from core.label_tapper import get_label_match
 from core.matcher import get_match
@@ -173,6 +179,158 @@ def test_blind_floating_gem_taps_retain_input_logging():
             "stop_requested=False failure=None"
         ),
     )
+
+
+def test_blind_floating_gem_rechecks_authority_before_every_tap():
+    class Clock:
+        now = 0.0
+
+        def time(self):
+            return self.now
+
+        def sleep(self, duration):
+            self.now += max(0.0, duration)
+
+    clock = Clock()
+    guard = Mock(side_effect=[True, True, True, False])
+    with (
+        patch.object(ad_gems, "get_click", return_value=(250, 1200)),
+        patch.object(ad_gems.time, "time", side_effect=clock.time),
+        patch.object(ad_gems.time, "sleep", side_effect=clock.sleep),
+        patch.object(ad_gems, "tap") as tap,
+        patch.object(ad_gems, "log_action_intent"),
+        patch.object(ad_gems, "log_result") as result_log,
+    ):
+        ad_gems.start_blind_gem_tapper(
+            duration=5,
+            interval=1,
+            blocking=True,
+            action_guard_fn=guard,
+        )
+
+    assert guard.call_count == 4  # start check plus one check per attempted tap
+    assert tap.call_count == 2
+    assert not ad_gems.is_blind_gem_tapper_active()
+    assert "result=interrupted taps=2" in result_log.call_args.kwargs["detail"]
+    assert "authority_lost=True" in result_log.call_args.kwargs["detail"]
+
+
+def test_global_pause_stops_floating_gem_scan_before_its_next_tap():
+    class Clock:
+        now = 0.0
+
+        def time(self):
+            return self.now
+
+        def sleep(self, duration):
+            self.now += max(0.0, duration)
+
+    clock = Clock()
+    authority = RuntimeActionAuthority()
+
+    def set_pause(paused):
+        authority.update_context(
+            global_pause=paused,
+            active_battle=True,
+            battle_scope="run-1",
+            primary_state="RUNNING",
+        )
+
+    set_pause(False)
+    authority.activate_strategy_gate(
+        strategy="farm_t18",
+        battle_scope="run-1",
+        source="session_preflight",
+        phase="running_battle",
+        failed_check_ids=("modules",),
+        reason="Modules do not match",
+    )
+
+    def guarded():
+        return authority.decision(
+            RuntimeActionClass.AUXILIARY_COLLECTION,
+            collector=AuxiliaryCollector.FLOATING_GEM_SCAN,
+        ).allowed
+
+    def tap_once_then_pause(*_args, **_kwargs):
+        set_pause(True)
+
+    with (
+        patch.object(ad_gems, "get_click", return_value=(250, 1200)),
+        patch.object(ad_gems.time, "time", side_effect=clock.time),
+        patch.object(ad_gems.time, "sleep", side_effect=clock.sleep),
+        patch.object(ad_gems, "tap", side_effect=tap_once_then_pause) as tap,
+        patch.object(ad_gems, "log_action_intent"),
+        patch.object(ad_gems, "log_result") as result_log,
+    ):
+        ad_gems.start_blind_gem_tapper(
+            duration=5,
+            interval=1,
+            blocking=True,
+            action_guard_fn=guarded,
+        )
+
+    tap.assert_called_once()
+    assert "result=interrupted taps=1" in result_log.call_args.kwargs["detail"]
+    assert "authority_lost=True" in result_log.call_args.kwargs["detail"]
+
+
+def test_floating_gem_guard_latency_does_not_accumulate_in_tap_cadence():
+    class Clock:
+        now = 0.0
+
+        def time(self):
+            return self.now
+
+        def sleep(self, duration):
+            self.now += max(0.0, duration)
+
+    clock = Clock()
+    tap_times = []
+
+    def guarded():
+        # Deliberately exaggerate the real guard cost. The next tap should
+        # remain on the original wall-clock cadence rather than drifting by
+        # another 200 ms every iteration.
+        clock.now += 0.2
+        return True
+
+    with (
+        patch.object(ad_gems, "get_click", return_value=(250, 1200)),
+        patch.object(ad_gems.time, "time", side_effect=clock.time),
+        patch.object(ad_gems.time, "sleep", side_effect=clock.sleep),
+        patch.object(
+            ad_gems,
+            "tap",
+            side_effect=lambda *_args, **_kwargs: tap_times.append(clock.now),
+        ),
+        patch.object(ad_gems, "log_action_intent"),
+        patch.object(ad_gems, "log_result"),
+    ):
+        ad_gems._blind_floating_gem_tapper(
+            duration=3,
+            interval=1,
+            stop_event=ad_gems.threading.Event(),
+            action_guard_fn=guarded,
+        )
+
+    assert tap_times == pytest.approx([0.2, 1.2, 2.2])
+
+
+def test_visible_ad_gem_rechecks_authority_before_each_retry_input():
+    guard = Mock(side_effect=[True, False])
+    with (
+        patch.object(ad_gems, "is_visible", side_effect=[True, True, True]),
+        patch.object(ad_gems, "safe_tap", return_value=True) as tap,
+        patch.object(ad_gems.time, "sleep"),
+    ):
+        assert not ad_gems._collect_visible_ad_gem(
+            "overlays.ad_gem",
+            action_guard_fn=guard,
+        )
+
+    assert guard.call_count == 2
+    tap.assert_called_once()
 
 
 def test_in_battle_ad_gem_has_one_intent_and_terminal_result():

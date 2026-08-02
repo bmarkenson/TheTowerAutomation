@@ -14,6 +14,7 @@ from numpy.typing import NDArray
 
 from utils.logger import (
     ensure_activity_scope,
+    get_activity_scope,
     log,
     log_action_intent,
     log_result,
@@ -26,6 +27,17 @@ from core.adb_connection import AdbConnectionCoordinator
 from core.adb_target_session import AdbTargetSession
 from core.artifact_retention import RuntimeArtifactRetention
 from core.activity_continuity import ActivityContinuityCoordinator
+from core.action_authority import (
+    ActionAuthorityDecision,
+    AuthorityHold,
+    AuthorityHoldState,
+    AuxiliaryCollector,
+    AuxiliaryRouteLease,
+    RuntimeActionAuthority,
+    RuntimeActionAuthorityPublisher,
+    RuntimeActionClass,
+    StrategyGateExitEvent,
+)
 from core.ss_capture import (
     ScreenshotFailure,
     capture_and_save_screenshot,
@@ -102,14 +114,25 @@ from handlers.ad_gem_handler import (
     start_blind_gem_tapper,
     stop_blind_gem_tapper,
 )
-from handlers.daily_gem_handler import DailyGemResult, handle_daily_gem
+from handlers.daily_gem_handler import (
+    DailyGemCleanupResult,
+    DailyGemResult,
+    handle_daily_gem,
+    resume_daily_gem_cleanup,
+)
 from handlers.dismiss_uw_detail import handle_upgrade_detail_popup
-from handlers.mission_reward_handler import MissionRewardResult, handle_mission_rewards
+from handlers.mission_reward_handler import (
+    MissionRewardCleanupResult,
+    MissionRewardResult,
+    handle_mission_rewards,
+    resume_mission_reward_cleanup,
+)
 from utils.wave_detector import detect_wave_number_from_image
 
 
 Frame = NDArray[np.uint8]
 HOME_SETUP_MAX_ATTEMPTS = 3
+_BATTLE_SCOPE_UNSET = object()
 
 
 class App:
@@ -243,6 +266,17 @@ class App:
             Path(config.control_file).parent / "event_mission_tracker.json"
         )
         self._event_mission_tracker = EventMissionTracker(event_mission_state)
+        self._action_authority = RuntimeActionAuthority()
+        self._action_authority_publisher = RuntimeActionAuthorityPublisher(
+            Path(config.control_file).with_name("strategy_action_gate.json"),
+            owner=self._supervisor.current_exclusive_validation_owner(),
+        )
+        self._authority_battle_active = False
+        self._authority_primary_state = "UNKNOWN"
+        self._authority_holds: tuple[AuthorityHoldState, ...] = ()
+        self._pending_auxiliary_cleanup: Optional[
+            tuple[str, AuxiliaryRouteLease]
+        ] = None
 
     def _activation_tracker(self) -> BattleActivationTracker:
         """Return the run-scoped passive tracker, including in partial test apps."""
@@ -261,6 +295,171 @@ class App:
             observer = PerkTimelineObserver()
             self._perk_timeline_observer = observer
         return observer
+
+    def _get_action_authority(self) -> RuntimeActionAuthority:
+        """Return the central authority, including for partial test instances."""
+
+        authority = getattr(self, "_action_authority", None)
+        if authority is None:
+            authority = RuntimeActionAuthority()
+            self._action_authority = authority
+        return authority
+
+    @staticmethod
+    def _current_run_scope_id() -> Optional[str]:
+        scope = get_activity_scope()
+        if not isinstance(scope, Mapping):
+            return None
+        run_id = str(scope.get("run_id") or "").strip()
+        return run_id or None
+
+    def _observe_battle_authority_precondition(
+        self,
+        detection: Mapping[str, Any],
+    ) -> bool:
+        """Track same-battle authority independently of temporary UI screens."""
+
+        state = str(detection.get("state") or "UNKNOWN").upper()
+        control = HomeBattleControl.parse(
+            detection.get("home_battle_control", "UNKNOWN")
+        )
+        active = bool(getattr(self, "_authority_battle_active", False))
+        manager_method = getattr(
+            getattr(self, "_mission_mgr", None),
+            "active_battle_observed",
+            None,
+        )
+        if callable(manager_method):
+            try:
+                manager_active = manager_method()
+            except Exception:
+                manager_active = None
+            if isinstance(manager_active, bool):
+                active = manager_active
+        if state == "RUNNING":
+            active = True
+        elif state in {"GAME_OVER", "TOURNAMENT_RESULTS", "WORKSHOP"}:
+            active = False
+        elif state in {"HOME", "HOME_SCREEN"}:
+            if control is HomeBattleControl.NEW_BATTLE:
+                active = False
+            elif control is HomeBattleControl.RESUME_BATTLE:
+                active = True
+        self._authority_battle_active = active
+        self._authority_primary_state = state
+        return active
+
+    def _update_action_authority(
+        self,
+        *,
+        detection: Optional[Mapping[str, Any]] = None,
+        holds: Optional[tuple[AuthorityHoldState, ...]] = None,
+        shutting_down: bool = False,
+        observed_battle_scope: object = _BATTLE_SCOPE_UNSET,
+    ) -> None:
+        """Publish fresh Pause, ownership, battle, and screen inputs to the matrix."""
+
+        if detection is not None:
+            active_battle = self._observe_battle_authority_precondition(
+                detection
+            )
+        else:
+            active_battle = bool(
+                getattr(self, "_authority_battle_active", False)
+            )
+        if holds is not None:
+            self._authority_holds = tuple(holds)
+        current_holds = tuple(getattr(self, "_authority_holds", ()))
+        supervisor = getattr(self, "_supervisor", None)
+        paused = bool(
+            supervisor is not None
+            and getattr(supervisor, "is_paused", False)
+        )
+        control_state = getattr(AUTOMATION, "state", None)
+        runtime_stopped = bool(
+            control_state is RunState.STOPPED
+            or str(control_state) in {"STOPPED", "RunState.STOPPED"}
+        )
+        battle_scope = (
+            self._current_run_scope_id()
+            if observed_battle_scope is _BATTLE_SCOPE_UNSET
+            else (
+                str(observed_battle_scope).strip() or None
+                if observed_battle_scope is not None
+                else None
+            )
+        )
+        self._get_action_authority().update_context(
+            global_pause=paused,
+            active_battle=active_battle,
+            battle_scope=battle_scope,
+            primary_state=str(
+                getattr(self, "_authority_primary_state", "UNKNOWN")
+            ),
+            holds=current_holds,
+            runtime_stopped=runtime_stopped,
+            shutting_down=shutting_down,
+        )
+
+    def _publish_action_authority(
+        self,
+        *,
+        runtime_active: bool = True,
+    ) -> None:
+        publisher = getattr(self, "_action_authority_publisher", None)
+        if publisher is None:
+            return
+        supervisor = getattr(self, "_supervisor", None)
+        owner = (
+            supervisor.current_exclusive_validation_owner()
+            if supervisor is not None
+            and callable(
+                getattr(supervisor, "current_exclusive_validation_owner", None)
+            )
+            else None
+        )
+        publisher.publish(
+            self._get_action_authority().snapshot(),
+            runtime_active=runtime_active,
+            owner=owner,
+        )
+
+    def _action_decision(
+        self,
+        action_class: RuntimeActionClass,
+        *,
+        owner: Optional[AuthorityHold | str] = None,
+        collector: Optional[AuxiliaryCollector] = None,
+        route: Optional[AuxiliaryRouteLease] = None,
+    ) -> ActionAuthorityDecision:
+        owner_value = owner.value if isinstance(owner, AuthorityHold) else owner
+        return self._get_action_authority().decision(
+            action_class,
+            owner=owner_value,
+            collector=collector,
+            route_id=route.route_id if route is not None else None,
+        )
+
+    def _run_owned_strategy_tick(
+        self,
+        owner: AuthorityHold,
+        img: Frame,
+        detection: Dict[str, Any],
+        *,
+        strategy_only: bool,
+    ) -> None:
+        """Run one exclusive gate tick with only that hold's input authority."""
+
+        previous = getattr(self, "_active_action_authority_owner", None)
+        self._active_action_authority_owner = owner
+        try:
+            self._mission_mgr.tick(
+                img,
+                detection,
+                strategy_only=strategy_only,
+            )
+        finally:
+            self._active_action_authority_owner = previous
 
     def _perk_timeline_enabled(self) -> bool:
         """Track runs whose declared configuration enables automatic Perks."""
@@ -1361,6 +1560,21 @@ class App:
             )
         else:
             return False
+        if phase == "session_preflight" and action in {
+            "waive",
+            "retry",
+            "repair_restart",
+        }:
+            self._get_action_authority().clear_strategy_gate(
+                event={
+                    "waive": StrategyGateExitEvent.RUN_SCOPED_WAIVER,
+                    "retry": StrategyGateExitEvent.ACCEPTED_RETRY,
+                    "repair_restart": (
+                        StrategyGateExitEvent.AUTHORIZED_REPAIR_TRANSITION
+                    ),
+                }[action],
+                reason=completion_reason,
+            )
         self._supervisor.consume_gate_decision(
             request_id,
             completion_reason=completion_reason,
@@ -1501,6 +1715,113 @@ class App:
             )
         log(message, "INFO", console=True)
 
+    def _observe_strategy_gate_boundary(
+        self,
+        detection: Mapping[str, Any],
+    ) -> None:
+        """Clear a running-battle gate only on authoritative boundary evidence."""
+
+        authority = self._get_action_authority()
+        gate = authority.strategy_gate
+        if gate is None and authority.auxiliary_route is None:
+            return
+        state = str(detection.get("state") or "UNKNOWN").upper()
+        control = HomeBattleControl.parse(
+            detection.get("home_battle_control", "UNKNOWN")
+        )
+        boundary_event: Optional[StrategyGateExitEvent] = None
+        boundary_reason: Optional[str] = None
+        if state in {"GAME_OVER", "TOURNAMENT_RESULTS"}:
+            boundary_event = StrategyGateExitEvent.NATURAL_BATTLE_BOUNDARY
+            boundary_reason = f"natural {state} was observed"
+        elif state in {"HOME", "HOME_SCREEN"} and (
+            control is HomeBattleControl.NEW_BATTLE
+        ):
+            boundary_event = StrategyGateExitEvent.NATURAL_BATTLE_BOUNDARY
+            boundary_reason = "Home authoritatively offers New Battle"
+        elif state == "WORKSHOP":
+            boundary_event = StrategyGateExitEvent.NATURAL_BATTLE_BOUNDARY
+            boundary_reason = "Workshop proves that no resumable battle is active"
+        else:
+            current_scope = self._current_run_scope_id()
+            route_state = authority.auxiliary_route
+            authoritative_scope = (
+                gate.battle_scope
+                if gate is not None and gate.battle_scope is not None
+                else (
+                    route_state.lease.battle_scope
+                    if route_state is not None
+                    else None
+                )
+            )
+            if (
+                authoritative_scope is not None
+                and current_scope is not None
+                and authoritative_scope != current_scope
+            ):
+                boundary_event = StrategyGateExitEvent.BATTLE_IDENTITY_CHANGE
+                boundary_reason = (
+                    "the authoritative current-run identity changed from "
+                    f"{authoritative_scope} to {current_scope}"
+                )
+        if boundary_event is None or boundary_reason is None:
+            if gate is not None:
+                authority.scope_gate_if_missing(self._current_run_scope_id())
+            return
+        authority.abandon_auxiliary_route(reason=boundary_reason)
+        self._pending_auxiliary_cleanup = None
+        authority.clear_strategy_gate(
+            event=boundary_event,
+            reason=boundary_reason,
+        )
+
+    def _sync_strategy_action_gate(
+        self,
+        *,
+        terminally_blocked: bool,
+    ) -> None:
+        """Translate terminal preflight evidence into the typed gate state."""
+
+        authority = self._get_action_authority()
+        if terminally_blocked:
+            mission_vars = self._mission_mgr.ctx.data.setdefault(
+                "mission_vars",
+                {},
+            )
+            checks = self._mission_mgr.session_preflight_failure_checks()
+            evidence = mission_vars.get("gc_session_preflight_evidence")
+            if not checks and isinstance(evidence, Mapping):
+                raw_checks = evidence.get("failed_checks")
+                if isinstance(raw_checks, (list, tuple)):
+                    checks = [str(value) for value in raw_checks]
+            reason = str(
+                mission_vars.get("gc_session_preflight_last_reason")
+                or "running-battle strategy validation failed"
+            )
+            authority.activate_strategy_gate(
+                strategy=self._current_strategy_name(),
+                battle_scope=self._current_run_scope_id(),
+                source="session_preflight",
+                phase="running_battle",
+                failed_check_ids=checks,
+                reason=reason,
+            )
+            return
+
+        gate = authority.strategy_gate
+        if gate is None:
+            return
+        strategy = self._mission_mgr.strategy
+        if (
+            strategy is not None
+            and strategy.requires_session_preflight()
+            and strategy.is_session_preflight_complete(self._mission_mgr.ctx)
+        ):
+            authority.clear_strategy_gate(
+                event=StrategyGateExitEvent.SUCCESSFUL_VALIDATION,
+                reason="the running-battle strategy checks completed successfully",
+            )
+
     def _process_strategy_boundary(self, detection: Mapping[str, Any]) -> None:
         state = str(detection.get("state") or "UNKNOWN").upper()
         control = HomeBattleControl.parse(
@@ -1603,6 +1924,16 @@ class App:
         return True
 
     def _complete_strategy_application(self, requested_name: str) -> None:
+        self._get_action_authority().clear_strategy_gate(
+            event=StrategyGateExitEvent.ACTIVE_STRATEGY_CHANGE,
+            reason=(
+                f"strategy policy changed explicitly to {requested_name}"
+            ),
+        )
+        self._get_action_authority().abandon_auxiliary_route(
+            reason="the active strategy changed"
+        )
+        self._pending_auxiliary_cleanup = None
         self._config.strategy_name = requested_name
         self._pending_strategy_request = None
         self._run_initialization_gate_logged = False
@@ -1678,6 +2009,8 @@ class App:
         if self._supervisor.is_paused:
             if stop_blind_gem_tapper():
                 self._blind_tapper_suspended = True
+        self._update_action_authority()
+        self._publish_action_authority()
         if self._adb_connection_coordinator.ensure_connected():
             time.sleep(2)
 
@@ -1699,6 +2032,8 @@ class App:
                 is_paused = self._supervisor.is_paused
                 if is_paused and stop_blind_gem_tapper():
                     self._blind_tapper_suspended = True
+                self._update_action_authority()
+                self._publish_action_authority()
 
                 img = self._capture_frame()
                 if img is None:
@@ -1721,9 +2056,11 @@ class App:
                         "DEBUG",
                     )
 
+                self._mission_mgr.observe_detection(detection)
                 self._observe_no_strategy_frame(img, detection)
 
                 self._process_strategy_boundary(detection)
+                self._observe_strategy_gate_boundary(detection)
 
                 # Update battle identity independently of screen navigation,
                 # then give a genuinely initializing strategy exclusive tap
@@ -1758,6 +2095,20 @@ class App:
                         detection,
                         post_retry_poll_allowed=post_retry_poll_allowed,
                     )
+                    continuity_holds = (
+                        (
+                            AuthorityHoldState(
+                                AuthorityHold.ACTIVITY_CONTINUITY,
+                                "activity continuity owns its verification route",
+                            ),
+                        )
+                        if continuity_needed
+                        else ()
+                    )
+                    self._update_action_authority(
+                        detection=detection,
+                        holds=continuity_holds,
+                    )
                     if (
                         not is_paused
                         and continuity_needed
@@ -1766,13 +2117,19 @@ class App:
                         self._blind_tapper_suspended = True
                     continuity = activity_continuity.handle(
                         detection,
-                        actions_allowed=not is_paused,
-                        action_guard_fn=self._runtime_action_guard,
+                        actions_allowed=self._action_decision(
+                            RuntimeActionClass.STRATEGY_ACTION,
+                            owner=AuthorityHold.ACTIVITY_CONTINUITY,
+                        ).allowed,
+                        action_guard_fn=lambda: self._runtime_action_guard(
+                            owner=AuthorityHold.ACTIVITY_CONTINUITY
+                        ),
                         post_retry_poll_allowed=post_retry_poll_allowed,
                     )
                     continuity_pending = continuity.pending
                     self._apply_activity_continuity_outcome(continuity)
                     if continuity.recapture:
+                        self._publish_action_authority()
                         continue
                 self._observe_exclusive_validation_battle_start(
                     detection,
@@ -1825,39 +2182,6 @@ class App:
                             not initialization_pending
                             and self._mission_mgr.session_preflight_pending()
                         )
-                game_speed_guard = getattr(self, "_game_speed_guard", None)
-                if game_speed_guard is not None:
-                    game_speed_guard.set_target(
-                        self._supervisor.game_speed_target,
-                        wave=self._last_wave_value,
-                    )
-                    expected_game_speed_target = (
-                        self._supervisor.game_speed_target
-                    )
-                    game_speed_allowed = bool(
-                        not is_paused
-                        and not continuity_pending
-                        and not exclusive_validation_ownership_hold
-                        and not self._exclusive_validation_in_progress()
-                        and self._handler_enabled("game_speed")
-                        and self._game_speed_priority_ready(
-                            initialization_pending=initialization_pending
-                        )
-                    )
-                    if game_speed_guard.handle(
-                        img,
-                        detection,
-                        action_guard_fn=lambda: (
-                            game_speed_allowed
-                            and self._runtime_action_guard()
-                            and self._supervisor.game_speed_target
-                            == expected_game_speed_target
-                        ),
-                    ):
-                        # The guard may have captured several newer frames while
-                        # walking the speed control. Re-enter through capture
-                        # before any other consumer sees the stale frame.
-                        continue
                 if (
                     not continuity_pending
                     and self._advance_exclusive_validation(detection)
@@ -1877,6 +2201,91 @@ class App:
                         session_preflight_pending
                         and self._mission_mgr.session_preflight_terminally_blocked()
                     )
+                self._sync_strategy_action_gate(
+                    terminally_blocked=session_preflight_terminally_blocked
+                )
+                if continuity_pending:
+                    authority_holds = (
+                        AuthorityHoldState(
+                            AuthorityHold.ACTIVITY_CONTINUITY,
+                            "activity continuity owns its verification route",
+                        ),
+                    )
+                elif exclusive_validation_ownership_hold:
+                    authority_holds = (
+                        AuthorityHoldState(
+                            AuthorityHold.EXCLUSIVE_OWNERSHIP,
+                            "exclusive validation ownership is unresolved",
+                        ),
+                    )
+                elif self._exclusive_validation_in_progress():
+                    authority_holds = (
+                        AuthorityHoldState(
+                            AuthorityHold.EXCLUSIVE_VALIDATION,
+                            "exclusive strategy validation owns the screen",
+                        ),
+                    )
+                elif initialization_pending:
+                    authority_holds = (
+                        AuthorityHoldState(
+                            AuthorityHold.RUN_INITIALIZATION,
+                            "run initialization owns strategy input",
+                        ),
+                    )
+                elif (
+                    session_preflight_pending
+                    and not session_preflight_terminally_blocked
+                ):
+                    authority_holds = (
+                        AuthorityHoldState(
+                            AuthorityHold.SESSION_PREFLIGHT,
+                            "session preflight owns strategy validation input",
+                        ),
+                    )
+                else:
+                    authority_holds = ()
+                self._update_action_authority(
+                    detection=detection,
+                    holds=authority_holds,
+                )
+                self._publish_action_authority()
+
+                strategy_action_allowed = self._action_decision(
+                    RuntimeActionClass.STRATEGY_ACTION
+                ).allowed
+                lifecycle_action_allowed = self._action_decision(
+                    RuntimeActionClass.LIFECYCLE_ACTION
+                ).allowed
+                game_speed_guard = getattr(self, "_game_speed_guard", None)
+                if game_speed_guard is not None:
+                    game_speed_guard.set_target(
+                        self._supervisor.game_speed_target,
+                        wave=self._last_wave_value,
+                    )
+                    expected_game_speed_target = (
+                        self._supervisor.game_speed_target
+                    )
+                    game_speed_allowed = bool(
+                        strategy_action_allowed
+                        and self._handler_enabled("game_speed")
+                        and self._game_speed_priority_ready(
+                            initialization_pending=initialization_pending
+                        )
+                    )
+                    if game_speed_guard.handle(
+                        img,
+                        detection,
+                        action_guard_fn=lambda: (
+                            game_speed_allowed
+                            and self._runtime_action_guard()
+                            and self._supervisor.game_speed_target
+                            == expected_game_speed_target
+                        ),
+                    ):
+                        # The guard may have captured several newer frames while
+                        # walking the speed control. Re-enter through capture
+                        # before any other consumer sees the stale frame.
+                        continue
                 if initialization_pending:
                     if not self._run_initialization_gate_logged:
                         log(
@@ -1887,8 +2296,19 @@ class App:
                         self._run_initialization_gate_logged = True
                     if stop_blind_gem_tapper():
                         self._blind_tapper_suspended = True
-                    if not is_paused and not continuity_pending:
-                        self._mission_mgr.tick(img, detection, strategy_only=True)
+                    if (
+                        not continuity_pending
+                        and self._action_decision(
+                            RuntimeActionClass.STRATEGY_ACTION,
+                            owner=AuthorityHold.RUN_INITIALIZATION,
+                        ).allowed
+                    ):
+                        self._run_owned_strategy_tick(
+                            AuthorityHold.RUN_INITIALIZATION,
+                            img,
+                            detection,
+                            strategy_only=True,
+                        )
                 elif self._run_initialization_gate_logged:
                     strategy = self._mission_mgr.strategy
                     if (
@@ -1929,11 +2349,28 @@ class App:
                             self._session_preflight_gate_logged = True
                         if stop_blind_gem_tapper():
                             self._blind_tapper_suspended = True
-                        if not is_paused and not continuity_pending:
+                        if (
+                            not continuity_pending
+                            and self._action_decision(
+                                RuntimeActionClass.STRATEGY_ACTION,
+                                owner=AuthorityHold.SESSION_PREFLIGHT,
+                            ).allowed
+                        ):
                             if self._mission_mgr.session_preflight_repair_required():
-                                self._attempt_session_preflight_repair(detection)
+                                if self._action_decision(
+                                    RuntimeActionClass.LIFECYCLE_ACTION,
+                                    owner=AuthorityHold.SESSION_PREFLIGHT,
+                                ).allowed:
+                                    self._attempt_session_preflight_repair(
+                                        detection
+                                    )
                             else:
-                                self._mission_mgr.tick(img, detection, strategy_only=True)
+                                self._run_owned_strategy_tick(
+                                    AuthorityHold.SESSION_PREFLIGHT,
+                                    img,
+                                    detection,
+                                    strategy_only=True,
+                                )
                 elif self._session_preflight_gate_logged or getattr(
                     self,
                     "_session_preflight_terminal_blocked_logged",
@@ -1978,28 +2415,11 @@ class App:
                 ):
                     continue
 
-                actions_blocked = (
-                    is_paused
-                    or continuity_pending
-                    or exclusive_validation_ownership_hold
-                    or initialization_pending
-                    or session_preflight_pending
-                )
-                safe_runtime_actions_blocked = (
-                    is_paused
-                    or continuity_pending
-                    or exclusive_validation_ownership_hold
-                    or initialization_pending
-                    or (
-                        session_preflight_pending
-                        and not session_preflight_terminally_blocked
-                    )
-                )
                 self._maybe_log_steady_run_entry(
-                    actions_blocked=actions_blocked
+                    actions_blocked=not strategy_action_allowed
                 )
 
-                if not actions_blocked and self._handler_enabled("upgrade_detail"):
+                if strategy_action_allowed and self._handler_enabled("upgrade_detail"):
                     img, detection, overlay_cleared = self._resolve_upgrade_detail_overlay(
                         img,
                         detection,
@@ -2009,7 +2429,7 @@ class App:
                         continue
 
                 if (
-                    not actions_blocked
+                    strategy_action_allowed
                     and self._current_strategy_name() == "none"
                     and self._run_perk_selector.handle(
                         img,
@@ -2022,7 +2442,7 @@ class App:
                     continue
 
                 if (
-                    not actions_blocked
+                    strategy_action_allowed
                     and self._handle_no_strategy_in_battle_inventory(detection)
                 ):
                     # The inventory owns a multi-screen route. Always recapture
@@ -2065,7 +2485,7 @@ class App:
                         img,
                         detection,
                         wave=wave_val,
-                        actions_allowed=not actions_blocked,
+                        actions_allowed=strategy_action_allowed,
                         action_guard_fn=self._runtime_action_guard,
                     )
                 ):
@@ -2126,7 +2546,7 @@ class App:
 
                 new_state, menu, secondary, overlays = self._normalise_detection(detection)
 
-                if not actions_blocked:
+                if strategy_action_allowed:
                     # Allow missions to react immediately to overlays before general state handling.
                     self._mission_mgr.handle_overlays(detection)
 
@@ -2151,7 +2571,7 @@ class App:
                     wave=wave_val,
                     wave_conf=wave_conf,
                     allow_actions=(
-                        not actions_blocked
+                        strategy_action_allowed
                         and self._handler_enabled("coin_display")
                     ),
                 )
@@ -2159,7 +2579,7 @@ class App:
                     self._emit_event_mission_warnings()
 
                 if (
-                    not actions_blocked
+                    strategy_action_allowed
                     and self._handler_enabled("auto_return")
                     and self._runtime_policy().get("auto_return", True) is not False
                 ):
@@ -2168,7 +2588,7 @@ class App:
                 if new_state == "UNKNOWN":
                     update_unknown_state(True)
                     if (
-                        not actions_blocked
+                        strategy_action_allowed
                         and self._handler_enabled("unknown_recovery")
                     ):
                         trigger_after = self._supervisor.auto_return_secs or 900
@@ -2178,16 +2598,25 @@ class App:
 
                 self._sync_floating_gem_tapper(
                     state=new_state,
-                    actions_blocked=safe_runtime_actions_blocked,
+                    auxiliary_authority=self._action_decision(
+                        RuntimeActionClass.AUXILIARY_COLLECTION,
+                        collector=AuxiliaryCollector.FLOATING_GEM_SCAN,
+                    ),
                 )
 
-                if not actions_blocked:
+                if strategy_action_allowed:
                     self._mission_mgr.tick(img, detection)
+                if strategy_action_allowed and lifecycle_action_allowed:
                     self._handle_primary_states(new_state, overlays, img)
-                elif not safe_runtime_actions_blocked:
-                    self._handle_terminal_preflight_safe_actions(
+                elif (
+                    getattr(self, "_pending_auxiliary_cleanup", None)
+                    is not None
+                    or self._get_action_authority().strategy_gate is not None
+                ):
+                    self._handle_strategy_gate_auxiliary_actions(
                         new_state,
                         overlays,
+                        img,
                     )
 
                 sleep_interval = 1.0 if initialization_pending else 5.0
@@ -2201,7 +2630,9 @@ class App:
         except KeyboardInterrupt:
             log("KeyboardInterrupt — shutting down.", "INFO")
         finally:
+            self._update_action_authority(shutting_down=True)
             stop_blind_gem_tapper()
+            self._publish_action_authority(runtime_active=False)
             log("Exited cleanly.", "INFO")
 
     def _capture_frame(self) -> Optional[Frame]:
@@ -2346,31 +2777,56 @@ class App:
         self,
         *,
         state: str,
-        actions_blocked: bool,
+        auxiliary_authority: ActionAuthorityDecision,
     ) -> None:
-        """Suspend and resume only an ad-gem-triggered bounded tapper."""
+        """Cooperatively stop a bounded tapper after authority is lost."""
 
-        if state != "RUNNING" or actions_blocked:
-            if stop_blind_gem_tapper():
-                self._blind_tapper_suspended = True
-            return
-        if self._blind_tapper_suspended:
-            start_blind_gem_tapper(duration=10, interval=1, blocking=False)
+        if state != "RUNNING" or not auxiliary_authority.allowed:
+            stop_blind_gem_tapper()
             self._blind_tapper_suspended = False
+            return
 
-    def _handle_terminal_preflight_safe_actions(
+    def _handle_strategy_gate_auxiliary_actions(
         self,
         state: str,
         overlays: Set[str],
+        img: Frame,
     ) -> None:
-        """Allow bounded operational actions after a terminal preflight failure."""
+        """Dispatch only explicitly allowlisted independent collectors."""
 
+        if self._resume_pending_auxiliary_cleanup():
+            return
+        if (
+            state == "RUNNING"
+            and getattr(self, "_daily_gem_scheduler", None) is not None
+            and self._handler_enabled("daily_gem")
+            and self._handle_daily_gem_if_due(state, overlays)
+        ):
+            return
+        if (
+            state == "RUNNING"
+            and getattr(self, "_mission_reward_scheduler", None) is not None
+            and self._handler_enabled("mission_rewards")
+            and self._handle_mission_rewards_if_due(state, img, overlays)
+        ):
+            return
         if (
             state == "RUNNING"
             and "AD_GEMS_AVAILABLE" in overlays
             and self._handler_enabled("ad_gem")
+            and self._action_decision(
+                RuntimeActionClass.AUXILIARY_COLLECTION,
+                collector=AuxiliaryCollector.IN_BATTLE_AD_GEM,
+            ).allowed
         ):
-            handle_ad_gem()
+            handle_ad_gem(
+                action_guard_fn=self._auxiliary_action_guard(
+                    AuxiliaryCollector.IN_BATTLE_AD_GEM
+                ),
+                floating_action_guard_fn=self._auxiliary_action_guard(
+                    AuxiliaryCollector.FLOATING_GEM_SCAN
+                ),
+            )
 
     def _attempt_session_preflight_repair(
         self,
@@ -2407,7 +2863,9 @@ class App:
             detail="[SESSION_PREFLIGHT] repair_transition=surrender_to_game_over",
             console=True,
         )
-        if not surrender_run(action_guard=self._runtime_action_guard):
+        if not surrender_run(
+            action_guard=self._session_preflight_repair_action_guard
+        ):
             reason = "guarded Surrender did not reach Game Over"
             self._mission_mgr.fail_session_preflight_repair(reason)
             log(
@@ -2428,6 +2886,14 @@ class App:
                 "next_step=return_home_and_revalidate"
             ),
             console=True,
+        )
+
+    def _session_preflight_repair_action_guard(self) -> bool:
+        """Revalidate the separately authorized repair owner's lifecycle lease."""
+
+        return self._runtime_action_guard(
+            action_class=RuntimeActionClass.LIFECYCLE_ACTION,
+            owner=AuthorityHold.SESSION_PREFLIGHT,
         )
 
     def _observe_no_strategy_frame(
@@ -2451,12 +2917,227 @@ class App:
         except Exception as exc:
             log(f"[NO_STRATEGY] Passive observation failed: {exc}", "WARN")
 
-    def _runtime_action_guard(self) -> bool:
-        """Synchronize persistent control before one bounded runtime action."""
+    def _runtime_action_guard(
+        self,
+        *,
+        action_class: RuntimeActionClass = RuntimeActionClass.STRATEGY_ACTION,
+        owner: Optional[AuthorityHold | str] = None,
+        collector: Optional[AuxiliaryCollector] = None,
+        route: Optional[AuxiliaryRouteLease] = None,
+        observed_battle_scope: object = _BATTLE_SCOPE_UNSET,
+    ) -> bool:
+        """Synchronize control and recheck the central typed authority."""
 
         if self._supervisor.apply_control():
             self._status_reporter.request_immediate_report()
-        return AUTOMATION.state is RunState.RUNNING
+        self._update_action_authority(
+            observed_battle_scope=observed_battle_scope
+        )
+        effective_owner = owner or getattr(
+            self,
+            "_active_action_authority_owner",
+            None,
+        )
+        return self._action_decision(
+            action_class,
+            owner=effective_owner,
+            collector=collector,
+            route=route,
+        ).allowed
+
+    def _auxiliary_action_guard(
+        self,
+        collector: AuxiliaryCollector,
+        *,
+        route: Optional[AuxiliaryRouteLease] = None,
+    ) -> Callable[[], bool]:
+        """Bind one collector/input route to the current gate and run scope."""
+
+        gate = self._get_action_authority().strategy_gate
+        bound_gate_id = gate.gate_id if gate is not None else None
+        bound_scope = (
+            route.battle_scope if route is not None else self._current_run_scope_id()
+        )
+
+        def allowed() -> bool:
+            current_gate = self._get_action_authority().strategy_gate
+            current_gate_id = (
+                current_gate.gate_id if current_gate is not None else None
+            )
+            if current_gate_id != bound_gate_id:
+                return False
+            current_scope = self._current_run_scope_id()
+            if (
+                bound_scope is not None
+                and current_scope is not None
+                and bound_scope != current_scope
+            ):
+                return False
+            return self._runtime_action_guard(
+                action_class=RuntimeActionClass.AUXILIARY_COLLECTION,
+                collector=collector,
+                route=route,
+                # The hot floating-gem path has already refreshed this scope.
+                # Do not parse the same run ledger twice before one input.
+                observed_battle_scope=current_scope,
+            )
+
+        return allowed
+
+    def _begin_auxiliary_route(
+        self,
+        collectors: tuple[AuxiliaryCollector, ...],
+        *,
+        source_state: str,
+    ) -> Optional[AuxiliaryRouteLease]:
+        """Claim exclusive route ownership after a fresh source observation."""
+
+        current_scope = self._current_run_scope_id()
+        self._update_action_authority(
+            observed_battle_scope=current_scope
+        )
+        lease = self._get_action_authority().begin_auxiliary_route(
+            collectors,
+            battle_scope=current_scope,
+            source_state=source_state,
+        )
+        if lease is not None:
+            self._publish_action_authority()
+        return lease
+
+    def _auxiliary_route_state_callback(
+        self,
+        lease: AuxiliaryRouteLease,
+    ) -> Callable[[str, bool, Optional[str]], None]:
+        def update(
+            expected_state: str,
+            cleanup_pending: bool,
+            reason: Optional[str],
+        ) -> None:
+            self._get_action_authority().update_auxiliary_route(
+                lease,
+                expected_state=expected_state,
+                cleanup_pending=cleanup_pending,
+                suspended_reason=reason,
+            )
+            self._publish_action_authority()
+
+        return update
+
+    def _release_auxiliary_route(
+        self,
+        lease: AuxiliaryRouteLease,
+        *,
+        reason: str,
+    ) -> None:
+        self._get_action_authority().release_auxiliary_route(
+            lease,
+            reason=reason,
+        )
+        pending = getattr(self, "_pending_auxiliary_cleanup", None)
+        if pending is not None and pending[1].route_id == lease.route_id:
+            self._pending_auxiliary_cleanup = None
+        self._publish_action_authority()
+
+    def _resume_pending_auxiliary_cleanup(self) -> bool:
+        """Resume only collector-owned cleanup after fresh authority returns."""
+
+        pending = getattr(self, "_pending_auxiliary_cleanup", None)
+        if pending is None:
+            return False
+        route_kind, old_lease = pending
+        authority = self._get_action_authority()
+        route_state = authority.auxiliary_route
+        if route_state is None or route_state.lease.route_id != old_lease.route_id:
+            self._pending_auxiliary_cleanup = None
+            return False
+        lease = authority.resume_auxiliary_route(old_lease)
+        if lease is None:
+            return True
+        self._pending_auxiliary_cleanup = (route_kind, lease)
+        expected_state = route_state.expected_state
+        if route_kind == "daily_gem":
+            log_action_intent(
+                "Restoring the interrupted Daily Gem route",
+                reason="collector-owned cleanup retained the verified Store route",
+                detail=f"[AUXILIARY_ROUTE] route={lease.route_id} kind=daily_gem",
+            )
+            result = resume_daily_gem_cleanup(
+                lease.source_state,
+                action_guard_fn=self._auxiliary_action_guard(
+                    AuxiliaryCollector.DAILY_GEM_STORE,
+                    route=lease,
+                ),
+            )
+            complete = result is DailyGemCleanupResult.COMPLETE
+            abandoned = result is DailyGemCleanupResult.ABANDONED
+        elif route_kind == "mission_rewards":
+            log_action_intent(
+                "Restoring the interrupted mission-reward route",
+                reason="collector-owned cleanup retained the verified reward route",
+                detail=(
+                    f"[AUXILIARY_ROUTE] route={lease.route_id} "
+                    "kind=mission_rewards"
+                ),
+            )
+            result = resume_mission_reward_cleanup(
+                lease.source_state,
+                expected_state,
+                action_guard_fn=self._auxiliary_action_guard(
+                    lease.collectors[0],
+                    route=lease,
+                ),
+            )
+            complete = result is MissionRewardCleanupResult.COMPLETE
+            abandoned = result is MissionRewardCleanupResult.ABANDONED
+        else:
+            authority.abandon_auxiliary_route(
+                reason=f"unknown retained route kind {route_kind}"
+            )
+            self._pending_auxiliary_cleanup = None
+            self._publish_action_authority()
+            return True
+        log_result(
+            (
+                "Auxiliary route cleanup complete"
+                if complete
+                else (
+                    "Auxiliary route cleanup abandoned at an authoritative boundary"
+                    if abandoned
+                    else "Auxiliary route cleanup interrupted"
+                )
+            ),
+            detail=(
+                f"[AUXILIARY_ROUTE] result={result.value} "
+                f"route={lease.route_id} kind={route_kind}"
+            ),
+        )
+        if complete:
+            self._release_auxiliary_route(
+                lease,
+                reason="verified auxiliary cleanup returned to the source UI",
+            )
+            if route_kind == "daily_gem":
+                self._daily_gem_scheduler.mark_failed()
+            else:
+                self._mission_reward_scheduler.mark_failed(
+                    wall_now=datetime.now(timezone.utc)
+                )
+        elif abandoned:
+            authority.abandon_auxiliary_route(
+                reason="a boundary or unexpected state superseded collector cleanup"
+            )
+            self._pending_auxiliary_cleanup = None
+            self._publish_action_authority()
+        else:
+            authority.update_auxiliary_route(
+                lease,
+                expected_state=expected_state,
+                cleanup_pending=True,
+                suspended_reason=f"cleanup result={result.value}",
+            )
+            self._publish_action_authority()
+        return True
 
     def _game_speed_priority_ready(
         self,
@@ -3170,7 +3851,14 @@ class App:
             "AD_GEMS_AVAILABLE" in overlays
             and self._handler_enabled("ad_gem")
         ):
-            handle_ad_gem()
+            handle_ad_gem(
+                action_guard_fn=self._auxiliary_action_guard(
+                    AuxiliaryCollector.IN_BATTLE_AD_GEM
+                ),
+                floating_action_guard_fn=self._auxiliary_action_guard(
+                    AuxiliaryCollector.FLOATING_GEM_SCAN
+                ),
+            )
 
     def _handle_mission_rewards_if_due(
         self,
@@ -3205,15 +3893,77 @@ class App:
             self._blind_tapper_suspended = True
         wall_now = datetime.now(timezone.utc)
         claim_daily_missions = daily_mission_claims_allowed(wall_now)
-        result = handle_mission_rewards(
-            screenshot=img,
-            claim_daily_missions=claim_daily_missions,
-            event_inventory_callback=self._event_mission_tracker.record_inventory,
-        )
+        lease = None
+        if new_state == "RUNNING":
+            lease = self._begin_auxiliary_route(
+                (
+                    AuxiliaryCollector.DAILY_MISSION_REWARDS,
+                    AuxiliaryCollector.WEEKLY_MISSION_REWARDS,
+                    AuxiliaryCollector.EVENT_MISSION_REWARDS,
+                    AuxiliaryCollector.GUILD_CHEST_REWARDS,
+                ),
+                source_state=new_state,
+            )
+            if lease is None:
+                return False
+            action_guard = self._auxiliary_action_guard(
+                AuxiliaryCollector.DAILY_MISSION_REWARDS,
+                route=lease,
+            )
+            result = handle_mission_rewards(
+                screenshot=img,
+                claim_daily_missions=claim_daily_missions,
+                event_inventory_callback=(
+                    self._event_mission_tracker.record_inventory
+                ),
+                action_guard_fn=action_guard,
+                route_state_callback=self._auxiliary_route_state_callback(
+                    lease
+                ),
+            )
+        else:
+            result = handle_mission_rewards(
+                screenshot=img,
+                claim_daily_missions=claim_daily_missions,
+                event_inventory_callback=(
+                    self._event_mission_tracker.record_inventory
+                ),
+            )
         if result == MissionRewardResult.FAILED:
             self._mission_reward_scheduler.mark_failed(wall_now=wall_now)
-        else:
+        elif result != MissionRewardResult.INTERRUPTED:
             self._mission_reward_scheduler.mark_completed(wall_now=wall_now)
+        if lease is not None:
+            route_state = self._get_action_authority().auxiliary_route
+            cleanup_pending = bool(
+                route_state is not None
+                and route_state.lease.route_id == lease.route_id
+                and route_state.cleanup_pending
+            )
+            if (
+                result != MissionRewardResult.INTERRUPTED
+                and not cleanup_pending
+                and not action_guard()
+            ):
+                self._get_action_authority().update_auxiliary_route(
+                    lease,
+                    expected_state=lease.source_state,
+                    cleanup_pending=True,
+                    suspended_reason=(
+                        "auxiliary authority was lost before final route release"
+                    ),
+                )
+                cleanup_pending = True
+            if result == MissionRewardResult.INTERRUPTED or cleanup_pending:
+                self._pending_auxiliary_cleanup = (
+                    "mission_rewards",
+                    lease,
+                )
+            else:
+                self._release_auxiliary_route(
+                    lease,
+                    reason=f"mission reward route result={result.value}",
+                )
         return True
 
     def _emit_event_mission_warnings(self) -> None:
@@ -3254,14 +4004,54 @@ class App:
         )
         if stop_blind_gem_tapper():
             self._blind_tapper_suspended = True
-        result = handle_daily_gem()
+        lease = self._begin_auxiliary_route(
+            (AuxiliaryCollector.DAILY_GEM_STORE,),
+            source_state=new_state,
+        )
+        if lease is None:
+            return False
+        action_guard = self._auxiliary_action_guard(
+            AuxiliaryCollector.DAILY_GEM_STORE,
+            route=lease,
+        )
+        result = handle_daily_gem(
+            action_guard_fn=action_guard,
+            route_state_callback=self._auxiliary_route_state_callback(lease),
+        )
         if result in {DailyGemResult.CLAIMED, DailyGemResult.NOT_READY}:
             # Attribute a badge-triggered claim to the game day on which the
             # handler began. If navigation crosses UTC midnight, the new day
             # must remain eligible on the next loop.
             self._daily_gem_scheduler.mark_completed(result.value, now=attempted_at)
-        else:
+        elif result != DailyGemResult.INTERRUPTED:
             self._daily_gem_scheduler.mark_failed()
+        route_state = self._get_action_authority().auxiliary_route
+        cleanup_pending = bool(
+            route_state is not None
+            and route_state.lease.route_id == lease.route_id
+            and route_state.cleanup_pending
+        )
+        if (
+            result != DailyGemResult.INTERRUPTED
+            and not cleanup_pending
+            and not action_guard()
+        ):
+            self._get_action_authority().update_auxiliary_route(
+                lease,
+                expected_state=lease.source_state,
+                cleanup_pending=True,
+                suspended_reason=(
+                    "auxiliary authority was lost before final route release"
+                ),
+            )
+            cleanup_pending = True
+        if result == DailyGemResult.INTERRUPTED or cleanup_pending:
+            self._pending_auxiliary_cleanup = ("daily_gem", lease)
+        else:
+            self._release_auxiliary_route(
+                lease,
+                reason=f"Daily Gem route result={result.value}",
+            )
         return True
 
     def _normalise_detection(self, detection: Dict[str, Any]) -> tuple[str, Optional[str], Set[str], Set[str]]:

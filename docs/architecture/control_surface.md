@@ -247,7 +247,7 @@ memory only. The API deliberately sends no CORS permission.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/v1/status` | Server revision/capabilities, control intent, acknowledgement, current-run identity, latest observation, and runtime evidence |
+| `GET` | `/api/v1/status` | Server revision/capabilities, control intent, acknowledgement, current-run identity, latest observation, structured Strategy Action Gate, and runtime evidence |
 | `POST` | `/api/v1/control` | Allowlisted control mutation |
 | `POST` | `/api/v1/process` | Start/stop or guarded-reload the fixed systemd automation unit, select its startup-gate policy, save/queue/adopt a bundled or published custom strategy, or configure/safely hand off its ADB port |
 | `POST` | `/api/v1/host-performance` | Bounded, idempotent batches of native Windows host/BlueStacks performance aggregates |
@@ -258,6 +258,24 @@ memory only. The API deliberately sends no CORS permission.
 | `GET` | `/api/v1/battles?limit=N` | Newest Battle and Tournament summaries |
 | `GET` | `/api/v1/battles/{battle_id}` | One full structured battle record |
 | `GET` | `/api/v1/activity?limit=N&levels=ERROR,WARN&scope=current_run&after=CURSOR` | Recent structured action-log entries, optionally filtered by level, explicit run scope, and opaque clear-view cursor |
+
+### Structured Strategy Action Gate status
+
+`GET /api/v1/status` exposes `strategy_action_gate` separately from
+`control.state`, state acknowledgement, and the latest observation. The object
+reports availability, active/inactive and stale state, age, owner match,
+strategy and battle scope, source/phase, failed check IDs, operator reason,
+activation/update times, Pause/Stop context, active exclusive holds, the four
+typed authority decisions, currently allowed auxiliary collectors, and any
+exclusive auxiliary route.
+
+The adapter reads only the runtime-owned atomic snapshot. It rejects malformed
+or unsupported schemas, inactive publishers, expired timestamps, and PID/ADB
+owners that do not match an active runtime lock. Missing or stale evidence is
+reported as unavailable/stale and cannot be promoted into action authority.
+Warning text in the action log is never parsed as gate state. Adding this
+field is backward compatible: earlier clients ignore it and retain every older
+endpoint and capability.
 
 ## Strategy profile publication
 
@@ -291,15 +309,15 @@ existing process API and its normal next-boundary or active-battle semantics.
 
 ## Sparse strategy authoring
 
-Server revision 21 preserves `strategy_authoring_v1` and
+Server revision 22 preserves `strategy_authoring_v1` and
 `strategy_authoring_specialized_editors_v1`, and advertises
-`strategy_authoring_profile_lifecycle_v1`. The additive
+`strategy_authoring_profile_lifecycle_v1` plus `strategy_action_gate_v1`. The additive
 `/api/v1/strategy-authoring` endpoint implements the sparse Base/Strategy model
 without changing `/api/v1/strategy-profiles`, `strategy_profile_catalog_v1`, or
 `strategy_profile_editor_v2`. Older native clients therefore keep using their
-existing facade, while the revision-21 client requires all three authoring
-capabilities and fails compatibility clearly against an older resident
-service.
+existing facade. The revision-22 client requires the retained authoring
+capabilities and the structured Strategy Gate status it presents, and fails
+compatibility clearly against an older resident service.
 
 The GET response carries the setting registry, normalized initial values,
 behavior-free specialized-editor metadata, safe editor catalogs, separate Base
@@ -492,6 +510,13 @@ Process request examples:
 - Resume and Game Over mode selection (`RETRY`, `WAIT`, or `HOME`). State and
   mode controls highlight the saved selection; amber means a live runtime has
   not yet acknowledged the latest directive.
+- A distinct running-battle Strategy Action Gate banner based only on fresh,
+  owner-matched structured status. It reads “Strategy actions blocked —
+  observation and safe collectors remain active.” and shows the reason, failed
+  checks, and collectors that currently retain authority. The Automation field
+  and Pause coloring continue to show only requested/acknowledged control
+  state; an active Strategy Gate is never labelled globally Paused. This
+  requires server revision 22 and capability `strategy_action_gate_v1`.
 - Persistent numeric game-speed selection from `x0.0` through `x6.0` in
   `x0.5` increments, plus `x6.3` for maximum available. Lower values are exact
   targets across live and future runs. Both clients keep the custom-target

@@ -37,6 +37,40 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-02 running-battle Strategy Action Gate
+
+- The runtime now owns one typed four-class action-authority matrix for passive
+  observation, explicitly allowlisted auxiliary collection, strategy actions,
+  and lifecycle transitions. A terminal running-battle validation mismatch
+  becomes a battle-scoped Strategy Gate without mutating Pause. Natural
+  boundaries, validated retry/waiver/success, explicit active-strategy changes,
+  and separately authorized repairs remain the only release transitions; the
+  gate itself grants no Surrender, Exit Battle, restart, Go Home, or New Battle
+  authority.
+- Capture, detection, OCR/state/wave updates, activation tracking, passive
+  evidence, and status continue under the gate. Daily Gem and mission reward
+  routes retain their schedulers and limits, claim exclusive same-battle
+  ownership before input, recheck screen/control/scope/authority at every
+  dispatch, and retain only collector-owned cleanup after interruption. The
+  in-battle ad-gem and floating-gem workflows use the same typed guard; a
+  regression with an intentionally delayed 200 ms guard proves the one-second
+  blind-tap cadence does not accumulate guard latency.
+- Revision 22 adds `strategy_action_gate_v1` while retaining every older
+  capability and endpoint. `/api/v1/status` serializes the fresh atomic
+  PID/ADB-owned gate snapshot with explicit staleness behavior. WPF presents a
+  separate amber Strategy Gate banner with reason, failed checks, and allowed
+  collectors, while its Automation/Pause state remains unchanged.
+- Focused runtime, preflight, reward, tap-safety, status, control-surface, API,
+  compatibility, and WPF coverage passed all 295 tests. The complete Python
+  suite passed all 1,142 tests. Linux cross-publishing produced both standalone
+  Windows executables; only the sandbox's known read-only NuGet
+  vulnerability-cache warnings were emitted.
+- The operator reported on 2026-08-02 that the available phase-three Windows
+  runtime smoke checks completed with no blocking issue reported. This was not
+  exhaustive Windows validation. Development did not inspect or interact with
+  a live process, control file, ADB target, emulator, or battle, and the
+  untracked operator-owned `playerInfo.dat` was not modified or staged.
+
 ### 2026-08-02 save-first history-tail contract correction
 
 - Runtime-save schema 2 now separates a privacy-safe structural identity and

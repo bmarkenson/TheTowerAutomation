@@ -17,6 +17,7 @@ from utils.logger import log
 Frame = np.ndarray
 Region = Tuple[int, int, int, int]
 StopFn = Callable[[Frame], Optional[str]]
+ActionGuardFn = Callable[[], bool]
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,7 @@ def guarded_swipe(
     visible_fn: Callable[..., bool] = is_visible,
     swipe_fn: Callable[[str], bool] = swipe_now,
     sleep_fn: Callable[[float], None] = time.sleep,
+    action_guard_fn: Optional[ActionGuardFn] = None,
 ) -> ScrollResult:
     """Send one swipe only if the expected screen is visible before and after."""
 
@@ -61,6 +63,12 @@ def guarded_swipe(
             "DEBUG",
         )
         return ScrollResult(False, before, 0, "wrong_source_screen")
+    if action_guard_fn is not None and not action_guard_fn():
+        log(
+            f"[SCROLL] Refusing '{swipe_key}': action authority was lost",
+            "DEBUG",
+        )
+        return ScrollResult(False, before, 0, "action_authority_lost")
     if not swipe_fn(swipe_key):
         log(f"[SCROLL] Swipe dispatch failed: {swipe_key}", "DEBUG")
         return ScrollResult(False, before, 0, "swipe_dispatch_failed")
@@ -91,6 +99,7 @@ def scroll_to_edge(
     visible_fn: Callable[..., bool] = is_visible,
     swipe_fn: Callable[[str], bool] = swipe_now,
     sleep_fn: Callable[[float], None] = time.sleep,
+    action_guard_fn: Optional[ActionGuardFn] = None,
 ) -> ScrollResult:
     """Repeat a guarded swipe until the content no longer moves or the bound is hit."""
 
@@ -115,6 +124,7 @@ def scroll_to_edge(
             visible_fn=visible_fn,
             swipe_fn=swipe_fn,
             sleep_fn=sleep_fn,
+            action_guard_fn=action_guard_fn,
         )
         total_swipes += step.swipes
         if not step.success or step.screenshot is None:
@@ -151,6 +161,7 @@ def capture_scroll_to_edge(
     swipe_fn: Callable[[str], bool] = swipe_now,
     sleep_fn: Callable[[float], None] = time.sleep,
     stop_fn: Optional[StopFn] = None,
+    action_guard_fn: Optional[ActionGuardFn] = None,
 ) -> ScrollCaptureResult:
     """Capture distinct viewports until a proven stop condition or an edge.
 
@@ -185,6 +196,7 @@ def capture_scroll_to_edge(
             visible_fn=visible_fn,
             swipe_fn=swipe_fn,
             sleep_fn=sleep_fn,
+            action_guard_fn=action_guard_fn,
         )
         total_swipes += step.swipes
         if not step.success or step.screenshot is None:
@@ -250,6 +262,7 @@ def scroll_until_visible(
     swipe_fn: Callable[[str], bool] = swipe_now,
     sleep_fn: Callable[[float], None] = time.sleep,
     stop_fn: Optional[StopFn] = None,
+    action_guard_fn: Optional[ActionGuardFn] = None,
 ) -> ScrollResult:
     """Swipe on a verified source screen until a target or stop condition is seen.
 
@@ -285,6 +298,7 @@ def scroll_until_visible(
             visible_fn=visible_fn,
             swipe_fn=swipe_fn,
             sleep_fn=sleep_fn,
+            action_guard_fn=action_guard_fn,
         )
         total_swipes += step.swipes
         if not step.success or step.screenshot is None:

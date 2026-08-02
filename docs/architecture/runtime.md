@@ -602,6 +602,64 @@ evidence is attached.
 
 ## Matching and action authority
 
+### Typed runtime action authority
+
+`core/action_authority.py` is the central runtime owner for action decisions.
+It returns immutable decisions for `observation`, `auxiliary_collection`,
+`strategy_action`, and `lifecycle_action`; each decision carries an explicit
+allowed flag and operator-facing reason. Observation is intentionally not
+routed through an input guard.
+
+| Runtime condition | Observation | Auxiliary collection | Strategy action | Lifecycle action |
+| --- | --- | --- | --- | --- |
+| Normal | Always continues | Existing screen, handler, and scheduler policy | Existing strategy policy | Existing lifecycle policy |
+| Global Pause or Stop | Continues | Blocked | Blocked | Blocked |
+| Running-battle Strategy Gate | Continues | Only the explicit safe allowlist | Blocked | Blocked |
+| Continuity, initialization, validation, or exclusive screen hold | Continues | Blocked | Matching bounded owner only | Matching bounded owner only |
+
+An active Strategy Gate is distinct from Pause and never mutates the control
+file or `AUTOMATION.state`. It is scoped to the current activity/run identity
+when available and persists while the same battle visits Store, Mission,
+Event, Guild, reward-reveal, side-menu, and other temporary screens. Entry and
+changed evidence are logged once per transition rather than once per frame.
+The gate is released only by successful validation, accepted retry, a
+run-scoped waiver, an explicit active-battle strategy change, an explicitly
+authorized repair transition, changed authoritative run identity, or a natural
+battle boundary. Notification-only/`observe` mismatches retain evidence without
+activating the blocking gate. Natural Game Over releases it before normal
+terminal handling, but the gate can neither authorize nor dispatch Surrender,
+Exit Battle, Go Home, restart, or New Battle.
+
+The gate's auxiliary allowlist is explicit: in-battle ad-gem collection and its
+bounded floating-gem scan, Daily Gem Store, Daily and Weekly Mission rewards,
+Event Mission rewards, and Guild chest rewards. Authority is necessary but not
+sufficient: all existing badge, rollover, claim-limit, Sunday-hold, eligibility,
+cooldown, and scheduler rules still decide whether a collector is due. A
+collector cannot navigate to Home or cross a battle boundary merely to collect.
+Home ad gems retain ordinary Home handling outside this running-battle gate.
+
+Daily Gem and mission collectors claim an exclusive auxiliary-route lease from
+a freshly detected same-battle `RUNNING` frame before their first input. While
+that lease exists, no other collector, background floating-gem tap, strategy
+handler, lifecycle handler, or generic recovery owns the screen. Every input
+checks a fresh screen precondition and then rechecks control state, typed
+authority, route identity, and battle scope at the final dispatch boundary.
+Pause or lost authority retains the exact collector cleanup state without
+sending more input. After authority returns, only that collector's bounded
+cleanup may resume. Game Over, Home boundary, run-identity change, or an
+unexpected state abandons the route without cleanup input so the authoritative
+boundary handler can take ownership.
+
+`RuntimeActionAuthorityPublisher` atomically refreshes
+`logs/strategy_action_gate.json`. Schema version 1 includes runtime/ADB/PID
+ownership, observation time, runtime-active flag, staleness threshold, active
+gate and run scope, strategy, source/phase, failed checks, reason, activation
+and update times, Pause/Stop/hold context, all four authority decisions,
+currently allowed collectors, and any auxiliary-route lease. The control
+surface accepts the channel only while its timestamp is fresh, `runtime_active`
+is true, and its PID/target owner matches the active runtime lock. It never
+derives gate authority from warning text in `actions.log`.
+
 - Direct ADB capture accepts supported native `1080x1920` and `720x1280`
   framebuffers, records the source geometry, and normalizes them to the
   canonical `1080x1920` vision coordinate space. Unsupported or majority-black
@@ -628,10 +686,15 @@ evidence is attached.
   Both paths reacquire authoritative result evidence after the batch; the
   reusable-authority API is statically allowlisted to those two modules.
 - The bounded in-battle floating-gem sweep remains the explicit blind runtime
-  exception: the moving gem cannot be reacquired reliably, and its dedicated
-  tapper acts only while automation remains `RUNNING`. Operator-invoked gesture
-  tuning may use its separately named unchecked tooling path with a recorded
-  reason.
+  exception: the moving gem cannot be reacquired reliably. Its dedicated
+  tapper rechecks the central floating-gem auxiliary decision immediately
+  before every tap and stops cooperatively on Pause, Stop, gate replacement,
+  exclusive ownership, shutdown, battle-scope change, or loss of the detected
+  `RUNNING` precondition. That hot guard performs no capture, OCR, detector, or
+  status-publication work, and its wall-clock schedule prevents guard latency
+  from accumulating across the one-second sweep cadence. Operator-invoked
+  gesture tuning may use its separately named unchecked tooling path with a
+  recorded reason.
 - Every ordinary live action requires fresh source-state evidence immediately
   before the input. A bounded urgent block requires fresh evidence before
   issuing its reusable authority. Transition frames and unrelated stale

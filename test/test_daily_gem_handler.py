@@ -1,5 +1,5 @@
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import cv2
 import numpy as np
@@ -9,12 +9,14 @@ from core.scrolling import ScrollResult
 from handlers.daily_gem_handler import (
     DAILY_GEM_BUTTON,
     DAILY_GEM_NOT_READY,
+    DailyGemCleanupResult,
     DailyGemResult,
     STORE_MENU_INDICATOR,
     _daily_gem_unavailable,
     _open_store_for_current_screen,
     _return_from_store,
     handle_daily_gem,
+    resume_daily_gem_cleanup,
 )
 
 
@@ -23,6 +25,69 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 def _screenshot():
     return np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+
+def test_authority_loss_before_claim_stops_input_and_retains_store_cleanup():
+    screenshot = _screenshot()
+    guard = Mock(side_effect=[True, False])
+    route_state = Mock()
+    with (
+        patch(
+            "handlers.daily_gem_handler._open_store_for_current_screen",
+            return_value="RUNNING",
+        ),
+        patch("handlers.daily_gem_handler._wait_for_label", return_value=True),
+        patch(
+            "handlers.daily_gem_handler.capture_adb_screenshot",
+            return_value=screenshot,
+        ),
+        patch(
+            "handlers.daily_gem_handler.is_visible",
+            side_effect=lambda label, **_kwargs: label
+            in {STORE_MENU_INDICATOR, DAILY_GEM_BUTTON},
+        ),
+        patch("handlers.daily_gem_handler._daily_gem_unavailable", return_value=None),
+        patch("handlers.daily_gem_handler.tap_if_visible") as tap,
+        patch("handlers.daily_gem_handler.save_image"),
+        patch("handlers.daily_gem_handler.time.sleep"),
+    ):
+        result = handle_daily_gem(
+            action_guard_fn=guard,
+            route_state_callback=route_state,
+        )
+
+    assert result is DailyGemResult.INTERRUPTED
+    tap.assert_not_called()
+    route_state.assert_any_call("STORE", True, None)
+    route_state.assert_any_call(
+        "STORE",
+        True,
+        "auxiliary authority was lost before claim",
+    )
+
+
+def test_daily_cleanup_abandons_unexpected_boundary_without_input():
+    with (
+        patch(
+            "handlers.daily_gem_handler.capture_adb_screenshot",
+            return_value=_screenshot(),
+        ),
+        patch(
+            "handlers.daily_gem_handler.detect_state_and_overlays",
+            return_value={"state": "GAME_OVER"},
+        ),
+        patch("handlers.daily_gem_handler.is_visible", return_value=False),
+        patch("handlers.daily_gem_handler.tap_if_visible") as tap,
+        patch("handlers.daily_gem_handler.safe_tap") as safe_tap,
+    ):
+        result = resume_daily_gem_cleanup(
+            "RUNNING",
+            action_guard_fn=lambda: True,
+        )
+
+    assert result is DailyGemCleanupResult.ABANDONED
+    tap.assert_not_called()
+    safe_tap.assert_not_called()
 
 
 def test_home_screen_uses_bottom_store_navigation():

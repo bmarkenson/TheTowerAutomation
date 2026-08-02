@@ -182,6 +182,36 @@
                   Padding="9,4"
                   FontSize="10" />
         </Grid>
+        <Border x:Name="StrategyActionGateBanner"
+                Visibility="Collapsed"
+                Background="#302515"
+                BorderBrush="#F1BF5B"
+                BorderThickness="1"
+                CornerRadius="7"
+                Padding="10,8"
+                Margin="0,0,0,10">
+          <StackPanel>
+            <TextBlock Text="Strategy actions blocked — observation and safe collectors remain active."
+                       Foreground="#FFD37A"
+                       FontWeight="Bold"
+                       TextWrapping="Wrap" />
+            <TextBlock x:Name="StrategyActionGateReasonText"
+                       Text="-"
+                       Foreground="#F7E8C1"
+                       TextWrapping="Wrap"
+                       Margin="0,3,0,0" />
+            <TextBlock x:Name="StrategyActionGateChecksText"
+                       Text="Failed checks: -"
+                       Foreground="#C8D5E6"
+                       TextWrapping="Wrap"
+                       Margin="0,2,0,0" />
+            <TextBlock x:Name="StrategyActionGateCollectorsText"
+                       Text="Allowed collectors: -"
+                       Foreground="#C8D5E6"
+                       TextWrapping="Wrap"
+                       Margin="0,2,0,0" />
+          </StackPanel>
+        </Border>
         <UniformGrid Columns="7">
           <StackPanel ToolTip="The requested automation control state. The controls pane shows whether the live runtime has acknowledged it.">
             <TextBlock Text="AUTOMATION" Foreground="{StaticResource MutedBrush}" FontSize="10" />

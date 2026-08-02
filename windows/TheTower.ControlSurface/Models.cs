@@ -32,6 +32,9 @@ public sealed class StatusResponse
     [JsonPropertyName("current_run")]
     public CurrentRunStatus? CurrentRun { get; set; }
 
+    [JsonPropertyName("strategy_action_gate")]
+    public StrategyActionGateStatus? StrategyActionGate { get; set; }
+
     [JsonPropertyName("runtime")]
     public RuntimeStatus Runtime { get; set; } = new();
 
@@ -40,6 +43,69 @@ public sealed class StatusResponse
 
     [JsonPropertyName("request")]
     public RequestStatus? Request { get; set; }
+}
+
+public sealed class StrategyActionGateStatus
+{
+    [JsonPropertyName("available")]
+    public bool Available { get; set; }
+
+    [JsonPropertyName("active")]
+    public bool Active { get; set; }
+
+    [JsonPropertyName("stale")]
+    public bool Stale { get; set; }
+
+    [JsonPropertyName("age_seconds")]
+    public int? AgeSeconds { get; set; }
+
+    [JsonPropertyName("strategy")]
+    public string? Strategy { get; set; }
+
+    [JsonPropertyName("battle_scope")]
+    public string? BattleScope { get; set; }
+
+    [JsonPropertyName("source")]
+    public string? Source { get; set; }
+
+    [JsonPropertyName("phase")]
+    public string? Phase { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    [JsonPropertyName("failed_check_ids")]
+    public List<string> FailedCheckIds { get; set; } = [];
+
+    [JsonPropertyName("allowed_auxiliary_collectors")]
+    public List<string> AllowedAuxiliaryCollectors { get; set; } = [];
+
+    [JsonPropertyName("activated_at")]
+    public string? ActivatedAt { get; set; }
+
+    [JsonPropertyName("observation_authority")]
+    public RuntimeActionAuthorityStatus ObservationAuthority { get; set; } = new();
+
+    [JsonPropertyName("auxiliary_collection_authority")]
+    public RuntimeActionAuthorityStatus AuxiliaryCollectionAuthority { get; set; } = new();
+
+    [JsonPropertyName("strategy_action_authority")]
+    public RuntimeActionAuthorityStatus StrategyActionAuthority { get; set; } = new();
+
+    [JsonPropertyName("lifecycle_action_authority")]
+    public RuntimeActionAuthorityStatus LifecycleActionAuthority { get; set; } = new();
+}
+
+public sealed class RuntimeActionAuthorityStatus
+{
+    [JsonPropertyName("action_class")]
+    public string ActionClass { get; set; } = "";
+
+    [JsonPropertyName("allowed")]
+    public bool Allowed { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
 }
 
 public sealed class CurrentRunStatus

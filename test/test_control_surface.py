@@ -11,6 +11,10 @@ from unittest.mock import patch
 
 import pytest
 
+from core.action_authority import (
+    RuntimeActionAuthority,
+    RuntimeActionAuthorityPublisher,
+)
 from core.control_directives import (
     ControlDirectiveError,
     ControlDirectiveStore,
@@ -333,6 +337,152 @@ def test_status_separates_fresh_observation_from_control_and_lock_evidence(tmp_p
     assert status["acknowledgements"]["adb_target"]["acknowledges_current"]
     assert status["acknowledgements"]["strategy"]["value"] == "farm_t18"
     assert status["acknowledgements"]["strategy"]["acknowledges_current"]
+
+
+def test_status_serializes_fresh_runtime_owned_strategy_gate(tmp_path):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    lock_handle = _fresh_runtime_lock(tmp_path, state="RUNNING")
+    authority = RuntimeActionAuthority()
+    authority.update_context(
+        global_pause=False,
+        active_battle=True,
+        battle_scope="run-status",
+        primary_state="RUNNING",
+    )
+    gate = authority.activate_strategy_gate(
+        strategy="farm_t18",
+        battle_scope="run-status",
+        source="session_preflight",
+        phase="running_battle",
+        failed_check_ids=("modules", "target_priority"),
+        reason="Modules and Target Priority do not match",
+        now=now.timestamp() - 3,
+    )
+    publisher = RuntimeActionAuthorityPublisher(
+        tmp_path / "logs" / "strategy_action_gate.json",
+        owner={
+            "runtime_id": "runtime-status",
+            "pid": os.getpid(),
+            "adb_target": "localhost:5555",
+        },
+        stale_after_seconds=30,
+    )
+    assert publisher.publish(
+        authority.snapshot(now=now.timestamp()),
+        now=now.timestamp(),
+    )
+    try:
+        status = _service(tmp_path).status(now=now.timestamp())
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+    published = status["strategy_action_gate"]
+    assert published["available"] is True
+    assert published["active"] is True
+    assert published["stale"] is False
+    assert published["owner_matches_active_runtime"] is True
+    assert published["gate_id"] == gate.gate_id
+    assert published["strategy"] == "farm_t18"
+    assert published["battle_scope"] == "run-status"
+    assert published["source"] == "session_preflight"
+    assert published["phase"] == "running_battle"
+    assert published["failed_check_ids"] == ["modules", "target_priority"]
+    assert published["reason"] == "Modules and Target Priority do not match"
+    assert published["observation_authority"]["allowed"] is True
+    assert published["auxiliary_collection_authority"]["allowed"] is True
+    assert published["strategy_action_authority"]["allowed"] is False
+    assert published["lifecycle_action_authority"]["allowed"] is False
+    assert "in_battle_ad_gem" in published["allowed_auxiliary_collectors"]
+    assert "daily_gem_store" in published["allowed_auxiliary_collectors"]
+    assert status["control"]["state"] == "RUNNING"
+
+
+def test_strategy_gate_status_rejects_stale_inactive_or_wrong_owner_snapshot(
+    tmp_path,
+):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    lock_handle = _fresh_runtime_lock(tmp_path, state="RUNNING")
+    authority = RuntimeActionAuthority()
+    authority.update_context(
+        global_pause=False,
+        active_battle=True,
+        battle_scope="run-status",
+        primary_state="RUNNING",
+    )
+    authority.activate_strategy_gate(
+        strategy="farm_t18",
+        battle_scope="run-status",
+        source="session_preflight",
+        phase="running_battle",
+        failed_check_ids=("modules",),
+        reason="Modules do not match",
+    )
+    path = tmp_path / "logs" / "strategy_action_gate.json"
+    matching = RuntimeActionAuthorityPublisher(
+        path,
+        owner={
+            "runtime_id": "runtime-status",
+            "pid": os.getpid(),
+            "adb_target": "localhost:5555",
+        },
+        stale_after_seconds=10,
+    )
+    service = _service(tmp_path)
+    try:
+        matching.publish(
+            authority.snapshot(now=now.timestamp() - 11),
+            now=now.timestamp() - 11,
+        )
+        assert service.status(now=now.timestamp())["strategy_action_gate"][
+            "stale"
+        ]
+
+        matching.publish(
+            authority.snapshot(now=now.timestamp()),
+            runtime_active=False,
+            now=now.timestamp(),
+        )
+        inactive = service.status(now=now.timestamp())["strategy_action_gate"]
+        assert inactive["stale"]
+        assert inactive["runtime_active"] is False
+
+        wrong_owner = RuntimeActionAuthorityPublisher(
+            path,
+            owner={
+                "runtime_id": "other-runtime",
+                "pid": os.getpid() + 1000,
+                "adb_target": "localhost:5555",
+            },
+        )
+        wrong_owner.publish(
+            authority.snapshot(now=now.timestamp()),
+            now=now.timestamp(),
+        )
+        mismatched = service.status(now=now.timestamp())[
+            "strategy_action_gate"
+        ]
+        assert mismatched["stale"]
+        assert mismatched["owner_matches_active_runtime"] is False
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+def test_strategy_gate_status_never_scrapes_warning_text(tmp_path):
+    log_path = tmp_path / "logs" / "actions.log"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text(
+        "[WARN 2026-08-02 12:00:00] [STRATEGY_GATE] Entered running-battle "
+        "gate fake: Modules do not match\n",
+        encoding="utf-8",
+    )
+
+    gate = _service(tmp_path).status()["strategy_action_gate"]
+
+    assert gate["available"] is False
+    assert gate["active"] is False
+    assert gate["stale"] is True
 
 
 def test_status_reads_concise_heartbeat_with_paired_diagnostic_detail(tmp_path):
@@ -775,6 +925,18 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
         / "TheTower.ControlSurface"
         / "ControlSurfaceCompatibility.cs"
     ).read_text(encoding="utf-8")
+    native_code = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+        / "MainWindow.xaml.cs"
+    ).read_text(encoding="utf-8")
+    native_models = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+        / "Models.cs"
+    ).read_text(encoding="utf-8")
 
     assert 'id="priorTransition"' in html
     assert (
@@ -797,7 +959,24 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert 'Text="PREVIOUS GAME SCREEN"' in native_xaml
     assert 'id="gameSpeedTargetSelect"' in html
     assert 'Content="x6.3 — Maximum available"' in native_xaml
-    assert "MinimumServerRevision = 21" in native_compatibility
+    assert "MinimumServerRevision = 22" in native_compatibility
+    assert '"strategy_action_gate_v1"' in native_compatibility
+    assert 'x:Name="StrategyActionGateBanner"' in native_xaml
+    assert (
+        "Strategy actions blocked — observation and safe collectors remain active."
+        in native_xaml
+    )
+    assert 'x:Name="StrategyActionGateReasonText"' in native_xaml
+    assert 'x:Name="StrategyActionGateChecksText"' in native_xaml
+    assert 'x:Name="StrategyActionGateCollectorsText"' in native_xaml
+    assert "{ Available: true, Active: true, Stale: false }" in native_code
+    assert (
+        "DirectiveText.Text = FormatAutomationState(status.Control);"
+        in native_code
+    )
+    assert 'JsonPropertyName("strategy_action_gate")' in native_models
+    assert 'JsonPropertyName("failed_check_ids")' in native_models
+    assert 'JsonPropertyName("allowed_auxiliary_collectors")' in native_models
     assert '"current_run_activity_scope"' in native_compatibility
     assert '"game_speed_target"' in native_compatibility
     assert '"host_performance_telemetry_v1"' in native_compatibility
@@ -1385,6 +1564,17 @@ def test_http_api_requires_token_but_static_gui_does_not(tmp_path):
         response = connection.getresponse()
         response.read()
         assert response.status == 401
+
+        connection.request(
+            "GET",
+            "/api/v1/status",
+            headers={"Authorization": "Bearer test-secret"},
+        )
+        response = connection.getresponse()
+        status_payload = json.loads(response.read())
+        assert response.status == 200
+        assert "strategy_action_gate" in status_payload
+        assert status_payload["strategy_action_gate"]["active"] is False
 
         connection.request(
             "GET",

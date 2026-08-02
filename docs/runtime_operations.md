@@ -205,6 +205,46 @@ consumed it. Paused automation continues capture, state detection, lifecycle
 observation, and status reporting, while strategy and handler actions remain
 blocked.
 
+### Strategy Action Gate is not Pause
+
+An enforced validation mismatch discovered inside an authoritative running
+battle may activate the separate Strategy Action Gate. The control file and
+`AUTOMATION.state` remain `RUNNING`; do not treat that as a failed Pause
+acknowledgement. The native client displays:
+
+> Strategy actions blocked — observation and safe collectors remain active.
+
+The same banner shows the reason, failed checks, and collectors that currently
+retain authority. `/api/v1/status` exposes the structured
+`strategy_action_gate` object separately from requested/acknowledged Pause.
+That status comes from the runtime-owned `logs/strategy_action_gate.json`
+snapshot and is accepted only while fresh and owned by the active PID/ADB lock;
+do not infer gate state by searching warning messages.
+
+While the Strategy Gate is active, capture, detection, OCR, wave/state/status
+updates, activation tracking, and passive evidence continue. Only independently
+safe, explicitly allowlisted reward collectors may act, and only when their
+existing scheduler, badge, eligibility, Sunday-hold, claim-limit, and cooldown
+policy says they are due. Global Pause, Stop, continuity, initialization,
+validation, and exclusive screen ownership still block those collectors. A
+collector started from a fresh running-battle frame owns its complete menu
+route; if authority is lost, it stops input and later performs only its own
+verified cleanup. It never navigates to Home or crosses a battle boundary for a
+reward.
+
+Resolve the gate through the existing gate-decision workflow: fresh retry, a
+named run-scoped waiver, explicit Pause for manual changes, or the separately
+offered guarded repair/restart decision. Pause intentionally leaves the
+Strategy Gate pending. Retry, waiver, a successful validation, or an explicit
+active-battle strategy change supersedes it. A natural Game Over or changed
+authoritative run identity ends it and returns ownership to normal boundary
+handling.
+
+The gate is evidence that strategy/lifecycle actions must stop; it is not
+repair authority. It must never cause Surrender, Exit Battle, Go Home, restart,
+or New Battle. A repair continues to require the profile's supported repair
+class plus the existing explicit operator decision and guarded owner sequence.
+
 Game-speed target is an independent persistent directive. Values from `x0.0`
 through `x6.0` in `x0.5` increments are exact. `x6.3` means maximum available:
 the guard probes `+` at `x5.0`, accepts it only when no change proves the

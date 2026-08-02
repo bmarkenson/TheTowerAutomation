@@ -208,6 +208,15 @@ PID evidence remains available on Process without occupying the always-visible
 status strip, and Previous Game Screen remains visible by default but can be
 collapsed.
 
+A fresh active running-battle Strategy Action Gate appears in its own amber
+banner: **Strategy actions blocked — observation and safe collectors remain
+active.** The banner also shows the operator-facing reason, failed checks, and
+collectors that currently retain authority. It does not change the Automation
+field, Pause selection, or global status color; those continue to represent
+only requested and acknowledged control state. Missing, stale, inactive, or
+wrong-runtime gate evidence is not displayed as an active gate. This structured
+presentation requires Linux revision 22 and `strategy_action_gate_v1`.
+
 The Automation Control panel uses selection highlights instead of permanently
 colored Pause and Resume actions. Cyan is the saved state or Game Over mode;
 amber means a live runtime has not acknowledged that directive yet. Mode buttons
@@ -271,12 +280,13 @@ are displayed under the button, are consumed by the next applicable run, and
 are cleared if the selected strategy changes.
 
 **Strategy profiles...** opens the shared Strategy Authoring shell. Linux
-server revision 21 preserves `strategy_authoring_v1` and
+server revision 22 preserves `strategy_authoring_v1` and
 `strategy_authoring_specialized_editors_v1`, and adds
-`strategy_authoring_profile_lifecycle_v1`. It provides separate **Bases** and
-**Strategies** catalogs while retaining the older profile endpoint and
-capabilities for older clients. A Base is a sparse reusable component and is
-never activatable. Editing one publishes the next immutable revision;
+`strategy_authoring_profile_lifecycle_v1` plus `strategy_action_gate_v1`. It
+provides separate **Bases** and **Strategies** catalogs while retaining the
+older profile endpoint and capabilities for older clients. A Base is a sparse
+reusable component and is never activatable. Editing one publishes the next
+immutable revision;
 Strategies already pinned to an earlier revision continue to use their
 embedded snapshot.
 
@@ -362,6 +372,11 @@ workflow.
 The Linux build cannot detect all WPF runtime binding failures. Run this check
 on Windows against a disposable repository/profile catalog, never the
 operator's real `config/strategies/custom` directory:
+
+Operator report, 2026-08-02: the available phase-three Windows runtime smoke
+checks were completed with no blocking issue reported. This was not exhaustive
+Windows validation; the bounded disposable-catalog checks below remain the
+canonical coverage when the relevant environment and cases are available.
 
 1. Copy the repository to a temporary test root, empty only that copy's custom
    profile/Base catalog, and start the control-surface server with

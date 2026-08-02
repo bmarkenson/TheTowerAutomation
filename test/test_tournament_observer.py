@@ -9,6 +9,11 @@ import yaml
 from automation.missions.base import MissionContext
 from automation.missions.manager import MissionManager
 from automation.strategies import get_strategy
+from core.action_authority import (
+    ActionAuthorityDecision,
+    AuxiliaryCollector,
+    RuntimeActionClass,
+)
 from core.action_executor import execute_actions
 from core.app import App
 from core.gc_preflight_navigation import (
@@ -339,6 +344,15 @@ def test_tournament_invariant_mismatch_is_nonblocking_but_warned():
         "capture continue without operator action.",
         "WARN",
     )
+    app = App.__new__(App)
+    app._mission_mgr = SimpleNamespace(strategy=strategy, ctx=ctx)
+    app._current_run_scope_id = lambda: "run-observe"
+    app._sync_strategy_action_gate(
+        terminally_blocked=bool(
+            variables["gc_session_preflight_blocked"]
+        )
+    )
+    assert app._get_action_authority().strategy_gate is None
 
 
 def test_tournament_attachment_enforces_battle_loadout_before_preflight():
@@ -421,7 +435,12 @@ def test_tournament_does_not_start_independent_floating_gem_tapper():
     ):
         app._sync_floating_gem_tapper(
             state="RUNNING",
-            actions_blocked=False,
+            auxiliary_authority=ActionAuthorityDecision(
+                RuntimeActionClass.AUXILIARY_COLLECTION,
+                True,
+                "test authority",
+                collector=AuxiliaryCollector.FLOATING_GEM_SCAN,
+            ),
         )
 
     start.assert_not_called()
@@ -572,7 +591,11 @@ def test_tournament_main_loop_collects_ad_gem_after_attached_gate_releases():
         AUTOMATION.mode = previous_mode
 
     assert gate_complete
-    handle_ad_gem.assert_called_once_with()
+    handle_ad_gem.assert_called_once()
+    assert callable(handle_ad_gem.call_args.kwargs["action_guard_fn"])
+    assert callable(
+        handle_ad_gem.call_args.kwargs["floating_action_guard_fn"]
+    )
 
 
 def test_tournament_running_handler_collects_only_visible_ad_gem():
@@ -589,7 +612,9 @@ def test_tournament_running_handler_collects_only_visible_ad_gem():
     with patch("core.app.handle_ad_gem") as ad_gem:
         app._handle_primary_states("RUNNING", {"AD_GEMS_AVAILABLE"}, frame)
 
-    ad_gem.assert_called_once_with()
+    ad_gem.assert_called_once()
+    assert callable(ad_gem.call_args.kwargs["action_guard_fn"])
+    assert callable(ad_gem.call_args.kwargs["floating_action_guard_fn"])
 
 
 def test_tournament_game_over_waits_and_records_profile_evidence():

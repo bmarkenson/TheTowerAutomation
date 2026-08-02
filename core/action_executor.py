@@ -129,6 +129,21 @@ def execute_actions(
                         state_guard = set(allowed)
             allowed_states = state_guard or {"RUNNING"}
 
+            # A main-loop decision is not reusable input authority. Refresh
+            # the central guard immediately before materializing each action;
+            # bounded multi-input routes continue to receive the same guard
+            # for their own per-input checks.
+            if (
+                t != "sleep"
+                and action_guard_fn is not None
+                and not action_guard_fn()
+            ):
+                log_mission(
+                    f"[EXEC] Skip {t or 'unknown'} because action authority was lost",
+                    "DEBUG",
+                )
+                continue
+
             if t == "tap_label":
                 if is_strategy_action and last_state not in allowed_states:
                     log_mission(

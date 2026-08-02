@@ -24,7 +24,10 @@ from core.mission_reward_scheduler import (
 )
 from core.scrolling import ScrollResult
 import handlers.mission_reward_handler as rewards
-from handlers.mission_reward_handler import MissionRewardResult
+from handlers.mission_reward_handler import (
+    MissionRewardCleanupResult,
+    MissionRewardResult,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -43,6 +46,75 @@ def _weekly_found(frame, *, swipes: int = 0) -> ScrollResult:
 
 def _weekly_absent(frame, *, swipes: int = 0) -> ScrollResult:
     return ScrollResult(False, frame, swipes, "edge_before_target")
+
+
+def test_authority_loss_before_reward_navigation_retains_cleanup_ownership():
+    screenshot = np.zeros((2, 2, 3), dtype=np.uint8)
+    route_state = Mock()
+    badges = MenuRewardBadges(True, False, False)
+    with (
+        patch.object(rewards, "_reward_source_state", return_value="RUNNING"),
+        patch.object(rewards, "_ensure_reward_hub", return_value=screenshot),
+        patch.object(rewards, "measure_menu_reward_badges", return_value=badges),
+        patch.object(rewards, "_is_state", return_value=True),
+        patch.object(rewards, "tap_if_visible") as tap,
+    ):
+        result = rewards.handle_mission_rewards(
+            screenshot=screenshot,
+            action_guard_fn=lambda: False,
+            route_state_callback=route_state,
+        )
+
+    assert result is MissionRewardResult.INTERRUPTED
+    tap.assert_not_called()
+    assert route_state.call_args.args[:2] == ("RUNNING", True)
+
+
+def test_mission_cleanup_abandons_unexpected_boundary_without_input():
+    screenshot = np.zeros((2, 2, 3), dtype=np.uint8)
+    with (
+        patch.object(rewards, "capture_adb_screenshot", return_value=screenshot),
+        patch.object(
+            rewards,
+            "detect_state_and_overlays",
+            return_value={"state": "GAME_OVER", "overlays": []},
+        ),
+        patch.object(rewards, "is_visible", return_value=False),
+        patch.object(rewards, "tap_if_visible") as tap,
+    ):
+        result = rewards.resume_mission_reward_cleanup(
+            "RUNNING",
+            "EVENT",
+            action_guard_fn=lambda: True,
+        )
+
+    assert result is MissionRewardCleanupResult.ABANDONED
+    tap.assert_not_called()
+
+
+def test_guarded_menu_cleanup_recaptures_and_refuses_game_over():
+    stale_menu = np.zeros((2, 2, 3), dtype=np.uint8)
+    game_over = np.ones((2, 2, 3), dtype=np.uint8)
+    with (
+        patch.object(
+            rewards,
+            "capture_adb_screenshot",
+            return_value=game_over,
+        ) as capture,
+        patch.object(
+            rewards,
+            "detect_state_and_overlays",
+            return_value={"state": "GAME_OVER", "overlays": []},
+        ),
+        patch.object(rewards, "tap_if_visible") as tap,
+    ):
+        assert not rewards._close_menu(
+            stale_menu,
+            action_guard_fn=lambda: True,
+        )
+
+    capture.assert_called_once_with()
+    tap.assert_not_called()
 
 
 def test_closed_menu_attention_dot_and_open_menu_section_badges_are_distinct():
@@ -672,6 +744,12 @@ def test_app_dispatches_alert_probe_and_records_success():
     app._mission_reward_scheduler.should_attempt.return_value = True
     app._event_mission_tracker = Mock()
     app._blind_tapper_suspended = False
+    app._authority_battle_active = True
+    app._authority_primary_state = "RUNNING"
+    app._authority_holds = ()
+    app._supervisor = Mock(is_paused=False)
+    app._supervisor.apply_control.return_value = False
+    app._status_reporter = Mock()
     screenshot = np.zeros((2, 2, 3), dtype=np.uint8)
 
     with (
@@ -692,11 +770,16 @@ def test_app_dispatches_alert_probe_and_records_success():
     app._mission_reward_scheduler.should_attempt.assert_called_once_with(
         alert_visible=True,
     )
-    handler.assert_called_once_with(
-        screenshot=screenshot,
-        claim_daily_missions=False,
-        event_inventory_callback=app._event_mission_tracker.record_inventory,
+    handler.assert_called_once()
+    handler_kwargs = handler.call_args.kwargs
+    assert handler_kwargs["screenshot"] is screenshot
+    assert handler_kwargs["claim_daily_missions"] is False
+    assert (
+        handler_kwargs["event_inventory_callback"]
+        == app._event_mission_tracker.record_inventory
     )
+    assert callable(handler_kwargs["action_guard_fn"])
+    assert callable(handler_kwargs["route_state_callback"])
     assert app._mission_reward_scheduler.mark_completed.call_count == 1
     wall_now = app._mission_reward_scheduler.mark_completed.call_args.kwargs["wall_now"]
     assert wall_now.tzinfo is timezone.utc
@@ -710,6 +793,12 @@ def test_app_dispatches_reward_probe_from_verified_open_menu_badge():
     app._mission_reward_scheduler.should_attempt.return_value = True
     app._event_mission_tracker = Mock()
     app._blind_tapper_suspended = False
+    app._authority_battle_active = True
+    app._authority_primary_state = "RUNNING"
+    app._authority_holds = ()
+    app._supervisor = Mock(is_paused=False)
+    app._supervisor.apply_control.return_value = False
+    app._status_reporter = Mock()
     screenshot = _load("running_menu_reward_badges_20260715.png")
 
     with (
@@ -729,11 +818,16 @@ def test_app_dispatches_reward_probe_from_verified_open_menu_badge():
     app._mission_reward_scheduler.should_attempt.assert_called_once_with(
         alert_visible=True,
     )
-    handler.assert_called_once_with(
-        screenshot=screenshot,
-        claim_daily_missions=True,
-        event_inventory_callback=app._event_mission_tracker.record_inventory,
+    handler.assert_called_once()
+    handler_kwargs = handler.call_args.kwargs
+    assert handler_kwargs["screenshot"] is screenshot
+    assert handler_kwargs["claim_daily_missions"] is True
+    assert (
+        handler_kwargs["event_inventory_callback"]
+        == app._event_mission_tracker.record_inventory
     )
+    assert callable(handler_kwargs["action_guard_fn"])
+    assert callable(handler_kwargs["route_state_callback"])
     app._mission_reward_scheduler.mark_completed.assert_called_once()
     app._mission_reward_scheduler.mark_failed.assert_not_called()
 

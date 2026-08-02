@@ -74,6 +74,12 @@ def test_app_dispatches_scheduled_probe_without_badge_and_records_result():
     app._daily_gem_scheduler = Mock()
     app._daily_gem_scheduler.should_attempt.return_value = True
     app._blind_tapper_suspended = False
+    app._authority_battle_active = True
+    app._authority_primary_state = "RUNNING"
+    app._authority_holds = ()
+    app._supervisor = Mock(is_paused=False)
+    app._supervisor.apply_control.return_value = False
+    app._status_reporter = Mock()
 
     with (
         patch("core.app.stop_blind_gem_tapper", return_value=True),
@@ -84,7 +90,9 @@ def test_app_dispatches_scheduled_probe_without_badge_and_records_result():
     attempt = app._daily_gem_scheduler.should_attempt.call_args.kwargs
     assert attempt["badge_visible"] is False
     assert attempt["now"].tzinfo is UTC
-    handler.assert_called_once_with()
+    handler.assert_called_once()
+    assert callable(handler.call_args.kwargs["action_guard_fn"])
+    assert callable(handler.call_args.kwargs["route_state_callback"])
     app._daily_gem_scheduler.mark_completed.assert_called_once_with(
         "claimed",
         now=attempt["now"],

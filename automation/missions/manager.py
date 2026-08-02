@@ -135,6 +135,11 @@ class MissionManager:
         self._last_state = state
         return battle_started
 
+    def active_battle_observed(self) -> bool:
+        """Return the lifecycle-owned same-battle precondition."""
+
+        return bool(self._battle_lifecycle.active_battle_observed)
+
     def _arm_startup_gates(self) -> None:
         self._clear_attached_check_state()
         if not self._startup_gates_deferred:
@@ -699,12 +704,22 @@ class MissionManager:
             mv["gc_session_preflight_blocked"] = False
             self._reset_session_preflight_repair_attempts()
 
-    def tick(self, screen, detection: Detection, *, strategy_only: bool = False) -> None:
+    def observe_detection(self, detection: Detection) -> None:
+        """Update passive runtime context without materializing any action.
+
+        Strategy Gates and global Pause suppress mission/strategy callbacks,
+        but they must not leave the shared state interpretation frozen on the
+        frame that activated the hold.
+        """
+
         state = detection.get("state")
         self.ctx.data["last_detection_state"] = state
         self.ctx.data["last_detection"] = detection
         mv = self.ctx.data.setdefault("mission_vars", {})
         mv["last_detection_state"] = state
+
+    def tick(self, screen, detection: Detection, *, strategy_only: bool = False) -> None:
+        self.observe_detection(detection)
 
         mission_actions: List[Any] = []
         mission_complete = not bool(self.mission)

@@ -2326,7 +2326,9 @@ class GcFarmProfileTests(unittest.TestCase):
             app._attempt_session_preflight_repair({"state": "RUNNING"})
 
         manager.begin_session_preflight_repair.assert_called_once_with()
-        surrender.assert_called_once_with(action_guard=app._runtime_action_guard)
+        surrender.assert_called_once_with(
+            action_guard=app._session_preflight_repair_action_guard
+        )
         manager.fail_session_preflight_repair.assert_not_called()
 
     def test_app_fails_closed_when_guarded_surrender_does_not_complete(self):
@@ -2536,10 +2538,15 @@ class PausedStartupObservationTests(unittest.TestCase):
         manager.run_initialization_pending.return_value = False
         manager.session_preflight_pending.return_value = True
         manager.session_preflight_terminally_blocked.return_value = True
+        manager.session_preflight_failure_checks.return_value = ["modules"]
 
         supervisor = MagicMock()
         supervisor.is_paused = False
         supervisor.auto_return_secs = 900
+        supervisor.game_speed_target = 6.3
+        supervisor.apply_control.return_value = False
+        supervisor.gate_decision = None
+        supervisor.publish_gate_decision.return_value = None
 
         app = App.__new__(App)
         app._config = SimpleNamespace(wait_on_start=False)
@@ -2563,6 +2570,11 @@ class PausedStartupObservationTests(unittest.TestCase):
         app._capture_frame = MagicMock(side_effect=[frame, KeyboardInterrupt])
         app._resolve_upgrade_detail_overlay = MagicMock()
         app._handle_primary_states = MagicMock()
+        app._game_speed_guard = MagicMock()
+        app._game_speed_guard.handle.return_value = False
+        app._battle_activation_tracker = MagicMock()
+        app._battle_activation_tracker.observe.return_value = []
+        app._battle_activation_tracker.drain_evidence_captures.return_value = []
 
         with (
             patch("core.app.threading.Thread"),
@@ -2577,18 +2589,54 @@ class PausedStartupObservationTests(unittest.TestCase):
             patch("core.app.stop_blind_gem_tapper", return_value=False),
             patch("core.app.start_blind_gem_tapper") as start_tapper,
             patch("core.app.handle_ad_gem") as handle_ad_gem,
+            patch("core.app.handle_daily_gem") as handle_daily_gem,
+            patch("core.app.handle_mission_rewards") as handle_mission_rewards,
+            patch("core.app.handle_unknown_state") as recover,
+            patch("core.app.surrender_run") as surrender,
+            patch("core.app.handle_home_screen") as home,
+            patch("core.app.handle_game_over") as game_over,
             patch("core.app.time.sleep"),
         ):
             app.run()
 
-        handle_ad_gem.assert_called_once_with()
+        handle_ad_gem.assert_called_once()
+        ad_gem_call = handle_ad_gem.call_args.kwargs
+        self.assertTrue(callable(ad_gem_call["action_guard_fn"]))
+        self.assertTrue(callable(ad_gem_call["floating_action_guard_fn"]))
+        manager.observe_detection.assert_called_once()
+        observed_detection = manager.observe_detection.call_args.args[0]
+        self.assertEqual(observed_detection["state"], "RUNNING")
+        self.assertEqual(
+            observed_detection["overlays"],
+            ["AD_GEMS_AVAILABLE"],
+        )
         manager.tick.assert_not_called()
         manager.handle_overlays.assert_not_called()
         manager.on_state.assert_not_called()
         app._resolve_upgrade_detail_overlay.assert_not_called()
         app._handle_primary_states.assert_not_called()
+        handle_daily_gem.assert_not_called()
+        handle_mission_rewards.assert_not_called()
+        recover.assert_not_called()
+        surrender.assert_not_called()
+        home.assert_not_called()
+        game_over.assert_not_called()
+        supervisor.persist_state.assert_not_called()
         supervisor.auto_return_check.assert_not_called()
         start_tapper.assert_not_called()
+        self.assertEqual(manager.ctx.data["mission_vars"]["last_wave"], 1)
+        app._battle_activation_tracker.observe.assert_called_once()
+        app._state_tracker.update.assert_called_once_with(
+            state="RUNNING",
+            menu=None,
+            secondary=set(),
+            overlays={"AD_GEMS_AVAILABLE"},
+        )
+        app._game_speed_guard.handle.assert_called_once()
+        speed_guard = app._game_speed_guard.handle.call_args.kwargs[
+            "action_guard_fn"
+        ]
+        self.assertFalse(speed_guard())
         app._status_reporter.maybe_report.assert_called_once_with(
             img=frame,
             ui_state="RUNNING",

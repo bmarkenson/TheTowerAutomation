@@ -49,6 +49,129 @@ class MissionRewardResult(str, Enum):
     CLAIMED = "claimed"
     NOTHING_AVAILABLE = "nothing_available"
     FAILED = "failed"
+    INTERRUPTED = "interrupted"
+
+
+class MissionRewardCleanupResult(str, Enum):
+    COMPLETE = "complete"
+    INTERRUPTED = "interrupted"
+    ABANDONED = "abandoned"
+    FAILED = "failed"
+
+
+ActionGuard = Optional[Callable[[], bool]]
+RouteStateCallback = Optional[
+    Callable[[str, bool, Optional[str]], None]
+]
+
+
+class _AuxiliaryAuthorityLost(RuntimeError):
+    def __init__(self, expected_state: str):
+        super().__init__("auxiliary authority was lost")
+        self.expected_state = expected_state
+
+
+def _action_allowed(action_guard_fn: ActionGuard) -> bool:
+    if action_guard_fn is None:
+        return True
+    try:
+        return bool(action_guard_fn())
+    except Exception as exc:
+        log(
+            f"[MISSION_REWARDS] Auxiliary authority check failed: {exc}",
+            "ERROR",
+        )
+        return False
+
+
+def _require_action_authority(
+    action_guard_fn: ActionGuard,
+    *,
+    expected_state: str,
+) -> None:
+    if not _action_allowed(action_guard_fn):
+        raise _AuxiliaryAuthorityLost(expected_state)
+
+
+def _note_route(
+    callback: RouteStateCallback,
+    expected_state: str,
+    cleanup_pending: bool,
+    reason: Optional[str] = None,
+) -> None:
+    if callback is not None:
+        callback(expected_state, cleanup_pending, reason)
+
+
+def _tap_if_visible_guarded(
+    label: str,
+    *,
+    action_guard_fn: ActionGuard,
+    expected_state: str,
+    screenshot=None,
+    retries: Optional[int] = None,
+) -> bool:
+    if (
+        action_guard_fn is not None
+        and screenshot is not None
+        and expected_state not in {
+            "REWARD_REVEAL",
+            "RUNNING_MENU",
+        }
+    ):
+        if not _is_state(screenshot, expected_state):
+            return False
+    _require_action_authority(
+        action_guard_fn,
+        expected_state=expected_state,
+    )
+    kwargs: dict[str, object] = {}
+    if screenshot is not None:
+        kwargs["screenshot"] = screenshot
+    if retries is not None:
+        kwargs["retries"] = retries
+    if action_guard_fn is not None:
+        kwargs["action_guard_fn"] = action_guard_fn
+    return tap_if_visible(label, **kwargs)
+
+
+def _guarded_wait_for_state(
+    state: str,
+    *,
+    action_guard_fn: ActionGuard,
+    **kwargs,
+):
+    if action_guard_fn is None:
+        return _wait_for_state(state, **kwargs)
+    return _wait_for_state(
+        state,
+        action_guard_fn=action_guard_fn,
+        **kwargs,
+    )
+
+
+def _guarded_wait_for_label(
+    label: str,
+    *,
+    action_guard_fn: ActionGuard,
+    **kwargs,
+):
+    if action_guard_fn is None:
+        return _wait_for_label(label, **kwargs)
+    return _wait_for_label(
+        label,
+        action_guard_fn=action_guard_fn,
+        **kwargs,
+    )
+
+
+def _guarded_close_menu(screenshot, action_guard_fn: ActionGuard) -> bool:
+    if action_guard_fn is None:
+        return _close_menu(screenshot)
+    return _close_menu(
+        screenshot,
+        action_guard_fn=action_guard_fn,
+    )
 
 
 @dataclass(frozen=True)
@@ -97,6 +220,10 @@ def _finish_mission_reward_review(
         result_summary = (
             "Mission reward review complete — no claimable rewards found"
         )
+    elif result == MissionRewardResult.INTERRUPTED:
+        result_summary = (
+            "Mission reward review interrupted — verified cleanup remains pending"
+        )
     else:
         result_summary = f"Mission reward review failed — {reason}"
 
@@ -111,13 +238,15 @@ def _finish_mission_reward_review(
     return result
 
 
-def handle_mission_rewards(
+def _handle_mission_rewards_route(
     screenshot=None,
     *,
     claim_daily_missions: bool = True,
     event_inventory_callback: Optional[
         Callable[[EventMissionInventory], object]
     ] = None,
+    action_guard_fn: ActionGuard = None,
+    route_state_callback: RouteStateCallback = None,
 ) -> MissionRewardResult:
     """Inspect relevant badges, claim proven rewards, and restore the source UI."""
 
@@ -130,7 +259,12 @@ def handle_mission_rewards(
     )
     initial = screenshot if screenshot is not None else capture_adb_screenshot()
     source_state = _reward_source_state(initial)
-    reward_hub = _ensure_reward_hub(initial, source_state=source_state)
+    reward_hub = _ensure_reward_hub(
+        initial,
+        source_state=source_state,
+        action_guard_fn=action_guard_fn,
+        route_state_callback=route_state_callback,
+    )
     if reward_hub is None:
         return _finish_mission_reward_review(
             MissionRewardResult.FAILED,
@@ -197,32 +331,48 @@ def handle_mission_rewards(
     for enabled, name, navigation, state, claim_fn, summary_field in sections:
         if not enabled:
             continue
-        reward_hub = _ensure_reward_hub(reward_hub, source_state=source_state)
+        reward_hub = _ensure_reward_hub(
+            reward_hub,
+            source_state=source_state,
+            action_guard_fn=action_guard_fn,
+            route_state_callback=route_state_callback,
+        )
         if reward_hub is None or navigation is None:
             success = False
             break
-        if not tap_if_visible(navigation, screenshot=reward_hub, retries=1):
+        _note_route(route_state_callback, str(source_state), True)
+        if not _tap_if_visible_guarded(
+            navigation,
+            screenshot=reward_hub,
+            retries=1,
+            action_guard_fn=action_guard_fn,
+            expected_state=str(source_state),
+        ):
             log(f"[MISSION_REWARDS] Could not open {name}", "WARN")
             success = False
             break
-        panel = _wait_for_state(state)
+        _note_route(route_state_callback, state, True)
+        panel = _guarded_wait_for_state(
+            state,
+            action_guard_fn=action_guard_fn,
+        )
         if panel is None:
             log(f"[MISSION_REWARDS] {name} identity was not verified", "WARN")
             success = False
             break
 
         if summary_field == "daily":
-            section_success, claimed = claim_fn(
-                panel,
-                claim_missions=claim_daily_missions,
-            )
+            claim_kwargs = {"claim_missions": claim_daily_missions}
         elif summary_field == "event":
-            section_success, claimed = claim_fn(
-                panel,
-                inventory_callback=event_inventory_callback,
-            )
+            claim_kwargs = {
+                "inventory_callback": event_inventory_callback,
+            }
         else:
-            section_success, claimed = claim_fn(panel)
+            claim_kwargs = {}
+        if action_guard_fn is not None:
+            claim_kwargs["action_guard_fn"] = action_guard_fn
+            claim_kwargs["route_state_callback"] = route_state_callback
+        section_success, claimed = claim_fn(panel, **claim_kwargs)
         summary = MissionRewardSummary(
             daily=claimed if summary_field == "daily" else summary.daily,
             event=claimed if summary_field == "event" else summary.event,
@@ -230,7 +380,12 @@ def handle_mission_rewards(
         )
         success = success and section_success
 
-        reward_hub = _return_to_reward_hub(state, source_state=source_state)
+        reward_hub = _return_to_reward_hub(
+            state,
+            source_state=source_state,
+            action_guard_fn=action_guard_fn,
+            route_state_callback=route_state_callback,
+        )
         if reward_hub is None:
             success = False
             break
@@ -238,9 +393,11 @@ def handle_mission_rewards(
     if (
         source_state == "RUNNING"
         and reward_hub is not None
-        and not _close_menu(reward_hub)
+        and not _guarded_close_menu(reward_hub, action_guard_fn)
     ):
         success = False
+    if success:
+        _note_route(route_state_callback, str(source_state), False)
 
     if not success:
         return _finish_mission_reward_review(
@@ -264,10 +421,47 @@ def handle_mission_rewards(
     )
 
 
+def handle_mission_rewards(
+    screenshot=None,
+    *,
+    claim_daily_missions: bool = True,
+    event_inventory_callback: Optional[
+        Callable[[EventMissionInventory], object]
+    ] = None,
+    action_guard_fn: ActionGuard = None,
+    route_state_callback: RouteStateCallback = None,
+) -> MissionRewardResult:
+    """Run a guarded reward route and retain cleanup ownership if interrupted."""
+
+    try:
+        return _handle_mission_rewards_route(
+            screenshot,
+            claim_daily_missions=claim_daily_missions,
+            event_inventory_callback=event_inventory_callback,
+            action_guard_fn=action_guard_fn,
+            route_state_callback=route_state_callback,
+        )
+    except _AuxiliaryAuthorityLost as exc:
+        _note_route(
+            route_state_callback,
+            exc.expected_state,
+            True,
+            "auxiliary authority was lost",
+        )
+        return _finish_mission_reward_review(
+            MissionRewardResult.INTERRUPTED,
+            summary=MissionRewardSummary(),
+            source_state=_reward_source_state(screenshot) or "UNKNOWN",
+            reason="auxiliary authority was lost",
+        )
+
+
 def _claim_daily_rewards(
     screenshot,
     *,
     claim_missions: bool = True,
+    action_guard_fn: ActionGuard = None,
+    route_state_callback: RouteStateCallback = None,
 ) -> tuple[bool, int]:
     current = screenshot
     claimed = 0
@@ -311,7 +505,10 @@ def _claim_daily_rewards(
             f"ordinary_claimed={ordinary_claimed})",
             "DEBUG",
         )
-        weekly_chest = _find_weekly_mission_chest(current)
+        weekly_chest = _find_weekly_mission_chest(
+            current,
+            action_guard_fn=action_guard_fn,
+        )
         log(
             f"[MISSION_REWARDS] Weekly chest check {weekly_checks} result: "
             f"found={weekly_chest.success} swipes={weekly_chest.swipes} "
@@ -320,12 +517,23 @@ def _claim_daily_rewards(
         )
         if weekly_chest.success:
             current = weekly_chest.screenshot
-            if current is None or not tap_if_visible(
+            if current is None or not _tap_if_visible_guarded(
                 WEEKLY_MISSION_CHEST,
                 screenshot=current,
+                action_guard_fn=action_guard_fn,
+                expected_state="DAILY_MISSIONS",
             ):
                 return False, claimed
-            current = _dismiss_reward_reveal("DAILY_MISSIONS")
+            _note_route(
+                route_state_callback,
+                "REWARD_REVEAL:DAILY_MISSIONS",
+                True,
+            )
+            current = _dismiss_reward_reveal(
+                "DAILY_MISSIONS",
+                action_guard_fn=action_guard_fn,
+                route_state_callback=route_state_callback,
+            )
             if current is None:
                 return False, claimed
             claimed += 1
@@ -357,9 +565,18 @@ def _claim_daily_rewards(
                 )
             break
         if is_visible(DAILY_MISSION_CLAIM, screenshot=current):
-            if not tap_if_visible(DAILY_MISSION_CLAIM, screenshot=current):
+            if not _tap_if_visible_guarded(
+                DAILY_MISSION_CLAIM,
+                screenshot=current,
+                action_guard_fn=action_guard_fn,
+                expected_state="DAILY_MISSIONS",
+            ):
                 return False, claimed
-            current = _wait_for_state("DAILY_MISSIONS", settle_s=0.6)
+            current = _guarded_wait_for_state(
+                "DAILY_MISSIONS",
+                settle_s=0.6,
+                action_guard_fn=action_guard_fn,
+            )
             if current is None:
                 return False, claimed
             claimed += 1
@@ -383,12 +600,21 @@ def _claim_daily_rewards(
     return True, claimed
 
 
-def _find_weekly_mission_chest(screenshot) -> ScrollResult:
+def _find_weekly_mission_chest(
+    screenshot,
+    *,
+    action_guard_fn: ActionGuard = None,
+) -> ScrollResult:
     """Find an available weekly chest across the bounded horizontal track."""
 
     if is_visible(WEEKLY_MISSION_CHEST, screenshot=screenshot):
         return ScrollResult(True, screenshot, 0, "target_visible")
 
+    guard_kwargs = (
+        {"action_guard_fn": action_guard_fn}
+        if action_guard_fn is not None
+        else {}
+    )
     first = scroll_to_edge(
         "gesture_targets.goto_first:weekly_mission_chests",
         source_label="indicators.daily_missions",
@@ -397,6 +623,7 @@ def _find_weekly_mission_chest(screenshot) -> ScrollResult:
         max_swipes=4,
         settle_s=0.8,
         stable_threshold=2.0,
+        **guard_kwargs,
     )
     current = first.screenshot if first.screenshot is not None else screenshot
     if first.reason not in {"edge_reached", "max_swipes_exceeded"}:
@@ -413,6 +640,7 @@ def _find_weekly_mission_chest(screenshot) -> ScrollResult:
         max_swipes=8,
         settle_s=0.8,
         stable_threshold=2.0,
+        **guard_kwargs,
     )
     return ScrollResult(
         found.success,
@@ -460,18 +688,35 @@ def _claim_event_rewards(
     inventory_callback: Optional[
         Callable[[EventMissionInventory], object]
     ] = None,
+    action_guard_fn: ActionGuard = None,
+    route_state_callback: RouteStateCallback = None,
 ) -> tuple[bool, int]:
     # Event retains its last-selected tab.  Re-enter Missions explicitly so a
     # prior Bots or Event Shop visit cannot be mistaken for the mission list.
     if not _is_state(screenshot, "EVENT"):
         return False, 0
-    if not tap_if_visible(EVENT_MISSIONS_TAB, screenshot=screenshot, retries=1):
+    if not _tap_if_visible_guarded(
+        EVENT_MISSIONS_TAB,
+        screenshot=screenshot,
+        retries=1,
+        action_guard_fn=action_guard_fn,
+        expected_state="EVENT",
+    ):
         log("[MISSION_REWARDS] Could not select the Event Missions tab", "WARN")
         return False, 0
-    missions = _wait_for_state("EVENT", settle_s=0.8)
+    missions = _guarded_wait_for_state(
+        "EVENT",
+        settle_s=0.8,
+        action_guard_fn=action_guard_fn,
+    )
     if missions is None:
         return False, 0
 
+    guard_kwargs = (
+        {"action_guard_fn": action_guard_fn}
+        if action_guard_fn is not None
+        else {}
+    )
     top = scroll_to_edge(
         "gesture_targets.goto_top:event_missions",
         source_label="indicators.event",
@@ -480,6 +725,7 @@ def _claim_event_rewards(
         max_swipes=8,
         settle_s=0.8,
         stable_threshold=2.0,
+        **guard_kwargs,
     )
     current = top.screenshot if top.screenshot is not None else screenshot
     if top.reason not in {"edge_reached", "max_swipes_exceeded"}:
@@ -499,6 +745,7 @@ def _claim_event_rewards(
                 max_swipes=10,
                 settle_s=0.8,
                 stable_threshold=2.0,
+                **guard_kwargs,
             )
             if not found.success:
                 if found.reason in {"edge_before_target", "max_swipes_exceeded"}:
@@ -509,9 +756,18 @@ def _claim_event_rewards(
                     return True, claimed
                 return False, claimed
             current = found.screenshot
-        if current is None or not tap_if_visible(EVENT_MISSION_CLAIM, screenshot=current):
+        if current is None or not _tap_if_visible_guarded(
+            EVENT_MISSION_CLAIM,
+            screenshot=current,
+            action_guard_fn=action_guard_fn,
+            expected_state="EVENT",
+        ):
             return False, claimed
-        current = _wait_for_state("EVENT", settle_s=0.6)
+        current = _guarded_wait_for_state(
+            "EVENT",
+            settle_s=0.6,
+            action_guard_fn=action_guard_fn,
+        )
         if current is None:
             return False, claimed
         claimed += 1
@@ -545,19 +801,30 @@ def _record_event_inventory(
         log(f"[EVENT_MISSIONS] Inventory failed: {exc}", "WARN")
 
 
-def _claim_guild_chests(screenshot) -> tuple[bool, int]:
+def _claim_guild_chests(
+    screenshot,
+    *,
+    action_guard_fn: ActionGuard = None,
+    route_state_callback: RouteStateCallback = None,
+) -> tuple[bool, int]:
     current = screenshot
     if not _is_state(current, "GUILD"):
         return False, 0
     # Guild retains its last selected tab.  Always reselect Members before
     # interpreting absence of glowing contribution chests as authoritative.
-    if not tap_if_visible(
+    if not _tap_if_visible_guarded(
         "navigation.guild:members_tab",
         screenshot=current,
         retries=1,
+        action_guard_fn=action_guard_fn,
+        expected_state="GUILD",
     ):
         return False, 0
-    current = _wait_for_state("GUILD", settle_s=0.8)
+    current = _guarded_wait_for_state(
+        "GUILD",
+        settle_s=0.8,
+        action_guard_fn=action_guard_fn,
+    )
     if current is None:
         return False, 0
 
@@ -567,9 +834,23 @@ def _claim_guild_chests(screenshot) -> tuple[bool, int]:
             return False, claimed
         if not is_visible(GUILD_CHEST_CLAIM, screenshot=current):
             return True, claimed
-        if not tap_if_visible(GUILD_CHEST_CLAIM, screenshot=current):
+        if not _tap_if_visible_guarded(
+            GUILD_CHEST_CLAIM,
+            screenshot=current,
+            action_guard_fn=action_guard_fn,
+            expected_state="GUILD",
+        ):
             return False, claimed
-        current = _dismiss_reward_reveal("GUILD")
+        _note_route(
+            route_state_callback,
+            "REWARD_REVEAL:GUILD",
+            True,
+        )
+        current = _dismiss_reward_reveal(
+            "GUILD",
+            action_guard_fn=action_guard_fn,
+            route_state_callback=route_state_callback,
+        )
         if current is None:
             return False, claimed
         claimed += 1
@@ -578,14 +859,33 @@ def _claim_guild_chests(screenshot) -> tuple[bool, int]:
     return False, claimed
 
 
-def _dismiss_reward_reveal(return_state: str):
-    reveal = _wait_for_label(REWARD_REVEAL_SKIP, timeout=8.0)
+def _dismiss_reward_reveal(
+    return_state: str,
+    *,
+    action_guard_fn: ActionGuard = None,
+    route_state_callback: RouteStateCallback = None,
+):
+    reveal = _guarded_wait_for_label(
+        REWARD_REVEAL_SKIP,
+        timeout=8.0,
+        action_guard_fn=action_guard_fn,
+    )
     if reveal is None:
         log("[MISSION_REWARDS] Reward reveal SKIP was not verified", "WARN")
         return None
-    if not tap_if_visible(REWARD_REVEAL_SKIP, screenshot=reveal):
+    if not _tap_if_visible_guarded(
+        REWARD_REVEAL_SKIP,
+        screenshot=reveal,
+        action_guard_fn=action_guard_fn,
+        expected_state="REWARD_REVEAL",
+    ):
         return None
-    return _wait_for_state(return_state, settle_s=0.6)
+    _note_route(route_state_callback, return_state, True)
+    return _guarded_wait_for_state(
+        return_state,
+        settle_s=0.6,
+        action_guard_fn=action_guard_fn,
+    )
 
 
 def _reward_source_state(screenshot) -> Optional[str]:
@@ -595,7 +895,13 @@ def _reward_source_state(screenshot) -> Optional[str]:
     return state if state in {"RUNNING", "HOME_SCREEN"} else None
 
 
-def _ensure_reward_hub(screenshot=None, *, source_state: Optional[str]):
+def _ensure_reward_hub(
+    screenshot=None,
+    *,
+    source_state: Optional[str],
+    action_guard_fn: ActionGuard = None,
+    route_state_callback: RouteStateCallback = None,
+):
     current = screenshot if screenshot is not None else capture_adb_screenshot()
     if current is None:
         return None
@@ -618,12 +924,29 @@ def _ensure_reward_hub(screenshot=None, *, source_state: Optional[str]):
     if "MENU_CLOSED" not in overlays:
         log("[MISSION_REWARDS] Menu state is not verified", "WARN")
         return None
-    if not tap_if_visible("navigation.toggle_menu", screenshot=current):
+    if not _tap_if_visible_guarded(
+        "navigation.toggle_menu",
+        screenshot=current,
+        action_guard_fn=action_guard_fn,
+        expected_state="RUNNING",
+    ):
         return None
-    return _wait_for_state("RUNNING", required_overlay="MENU_OPEN", settle_s=0.6)
+    _note_route(route_state_callback, "RUNNING_MENU", True)
+    return _guarded_wait_for_state(
+        "RUNNING",
+        required_overlay="MENU_OPEN",
+        settle_s=0.6,
+        action_guard_fn=action_guard_fn,
+    )
 
 
-def _return_to_reward_hub(panel_state: str, *, source_state: str):
+def _return_to_reward_hub(
+    panel_state: str,
+    *,
+    source_state: str,
+    action_guard_fn: ActionGuard = None,
+    route_state_callback: RouteStateCallback = None,
+):
     current = capture_adb_screenshot()
     if current is None or not _is_state(current, panel_state):
         log(
@@ -632,15 +955,41 @@ def _return_to_reward_hub(panel_state: str, *, source_state: str):
             "WARN",
         )
         return None
-    if not tap_if_visible("buttons.return_to_game", screenshot=current):
+    if not _tap_if_visible_guarded(
+        "buttons.return_to_game",
+        screenshot=current,
+        action_guard_fn=action_guard_fn,
+        expected_state=panel_state,
+    ):
         return None
-    source = _wait_for_state(source_state, settle_s=0.6)
+    _note_route(route_state_callback, source_state, True)
+    source = _guarded_wait_for_state(
+        source_state,
+        settle_s=0.6,
+        action_guard_fn=action_guard_fn,
+    )
     if source is None:
         return None
-    return _ensure_reward_hub(source, source_state=source_state)
+    return _ensure_reward_hub(
+        source,
+        source_state=source_state,
+        action_guard_fn=action_guard_fn,
+        route_state_callback=route_state_callback,
+    )
 
 
-def _close_menu(screenshot) -> bool:
+def _close_menu(
+    screenshot,
+    *,
+    action_guard_fn: ActionGuard = None,
+) -> bool:
+    if action_guard_fn is not None:
+        # A panel wait may have consumed newer boundary frames. Never let its
+        # older reward-hub image authorize cleanup after Game Over, Home, or
+        # unexpected navigation has taken ownership.
+        screenshot = capture_adb_screenshot()
+        if screenshot is None:
+            return False
     detection = detect_state_and_overlays(screenshot)
     if detection.get("state") != "RUNNING":
         return False
@@ -649,12 +998,18 @@ def _close_menu(screenshot) -> bool:
         return True
     if "MENU_OPEN" not in overlays:
         return False
-    if not tap_if_visible("navigation.menu_close_button", screenshot=screenshot):
+    if not _tap_if_visible_guarded(
+        "navigation.menu_close_button",
+        screenshot=screenshot,
+        action_guard_fn=action_guard_fn,
+        expected_state="RUNNING_MENU",
+    ):
         return False
-    return _wait_for_state(
+    return _guarded_wait_for_state(
         "RUNNING",
         required_overlay="MENU_CLOSED",
         settle_s=0.6,
+        action_guard_fn=action_guard_fn,
     ) is not None
 
 
@@ -665,11 +1020,16 @@ def _wait_for_state(
     timeout: float = 8.0,
     poll: float = 0.3,
     settle_s: float = 0.0,
+    action_guard_fn: ActionGuard = None,
 ):
     if settle_s > 0:
         time.sleep(settle_s)
     deadline = time.monotonic() + max(0.0, timeout)
     while time.monotonic() < deadline:
+        _require_action_authority(
+            action_guard_fn,
+            expected_state=state,
+        )
         screenshot = capture_adb_screenshot()
         if screenshot is not None:
             detection = detect_state_and_overlays(screenshot)
@@ -682,9 +1042,19 @@ def _wait_for_state(
     return None
 
 
-def _wait_for_label(label: str, *, timeout: float, poll: float = 0.3):
+def _wait_for_label(
+    label: str,
+    *,
+    timeout: float,
+    poll: float = 0.3,
+    action_guard_fn: ActionGuard = None,
+):
     deadline = time.monotonic() + max(0.0, timeout)
     while time.monotonic() < deadline:
+        _require_action_authority(
+            action_guard_fn,
+            expected_state="REWARD_REVEAL",
+        )
         screenshot = capture_adb_screenshot()
         if screenshot is not None and is_visible(label, screenshot=screenshot):
             return screenshot
@@ -692,12 +1062,94 @@ def _wait_for_label(label: str, *, timeout: float, poll: float = 0.3):
     return None
 
 
+def resume_mission_reward_cleanup(
+    source_state: str,
+    expected_state: str,
+    *,
+    action_guard_fn: Callable[[], bool],
+    max_steps: int = 4,
+) -> MissionRewardCleanupResult:
+    """Restore an interrupted reward route through only declared route states."""
+
+    source = str(source_state or "").upper()
+    expected = str(expected_state or "").upper()
+    if source not in {"RUNNING", "HOME_SCREEN"}:
+        return MissionRewardCleanupResult.ABANDONED
+    allowed_panels = {"DAILY_MISSIONS", "EVENT", "GUILD"}
+    reveal_return = None
+    if expected.startswith("REWARD_REVEAL:"):
+        candidate = expected.split(":", 1)[1]
+        if candidate in allowed_panels:
+            reveal_return = candidate
+
+    try:
+        for _ in range(max(1, int(max_steps))):
+            _require_action_authority(
+                action_guard_fn,
+                expected_state=expected or source,
+            )
+            screenshot = capture_adb_screenshot()
+            if screenshot is None:
+                return MissionRewardCleanupResult.FAILED
+            detection = detect_state_and_overlays(screenshot)
+            state = str(detection.get("state") or "UNKNOWN").upper()
+            overlays = set(detection.get("overlays") or [])
+            if state == source:
+                if source != "RUNNING" or "MENU_CLOSED" in overlays:
+                    return MissionRewardCleanupResult.COMPLETE
+                if "MENU_OPEN" not in overlays:
+                    return MissionRewardCleanupResult.ABANDONED
+                return (
+                    MissionRewardCleanupResult.COMPLETE
+                    if _close_menu(
+                        screenshot,
+                        action_guard_fn=action_guard_fn,
+                    )
+                    else MissionRewardCleanupResult.FAILED
+                )
+            if is_visible(REWARD_REVEAL_SKIP, screenshot=screenshot):
+                if reveal_return is None:
+                    return MissionRewardCleanupResult.ABANDONED
+                if not _tap_if_visible_guarded(
+                    REWARD_REVEAL_SKIP,
+                    screenshot=screenshot,
+                    action_guard_fn=action_guard_fn,
+                    expected_state="REWARD_REVEAL",
+                ):
+                    return MissionRewardCleanupResult.FAILED
+                expected = reveal_return
+                time.sleep(0.6)
+                continue
+            if state not in allowed_panels:
+                # A natural boundary or unexpected route state belongs to the
+                # ordinary boundary observer; never improvise recovery input.
+                return MissionRewardCleanupResult.ABANDONED
+            hub = _return_to_reward_hub(
+                state,
+                source_state=source,
+                action_guard_fn=action_guard_fn,
+            )
+            if hub is None:
+                return MissionRewardCleanupResult.FAILED
+            if source == "RUNNING" and not _close_menu(
+                hub,
+                action_guard_fn=action_guard_fn,
+            ):
+                return MissionRewardCleanupResult.FAILED
+            return MissionRewardCleanupResult.COMPLETE
+    except _AuxiliaryAuthorityLost:
+        return MissionRewardCleanupResult.INTERRUPTED
+    return MissionRewardCleanupResult.FAILED
+
+
 def _is_state(screenshot, state: str) -> bool:
     return detect_state_and_overlays(screenshot).get("state") == state
 
 
 __all__ = [
+    "MissionRewardCleanupResult",
     "MissionRewardResult",
     "MissionRewardSummary",
     "handle_mission_rewards",
+    "resume_mission_reward_cleanup",
 ]

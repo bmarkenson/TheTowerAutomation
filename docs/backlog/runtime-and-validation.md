@@ -415,10 +415,14 @@ stages:
     Distance relationship derived from observed Attack Range, Extra Orb
     distance, and Workshop distance. Published Strategies must embed resolved
     local data and remain independent of later mutable preset changes.
-  - [ ] Refine running-battle validation into an explicit strategy gate so
+  - [x] Refine running-battle validation into an explicit strategy gate so
     observation and allowlisted independent collectors can continue while
     strategy and lifecycle actions are blocked. Validate this authority split
-    before newly editable settings rely on running-battle enforcement.
+    before newly editable settings rely on running-battle enforcement. The
+    typed four-class matrix, run-scoped transitions, guarded collector routes,
+    fresh runtime-owned status, revision-22 capability, and separate WPF banner
+    are implemented with focused authority/runtime/control-surface/native
+    regression coverage.
   - [ ] Retain immutable Strategy publication history and add safe fallback.
     - Append every validated publication as a durable revision containing its
       sparse source, pinned Base snapshot, resolved values/provenance, generated

@@ -16,6 +16,7 @@ from core.ss_capture import is_complete_screenshot
 DispatchMode = Literal["now", "queue"]
 Coord = Union[Sequence[int], Sequence[float]]
 Region = Tuple[int, int, int, int]
+ActionGuard = Optional[Callable[[], bool]]
 
 
 @dataclass(frozen=True)
@@ -102,6 +103,31 @@ def _tap_summary(label: str, dispatch: DispatchMode) -> str:
     return f"Tap {verb}: {_operator_label(label)}"
 
 
+def _input_authority_available(
+    action_guard_fn: ActionGuard,
+    *,
+    label: Optional[str],
+) -> bool:
+    """Recheck optional caller authority at the final dispatch boundary."""
+
+    if action_guard_fn is None:
+        return True
+    try:
+        allowed = bool(action_guard_fn())
+    except Exception as exc:
+        log(
+            f"[SKIP] TAP_SAFE authority check failed for {label}: {exc}",
+            "ERROR",
+        )
+        return False
+    if not allowed:
+        log(
+            f"[SKIP] TAP_SAFE authority was lost for {label}",
+            "DEBUG",
+        )
+    return allowed
+
+
 def safe_tap(
     name: Union[str, Coord],
     *,
@@ -112,6 +138,7 @@ def safe_tap(
     log_label: Optional[str] = None,
     verification: Optional[TapVerification] = None,
     failure_log_level: Literal["DEBUG", "WARN"] = "WARN",
+    action_guard_fn: ActionGuard = None,
 ) -> bool:
     """Tap only a freshly matched or explicitly reverified target.
 
@@ -122,6 +149,10 @@ def safe_tap(
     ``failure_log_level`` applies only when a template-backed target exhausts
     its match attempts. Callers that own a fallback or workflow-level outcome
     may keep that expected miss diagnostic without weakening tap authority.
+
+    When ``action_guard_fn`` is supplied, it is evaluated after the final
+    template/target verification and immediately before INPUT logging and
+    dispatch. A false or failing guard sends no input.
     """
 
     if dispatch not in ("now", "queue"):
@@ -143,6 +174,11 @@ def safe_tap(
                 offset = _compute_offset(entry)
                 tap_x = x + (offset[0] if offset else width // 2)
                 tap_y = y + (offset[1] if offset else height // 2)
+                if not _input_authority_available(
+                    action_guard_fn,
+                    label=str(label) if label is not None else None,
+                ):
+                    return False
                 log_input(
                     _tap_summary(str(label), dispatch),
                     detail=(
@@ -207,6 +243,12 @@ def safe_tap(
         )
         return False
 
+    if not _input_authority_available(
+        action_guard_fn,
+        label=str(label) if label is not None else None,
+    ):
+        return False
+
     log_input(
         _tap_summary(str(summary_label), dispatch),
         detail=(
@@ -226,6 +268,7 @@ def tap_if_visible(
     dispatch: DispatchMode = "now",
     screenshot=None,
     failure_log_level: Literal["DEBUG", "WARN"] = "WARN",
+    action_guard_fn: ActionGuard = None,
 ) -> bool:
     return safe_tap(
         name,
@@ -234,6 +277,7 @@ def tap_if_visible(
         dispatch=dispatch,
         screenshot=screenshot,
         failure_log_level=failure_log_level,
+        action_guard_fn=action_guard_fn,
     )
 
 

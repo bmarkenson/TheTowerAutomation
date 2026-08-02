@@ -2287,6 +2287,25 @@ public partial class MainWindow : Window
         UpdateControlSurfaceCompatibility();
         DirectiveText.Text = FormatAutomationState(status.Control);
         ModeText.Text = FormatStatusToken(status.Control.Mode);
+        var strategyGate = status.StrategyActionGate;
+        var strategyGateVisible = strategyGate is
+            { Available: true, Active: true, Stale: false };
+        StrategyActionGateBanner.Visibility = strategyGateVisible
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        if (strategyGateVisible && strategyGate is not null)
+        {
+            StrategyActionGateReasonText.Text = string.IsNullOrWhiteSpace(
+                strategyGate.Reason)
+                ? "The running-battle strategy validation did not pass."
+                : strategyGate.Reason;
+            StrategyActionGateChecksText.Text = "Failed checks: "
+                + Join(strategyGate.FailedCheckIds.Select(FormatStatusToken));
+            StrategyActionGateCollectorsText.Text = "Allowed collectors: "
+                + Join(
+                    strategyGate.AllowedAuxiliaryCollectors.Select(
+                        FormatStatusToken));
+        }
         _gameSpeedTarget = status.Control.GameSpeedTarget;
         SelectGameSpeedTarget(_gameSpeedTarget);
         var observedGameSpeed = status.Observation?.GameSpeed;
@@ -2634,6 +2653,9 @@ public partial class MainWindow : Window
                 $"Installed unit reads target file: {YesNo(service?.AutomationEnvironmentFileLoaded)}",
                 $"Systemd EnvironmentFiles: {service?.ServiceEnvironmentFiles ?? "-"}",
                 $"Current runtime strategy: {currentStrategy ?? "-"}",
+                $"Strategy Action Gate: {FormatStrategyActionGate(strategyGate)}",
+                $"Strategy Gate failed checks: {Join(strategyGate?.FailedCheckIds)}",
+                $"Strategy Gate allowed collectors: {Join(strategyGate?.AllowedAuxiliaryCollectors)}",
                 $"{pendingStrategyLabel}: {pendingStrategy ?? "-"}",
                 $"Strategy request mode: {status.Control.StrategyApplyMode}",
                 $"Configured next-start strategy: {service?.Strategy ?? "-"}",
@@ -3444,6 +3466,22 @@ public partial class MainWindow : Window
             && control.RemainingSeconds is not null
                 ? $"{state} · {FormatAge(control.RemainingSeconds)} left"
                 : state;
+    }
+
+    private static string FormatStrategyActionGate(
+        StrategyActionGateStatus? gate)
+    {
+        if (gate is null || !gate.Available)
+        {
+            return "unavailable";
+        }
+        if (gate.Stale)
+        {
+            return $"stale ({FormatAge(gate.AgeSeconds)})";
+        }
+        return gate.Active
+            ? $"active — {gate.Reason}"
+            : "inactive";
     }
 
     private static string FormatGameScreen(string? stateLabel)

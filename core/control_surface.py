@@ -52,7 +52,7 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 21
+CONTROL_SURFACE_REVISION = 22
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -67,6 +67,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "host_performance_telemetry_v1",
     "observed_game_speed",
     "selected_strategy_process_start",
+    "strategy_action_gate_v1",
     "strategy_authoring_profile_lifecycle_v1",
     "strategy_authoring_specialized_editors_v1",
     "strategy_authoring_v1",
@@ -160,6 +161,9 @@ class ControlSurfaceService:
             DEFAULT_HOST_PERFORMANCE_RETENTION_DAYS
         ),
         activity_scope_file: Path | str | None = None,
+        strategy_action_gate_file: Path | str = (
+            "logs/strategy_action_gate.json"
+        ),
         stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS,
         process_manager: Optional[SystemdAutomationManager] = None,
         strategy_profile_dir: Path | str = "config/strategies/custom",
@@ -171,6 +175,9 @@ class ControlSurfaceService:
             self.action_log.with_name(DEFAULT_ACTIVITY_SCOPE_FILENAME)
             if activity_scope_file is None
             else self._resolve_path(activity_scope_file)
+        )
+        self.strategy_action_gate_path = self._resolve_path(
+            strategy_action_gate_file
         )
         self.battles_dir = self._resolve_path(battles_dir)
         self.tournaments_dir = self._resolve_path(tournaments_dir)
@@ -424,6 +431,10 @@ class ControlSurfaceService:
             )
         acknowledgements = self._latest_acknowledgements(lines, control)
         runtime = self._runtime_evidence()
+        strategy_action_gate = self._strategy_action_gate_status(
+            now=current_time,
+            runtime=runtime,
+        )
         process_service = (
             self.process_manager.status() if self.process_manager is not None else None
         )
@@ -454,6 +465,7 @@ class ControlSurfaceService:
                 if current_run is not None
                 else None
             ),
+            "strategy_action_gate": strategy_action_gate,
             "runtime": runtime,
             "process_service": process_service,
         }
@@ -1836,6 +1848,231 @@ class ControlSurfaceService:
             "game_speed_target": game_speed_target_ack,
             "adb_target": adb_target_ack,
             "strategy": strategy_ack,
+        }
+
+    def _strategy_action_gate_status(
+        self,
+        *,
+        now: float,
+        runtime: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Read the fresh runtime-owned gate channel without log inference."""
+
+        def unavailable(reason: str, *, error: Optional[str] = None) -> dict[str, Any]:
+            response: dict[str, Any] = {
+                "schema_version": 1,
+                "available": False,
+                "active": False,
+                "stale": True,
+                "age_seconds": None,
+                "observed_at": None,
+                "runtime_active": False,
+                "owner": None,
+                "owner_matches_active_runtime": False,
+                "gate_id": None,
+                "strategy": None,
+                "battle_scope": None,
+                "source": None,
+                "phase": None,
+                "failed_check_ids": [],
+                "reason": reason,
+                "activated_at": None,
+                "updated_at": None,
+                "global_pause": False,
+                "runtime_stopped": False,
+                "primary_state": "UNKNOWN",
+                "holds": [],
+                "observation_authority": {
+                    "action_class": "observation",
+                    "allowed": True,
+                    "reason": "observation authority is independent of input",
+                    "collector": None,
+                    "owner": None,
+                },
+                "auxiliary_collection_authority": {
+                    "action_class": "auxiliary_collection",
+                    "allowed": False,
+                    "reason": reason,
+                    "collector": None,
+                    "owner": None,
+                },
+                "allowed_auxiliary_collectors": [],
+                "strategy_action_authority": {
+                    "action_class": "strategy_action",
+                    "allowed": False,
+                    "reason": reason,
+                    "collector": None,
+                    "owner": None,
+                },
+                "lifecycle_action_authority": {
+                    "action_class": "lifecycle_action",
+                    "allowed": False,
+                    "reason": reason,
+                    "collector": None,
+                    "owner": None,
+                },
+                "auxiliary_route": None,
+                "path": self._display_path(self.strategy_action_gate_path),
+            }
+            if error:
+                response["error"] = error
+            return response
+
+        try:
+            raw = self.strategy_action_gate_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return unavailable("no runtime-owned Strategy Gate snapshot exists")
+        except OSError as exc:
+            return unavailable(
+                "the runtime-owned Strategy Gate snapshot could not be read",
+                error=str(exc),
+            )
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError) as exc:
+            return unavailable(
+                "the runtime-owned Strategy Gate snapshot is malformed",
+                error=str(exc),
+            )
+        if not isinstance(payload, Mapping) or payload.get("schema_version") != 1:
+            return unavailable(
+                "the runtime-owned Strategy Gate snapshot has an unsupported schema"
+            )
+        owner = payload.get("owner")
+        if not isinstance(owner, Mapping):
+            return unavailable(
+                "the runtime-owned Strategy Gate snapshot has no valid owner"
+            )
+        try:
+            owner_pid = int(owner.get("pid"))
+        except (TypeError, ValueError):
+            return unavailable(
+                "the runtime-owned Strategy Gate snapshot has no valid owner PID"
+            )
+        owner_target = str(owner.get("adb_target") or "").strip()
+        observed_at = str(payload.get("observed_at") or "").strip()
+        try:
+            observed_timestamp = datetime.fromisoformat(observed_at).timestamp()
+        except ValueError:
+            return unavailable(
+                "the runtime-owned Strategy Gate snapshot has no valid timestamp"
+            )
+        age_seconds = max(0, int(float(now) - observed_timestamp))
+        try:
+            publisher_stale_after = max(
+                1,
+                int(payload.get("stale_after_seconds") or 0),
+            )
+        except (TypeError, ValueError):
+            publisher_stale_after = self.stale_after_seconds
+        stale_after = min(self.stale_after_seconds, publisher_stale_after)
+        instances = runtime.get("instances")
+        owner_matches = any(
+            isinstance(instance, Mapping)
+            and instance.get("active") is True
+            and instance.get("pid") == owner_pid
+            and (
+                not owner_target
+                or owner_target == "unknown"
+                or str(instance.get("target") or "") == owner_target
+            )
+            for instance in (instances if isinstance(instances, list) else [])
+        )
+        runtime_active = payload.get("runtime_active") is True
+        stale = bool(
+            age_seconds > stale_after
+            or not runtime_active
+            or not owner_matches
+        )
+
+        def authority_field(name: str, action_class: str) -> dict[str, Any]:
+            candidate = payload.get(name)
+            if not isinstance(candidate, Mapping):
+                return {
+                    "action_class": action_class,
+                    "allowed": False,
+                    "reason": "authority field is missing",
+                    "collector": None,
+                    "owner": None,
+                }
+            return {
+                "action_class": str(
+                    candidate.get("action_class") or action_class
+                ),
+                "allowed": candidate.get("allowed") is True,
+                "reason": str(candidate.get("reason") or ""),
+                "collector": candidate.get("collector"),
+                "owner": candidate.get("owner"),
+            }
+
+        failed_checks = payload.get("failed_check_ids")
+        allowed_collectors = payload.get("allowed_auxiliary_collectors")
+        holds = payload.get("holds")
+        return {
+            "schema_version": 1,
+            "available": True,
+            "active": payload.get("active") is True,
+            "stale": stale,
+            "age_seconds": age_seconds,
+            "observed_at": observed_at,
+            "stale_after_seconds": stale_after,
+            "runtime_active": runtime_active,
+            "owner": {
+                "runtime_id": str(owner.get("runtime_id") or ""),
+                "pid": owner_pid,
+                "adb_target": owner_target or "unknown",
+            },
+            "owner_matches_active_runtime": owner_matches,
+            "gate_id": payload.get("gate_id"),
+            "strategy": payload.get("strategy"),
+            "battle_scope": payload.get("battle_scope"),
+            "source": payload.get("source"),
+            "phase": payload.get("phase"),
+            "failed_check_ids": [
+                str(value)
+                for value in (
+                    failed_checks if isinstance(failed_checks, list) else []
+                )
+                if str(value).strip()
+            ],
+            "reason": str(payload.get("reason") or ""),
+            "activated_at": payload.get("activated_at"),
+            "updated_at": payload.get("updated_at"),
+            "global_pause": payload.get("global_pause") is True,
+            "runtime_stopped": payload.get("runtime_stopped") is True,
+            "primary_state": str(payload.get("primary_state") or "UNKNOWN"),
+            "holds": holds if isinstance(holds, list) else [],
+            "observation_authority": authority_field(
+                "observation_authority",
+                "observation",
+            ),
+            "auxiliary_collection_authority": authority_field(
+                "auxiliary_collection_authority",
+                "auxiliary_collection",
+            ),
+            "allowed_auxiliary_collectors": [
+                str(value)
+                for value in (
+                    allowed_collectors
+                    if isinstance(allowed_collectors, list)
+                    else []
+                )
+                if str(value).strip()
+            ],
+            "strategy_action_authority": authority_field(
+                "strategy_action_authority",
+                "strategy_action",
+            ),
+            "lifecycle_action_authority": authority_field(
+                "lifecycle_action_authority",
+                "lifecycle_action",
+            ),
+            "auxiliary_route": (
+                payload.get("auxiliary_route")
+                if isinstance(payload.get("auxiliary_route"), Mapping)
+                else None
+            ),
+            "path": self._display_path(self.strategy_action_gate_path),
         }
 
     def _runtime_evidence(self) -> dict[str, Any]:
