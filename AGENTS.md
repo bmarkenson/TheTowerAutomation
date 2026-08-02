@@ -19,16 +19,18 @@ current process and device.
 ## Non-negotiable rules
 
 - Run project Python through `.venv/bin/python`, including tests.
-- The trusted project permission profile enables loopback access to the
-  established host ADB server. Choose the ADB execution path from the current
-  session's declared permissions: use the normal workspace sandbox when
-  network is enabled; when the session explicitly declares network restricted,
-  skip the known-failing isolated probe and use approved host execution. If the
-  capability is not stated, try one bounded sandbox command and retry it
-  immediately through approved host execution on an environment-level network
-  failure. Treat that failure as an invocation-environment failure, not proof
-  that the device is unavailable, and do not interrupt the workflow merely to
-  narrate the fallback.
+- Follow [`docs/sandbox_boundaries.md`](docs/sandbox_boundaries.md) for host
+  process, PID-lock, user-systemd, ADB, local-socket, and long-lived-process
+  checks. Sandbox `ps`, `/proc`, `pgrep`, `kill -0`, or `systemctl --user`
+  failures cannot prove that a host process is absent or that a lock is stale;
+  use host-backed API or approved-host process evidence plus the OS lock.
+- Run ADB reads as bounded, exact-target commands. A normal sandbox may be used
+  for `get-state` or capture only when the current session explicitly provides
+  working project loopback access. Never use sandbox `adb connect`,
+  `start-server`, or `kill-server` as an availability probe; connection
+  management and any retry after an invocation-environment failure belong on
+  the approved host path. Such a failure is not evidence that the host ADB
+  server, tunnel, emulator, or target is unavailable.
 - Never Surrender a pre-existing or operator-owned battle merely to create a
   development test boundary. A battle deliberately started by the agent for a
   bounded test may be Surrendered only when the task author explicitly

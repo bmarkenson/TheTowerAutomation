@@ -2,7 +2,9 @@
 
 This runbook records stable operational facts for TheTower. Process IDs, waves,
 screen states, control directives, and active targets are volatile and must be
-re-inspected at the start of every thread.
+re-inspected at the start of every thread. Follow
+[`sandbox_boundaries.md`](sandbox_boundaries.md) when interpreting host PID,
+OS-lock, user-systemd, ADB, localhost-socket, or execution-wrapper evidence.
 
 ## Python and repository
 
@@ -23,28 +25,15 @@ timeout 8s adb -s localhost:5555 get-state
 timeout 10s adb -s localhost:5555 exec-out screencap -p > /tmp/thetower_current.png
 ```
 
-The expected connection response is `device`. The trusted project's
-`.codex/config.toml` selects a workspace permission profile that explicitly
-allows `localhost` and `127.0.0.1`, so a session that loads the project layer
-can reach the established host ADB server. Start a new Codex session after
-changing that configuration so the project layer is reloaded.
-
-Choose the execution path from the permissions declared for the current
-session:
-
-- When command network access is enabled, run one bounded ADB check through
-  the normal workspace sandbox.
-- When the session explicitly declares command network restricted, skip the
-  isolated ADB probe and run the check once through approved host execution.
-- When command network capability is not stated, try one bounded sandbox
-  command. On an environment-level failure such as `could not install
-  *smartsocket* listener: Operation not permitted`, retry immediately through
-  approved host execution.
-
-Do not preflight ADB with an extra known-failing invocation, and do not pause
-the workflow merely to narrate the fallback. An isolated failure describes the
-invocation environment; it does **not** prove that the established host ADB
-server or emulator target is unavailable.
+The expected connection response is `device`. A bounded exact-target read may
+use the normal sandbox only when the current session declares working project
+loopback access. Never use sandbox `adb connect`, `start-server`, or
+`kill-server` as a preflight. The managed runtime owns normal reconnection and
+target handoff; explicit connection management uses approved host execution.
+Retry an invocation-environment failure once on that host path before making
+any claim about the established ADB server, tunnel, emulator, or target. The
+complete decision and error-classification procedure is in
+[`sandbox_boundaries.md`](sandbox_boundaries.md#adb-reads-and-connection-management).
 
 Project screenshot helpers accept native portrait framebuffers at `1080x1920`
 or `720x1280` and normalize them into the canonical `1080x1920` vision space.
@@ -71,17 +60,30 @@ Inspect these sources together; none is sufficient alone:
 ```bash
 .venv/bin/python tools/automation_ctl.py status
 sed -n '1,160p' logs/automation_ctl.json
-sed -n '1,160p' logs/automation-localhost_5555.lock
+for lock in logs/automation-*.lock; do
+  [ -e "$lock" ] || continue
+  printf '%s\n' "$lock"
+  sed -n '1,160p' "$lock"
+done
+curl --fail --silent --show-error http://127.0.0.1:8787/api/v1/status \
+  | jq '{runtime, process_service, observation, acknowledgements}'
 tail -120 logs/actions.log
 timeout 8s adb -s localhost:5555 get-state
 ```
 
-- The control file is persistent operator intent.
+- The control file and `automation_ctl.py status` are persistent operator
+  intent, not evidence that a process is alive.
+- The control-surface API is the preferred host-backed view of held locks, PID
+  liveness, systemd `MainPID`, and observation freshness. If it is unreachable,
+  use the OS-lock and approved-host fallbacks in the
+  [sandbox-boundary guide](sandbox_boundaries.md#pid-lock-and-process-checks).
 - An active lock record names its owner PID and target. A clean release rewrites
   the record as `state: released`, clears `pid`, and records `released_at`;
   that record is historical and needs no stale-process confirmation. A crash
   can leave `state: held` metadata after the OS lock has been released, so
-  confirm a remaining PID and OS-lock evidence before treating it as a live
+  confirm OS-lock and host-backed process evidence before treating it as a live
+  owner. Conversely, a held OS lock is not stale merely because sandbox
+  `ps`, `/proc`, `pgrep`, `kill -0`, or `systemctl --user` cannot see its
   owner.
 - `actions.log` records what the automation intended, observed, and dispatched.
   Guarded and multi-step workflows follow the

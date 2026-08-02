@@ -71,6 +71,9 @@ Read these only when their condition applies:
   when changing runtime, control, process, or ADB behavior; read the complete
   runbook before process/device interaction, live validation, or runtime
   diagnosis.
+- [`sandbox_boundaries.md`](sandbox_boundaries.md): read before host-process,
+  PID-lock, user-systemd, ADB, localhost-socket, or long-lived-process work.
+  Sandbox process and bus visibility are not host liveness evidence.
 - [`observed_issues.md`](observed_issues.md): read `Open` before live work or
   runtime diagnosis. Read matching entries in
   [`issues/`](issues/README.md) only when investigating a recurrence or
@@ -99,9 +102,9 @@ Read these only when their condition applies:
 
 This path is mandatory before process/device interaction, live validation,
 runtime diagnosis, or claims about volatile runtime state. First read the
-complete runtime runbook and the `Open` section of the issue ledger. Then
-perform the fresh inspection below. This is not a prerequisite for code-only
-edits whose validation is entirely repository-local.
+complete runtime runbook, the sandbox-boundary guide, and the `Open` section of
+the issue ledger. Then perform the fresh inspection below. This is not a
+prerequisite for code-only edits whose validation is entirely repository-local.
 
 Do not assume that the process, PID, ADB port, control state, battle state,
 pause state, current screen, wave, strategy, or last handoff observation is
@@ -112,14 +115,27 @@ git status --short
 git log -6 --oneline
 .venv/bin/python tools/automation_ctl.py status
 sed -n '1,160p' logs/automation_ctl.json
-sed -n '1,160p' logs/automation-localhost_5555.lock
+for lock in logs/automation-*.lock; do
+  [ -e "$lock" ] || continue
+  printf '%s\n' "$lock"
+  sed -n '1,160p' "$lock"
+done
+curl --fail --silent --show-error http://127.0.0.1:8787/api/v1/status \
+  | jq '{runtime, process_service, observation, acknowledgements}'
 tail -120 logs/actions.log
 timeout 8s adb -s localhost:5555 get-state
 ```
 
-Confirm the lock PID against the host process table and take a read-only current
-screenshot when screen state matters. Adjust the target if the lock, process,
-or handoff identifies a different ADB port.
+`automation_ctl.py status` and the control JSON report intent, not process
+liveness. The control-surface API supplies host-backed PID, OS-lock, systemd,
+and heartbeat evidence even when sandbox PID tools cannot see the owner. If it
+is unreachable, follow the
+[sandbox-boundary fallback](sandbox_boundaries.md#pid-lock-and-process-checks)
+for the nonblocking lock probe and approved-host `ps`/`systemctl`; never
+classify a lock as stale from sandbox `ps`, `/proc`, `pgrep`, `kill -0`, or
+user-bus failure. Adjust the ADB target from current evidence, follow the
+documented ADB execution path, and take a read-only current screenshot when
+screen state matters.
 
 If a natural Game Over appears during inspection, preserve it. Pause or stop
 automation when needed to prevent an unintended terminal action, then pivot to

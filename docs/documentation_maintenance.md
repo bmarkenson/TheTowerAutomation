@@ -12,6 +12,7 @@ and transition rules below.
 | Always-on repository safety and development rules | `AGENTS.md` |
 | Task-based startup and live-inspection routing | `docs/new_thread.md` |
 | Handoff content and freshness format | `docs/handoff_template.md` |
+| Sandbox-versus-host evidence and execution fallbacks | `docs/sandbox_boundaries.md` |
 | Stable live process, control, ADB, and action procedure | `docs/runtime_operations.md` |
 | Current runtime architecture and layer boundaries | `docs/architecture/runtime.md` |
 | Current priorities and domain routing | `PENDING_DEVELOPMENT.md` |
