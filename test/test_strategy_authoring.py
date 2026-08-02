@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import replace
+import hashlib
 import json
 from pathlib import Path
 
@@ -46,6 +47,43 @@ def _bundled_authoring(name: str = "farm_t18") -> dict:
         _yaml(STRATEGY_DIRECTORY / f"{name}.source.yaml"),
         display_name=f"{name} authoring",
     )
+
+
+def _fingerprint(value: dict) -> str:
+    canonical = json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _write_schema_one_profile(profile_directory: Path) -> Path:
+    profile_directory.mkdir(parents=True, exist_ok=True)
+    source = _yaml(STRATEGY_DIRECTORY / "farm_t19.source.yaml")
+    source["meta"] = {
+        **source["meta"],
+        "name": "farm_t19_custom",
+        "version": 1,
+    }
+    plan = build_strategy_yaml(source)
+    publication = {
+        "schema_version": 1,
+        "id": "farm_t19_custom",
+        "display_name": "Farm T19 Custom",
+        "published_at": "2026-08-02T09:00:00-07:00",
+        "source_fingerprint": _fingerprint(source),
+        "plan_fingerprint": _fingerprint(plan),
+        "source": source,
+        "plan": plan,
+    }
+    path = profile_directory / "farm_t19_custom.profile.yaml"
+    path.write_text(
+        yaml.safe_dump(publication, sort_keys=False),
+        encoding="utf-8",
+    )
+    return path
 
 
 def _custom_source(
@@ -643,11 +681,8 @@ def test_repository_farm_sources_resolve_through_adapter_without_plan_changes(na
 def test_schema_one_profile_converts_in_memory_without_rewrite_or_plan_change(
     tmp_path,
 ):
-    fixture = STRATEGY_DIRECTORY / "custom" / "farm_t19_custom.profile.yaml"
     profile_directory = tmp_path / "profiles"
-    profile_directory.mkdir()
-    copied = profile_directory / fixture.name
-    copied.write_bytes(fixture.read_bytes())
+    copied = _write_schema_one_profile(profile_directory)
     before = copied.read_bytes()
     legacy = _yaml(copied)
     store = StrategyProfileStore(profile_directory=profile_directory)

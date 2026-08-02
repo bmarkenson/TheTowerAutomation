@@ -276,7 +276,9 @@ into the runtime evaluator:
   write protection, and atomic publication.
 - `StrategyProfileStore` (or a narrowly separated authoring store behind it)
   owns strategy drafts and publications, embeds the pinned base snapshot, and
-  retains the existing fixed-directory and fixed-filename safety boundary.
+  retains the existing fixed-directory and fixed-filename safety boundary. It
+  also owns recoverable custom-Strategy retirement under the same catalog
+  writer lock; the client never supplies an archive path.
 - The Farm authoring adapter feeds resolved settings into the existing shared
   strategy builder. Generated plans remain validated output, not user-authored
   input.
@@ -323,11 +325,24 @@ The actionable sequence is tracked in the
 [`runtime and validation backlog`](../backlog/runtime-and-validation.md).
 
 Backend slice 1, additive API/editor slice 2, and specialized-editor slice 3
-are implemented. Server revision 20 preserves `strategy_authoring_v1` and adds
-`strategy_authoring_specialized_editors_v1`; the original profile endpoint and
+are implemented. Server revision 21 preserves `strategy_authoring_v1` and
+`strategy_authoring_specialized_editors_v1`, and adds
+`strategy_authoring_profile_lifecycle_v1`; the original profile endpoint and
 capabilities remain as the older-client compatibility facade. The native shell
-now handles every registered editor type with server-declared managed controls
-or an honest fixed presentation, retains dormant Ignore values and unknown
+handles every registered editor type with server-declared managed controls or
+an honest fixed presentation, retains dormant Ignore values and unknown
 Ultimate Weapon fields, and keeps validation, resolution, publication, and
-runtime authority in Python. The running-battle strategy-gate refinement and
-future profile-local definitions remain separate later slices above.
+runtime authority in Python.
+
+Custom Strategy display-name changes use ordinary reviewed publication, so the
+stable ID does not change and the next logical version is published under the
+same optimistic fingerprint protection as any other edit. Recoverable deletion
+is a separate `retire_strategy` operation: Linux validates the fixed ID and
+fresh source fingerprint, refuses bundled/reserved or currently selected
+Strategies, and atomically moves the exact publication into the store-owned
+`retired` directory. It then refreshes both authoring and legacy active
+catalogs and audits the retirement without changing selection or activation.
+Managed restore and immutable publication history remain the explicit future
+fallback work; a retirement archive is not presented as revision history. The
+running-battle strategy-gate refinement and future profile-local definitions
+remain separate later slices above.

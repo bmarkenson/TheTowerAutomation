@@ -409,9 +409,13 @@ stages:
       conflicts, failed publication atomicity, legacy schema-1 migration,
       rollback-as-new semantic fidelity, older-client compatibility, and
       publication/activation separation.
-  - [ ] Add profile duplication/retirement workflows after the source and base
-    revision model is stable, preserving immutable bundled templates and
-    atomic/stale-write publication protections.
+  - [x] Add discoverable custom Strategy cloning and display-name renaming plus
+    recoverable deletion/retirement. Stable IDs and immutable bundled templates
+    remain protected; retirement requires the opened source fingerprint,
+    refuses the currently selected Strategy, moves the exact publication into
+    the server-owned archive, and changes neither selection nor activation.
+    Managed restoration remains coupled to the immutable Strategy-history and
+    safe-fallback item above rather than introducing a second rollback model.
   - [x] Show directive/acknowledgement separately from primary state, menu,
     overlays, run mode, pause status, runtime evidence, activity, and completed
     battle records.

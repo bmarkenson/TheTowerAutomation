@@ -285,18 +285,19 @@ revision.
 Custom publications live under `config/strategies/custom` and are ignored by
 Git as operator-owned configuration. Profile IDs are restricted to fixed-name
 lowercase identifiers and cannot collide with bundled or legacy names. There is
-no API delete or arbitrary-path operation. Selecting or applying a published
-profile remains a separate explicit action through the existing process API and
-its normal next-boundary or active-battle semantics.
+no delete or arbitrary-path operation on the older profile endpoint. Selecting
+or applying a published profile remains a separate explicit action through the
+existing process API and its normal next-boundary or active-battle semantics.
 
 ## Sparse strategy authoring
 
-Server revision 20 preserves `strategy_authoring_v1` and advertises
-`strategy_authoring_specialized_editors_v1`. The additive
+Server revision 21 preserves `strategy_authoring_v1` and
+`strategy_authoring_specialized_editors_v1`, and advertises
+`strategy_authoring_profile_lifecycle_v1`. The additive
 `/api/v1/strategy-authoring` endpoint implements the sparse Base/Strategy model
 without changing `/api/v1/strategy-profiles`, `strategy_profile_catalog_v1`, or
 `strategy_profile_editor_v2`. Older native clients therefore keep using their
-existing facade, while the revision-20 client requires both authoring
+existing facade, while the revision-21 client requires all three authoring
 capabilities and fails compatibility clearly against an older resident
 service.
 
@@ -321,15 +322,27 @@ first included or overridden. The client does not implement a second
 normalizer or resolver.
 
 POST accepts only `validate_base`, `publish_base`, `validate_strategy`,
-`publish_strategy`, and `preview_rebase`. Validation returns normalized source,
-effective resolution, source/effective review data, fingerprints, summary, and
-rule count where applicable. Responses never include the expanded generated
-plan. Base publication appends the next immutable revision under optimistic
-latest-fingerprint protection. Strategy publication uses the existing atomic
-fixed-name store, embeds its pinned Base snapshot, and remains separate from
-every strategy-selection or activation action. Stale writes are conflicts;
-invalid source is a bad request. Both publication paths append an
-operator-facing control-surface audit entry.
+`publish_strategy`, `preview_rebase`, and `retire_strategy`. Validation returns
+normalized source, effective resolution, source/effective review data,
+fingerprints, summary, and rule count where applicable. Responses never include
+the expanded generated plan. Base publication appends the next immutable
+revision under optimistic latest-fingerprint protection. Strategy publication
+uses the existing atomic fixed-name store, embeds its pinned Base snapshot, and
+remains separate from every strategy-selection or activation action. Stale
+writes are conflicts; invalid source is a bad request. Publication paths append
+an operator-facing control-surface audit entry.
+
+The native **Rename Strategy** affordance focuses the existing display-name
+field and deliberately completes through normal Strategy review and
+publication; IDs remain stable. `retire_strategy` is the backend operation
+behind **Delete Strategy...**. It accepts only an exact custom Strategy ID and
+the source fingerprint loaded by the client, refuses bundled/reserved or
+currently selected Strategies, and moves the complete fixed-name publication
+to a server-owned `retired` directory under the same advisory catalog lock.
+The response returns retirement metadata and refreshed catalogs, not source,
+generated plans, rules, executor actions, or a client-selected path. The
+operation changes neither the control directive nor activation. Restoration is
+not exposed in this revision.
 
 Rebase preview is computed by the backend authoring resolver and shared diff
 helpers. It reports Base entries added, removed, or changed; inherited effective

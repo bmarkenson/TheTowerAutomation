@@ -1155,8 +1155,38 @@ public sealed class StrategyAuthoringMutationResponse
     [JsonPropertyName("catalog")]
     public StrategyAuthoringCatalogResponse? Catalog { get; set; }
 
+    [JsonPropertyName("retired")]
+    public bool Retired { get; set; }
+
+    [JsonPropertyName("retirement")]
+    public StrategyRetirement? Retirement { get; set; }
+
     [JsonPropertyName("warning")]
     public string? Warning { get; set; }
+}
+
+public sealed class StrategyRetirement
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("display_name")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("version")]
+    public int Version { get; set; }
+
+    [JsonPropertyName("source_fingerprint")]
+    public string SourceFingerprint { get; set; } = "";
+
+    [JsonPropertyName("retired_at")]
+    public string RetiredAt { get; set; } = "";
+
+    [JsonPropertyName("archive_name")]
+    public string ArchiveName { get; set; } = "";
+
+    [JsonPropertyName("recoverable")]
+    public bool Recoverable { get; set; }
 }
 
 public sealed class StrategyAuthoringReview

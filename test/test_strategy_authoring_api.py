@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import http.client
 import json
 from pathlib import Path
@@ -18,6 +19,7 @@ from core.control_surface import (
 )
 from core.strategy_authoring import legacy_farm_source_to_strategy_source
 from tools.control_surface_server import ControlSurfaceHTTPServer, STATIC_DIR
+from tools.strategy_builders.lib import build_strategy_yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -77,6 +79,45 @@ def _strategy_source(*, revision: int = 1) -> dict[str, Any]:
     }
 
 
+def _fingerprint(value: Mapping[str, Any]) -> str:
+    canonical = json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _write_schema_one_profile(profile_directory: Path) -> Path:
+    """Create a deterministic legacy fixture outside operator-owned catalogs."""
+
+    profile_directory.mkdir(parents=True, exist_ok=True)
+    source = _yaml(STRATEGIES / "farm_t19.source.yaml")
+    source["meta"] = {
+        **source["meta"],
+        "name": "farm_t19_custom",
+        "version": 1,
+    }
+    plan = build_strategy_yaml(source)
+    publication = {
+        "schema_version": 1,
+        "id": "farm_t19_custom",
+        "display_name": "Farm T19 Custom",
+        "published_at": "2026-08-02T09:00:00-07:00",
+        "source_fingerprint": _fingerprint(source),
+        "plan_fingerprint": _fingerprint(plan),
+        "source": source,
+        "plan": plan,
+    }
+    path = profile_directory / "farm_t19_custom.profile.yaml"
+    path.write_text(
+        yaml.safe_dump(publication, sort_keys=False),
+        encoding="utf-8",
+    )
+    return path
+
+
 def _service(tmp_path: Path) -> ControlSurfaceService:
     return ControlSurfaceService(
         repository_root=tmp_path,
@@ -113,6 +154,14 @@ def test_authoring_catalog_separates_bases_strategies_and_registry(tmp_path):
     ]["provenance"] == {"kind": "local"}
     assert catalog["strategies"]["items"][2]["authoring_supported"] is False
     assert catalog["capabilities"]["publication_activates_strategy"] is False
+    assert catalog["capabilities"]["operations"] == [
+        "validate_base",
+        "publish_base",
+        "validate_strategy",
+        "publish_strategy",
+        "preview_rebase",
+        "retire_strategy",
+    ]
     assert [state["id"] for state in catalog["capabilities"]["base_source_states"]] == [
         "not_included",
         "included_enforce",
@@ -439,11 +488,8 @@ def test_unknown_ultimate_weapon_values_survive_validation_publication_and_reope
 
 
 def test_authoring_api_opens_schema_one_profile_without_rewriting_it(tmp_path):
-    fixture = STRATEGIES / "custom" / "farm_t19_custom.profile.yaml"
     profile_directory = tmp_path / "profiles"
-    profile_directory.mkdir()
-    copied = profile_directory / fixture.name
-    copied.write_bytes(fixture.read_bytes())
+    copied = _write_schema_one_profile(profile_directory)
     before = copied.read_bytes()
     service = ControlSurfaceService(
         repository_root=tmp_path,
@@ -468,11 +514,8 @@ def test_authoring_api_opens_schema_one_profile_without_rewriting_it(tmp_path):
 
 
 def test_schema_one_profile_can_attach_first_base_only_after_review(tmp_path):
-    fixture = STRATEGIES / "custom" / "farm_t19_custom.profile.yaml"
     profile_directory = tmp_path / "profiles"
-    profile_directory.mkdir()
-    copied = profile_directory / fixture.name
-    copied.write_bytes(fixture.read_bytes())
+    copied = _write_schema_one_profile(profile_directory)
     before = copied.read_bytes()
     service = ControlSurfaceService(
         repository_root=tmp_path,
@@ -535,12 +578,103 @@ def test_schema_one_profile_can_attach_first_base_only_after_review(tmp_path):
     _assert_no_expanded_plan(published)
 
 
+def test_custom_strategy_rename_and_recoverable_deletion_are_guarded(tmp_path):
+    service = _service(tmp_path)
+    service.apply_strategy_authoring(
+        {
+            "operation": "publish_base",
+            "source": _base_source(_full_settings()),
+        }
+    )
+    published = service.apply_strategy_authoring(
+        {
+            "operation": "publish_strategy",
+            "source": _strategy_source(),
+        }
+    )
+
+    renamed_source = copy.deepcopy(published["source"])
+    renamed_source["display_name"] = "Farm Authored Experiment"
+    renamed = service.apply_strategy_authoring(
+        {
+            "operation": "publish_strategy",
+            "source": renamed_source,
+            "expected_source_fingerprint": published["profile"][
+                "source_fingerprint"
+            ],
+        }
+    )
+
+    assert renamed["source"]["id"] == "farm_authored"
+    assert renamed["source"]["display_name"] == "Farm Authored Experiment"
+    assert renamed["profile"]["version"] == 2
+    assert service.control_store.status()["strategy"] is None
+    _assert_no_expanded_plan(renamed)
+
+    active_path = tmp_path / "profiles" / "farm_authored.profile.yaml"
+    exact_publication = active_path.read_bytes()
+    service.control_store.set_strategy("farm_authored", source="test")
+    with pytest.raises(ControlSurfaceRequestError) as selected_error:
+        service.apply_strategy_authoring(
+            {
+                "operation": "retire_strategy",
+                "strategy_id": "farm_authored",
+                "expected_source_fingerprint": renamed["profile"][
+                    "source_fingerprint"
+                ],
+            }
+        )
+    assert selected_error.value.status == 409
+    assert "currently selected" in str(selected_error.value)
+    assert active_path.read_bytes() == exact_publication
+
+    service.control_store.set_strategy("farm_t18", source="test")
+    retired = service.apply_strategy_authoring(
+        {
+            "operation": "retire_strategy",
+            "strategy_id": "farm_authored",
+            "expected_source_fingerprint": renamed["profile"][
+                "source_fingerprint"
+            ],
+        }
+    )
+
+    assert retired["valid"] is True
+    assert retired["published"] is False
+    assert retired["retired"] is True
+    assert retired["retirement"] == {
+        "id": "farm_authored",
+        "display_name": "Farm Authored Experiment",
+        "version": 2,
+        "source_fingerprint": renamed["profile"]["source_fingerprint"],
+        "retired_at": retired["retirement"]["retired_at"],
+        "archive_name": retired["retirement"]["archive_name"],
+        "recoverable": True,
+    }
+    archive_path = (
+        tmp_path
+        / "profiles"
+        / "retired"
+        / retired["retirement"]["archive_name"]
+    )
+    assert archive_path.read_bytes() == exact_publication
+    assert not active_path.exists()
+    assert service.control_store.status()["strategy"] == "farm_t18"
+    assert "farm_authored" not in {
+        item["id"] for item in retired["catalog"]["strategies"]["items"]
+    }
+    assert "farm_authored" not in {
+        item["id"] for item in service.strategy_profiles()["items"]
+    }
+    assert "Retired Strategy farm_authored version 2" in (
+        tmp_path / "logs" / "actions.log"
+    ).read_text(encoding="utf-8")
+    _assert_no_expanded_plan(retired)
+
+
 def test_schema_one_profile_publishes_only_after_explicit_review_boundary(tmp_path):
-    fixture = STRATEGIES / "custom" / "farm_t19_custom.profile.yaml"
     profile_directory = tmp_path / "profiles"
-    profile_directory.mkdir()
-    copied = profile_directory / fixture.name
-    copied.write_bytes(fixture.read_bytes())
+    copied = _write_schema_one_profile(profile_directory)
     legacy = _yaml(copied)
     service = ControlSurfaceService(
         repository_root=tmp_path,
@@ -658,7 +792,11 @@ def test_authoring_http_status_codes_auth_compatibility_and_no_plan(tmp_path):
 
         status, server_status = request("GET", "/api/v1/status")
         assert status == 200
-        assert server_status["server_revision"] == CONTROL_SURFACE_REVISION == 20
+        assert server_status["server_revision"] == CONTROL_SURFACE_REVISION == 21
+        assert (
+            "strategy_authoring_profile_lifecycle_v1"
+            in CONTROL_SURFACE_CAPABILITIES
+        )
         assert (
             "strategy_authoring_specialized_editors_v1"
             in CONTROL_SURFACE_CAPABILITIES

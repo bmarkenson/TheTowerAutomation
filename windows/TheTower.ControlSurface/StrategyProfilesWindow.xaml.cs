@@ -181,6 +181,7 @@ public partial class StrategyProfilesWindow : Window
         EditorTitle.Text = $"{item.DisplayName} — next revision {item.LatestRevision + 1}";
         ShowBaseUpdate(null, false);
         CloneButton.IsEnabled = false;
+        RefreshStrategyLifecycleButtons();
     }
 
     private void SelectStrategy(StrategyAuthoringStrategyItem item)
@@ -203,6 +204,7 @@ public partial class StrategyProfilesWindow : Window
             EditorTitle.Text = item.DisplayName;
             EntityIdBox.Text = item.Id;
             DisplayNameBox.Text = item.DisplayName;
+            RefreshStrategyLifecycleButtons();
             return;
         }
 
@@ -218,6 +220,7 @@ public partial class StrategyProfilesWindow : Window
                     ?? "Bundled Strategies are immutable; clone this source to edit it.");
         EditorTitle.Text = item.DisplayName;
         ShowBaseUpdate(item.BaseUpdate, item.Editable);
+        RefreshStrategyLifecycleButtons();
     }
 
     private void BeginSource(
@@ -381,6 +384,8 @@ public partial class StrategyProfilesWindow : Window
             PublishButton.IsEnabled = false;
             ValidationSummaryText.Text = help;
             CloneButton.IsEnabled = false;
+            RenameStrategyButton.IsEnabled = false;
+            DeleteStrategyButton.IsEnabled = false;
         }
         finally
         {
@@ -413,6 +418,7 @@ public partial class StrategyProfilesWindow : Window
             help: "A Base is sparse and never activatable. Include only settings this reusable Base should own.");
         EditorTitle.Text = "New Base";
         ShowBaseUpdate(null, false);
+        RefreshStrategyLifecycleButtons();
         EntityIdBox.Focus();
         EntityIdBox.SelectAll();
     }
@@ -434,6 +440,106 @@ public partial class StrategyProfilesWindow : Window
         if (_selectedStrategy is { AuthoringSupported: true, Source: not null } template)
         {
             BeginStrategyClone(template);
+        }
+    }
+
+    private void RenameStrategy_Click(object sender, RoutedEventArgs e)
+    {
+        if (!CanManageSelectedStrategy())
+        {
+            return;
+        }
+        DisplayNameBox.Focus();
+        DisplayNameBox.SelectAll();
+        StatusText.Text =
+            "Edit the Strategy display name, then use Review & Publish. "
+            + "The stable ID and activation remain unchanged.";
+        StatusText.Foreground = (Brush)FindResource("MutedBrush");
+        ValidationSummaryText.Text =
+            "A rename uses normal server validation and publishes the next "
+            + "Strategy version together with any other reviewed draft changes.";
+        ValidationSummaryText.Foreground = (Brush)FindResource("MutedBrush");
+    }
+
+    private async void DeleteStrategy_Click(object sender, RoutedEventArgs e)
+    {
+        if (!CanManageSelectedStrategy()
+            || _selectedStrategy is not { } selected)
+        {
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(selected.SourceFingerprint))
+        {
+            ShowFailure(
+                "The Strategy has no current source fingerprint. Reload the catalog before deleting it.");
+            return;
+        }
+
+        var confirmation =
+            $"Delete {selected.DisplayName} ({selected.Id}), version {selected.Version}, "
+            + "from the active Strategy catalog?\n\n"
+            + "Linux will move the exact publication into its recoverable retired "
+            + "archive; it will not be erased. Bundled Strategies cannot be deleted.\n\n"
+            + "Selection and activation will not be changed. If this Strategy is "
+            + "currently selected, the server will refuse the deletion.";
+        if (MessageBox.Show(
+                this,
+                confirmation,
+                "Delete custom Strategy",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No) != MessageBoxResult.Yes)
+        {
+            StatusText.Text = "Strategy deletion cancelled; no file was changed.";
+            StatusText.Foreground = (Brush)FindResource("MutedBrush");
+            return;
+        }
+
+        SetBusy(true, $"Moving Strategy {selected.Id} to the recoverable archive...");
+        try
+        {
+            using var cancellation = new CancellationTokenSource(
+                TimeSpan.FromSeconds(120));
+            var response = await _api.PostStrategyAuthoringAsync(
+                new
+                {
+                    operation = "retire_strategy",
+                    strategy_id = selected.Id,
+                    expected_source_fingerprint = selected.SourceFingerprint,
+                },
+                cancellation.Token);
+            if (!response.Retired || response.Retirement is null)
+            {
+                throw new InvalidOperationException(
+                    "Linux did not confirm a recoverable Strategy retirement.");
+            }
+
+            var successMessage =
+                $"Deleted Strategy {response.Retirement.DisplayName} "
+                + $"({response.Retirement.Id}) from active catalogs; its exact "
+                + "publication is recoverable and nothing was activated.";
+            if (!string.IsNullOrWhiteSpace(response.Warning))
+            {
+                successMessage += $" Audit warning: {response.Warning}";
+            }
+            if (response.Catalog is not null)
+            {
+                ApplyCatalog(response.Catalog);
+            }
+            else
+            {
+                await LoadCatalogAsync();
+            }
+            StatusText.Text = successMessage;
+            StatusText.Foreground = new SolidColorBrush(Color.FromRgb(101, 230, 166));
+        }
+        catch (Exception exc)
+        {
+            ShowFailureWithConflictContext(exc.Message);
+        }
+        finally
+        {
+            SetBusy(false);
         }
     }
 
@@ -460,6 +566,7 @@ public partial class StrategyProfilesWindow : Window
         EditorTitle.Text = "New Strategy draft";
         ShowBaseUpdate(null, false);
         CloneButton.IsEnabled = false;
+        RefreshStrategyLifecycleButtons();
         EntityIdBox.Focus();
         EntityIdBox.SelectAll();
     }
@@ -996,6 +1103,24 @@ public partial class StrategyProfilesWindow : Window
             && (_isNew || _selectedStrategy?.Editable == true);
     }
 
+    private bool CanManageSelectedStrategy() =>
+        !_busy
+        && !_isBase
+        && !_isNew
+        && _selectedStrategy is
+        {
+            BuiltIn: false,
+            Editable: true,
+            AuthoringSupported: true,
+        };
+
+    private void RefreshStrategyLifecycleButtons()
+    {
+        var canManage = CanManageSelectedStrategy();
+        RenameStrategyButton.IsEnabled = canManage;
+        DeleteStrategyButton.IsEnabled = canManage;
+    }
+
     private void SetBusy(bool busy, string? message = null)
     {
         _busy = busy;
@@ -1005,6 +1130,7 @@ public partial class StrategyProfilesWindow : Window
         NewStrategyButton.IsEnabled = !busy;
         CloneButton.IsEnabled = !busy
             && _selectedStrategy is { AuthoringSupported: true };
+        RefreshStrategyLifecycleButtons();
         RefreshAuthoringActionButtons();
         if (!string.IsNullOrWhiteSpace(message))
         {

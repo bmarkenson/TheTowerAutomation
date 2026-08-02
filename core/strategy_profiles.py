@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime
 import fcntl
 import hashlib
@@ -11,7 +12,7 @@ from pathlib import Path
 import re
 import tempfile
 import threading
-from typing import Any, Mapping, Optional
+from typing import Any, Iterator, Mapping, Optional
 
 import yaml
 
@@ -86,6 +87,7 @@ STRATEGY_AUTHORING_OPERATIONS = (
     "validate_strategy",
     "publish_strategy",
     "preview_rebase",
+    "retire_strategy",
 )
 MAX_PROFILE_FILE_BYTES = 4 * 1024 * 1024
 _STRATEGY_ID_RE = re.compile(r"[a-z][a-z0-9_]{2,47}")
@@ -774,17 +776,34 @@ class StrategyProfileStore:
         """Atomically publish source and generated plan as one fixed file."""
 
         with self._publish_lock:
-            return self._publish_locked(
-                raw_profile,
-                expected_source_fingerprint=expected_source_fingerprint,
-            )
+            with self._catalog_write_lock():
+                return self._publish_under_file_lock(
+                    raw_profile,
+                    expected_source_fingerprint=expected_source_fingerprint,
+                )
 
-    def _publish_locked(
+    def retire_strategy(
         self,
-        raw_profile: object,
+        strategy_id: object,
         *,
         expected_source_fingerprint: object,
     ) -> dict[str, Any]:
+        """Remove one custom Strategy from active catalogs without erasing it."""
+
+        identifier = _draft_identifier({"id": strategy_id})
+        if identifier in _RESERVED_STRATEGY_IDS:
+            raise StrategyProfileError(
+                f"{identifier!r} is a bundled or reserved strategy name"
+            )
+        with self._publish_lock:
+            with self._catalog_write_lock():
+                return self._retire_under_file_lock(
+                    identifier,
+                    expected_source_fingerprint=expected_source_fingerprint,
+                )
+
+    @contextmanager
+    def _catalog_write_lock(self) -> Iterator[None]:
         self.profile_directory.mkdir(parents=True, exist_ok=True)
         lock_path = self.profile_directory / ".strategy-profiles.write.lock"
         try:
@@ -800,10 +819,110 @@ class StrategyProfileStore:
                 raise StrategyProfileError(
                     f"Unable to lock the strategy profile catalog: {exc}"
                 ) from exc
-            return self._publish_under_file_lock(
-                raw_profile,
-                expected_source_fingerprint=expected_source_fingerprint,
+            yield
+
+    def _retire_under_file_lock(
+        self,
+        identifier: str,
+        *,
+        expected_source_fingerprint: object,
+    ) -> dict[str, Any]:
+        path = _profile_path(self.profile_directory, identifier)
+        if not path.exists():
+            raise StrategyProfileConflictError(
+                f"Profile {identifier!r} no longer exists; reload the catalog"
             )
+        if path.is_symlink() or not path.is_file():
+            raise StrategyProfileConflictError(
+                f"Existing profile path for {identifier!r} is not a regular file"
+            )
+        try:
+            publication = _load_publication(path, expected_id=identifier)
+        except StrategyProfileError as exc:
+            raise StrategyProfileConflictError(
+                f"Existing profile {identifier!r} is invalid and was preserved: {exc}"
+            ) from exc
+
+        expected = str(expected_source_fingerprint or "").strip()
+        current = str(publication["source_fingerprint"])
+        if not expected or expected != current:
+            raise StrategyProfileConflictError(
+                f"Profile {identifier!r} changed after it was opened; "
+                "reload it before deleting"
+            )
+
+        retired_at = datetime.now().astimezone()
+        retirement_directory = self.profile_directory / "retired"
+        try:
+            if retirement_directory.is_symlink() or (
+                retirement_directory.exists()
+                and not retirement_directory.is_dir()
+            ):
+                raise StrategyProfileConflictError(
+                    "The retired Strategy archive is not a regular directory"
+                )
+            retirement_directory.mkdir(mode=0o700, exist_ok=True)
+        except StrategyProfileConflictError:
+            raise
+        except OSError as exc:
+            raise StrategyProfileError(
+                f"Unable to create the retired Strategy archive: {exc}"
+            ) from exc
+
+        item = self._publication_item(publication)
+        stamp = retired_at.strftime("%Y%m%dT%H%M%S%f%z")
+        archive_name = (
+            f"{identifier}.v{item['version']}.{stamp}."
+            f"{current[:12]}.retired.yaml"
+        )
+        archive_path = retirement_directory / archive_name
+        if archive_path.parent != retirement_directory:
+            raise StrategyProfileError("Invalid retired Strategy archive path")
+        if archive_path.exists() or archive_path.is_symlink():
+            raise StrategyProfileConflictError(
+                f"Retired archive target {archive_name!r} already exists"
+            )
+
+        moved = False
+        try:
+            os.replace(path, archive_path)
+            moved = True
+            self._fsync_directory(retirement_directory)
+            self._fsync_directory(self.profile_directory)
+        except OSError as exc:
+            if moved:
+                try:
+                    os.replace(archive_path, path)
+                    self._fsync_directory(retirement_directory)
+                    self._fsync_directory(self.profile_directory)
+                except OSError as rollback_exc:
+                    raise StrategyProfileError(
+                        "Unable to finish or roll back Strategy retirement; "
+                        f"inspect retired/{archive_name}: {rollback_exc}"
+                    ) from exc
+            raise StrategyProfileError(
+                f"Unable to retire Strategy {identifier!r}: {exc}"
+            ) from exc
+
+        with _PROFILE_ID_CACHE_LOCK:
+            _PROFILE_ID_CACHE.pop(self.profile_directory, None)
+        return {
+            "id": identifier,
+            "display_name": item["display_name"],
+            "version": item["version"],
+            "source_fingerprint": current,
+            "retired_at": retired_at.isoformat(timespec="seconds"),
+            "archive_name": archive_name,
+            "recoverable": True,
+        }
+
+    @staticmethod
+    def _fsync_directory(directory: Path) -> None:
+        directory_fd = os.open(directory, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
 
     def _publish_under_file_lock(
         self,
@@ -1272,11 +1391,7 @@ class StrategyProfileStore:
             os.chmod(temp_name, 0o600)
             os.replace(temp_name, path)
             temp_name = None
-            directory_fd = os.open(self.profile_directory, os.O_RDONLY)
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
+            self._fsync_directory(self.profile_directory)
         except OSError as exc:
             raise StrategyProfileError(
                 f"Unable to publish strategy profile {path.name}: {exc}"

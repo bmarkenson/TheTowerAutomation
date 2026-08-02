@@ -271,8 +271,9 @@ are displayed under the button, are consumed by the next applicable run, and
 are cleared if the selected strategy changes.
 
 **Strategy profiles...** opens the shared Strategy Authoring shell. Linux
-server revision 20 preserves `strategy_authoring_v1` and adds
-`strategy_authoring_specialized_editors_v1`. It provides separate **Bases** and
+server revision 21 preserves `strategy_authoring_v1` and
+`strategy_authoring_specialized_editors_v1`, and adds
+`strategy_authoring_profile_lifecycle_v1`. It provides separate **Bases** and
 **Strategies** catalogs while retaining the older profile endpoint and
 capabilities for older clients. A Base is a sparse reusable component and is
 never activatable. Editing one publishes the next immutable revision;
@@ -343,6 +344,19 @@ Distance definitions are a later phase; shared presets remain available.
 Tournament behavior, generated YAML rules, executor actions, runtime strategy
 gates, and activation behavior remain outside this editor.
 
+For a custom Strategy, **Rename Strategy** selects the editable display-name
+field; **Review & Publish...** applies the rename through the same Linux
+validation, review, stale-fingerprint protection, and next-version publication
+as every other edit. The stable lowercase ID does not change. **Delete
+Strategy...** never hard-deletes a publication: after an explicit confirmation,
+Linux moves its exact file into `config/strategies/custom/retired`, removes it
+from active catalogs, and records an audit entry. Bundled Strategies cannot be
+renamed or deleted. A stale editor or a Strategy still selected by the control
+directive is refused, and deletion never changes selection or activation.
+Restoring a retired publication is currently an operator/server maintenance
+action; a managed restore UI belongs with the future immutable Strategy-history
+workflow.
+
 ### Manual Windows Strategy Authoring smoke
 
 The Linux build cannot detect all WPF runtime binding failures. Run this check
@@ -370,7 +384,9 @@ operator's real `config/strategies/custom` directory:
 4. Create a disposable Strategy pinned to that Base. Exercise every applicable
    editor again, plus Inherit, Override Enforce, Override Observe, explicit
    Ignore, Reset to inherited, and dormant values across repeated state
-   changes. Validate, publish, close, reopen, and verify exact round trips.
+   changes. Validate, publish, close, reopen, and verify exact round trips. Use
+   **Rename Strategy** to change its display name, review and publish, then
+   reopen and verify the name and version advanced while its stable ID did not.
 5. Open an editable disposable existing Strategy with **No Base** (including a
    copied schema-1 fixture). Select the disposable Base, confirm **Review Base
    selection...** appears and publication is blocked before review, inspect and
@@ -383,7 +399,14 @@ operator's real `config/strategies/custom` directory:
 7. Publish a second disposable Base revision, open the Strategy's Base-update
    review, verify the semantic diff, accept it into the draft, validate and
    publish, then reopen and verify the reviewed pin and inherited values.
-8. Throughout the run, verify Validate writes nothing, publishing never changes
+8. Clone a second disposable custom Strategy solely for deletion. Select it for
+   the next battle in the disposable control catalog without starting a
+   process, then verify **Delete Strategy...** is refused and neither the file
+   nor control directive changes. Select a bundled Strategy, retry deletion,
+   decline once to prove cancellation, then confirm it. Verify the custom item
+   leaves both new and legacy active catalogs, its exact publication appears in
+   the disposable `retired` archive, and no process or Strategy was activated.
+9. Throughout the run, verify Validate writes nothing, publishing never changes
    the selected/active Strategy, no activation prompt appears, and the real
    operator profile catalog and control state remain byte-for-byte untouched.
 

@@ -158,6 +158,73 @@ def test_strategy_profile_publish_requires_current_revision(tmp_path):
     assert current["version"] == 1
 
 
+def test_strategy_profile_retirement_is_recoverable_and_stale_safe(tmp_path):
+    store = StrategyProfileStore(profile_directory=tmp_path)
+    published = store.publish(_draft())
+    active_path = tmp_path / "farm_t19_custom.profile.yaml"
+    exact_publication = active_path.read_bytes()
+
+    with pytest.raises(StrategyProfileConflictError, match="changed after"):
+        store.retire_strategy(
+            "farm_t19_custom",
+            expected_source_fingerprint="stale",
+        )
+    assert active_path.read_bytes() == exact_publication
+    assert not (tmp_path / "retired").exists()
+
+    retirement = store.retire_strategy(
+        "farm_t19_custom",
+        expected_source_fingerprint=published["profile"][
+            "source_fingerprint"
+        ],
+    )
+
+    assert retirement["id"] == "farm_t19_custom"
+    assert retirement["display_name"] == "Farm T19 Custom"
+    assert retirement["version"] == 1
+    assert retirement["recoverable"] is True
+    archive_path = tmp_path / "retired" / retirement["archive_name"]
+    assert archive_path.read_bytes() == exact_publication
+    assert not active_path.exists()
+    assert "farm_t19_custom" not in configurable_strategy_ids(tmp_path)
+    assert load_published_strategy_plan("farm_t19_custom", tmp_path) is None
+    assert "farm_t19_custom" not in {
+        item["id"] for item in store.catalog()["items"]
+    }
+
+    with pytest.raises(StrategyProfileConflictError, match="no longer exists"):
+        store.retire_strategy(
+            "farm_t19_custom",
+            expected_source_fingerprint=retirement["source_fingerprint"],
+        )
+    with pytest.raises(StrategyProfileError, match="bundled or reserved"):
+        store.retire_strategy(
+            "farm_t18",
+            expected_source_fingerprint="unused",
+        )
+
+
+def test_strategy_profile_retirement_rejects_archive_symlink(tmp_path):
+    store = StrategyProfileStore(profile_directory=tmp_path)
+    published = store.publish(_draft())
+    active_path = tmp_path / "farm_t19_custom.profile.yaml"
+    exact_publication = active_path.read_bytes()
+    outside = tmp_path / "outside-retired"
+    outside.mkdir()
+    (tmp_path / "retired").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(StrategyProfileConflictError, match="not a regular"):
+        store.retire_strategy(
+            "farm_t19_custom",
+            expected_source_fingerprint=published["profile"][
+                "source_fingerprint"
+            ],
+        )
+
+    assert active_path.read_bytes() == exact_publication
+    assert list(outside.iterdir()) == []
+
+
 def test_strategy_profile_edits_complete_setup_and_persists_permanent_skips(
     tmp_path,
 ):

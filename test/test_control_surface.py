@@ -797,7 +797,7 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert 'Text="PREVIOUS GAME SCREEN"' in native_xaml
     assert 'id="gameSpeedTargetSelect"' in html
     assert 'Content="x6.3 — Maximum available"' in native_xaml
-    assert "MinimumServerRevision = 20" in native_compatibility
+    assert "MinimumServerRevision = 21" in native_compatibility
     assert '"current_run_activity_scope"' in native_compatibility
     assert '"game_speed_target"' in native_compatibility
     assert '"host_performance_telemetry_v1"' in native_compatibility
@@ -813,6 +813,7 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert 'Content="Switch this battle"' in native_xaml
     assert 'Content="Strategy profiles..."' in native_xaml
     assert '"strategy_authoring_v1"' in native_compatibility
+    assert '"strategy_authoring_profile_lifecycle_v1"' in native_compatibility
     assert '"strategy_authoring_specialized_editors_v1"' in native_compatibility
     assert '"strategy_profile_catalog_v1"' in native_compatibility
     assert '"strategy_profile_editor_v2"' in native_compatibility
@@ -833,7 +834,10 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert 'Content="Show all settings"' in profile_xaml
     assert 'Content="Reset to inherited"' in profile_xaml
     assert 'Content="Review &amp; Publish..."' in profile_xaml
+    assert 'Content="Rename Strategy"' in profile_xaml
+    assert 'Content="Delete Strategy..."' in profile_xaml
     assert 'operation = "preview_rebase"' in profile_code
+    assert 'operation = "retire_strategy"' in profile_code
     assert 'reviewed_rebase_fingerprint' in profile_code
     assert 'Text="HOST HEALTH"' in native_xaml
     assert 'Text="BLUESTACKS CPU"' in native_xaml

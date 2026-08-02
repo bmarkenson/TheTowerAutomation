@@ -253,6 +253,30 @@ def test_wpf_rebase_and_publish_reviews_keep_activation_separate():
     assert "Publishing will not activate this Strategy" in view_models
     assert "Bases cannot be activated" in view_models
     assert '"/api/v1/strategy-authoring"' in api_client
-    assert "MinimumServerRevision = 20" in compatibility
+    assert "MinimumServerRevision = 21" in compatibility
+    assert '"strategy_authoring_profile_lifecycle_v1"' in compatibility
     assert '"strategy_authoring_specialized_editors_v1"' in compatibility
     assert '"strategy_authoring_v1"' in compatibility
+
+
+def test_wpf_custom_strategy_rename_and_delete_are_explicit_and_guarded():
+    xaml = _text("StrategyProfilesWindow.xaml")
+    code = _text("StrategyProfilesWindow.xaml.cs")
+    models = _text("Models.cs")
+
+    assert 'x:Name="RenameStrategyButton"' in xaml
+    assert 'Content="Rename Strategy"' in xaml
+    assert 'x:Name="DeleteStrategyButton"' in xaml
+    assert 'Content="Delete Strategy..."' in xaml
+    assert 'Style="{StaticResource DangerButton}"' in xaml
+    assert "EntityIdBox.IsEnabled = editable && _isNew" in code
+    assert "DisplayNameBox.Focus();" in code
+    assert "The stable ID and activation remain unchanged" in code
+    assert 'operation = "retire_strategy"' in code
+    assert "expected_source_fingerprint = selected.SourceFingerprint" in code
+    assert "MessageBoxResult.No" in code
+    assert "currently selected, the server will refuse" in code
+    assert "BuiltIn: false" in code
+    assert 'JsonPropertyName("retired")' in models
+    assert 'JsonPropertyName("retirement")' in models
+    assert 'JsonPropertyName("recoverable")' in models

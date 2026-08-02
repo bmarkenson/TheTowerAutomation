@@ -89,6 +89,13 @@
                     Click="NewStrategy_Click" />
             <Button x:Name="CloneButton" Content="Clone Strategy"
                     Click="CloneStrategy_Click" IsEnabled="False" />
+            <Button x:Name="RenameStrategyButton" Content="Rename Strategy"
+                    Click="RenameStrategy_Click" IsEnabled="False"
+                    ToolTip="Edit the display name, then use the normal reviewed publication flow. The stable ID does not change." />
+            <Button x:Name="DeleteStrategyButton" Content="Delete Strategy..."
+                    Click="DeleteStrategy_Click" IsEnabled="False"
+                    Style="{StaticResource DangerButton}"
+                    ToolTip="Remove a custom Strategy from active catalogs by moving its exact publication to the recoverable server archive." />
           </WrapPanel>
         </Grid>
       </Border>
@@ -142,7 +149,8 @@
                        ToolTip="Published IDs are immutable. Clone to choose another ID." />
               <TextBlock Grid.Column="2" Text="Display name" VerticalAlignment="Center"
                          Foreground="#C8D5E6" />
-              <TextBox Grid.Column="3" x:Name="DisplayNameBox" Margin="4" />
+              <TextBox Grid.Column="3" x:Name="DisplayNameBox" Margin="4"
+                       ToolTip="Rename a custom Strategy here, then Review &amp; Publish. Its stable ID remains unchanged." />
               <TextBlock Grid.Column="4" Text="Tier" VerticalAlignment="Center"
                          Foreground="#C8D5E6" />
               <TextBox Grid.Column="5" x:Name="TierBox" Margin="4" MaxLength="3" />

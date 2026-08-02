@@ -39,9 +39,11 @@ from core.host_performance import (
     HostPerformanceStore,
 )
 from core.strategy_profiles import (
+    STRATEGY_AUTHORING_OPERATIONS,
     StrategyProfileConflictError,
     StrategyProfileError,
     StrategyProfileStore,
+    normalize_strategy_id,
 )
 from utils.logger import DEFAULT_ACTIVITY_SCOPE_FILENAME
 
@@ -50,7 +52,7 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 20
+CONTROL_SURFACE_REVISION = 21
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -65,6 +67,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "host_performance_telemetry_v1",
     "observed_game_speed",
     "selected_strategy_process_start",
+    "strategy_authoring_profile_lifecycle_v1",
     "strategy_authoring_specialized_editors_v1",
     "strategy_authoring_v1",
     "strategy_profile_catalog_v1",
@@ -215,17 +218,10 @@ class ControlSurfaceService:
         if not isinstance(request, Mapping):
             raise ControlSurfaceRequestError("Request body must be a JSON object")
         operation = str(request.get("operation") or "").strip().lower()
-        operations = {
-            "validate_base",
-            "publish_base",
-            "validate_strategy",
-            "publish_strategy",
-            "preview_rebase",
-        }
-        if operation not in operations:
+        if operation not in STRATEGY_AUTHORING_OPERATIONS:
             raise ControlSurfaceRequestError(
-                "operation must be validate_base, publish_base, "
-                "validate_strategy, publish_strategy, or preview_rebase"
+                "operation must be one of: "
+                + ", ".join(STRATEGY_AUTHORING_OPERATIONS)
             )
         try:
             if operation == "validate_base":
@@ -251,11 +247,51 @@ class ControlSurfaceService:
                         "reviewed_rebase_fingerprint"
                     ),
                 )
-            else:
+            elif operation == "preview_rebase":
                 response = self.profile_store.preview_rebase(
                     request.get("source"),
                     request.get("target_base"),
                 )
+            else:
+                raw_identifier = request.get("strategy_id")
+                identifier = normalize_strategy_id(raw_identifier)
+                if (
+                    identifier is None
+                    or str(raw_identifier or "").strip() != identifier
+                ):
+                    raise StrategyProfileError(
+                        "strategy_id must use 3-48 lowercase letters, digits, "
+                        "or underscores and start with a letter"
+                    )
+                try:
+                    selected_strategy = self.control_store.status().get(
+                        "strategy"
+                    )
+                except ControlDirectiveError as exc:
+                    raise ControlSurfaceRequestError(
+                        "Unable to verify the selected Strategy before "
+                        f"deletion: {exc}",
+                        status=409,
+                    ) from exc
+                if selected_strategy == identifier:
+                    raise ControlSurfaceRequestError(
+                        f"Strategy {identifier!r} is currently selected; "
+                        "select another Strategy before deleting it. No "
+                        "control state was changed.",
+                        status=409,
+                    )
+                retirement = self.profile_store.retire_strategy(
+                    identifier,
+                    expected_source_fingerprint=request.get(
+                        "expected_source_fingerprint"
+                    ),
+                )
+                response = {
+                    "valid": True,
+                    "published": False,
+                    "retired": True,
+                    "retirement": retirement,
+                }
         except StrategyProfileConflictError as exc:
             raise ControlSurfaceRequestError(str(exc), status=409) from exc
         except StrategyProfileError as exc:
@@ -277,6 +313,17 @@ class ControlSurfaceService:
                 "Published Strategy "
                 f"{profile.get('id')} version {profile.get('version')}; "
                 "activation unchanged"
+            )
+            response["catalog"] = self.profile_store.authoring_catalog()
+            if audit_warning:
+                response["warning"] = audit_warning
+        elif operation == "retire_strategy":
+            retirement = response["retirement"]
+            audit_warning = self._append_audit(
+                "Retired Strategy "
+                f"{retirement.get('id')} version "
+                f"{retirement.get('version')} into the recoverable archive; "
+                "selection and activation unchanged"
             )
             response["catalog"] = self.profile_store.authoring_catalog()
             if audit_warning:
