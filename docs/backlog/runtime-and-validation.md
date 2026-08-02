@@ -390,6 +390,25 @@ stages:
     observation and allowlisted independent collectors can continue while
     strategy and lifecycle actions are blocked. Validate this authority split
     before newly editable settings rely on running-battle enforcement.
+  - [ ] Retain immutable Strategy publication history and add safe fallback.
+    - Append every validated publication as a durable revision containing its
+      sparse source, pinned Base snapshot, resolved values/provenance, generated
+      plan, fingerprints, version, timestamp, and audit identity; do not merely
+      increment the version while replacing the only recoverable file.
+    - Preserve the current latest-Strategy catalog and older-client endpoints,
+      while exposing ordered revision history and server-computed semantic diffs
+      without returning expanded generated plans.
+    - Restore a proven historical setup only by reviewing, validating, and
+      publishing it as a new latest revision under optimistic concurrency. Do
+      not mutate or delete history, change the selected Strategy, or activate a
+      restored revision automatically.
+    - Offer **Clone from revision** as an optional experimental branch, not as
+      the required backup or rollback mechanism. Conservatively adopt each
+      existing custom publication as its initial retained revision.
+    - Cover restart/reopen durability, embedded-Base independence, stale-write
+      conflicts, failed publication atomicity, legacy schema-1 migration,
+      rollback-as-new semantic fidelity, older-client compatibility, and
+      publication/activation separation.
   - [ ] Add profile duplication/retirement workflows after the source and base
     revision model is stable, preserving immutable bundled templates and
     atomic/stale-write publication protections.
