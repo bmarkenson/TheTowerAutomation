@@ -788,7 +788,7 @@ public static class StrategyAuthoringReviewFormatter
         var rebase = response.Rebase
             ?? throw new InvalidOperationException("The server did not return a rebase review.");
         var builder = new StringBuilder();
-        builder.AppendLine("REBASE REVIEW");
+        builder.AppendLine("BASE PIN REVIEW");
         builder.AppendLine();
         builder.AppendLine(
             $"Base settings: {rebase.BaseChanges.Added.Count} added, "
@@ -833,7 +833,7 @@ public static class StrategyAuthoringReviewFormatter
                         rebase.ValidationErrors.Select(error => error.Message)));
         builder.AppendLine();
         builder.AppendLine(
-            "Accepting this review changes only the draft's pinned Base revision. "
+            "Accepting this review changes only the draft's pinned Base reference. "
             + "The Strategy must still be validated and published, and publishing will not activate it.");
         return builder.ToString().TrimEnd();
     }

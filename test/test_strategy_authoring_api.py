@@ -467,6 +467,74 @@ def test_authoring_api_opens_schema_one_profile_without_rewriting_it(tmp_path):
     assert copied.read_bytes() == before
 
 
+def test_schema_one_profile_can_attach_first_base_only_after_review(tmp_path):
+    fixture = STRATEGIES / "custom" / "farm_t19_custom.profile.yaml"
+    profile_directory = tmp_path / "profiles"
+    profile_directory.mkdir()
+    copied = profile_directory / fixture.name
+    copied.write_bytes(fixture.read_bytes())
+    before = copied.read_bytes()
+    service = ControlSurfaceService(
+        repository_root=tmp_path,
+        strategy_profile_dir=profile_directory,
+    )
+    service.apply_strategy_authoring(
+        {
+            "operation": "publish_base",
+            "source": _base_source(_full_settings()),
+        }
+    )
+    item = next(
+        candidate
+        for candidate in service.strategy_authoring()["strategies"]["items"]
+        if candidate["id"] == "farm_t19_custom"
+    )
+
+    preview = service.apply_strategy_authoring(
+        {
+            "operation": "preview_rebase",
+            "source": item["source"],
+            "target_base": {"id": "farm_base", "revision": 1},
+        }
+    )
+
+    assert preview["valid"] is True
+    assert preview["source"]["id"] == "farm_t19_custom"
+    assert preview["source"]["base"] == {"id": "farm_base", "revision": 1}
+    assert preview["rebase"]["base_changes"]["added"]
+    assert preview["rebase"]["inherited_effective_changes"] == []
+    assert copied.read_bytes() == before
+    with pytest.raises(ControlSurfaceRequestError, match="reviewed rebase"):
+        service.apply_strategy_authoring(
+            {
+                "operation": "publish_strategy",
+                "source": preview["source"],
+                "expected_source_fingerprint": item["source_fingerprint"],
+            }
+        )
+    assert copied.read_bytes() == before
+
+    published = service.apply_strategy_authoring(
+        {
+            "operation": "publish_strategy",
+            "source": preview["source"],
+            "expected_source_fingerprint": item["source_fingerprint"],
+            "reviewed_rebase_fingerprint": preview[
+                "reviewed_rebase_fingerprint"
+            ],
+        }
+    )
+
+    assert published["source"]["id"] == "farm_t19_custom"
+    assert published["source"]["base"] == {"id": "farm_base", "revision": 1}
+    stored = _yaml(copied)
+    assert stored["source"]["base"] == {"id": "farm_base", "revision": 1}
+    assert stored["base_snapshot"]["id"] == "farm_base"
+    assert stored["base_snapshot"]["revision"] == 1
+    assert service.control_store.status()["strategy"] is None
+    _assert_no_expanded_plan(published)
+
+
 def test_schema_one_profile_publishes_only_after_explicit_review_boundary(tmp_path):
     fixture = STRATEGIES / "custom" / "farm_t19_custom.profile.yaml"
     profile_directory = tmp_path / "profiles"

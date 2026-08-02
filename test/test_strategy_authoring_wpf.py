@@ -20,7 +20,9 @@ def test_wpf_authoring_shell_groups_catalogs_and_registry_sections():
     assert 'Text="STRATEGIES"' in xaml
     assert 'x:Name="StrategiesList"' in xaml
     assert 'x:Name="BasePinBox"' in xaml
-    assert "BasePinBox.IsEnabled = editable && _isNew" in code
+    assert "BasePinBox.IsEnabled = editable && (_isNew || canChooseFirstBase)" in code
+    assert "_publishedBasePin = item.Source?.Base is not null" in code
+    assert "Choose the first compatible Base" in code
     assert "LatestCompatibleBaseRevisions" in code
     assert (
         "PropertyGroupDescription(nameof(AuthoringSettingRowViewModel.Section))"
@@ -224,6 +226,7 @@ def test_portable_view_model_suite_covers_editors_states_and_round_trips():
     assert "UltimateWeaponEditorPreservesUnknownValuesAndConstrainsStun" in tests
     assert "DormantIgnoreValueSurvivesInheritedAndReconstructedRows" in tests
     assert "ComputedDisplayPropertiesRemainReadOnly" in tests
+    assert "BasePinReviewCoversFirstAttachmentWithoutImplyingActivation" in tests
 
 
 def test_wpf_rebase_and_publish_reviews_keep_activation_separate():
@@ -239,8 +242,13 @@ def test_wpf_rebase_and_publish_reviews_keep_activation_separate():
     assert 'operation = "preview_rebase"' in code
     assert "_reviewedRebaseFingerprint = response.ReviewedRebaseFingerprint" in code
     assert "InvalidateReviewedRebase();" in code
-    assert "source.Base = CloneBaseReference(_rebaseOriginalBase);" in code
-    assert "the pinned revision was not changed" in code
+    assert "source.Base = _publishedBasePin is null" in code
+    assert 'ReviewRebaseButton.Content = "Review Base selection..."' in code
+    assert "RequiresReviewedBaseSelection()" in code
+    assert "SameBaseReference(_publishedBasePin, SelectedBasePin())" in code
+    assert "the draft pin was not changed" in code
+    assert 'builder.AppendLine("BASE PIN REVIEW")' in view_models
+    assert "draft's pinned Base reference" in view_models
     assert "StrategyAuthoringReviewFormatter.FormatPublishReview" in code
     assert "Publishing will not activate this Strategy" in view_models
     assert "Bases cannot be activated" in view_models

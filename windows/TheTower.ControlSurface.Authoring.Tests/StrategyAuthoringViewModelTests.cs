@@ -358,6 +358,20 @@ public sealed class StrategyAuthoringViewModelTests
     }
 
     [Fact]
+    public void BasePinReviewCoversFirstAttachmentWithoutImplyingActivation()
+    {
+        var review = StrategyAuthoringReviewFormatter.FormatRebaseReview(
+            new StrategyAuthoringMutationResponse
+            {
+                Rebase = new StrategyRebasePreview(),
+            });
+
+        Assert.Contains("BASE PIN REVIEW", review);
+        Assert.Contains("draft's pinned Base reference", review);
+        Assert.Contains("publishing will not activate it", review);
+    }
+
+    [Fact]
     public void ServerMetadataModelsRoundTripForEveryEditorFamily()
     {
         foreach (var editorType in EditorTypes)

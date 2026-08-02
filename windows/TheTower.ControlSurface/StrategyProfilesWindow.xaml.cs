@@ -24,7 +24,7 @@ public partial class StrategyProfilesWindow : Window
     private StrategyBaseItem? _selectedBase;
     private StrategyAuthoringStrategyItem? _selectedStrategy;
     private StrategyBaseUpdate? _baseUpdate;
-    private StrategyBaseReference? _rebaseOriginalBase;
+    private StrategyBaseReference? _publishedBasePin;
     private string? _expectedFingerprint;
     private string? _reviewedRebaseFingerprint;
     private bool _isBase;
@@ -168,7 +168,7 @@ public partial class StrategyProfilesWindow : Window
         _selectedBase = item;
         _selectedStrategy = null;
         _baseUpdate = null;
-        _rebaseOriginalBase = null;
+        _publishedBasePin = null;
         _isBase = true;
         _isNew = false;
         _expectedFingerprint = item.SourceFingerprint;
@@ -188,7 +188,7 @@ public partial class StrategyProfilesWindow : Window
         _selectedBase = null;
         _selectedStrategy = item;
         _baseUpdate = item.BaseUpdate;
-        _rebaseOriginalBase = item.BaseUpdate is not null && item.Source?.Base is not null
+        _publishedBasePin = item.Source?.Base is not null
             ? CloneBaseReference(item.Source.Base)
             : null;
         _isBase = false;
@@ -352,10 +352,13 @@ public partial class StrategyProfilesWindow : Window
                 ? choice.Reference is null
                 : choice.Reference?.Id == source.Base.Id
                     && choice.Reference.Revision == source.Base.Revision);
-        BasePinBox.IsEnabled = editable && _isNew;
+        var canChooseFirstBase = !_isNew && _publishedBasePin is null;
+        BasePinBox.IsEnabled = editable && (_isNew || canChooseFirstBase);
         BasePinHelpText.Text = _isNew
             ? "A new Strategy may pin a latest compatible Base. Reset local directives to inherit from it."
-            : "Published Base pins change only through the explicit reviewed update workflow.";
+            : canChooseFirstBase
+                ? "Choose the first compatible Base, then review its semantic changes before publishing. The Strategy ID and activation remain unchanged."
+                : "Published Base pins change only through the explicit reviewed update workflow.";
         BasePinPanel.Visibility = Visibility.Visible;
     }
 
@@ -394,7 +397,7 @@ public partial class StrategyProfilesWindow : Window
         _expectedFingerprint = null;
         _reviewedRebaseFingerprint = null;
         _baseUpdate = null;
-        _rebaseOriginalBase = null;
+        _publishedBasePin = null;
         BeginSource(
             new StrategyAuthoringSource
             {
@@ -448,7 +451,7 @@ public partial class StrategyProfilesWindow : Window
         _expectedFingerprint = null;
         _reviewedRebaseFingerprint = null;
         _baseUpdate = null;
-        _rebaseOriginalBase = null;
+        _publishedBasePin = null;
         BeginSource(
             source,
             template.Resolution,
@@ -513,6 +516,12 @@ public partial class StrategyProfilesWindow : Window
 
     private async void Publish_Click(object sender, RoutedEventArgs e)
     {
+        if (RequiresReviewedBaseSelection())
+        {
+            ShowFailure(
+                "Review the selected Base before publishing. The server must show and approve its effective changes first.");
+            return;
+        }
         var review = await ValidateDraftAsync(showSuccess: false);
         if (review is null)
         {
@@ -601,18 +610,19 @@ public partial class StrategyProfilesWindow : Window
 
     private async void ReviewRebase_Click(object sender, RoutedEventArgs e)
     {
-        if (_baseUpdate is null || _isBase)
+        var targetBase = BaseReviewTarget();
+        if (targetBase is null || _isBase)
         {
             return;
         }
+        var attachingFirstBase = _publishedBasePin is null;
         StrategyAuthoringSource source;
         try
         {
             source = BuildDraftSource();
-            if (_rebaseOriginalBase is not null)
-            {
-                source.Base = CloneBaseReference(_rebaseOriginalBase);
-            }
+            source.Base = _publishedBasePin is null
+                ? null
+                : CloneBaseReference(_publishedBasePin);
         }
         catch (Exception exc)
         {
@@ -620,7 +630,11 @@ public partial class StrategyProfilesWindow : Window
             return;
         }
 
-        SetBusy(true, "Computing reviewed Base rebase on Linux...");
+        SetBusy(
+            true,
+            attachingFirstBase
+                ? "Computing reviewed Base attachment on Linux..."
+                : "Computing reviewed Base rebase on Linux...");
         try
         {
             using var cancellation = new CancellationTokenSource(
@@ -632,8 +646,8 @@ public partial class StrategyProfilesWindow : Window
                     source,
                     target_base = new
                     {
-                        id = _baseUpdate.Id,
-                        revision = _baseUpdate.LatestRevision,
+                        id = targetBase.Id,
+                        revision = targetBase.Revision,
                     },
                 },
                 cancellation.Token);
@@ -643,21 +657,25 @@ public partial class StrategyProfilesWindow : Window
                 MessageBox.Show(
                     this,
                     reviewText,
-                    "Rebase validation failed",
+                    attachingFirstBase
+                        ? "Base attachment validation failed"
+                        : "Rebase validation failed",
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
-                StatusText.Text = "The rebase preview found validation errors; the pinned revision was not changed.";
+                StatusText.Text = "The Base review found validation errors; the draft pin was not changed.";
                 StatusText.Foreground = new SolidColorBrush(Color.FromRgb(255, 113, 135));
                 return;
             }
             if (MessageBox.Show(
                     this,
                     reviewText,
-                    "Review Base rebase",
+                    attachingFirstBase
+                        ? "Review Base attachment"
+                        : "Review Base rebase",
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Question) != MessageBoxResult.Yes)
             {
-                StatusText.Text = "Rebase cancelled; the pinned revision was not changed.";
+                StatusText.Text = "Base review cancelled; the draft pin was not changed.";
                 StatusText.Foreground = (Brush)FindResource("MutedBrush");
                 return;
             }
@@ -676,7 +694,7 @@ public partial class StrategyProfilesWindow : Window
                     dormantValues);
                 RebaseBanner.Visibility = Visibility.Collapsed;
                 ValidationSummaryText.Text =
-                    $"Reviewed rebase accepted for {_draftSource.Base?.Id} revision "
+                    $"Reviewed Base {(attachingFirstBase ? "attachment" : "rebase")} accepted for {_draftSource.Base?.Id} revision "
                     + $"{_draftSource.Base?.Revision}. Validate and Review & Publish to persist it.";
                 ValidationSummaryText.Foreground = new SolidColorBrush(
                     Color.FromRgb(101, 230, 166));
@@ -787,16 +805,68 @@ public partial class StrategyProfilesWindow : Window
             row => row.CaptureDormantValue(),
             StringComparer.Ordinal);
 
+    private StrategyBaseReference? SelectedBasePin() =>
+        BasePinBox.SelectedItem is StrategyBasePinChoice
+        {
+            Reference: not null,
+        } choice
+            ? CloneBaseReference(choice.Reference)
+            : null;
+
+    private StrategyBaseReference? BaseReviewTarget()
+    {
+        if (_baseUpdate is not null)
+        {
+            return new StrategyBaseReference
+            {
+                Id = _baseUpdate.Id,
+                Revision = _baseUpdate.LatestRevision,
+            };
+        }
+        if (_isBase || _isNew || _publishedBasePin is not null)
+        {
+            return null;
+        }
+        return SelectedBasePin();
+    }
+
+    private bool RequiresReviewedBaseSelection() =>
+        !_isBase
+        && !_isNew
+        && !SameBaseReference(_publishedBasePin, SelectedBasePin())
+        && _reviewedRebaseFingerprint is null;
+
+    private static bool SameBaseReference(
+        StrategyBaseReference? first,
+        StrategyBaseReference? second) =>
+        first?.Id == second?.Id
+        && first?.Revision == second?.Revision;
+
     private void ShowBaseUpdate(StrategyBaseUpdate? update, bool editable)
     {
         _baseUpdate = update;
-        if (update is null)
+        if (update is not null)
+        {
+            RebaseBannerText.Text = $"{update.DisplayName} revision {update.LatestRevision} is available; "
+                + $"the published Strategy remains pinned to revision {update.PinnedRevision}.";
+            ReviewRebaseButton.Content = "Review Base update...";
+            ReviewRebaseButton.IsEnabled = editable && !_busy;
+            RebaseBanner.Visibility = Visibility.Visible;
+            return;
+        }
+
+        var target = BaseReviewTarget();
+        if (target is null)
         {
             RebaseBanner.Visibility = Visibility.Collapsed;
             return;
         }
-        RebaseBannerText.Text = $"{update.DisplayName} revision {update.LatestRevision} is available; "
-            + $"the published Strategy remains pinned to revision {update.PinnedRevision}.";
+        var selectedLabel = BasePinBox.SelectedItem is StrategyBasePinChoice choice
+            ? choice.DisplayName
+            : $"{target.Id} revision {target.Revision}";
+        RebaseBannerText.Text = $"{selectedLabel} will become this Strategy's first Base. "
+            + "Review inherited values and provenance before publishing.";
+        ReviewRebaseButton.Content = "Review Base selection...";
         ReviewRebaseButton.IsEnabled = editable && !_busy;
         RebaseBanner.Visibility = Visibility.Visible;
     }
@@ -848,21 +918,26 @@ public partial class StrategyProfilesWindow : Window
         }
         InvalidateReviewedRebase();
         ValidationSummaryText.Text =
-            "The draft Base selection changed. Validate to refresh inherited values and provenance.";
+            BaseReviewTarget() is null || _isNew
+                ? "The draft Base selection changed. Validate to refresh inherited values and provenance."
+                : "The draft Base selection changed. Review the Base selection to refresh inherited values and provenance before publishing.";
         ValidationSummaryText.Foreground = new SolidColorBrush(
             Color.FromRgb(241, 191, 91));
+        RefreshAuthoringActionButtons();
     }
 
     private void InvalidateReviewedRebase()
     {
-        if (_reviewedRebaseFingerprint is null)
+        var reviewInvalidated = _reviewedRebaseFingerprint is not null;
+        _reviewedRebaseFingerprint = null;
+        ShowBaseUpdate(_baseUpdate, editable: true);
+        RefreshAuthoringActionButtons();
+        if (!reviewInvalidated)
         {
             return;
         }
-        _reviewedRebaseFingerprint = null;
-        ShowBaseUpdate(_baseUpdate, editable: true);
         ValidationSummaryText.Text =
-            "The draft changed after its Base review. Review the Base update again before publishing.";
+            "The draft changed after its Base review. Review the Base selection again before publishing.";
         ValidationSummaryText.Foreground = new SolidColorBrush(
             Color.FromRgb(241, 191, 91));
     }
@@ -907,6 +982,20 @@ public partial class StrategyProfilesWindow : Window
         }
     }
 
+    private void RefreshAuthoringActionButtons()
+    {
+        var canEdit = !_busy
+            && _draftSource is not null
+            && (_isNew
+                || _selectedBase?.Editable == true
+                || _selectedStrategy?.Editable == true);
+        ValidateButton.IsEnabled = canEdit;
+        PublishButton.IsEnabled = canEdit && !RequiresReviewedBaseSelection();
+        ReviewRebaseButton.IsEnabled = !_busy
+            && BaseReviewTarget() is not null
+            && (_isNew || _selectedStrategy?.Editable == true);
+    }
+
     private void SetBusy(bool busy, string? message = null)
     {
         _busy = busy;
@@ -916,13 +1005,7 @@ public partial class StrategyProfilesWindow : Window
         NewStrategyButton.IsEnabled = !busy;
         CloneButton.IsEnabled = !busy
             && _selectedStrategy is { AuthoringSupported: true };
-        ValidateButton.IsEnabled = !busy
-            && _draftSource is not null
-            && (_isNew || _selectedBase?.Editable == true || _selectedStrategy?.Editable == true);
-        PublishButton.IsEnabled = ValidateButton.IsEnabled;
-        ReviewRebaseButton.IsEnabled = !busy
-            && _baseUpdate is not null
-            && (_isNew || _selectedStrategy?.Editable == true);
+        RefreshAuthoringActionButtons();
         if (!string.IsNullOrWhiteSpace(message))
         {
             StatusText.Text = message;
