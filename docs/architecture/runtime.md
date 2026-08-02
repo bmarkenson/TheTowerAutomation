@@ -166,10 +166,12 @@ For an active save, the guarded identity is exactly
 `(versionNumber, currentTier, roundsStartedThisTier[currentTier], roundSeed)`.
 It is accompanied by `roundActiveBool`, `currentWave`, `saveRevision`, capture
 time, source fingerprint, and bounded container metadata. The identity has a
-canonical fingerprint, but it is observation only until a natural new battle
-proves seed change, the per-tier counter transition, and initial serialization
-timing. Process attachment therefore does not yet use it to suppress Battle
-History UI continuity inspection.
+canonical fingerprint. The authorized Tier 22 natural boundary proved that a
+known Home state preceded a new seed and per-tier counter, then that the exact
+identity stayed stable while revisions and waves advanced through the last
+active snapshot. The decoder's projection is nevertheless observation only:
+no implemented consumer binds a process with it or suppresses Battle History
+UI continuity inspection.
 
 The in-battle Perk projection requires exact agreement among the 50-entry
 `perkLevel` array, `perksPickedCount`, and every ordered `PerkPick(wave, perk)`
@@ -179,7 +181,12 @@ Unknown IDs, changed entry shape/class, non-monotonic waves, or any
 count/list/level inconsistency publish no Perk snapshot. An inactive zero/empty
 projection is explicitly `cleared`; later runtime ownership must retain the
 newest complete same-round snapshot rather than treating that cleared save as
-final-Perk evidence.
+final-Perk evidence. At the Tier 22 boundary, the last complete active snapshot
+contained 15 internally consistent ordered picks that exactly represented the
+terminal UI's 11 collapsed rows, and the immediate stable post-death projection
+was inactive/cleared. The normalized exact-version snapshot is therefore ready
+for a future fail-closed consumer, but that same-round cache and navigation
+decision do not exist yet.
 
 The same privacy boundary will expose additional active-round components only
 through exact-version manifests. In-battle Attack, Defense, and Utility levels
@@ -217,13 +224,21 @@ authorized automation initiated it. A future unknown numeric value remains in
 structural tail identity so rollover/change detection works, but the semantic
 completed entry is unavailable and terminal capture stays on UI evidence.
 
+The same Tier 22 audit changed its known pre-battle capped-tail baseline to a
+Tier 22, wave 751, Boss candidate whose complete 144-row projection agreed with
+the terminal UI. This validates the natural-boundary causality and projection,
+not runtime attachment. The dated evidence and exact row-level promotions are
+recorded in
+[`player_save_import.md`](../modules/player_save_import.md#2026-08-02-tier-22-natural-boundary-audit).
+
 Runtime adoption proceeds in bounded vertical slices with these ownership
 rules:
 
 1. A future observer may poll stable revisions at approximately five-minute
    cadence without navigation or input.
-2. After the new-round audit passes, only an exact active identity may bind a
-   process to a round without Battle History navigation.
+2. The completed new-round audit permits an implemented consumer to bind only
+   an exact active identity to a round without Battle History navigation; no
+   such consumer is implemented yet.
 3. Perk strategy facts may advance only from a newer complete snapshot carrying
    that same identity; a stale, different-round, or incomplete snapshot cannot
    drive strategy.
@@ -262,6 +277,13 @@ rules:
     or unbound save claim.
 13. Wait, Retry, Home, every setting mutation, post-action verification, and
     terminal transition confirmation remain owned by verified UI controls.
+
+Save-tail causality does not relax the independent current-process
+`runtime.run_binding` boundary. A process that starts only on a terminal remains
+unbound and cannot inherit Strategy, run configuration, Perk history, survival
+events, or other process-local evidence. A future save-derived attachment may
+identify the completed round only through its own guarded evidence; it cannot
+manufacture active-process continuity.
 
 The foundation model does not poll, cache, bind a process, build a persisted
 battle record, or alter `App`/Game Over dispatch. Those are later slices gated
@@ -304,14 +326,15 @@ receipt stores event metadata and an optional evidence reference, not the
 image. The passive compact Game Stats capture remains a separate optional
 base/ad coin-split augmentation.
 
-The collector foundation is complete only after synthetic state-machine/
-privacy tests and one authorized natural-boundary audit capture the new-round
-seed/counter/first-write transition, periodic freshness, final Perk/clearing
-behavior, and Game Over tail serialization. Upgrade, survival-ability, and
-other candidate components remain independently unavailable until their own
-matrix rows capture the prescribed transitions and are promoted. Until those
-audits promote their individual rows, the existing full UI terminal path
-remains authoritative.
+The authorized Tier 22 boundary now supplies the collector's core natural-round
+evidence: new identity, ordinary-foreground revision progress, final
+Perk/clearing behavior, and Game Over tail serialization. The collector itself
+and its synthetic state-machine/privacy tests remain unimplemented under
+`V1073-RUNTIME-013`; no replacement purpose-built battle is required before
+that work begins. Upgrade, survival-ability, and other candidate components
+remain independently unavailable until their own matrix rows are promoted, but
+they do not gate the core collector. The existing full UI terminal path remains
+authoritative until an implemented consumer passes its own validation.
 
 Game speed is a global battle-only invariant with persistent operator intent
 independent of strategy and ADB target. Numeric selections from `x0.0` through

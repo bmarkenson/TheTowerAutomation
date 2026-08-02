@@ -36,11 +36,16 @@ checked-item detail remains in the
     `3=Boss`, `6=Vampire`, and `99=Surrender`. Surrender carries no initiator
     attribution. Keep malformed newest entries and unknown semantic causes on
     UI fallback.
-  - [ ] Complete the natural-boundary runtime audits `V1073-RUNTIME-003` through
-    `V1073-RUNTIME-011`: new-round seed/counter/first-write timing, five-minute
-    freshness, final Perk serialization and clearing, Game Over history write
-    timing and tail binding, the complete `killedBy` enum, and passive coin
-    split augmentation. Every incomplete row remains routed to UI fallback.
+  - [x] Reconcile the authorized Tier 22 natural-boundary audit against
+    `V1073-RUNTIME-003` through `V1073-RUNTIME-011`. The
+    [dated outcome and row-level evidence](../modules/player_save_import.md#2026-08-02-tier-22-natural-boundary-audit)
+    establish the core new-round, foreground-revision, final-Perk/clearing,
+    Game Over tail-candidate, complete 144-row projection, mapped Boss, and
+    optional coin-split observations. No additional purpose-built battle is
+    requested. Pause/background freshness, future unknown `killedBy` values,
+    Retry/Home timing, runtime attachment, and survival repeated-event/timer
+    semantics remain explicit independent extensions, not blockers for
+    `V1073-RUNTIME-013`; incomplete runtime claims still use UI fallback.
   - [ ] Implement `V1073-RUNTIME-013`, the explicitly enabled read-only
     natural-boundary audit collector defined in the runtime architecture. Its
     allowlisted append-only receipts may record stable revision, active
@@ -48,7 +53,9 @@ checked-item detail remains in the
     semantic availability, passive boundary timing, and independently enabled
     upgrade/survival checkpoints plus visual-event metadata once their audit
     manifests exist. It must not attach an entry, write a battle record, decide
-    Perks navigation, send input, or suppress any UI path.
+    Perks navigation, send input, or suppress any UI path. The completed Tier
+    22 core audit supplies its natural-boundary evidence prerequisite;
+    `V1073-RUNTIME-015`/`016` survival extensions do not gate this collector.
   - [ ] Extend the exact-version runtime projection with independently failing
     active-upgrade, survival-ability, and allowlisted live-tally components.
     For upgrades, map all three current-level arrays to their Workshop
