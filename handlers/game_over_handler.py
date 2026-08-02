@@ -193,28 +193,65 @@ def handle_game_over(
     else:
         log("[GAME_OVER] Fast mode enabled — skipping More Stats capture", "DEBUG")
 
+    if completed_record is not None:
+        stats_status = "saved"
+        stats_summary = "stats saved"
+    elif capture_stats:
+        stats_status = "unavailable"
+        stats_summary = "stats unavailable"
+    else:
+        stats_status = "skipped"
+        stats_summary = "stats capture skipped"
+
     # Decide the terminal action while continuing to consume the same control
     # file used by the main loop. PAUSED blocks every action; STOPPED exits.
     mode = AUTOMATION.mode
-    if mode == ExecMode.WAIT:
-        log("Pausing on Game Over — waiting for user signal.", "INFO", console=True)
+    entered_wait = mode == ExecMode.WAIT and not return_home_after_battle
+    if entered_wait:
+        log_result(
+            (
+                f"Finished-battle actions complete — {stats_summary}; "
+                "automation is waiting on the Game Over screen (mode WAIT)"
+            ),
+            detail=(
+                f"[GAME_OVER] result=completed session={session_id} route=wait "
+                f"stats={stats_status} next_mode=WAIT"
+            ),
+        )
     mode = _wait_for_game_over_direction(
         control_sync,
         wait_mode_blocks=not return_home_after_battle,
     )
     if mode is None:
-        log_result(
-            (
-                "Finished-battle handling interrupted — automation stopped "
-                "before post-run navigation"
-            ),
+        if entered_wait:
+            log(
+                "Automation stopped after finished-battle actions completed "
+                "while waiting on the Game Over screen",
+                "INFO",
+                console=True,
+            )
+        else:
+            log_result(
+                (
+                    "Finished-battle handling interrupted — automation stopped "
+                    "before post-run navigation"
+                ),
+                detail=(
+                    f"[GAME_OVER] result=interrupted session={session_id} "
+                    f"capture_stats={capture_stats} "
+                    f"stats_saved={completed_record is not None}"
+                ),
+            )
+        return
+    if entered_wait:
+        log_action_intent(
+            "Following the finished-battle direction",
+            reason=f"mode {mode.value} was selected after WAIT",
             detail=(
-                f"[GAME_OVER] result=interrupted session={session_id} "
-                f"capture_stats={capture_stats} "
-                f"stats_saved={completed_record is not None}"
+                f"[GAME_OVER] session={session_id} previous_mode=WAIT "
+                f"next_mode={mode.value}"
             ),
         )
-        return
     if before_terminal_action is not None:
         before_terminal_action()
     if return_home_after_battle:
@@ -234,15 +271,6 @@ def handle_game_over(
         route_summary = "selected Retry"
 
     time.sleep(2)
-    if completed_record is not None:
-        stats_status = "saved"
-        stats_summary = "stats saved"
-    elif capture_stats:
-        stats_status = "unavailable"
-        stats_summary = "stats unavailable"
-    else:
-        stats_status = "skipped"
-        stats_summary = "stats capture skipped"
     log_result(
         f"Finished-battle handling complete — {stats_summary}; {route_summary}",
         detail=(

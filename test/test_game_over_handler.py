@@ -292,6 +292,58 @@ def test_required_post_run_home_inventory_still_waits_while_paused():
     sleep.assert_called_once_with(1)
 
 
+def test_game_over_wait_reports_completed_actions_before_polling_for_direction():
+    original_state = AUTOMATION.state
+    original_mode = AUTOMATION.mode
+    AUTOMATION.state = RunState.RUNNING
+    AUTOMATION.mode = ExecMode.WAIT
+    result_log = None
+
+    def sync_control():
+        assert result_log is not None
+        assert result_log.call_count == 1
+        AUTOMATION.mode = ExecMode.HOME
+
+    try:
+        with (
+            patch("handlers.game_over_handler._make_session_id", return_value="test"),
+            patch("handlers.game_over_handler.tap_if_visible", return_value=True) as tap,
+            patch("handlers.game_over_handler.log_action_intent") as action_log,
+            patch("handlers.game_over_handler.log_result") as result_log,
+            patch("handlers.game_over_handler.time.sleep"),
+        ):
+            handle_game_over(
+                capture_stats=False,
+                control_sync=sync_control,
+            )
+    finally:
+        AUTOMATION.state = original_state
+        AUTOMATION.mode = original_mode
+
+    tap.assert_called_once_with("buttons.home:game_over", retries=1)
+    assert action_log.call_count == 2
+    action_log.assert_any_call(
+        "Following the finished-battle direction",
+        reason="mode HOME was selected after WAIT",
+        detail=(
+            "[GAME_OVER] session=test previous_mode=WAIT next_mode=HOME"
+        ),
+    )
+    assert result_log.call_args_list[0].args == (
+        "Finished-battle actions complete — stats capture skipped; automation "
+        "is waiting on the Game Over screen (mode WAIT)",
+    )
+    assert result_log.call_args_list[0].kwargs == {
+        "detail": (
+            "[GAME_OVER] result=completed session=test route=wait "
+            "stats=skipped next_mode=WAIT"
+        )
+    }
+    assert result_log.call_args_list[1].args == (
+        "Finished-battle handling complete — stats capture skipped; returned Home",
+    )
+
+
 def test_game_over_finalizes_boundary_before_terminal_navigation():
     original_state = AUTOMATION.state
     original_mode = AUTOMATION.mode
