@@ -151,6 +151,74 @@ redacted profile summary; account identifiers and the raw save are not copied
 into runtime evidence. The component contract and version-update procedure are
 in [`../modules/player_save_import.md`](../modules/player_save_import.md).
 
+#### Save-first active-round and terminal evidence
+
+The normalized runtime-save model is a second privacy boundary inside the
+exact-version decoder. Snapshot schema 2 exposes only the fields allowlisted by
+`data-9-game-1073-runtime-audit-v1`; it never publishes the decoded root or an
+arbitrary `BattleHistoryEntry`. A root-level version or structural failure
+publishes no runtime model. Perks and the history tail fail independently so an
+unknown Perk or `killedBy` ID cannot leak a partial semantic record or silently
+invalidate an otherwise usable round identity.
+
+For an active save, the guarded identity is exactly
+`(versionNumber, currentTier, roundsStartedThisTier[currentTier], roundSeed)`.
+It is accompanied by `roundActiveBool`, `currentWave`, `saveRevision`, capture
+time, source fingerprint, and bounded container metadata. The identity has a
+canonical fingerprint, but it is observation only until a natural new battle
+proves seed change, the per-tier counter transition, and initial serialization
+timing. Process attachment therefore does not yet use it to suppress Battle
+History UI continuity inspection.
+
+The in-battle Perk projection requires exact agreement among the 50-entry
+`perkLevel` array, `perksPickedCount`, and every ordered `PerkPick(wave, perk)`
+entry. It publishes canonical Perk IDs, selection waves, level-after values,
+and a stable snapshot fingerprint. Perk ID `0` is `max_health` (Max Health).
+Unknown IDs, changed entry shape/class, non-monotonic waves, or any
+count/list/level inconsistency publish no Perk snapshot. An inactive zero/empty
+projection is explicitly `cleared`; later runtime ownership must retain the
+newest complete same-round snapshot rather than treating that cleared save as
+final-Perk evidence.
+
+The completed-history projection accepts a chronological list of at most 30
+exact 148-field `BattleHistoryEntry` objects. Its newest entry becomes a
+canonical 16-section, 144-row More Stats projection plus a fingerprint derived
+only from mapped battle evidence. The two hourly rows and effect-active
+percentages are explicit derivations. `adGemsThisRound` supplies Ad Gems;
+base/ad coins are absent. Only cross-channel-validated `killedBy` values are
+published (`1=Fast`, `2=Tank`, `8=Scatter`); every other value makes the whole
+entry unavailable and keeps terminal capture on UI evidence.
+
+Runtime adoption proceeds in bounded vertical slices with these ownership
+rules:
+
+1. A future observer may poll stable revisions at approximately five-minute
+   cadence without navigation or input.
+2. After the new-round audit passes, only an exact active identity may bind a
+   process to a round without Battle History navigation.
+3. Perk strategy facts may advance only from a newer complete snapshot carrying
+   that same identity; a stale, different-round, or incomplete snapshot cannot
+   drive strategy.
+4. The observer retains same-round Perk snapshots across post-run clearing.
+5. Normal completed records may be built from a newly serialized history entry
+   only after the pre-boundary tail fingerprint changed at this Game Over and
+   tier/time/wave evidence matches the bound round.
+6. One passive compact Game Stats capture remains for optional base/ad coin
+   split augmentation. Its absence never invalidates otherwise authoritative
+   save-derived battle stats.
+7. Game Over opens the Perks panel only when a complete final same-round Perk
+   snapshot has not already been proven.
+8. The complete existing Game Stats/Perks/More Stats path remains the forced
+   audit and fallback for every missing, unknown, stale, changed, inconsistent,
+   or unbound save claim.
+9. Wait, Retry, Home, every setting mutation, post-action verification, and
+   terminal transition confirmation remain owned by verified UI controls.
+
+The foundation model does not poll, cache, bind a process, build a persisted
+battle record, or alter `App`/Game Over dispatch. Those are later slices gated
+by the versioned audit matrix in
+[`player_save_import.md`](../modules/player_save_import.md#versioned-audit-matrix-data-9-game-1073--revision-1).
+
 Game speed is a global battle-only invariant with persistent operator intent
 independent of strategy and ADB target. Numeric selections from `x0.0` through
 `x6.0` are exact targets. `x6.3` has `maximum_available` semantics because the

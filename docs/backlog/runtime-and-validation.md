@@ -11,7 +11,7 @@ checked-item detail remains in the
 - [ ] Cross-validate the `data-9-game-1073` player-save mapping against fresh
   UI inventory from the same version, and add a new exact candidate mapping if
   the current game reports a different identity. Execute the complete
-  [field matrix and rollout sequence](../modules/player_save_import.md#complete-validation-program).
+  [versioned audit matrix and rollout sequence](../modules/player_save_import.md#versioned-audit-matrix-data-9-game-1073--revision-1).
   Promote only fully cross-validated fields; retain scheduled audits and every
   existing UI checker as the fallback for unknown versions, shape changes,
   stale data, mismatches, and unmapped settings.
@@ -24,6 +24,24 @@ checked-item detail remains in the
     recharge booleans through isolated app-pause flushes and restorations.
     Allowlist the complete Cards preset and recharge-mode checks while keeping
     the overall mapping `candidate`.
+  - [x] Consolidate every profile and runtime save claim into the authoritative
+    `data-9-game-1073` revision-1 audit matrix. Implement the repository-local
+    normalized runtime foundation: guarded round identity, exact consistent
+    Perks (including ID `0` Max Health), and an exact 144-row completed-history
+    projection/fingerprint. Keep `App` and Game Over navigation unchanged.
+  - [ ] Complete the natural-boundary runtime audits `V1073-RUNTIME-003` through
+    `V1073-RUNTIME-011`: new-round seed/counter/first-write timing, five-minute
+    freshness, final Perk serialization and clearing, Game Over history write
+    timing and tail binding, the complete `killedBy` enum, and passive coin
+    split augmentation. Every incomplete row remains routed to UI fallback.
+  - [ ] Add the polling/same-round cache vertical slice only after its required
+    matrix evidence is complete. Bind snapshots to the guarded identity, reject
+    stale or different-round revisions, and retain the newest complete Perks
+    across post-run clearing without changing terminal navigation.
+  - [ ] Add save-derived normal completed records and conditional terminal
+    Perks navigation only after history-tail attachment and final-Perk proofs
+    are complete. Preserve passive compact Game Stats OCR, forced full UI audit,
+    and every verified Wait/Retry/Home/mutation/transition control.
   - [ ] Add the versioned raw-field disposition manifest and explicit
     validation status/provenance for every normalized profile group. Keep
     private, ignored, and unknown fields unpublished.

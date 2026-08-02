@@ -4,6 +4,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import gzip
 import json
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import nrbf
@@ -20,6 +21,13 @@ from core.player_save import (
 
 
 CAPTURED_AT = datetime(2026, 7, 31, 20, 0, tzinfo=timezone.utc)
+ROOT = Path(__file__).resolve().parents[1]
+VERSION_MAPPING = json.loads(
+    (ROOT / "config/player_save_versions/data_9_game_1073.json").read_text(
+        encoding="utf-8"
+    )
+)
+CLIPBOARD_REPORT_PATH = ROOT / "test/fixtures/battle_report_clipboard.txt"
 
 
 def test_default_device_path_matches_operator_adb_pull():
@@ -35,6 +43,20 @@ def _decoded_save() -> dict:
         "dataVersion": 9,
         "versionNumber": 1073,
         "saveRevision": 1234,
+        "roundActiveBool": True,
+        "currentTier": 19,
+        "currentWave": 450,
+        "roundSeed": 123456789,
+        "roundsStartedThisTier": [0] * 40,
+        "perkLevel": [0] * 50,
+        "perksPickedCount": 4,
+        "perksPicked": [
+            {"wave": 200, "perk": 10, "__class__": "PerkPick"},
+            {"wave": 290, "perk": 41, "__class__": "PerkPick"},
+            {"wave": 430, "perk": 10, "__class__": "PerkPick"},
+            {"wave": 430, "perk": 0, "__class__": "PerkPick"},
+        ],
+        "battleHistory": [_synthetic_battle_history_entry()],
         "presetName": ["Farm", "Tournament", "Other", "Fourth", "Fifth"],
         "workshopPresetName": ["Farm", "Tourney", "D1", "D2", "D3"],
         "botPresetName": ["Farm", "Flame", "Amplify"],
@@ -111,7 +133,58 @@ def _decoded_save() -> dict:
     payload["upgradesLockedFreeUpgrades"][11] = True
     payload["upgradesLockedFreeUpgrades"][12] = True
     payload["upgradesDefenseLockedFreeUpgrades"][10] = True
+    payload["roundsStartedThisTier"][19] = 12
+    payload["perkLevel"][0] = 1
+    payload["perkLevel"][10] = 2
+    payload["perkLevel"][41] = 1
     return payload
+
+
+def _synthetic_battle_history_entry(*, day: int = 1) -> dict:
+    history_spec = VERSION_MAPPING["runtime_save"]["battle_history"]
+    fields = set(history_spec["non_report_fields"])
+    for section in history_spec["more_stats_sections"]:
+        for _label, row_spec in section["rows"]:
+            if isinstance(row_spec, str):
+                fields.add(row_spec)
+            else:
+                for key in ("source", "amount", "seconds", "active_percent_of"):
+                    field = row_spec.get(key)
+                    if field:
+                        fields.add(field)
+
+    integer_fields = set(history_spec["integer_fields"])
+    boolean_fields = set(history_spec["boolean_fields"])
+    entry = {"__class__": history_spec["entry_class"]}
+    for field in fields:
+        if field in boolean_fields:
+            entry[field] = False
+        elif field in integer_fields:
+            entry[field] = 1
+        else:
+            entry[field] = 1.0
+
+    when = datetime(2026, 1, day)
+    delta = when - datetime(1, 1, 1)
+    ticks = (
+        (delta.days * 86400 + delta.seconds) * 10_000_000
+        + delta.microseconds * 10
+    )
+    entry.update(
+        {
+            "battleDate": ticks | (2 << 62),
+            "tier": 19,
+            "wave": 2558 + day,
+            "gameTime": 20599.0 + day,
+            "realTime": 4244.0 + day,
+            "killedBy": 8,
+            "coinsEarned": 872_380_000_000_000_000.0,
+            "cellsEarned": 204_600.0,
+            "totalEnemies": 160_757.0,
+            "adGemsThisRound": 30,
+        }
+    )
+    return entry
 
 
 def _snapshot(monkeypatch, decoded: dict | None = None):
@@ -126,6 +199,7 @@ def _snapshot(monkeypatch, decoded: dict | None = None):
 def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
     snapshot = _snapshot(monkeypatch)
 
+    assert snapshot.as_dict()["schema_version"] == 2
     assert snapshot.mapping_id == "data-9-game-1073"
     assert snapshot.mapping_maturity == "candidate"
     assert snapshot.validated_checks == (
@@ -171,10 +245,255 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
     ]
     assert snapshot.checks["modules"].status == "unmapped"
 
+    runtime = snapshot.runtime_save
+    assert runtime is not None
+    assert runtime.audit_matrix_id == "data-9-game-1073-runtime-audit-v1"
+    assert runtime.save_revision == 1234
+    assert runtime.round_active
+    assert runtime.current_wave == 450
+    assert runtime.active_round_identity is not None
+    assert runtime.active_round_identity.as_tuple() == (1073, 19, 12, 123456789)
+    assert runtime.perks_status == "observed"
+    assert runtime.perks is not None
+    assert runtime.perks.picked_count == 4
+    assert runtime.perks.levels[0] == (0, "max_health", 1)
+    assert runtime.perks.picks[-1].perk_key == "max_health"
+    assert runtime.battle_history_tail.status == "observed"
+    assert runtime.battle_history_tail.entry is not None
+    assert runtime.battle_history_tail.entry.row_count == 144
+    assert len(runtime.battle_history_tail.entry.sections) == 16
+    assert len(_synthetic_battle_history_entry()) == 148
+
     rendered = json.dumps(snapshot.as_dict())
     assert "must-not-leak-player-id" not in rendered
     assert "must-not-leak-user-name" not in rendered
     assert "/private/path" not in rendered
+
+
+def test_runtime_capture_and_history_projection_are_privacy_safe(monkeypatch):
+    snapshot = _snapshot(monkeypatch)
+    runtime = snapshot.runtime_save
+    assert runtime is not None
+
+    payload = runtime.as_dict()
+    assert payload["capture"] == {
+        "captured_at": CAPTURED_AT.isoformat(),
+        "source_name": "playerInfo.dat",
+        "source_sha256": snapshot.source_sha256,
+        "source_size": snapshot.source_size,
+        "container": "gzip+nrbf",
+        "decompressed_size": len(b"synthetic-nrbf"),
+    }
+    history = payload["battle_history_tail"]
+    assert history["fingerprint"]
+    assert len(history["fingerprint"]) == 64
+    assert history["projection"]["more_stats"]["row_count"] == 144
+    assert "raw_text" not in json.dumps(history)
+    assert "playerID" not in json.dumps(history)
+    assert "damageTakenWhileBerserked" not in json.dumps(history)
+
+    rows = {
+        (section["key"], row["key"]): row
+        for section in history["projection"]["more_stats"]["sections"]
+        for row in section["rows"]
+    }
+    assert rows[("battle_report", "killed_by")]["value"] == "Scatter"
+    assert rows[("battle_report", "coins_per_hour")]["derivation"] == (
+        "amount_per_real_hour"
+    )
+    assert rows[("currencies", "ad_gems")]["value"] == 30
+    assert rows[("currencies", "ad_gems")]["source_fields"] == [
+        "adGemsThisRound"
+    ]
+    assert rows[("killed_with_effect_active", "golden_tower")][
+        "active_percent_decimal"
+    ]
+
+
+def test_history_projection_covers_the_ordered_144_row_more_stats_report(
+    monkeypatch,
+):
+    runtime = _snapshot(monkeypatch).runtime_save
+    assert runtime is not None
+    entry = runtime.battle_history_tail.entry
+    assert entry is not None
+
+    expected_rows = []
+    section_name = None
+    for line in CLIPBOARD_REPORT_PATH.read_text(encoding="utf-8").splitlines():
+        if "\t" not in line:
+            section_name = line
+            continue
+        label, _value = line.split("\t", 1)
+        if label == "Battle Date":
+            continue
+        expected_rows.append((section_name, label))
+    projected_rows = [
+        (section.name, row.label)
+        for section in entry.sections
+        for row in section.rows
+    ]
+
+    assert len(expected_rows) == 144
+    assert projected_rows == expected_rows
+
+
+def test_runtime_fingerprints_are_stable_and_projection_sensitive(monkeypatch):
+    first_decoded = _decoded_save()
+    second_decoded = _decoded_save()
+    second_decoded["saveRevision"] += 1
+    second_decoded["playerID"] = "different-private-id"
+
+    first = _snapshot(monkeypatch, first_decoded).runtime_save
+    second = _snapshot(monkeypatch, second_decoded).runtime_save
+    assert first is not None and second is not None
+    assert first.active_round_identity is not None
+    assert second.active_round_identity is not None
+    assert first.active_round_identity.fingerprint == (
+        second.active_round_identity.fingerprint
+    )
+    assert first.perks is not None and second.perks is not None
+    assert first.perks.fingerprint == second.perks.fingerprint
+    assert first.battle_history_tail.fingerprint == (
+        second.battle_history_tail.fingerprint
+    )
+
+    changed_decoded = _decoded_save()
+    changed_decoded["battleHistory"][-1]["coinsEarned"] *= 1.01
+    changed = _snapshot(monkeypatch, changed_decoded).runtime_save
+    assert changed is not None
+    assert changed.battle_history_tail.fingerprint != (
+        first.battle_history_tail.fingerprint
+    )
+
+
+def test_inactive_round_exposes_cleared_perks_without_active_identity(monkeypatch):
+    decoded = _decoded_save()
+    decoded.update(
+        {
+            "roundActiveBool": False,
+            "currentWave": 0,
+            "roundSeed": 0,
+            "perkLevel": [0] * 50,
+            "perksPickedCount": 0,
+            "perksPicked": None,
+        }
+    )
+
+    runtime = _snapshot(monkeypatch, decoded).runtime_save
+
+    assert runtime is not None
+    assert runtime.active_round_identity is None
+    assert runtime.perks_status == "observed"
+    assert runtime.perks is not None
+    assert runtime.perks.state == "cleared"
+    assert runtime.perks.picks == ()
+
+
+def test_unknown_perk_id_fails_only_the_perk_component(monkeypatch):
+    decoded = _decoded_save()
+    decoded["perksPicked"].append(
+        {"wave": 440, "perk": 46, "__class__": "PerkPick"}
+    )
+    decoded["perksPickedCount"] = 5
+    decoded["perkLevel"][46] = 1
+
+    runtime = _snapshot(monkeypatch, decoded).runtime_save
+
+    assert runtime is not None
+    assert runtime.perks is None
+    assert runtime.perks_status == "unavailable"
+    assert runtime.perks_reason == "unmapped_perk_id:46"
+    assert runtime.active_round_identity is not None
+    assert runtime.battle_history_tail.status == "observed"
+
+
+@pytest.mark.parametrize(
+    ("mutation", "reason"),
+    (
+        (
+            lambda decoded: decoded.update(perksPickedCount=3),
+            "perk_count_list_mismatch",
+        ),
+        (
+            lambda decoded: decoded["perkLevel"].__setitem__(10, 1),
+            "perk_count_levels_mismatch",
+        ),
+        (
+            lambda decoded: (
+                decoded["perkLevel"].__setitem__(10, 1),
+                decoded["perkLevel"].__setitem__(41, 2),
+            ),
+            "perk_list_level_mismatch:10",
+        ),
+        (
+            lambda decoded: decoded["perksPicked"][0].update(extra=True),
+            "perk_pick_changed_shape:0",
+        ),
+    ),
+)
+def test_inconsistent_perk_shapes_fail_closed(monkeypatch, mutation, reason):
+    decoded = _decoded_save()
+    mutation(decoded)
+
+    runtime = _snapshot(monkeypatch, decoded).runtime_save
+
+    assert runtime is not None
+    assert runtime.perks is None
+    assert runtime.perks_reason == reason
+
+
+def test_unknown_killed_by_id_fails_only_the_history_component(monkeypatch):
+    decoded = _decoded_save()
+    decoded["battleHistory"][-1]["killedBy"] = 99
+
+    runtime = _snapshot(monkeypatch, decoded).runtime_save
+
+    assert runtime is not None
+    assert runtime.battle_history_tail.status == "unavailable"
+    assert runtime.battle_history_tail.reason == "unmapped_killed_by_id:99"
+    assert runtime.battle_history_tail.fingerprint is None
+    assert runtime.battle_history_tail.entry is None
+    assert runtime.perks_status == "observed"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda entry: entry.pop("coinsEarned"),
+        lambda entry: entry.update(coinsEarned=1),
+        lambda entry: entry.update(unexpectedField=1.0),
+    ),
+)
+def test_malformed_history_entry_never_publishes_partial_projection(
+    monkeypatch,
+    mutation,
+):
+    decoded = _decoded_save()
+    mutation(decoded["battleHistory"][-1])
+
+    runtime = _snapshot(monkeypatch, decoded).runtime_save
+
+    assert runtime is not None
+    assert runtime.battle_history_tail.status == "unavailable"
+    assert runtime.battle_history_tail.fingerprint is None
+    assert runtime.battle_history_tail.entry is None
+
+
+def test_nonchronological_history_fails_closed(monkeypatch):
+    decoded = _decoded_save()
+    decoded["battleHistory"] = [
+        _synthetic_battle_history_entry(day=2),
+        _synthetic_battle_history_entry(day=1),
+    ]
+
+    runtime = _snapshot(monkeypatch, decoded).runtime_save
+
+    assert runtime is not None
+    assert runtime.battle_history_tail.status == "unavailable"
+    assert runtime.battle_history_tail.reason == (
+        "battle_history_is_not_chronological"
+    )
 
 
 def test_live_calibrated_card_recharge_boolean_polarity(monkeypatch):
@@ -277,6 +596,7 @@ def test_unknown_game_version_decodes_metadata_but_requires_ui(monkeypatch):
     assert not snapshot.mapping_supported
     assert not snapshot.shape_valid
     assert snapshot.checks == {}
+    assert snapshot.runtime_save is None
     assert "No exact player-save mapping" in snapshot.warnings[0]
 
     plan = reconcile_requirements(snapshot, {"cards_deck": "Farm"})
@@ -295,6 +615,30 @@ def test_exact_version_with_changed_shape_fails_closed(monkeypatch):
     assert not snapshot.shape_valid
     assert snapshot.checks == {}
     assert any("researchLevel length changed" in item for item in snapshot.warnings)
+
+
+def test_runtime_array_shape_change_fails_the_exact_mapping(monkeypatch):
+    decoded = _decoded_save()
+    decoded["perkLevel"] = [0] * 49
+
+    snapshot = _snapshot(monkeypatch, decoded)
+
+    assert not snapshot.shape_valid
+    assert snapshot.runtime_save is None
+    assert any("perkLevel length changed" in item for item in snapshot.warnings)
+
+
+def test_runtime_round_counter_type_change_publishes_no_runtime_model(monkeypatch):
+    decoded = _decoded_save()
+    decoded["roundsStartedThisTier"][0] = False
+
+    snapshot = _snapshot(monkeypatch, decoded)
+
+    assert snapshot.shape_valid
+    assert snapshot.runtime_save is None
+    assert any(
+        "runtime projection failed closed" in item for item in snapshot.warnings
+    )
 
 
 def test_candidate_mapping_keeps_ui_for_matching_checks(monkeypatch):

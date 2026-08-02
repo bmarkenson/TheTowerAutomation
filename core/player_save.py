@@ -19,6 +19,11 @@ from pathlib import Path
 import time
 from typing import Any, Optional
 
+from core.runtime_save import (
+    NormalizedRuntimeSave,
+    RuntimeSaveNormalizationError,
+    normalize_runtime_save,
+)
 from core.tournament_conditions import derive_tournament_conditions_from_save
 
 
@@ -30,7 +35,7 @@ PLAYER_SAVE_DEVICE_PATH = (
 )
 MAX_PLAYER_SAVE_BYTES = 512 * 1024
 MAX_DECOMPRESSED_SAVE_BYTES = 4 * 1024 * 1024
-SNAPSHOT_SCHEMA_VERSION = 1
+SNAPSHOT_SCHEMA_VERSION = 2
 
 
 class PlayerSaveError(RuntimeError):
@@ -88,6 +93,7 @@ class PlayerSaveSnapshot:
     warnings: tuple[str, ...]
     profile_summary: Mapping[str, Any]
     checks: Mapping[str, SaveCheckEvidence]
+    runtime_save: Optional[NormalizedRuntimeSave]
 
     @property
     def mapping_supported(self) -> bool:
@@ -124,6 +130,11 @@ class PlayerSaveSnapshot:
                 check_id: evidence.as_dict()
                 for check_id, evidence in sorted(self.checks.items())
             },
+            "runtime_save": (
+                self.runtime_save.as_dict()
+                if self.runtime_save is not None
+                else None
+            ),
         }
 
 
@@ -212,6 +223,7 @@ def decode_player_save_bytes(
             warnings=tuple(warnings),
             profile_summary={},
             checks={},
+            runtime_save=None,
         )
 
     shape_warnings = _validate_shape(decoded, mapping)
@@ -219,9 +231,28 @@ def decode_player_save_bytes(
     shape_valid = not shape_warnings
     checks: dict[str, SaveCheckEvidence] = {}
     profile_summary: dict[str, Any] = {}
+    runtime_save: Optional[NormalizedRuntimeSave] = None
     if shape_valid:
         checks = _build_checks(decoded, mapping, captured_at=stamp)
         profile_summary = _build_profile_summary(decoded, mapping)
+        try:
+            runtime_save = normalize_runtime_save(
+                decoded,
+                mapping,
+                capture={
+                    "captured_at": stamp.isoformat(),
+                    "source_name": Path(source_name).name,
+                    "source_sha256": digest,
+                    "source_size": len(payload),
+                    "container": container,
+                    "decompressed_size": len(raw),
+                },
+            )
+        except RuntimeSaveNormalizationError as exc:
+            warnings.append(
+                "The exact-version runtime projection failed closed: "
+                f"{exc}. Runtime save evidence requires UI fallback."
+            )
     else:
         warnings.append(
             "The exact version matched but its structural signature changed; "
@@ -257,6 +288,7 @@ def decode_player_save_bytes(
         warnings=tuple(warnings),
         profile_summary=profile_summary,
         checks=checks,
+        runtime_save=runtime_save,
     )
 
 

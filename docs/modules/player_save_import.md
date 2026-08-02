@@ -86,6 +86,22 @@ Orb Distance remain explicitly unmapped and always use the UI. More fields can
 be added only with semantic and polarity calibration, not merely because a
 plausible raw field exists.
 
+Snapshot schema 2 now contains the first repository-local save-first runtime
+foundation. For the exact version-1073 mapping it publishes capture metadata,
+`saveRevision`, `roundActiveBool`, `currentWave`, the active identity tuple,
+and independent normalized Perk and Battle History tail components. Perk ID
+`0` is `max_health` (Max Health). Perks are emitted only when every ordered
+pick, count, and level agrees. A complete history tail is emitted only when all
+30-or-fewer entries retain the exact 148-field shape and the newest entry has a
+validated `killedBy` value; its allowlisted projection contains all 144 current
+More Stats rows and a stable canonical fingerprint.
+
+The foundation does not poll the save, retain a same-round cache, bind a
+process, suppress navigation, or build/persist a normal battle record. A
+component failure publishes an explicit UI fallback without exposing a partial
+entry. The authoritative ownership and later slice boundaries are in
+[`runtime.md`](../architecture/runtime.md#save-first-active-round-and-terminal-evidence).
+
 ## Complete validation program
 
 The validation target is not every opaque counter in the save. It is every
@@ -129,45 +145,65 @@ control fields; flush through a proven lifecycle boundary; visually verify the
 restoration; and finish at the original safe boundary. A new exact game
 version starts again at structural status even when its fields look unchanged.
 
-### Automation-gating matrix
+### Versioned audit matrix: `data-9-game-1073` / revision 1
 
-`Shortcut-ready` below describes the decoder/reconciler. Runtime preflight has
-not yet adopted the navigation shortcut.
+This is the single authoritative matrix for every normalized claim published
+or proposed for exact game version 1073. The evidence level names the highest
+complete level for the **whole row**, not an encouraging partial result:
+`Structural`, `Cross-channel`, `Causal`, or `Shortcut-ready`. A row can be
+implemented as a privacy-safe observation at Structural or Cross-channel level
+when its stated evidence is complete, but it cannot suppress its UI route
+until it is Shortcut-ready. `Shortcut-ready` here describes the
+decoder/reconciler; runtime navigation adoption is a separate row. Every new
+exact game version starts a new matrix at Structural level.
 
-| Normalized check | Version-1073 source | Current evidence | Remaining work before runtime adoption |
+| Audit ID and normalized claim | Version-1073 source | Evidence level and retained evidence | Required work / current runtime disposition |
 | --- | --- | --- | --- |
-| Cards preset | `presetName`, `currentPreset` | Shortcut-ready; UI slot 2/1/2 caused raw `1/0/1`. | Audit the runtime acquisition path, then retain scheduled UI samples. |
-| Card recharge modes | `demonModeAutomateToggle`, `nukeAutomateToggle` | Shortcut-ready; both booleans were independently flipped and restored. `true` means auto-reactivate. | Audit the runtime acquisition path, then retain scheduled UI samples. |
-| Workshop preset | `workshopPresetName`, `currentWorkshopPreset` | Shortcut-ready from exact selected-name/index agreement. | Do not manufacture a switch; force UI again on mapping/version audit. |
-| Bots preset | `botPresetName`, `currentBotPreset` | Shortcut-ready from exact selected-name/index agreement. | Never spend medals for causality; validate future values through naturally selected presets. |
-| First Perk | `firstPerkIndex` plus `perk_ids` | Shortcut-ready for mapped IDs; an unknown ID fails closed. | Extend only when a new ID is authoritatively visible. |
-| Ban Perks | `bannedPerksIndex` plus `perk_ids` | Shortcut-ready for a complete mapped selected set. | Validate any newly encountered ID; unknown selected IDs keep the whole check in UI. |
-| Guardian chips | `guardianChipSlot`, `guardianSlotsUnlocked`, `guardian_chip_ids` | Shortcut-ready for the mapped Farm/Tournament chips; unknown IDs fail closed. | Extend through read-only equipped evidence; never equip merely to identify an ID. |
-| Auto Pick enabled | `autoPickPerk` | Observed but not allowlisted. | Toggle off/on at a safe no-battle boundary, flush each state, restore, and prove polarity. |
-| Auto Pick order | `autoPickOrder` plus `perk_ids` | Ranked prefix agrees, but the save contains an unranked tail and unknown IDs; evidence is deliberately incomplete. | Map every reachable ID and encode ranked-count/tail semantics so only the visible ranked block is compared. |
-| Free Upgrade locks | Three `*LockedFreeUpgrades` arrays | The three Farm locks agree; the full index-to-upgrade map is not validated. | Either validate every supported index and polarity or narrow the mapping to proven indices and fail closed whenever another bit is set. |
-| Target Priority | `targetPriorityList` plus `target_priority_ids` | Plausible ordered mapping, not allowlisted. | Compare a fresh in-battle list and use one reversible adjacent reorder/restore to prove index order and serialization. |
-| Ultimate Weapons | `ultimateWeaponUnlocked`, `ultimateWeaponOn`, `poisonSwampStunOff`, `spotlightSmartMissilesOff` | Weapon order and current values agree; Poison Swamp Stun polarity is causal. The combined check remains unvalidated. | Prove all nine primary-toggle booleans and Spotlight Missiles independently, or split the combined check into smaller atomic evidence before allowlisting. |
-| Tournament conditions | `tourneyConditionsSeed`, `tournamentNumber`, `tournamentCheckedNumber`, `tournamentRecords`, `leagueID` plus the exact-version generator | Shortcut-ready for Legend on version 1073. Seventeen consecutive event sets agree with historical and live UI evidence. | Retain scheduled Heat/Overheat UI audits; validate each additional league and every new exact game version independently. |
-| Modules | Module equipped/inventory records | Explicitly unmapped. | Map slot order, stable module identity, Primary/Assist roles, rarity, level ownership, and substats through read-only UI comparisons; do not swap modules solely for calibration. |
-| Damage Slider | Field not identified | Explicitly unmapped. | In an explicitly authorized test battle, correlate at least two distinct values and restoration, including percentage encoding and save timing. |
-| Orb Distance | Candidate distance/preset fields not accepted | Explicitly unmapped. | In an explicitly authorized battle, cycle known Extra/Workshop presets, prove units and selected-preset semantics, and restore the original pair. |
+| `V1073-RAW-001` raw-field disposition manifest | Exact root field names; no raw values | **Structural.** Root identity, selected array dimensions, and the current redacted summary are known. | Classify every raw field as structural, automation-gating, profile observation, private, ignored-with-reason, or unknown. Until complete, unclassified fields are unpublished. |
+| `V1073-CFG-001` Cards preset | `presetName`, `currentPreset` | **Shortcut-ready.** UI slot 2/1/2 caused raw `1/0/1`; restoration and unrelated controls were verified. | Audit runtime acquisition, then retain scheduled UI samples. |
+| `V1073-CFG-002` card recharge modes | `demonModeAutomateToggle`, `nukeAutomateToggle` | **Shortcut-ready.** Both booleans were independently flipped and restored; `true` means auto-reactivate. | Audit runtime acquisition, then retain scheduled UI samples. |
+| `V1073-CFG-003` Workshop preset | `workshopPresetName`, `currentWorkshopPreset` | **Shortcut-ready.** Exact selected-name/index agreement at a verified boundary; causality is not required for this non-polarity claim. | Do not manufacture a switch; force UI again on mapping/version audit. |
+| `V1073-CFG-004` Bots preset | `botPresetName`, `currentBotPreset` | **Shortcut-ready.** Exact selected-name/index agreement at a verified boundary. | Never spend medals for causality; validate future values through naturally selected presets. |
+| `V1073-CFG-005` First Perk | `firstPerkIndex`, versioned Perk IDs | **Shortcut-ready** for the mapped IDs. | Extend only from authoritative visible evidence; any unknown selected ID keeps the whole check in UI. |
+| `V1073-CFG-006` Ban Perks | `bannedPerksIndex`, versioned Perk IDs | **Shortcut-ready** for a complete mapped selected set. | Validate each newly encountered ID; any unknown selected ID keeps the whole check in UI. |
+| `V1073-CFG-007` Guardian chips | `guardianChipSlot`, `guardianSlotsUnlocked`, versioned Guardian IDs | **Shortcut-ready** for the mapped Farm/Tournament chips. | Extend through read-only equipped evidence; never equip merely to identify an ID. |
+| `V1073-CFG-008` Auto Pick enabled | `autoPickPerk` | **Structural.** A boolean value is observed, but polarity is not allowlisted. | At a safe no-battle boundary, toggle off/on, flush each state, restore, and prove polarity; UI remains required. |
+| `V1073-CFG-009` ranked Auto Pick order | `autoPickOrder`, versioned Perk IDs | **Structural.** The visible 18-row ranked prefix agreed cross-channel, but the save has an unranked tail and unknown IDs, so the whole claim is incomplete. | Map every reachable ID and encode ranked-count/tail semantics; UI remains required. |
+| `V1073-CFG-010` Free Upgrade locks | Three `*LockedFreeUpgrades` arrays | **Structural.** The three Farm locks agree cross-channel; the complete index/polarity claim does not. | Validate every supported index/polarity or narrow the mapping to proven indices and fail closed on every other set bit; UI remains required. |
+| `V1073-CFG-011` Target Priority | `targetPriorityList`, versioned Target Priority IDs | **Structural.** Candidate ordered mapping only. | Compare a fresh in-battle list, then make and restore one reversible adjacent reorder to prove index order and serialization; UI remains required. |
+| `V1073-CFG-012` Ultimate Weapon controls | `ultimateWeaponUnlocked`, `ultimateWeaponOn`, `poisonSwampStunOff`, `spotlightSmartMissilesOff` | **Structural** for the whole check. Weapon order/current values agree; Poison Swamp Stun alone is causally validated. | Prove all nine primary booleans and Spotlight Missiles independently, or split the atomic checks before allowlisting; UI remains required. |
+| `V1073-CFG-013` Legend Tournament conditions | Tournament identity fields plus exact-version generator | **Shortcut-ready.** Seventeen consecutive event sets agreed with historical/live UI evidence. | Retain Heat/Overheat audits; validate every additional league and new exact game version independently. |
+| `V1073-CFG-014` Modules | Equipped/inventory records | **Structural.** Array dimensions are known; semantics are deliberately unpublished. | Map slot order, stable identity, Primary/Assist roles, rarity, level ownership, and substats through naturally occurring read-only comparisons; UI remains required. |
+| `V1073-CFG-015` Damage Slider | No accepted field | **Structural.** The absence of an accepted normalized source is explicit. | In an explicitly authorized test battle, correlate at least two values and restoration, percentage encoding, and save timing; UI remains required. |
+| `V1073-CFG-016` Orb Distance | Candidate distance/preset fields not accepted | **Structural.** Candidate fields are deliberately unpublished. | In an explicitly authorized battle, cycle known Extra/Workshop presets, prove units and selected-preset semantics, and restore the original pair; UI remains required. |
+| `V1073-PROFILE-001` card ownership, levels, and five 28-slot decks | `cardUnlocked`, `cardLevel`, `slotPresetCardInt`, `slotPresetCardAssignedBool`, `slotsUnlocked` | **Structural.** Dimensions and base/effective width distinction are known. | Build the complete card-ID map, compare ownership/levels, and inventory every preset membership before publication. |
+| `V1073-PROFILE-002` Workshop and Enhancements | Attack/Defense/Utility workshop and enhancement arrays | **Structural.** Dimensions only. | Map every index; verify zero, nonzero, maxed, and unlocked states; account for special upgrades with different level semantics. |
+| `V1073-PROFILE-003` Research and Labs | `researchLevel` plus candidate queue/timing fields | **Structural.** Dimensions only. | Map research IDs/levels; give active lab, duration, and completion timestamps independent volatile-freshness rules. |
+| `V1073-PROFILE-004` Ultimate Weapon progression | Unlock/level arrays plus candidate cooldown/quantity fields | **Structural.** Dimensions and candidate tuple layout only. | Prove weapon order and every three-level tuple before publishing names or levels. |
+| `V1073-PROFILE-005` Guardian and Bot progression | Unlock/level arrays and candidate Bot fields | **Structural.** Dimensions and selected preset/chip subset only. | Map every stable ID, slot count, level tuple, and preset field through read-only evidence; no cost-bearing calibration. |
+| `V1073-PROFILE-006` Module inventory/equipped loadout | Equipped and module-record structures | **Structural.** Dimensions only. | Decode stable IDs, uniqueness, slot/role, rarity, levels, ancestral stars, and substats across naturally occurring loadouts. |
+| `V1073-RUNTIME-001` stable audit-only preflight acquisition | Proven app-pause flush, two identical ADB reads, exact decoder | **Causal** for the tested profile fields' app-pause serialization boundary; runtime integration is absent. | Add one audit-only `HOME_SCREEN / NEW_BATTLE` acquisition, keep all UI checks, and retain normalized agreement/disagreement. |
+| `V1073-RUNTIME-002` configuration-fingerprint audits and incremental navigation suppression | Normalized profile fingerprint plus per-check evidence | **Structural.** Policy is specified but not exercised. | Force one clean audit per Farm/Tournament fingerprint; then suppress one allowlisted route at a time. Any mismatch, version/shape/freshness failure, repair, or due audit restores UI. |
+| `V1073-RUNTIME-003` active round identity | `(versionNumber, currentTier, roundsStartedThisTier[currentTier], roundSeed)` | **Structural.** The tuple stayed stable across three same-round snapshots while revision/wave advanced. | At one natural new battle, prove seed change, per-tier counter increment, and first serialized timing. Until then the model may expose the tuple, but runtime cannot use it as authoritative boundary proof. |
+| `V1073-RUNTIME-004` approximately five-minute save freshness | `saveRevision`, capture time, stable source hash, active identity/wave | **Structural.** The active save rewrote at two consecutive five-minute intervals. | Characterize jitter, unchanged intervals, pause/background effects, stable-read behavior during writes, and staleness thresholds. Polling/navigation decisions remain unimplemented. |
+| `V1073-RUNTIME-005` in-battle Perk inventory | `perkLevel[50]`, `perksPickedCount`, ordered `PerkPick(wave, perk)` list, versioned Perk IDs | **Cross-channel.** Three retained active snapshots have internally exact list/count/level agreement and ordered progression; ID `0` is Max Health. | The foundation may publish only a fully consistent exact-version snapshot. Unknown IDs, shape changes, count/list/level disagreement, or non-monotonic entries publish no Perk inventory and route strategy/UI evidence conservatively. |
+| `V1073-RUNTIME-006` post-run Perk clearing and same-round retention | Active Perk snapshots followed by the post-run zero/empty fields | **Structural.** Clearing is observed after the retained run, but boundary timing and final-write completeness are not causal. | At natural Game Over, prove the final same-round save timing and clearing transition. Runtime must retain the newest complete same-round snapshot before accepting a cleared post-run save. |
+| `V1073-RUNTIME-007` complete `BattleHistory` More Stats projection | Chronological capped `battleHistory[<=30]`; exact 148-field `BattleHistoryEntry` shape | **Cross-channel.** Across 21 retained UI-captured battles, all 144 More Stats rows were direct or derivable; all 3,003 numeric comparisons agreed within UI display precision. `adGemsThisRound` supplies Ad Gems. | The exact-version foundation may normalize a complete entry and fingerprint only its allowlisted fields. Raw decoded entries, arbitrary fields, and account data stay unpublished. Normal completed-record construction remains a later slice. |
+| `V1073-RUNTIME-008` Game Over history serialization timing | Pre-run history tail, Game Over observation, post-run stable save | **Structural.** A post-run history entry exists; the exact Game Over write boundary is not proven. | At a natural Game Over, prove when the new entry becomes stable and how Retry/Home/Wait affect timing. Until then terminal capture stays on the UI path. |
+| `V1073-RUNTIME-009` terminal history-tail attachment | Pre-boundary tail fingerprint plus newest post-boundary entry tier/time/wave | **Structural.** History is chronological/capped, and `roundSeed` is not copied into entries. | Causally prove that this Game Over changed the previously bound tail, then require matching tier/time/wave evidence. Ambiguity, no tail change, or a malformed entry keeps the full UI path. |
+| `V1073-RUNTIME-010` complete `killedBy` enum | `BattleHistoryEntry.killedBy` | **Cross-channel** only for `1=Fast`, `2=Tank`, and `8=Scatter`; the whole enum claim is incomplete. | Validate every naturally observed value. Any unknown value makes that completed entry unavailable and requires UI evidence; never synthesize `Enemy N`. |
+| `V1073-RUNTIME-011` passive base/ad coin split augmentation | Compact Game Stats screenshot/OCR; `battleHistory.coinsEarned` total | **Cross-channel.** `battleHistory` retains total coins but not the base/ad split; the existing compact UI reader supplies the optional split. | Retain one passive compact capture. Missing/invalid split is explicit optional augmentation and must not invalidate otherwise authoritative save-derived stats. |
+| `V1073-RUNTIME-012` forced terminal UI audit/fallback | Existing Game Stats, Perks, clipboard/OCR More Stats, and verified terminal controls | **Shortcut-ready** as maintained fallback behavior, not as a save shortcut. | Keep the complete path forced on audit, unknown version/shape/ID, incomplete final Perks, history-binding failure, or save-record mismatch. Wait/Retry/Home and mutation/transition confirmation always remain verified UI actions. |
+| `V1073-TOURNEY-001` Tournament condition profile/history coverage | Exact-version generator, event identity fields, and Heat/Overheat UI | **Shortcut-ready** for Legend condition identity only. | Complete UI inventory, effective descriptions, lower leagues, and unknown-condition preservation in the separate [Tournament condition plan](../backlog/runtime-and-validation.md#tournament-battle-condition-evidence). |
 
-### Full-profile matrix
+The overall version-1073 save adoption remains incomplete while any runtime
+row above is below its required level. Implementing the normalized foundation
+does not promote new-round identity, polling freshness, terminal attachment,
+Perk finality, the full `killedBy` enum, or runtime navigation suppression.
 
-These groups broaden the profile view but cannot influence automation until
-their own normalized evidence is validated. Each published group must carry
-mapping ID, source fields, capture time, and validation status.
-
-| Profile group | Candidate source | Required validation |
-| --- | --- | --- |
-| Card ownership, levels, and all five 28-slot decks | `cardUnlocked`, `cardLevel`, `slotPresetCardInt`, `slotPresetCardAssignedBool`, `slotsUnlocked` | Build the complete card-ID map, compare ownership/levels, inventory every preset membership, and distinguish base slots from the 28-entry stored width. |
-| Workshop and Enhancements | Attack/Defense/Utility workshop and enhancement arrays | Map every index to its UI label, verify representative zero, nonzero, maxed, and unlocked states, and account for special upgrades that do not share ordinary level semantics. |
-| Research and Labs | `researchLevel` plus candidate lab queue/timing fields | Map research IDs and levels first; treat active lab, duration, and completion timestamps as volatile observations with their own freshness rules. |
-| Ultimate Weapon progression | unlock and level arrays plus candidate cooldown/quantity fields | Prove weapon order and the three-level tuple layout for all nine weapons before reporting names or levels. |
-| Guardian and Bot progression | unlock/level arrays and candidate Bot fields | Map every stable ID, slot count, level tuple, and preset field through read-only UI evidence; keep cost-bearing changes outside calibration. |
-| Module inventory and equipped loadout | equipped and module-record structures | Decode stable IDs, uniqueness, slot/role, rarity, levels, ancestral stars, and substats; cross-check multiple naturally occurring loadouts. |
-| Tournament conditions | Exact-version seeded generator plus current event identity fields | Legend condition identity is mapped for version 1073 and is attached to Tournament records. Complete UI inventory, effective descriptions, lower leagues, and unknown-version handling remain in the separate [Tournament condition plan](../backlog/runtime-and-validation.md#tournament-battle-condition-evidence). |
+Profile groups broaden the diagnostic view but cannot influence automation
+until their own row is Shortcut-ready. Every published group carries mapping
+ID, source fields, capture time, and validation status.
 
 ### Runtime rollout sequence
 
@@ -226,8 +262,11 @@ integrity, parses the NRBF root, selects the exact version mapping, and
 validates its structural signature.
 
 The normalized report deliberately omits `playerID`, `userName`, and every
-unmapped raw field. It includes a SHA-256 source fingerprint so two observations
-can be correlated without retaining the save. The operator-owned
+unmapped raw field. Its runtime projection contains only version-allowlisted
+round, Perk, and completed-battle evidence; non-report history fields have
+explicit dispositions and remain unpublished. It includes SHA-256 source and
+canonical component fingerprints so observations can be correlated without
+retaining the save. The operator-owned
 `playerInfo.dat` must remain untracked and must never be copied into tests,
 logs, commits, or retained runtime evidence.
 

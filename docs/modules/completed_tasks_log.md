@@ -37,6 +37,30 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-01 save-first runtime normalization foundation
+
+- This commit adds snapshot-schema-2 runtime evidence for exact mapping
+  `data-9-game-1073`: privacy-safe capture/revision metadata, the guarded
+  active-round identity tuple, exact ordered in-battle Perks with ID `0`
+  normalized as Max Health, and a stable fingerprinted Battle History tail.
+- The completed-history model validates the chronological capped list and exact
+  148-field entry shape, then exposes only the mapped 16-section/144-row More
+  Stats projection. Unknown versions, changed structures, unknown Perk or
+  `killedBy` IDs, inconsistent Perk count/list/levels, and malformed history
+  entries fail closed without publishing partial component evidence.
+- The canonical runtime architecture and the consolidated version-1073
+  revision-1 audit matrix keep new-round causality, five-minute freshness,
+  post-run Perk retention, Game Over serialization/tail attachment, the full
+  `killedBy` enum, coin-split augmentation, record construction, and navigation
+  suppression as explicit later work. No `App` or handler dispatch changed;
+  all UI readers, mutations, terminal controls, forced audits, and fallbacks
+  remain intact.
+- Tests use only synthetic decoded mappings and the existing UI report shape;
+  no real save was added. The focused player-save, battle-stats, and Game Over
+  suite passed 77 tests, and the complete repository suite passed all 1,101
+  tests. Validation was repository-local and did not inspect or interact with
+  a live process, control file, ADB target, emulator, or battle.
+
 ### 2026-08-01 specialized Strategy Authoring editors
 
 - This commit advances Linux and the native client together to revision 20 and

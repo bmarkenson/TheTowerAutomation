@@ -18,6 +18,16 @@
     "root_class": "SaveLoad+PlayerData"
   },
   "required_fields": [
+    "saveRevision",
+    "roundActiveBool",
+    "currentTier",
+    "currentWave",
+    "roundSeed",
+    "roundsStartedThisTier",
+    "perkLevel",
+    "perksPickedCount",
+    "perksPicked",
+    "battleHistory",
     "presetName",
     "workshopPresetName",
     "botPresetName",
@@ -42,6 +52,8 @@
     "leagueID"
   ],
   "required_array_lengths": {
+    "roundsStartedThisTier": 40,
+    "perkLevel": 50,
     "researchLevel": 250,
     "upgradeWorkshopLevel": 20,
     "upgradeWorkshopDefenseLevel": 20,
@@ -99,6 +111,7 @@
     }
   },
   "perk_ids": {
+    "0": "max_health",
     "1": "damage",
     "3": "coins_bonus",
     "5": "interest",
@@ -234,6 +247,380 @@
     "validated_league_ids": [
       5
     ]
+  },
+  "runtime_save": {
+    "schema_version": 1,
+    "audit_matrix_id": "data-9-game-1073-runtime-audit-v1",
+    "rounds_started_tier_count": 40,
+    "perks": {
+      "level_count": 50,
+      "entry_class": "PerkPick"
+    },
+    "battle_history": {
+      "capacity": 30,
+      "entry_class": "BattleHistoryEntry",
+      "more_stats_row_count": 144,
+      "killed_by_ids": {
+        "1": "Fast",
+        "2": "Tank",
+        "8": "Scatter"
+      },
+      "integer_fields": [
+        "adGemsThisRound",
+        "attackLevelSkips",
+        "battleDate",
+        "deathDefy",
+        "demonModesUsed",
+        "dissonanceType",
+        "freeAttackUpgrades",
+        "freeDefenseUpgrades",
+        "freeUtilityUpgrades",
+        "gemBlocksTapped",
+        "gemsThisRound",
+        "healthLevelSkips",
+        "killedBy",
+        "largestGoldenCombo",
+        "largestILMCharge",
+        "largestSmartMissileStack",
+        "largestWaveSkip",
+        "nukesUsed",
+        "recoveryPackages",
+        "secondWindsUsed",
+        "selectedTower",
+        "tier",
+        "wave",
+        "wavesSkipped"
+      ],
+      "boolean_fields": [
+        "isTournament"
+      ],
+      "non_report_fields": [
+        "battleDate",
+        "damageGainFromBerserk",
+        "damageTakenWhileBerserked",
+        "dissonanceType",
+        "guardianCatches",
+        "isTournament",
+        "selectedTower",
+        "totalElites"
+      ],
+      "non_report_field_reasons": {
+        "battleDate": "Normalized only as completed-entry identity; the live 144-row More Stats report omits it.",
+        "damageGainFromBerserk": "Not displayed in the version-1073 144-row More Stats report.",
+        "damageTakenWhileBerserked": "Not displayed in the version-1073 144-row More Stats report.",
+        "dissonanceType": "Semantic enum is not validated for this foundation.",
+        "guardianCatches": "Not displayed in the version-1073 144-row More Stats report.",
+        "isTournament": "Normalized only as completed-entry identity.",
+        "selectedTower": "Semantic enum is not validated for this foundation.",
+        "totalElites": "The report exposes validated elite subtypes instead of this aggregate."
+      },
+      "more_stats_sections": [
+        {
+          "name": "Battle Report",
+          "rows": [
+            [
+              "Game Time",
+              {
+                "source": "gameTime",
+                "kind": "duration_seconds"
+              }
+            ],
+            [
+              "Real Time",
+              {
+                "source": "realTime",
+                "kind": "duration_seconds"
+              }
+            ],
+            ["Tier", "tier"],
+            ["Wave", "wave"],
+            [
+              "Killed By",
+              {
+                "source": "killedBy",
+                "kind": "killed_by_enum"
+              }
+            ],
+            ["Coins Earned", "coinsEarned"],
+            [
+              "Coins Per Hour",
+              {
+                "derive": "per_real_hour",
+                "amount": "coinsEarned",
+                "seconds": "realTime"
+              }
+            ],
+            ["Cells Earned", "cellsEarned"],
+            [
+              "Cells Per Hour",
+              {
+                "derive": "per_real_hour",
+                "amount": "cellsEarned",
+                "seconds": "realTime"
+              }
+            ]
+          ]
+        },
+        {
+          "name": "Records",
+          "rows": [
+            ["Highest Coins / Minute", "highestCPM"],
+            ["Largest Wave Skip", "largestWaveSkip"],
+            ["Most Coins From Wave Skip", "mostCoinsFromWaveSkip"],
+            ["Most Cells From Wave Skip", "mostCellsFromWaveSkip"],
+            ["Largest Smart Missile Stack", "largestSmartMissileStack"],
+            ["Largest Golden Combo", "largestGoldenCombo"],
+            ["Most Coins From Golden Combo", "mostCoinsFromGoldenCombo"],
+            ["Largest Inner Landmine Charge", "largestILMCharge"]
+          ]
+        },
+        {
+          "name": "Damage",
+          "rows": [
+            ["Damage Dealt", "damageDealt"],
+            ["Projectiles", "projectilesDamage"],
+            ["Rend Armor", "rendArmorDamage"],
+            ["Death Ray", "deathRayDamage"],
+            ["Thorns", "thornDamage"],
+            ["Orbs", "orbDamage"],
+            ["Land Mines", "landMineDamage"],
+            ["Chain Lightning", "chainLightningDamage"],
+            ["Smart Missiles", "smartMissileDamage"],
+            ["Inner Land Mines", "innerLandMineDamage"],
+            ["Poison Swamp", "swampDamage"],
+            ["Death Wave", "deathWaveDamage"],
+            ["Black Hole", "blackHoleDamage"],
+            ["Flame Bot", "flameBotDamage"],
+            ["Attack Chip", "guardianDamage"],
+            ["Electrons", "electronsDamage"]
+          ]
+        },
+        {
+          "name": "Damage Taken",
+          "rows": [
+            ["Tower", "damageTaken"],
+            ["Wall", "damageTakenWall"]
+          ]
+        },
+        {
+          "name": "Bonus Health Gained",
+          "rows": [
+            ["From Death Wave", "hpFromDeathWave"]
+          ]
+        },
+        {
+          "name": "Health Regenerated",
+          "rows": [
+            ["Lifesteal", "lifesteal"],
+            ["Tower Health Regen", "towerHealthRegen"],
+            ["Wall Health Regen", "wallHealthRegen"],
+            ["Recovery Packages", "recoveryPackagesRegen"]
+          ]
+        },
+        {
+          "name": "Damage Blocked",
+          "rows": [
+            ["Defense %", "defensePercentBlocked"],
+            ["Defense Absolute", "defenseAbsoluteBlocked"],
+            ["Chrono Field", "chronoFieldBlocked"],
+            ["Chain Thunder", "chainThunderBlocked"],
+            ["Flame Bot", "flameBotBlocked"],
+            ["Primordial Collapse", "primordialCollapseBlocked"],
+            ["Negative Mass Projector", "magicOrbBlocked"]
+          ]
+        },
+        {
+          "name": "Utility",
+          "rows": [
+            ["Recovery Packages", "recoveryPackages"],
+            ["Free Attack Upgrade", "freeAttackUpgrades"],
+            ["Free Defense Upgrade", "freeDefenseUpgrades"],
+            ["Free Utility Upgrade", "freeUtilityUpgrades"],
+            ["Enemy Attack Levels Skipped", "attackLevelSkips"],
+            ["Enemy Health Levels Skipped", "healthLevelSkips"]
+          ]
+        },
+        {
+          "name": "Counts",
+          "rows": [
+            ["Projectiles Count", "projectilesCount"],
+            ["Land Mines Spawned", "landMinesSpawned"],
+            ["Thunder Bot Stuns", "thunderBotStuns"],
+            ["Waves Skipped", "wavesSkipped"],
+            ["Death Defy", "deathDefy"],
+            ["Hits Absorbed By Energy Shield", "energyShieldHitsAbsorbed"],
+            ["Nuke", "nukesUsed"],
+            ["Second Wind", "secondWindsUsed"],
+            ["Demon Mode", "demonModesUsed"]
+          ]
+        },
+        {
+          "name": "Enemies Hit By",
+          "rows": [
+            ["Projectiles", "enemiesHitByProjectilesThisRound"],
+            ["Thorns", "enemiesHitByThornsThisRound"],
+            ["Orbs", "orbHits"],
+            ["Death Ray", "enemiesHitByDeathRayThisRound"],
+            ["Chain Lightning", "enemiesHitByChainLightningThisRound"],
+            ["Smart Missiles", "enemiesHitBySmartMissilesThisRound"],
+            ["Inner Land Mines", "enemiesHitByInnerLandMinesThisRound"],
+            ["Poison Swamp", "enemiesHitByPoisonSwampThisRound"],
+            ["Death Wave", "taggedByDeathwave"],
+            ["Black Hole", "enemiesHitByBlackHoleThisRound"],
+            ["Chrono Field", "enemiesHitByChronoFieldThisRound"],
+            ["Land Mines", "enemiesHitByLandMineThisRound"],
+            ["Thunder Bot", "enemiesHitByThunderBotThisRound"],
+            ["Flame Bot", "enemiesHitByFlameBotThisRound"],
+            ["Attack Chip", "enemiesHitByAttackChipThisRound"],
+            ["Orbital Augment", "enemiesHitByOrbitalAugmentThisRound"]
+          ]
+        },
+        {
+          "name": "Killed With Effect Active",
+          "rows": [
+            [
+              "Golden Tower",
+              {
+                "source": "destroyedInGoldenTower",
+                "active_percent_of": "totalEnemies"
+              }
+            ],
+            [
+              "Death Wave",
+              {
+                "source": "taggedByDeathwave",
+                "active_percent_of": "totalEnemies"
+              }
+            ],
+            [
+              "Spotlight",
+              {
+                "source": "destroyedInSpotlight",
+                "active_percent_of": "totalEnemies"
+              }
+            ],
+            [
+              "Amplify Bot",
+              {
+                "source": "destroyedInAmplifyBot",
+                "active_percent_of": "totalEnemies"
+              }
+            ],
+            [
+              "Golden Bot",
+              {
+                "source": "destroyedInGoldenBot",
+                "active_percent_of": "totalEnemies"
+              }
+            ],
+            [
+              "Death Penalty",
+              {
+                "source": "destroyedByDeathPenalty",
+                "active_percent_of": "totalEnemies"
+              }
+            ],
+            [
+              "Black Hole",
+              {
+                "source": "destroyedInBlackhole",
+                "active_percent_of": "totalEnemies"
+              }
+            ],
+            [
+              "Orbs",
+              {
+                "source": "destroyedInOrbs",
+                "active_percent_of": "totalEnemies"
+              }
+            ]
+          ]
+        },
+        {
+          "name": "Total Enemies",
+          "rows": [
+            ["Total Enemies", "totalEnemies"],
+            ["Basic", "totalBasic"],
+            ["Fast", "totalFast"],
+            ["Tank", "totalTank"],
+            ["Ranged", "totalRanged"],
+            ["Boss", "totalBoss"],
+            ["Protector", "totalProtector"],
+            ["Vampires", "totalVampire"],
+            ["Rays", "totalRays"],
+            ["Scatters", "totalScatters"],
+            ["Saboteur", "totalSaboteurs"],
+            ["Commander", "totalCommanders"],
+            ["Overcharge", "totalOvercharges"],
+            ["Summoned Enemies", "guardianSummoned"]
+          ]
+        },
+        {
+          "name": "Coins",
+          "rows": [
+            ["Coins Earned", "coinsEarned"],
+            ["Coins / Kill", "coinsFromCoinUpgrade"],
+            ["Other Coin Bonuses", "coinsFromCoinBonuses"],
+            ["Critical Coin", "coinsFromCritCoin"],
+            ["Golden Tower", "coinsFromGoldenTower"],
+            ["Golden Combo", "coinsFromGoldenTowerPlus"],
+            ["Death Wave", "coinsFromDeathWave"],
+            ["Spotlight", "coinsFromSpotlight"],
+            ["Black Hole", "coinsFromBlackHole"],
+            ["Orbs", "coinsFromOrbs"],
+            ["Golden Bot", "goldenBotCoinsEarned"],
+            ["Wave Skip", "coinsEarnedWaveSkip"],
+            ["Coins / Wave", "coinsEarnedCPW"],
+            ["Coins Fetched", "guardianCoinsFetched"],
+            ["Bounty Coins", "guardianCoinsStolen"]
+          ]
+        },
+        {
+          "name": "Cash",
+          "rows": [
+            ["Cash Earned", "cashEarned"],
+            ["Golden Tower", "cashFromGoldenTower"],
+            ["Interest earned", "interestEarned"]
+          ]
+        },
+        {
+          "name": "Currencies",
+          "rows": [
+            ["Cells Earned", "cellsEarned"],
+            ["Gems", "gemsThisRound"],
+            ["Ad Gems", "adGemsThisRound"],
+            ["Gem Blocks Tapped", "gemBlocksTapped"],
+            ["Fetch Gems", "guardianGems"],
+            ["Medals", "guardianMedals"],
+            ["Reroll Shards Earned", "rerollShardsEarned"],
+            ["Reroll Shards Fetched", "guardianRerollShards"],
+            ["Cannon Shards", "guardianCannonShards"],
+            ["Armor Shards", "guardianArmorShards"],
+            ["Generator Shards", "guardianGeneratorShards"],
+            ["Core Shards", "guardianCoreShards"],
+            ["Common Modules", "guardianCommonModules"],
+            ["Rare Modules", "guardianRareModules"]
+          ]
+        },
+        {
+          "name": "Enemies Destroyed By",
+          "rows": [
+            ["Projectiles", "destroyedByProjectiles"],
+            ["Thorns", "destroyedByThorns"],
+            ["Land Mines", "destroyedByLandMine"],
+            ["Orbs", "destroyedByOrbs"],
+            ["Chain Lightning", "destroyedByChainLightning"],
+            ["Smart Missiles", "destroyedBySmartMissiles"],
+            ["Inner Land Mines", "destroyedByInnerLandMines"],
+            ["Poison Swamp", "destroyedByPoisonSwamp"],
+            ["Death Ray", "destroyedByDeathRay"],
+            ["Black Hole", "destroyedByBlackHole"],
+            ["Flame Bot", "destroyedByFlameBot"],
+            ["Other", "destroyedByOther"]
+          ]
+        }
+      ]
+    }
   },
   "unmapped_checks": {
     "damage_slider": "No authoritative current Damage Slider field has been mapped.",
