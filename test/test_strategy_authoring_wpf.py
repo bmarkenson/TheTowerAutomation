@@ -174,10 +174,37 @@ def test_native_combo_theme_keeps_closed_and_dropdown_text_high_contrast():
     assert '<Setter Property="Background" Value="#182338" />' in combo_style
     assert '<Setter Property="Foreground" Value="#EDF2F7" />' in combo_style
     assert '<Setter Property="Foreground" Value="#111827" />' not in combo_style
+    assert '<Setter Property="OverridesDefaultStyle" Value="True" />' in combo_style
+    assert '<ControlTemplate TargetType="{x:Type ComboBox}">' in combo_style
+    assert 'x:Name="ComboChrome"' in combo_style
+    assert 'Background="{TemplateBinding Background}"' in combo_style
+    assert 'TextElement.Foreground="{TemplateBinding Foreground}"' in combo_style
+    assert 'x:Name="PART_Popup"' in combo_style
+    assert 'x:Name="PopupChrome"' in combo_style
+    assert '<Trigger Property="IsEnabled" Value="False">' in combo_style
     assert '<Setter Property="Background" Value="#182338" />' in item_style
     assert '<Setter Property="Foreground" Value="#EDF2F7" />' in item_style
+    assert '<Setter Property="OverridesDefaultStyle" Value="True" />' in item_style
+    assert '<ControlTemplate TargetType="{x:Type ComboBoxItem}">' in item_style
+    assert 'x:Name="ItemChrome"' in item_style
+    assert 'TextElement.Foreground="{TemplateBinding Foreground}"' in item_style
     assert '<Trigger Property="IsHighlighted" Value="True">' in item_style
     assert '<Trigger Property="IsSelected" Value="True">' in item_style
+
+
+def test_native_choice_labels_remain_readable_when_editor_is_disabled():
+    app_xaml = _text("App.xaml")
+
+    for control_type in ("RadioButton", "CheckBox"):
+        style = app_xaml.split(f'<Style TargetType="{control_type}">', 1)[1].split(
+            "</Style>", 1
+        )[0]
+        assert '<Setter Property="Foreground" Value="#EDF2F7" />' in style
+        assert '<Trigger Property="IsEnabled" Value="False">' in style
+        disabled = style.split(
+            '<Trigger Property="IsEnabled" Value="False">', 1
+        )[1].split("</Trigger>", 1)[0]
+        assert '<Setter Property="Foreground" Value="#7890AC" />' in disabled
 
 
 def test_portable_view_model_suite_covers_editors_states_and_round_trips():

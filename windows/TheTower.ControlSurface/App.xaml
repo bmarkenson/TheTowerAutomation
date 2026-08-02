@@ -55,29 +55,174 @@
       <Setter Property="BorderBrush" Value="#344660" />
       <Setter Property="Padding" Value="8,6" />
     </Style>
+    <Style TargetType="RadioButton">
+      <Setter Property="Foreground" Value="#EDF2F7" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Style.Triggers>
+        <Trigger Property="IsEnabled" Value="False">
+          <Setter Property="Foreground" Value="#7890AC" />
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+    <Style TargetType="CheckBox">
+      <Setter Property="Foreground" Value="#EDF2F7" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Style.Triggers>
+        <Trigger Property="IsEnabled" Value="False">
+          <Setter Property="Foreground" Value="#7890AC" />
+        </Trigger>
+      </Style.Triggers>
+    </Style>
     <Style TargetType="ComboBox">
       <Setter Property="Background" Value="#182338" />
       <Setter Property="Foreground" Value="#EDF2F7" />
       <Setter Property="BorderBrush" Value="#344660" />
-      <Setter Property="Padding" Value="6" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Padding" Value="8,5,34,5" />
+      <Setter Property="MinHeight" Value="30" />
+      <Setter Property="HorizontalContentAlignment" Value="Left" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="ScrollViewer.CanContentScroll" Value="True" />
+      <Setter Property="OverridesDefaultStyle" Value="True" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="{x:Type ComboBox}">
+            <Grid SnapsToDevicePixels="True">
+              <Border x:Name="ComboChrome"
+                      Background="{TemplateBinding Background}"
+                      BorderBrush="{TemplateBinding BorderBrush}"
+                      BorderThickness="{TemplateBinding BorderThickness}"
+                      CornerRadius="2">
+                <Grid>
+                  <ContentPresenter x:Name="SelectionPresenter"
+                                    Margin="{TemplateBinding Padding}"
+                                    HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    Content="{TemplateBinding SelectionBoxItem}"
+                                    ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                    ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
+                                    IsHitTestVisible="False"
+                                    RecognizesAccessKey="True"
+                                    SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"
+                                    TextElement.Foreground="{TemplateBinding Foreground}" />
+                  <ToggleButton x:Name="DropDownToggle"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                ClickMode="Press"
+                                Focusable="False"
+                                Foreground="{TemplateBinding Foreground}"
+                                IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                    <ToggleButton.Template>
+                      <ControlTemplate TargetType="{x:Type ToggleButton}">
+                        <Grid Background="{TemplateBinding Background}">
+                          <Border Width="30"
+                                  HorizontalAlignment="Right"
+                                  Background="Transparent"
+                                  BorderBrush="#344660"
+                                  BorderThickness="1,0,0,0">
+                            <Path Width="8"
+                                  Height="5"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"
+                                  Data="M 0 0 L 4 4 L 8 0 Z"
+                                  Fill="{TemplateBinding Foreground}"
+                                  Stretch="Fill" />
+                          </Border>
+                        </Grid>
+                      </ControlTemplate>
+                    </ToggleButton.Template>
+                  </ToggleButton>
+                </Grid>
+              </Border>
+              <Popup x:Name="PART_Popup"
+                     AllowsTransparency="True"
+                     Focusable="False"
+                     IsOpen="{TemplateBinding IsDropDownOpen}"
+                     Placement="Bottom"
+                     PopupAnimation="Fade">
+                <Grid MinWidth="{TemplateBinding ActualWidth}"
+                      MaxHeight="{TemplateBinding MaxDropDownHeight}"
+                      SnapsToDevicePixels="True">
+                  <Border x:Name="PopupChrome"
+                          Background="#182338"
+                          BorderBrush="#4B617F"
+                          BorderThickness="1"
+                          CornerRadius="2" />
+                  <ScrollViewer Margin="1"
+                                CanContentScroll="True"
+                                HorizontalScrollBarVisibility="Auto"
+                                SnapsToDevicePixels="True"
+                                VerticalScrollBarVisibility="Auto">
+                    <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"
+                                    SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
+                  </ScrollViewer>
+                </Grid>
+              </Popup>
+            </Grid>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="ComboChrome" Property="Background" Value="#1B2A42" />
+                <Setter TargetName="ComboChrome" Property="BorderBrush" Value="#4B617F" />
+              </Trigger>
+              <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                <Setter TargetName="ComboChrome" Property="BorderBrush" Value="#62D5FF" />
+              </Trigger>
+              <Trigger Property="IsDropDownOpen" Value="True">
+                <Setter TargetName="ComboChrome" Property="Background" Value="#0E3448" />
+                <Setter TargetName="ComboChrome" Property="BorderBrush" Value="#62D5FF" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Foreground" Value="#7890AC" />
+                <Setter TargetName="ComboChrome" Property="Background" Value="#121B2B" />
+                <Setter TargetName="ComboChrome" Property="BorderBrush" Value="#263349" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
     </Style>
     <Style TargetType="ComboBoxItem">
       <Setter Property="Background" Value="#182338" />
       <Setter Property="Foreground" Value="#EDF2F7" />
       <Setter Property="Padding" Value="8,5" />
-      <Style.Triggers>
-        <Trigger Property="IsHighlighted" Value="True">
-          <Setter Property="Background" Value="#0E4E67" />
-          <Setter Property="Foreground" Value="#BCEEFF" />
-        </Trigger>
-        <Trigger Property="IsSelected" Value="True">
-          <Setter Property="Background" Value="#0E4E67" />
-          <Setter Property="Foreground" Value="#BCEEFF" />
-        </Trigger>
-        <Trigger Property="IsEnabled" Value="False">
-          <Setter Property="Foreground" Value="#7890AC" />
-        </Trigger>
-      </Style.Triggers>
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+      <Setter Property="OverridesDefaultStyle" Value="True" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="{x:Type ComboBoxItem}">
+            <Border x:Name="ItemChrome"
+                    Background="{TemplateBinding Background}"
+                    Padding="{TemplateBinding Padding}"
+                    SnapsToDevicePixels="True">
+              <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                Content="{TemplateBinding Content}"
+                                ContentTemplate="{TemplateBinding ContentTemplate}"
+                                ContentTemplateSelector="{TemplateBinding ContentTemplateSelector}"
+                                RecognizesAccessKey="True"
+                                SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"
+                                TextElement.Foreground="{TemplateBinding Foreground}" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsHighlighted" Value="True">
+                <Setter Property="Foreground" Value="#BCEEFF" />
+                <Setter TargetName="ItemChrome" Property="Background" Value="#0E4E67" />
+              </Trigger>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter Property="Foreground" Value="#BCEEFF" />
+                <Setter TargetName="ItemChrome" Property="Background" Value="#0E4E67" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Foreground" Value="#7890AC" />
+                <Setter TargetName="ItemChrome" Property="Background" Value="#121B2B" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
     </Style>
     <Style TargetType="DataGrid">
       <Setter Property="Background" Value="#111827" />
