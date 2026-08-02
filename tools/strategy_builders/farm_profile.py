@@ -74,12 +74,12 @@ def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
             f"extra={extra})"
         )
 
-    module_policy = _resolve_preset_policy(
+    module_policy = _resolve_definition_policy(
         "modules",
         loadout["modules"],
         MODULE_PRESETS_PATH,
     )
-    target_policy = _resolve_preset_policy(
+    target_policy = _resolve_definition_policy(
         "target_priority",
         loadout["target_priority"],
         TARGET_PRIORITY_PRESETS_PATH,
@@ -262,32 +262,131 @@ def _normalize_gate_fallbacks(
     return normalized
 
 
-def _resolve_preset_policy(
+def _resolve_definition_policy(
     setting: str,
     raw: Any,
     catalog_path: Path,
 ) -> dict[str, Any]:
     policy = _normalize_policy(setting, raw)
     mode = policy["mode"]
-    preset = str(policy.get("preset") or "").strip()
     if mode == "preserve":
-        if preset:
+        if set(policy) != {"mode"}:
             raise ValueError(
-                f"farm loadout {setting} preserve mode must not supply a preset"
+                f"farm loadout {setting} preserve mode must not supply a "
+                "preset or local definition"
             )
         return {"mode": mode}
-    if not preset:
-        raise ValueError(
-            f"farm loadout {setting} {mode} mode requires a preset"
+
+    source_fields = set(policy) - {"mode"}
+    if source_fields == {"preset"}:
+        preset = str(policy.get("preset") or "").strip()
+        if not preset:
+            raise ValueError(
+                f"farm loadout {setting} {mode} mode requires a preset"
+            )
+        catalog = _load_mapping(catalog_path, f"{setting} preset catalog")
+        if catalog.get("schema_version") != 1:
+            raise ValueError(
+                f"{setting} preset catalog has an unsupported schema"
+            )
+        presets = catalog.get("presets")
+        if not isinstance(presets, Mapping) or preset not in presets:
+            raise ValueError(f"unknown {setting} preset {preset!r}")
+        resolved = _normalize_definition(setting, presets[preset])
+        return {"mode": mode, "preset": preset, "resolved": resolved}
+
+    if source_fields == {"preset_snapshot"}:
+        snapshot = policy.get("preset_snapshot")
+        expected_snapshot_fields = (
+            {"preset", "definition", "range_relationships"}
+            if setting == "orb_distance"
+            else {"preset", "definition"}
         )
-    catalog = _load_mapping(catalog_path, f"{setting} preset catalog")
-    presets = catalog.get("presets")
-    if not isinstance(presets, Mapping) or preset not in presets:
-        raise ValueError(f"unknown {setting} preset {preset!r}")
-    resolved = copy.deepcopy(presets[preset])
-    if not isinstance(resolved, (dict, list)):
-        raise ValueError(f"{setting} preset {preset!r} has invalid data")
-    return {"mode": mode, "preset": preset, "resolved": resolved}
+        if (
+            not isinstance(snapshot, Mapping)
+            or set(snapshot) != expected_snapshot_fields
+        ):
+            raise ValueError(
+                f"farm loadout {setting} preset_snapshot is incomplete or ambiguous"
+            )
+        preset = str(snapshot.get("preset") or "").strip()
+        if not preset:
+            raise ValueError(
+                f"farm loadout {setting} preset_snapshot requires a preset id"
+            )
+        resolved = _normalize_definition(setting, snapshot.get("definition"))
+        result = {"mode": mode, "preset": preset, "resolved": resolved}
+        if setting == "orb_distance":
+            result["range_presets"] = _normalize_orb_relationships(
+                resolved,
+                snapshot.get("range_relationships"),
+            )
+        return result
+
+    expected_local_fields = (
+        {"local", "range_relationships"}
+        if setting == "orb_distance"
+        else {"local"}
+    )
+    if source_fields != expected_local_fields:
+        raise ValueError(
+            f"farm loadout {setting} {mode} mode must define exactly one "
+            "preset or local definition"
+        )
+    resolved = _normalize_definition(setting, policy.get("local"))
+    result = {"mode": mode, "resolved": resolved}
+    if setting == "orb_distance":
+        result["range_presets"] = _normalize_orb_relationships(
+            resolved,
+            policy.get("range_relationships"),
+        )
+    return result
+
+
+def _normalize_definition(setting: str, raw: Any) -> Any:
+    try:
+        if setting == "modules":
+            from core.gc_module_loadout import normalize_gc_module_requirements
+
+            return normalize_gc_module_requirements(raw)
+        if setting == "target_priority":
+            from core.target_priority_config import validate_target_priority_order
+
+            if not isinstance(raw, list):
+                raise ValueError("target_priority local definition must be a list")
+            return validate_target_priority_order(raw)
+        if setting == "orb_distance":
+            from core.orb_distance import normalize_orb_distance_preset
+
+            return normalize_orb_distance_preset(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"farm loadout {setting} {exc}") from exc
+    raise ValueError(f"farm loadout has unsupported definition {setting!r}")
+
+
+def _normalize_orb_relationships(
+    selected: Mapping[str, str],
+    raw: Any,
+) -> list[dict[str, str]]:
+    from core.orb_distance import normalize_orb_distance_presets
+
+    try:
+        relationships = normalize_orb_distance_presets(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"farm loadout orb_distance range_relationships {exc}"
+        ) from exc
+    matching = [
+        item
+        for item in relationships
+        if item["range_basis"] == selected["range_basis"]
+    ]
+    if matching != [dict(selected)]:
+        raise ValueError(
+            "farm loadout orb_distance range_relationships must contain "
+            "the selected relationship exactly"
+        )
+    return relationships
 
 
 def _resolve_damage_slider_policy(raw: Any) -> dict[str, Any]:
@@ -313,7 +412,7 @@ def _resolve_damage_slider_policy(raw: Any) -> dict[str, Any]:
 
 
 def _resolve_orb_distance_policy(raw: Any) -> dict[str, Any]:
-    policy = _resolve_preset_policy(
+    policy = _resolve_definition_policy(
         "orb_distance",
         raw,
         ORB_DISTANCE_PRESETS_PATH,
@@ -327,13 +426,14 @@ def _resolve_orb_distance_policy(raw: Any) -> dict[str, Any]:
 
     try:
         policy["resolved"] = normalize_orb_distance_preset(policy["resolved"])
-        catalog = _load_mapping(
-            ORB_DISTANCE_PRESETS_PATH,
-            "orb_distance preset catalog",
-        )
-        policy["range_presets"] = normalize_orb_distance_presets(
-            catalog.get("presets")
-        )
+        if "range_presets" not in policy:
+            catalog = _load_mapping(
+                ORB_DISTANCE_PRESETS_PATH,
+                "orb_distance preset catalog",
+            )
+            policy["range_presets"] = normalize_orb_distance_presets(
+                catalog.get("presets")
+            )
     except ValueError as exc:
         raise ValueError(f"farm loadout orb_distance {exc}") from exc
     return policy

@@ -507,7 +507,7 @@ def test_authoring_api_opens_schema_one_profile_without_rewriting_it(tmp_path):
     )
 
     assert item["legacy_converted"] is True
-    assert item["source"]["schema_version"] == 2
+    assert item["source"]["schema_version"] == 3
     assert item["source"]["kind"] == "strategy"
     assert item["editable"] is True
     assert item["resolution"]["settings"]["ultimate_weapons"]["state"] == (

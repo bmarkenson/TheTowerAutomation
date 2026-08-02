@@ -37,6 +37,38 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-02 profile-local loadout definition backend
+
+- Sparse authoring schema 3 now gives Modules, Target Priority, and Orb
+  Distance one exact preset-or-local value contract shared by Bases and
+  Strategies. Existing authoritative normalizers enforce the complete
+  eight-slot Module mapping and module families, the complete unique ordered
+  target list, and the three normalized Attack Range/Extra Orb/Workshop
+  distance fields. Shared presets remain supported.
+- Effective resolution retains a fingerprinted definition snapshot; Orb
+  snapshots also retain every range relationship consumed by the generated
+  selection/preserve action. Immutable Base revisions store their definition
+  resolution, and new Strategy publications embed that Base resolution plus
+  every final effective snapshot. Current validation, semantic history review,
+  and restore-as-new use retained evidence after a Base or shared preset is
+  changed or removed.
+- Schema-2 sources/publications remain exact compatibility evidence and are not
+  rewritten. Any prospective schema-1/schema-2 edit upgrades to self-contained
+  schema 3 before publication. The protected Farm builder preserves the exact
+  bundled and retained preset plan structure while local definitions produce
+  equivalent runtime requirements/actions with honest local provenance.
+  Publication remains separate from activation, and expanded plans and paths
+  remain redacted.
+- This backend-only commit leaves the revision-23 API capabilities and the
+  native preset editor unchanged, so installed preset-only clients remain
+  safe. Additive API discovery, managed WPF preset/local editors, and Windows
+  runtime smoke remain active follow-up work.
+- The dedicated local-definition suite passed all 15 tests and the complete
+  Python suite passed all 1,186 tests. `git diff --check` passed. Validation was
+  repository-local: no process, control file, ADB target, emulator, game, or
+  Windows runtime was inspected or changed, and the untracked operator-owned
+  `playerInfo.dat` remained untouched and unstaged.
+
 ### 2026-08-02 fail-closed terminal run binding
 
 - Commit `6a81605` prevents a terminal-only process restart from assigning the

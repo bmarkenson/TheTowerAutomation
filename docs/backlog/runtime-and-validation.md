@@ -415,6 +415,21 @@ stages:
     Distance relationship derived from observed Attack Range, Extra Orb
     distance, and Workshop distance. Published Strategies must embed resolved
     local data and remain independent of later mutable preset changes.
+    - [x] Implement sparse source schema 3, authoritative preset-or-local
+      normalization, retained effective-definition and Orb range-relationship
+      snapshots, immutable Base/Strategy publication evidence, history and
+      restore reuse, conservative schema-2 reading, and protected Farm-builder
+      support without changing bundled preset-only output.
+    - [ ] Add an explicit additive API capability and metadata contract, then
+      implement managed WPF preset/local editors for Modules, complete ordered
+      Target Priority, and the three-field Orb Distance relationship. Preserve
+      preset-only round trips for revision-23 clients and treat definition
+      snapshots and fingerprints as server-owned review data.
+    - [ ] Run the disposable-catalog Windows runtime smoke for Base and Strategy
+      preset/local editing, inheritance/override/Ignore, validation errors,
+      review/publish, history comparison, and restore-as-new. Make only narrow
+      repairs supported by that runtime evidence; publication must not activate
+      or otherwise change automation state.
   - [x] Refine running-battle validation into an explicit strategy gate so
     observation and allowlisted independent collectors can continue while
     strategy and lifecycle actions are blocked. Validate this authority split

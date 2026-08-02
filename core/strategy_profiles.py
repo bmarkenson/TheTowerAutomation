@@ -28,11 +28,13 @@ from core.perk_configuration import (
 )
 from core.strategy_authoring import (
     AUTHORING_SCHEMA_VERSION,
+    LEGACY_AUTHORING_SCHEMA_VERSION,
     StrategyAuthoringConflictError,
     StrategyAuthoringError,
     StrategyBaseStore,
     _atomic_create_immutable,
     analyze_strategy_source,
+    base_publication_resolution,
     describe_base_resolution,
     diff_source_documents,
     diff_strategy_resolutions,
@@ -45,6 +47,7 @@ from core.strategy_authoring import (
     rebase_review_fingerprint,
     resolve_strategy_source,
     setting_registry_catalog,
+    upgrade_authoring_source_schema,
 )
 from tools.strategy_builders.lib import build_strategy_yaml
 
@@ -457,6 +460,9 @@ class StrategyProfileStore:
                     "base_snapshot": _copy_optional_mapping(
                         revision.get("base_snapshot")
                     ),
+                    "base_resolution": _copy_optional_mapping(
+                        revision.get("base_resolution")
+                    ),
                     "resolution": _copy_mapping(revision["resolution"]),
                     "expanded_plan_exposed": False,
                 }
@@ -566,14 +572,15 @@ class StrategyProfileStore:
         """Normalize a prospective next immutable Base revision."""
 
         try:
-            initial = normalize_base_source(raw_base, revision=1)
+            upgraded = upgrade_authoring_source_schema(raw_base)
+            initial = normalize_base_source(upgraded, revision=1)
             latest = self.base_store.latest(initial["id"])
             revision = (
                 int(latest["snapshot"]["revision"]) + 1
                 if latest is not None
                 else 1
             )
-            source = normalize_base_source(raw_base, revision=revision)
+            source = normalize_base_source(upgraded, revision=revision)
         except StrategyAuthoringError as exc:
             raise StrategyProfileError(str(exc)) from exc
         before = (
@@ -586,17 +593,22 @@ class StrategyProfileStore:
         )
         review = diff_source_documents(before, source)
         review["created"] = latest is None
+        resolution = describe_base_resolution(source)
         source_fingerprint = fingerprint_document(source)
+        resolution_fingerprint = fingerprint_document(resolution)
         return {
             "valid": True,
             "published": False,
             "source": source,
-            "resolution": describe_base_resolution(source),
+            "resolution": resolution,
             "source_fingerprint": source_fingerprint,
             "expected_latest_fingerprint": (
                 latest["source_fingerprint"] if latest is not None else None
             ),
-            "fingerprints": {"source_fingerprint": source_fingerprint},
+            "fingerprints": {
+                "source_fingerprint": source_fingerprint,
+                "resolution_fingerprint": resolution_fingerprint,
+            },
             "review": {
                 "source_changes": review,
                 "validation": {"valid": True, "errors": []},
@@ -626,13 +638,14 @@ class StrategyProfileStore:
             {
                 "published": True,
                 "source": _copy_mapping(publication["snapshot"]),
-                "resolution": describe_base_resolution(
-                    publication["snapshot"]
-                ),
+                "resolution": base_publication_resolution(publication),
                 "source_fingerprint": publication["source_fingerprint"],
                 "published_at": publication["published_at"],
                 "fingerprints": {
-                    "source_fingerprint": publication["source_fingerprint"]
+                    "source_fingerprint": publication["source_fingerprint"],
+                    "resolution_fingerprint": publication.get(
+                        "resolution_fingerprint"
+                    ),
                 },
             }
         )
@@ -732,7 +745,9 @@ class StrategyProfileStore:
                 f"Profile {identifier!r} no longer exists; reload the catalog"
             )
         try:
-            proposed = normalize_strategy_source(raw_strategy)
+            proposed = normalize_strategy_source(
+                upgrade_authoring_source_schema(raw_strategy)
+            )
         except StrategyAuthoringError as exc:
             raise StrategyProfileError(str(exc)) from exc
         if current is not None and current["source"].get("base") != proposed.get(
@@ -764,8 +779,12 @@ class StrategyProfileStore:
         """Preview a Base pin update, including builder/dependency failures."""
 
         try:
-            source = normalize_strategy_source(raw_strategy)
-            current_snapshot = self._base_snapshot_for_source(source)
+            source = normalize_strategy_source(
+                upgrade_authoring_source_schema(raw_strategy)
+            )
+            current_snapshot, current_base_resolution = (
+                self._base_evidence_for_source(source)
+            )
             if not isinstance(target_base, Mapping):
                 raise StrategyAuthoringError("target_base must be an object")
             target_id = target_base.get("id")
@@ -786,6 +805,10 @@ class StrategyProfileStore:
                 source,
                 current_snapshot,
                 target_publication["snapshot"],
+                current_base_resolution_snapshot=current_base_resolution,
+                target_base_resolution_snapshot=base_publication_resolution(
+                    target_publication
+                ),
             )
         except StrategyAuthoringError as exc:
             raise StrategyProfileError(str(exc)) from exc
@@ -935,10 +958,11 @@ class StrategyProfileStore:
 
         source, display_name = self._authoring_source_from_draft(raw_profile)
         try:
-            base_snapshot = self._load_base_snapshot(source)
+            base_snapshot, base_resolution = self._load_base_evidence(source)
             return self._validate_normalized_source(
                 source,
                 base_snapshot=base_snapshot,
+                base_resolution=base_resolution,
                 display_name=display_name,
             )
         except StrategyProfileError:
@@ -951,13 +975,24 @@ class StrategyProfileStore:
         raw_source: object,
         *,
         base_snapshot: object,
+        base_resolution: object = None,
+        retained_resolution: object = None,
         display_name: object = None,
     ) -> dict[str, Any]:
         """Build one normalized source against an exact embedded Base snapshot."""
 
         try:
             source = normalize_strategy_source(raw_source)
-            resolution = resolve_strategy_source(source, base_snapshot)
+            resolution = resolve_strategy_source(
+                source,
+                base_snapshot,
+                base_resolution_snapshot=base_resolution,
+                retained_resolution=retained_resolution,
+                require_base_definition_snapshots=(
+                    source["schema_version"] == AUTHORING_SCHEMA_VERSION
+                    and base_snapshot is not None
+                ),
+            )
             compact_source = farm_source_from_resolution(source, resolution)
             plan = build_strategy_yaml(compact_source)
         except Exception as exc:
@@ -968,7 +1003,11 @@ class StrategyProfileStore:
                 "Strategy display name does not match its normalized source"
             )
         source_fingerprint = fingerprint_document(source)
-        base_fingerprint = fingerprint_document(base_snapshot or {})
+        base_fingerprint = _base_state_fingerprint(
+            base_snapshot,
+            base_resolution,
+            source_schema_version=source["schema_version"],
+        )
         resolution_fingerprint = fingerprint_document(resolution)
         plan_fingerprint = _fingerprint(plan)
         rules = plan.get("rules")
@@ -995,6 +1034,7 @@ class StrategyProfileStore:
             },
             "source": source,
             "base_snapshot": base_snapshot,
+            "base_resolution": base_resolution,
             "resolution": resolution,
             "plan": plan,
             "rule_count": rule_count,
@@ -1231,9 +1271,17 @@ class StrategyProfileStore:
         exact_base_snapshot = _copy_optional_mapping(
             validation.get("base_snapshot")
         )
+        exact_base_resolution = _copy_optional_mapping(
+            validation.get("base_resolution")
+        )
+        retained_resolution = _copy_optional_mapping(
+            validation.get("resolution")
+        )
         rebuilt = self._validate_normalized_source(
             source,
             base_snapshot=exact_base_snapshot,
+            base_resolution=exact_base_resolution,
+            retained_resolution=retained_resolution,
             display_name=source["display_name"],
         )
         audit_identity = _new_audit_identity()
@@ -1254,6 +1302,7 @@ class StrategyProfileStore:
             "plan_fingerprint": rebuilt["profile"]["plan_fingerprint"],
             "source": rebuilt["source"],
             "base_snapshot": rebuilt["base_snapshot"],
+            "base_resolution": rebuilt["base_resolution"],
             "resolution": rebuilt["resolution"],
             "plan": rebuilt["plan"],
         }
@@ -1282,6 +1331,7 @@ class StrategyProfileStore:
         result = dict(rebuilt)
         result.pop("source", None)
         result.pop("base_snapshot", None)
+        result.pop("base_resolution", None)
         result.pop("resolution", None)
         result.pop("plan", None)
         result["profile"] = self._publication_item(stored)
@@ -2350,6 +2400,8 @@ class StrategyProfileStore:
                 current_validation = self._validate_normalized_source(
                     current_projection["source"],
                     base_snapshot=current_projection["base_snapshot"],
+                    base_resolution=current_projection.get("base_resolution"),
+                    retained_resolution=current_projection["resolution"],
                 )
                 if current_validation["plan"] != current_projection["plan"]:
                     raise StrategyProfileError(
@@ -2371,6 +2423,8 @@ class StrategyProfileStore:
             historical_validation = self._validate_normalized_source(
                 revision["source"],
                 base_snapshot=revision.get("base_snapshot"),
+                base_resolution=revision.get("base_resolution"),
+                retained_resolution=revision.get("resolution"),
             )
             if historical_validation["resolution"] != revision["resolution"]:
                 raise StrategyProfileError(
@@ -2402,6 +2456,8 @@ class StrategyProfileStore:
                 candidate_validation = self._validate_normalized_source(
                     candidate_source,
                     base_snapshot=revision.get("base_snapshot"),
+                    base_resolution=revision.get("base_resolution"),
+                    retained_resolution=revision.get("resolution"),
                 )
             except StrategyProfileError as exc:
                 if require_optimistic_state:
@@ -2497,6 +2553,8 @@ class StrategyProfileStore:
                 "resolution"
             ]
             before_base = None
+            before_base_resolution = None
+            before_base_fingerprint = fingerprint_document({})
             before_plan = None
             before_plan_fingerprint = None
             before_rule_count = 0
@@ -2504,6 +2562,8 @@ class StrategyProfileStore:
             before_source = current_projection["source"]
             before_resolution = current_projection["resolution"]
             before_base = current_projection.get("base_snapshot")
+            before_base_resolution = current_projection.get("base_resolution")
+            before_base_fingerprint = current_projection["base_fingerprint"]
             before_plan = current_projection["plan"]
             before_plan_fingerprint = current_projection["plan_fingerprint"]
             before_rule_count = _plan_rule_count(before_plan)
@@ -2514,20 +2574,25 @@ class StrategyProfileStore:
             candidate_resolution,
         )
         after_base = historical_revision.get("base_snapshot")
+        after_base_resolution = historical_revision.get("base_resolution")
+        after_base_fingerprint = historical_revision["base_fingerprint"]
         before_reference = before_source.get("base")
         after_reference = candidate_source.get("base")
         base_changes = {
             "changed": (
                 before_reference != after_reference
-                or fingerprint_document(before_base or {})
-                != fingerprint_document(after_base or {})
+                or before_base_fingerprint != after_base_fingerprint
             ),
             "before_reference": _copy_optional_mapping(before_reference),
             "after_reference": _copy_optional_mapping(after_reference),
-            "before_fingerprint": fingerprint_document(before_base or {}),
-            "after_fingerprint": fingerprint_document(after_base or {}),
+            "before_fingerprint": before_base_fingerprint,
+            "after_fingerprint": after_base_fingerprint,
             "embedded_snapshot_changed": fingerprint_document(before_base or {})
             != fingerprint_document(after_base or {}),
+            "embedded_definition_resolution_changed": fingerprint_document(
+                before_base_resolution or {}
+            )
+            != fingerprint_document(after_base_resolution or {}),
         }
         local_override_changes = _filter_directive_changes(
             source_changes,
@@ -2592,8 +2657,11 @@ class StrategyProfileStore:
             raise StrategyProfileError("profile must be an object")
         is_authoring = (
             raw_profile.get("kind") == "strategy"
-            or raw_profile.get("schema_version") == AUTHORING_SCHEMA_VERSION
-            and "settings" in raw_profile
+            or (
+                raw_profile.get("schema_version")
+                in {LEGACY_AUTHORING_SCHEMA_VERSION, AUTHORING_SCHEMA_VERSION}
+                and "settings" in raw_profile
+            )
         )
         if is_authoring:
             identifier = _draft_identifier(raw_profile)
@@ -2604,7 +2672,7 @@ class StrategyProfileStore:
                 )
             try:
                 source = normalize_strategy_source(
-                    raw_profile,
+                    upgrade_authoring_source_schema(raw_profile),
                     version=self._next_profile_version(identifier),
                 )
             except StrategyAuthoringError as exc:
@@ -2621,34 +2689,40 @@ class StrategyProfileStore:
             raise StrategyProfileError(str(exc)) from exc
         return source, display_name
 
-    def _load_base_snapshot(
+    def _load_base_evidence(
         self,
         source: Mapping[str, Any],
-    ) -> Optional[dict[str, Any]]:
+    ) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
         base = source.get("base")
         if not isinstance(base, Mapping):
-            return None
+            return None, None
         try:
             publication = self.base_store.load(base["id"], base["revision"])
         except StrategyAuthoringError as exc:
             raise StrategyProfileError(str(exc)) from exc
-        return _copy_mapping(publication["snapshot"])
+        return (
+            _copy_mapping(publication["snapshot"]),
+            base_publication_resolution(publication),
+        )
 
-    def _base_snapshot_for_source(
+    def _base_evidence_for_source(
         self,
         source: Mapping[str, Any],
-    ) -> Optional[dict[str, Any]]:
+    ) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
         base = source.get("base")
         if not isinstance(base, Mapping):
-            return None
+            return None, None
         current = self._existing_authoring_state(str(source.get("id") or ""))
         if (
             current is not None
             and current["source"].get("base") == base
             and current["base_snapshot"] is not None
         ):
-            return _copy_mapping(current["base_snapshot"])
-        return self._load_base_snapshot(source)
+            return (
+                _copy_mapping(current["base_snapshot"]),
+                _copy_optional_mapping(current.get("base_resolution")),
+            )
+        return self._load_base_evidence(source)
 
     def _existing_authoring_state(
         self,
@@ -2665,6 +2739,7 @@ class StrategyProfileStore:
             return {
                 "source": source,
                 "base_snapshot": None,
+                "base_resolution": None,
                 "resolution": resolution,
                 "legacy_converted": True,
                 "source_fingerprint": None,
@@ -2685,10 +2760,32 @@ class StrategyProfileStore:
             and isinstance(raw_base_snapshot, Mapping)
             else None
         )
-        resolution = resolve_strategy_source(source, base_snapshot)
+        raw_base_resolution = publication.get("base_resolution")
+        base_resolution = (
+            _copy_mapping(raw_base_resolution)
+            if isinstance(raw_base_resolution, Mapping)
+            else None
+        )
+        retained_resolution = (
+            publication.get("resolution")
+            if publication["schema_version"]
+            == STRATEGY_PUBLICATION_SCHEMA_VERSION
+            else None
+        )
+        resolution = resolve_strategy_source(
+            source,
+            base_snapshot,
+            base_resolution_snapshot=base_resolution,
+            retained_resolution=retained_resolution,
+            require_base_definition_snapshots=(
+                source["schema_version"] == AUTHORING_SCHEMA_VERSION
+                and base_snapshot is not None
+            ),
+        )
         return {
             "source": source,
             "base_snapshot": base_snapshot,
+            "base_resolution": base_resolution,
             "resolution": resolution,
             "legacy_converted": (
                 publication["schema_version"] == STRATEGY_PROFILE_SCHEMA_VERSION
@@ -3165,12 +3262,40 @@ def _load_authoring_publication(
         raise StrategyProfileError("Profile publication contains a non-canonical source")
 
     base_snapshot = loaded.get("base_snapshot")
+    base_resolution = loaded.get("base_resolution")
+    stored_resolution = loaded.get("resolution")
+    if not isinstance(stored_resolution, dict):
+        raise StrategyProfileError("Profile publication requires a resolution")
+    if source["schema_version"] == AUTHORING_SCHEMA_VERSION:
+        if source.get("base") is not None and not isinstance(
+            base_resolution,
+            Mapping,
+        ):
+            raise StrategyProfileError(
+                "Profile publication lacks its retained Base definition resolution"
+            )
+        if source.get("base") is None and base_resolution is not None:
+            raise StrategyProfileError(
+                "Profile publication without a Base has Base resolution data"
+            )
+    elif base_resolution is not None:
+        raise StrategyProfileError(
+            "Schema-2 authoring publication has unexpected Base resolution data"
+        )
     try:
-        resolution = resolve_strategy_source(source, base_snapshot)
+        resolution = resolve_strategy_source(
+            source,
+            base_snapshot,
+            base_resolution_snapshot=base_resolution,
+            retained_resolution=stored_resolution,
+            require_base_definition_snapshots=(
+                source["schema_version"] == AUTHORING_SCHEMA_VERSION
+                and base_snapshot is not None
+            ),
+        )
     except StrategyAuthoringError as exc:
         raise StrategyProfileError(f"Invalid embedded base or resolution: {exc}") from exc
-    stored_resolution = loaded.get("resolution")
-    if not isinstance(stored_resolution, dict) or stored_resolution != resolution:
+    if stored_resolution != resolution:
         raise StrategyProfileError("Profile resolution is not derived from its source")
 
     source_fingerprint = str(loaded.get("source_fingerprint") or "")
@@ -3179,7 +3304,11 @@ def _load_authoring_publication(
     plan_fingerprint = str(loaded.get("plan_fingerprint") or "")
     if source_fingerprint != fingerprint_document(source):
         raise StrategyProfileError("Profile source fingerprint does not match")
-    if base_fingerprint != fingerprint_document(base_snapshot or {}):
+    if base_fingerprint != _base_state_fingerprint(
+        base_snapshot,
+        base_resolution,
+        source_schema_version=source["schema_version"],
+    ):
         raise StrategyProfileError("Profile base fingerprint does not match")
     if resolution_fingerprint != fingerprint_document(resolution):
         raise StrategyProfileError("Profile resolution fingerprint does not match")
@@ -3262,6 +3391,9 @@ def _publication_projection(publication: Mapping[str, Any]) -> dict[str, Any]:
     if validated["schema_version"] == STRATEGY_PUBLICATION_SCHEMA_VERSION:
         source = _copy_mapping(validated["source"])
         base_snapshot = _copy_optional_mapping(validated.get("base_snapshot"))
+        base_resolution = _copy_optional_mapping(
+            validated.get("base_resolution")
+        )
         resolution = _copy_mapping(validated["resolution"])
     else:
         try:
@@ -3270,6 +3402,7 @@ def _publication_projection(publication: Mapping[str, Any]) -> dict[str, Any]:
                 display_name=validated["display_name"],
             )
             base_snapshot = None
+            base_resolution = None
             resolution = resolve_strategy_source(source)
         except StrategyAuthoringError as exc:
             raise StrategyProfileError(
@@ -3279,11 +3412,16 @@ def _publication_projection(publication: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "source": source,
         "base_snapshot": base_snapshot,
+        "base_resolution": base_resolution,
         "resolution": resolution,
         "plan": plan,
         "source_fingerprint": str(validated["source_fingerprint"]),
         "normalized_source_fingerprint": fingerprint_document(source),
-        "base_fingerprint": fingerprint_document(base_snapshot or {}),
+        "base_fingerprint": _base_state_fingerprint(
+            base_snapshot,
+            base_resolution,
+            source_schema_version=source["schema_version"],
+        ),
         "resolution_fingerprint": fingerprint_document(resolution),
         "plan_fingerprint": str(validated["plan_fingerprint"]),
         "rule_count": _plan_rule_count(plan),
@@ -3329,6 +3467,7 @@ def _revision_envelope_from_publication(
         "rule_count": projection["rule_count"],
         "source": projection["source"],
         "base_snapshot": projection["base_snapshot"],
+        "base_resolution": projection["base_resolution"],
         "resolution": projection["resolution"],
         "plan": projection["plan"],
         "publication": _copy_mapping(publication),
@@ -3389,6 +3528,7 @@ def _validate_revision_envelope(
         "rule_count": projection["rule_count"],
         "source": projection["source"],
         "base_snapshot": projection["base_snapshot"],
+        "base_resolution": projection["base_resolution"],
         "resolution": projection["resolution"],
         "plan": projection["plan"],
     }
@@ -3424,7 +3564,17 @@ def _current_revision_validation(revision: Mapping[str, Any]) -> dict[str, Any]:
     try:
         source = normalize_strategy_source(revision.get("source"))
         base_snapshot = revision.get("base_snapshot")
-        resolution = resolve_strategy_source(source, base_snapshot)
+        base_resolution = revision.get("base_resolution")
+        resolution = resolve_strategy_source(
+            source,
+            base_snapshot,
+            base_resolution_snapshot=base_resolution,
+            retained_resolution=revision.get("resolution"),
+            require_base_definition_snapshots=(
+                source["schema_version"] == AUTHORING_SCHEMA_VERSION
+                and base_snapshot is not None
+            ),
+        )
         if resolution != revision.get("resolution"):
             raise StrategyProfileError(
                 "stored resolution differs from current resolver output"
@@ -3450,6 +3600,9 @@ def _unvalidated_restore_candidate(
     return {
         "source": source,
         "base_snapshot": _copy_optional_mapping(revision.get("base_snapshot")),
+        "base_resolution": _copy_optional_mapping(
+            revision.get("base_resolution")
+        ),
         "resolution": _copy_mapping(revision.get("resolution")),
         "plan": _copy_mapping(revision.get("plan")),
         "profile": {
@@ -3623,6 +3776,26 @@ def _fingerprint(value: Mapping[str, Any]) -> str:
         sort_keys=True,
     ).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
+
+
+def _base_state_fingerprint(
+    base_snapshot: object,
+    base_resolution: object,
+    *,
+    source_schema_version: int,
+) -> str:
+    """Fingerprint the complete embedded Base state for each source schema."""
+
+    if base_snapshot is None:
+        return fingerprint_document({})
+    if source_schema_version == LEGACY_AUTHORING_SCHEMA_VERSION:
+        return fingerprint_document(base_snapshot)
+    return fingerprint_document(
+        {
+            "source": base_snapshot,
+            "resolution": base_resolution,
+        }
+    )
 
 
 def _copy_mapping(value: object) -> dict[str, Any]:

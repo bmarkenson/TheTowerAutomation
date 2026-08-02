@@ -678,7 +678,7 @@ def test_repository_farm_sources_resolve_through_adapter_without_plan_changes(na
     )
 
 
-def test_schema_one_profile_converts_in_memory_without_rewrite_or_plan_change(
+def test_schema_one_profile_converts_to_current_draft_without_rewrite_or_plan_change(
     tmp_path,
 ):
     profile_directory = tmp_path / "profiles"
@@ -690,7 +690,10 @@ def test_schema_one_profile_converts_in_memory_without_rewrite_or_plan_change(
     source = store.authoring_source("farm_t19_custom")
 
     assert source is not None
-    assert source["schema_version"] == 2
+    # Schema-1 is an editable compact facade, so the in-memory prospective
+    # draft crosses the explicit schema-3 self-containment boundary.  The
+    # retained publication itself remains byte-for-byte historical evidence.
+    assert source["schema_version"] == 3
     assert "base" not in source
     assert set(source["settings"]) == set(FARM_SETTING_REGISTRY)
     assert all(

@@ -34,11 +34,17 @@ from core.free_upgrade_locks import (
     normalize_free_upgrade_lock_requirements,
 )
 from core.gate_decisions import PROFILE_SKIPPABLE_CHECKS, normalize_profile_skip_checks
+from core.gc_module_loadout import normalize_gc_module_requirements
+from core.orb_distance import (
+    normalize_orb_distance_preset,
+    normalize_orb_distance_presets,
+)
 from core.perk_configuration import (
     PERK_BAN_CAPACITY,
     PERK_CONFIGURATION_LABELS,
     normalize_perk_configuration_requirements,
 )
+from core.target_priority_config import validate_target_priority_order
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -53,9 +59,16 @@ ORB_DISTANCE_PRESETS_PATH = (
 TARGET_PRIORITY_PRESETS_PATH = (
     PROJECT_ROOT / "config" / "loadouts" / "target_priorities.yaml"
 )
+_LOADOUT_PRESET_PATHS = {
+    "modules": MODULE_PRESETS_PATH,
+    "orb_distance": ORB_DISTANCE_PRESETS_PATH,
+    "target_priority": TARGET_PRIORITY_PRESETS_PATH,
+}
 
-AUTHORING_SCHEMA_VERSION = 2
+LEGACY_AUTHORING_SCHEMA_VERSION = 2
+AUTHORING_SCHEMA_VERSION = 3
 BASE_PUBLICATION_SCHEMA_VERSION = 1
+LOADOUT_DEFINITION_SCHEMA_VERSION = 1
 MAX_AUTHORING_FILE_BYTES = 4 * 1024 * 1024
 AUTHORING_POLICIES = ("enforce", "observe", "ignore")
 EDITOR_METADATA_SCHEMA_VERSION = 1
@@ -211,22 +224,39 @@ def _ultimate_weapons(value: object) -> dict[str, dict[str, str]]:
     return normalized
 
 
-def _preset_value(setting_id: str, path: Path) -> Normalizer:
-    def normalize(value: object) -> dict[str, str]:
+def _normalize_loadout_definition(setting_id: str, value: object) -> Any:
+    if setting_id == "modules":
+        return normalize_gc_module_requirements(value)
+    if setting_id == "target_priority":
+        if not isinstance(value, list):
+            raise ValueError("target_priority local definition must be a list")
+        return validate_target_priority_order(value)
+    if setting_id == "orb_distance":
+        return normalize_orb_distance_preset(value)
+    raise ValueError(f"unsupported loadout definition setting {setting_id!r}")
+
+
+def _preset_or_local_value(setting_id: str) -> Normalizer:
+    def normalize(value: object) -> dict[str, Any]:
         if not isinstance(value, Mapping):
-            raise ValueError(f"{setting_id} must be an object containing preset")
-        unknown = sorted(set(value) - {"preset"})
-        if unknown:
             raise ValueError(
-                f"{setting_id} has unsupported fields: "
-                + ", ".join(str(item) for item in unknown)
+                f"{setting_id} must select exactly one preset or local definition"
             )
-        preset = str(value.get("preset") or "").strip()
-        catalog = _load_yaml_mapping(path, f"{setting_id} preset catalog")
-        presets = catalog.get("presets")
-        if not isinstance(presets, Mapping) or preset not in presets:
-            raise ValueError(f"unknown {setting_id} preset {preset!r}")
-        return {"preset": preset}
+        if set(value) == {"preset"}:
+            preset = str(value.get("preset") or "").strip()
+            if not preset:
+                raise ValueError(f"{setting_id} preset must be a non-empty id")
+            return {"preset": preset}
+        if set(value) == {"local"}:
+            return {
+                "local": _normalize_loadout_definition(
+                    setting_id,
+                    value.get("local"),
+                )
+            }
+        raise ValueError(
+            f"{setting_id} must define exactly one of preset or local"
+        )
 
     return normalize
 
@@ -693,11 +723,11 @@ _SETTING_DEFINITIONS = (
         "Loadout",
         "preset",
         _LOADOUT_POLICIES,
-        _preset_value("modules", MODULE_PRESETS_PATH),
+        _preset_or_local_value("modules"),
         _farm_loadout_initial("modules", preset=True),
         _preset_editor(MODULE_PRESETS_PATH, "modules"),
         "run_configuration.loadout.modules",
-        "loadout_preset",
+        "loadout_definition",
     ),
     _definition(
         "damage_slider",
@@ -717,11 +747,11 @@ _SETTING_DEFINITIONS = (
         "Loadout",
         "preset",
         _LOADOUT_POLICIES,
-        _preset_value("orb_distance", ORB_DISTANCE_PRESETS_PATH),
+        _preset_or_local_value("orb_distance"),
         _farm_loadout_initial("orb_distance", preset=True),
         _preset_editor(ORB_DISTANCE_PRESETS_PATH, "orb_distance"),
         "run_configuration.loadout.orb_distance",
-        "loadout_preset",
+        "loadout_definition",
     ),
     _definition(
         "target_priority",
@@ -729,11 +759,11 @@ _SETTING_DEFINITIONS = (
         "Loadout",
         "preset",
         _LOADOUT_POLICIES,
-        _preset_value("target_priority", TARGET_PRIORITY_PRESETS_PATH),
+        _preset_or_local_value("target_priority"),
         _farm_loadout_initial("target_priority", preset=True),
         _preset_editor(TARGET_PRIORITY_PRESETS_PATH, "target_priority"),
         "run_configuration.loadout.target_priority",
-        "loadout_preset",
+        "loadout_definition",
     ),
 )
 
@@ -1312,7 +1342,11 @@ def normalize_base_source(
             "base source has unsupported fields: "
             + ", ".join(str(item) for item in unknown_fields)
         )
-    if raw_source.get("schema_version", AUTHORING_SCHEMA_VERSION) != AUTHORING_SCHEMA_VERSION:
+    schema_version = _authoring_schema_version(raw_source.get("schema_version"))
+    if schema_version not in {
+        LEGACY_AUTHORING_SCHEMA_VERSION,
+        AUTHORING_SCHEMA_VERSION,
+    }:
         raise StrategyAuthoringError("Unsupported base source schema")
     if raw_source.get("kind", "base") != "base":
         raise StrategyAuthoringError("base source has the wrong kind")
@@ -1332,9 +1366,13 @@ def normalize_base_source(
         ) from exc
     if selected_revision < 1:
         raise StrategyAuthoringError("base revision must be a positive integer")
-    settings = _normalize_settings(raw_source.get("settings"), base=True)
+    settings = _normalize_settings(
+        raw_source.get("settings"),
+        base=True,
+        schema_version=schema_version,
+    )
     return {
-        "schema_version": AUTHORING_SCHEMA_VERSION,
+        "schema_version": schema_version,
         "kind": "base",
         "id": identifier,
         "display_name": display_name,
@@ -1372,7 +1410,11 @@ def normalize_strategy_source(
             "strategy source has unsupported fields: "
             + ", ".join(str(item) for item in unknown_fields)
         )
-    if raw_source.get("schema_version", AUTHORING_SCHEMA_VERSION) != AUTHORING_SCHEMA_VERSION:
+    schema_version = _authoring_schema_version(raw_source.get("schema_version"))
+    if schema_version not in {
+        LEGACY_AUTHORING_SCHEMA_VERSION,
+        AUTHORING_SCHEMA_VERSION,
+    }:
         raise StrategyAuthoringError("Unsupported strategy source schema")
     if raw_source.get("kind", "strategy") != "strategy":
         raise StrategyAuthoringError("strategy source has the wrong kind")
@@ -1403,7 +1445,7 @@ def normalize_strategy_source(
         raise StrategyAuthoringError("strategy version must be a positive integer")
 
     normalized = {
-        "schema_version": AUTHORING_SCHEMA_VERSION,
+        "schema_version": schema_version,
         "kind": "strategy",
         "id": identifier,
         "display_name": display_name,
@@ -1435,18 +1477,249 @@ def normalize_strategy_source(
             raise StrategyAuthoringError("base revision must be a positive integer")
         normalized["base"] = {"id": base_id, "revision": base_revision}
     normalized["settings"] = _normalize_settings(
-        raw_source.get("settings"), base=False
+        raw_source.get("settings"),
+        base=False,
+        schema_version=schema_version,
     )
     return normalized
+
+
+def upgrade_authoring_source_schema(raw_source: object) -> dict[str, Any]:
+    """Return a new draft in the current sparse authoring schema.
+
+    Stored schema-2 evidence is normalized in place by the compatibility
+    readers.  Only prospective Base/Strategy drafts cross this explicit
+    migration boundary.
+    """
+
+    if not isinstance(raw_source, Mapping):
+        raise StrategyAuthoringError("authoring source must be an object")
+    upgraded = copy.deepcopy(dict(raw_source))
+    schema_version = _authoring_schema_version(upgraded.get("schema_version"))
+    if schema_version not in {
+        LEGACY_AUTHORING_SCHEMA_VERSION,
+        AUTHORING_SCHEMA_VERSION,
+    }:
+        raise StrategyAuthoringError("Unsupported authoring source schema")
+    upgraded["schema_version"] = AUTHORING_SCHEMA_VERSION
+    return upgraded
+
+
+def _current_definition_snapshot(
+    setting_id: str,
+    selector: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Resolve one source selector against the current shared catalogs."""
+
+    if setting_id not in _LOADOUT_PRESET_PATHS:
+        raise StrategyAuthoringError(
+            f"setting {setting_id!r} has no loadout-definition contract"
+        )
+    if set(selector) == {"preset"}:
+        preset = str(selector["preset"])
+        catalog = _load_yaml_mapping(
+            _LOADOUT_PRESET_PATHS[setting_id],
+            f"{setting_id} preset catalog",
+        )
+        if catalog.get("schema_version") != 1:
+            raise StrategyAuthoringError(
+                f"{setting_id} preset catalog has an unsupported schema"
+            )
+        presets = catalog.get("presets")
+        if not isinstance(presets, Mapping) or preset not in presets:
+            raise StrategyAuthoringError(
+                f"unknown {setting_id} preset {preset!r}"
+            )
+        try:
+            definition = _normalize_loadout_definition(
+                setting_id,
+                presets[preset],
+            )
+        except (TypeError, ValueError) as exc:
+            raise StrategyAuthoringError(
+                f"{setting_id} preset {preset!r} is invalid: {exc}"
+            ) from exc
+        source = "preset"
+    elif set(selector) == {"local"}:
+        preset = None
+        definition = copy.deepcopy(selector["local"])
+        source = "local"
+    else:
+        raise StrategyAuthoringError(
+            f"setting {setting_id!r} has an ambiguous definition selector"
+        )
+
+    payload: dict[str, Any] = {
+        "schema_version": LOADOUT_DEFINITION_SCHEMA_VERSION,
+        "source": source,
+    }
+    if preset is not None:
+        payload["preset"] = preset
+    payload["definition"] = copy.deepcopy(definition)
+    if setting_id == "orb_distance":
+        payload["range_relationships"] = _current_orb_range_relationships(
+            definition
+        )
+    return {**payload, "fingerprint": fingerprint_document(payload)}
+
+
+def _current_orb_range_relationships(
+    selected_definition: object,
+) -> list[dict[str, str]]:
+    catalog = _load_yaml_mapping(
+        ORB_DISTANCE_PRESETS_PATH,
+        "orb_distance preset catalog",
+    )
+    if catalog.get("schema_version") != 1:
+        raise StrategyAuthoringError(
+            "orb_distance preset catalog has an unsupported schema"
+        )
+    try:
+        selected = normalize_orb_distance_preset(selected_definition)
+        relationships = normalize_orb_distance_presets(catalog.get("presets"))
+    except (TypeError, ValueError) as exc:
+        raise StrategyAuthoringError(
+            f"orb_distance range relationships are invalid: {exc}"
+        ) from exc
+    replaced = False
+    merged: list[dict[str, str]] = []
+    for relationship in relationships:
+        if relationship["range_basis"] == selected["range_basis"]:
+            merged.append(copy.deepcopy(selected))
+            replaced = True
+        else:
+            merged.append(copy.deepcopy(relationship))
+    if not replaced:
+        merged.append(copy.deepcopy(selected))
+    return normalize_orb_distance_presets(merged)
+
+
+def _normalize_retained_definition_snapshot(
+    setting_id: str,
+    selector: Mapping[str, Any],
+    raw_snapshot: object,
+) -> dict[str, Any]:
+    """Validate retained effective data without consulting mutable catalogs."""
+
+    if not isinstance(raw_snapshot, Mapping):
+        raise StrategyAuthoringError(
+            f"setting {setting_id!r} lacks its retained definition snapshot"
+        )
+    expected_source = "preset" if set(selector) == {"preset"} else "local"
+    expected_fields = {
+        "schema_version",
+        "source",
+        "definition",
+        "fingerprint",
+    }
+    if expected_source == "preset":
+        expected_fields.add("preset")
+    if setting_id == "orb_distance":
+        expected_fields.add("range_relationships")
+    if set(raw_snapshot) != expected_fields:
+        raise StrategyAuthoringError(
+            f"setting {setting_id!r} retained definition snapshot has "
+            "unsupported or missing fields"
+        )
+    if raw_snapshot.get("schema_version") != LOADOUT_DEFINITION_SCHEMA_VERSION:
+        raise StrategyAuthoringError(
+            f"setting {setting_id!r} retained definition snapshot has an "
+            "unsupported schema"
+        )
+    if raw_snapshot.get("source") != expected_source:
+        raise StrategyAuthoringError(
+            f"setting {setting_id!r} retained definition source disagrees "
+            "with its selector"
+        )
+    if expected_source == "preset" and raw_snapshot.get("preset") != selector.get(
+        "preset"
+    ):
+        raise StrategyAuthoringError(
+            f"setting {setting_id!r} retained preset identity disagrees "
+            "with its selector"
+        )
+    try:
+        definition = _normalize_loadout_definition(
+            setting_id,
+            raw_snapshot.get("definition"),
+        )
+    except (TypeError, ValueError) as exc:
+        raise StrategyAuthoringError(
+            f"setting {setting_id!r} retained definition is invalid: {exc}"
+        ) from exc
+    payload: dict[str, Any] = {
+        "schema_version": LOADOUT_DEFINITION_SCHEMA_VERSION,
+        "source": expected_source,
+    }
+    if expected_source == "preset":
+        payload["preset"] = str(selector["preset"])
+    payload["definition"] = definition
+    if setting_id == "orb_distance":
+        try:
+            relationships = normalize_orb_distance_presets(
+                raw_snapshot.get("range_relationships")
+            )
+        except (TypeError, ValueError) as exc:
+            raise StrategyAuthoringError(
+                f"setting {setting_id!r} retained range relationships are "
+                f"invalid: {exc}"
+            ) from exc
+        matching = [
+            item
+            for item in relationships
+            if item["range_basis"] == definition["range_basis"]
+        ]
+        if matching != [definition]:
+            raise StrategyAuthoringError(
+                "orb_distance retained range relationships do not contain "
+                "the selected relationship exactly"
+            )
+        payload["range_relationships"] = relationships
+    fingerprint = str(raw_snapshot.get("fingerprint") or "")
+    if fingerprint != fingerprint_document(payload):
+        raise StrategyAuthoringError(
+            f"setting {setting_id!r} retained definition fingerprint does not match"
+        )
+    normalized = {**payload, "fingerprint": fingerprint}
+    if normalized != dict(raw_snapshot):
+        raise StrategyAuthoringError(
+            f"setting {setting_id!r} retained definition snapshot is not canonical"
+        )
+    return normalized
+
+
+def _resolution_definition_snapshot(
+    resolution: object,
+    setting_id: str,
+) -> object:
+    if not isinstance(resolution, Mapping):
+        return None
+    settings = resolution.get("settings")
+    if not isinstance(settings, Mapping):
+        return None
+    entry = settings.get(setting_id)
+    if not isinstance(entry, Mapping):
+        return None
+    return entry.get("definition_snapshot")
 
 
 def resolve_strategy_source(
     strategy_source: object,
     base_snapshot: object = None,
+    *,
+    base_resolution_snapshot: object = None,
+    retained_resolution: object = None,
+    require_base_definition_snapshots: bool = False,
 ) -> dict[str, Any]:
     """Resolve one sparse source against zero or one exact base snapshot."""
 
-    analysis = analyze_strategy_source(strategy_source, base_snapshot)
+    analysis = analyze_strategy_source(
+        strategy_source,
+        base_snapshot,
+        base_resolution_snapshot=base_resolution_snapshot,
+        retained_resolution=retained_resolution,
+        require_base_definition_snapshots=require_base_definition_snapshots,
+    )
     errors = analysis["errors"]
     if errors:
         raise StrategyAuthoringError(str(errors[0]["message"]))
@@ -1456,6 +1729,10 @@ def resolve_strategy_source(
 def analyze_strategy_source(
     strategy_source: object,
     base_snapshot: object = None,
+    *,
+    base_resolution_snapshot: object = None,
+    retained_resolution: object = None,
+    require_base_definition_snapshots: bool = False,
 ) -> dict[str, Any]:
     """Resolve source intent while retaining dependency errors for review.
 
@@ -1532,6 +1809,60 @@ def analyze_strategy_source(
             "provenance": {"kind": "unmanaged"},
         }
 
+    source_schema = source["schema_version"]
+    for setting_id, definition in FARM_SETTING_REGISTRY.items():
+        if definition.adapter != "loadout_definition":
+            continue
+        entry = resolved[setting_id]
+        if entry["state"] != "effective":
+            continue
+        selector = entry.get("value")
+        if not isinstance(selector, Mapping):
+            raise StrategyAuthoringError(
+                f"setting {setting_id!r} has no definition selector"
+            )
+        if source_schema == LEGACY_AUTHORING_SCHEMA_VERSION:
+            # Exact schema-2 publications retain their original compact
+            # resolution.  Ordinary schema-2 drafts are migrated before
+            # publication and still validate their current preset here.
+            if retained_resolution is None:
+                _current_definition_snapshot(setting_id, selector)
+            continue
+
+        raw_snapshot = _resolution_definition_snapshot(
+            retained_resolution,
+            setting_id,
+        )
+        provenance = entry.get("provenance")
+        inherited = (
+            isinstance(provenance, Mapping)
+            and provenance.get("kind") == "base"
+        )
+        if raw_snapshot is None and inherited:
+            raw_snapshot = _resolution_definition_snapshot(
+                base_resolution_snapshot,
+                setting_id,
+            )
+            if (
+                raw_snapshot is None
+                and base is not None
+                and base["schema_version"] == AUTHORING_SCHEMA_VERSION
+                and require_base_definition_snapshots
+            ):
+                raise StrategyAuthoringError(
+                    f"base setting {setting_id!r} lacks its immutable "
+                    "definition snapshot"
+                )
+        if raw_snapshot is None:
+            snapshot = _current_definition_snapshot(setting_id, selector)
+        else:
+            snapshot = _normalize_retained_definition_snapshot(
+                setting_id,
+                selector,
+                raw_snapshot,
+            )
+        entry["definition_snapshot"] = snapshot
+
     errors: list[dict[str, Any]] = []
     for setting_id, definition in FARM_SETTING_REGISTRY.items():
         if resolved[setting_id]["state"] != "effective":
@@ -1559,7 +1890,7 @@ def analyze_strategy_source(
         "source": source,
         "base_snapshot": copy.deepcopy(base),
         "resolution": {
-            "schema_version": AUTHORING_SCHEMA_VERSION,
+            "schema_version": source_schema,
             "family": source["family"],
             "settings": resolved,
         },
@@ -1567,7 +1898,10 @@ def analyze_strategy_source(
     }
 
 
-def describe_base_resolution(base_source: object) -> dict[str, Any]:
+def describe_base_resolution(
+    base_source: object,
+    retained_resolution: object = None,
+) -> dict[str, Any]:
     """Project sparse Base entries through the authoritative resolver.
 
     A Base is not runnable and may remain incomplete, so dependency errors do
@@ -1579,7 +1913,7 @@ def describe_base_resolution(base_source: object) -> dict[str, Any]:
     base = normalize_base_source(base_source)
     analysis = analyze_strategy_source(
         {
-            "schema_version": AUTHORING_SCHEMA_VERSION,
+            "schema_version": base["schema_version"],
             "kind": "strategy",
             "id": base["id"],
             "display_name": base["display_name"],
@@ -1593,6 +1927,8 @@ def describe_base_resolution(base_source: object) -> dict[str, Any]:
             "settings": {},
         },
         base,
+        base_resolution_snapshot=retained_resolution,
+        retained_resolution=retained_resolution,
     )
     return copy.deepcopy(analysis["resolution"])
 
@@ -1673,6 +2009,9 @@ def preview_strategy_rebase(
     strategy_source: object,
     current_base_snapshot: object,
     target_base_snapshot: object,
+    *,
+    current_base_resolution_snapshot: object = None,
+    target_base_resolution_snapshot: object = None,
 ) -> dict[str, Any]:
     """Compute the complete semantic review for an explicit Base rebase."""
 
@@ -1709,13 +2048,27 @@ def preview_strategy_rebase(
                 "the reviewed base revision must be newer than the pinned revision"
             )
 
-    current_analysis = analyze_strategy_source(source, current)
+    current_analysis = analyze_strategy_source(
+        source,
+        current,
+        base_resolution_snapshot=current_base_resolution_snapshot,
+        require_base_definition_snapshots=(
+            current_base_resolution_snapshot is not None
+        ),
+    )
     rebased_source = copy.deepcopy(source)
     rebased_source["base"] = {
         "id": target["id"],
         "revision": target["revision"],
     }
-    target_analysis = analyze_strategy_source(rebased_source, target)
+    target_analysis = analyze_strategy_source(
+        rebased_source,
+        target,
+        base_resolution_snapshot=target_base_resolution_snapshot,
+        require_base_definition_snapshots=(
+            target_base_resolution_snapshot is not None
+        ),
+    )
     current_resolution = current_analysis["resolution"]
     target_resolution = target_analysis["resolution"]
 
@@ -1858,7 +2211,7 @@ def legacy_farm_source_to_strategy_source(
                 f"legacy Farm loadout.{setting_id} has invalid mode {mode!r}"
             )
         raw_value: object
-        if FARM_SETTING_REGISTRY[setting_id].adapter == "loadout_preset":
+        if FARM_SETTING_REGISTRY[setting_id].adapter == "loadout_definition":
             raw_value = {"preset": raw_policy.get("preset")}
         else:
             raw_value = raw_policy.get("value")
@@ -1944,15 +2297,42 @@ def farm_source_from_resolution(
             )
         value = entry.get("value")
         definition = FARM_SETTING_REGISTRY[setting_id]
-        if definition.adapter == "loadout_preset":
+        if definition.adapter == "loadout_definition":
             if not isinstance(value, Mapping):
                 raise StrategyAuthoringError(
-                    f"Farm loadout setting {setting_id!r} requires a preset"
+                    f"Farm loadout setting {setting_id!r} requires a definition selector"
                 )
-            loadout[setting_id] = {
-                "mode": policy,
-                "preset": str(value.get("preset") or ""),
-            }
+            snapshot = entry.get("definition_snapshot")
+            if isinstance(snapshot, Mapping):
+                if snapshot.get("source") == "preset":
+                    preset_snapshot: dict[str, Any] = {
+                        "preset": snapshot.get("preset"),
+                        "definition": copy.deepcopy(snapshot.get("definition")),
+                    }
+                    if setting_id == "orb_distance":
+                        preset_snapshot["range_relationships"] = copy.deepcopy(
+                            snapshot.get("range_relationships")
+                        )
+                    loadout_entry = {
+                        "mode": policy,
+                        "preset_snapshot": preset_snapshot,
+                    }
+                else:
+                    loadout_entry = {
+                        "mode": policy,
+                        "local": copy.deepcopy(snapshot.get("definition")),
+                    }
+                    if setting_id == "orb_distance":
+                        loadout_entry["range_relationships"] = copy.deepcopy(
+                            snapshot.get("range_relationships")
+                        )
+                loadout[setting_id] = loadout_entry
+            else:
+                # Exact schema-2 sources retain the preset-only compact facade.
+                loadout[setting_id] = {
+                    "mode": policy,
+                    "preset": str(value.get("preset") or ""),
+                }
         else:
             loadout[setting_id] = {"mode": policy, "value": copy.deepcopy(value)}
 
@@ -1995,7 +2375,8 @@ class StrategyBaseStore:
 
         if not isinstance(raw_base, Mapping):
             raise StrategyAuthoringError("base source must be an object")
-        identifier = _safe_id(raw_base.get("id"), "base id")
+        upgraded = upgrade_authoring_source_schema(raw_base)
+        identifier = _safe_id(upgraded.get("id"), "base id")
         with self._publish_lock:
             self._prepare_directory()
             lock_path = self.base_directory / ".strategy-bases.write.lock"
@@ -2028,7 +2409,8 @@ class StrategyBaseStore:
                             "reload it before publishing"
                         )
                     revision = int(latest["snapshot"]["revision"]) + 1
-                snapshot = normalize_base_source(raw_base, revision=revision)
+                snapshot = normalize_base_source(upgraded, revision=revision)
+                resolution = describe_base_resolution(snapshot)
                 publication = {
                     "schema_version": BASE_PUBLICATION_SCHEMA_VERSION,
                     "kind": "strategy_base_revision",
@@ -2038,7 +2420,9 @@ class StrategyBaseStore:
                         timespec="seconds"
                     ),
                     "source_fingerprint": fingerprint_document(snapshot),
+                    "resolution_fingerprint": fingerprint_document(resolution),
                     "snapshot": snapshot,
+                    "resolution": resolution,
                 }
                 path = self._revision_path(identifier, revision)
                 _atomic_create_immutable(
@@ -2182,6 +2566,9 @@ class StrategyBaseStore:
                         "source_fingerprint": publication[
                             "source_fingerprint"
                         ],
+                        "resolution_fingerprint": publication.get(
+                            "resolution_fingerprint"
+                        ),
                         "setting_count": len(snapshot["settings"]),
                     }
                 )
@@ -2199,8 +2586,11 @@ class StrategyBaseStore:
                     "latest_revision": snapshot["revision"],
                     "published_at": latest["published_at"],
                     "source_fingerprint": latest["source_fingerprint"],
+                    "resolution_fingerprint": latest.get(
+                        "resolution_fingerprint"
+                    ),
                     "source": copy.deepcopy(snapshot),
-                    "resolution": describe_base_resolution(snapshot),
+                    "resolution": base_publication_resolution(latest),
                     "revisions": revisions,
                 }
             )
@@ -2314,12 +2704,17 @@ def _resolution_settings(resolution: object) -> Mapping[str, Any]:
 def _effective_resolution_view(entry: Mapping[str, Any]) -> dict[str, Any]:
     return {
         key: copy.deepcopy(entry.get(key))
-        for key in ("state", "policy", "value")
+        for key in ("state", "policy", "value", "definition_snapshot")
         if key in entry
     }
 
 
-def _normalize_settings(raw_settings: object, *, base: bool) -> dict[str, Any]:
+def _normalize_settings(
+    raw_settings: object,
+    *,
+    base: bool,
+    schema_version: int,
+) -> dict[str, Any]:
     if raw_settings is None:
         raw_settings = {}
     if not isinstance(raw_settings, Mapping):
@@ -2368,8 +2763,25 @@ def _normalize_settings(raw_settings: object, *, base: bool) -> dict[str, Any]:
                 raise StrategyAuthoringError(
                     f"setting {setting_id!r} has invalid value: {exc}"
                 ) from exc
+            if (
+                schema_version == LEGACY_AUTHORING_SCHEMA_VERSION
+                and definition.adapter == "loadout_definition"
+                and "local" in entry["value"]
+            ):
+                raise StrategyAuthoringError(
+                    f"setting {setting_id!r} local definitions require "
+                    f"authoring schema {AUTHORING_SCHEMA_VERSION}"
+                )
         normalized[setting_id] = entry
     return normalized
+
+
+def _authoring_schema_version(value: object) -> int:
+    if value is None:
+        return AUTHORING_SCHEMA_VERSION
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return -1
 
 
 def _validate_base_publication(
@@ -2393,7 +2805,37 @@ def _validate_base_publication(
     published_at = str(publication.get("published_at") or "").strip()
     if not published_at:
         raise StrategyAuthoringError("Base publication metadata is incomplete")
+    if snapshot["schema_version"] == AUTHORING_SCHEMA_VERSION:
+        stored_resolution = publication.get("resolution")
+        if not isinstance(stored_resolution, Mapping):
+            raise StrategyAuthoringError(
+                "Base publication lacks its immutable definition resolution"
+            )
+        resolution = describe_base_resolution(snapshot, stored_resolution)
+        if resolution != stored_resolution:
+            raise StrategyAuthoringError(
+                "Base definition resolution is not derived from its snapshot"
+            )
+        if publication.get("resolution_fingerprint") != fingerprint_document(
+            resolution
+        ):
+            raise StrategyAuthoringError(
+                "Base resolution fingerprint does not match"
+            )
+    elif "resolution" in publication or "resolution_fingerprint" in publication:
+        raise StrategyAuthoringError(
+            "Legacy Base publication has unexpected definition-resolution data"
+        )
     return copy.deepcopy(dict(publication))
+
+
+def base_publication_resolution(publication: Mapping[str, Any]) -> dict[str, Any]:
+    """Return retained Base resolution, or the exact legacy projection."""
+
+    stored = publication.get("resolution")
+    if isinstance(stored, Mapping):
+        return copy.deepcopy(dict(stored))
+    return describe_base_resolution(publication.get("snapshot"))
 
 
 def _atomic_create_immutable(
@@ -2501,6 +2943,8 @@ def _load_yaml_mapping_limited(path: Path, description: str) -> dict[str, Any]:
 __all__ = [
     "AUTHORING_POLICIES",
     "AUTHORING_SCHEMA_VERSION",
+    "LEGACY_AUTHORING_SCHEMA_VERSION",
+    "LOADOUT_DEFINITION_SCHEMA_VERSION",
     "EDITOR_METADATA_SCHEMA_VERSION",
     "FARM_LOADOUT_SETTING_IDS",
     "FARM_SETTING_REGISTRY",
@@ -2510,6 +2954,7 @@ __all__ = [
     "StrategyAuthoringError",
     "StrategyBaseStore",
     "analyze_strategy_source",
+    "base_publication_resolution",
     "describe_base_resolution",
     "diff_source_documents",
     "diff_strategy_resolutions",
@@ -2522,4 +2967,5 @@ __all__ = [
     "rebase_review_fingerprint",
     "resolve_strategy_source",
     "setting_registry_catalog",
+    "upgrade_authoring_source_schema",
 ]

@@ -3,9 +3,10 @@
 This document defines the contract for GUI-authored strategy bases and
 strategies. The sparse model, immutable Base revisions, immutable custom
 Strategy lineages, restore-as-new workflow, and current Farm editors are
-implemented. Profile-local Module, Target Priority, and Orb definitions remain
-future additive work. The original Farm profile format remains supported as a
-compatibility facade.
+implemented. Profile-local Module, Target Priority, and Orb definitions are now
+implemented in the backend; additive API discovery, native editors, and their
+Windows runtime smoke remain. The original Farm profile format remains
+supported as a compatibility facade.
 
 The runtime architecture remains authoritative for action ownership and
 execution. This authoring layer resolves reusable, operator-friendly source
@@ -391,22 +392,69 @@ The authoring surface uses one editor framework for bases and strategies:
 The API returns the same source, policy, resolution, provenance, capability,
 and validation vocabulary so the WPF client does not duplicate resolver rules.
 
-### Future profile-local definitions
+### Profile-local loadout definition backend
 
-Shared presets remain useful reusable inputs, but three loadout settings need a
-later additive local-data model:
+Sparse authoring source schema 3 gives `modules`, `target_priority`, and
+`orb_distance` one exact preset-or-local value contract. A directive value is
+either `{"preset": "<id>"}` or `{"local": <definition>}`; it cannot contain
+both or any extra field. Shared preset IDs and catalogs remain supported.
+Modules local data is the exact validated eight-slot-to-module mapping, Target
+Priority local data is the complete ordered target list, and Orb Distance local
+data contains exactly `range_basis`, `extra`, and `workshop`. The existing
+Module family/slot catalog, Target Priority order validator, and Orb Distance
+normalizers remain authoritative.
 
-- Modules should support profile-local module and slot definitions as well as
-  selecting a shared preset.
-- Target Priority should support a profile-local ordered target list as well as
-  selecting a shared preset.
-- Orb Distance should model the relationship from observed Attack Range to
-  Extra Orb distance and Workshop distance instead of treating one isolated
-  distance as the complete authoring value.
+Every effective schema-3 loadout definition has a server-owned
+`definition_snapshot` in resolution:
 
-Published Strategies must embed the resolved local data so a later edit to a
-mutable shared preset cannot change an existing publication. This is a future
-schema/authoring phase; it is not part of the current specialized-editor work.
+```text
+schema_version: 1
+source: preset | local
+preset: <id>                    # preset source only
+definition: <normalized exact definition>
+range_relationships: [...]      # Orb Distance only
+fingerprint: <canonical payload fingerprint>
+```
+
+Orb `range_relationships` retains the complete normalized relationship set
+used by the generated range-selection/preserve action, including the selected
+relationship exactly. Semantic effective comparisons include the complete
+snapshot, so a preset-data change is reviewable even when the source preset ID
+does not change.
+
+A new immutable Base revision stores its sparse schema-3 source plus retained
+resolution and resolution fingerprint. A new Strategy publication keeps the
+existing outer publication schema 2 but adds `base_resolution` beside the
+embedded `base_snapshot`; its final resolution retains every effective
+definition snapshot. For a pinned schema-3 Base, the Base fingerprint covers
+both source and retained resolution. Immutable Strategy revisions retain the
+same evidence. Current validation, comparison, and restore-as-new rebuild from
+those snapshots without consulting a later Base revision or shared catalog.
+Expanded plans and filesystem paths remain redacted.
+
+The protected Farm adapter passes a retained preset through a validated
+`preset_snapshot` builder input, preserving the existing preset-bearing plan
+and run-configuration structure without rereading the catalog. A local input
+uses the same normalized effective definition and produces equivalent runtime
+requirements/actions without falsely claiming shared-preset provenance. The
+legacy compact `{mode, preset}` builder path and bundled generated files remain
+structurally unchanged; `YamlStrategy` remains generic.
+
+Stored sparse schema-2 publications and Base revisions retain their exact
+source, resolution, fingerprints, and compact builder semantics. Readers do
+not eagerly rewrite them. Any prospective edit of a schema-1 compact profile
+or schema-2 sparse source crosses the explicit schema-3 boundary before it can
+publish, preventing a newly edited Strategy from remaining catalog-dependent.
+
+The control-surface API revision and capabilities remain at revision 23 in this
+backend slice, and the three registry entries still advertise the existing
+`preset` editor with `{preset: ...}` initial values. This keeps the installed
+native client safe for preset-only round trips. Existing authoring responses
+may additionally contain schema-3 source values, `definition_snapshot`, Base
+`resolution_fingerprint`, and `base_resolution`; clients must treat the latter
+three as server-owned review data. The next additive API/WPF slice must add an
+explicit capability and managed preset/local editors before the native client
+creates or edits local definitions.
 
 ## Code ownership
 
@@ -500,5 +548,5 @@ lineages; a successful explicit restore review publishes the historical intent
 as the next version and refreshes history/latest catalogs without selecting or
 activating it. The retirement archive remains evidence rather than a competing
 editable rollback model.
-Future profile-local definitions remain the separate later authoring slice
-above.
+The profile-local backend contract above is implemented. Additive API/WPF
+editing and Windows runtime smoke remain the separate follow-up slices.
