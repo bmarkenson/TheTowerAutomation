@@ -181,6 +181,24 @@ projection is explicitly `cleared`; later runtime ownership must retain the
 newest complete same-round snapshot rather than treating that cleared save as
 final-Perk evidence.
 
+The same privacy boundary will expose additional active-round components only
+through exact-version manifests. In-battle Attack, Defense, and Utility levels
+are stored separately from their Workshop baselines. The save does not carry a
+literal gold-box flag; a normalized `maxed` claim therefore requires a
+versioned index and maximum-level table and publishes the current level,
+Workshop baseline, and round delta with that claim. An unknown index, special
+level rule, or cap makes the complete upgrade component unavailable rather
+than guessing from a large value.
+
+Survival abilities are checkpoint state, not an event log. Demon Mode, Nuke,
+and Second Wind each expose round counts plus candidate active, cooldown,
+recharge-wave, and effect-timeout fields. Those fields may establish that an
+activation occurred and, after causal calibration, may identify the latest
+activation wave from a countdown or absolute-wave relationship. A single late
+snapshot cannot by itself reconstruct every earlier activation. Exact waves
+must never be inferred until the versioned mapping proves the field units,
+sentinels, reset behavior, recharge length, and serialization timing.
+
 The history component accepts the game's source-ordered list of at most 30
 entries and exact-shape-validates only its newest 148-field entry. UTC and local
 .NET DateTime ticks use different clock bases, so they are normalized
@@ -209,21 +227,41 @@ rules:
 3. Perk strategy facts may advance only from a newer complete snapshot carrying
    that same identity; a stale, different-round, or incomplete snapshot cannot
    drive strategy.
-4. The observer retains same-round Perk snapshots across post-run clearing.
-5. Normal completed records may be built from a newly serialized history entry
+4. Upgrade and survival components advance independently. A malformed or
+   unvalidated ability timer cannot erase valid Perks or upgrade evidence, and
+   none of these components grants UI action authority.
+5. The observer retains the newest complete same-round Perk, upgrade, survival,
+   and allowlisted tally snapshots across post-run clearing.
+6. Stable save checkpoints and passive visual events merge monotonically. A
+   count increase establishes that one or more activations occurred in the
+   half-open interval `(prior saved wave, current saved wave]`. It produces an
+   exact wave only when a calibrated timer relation or a matching visual
+   transition supports one; otherwise the record retains the interval, count
+   delta, and provenance without distributing multiple events across invented
+   waves.
+7. The visual activation tracker remains active. Its confirmed transition
+   event and first evidence frame can fill the tail after the last stable
+   active save, survive a save-field clear at Game Over, and refine a
+   save-derived interval. It cannot reduce a save count or cause the same
+   activation to be counted twice.
+8. Normal completed records may be built from a newly serialized history entry
    only after the pre-boundary structural tail fingerprint changed at this Game
    Over, the semantic entry is complete, and tier/time/wave evidence matches the
    bound round.
-6. One passive compact Game Stats capture remains for optional base/ad coin
-   split augmentation. Its absence never invalidates otherwise authoritative
-   save-derived battle stats.
-7. Game Over opens the Perks panel only when a complete final same-round Perk
-   snapshot has not already been proven.
-8. The complete existing Game Stats/Perks/More Stats path remains the forced
-   audit and fallback for every missing, unknown, stale, changed, inconsistent,
-   or unbound save claim.
-9. Wait, Retry, Home, every setting mutation, post-action verification, and
-   terminal transition confirmation remain owned by verified UI controls.
+9. Terminal Battle History counts reconcile the cached save checkpoints and
+   visual tail. Missing event timing remains explicitly unknown or bounded;
+   count disagreement, impossible ordering, or an unbound snapshot forces the
+   full UI audit rather than fabricating events.
+10. One passive compact Game Stats capture remains for optional base/ad coin
+    split augmentation. Its absence never invalidates otherwise authoritative
+    save-derived battle stats.
+11. Game Over opens the Perks panel only when a complete final same-round Perk
+    snapshot has not already been proven.
+12. The complete existing Game Stats/Perks/More Stats path remains the forced
+    audit and fallback for every missing, unknown, stale, changed, inconsistent,
+    or unbound save claim.
+13. Wait, Retry, Home, every setting mutation, post-action verification, and
+    terminal transition confirmation remain owned by verified UI controls.
 
 The foundation model does not poll, cache, bind a process, build a persisted
 battle record, or alter `App`/Game Over dispatch. Those are later slices gated
@@ -235,14 +273,21 @@ by the versioned audit matrix in
 The next slice is an explicitly enabled observation-only collector, not the
 normal runtime poller. It consumes stable exact-version reads and passive
 boundary observations without pausing the game, navigating, tapping, or
-changing handler dispatch. Its append-only evidence schema retains only:
+changing handler dispatch. Its append-only evidence schema can retain only the
+following independently versioned components when enabled by its audit
+manifest:
 
 - audit/mapping schema IDs, capture time, revision, and source fingerprint;
 - active identity and wave, including the per-tier counter value;
 - complete Perk status/count/fingerprint and same-round progression facts;
+- versioned upgrade-component status/fingerprint, current levels, baselines,
+  deltas, and only cap-backed `maxed` claims;
+- survival-component status/fingerprint, counts, calibrated recharge/active
+  state, and checkpoint-to-checkpoint event intervals;
 - structural tail status/identity/fingerprint, count/capacity, and semantic
   completed-entry status/fingerprint; and
-- passive boundary labels and timing deltas needed to evaluate the audit rows.
+- passive boundary labels, confirmed visual-event metadata, and timing deltas
+  needed to evaluate the audit rows.
 
 The collector begins with a pre-round structural-tail baseline, records the
 first naturally serialized active identity, samples only stable revision
@@ -252,15 +297,21 @@ and any structural tail change—including 30-entry rollover—as candidates. It
 may calculate candidate tier/wave/time agreement, but it cannot call that entry
 attached, update a battle record, decide whether to open Perks, or suppress any
 UI route. Raw saves, decoded roots, account identifiers, arbitrary history
-fields, screenshots, and OCR text are outside its retained schema.
-The existing passive compact Game Stats capture remains a separate optional
+fields, screenshot pixels, and OCR text are outside its retained schema. The
+existing visual activation tracker continues to retain only its confirmed
+first-transition evidence frames under the ordinary evidence policy; the audit
+receipt stores event metadata and an optional evidence reference, not the
+image. The passive compact Game Stats capture remains a separate optional
 base/ad coin-split augmentation.
 
-Implementation is complete only after synthetic state-machine/privacy tests
-and one authorized natural-boundary audit capture the new-round seed/counter/
-first-write transition, periodic freshness, final Perk/clearing behavior, and
-Game Over tail serialization. Until those audits promote their individual
-matrix rows, the existing full UI terminal path remains authoritative.
+The collector foundation is complete only after synthetic state-machine/
+privacy tests and one authorized natural-boundary audit capture the new-round
+seed/counter/first-write transition, periodic freshness, final Perk/clearing
+behavior, and Game Over tail serialization. Upgrade, survival-ability, and
+other candidate components remain independently unavailable until their own
+matrix rows capture the prescribed transitions and are promoted. Until those
+audits promote their individual rows, the existing full UI terminal path
+remains authoritative.
 
 Game speed is a global battle-only invariant with persistent operator intent
 independent of strategy and ADB target. Numeric selections from `x0.0` through

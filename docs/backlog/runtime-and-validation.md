@@ -45,13 +45,42 @@ checked-item detail remains in the
     natural-boundary audit collector defined in the runtime architecture. Its
     allowlisted append-only receipts may record stable revision, active
     identity/wave, complete Perk progression/clearing, structural tail change,
-    semantic availability, and passive boundary timing. It must not attach an
-    entry, write a battle record, decide Perks navigation, send input, or
-    suppress any UI path.
+    semantic availability, passive boundary timing, and independently enabled
+    upgrade/survival checkpoints plus visual-event metadata once their audit
+    manifests exist. It must not attach an entry, write a battle record, decide
+    Perks navigation, send input, or suppress any UI path.
+  - [ ] Extend the exact-version runtime projection with independently failing
+    active-upgrade, survival-ability, and allowlisted live-tally components.
+    For upgrades, map all three current-level arrays to their Workshop
+    baselines and versioned caps so a gold-box claim is explicit rather than
+    inferred from magnitude. For live tallies, prioritize values that replace
+    an existing OCR/navigation route or reconcile a terminal record; keep the
+    arbitrary decoded root private.
+  - [ ] Causally calibrate Demon Mode, Nuke, and Second Wind active-round
+    fields across natural activation, recharge, repeated activation, Game
+    Over, and clearing. Establish use-count polarity, sentinel values, timer
+    units, recharge lengths, and whether each countdown/timeout yields an exact
+    activation wave or only bounds it between stable save waves. Validate each
+    ability independently and do not infer a complete history from one late
+    snapshot.
+  - [ ] Merge stable same-round save checkpoints with the existing passive
+    visual activation tracker. Count deltas establish event intervals; a
+    matching visual transition may refine an interval without double counting.
+    Cache the newest complete active snapshot across post-run clearing, retain
+    confirmed screenshot-derived events after its saved wave through Game
+    Over, and reconcile the merged events with terminal Battle History counts.
+    Missing timing remains unknown/bounded; conflicts force the full UI audit.
+  - [ ] Inventory checkpoint candidates that could replace other observation
+    routes, including game speed, buy quantities, Damage Slider, Orb Distance,
+    Card activity, and UW/Bot/Guardian cooldowns. Rank them by navigation/OCR
+    cost and staleness tolerance, then validate and adopt one independent claim
+    at a time. Enforcement, mutation confirmation, and transition authority
+    remain visual.
   - [ ] Add the polling/same-round cache vertical slice only after its required
     matrix evidence is complete. Bind snapshots to the guarded identity, reject
-    stale or different-round revisions, and retain the newest complete Perks
-    across post-run clearing without changing terminal navigation.
+    stale or different-round revisions, retain each newest complete component
+    across post-run clearing, and preserve visual tail events without changing
+    terminal navigation.
   - [ ] Add save-derived normal completed records and conditional terminal
     Perks navigation only after history-tail attachment and final-Perk proofs
     are complete. Preserve passive compact Game Stats OCR, forced full UI audit,
