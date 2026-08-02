@@ -64,6 +64,35 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   staged, or committed, and no process, ADB target, emulator, or battle was
   inspected or changed.
 
+### 2026-08-02 custom Strategy rename and recoverable deletion
+
+- Commit `6a7e86f` makes custom Strategy renaming discoverable while retaining
+  the existing reviewed publication boundary: only the display name changes,
+  the stable ID remains fixed, and publication advances the logical version
+  without selecting or activating the Strategy.
+- The revision-21 `strategy_authoring_profile_lifecycle_v1` contract adds one
+  allowlisted `retire_strategy` operation. It requires the source fingerprint
+  loaded by the editor, refuses bundled/reserved or currently selected
+  Strategies, and moves the exact publication into the server-owned
+  recoverable archive under the existing catalog writer lock. Both new and
+  legacy active catalogs refresh without exposing generated plans or accepting
+  client paths. Managed history/restore remains in the safe-fallback backlog.
+- WPF adds explicit **Rename Strategy** and confirmed **Delete Strategy...**
+  affordances only for editable custom Strategies. The native README's
+  disposable Windows smoke now covers opening the authoring window, rename
+  round trips, cancellation, selected-Strategy refusal, archive-backed
+  deletion, and non-activation. No Windows runtime was available, so that
+  manual smoke remains pending rather than being claimed from compilation.
+- Focused authoring/profile/control-surface coverage passed 75 tests; the
+  portable native suite passed all 51 tests; and the complete Python suite
+  passed all 1,112 tests. Linux cross-publishing produced both standalone
+  Windows executables (with sandbox-only read-only NuGet vulnerability-cache
+  warnings), and `git diff --check` passed. Legacy schema-1 tests now create
+  disposable deterministic publications instead of reading the operator's
+  mutable custom catalog. No live process, control file, ADB target, emulator,
+  battle, operator profile publication, or `playerInfo.dat` was inspected or
+  changed.
+
 ### 2026-08-01 save-first runtime normalization foundation
 
 - This commit adds snapshot-schema-2 runtime evidence for exact mapping
