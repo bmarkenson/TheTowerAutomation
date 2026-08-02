@@ -254,7 +254,7 @@ memory only. The API deliberately sends no CORS permission.
 | `GET` | `/api/v1/strategy-profiles` | Bundled/custom profile summaries plus the allowlisted Farm policy and preset catalogs |
 | `POST` | `/api/v1/strategy-profiles` | Validate a constrained Farm draft or atomically publish its source and generated plan |
 | `GET` | `/api/v1/strategy-authoring` | Registry metadata, separate Base/Strategy catalogs, editable source, effective resolution/provenance, compatible Base revisions, capabilities, and catalog errors |
-| `POST` | `/api/v1/strategy-authoring` | Validate or publish Base/Strategy source, or preview an explicit reviewed Base rebase, without activation |
+| `POST` | `/api/v1/strategy-authoring` | Validate or publish Base/Strategy source, or preview an explicit reviewed Base pin change, without activation |
 | `GET` | `/api/v1/battles?limit=N` | Newest Battle and Tournament summaries |
 | `GET` | `/api/v1/battles/{battle_id}` | One full structured battle record |
 | `GET` | `/api/v1/activity?limit=N&levels=ERROR,WARN&scope=current_run&after=CURSOR` | Recent structured action-log entries, optionally filtered by level, explicit run scope, and opaque clear-view cursor |
@@ -338,6 +338,13 @@ that remain ignored; and resulting dependency/builder errors. A deterministic
 review fingerprint binds any later changed Base pin to that exact reviewed
 sparse source. Accepting the preview changes only the native client's draft;
 normal Strategy validation and publication are still required.
+
+The preview also supports attaching the first compatible Base to an existing
+editable Strategy whose current source has no Base. The native client exposes
+that choice, restores the published no-Base source when requesting the preview,
+and blocks publication of the changed pin until the returned review fingerprint
+is present. The published Strategy keeps its ID and receives a new version;
+selection and activation remain unchanged.
 
 ## Activity log audiences
 

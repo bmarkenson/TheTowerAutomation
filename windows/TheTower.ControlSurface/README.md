@@ -315,13 +315,16 @@ validation refreshes effective values without discarding retained draft data.
 Unsupported Strategy families such as Tournament and No Strategy remain
 clearly read-only.
 
-A new Strategy draft may initially pin a latest compatible Base. A published
-Strategy pinned behind that Base's latest revision shows an update banner; its
-pin cannot change directly. **Review Base update...** asks Linux to compute
-settings added/removed/changed, inherited effective changes, local overrides
-that remain unchanged, explicit ignores that remain ignored, and resulting
-dependency or builder errors. Accepting a valid review changes only the open
-draft and binds later publication to that exact reviewed source.
+A new Strategy draft may initially pin a latest compatible Base. An editable
+existing Strategy showing **No Base** may also choose its first compatible Base
+without cloning or changing its ID. That selection exposes **Review Base
+selection...**; publication remains disabled until Linux computes the complete
+semantic diff and the operator accepts it. A published Strategy pinned behind
+that Base's latest revision instead shows **Review Base update...**. Both
+reviews report settings added/removed/changed, inherited effective changes,
+local overrides that remain unchanged, explicit ignores that remain ignored,
+and resulting dependency or builder errors. Accepting a valid review changes
+only the open draft and binds later publication to that exact reviewed source.
 
 **Validate draft** returns normalized source, resolution/provenance, rule count,
 and fingerprints without writing a file or returning the expanded generated
@@ -368,14 +371,19 @@ operator's real `config/strategies/custom` directory:
    editor again, plus Inherit, Override Enforce, Override Observe, explicit
    Ignore, Reset to inherited, and dormant values across repeated state
    changes. Validate, publish, close, reopen, and verify exact round trips.
-5. Seed one unknown Ultimate Weapon group and one unknown toggle field through
+5. Open an editable disposable existing Strategy with **No Base** (including a
+   copied schema-1 fixture). Select the disposable Base, confirm **Review Base
+   selection...** appears and publication is blocked before review, inspect and
+   accept the semantic review, validate, publish, and reopen. Verify the same
+   Strategy ID now pins the reviewed Base revision and nothing was activated.
+6. Seed one unknown Ultimate Weapon group and one unknown toggle field through
    the disposable server fixture. Change a known toggle, validate, publish,
    reopen, and verify both unknown values are unchanged and only described as
    retained—not exposed as raw JSON.
-6. Publish a second disposable Base revision, open the Strategy's Base-update
+7. Publish a second disposable Base revision, open the Strategy's Base-update
    review, verify the semantic diff, accept it into the draft, validate and
    publish, then reopen and verify the reviewed pin and inherited values.
-7. Throughout the run, verify Validate writes nothing, publishing never changes
+8. Throughout the run, verify Validate writes nothing, publishing never changes
    the selected/active Strategy, no activation prompt appears, and the real
    operator profile catalog and control state remain byte-for-byte untouched.
 

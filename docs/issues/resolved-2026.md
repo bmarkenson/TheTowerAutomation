@@ -8,6 +8,49 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Existing no-Base Strategies could not attach their first Base
+
+- **Observed:** 2026-08-02 when the operator attempted to make the editable
+  legacy `Farm T19 Custom` Strategy use a newly published Farm Base.
+- **Symptom:** The Pinned Base control displayed **No Base** but was disabled.
+  The only exposed review action applied to a newer revision of an already
+  pinned Base, so the existing Strategy had no path to establish its first pin.
+  Cloning could choose a Base but would unnecessarily create another Strategy
+  identity.
+- **Evidence:** WPF enabled `BasePinBox` only for new drafts and returned early
+  from its review handler unless catalog metadata supplied `base_update`.
+  Backend inspection and a focused regression confirmed `preview_rebase`
+  already safely supports a null current snapshot and computes the complete
+  initial-attachment semantic diff.
+- **Safety response:** Diagnosis and correction were repository-local. No
+  profile, active selection, control state, process, ADB target, emulator, or
+  battle was inspected or changed.
+- **Cause:** The client conflated every existing Strategy with an immutable
+  current Base pin. It did not distinguish an existing editable Strategy whose
+  published source has no Base, even though the server's reviewed pin-change
+  contract already represented that transition.
+- **Resolution:** The first-Base picker is enabled only for an editable
+  existing Strategy with no published pin. Selecting a compatible
+  server-catalogued Base exposes **Review Base selection...** and uses the
+  existing Linux preview. Publication stays blocked until that exact review is
+  accepted; later draft changes invalidate it. Publishing retains the Strategy
+  ID, embeds the reviewed Base snapshot, creates the next version, and does not
+  activate it.
+- **Regression:**
+  `test/test_strategy_authoring_api.py::test_schema_one_profile_can_attach_first_base_only_after_review`
+  exercises the real legacy fixture, proves an unreviewed publish is rejected,
+  and verifies the same ID and embedded snapshot after reviewed publication.
+  WPF structure tests cover picker/review gating, and the portable C# suite
+  verifies that the review describes a Base reference without implying
+  activation.
+- **Validation:** The focused authoring/API/profile/control-surface suite
+  passed all 96 tests, the portable C# suite passed all 51 tests, the complete
+  Python suite passed all 1,108 tests, and the native project built with zero
+  warnings or errors. Linux cross-publishing produced both expected
+  executables. Windows interaction remains pending with the disposable smoke
+  workflow.
+- **Fixed by:** `26c3a17`.
+
 ### Strategy Authoring choice controls rendered unreadably in the dark theme
 
 - **Observed:** 2026-08-01 when the operator opened the native Windows

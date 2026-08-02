@@ -121,6 +121,14 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   built without warnings, and Linux cross-publishing again produced both
   expected executables; Windows visual confirmation remains in the smoke
   checklist.
+- Follow-up `26c3a17` exposes the backend's reviewed first-Base attachment for
+  an editable existing no-Base Strategy, including the legacy
+  `farm_t19_custom` profile. The picker remains server-catalogued, publication
+  is blocked until the exact semantic review is accepted, the Strategy ID is
+  retained, and activation remains unchanged. Focused coverage passed 96
+  tests, the portable C# suite passed 51 tests, the complete Python suite
+  passed all 1,108 tests, and Linux cross-publishing produced both expected
+  executables.
 
 ### 2026-08-01 versioned Tournament conditions and record attachment
 

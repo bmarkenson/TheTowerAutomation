@@ -178,6 +178,13 @@ shows a semantic diff:
 - explicit ignores that remain ignored; and
 - new validation errors or dependency changes.
 
+The same reviewed operation owns the first Base attachment for an existing
+editable Strategy that currently has no pin, including conservatively opened
+schema-1 profiles. The client may offer compatible server-catalogued Bases but
+cannot publish the new reference until Linux has reviewed the complete
+`No Base -> pinned Base` resolution. This keeps the Strategy ID and local
+directives intact; cloning is not required merely to establish its first Base.
+
 Accepting the rebase updates the strategy draft and requires normal validation
 and publication. Canceling it changes nothing. Publication and activation
 remain separate operations, so a newly published revision cannot silently
@@ -229,6 +236,9 @@ The authoring surface uses one editor framework for bases and strategies:
   still asks the backend to validate and resolve them.
 - A strategy whose base has a newer revision shows an update banner and opens
   the reviewed rebase diff before changing anything.
+- An editable existing strategy with no Base may select its first compatible
+  Base and must accept the same backend semantic review before publication;
+  this does not clone, rename, or activate the strategy.
 - Review & Publish displays source changes, resolved changes, validation
   results, generated-plan identity, and whether the active strategy will remain
   unchanged after publication.
