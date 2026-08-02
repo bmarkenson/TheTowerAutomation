@@ -352,7 +352,9 @@ operator's real `config/strategies/custom` directory:
    the same temporary root. Do not use process or activation endpoints.
 2. Connect the native client to that server and open **Strategy profiles...**.
    Confirm the window renders immediately with no `TwoWay`/read-only-property
-   binding exception; compilation alone does not exercise this boundary.
+   binding exception. Confirm selections and dropdown items use light text on
+   the dark-blue ComboBox surface, including highlighted and selected items;
+   compilation alone does not exercise these boundaries.
 3. Create a disposable Base. With **Show all settings**, exercise fixed values,
    the true-only boolean, Card recharge choices, Free Upgrade reorder,
    fixed Guardian chips, Perk add/remove/limits/order, Ultimate Weapon

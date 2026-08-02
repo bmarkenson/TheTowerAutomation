@@ -61,6 +61,12 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   disposable-catalog smoke checklist—including actually opening Strategy
   Authoring—remains required. Validation did not inspect or change live
   process, control, ADB, emulator, battle, or operator profile state.
+- Follow-up commit `10853ee` corrects the global ComboBox foreground and adds
+  explicit dropdown-item states after the operator reported black text on the
+  dark-blue editor controls. Its focused suite passed all 49 tests, the native
+  project built without warnings, and Linux cross-publishing again produced
+  both expected executables; Windows visual confirmation remains in the smoke
+  checklist.
 
 ### 2026-08-01 versioned Tournament conditions and record attachment
 
