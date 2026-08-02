@@ -57,8 +57,27 @@
     </Style>
     <Style TargetType="ComboBox">
       <Setter Property="Background" Value="#182338" />
-      <Setter Property="Foreground" Value="#111827" />
+      <Setter Property="Foreground" Value="#EDF2F7" />
+      <Setter Property="BorderBrush" Value="#344660" />
       <Setter Property="Padding" Value="6" />
+    </Style>
+    <Style TargetType="ComboBoxItem">
+      <Setter Property="Background" Value="#182338" />
+      <Setter Property="Foreground" Value="#EDF2F7" />
+      <Setter Property="Padding" Value="8,5" />
+      <Style.Triggers>
+        <Trigger Property="IsHighlighted" Value="True">
+          <Setter Property="Background" Value="#0E4E67" />
+          <Setter Property="Foreground" Value="#BCEEFF" />
+        </Trigger>
+        <Trigger Property="IsSelected" Value="True">
+          <Setter Property="Background" Value="#0E4E67" />
+          <Setter Property="Foreground" Value="#BCEEFF" />
+        </Trigger>
+        <Trigger Property="IsEnabled" Value="False">
+          <Setter Property="Foreground" Value="#7890AC" />
+        </Trigger>
+      </Style.Triggers>
     </Style>
     <Style TargetType="DataGrid">
       <Setter Property="Background" Value="#111827" />

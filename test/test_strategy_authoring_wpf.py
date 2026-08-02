@@ -162,6 +162,24 @@ def test_computed_display_bindings_are_explicitly_one_way_regression():
     assert "public string PendingEffectiveDisplay =>" in view_models
 
 
+def test_native_combo_theme_keeps_closed_and_dropdown_text_high_contrast():
+    app_xaml = _text("App.xaml")
+    combo_style = app_xaml.split('<Style TargetType="ComboBox">', 1)[1].split(
+        "</Style>", 1
+    )[0]
+    item_style = app_xaml.split('<Style TargetType="ComboBoxItem">', 1)[1].split(
+        "</Style>", 1
+    )[0]
+
+    assert '<Setter Property="Background" Value="#182338" />' in combo_style
+    assert '<Setter Property="Foreground" Value="#EDF2F7" />' in combo_style
+    assert '<Setter Property="Foreground" Value="#111827" />' not in combo_style
+    assert '<Setter Property="Background" Value="#182338" />' in item_style
+    assert '<Setter Property="Foreground" Value="#EDF2F7" />' in item_style
+    assert '<Trigger Property="IsHighlighted" Value="True">' in item_style
+    assert '<Trigger Property="IsSelected" Value="True">' in item_style
+
+
 def test_portable_view_model_suite_covers_editors_states_and_round_trips():
     project = (WPF_TESTS / "TheTower.ControlSurface.Authoring.Tests.csproj").read_text(
         encoding="utf-8"
