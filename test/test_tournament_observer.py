@@ -38,6 +38,11 @@ def _load(path: Path):
     return data
 
 
+def _bind_terminal_context(app: App, scope_id: str = "test-tournament") -> None:
+    app._current_run_scope_id = lambda: scope_id
+    app._observed_active_battle_scope_id = scope_id
+
+
 def test_tournament_generated_plan_matches_compact_source():
     assert build_strategy_yaml(_load(SOURCE_PATH)) == _load(PLAN_PATH)
 
@@ -634,6 +639,7 @@ def test_tournament_game_over_waits_and_records_profile_evidence():
     app._supervisor = MagicMock()
     app._status_reporter = MagicMock()
     app._status_reporter.coin_rate_samples = []
+    _bind_terminal_context(app)
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
     previous_mode = AUTOMATION.mode
 
@@ -668,6 +674,7 @@ def test_tournament_results_are_recorded_once_without_dismissing_dialog():
     app._last_wave_value = 2028
     app._last_wave_conf = 99.0
     app._tournament_results_captured = False
+    _bind_terminal_context(app)
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
 
     with (
@@ -722,6 +729,7 @@ def test_tournament_result_capture_failure_reports_wait_and_retry():
     app._last_wave_value = 2028
     app._last_wave_conf = 99.0
     app._tournament_results_captured = False
+    _bind_terminal_context(app)
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
 
     with (

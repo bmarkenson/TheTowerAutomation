@@ -50,6 +50,8 @@ def _app_without_strategy():
     app._no_strategy_post_run_stage = None
     app._no_strategy_post_run_retry_at = 0.0
     app._no_strategy_post_run_recovery_checked = True
+    app._current_run_scope_id = lambda: "test-no-strategy"
+    app._observed_active_battle_scope_id = "test-no-strategy"
     return app
 
 

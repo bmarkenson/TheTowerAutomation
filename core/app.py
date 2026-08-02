@@ -228,6 +228,15 @@ class App:
         self._last_wave_conf: float = -1.0
         self._last_wave_ts: float = 0.0
         self._battle_activation_tracker = BattleActivationTracker()
+        # Process-local battle evidence is safe for a terminal record only
+        # after this process has observed the active battle in the current
+        # continuity scope.  A process starting directly on Game Over has no
+        # authority to associate the selected strategy or a restored tracker
+        # checkpoint with that completed battle.
+        self._observed_active_battle_scope_id: Optional[str] = None
+        self._last_unbound_terminal_signature: Optional[
+            tuple[str, Optional[str], Optional[str]]
+        ] = None
         control_path = Path(config.control_file)
         perk_timeline_state = control_path.with_name(
             f"{control_path.stem}.perk_timeline_state.json"
@@ -295,6 +304,122 @@ class App:
             observer = PerkTimelineObserver()
             self._perk_timeline_observer = observer
         return observer
+
+    def _observe_terminal_run_binding(
+        self,
+        detection: Mapping[str, Any],
+        *,
+        continuity_pending: bool,
+    ) -> None:
+        """Bind process-local evidence only after a settled active observation."""
+
+        state = str(detection.get("state") or "UNKNOWN").upper()
+        if state == "RUNNING":
+            if continuity_pending:
+                return
+            self._observed_active_battle_scope_id = self._current_run_scope_id()
+            self._last_unbound_terminal_signature = None
+            return
+        if state in {"HOME", "HOME_SCREEN"} and HomeBattleControl.parse(
+            detection.get("home_battle_control", "UNKNOWN")
+        ) is HomeBattleControl.NEW_BATTLE:
+            self._observed_active_battle_scope_id = None
+            self._last_unbound_terminal_signature = None
+
+    def _terminal_run_binding(self) -> dict[str, Any]:
+        """Describe whether process-local evidence belongs to this terminal run."""
+
+        current_scope_id = self._current_run_scope_id()
+        observed_scope_id = getattr(
+            self,
+            "_observed_active_battle_scope_id",
+            None,
+        )
+        if current_scope_id is not None and observed_scope_id == current_scope_id:
+            return {
+                "schema_version": 1,
+                "status": "bound",
+                "reason": "active_battle_observed_in_current_scope",
+                "activity_scope_run_id": current_scope_id,
+            }
+        if observed_scope_id is None:
+            reason = "terminal_without_observed_active_battle"
+        elif current_scope_id is None:
+            reason = "current_activity_scope_unavailable"
+        else:
+            reason = "activity_scope_changed_after_active_observation"
+        return {
+            "schema_version": 1,
+            "status": "unbound",
+            "reason": reason,
+            "activity_scope_run_id": current_scope_id,
+            "observed_active_scope_run_id": observed_scope_id,
+        }
+
+    def _terminal_battle_context(
+        self,
+        terminal_state: str,
+        *,
+        observed_run_configuration: Optional[Mapping[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """Build terminal context without crossing an unproven run boundary."""
+
+        terminal = str(terminal_state or "UNKNOWN").upper()
+        binding = self._terminal_run_binding()
+        context: dict[str, Any] = {
+            "strategy": None,
+            "terminal_state": terminal,
+            "run_configuration": {},
+            "run_binding": binding,
+        }
+        if binding["status"] != "bound":
+            signature = (
+                terminal,
+                binding.get("activity_scope_run_id"),
+                binding.get("observed_active_scope_run_id"),
+            )
+            if getattr(self, "_last_unbound_terminal_signature", None) != signature:
+                self._perk_timeline().reset(fresh_battle=False)
+                self._activation_tracker().reset()
+                log(
+                    "[RUN_BINDING] Terminal battle was not observed active in "
+                    "the current process and activity scope; selected strategy "
+                    "and process-local run evidence are omitted from the record",
+                    "WARN",
+                    console=True,
+                )
+                self._last_unbound_terminal_signature = signature
+            return context
+
+        self._last_unbound_terminal_signature = None
+        strategy = self._mission_mgr.strategy
+        context.update(
+            {
+                "strategy": strategy.name if strategy else None,
+                "run_configuration": (
+                    strategy.run_configuration() if strategy else {}
+                ),
+                "last_wave": self._last_wave_value,
+                "last_wave_confidence": self._last_wave_conf,
+                "coin_rate_samples": self._status_reporter.coin_rate_samples,
+                "game_speed_control": self._game_speed_control_snapshot(),
+                "survival_ability_activations": (
+                    self._activation_tracker().snapshot()
+                ),
+                "perk_selection_timeline": self._perk_timeline().snapshot(),
+                "session_preflight_evidence": dict(
+                    self._mission_mgr.ctx.data.get("mission_vars", {}).get(
+                        "gc_session_preflight_evidence",
+                        {},
+                    )
+                ),
+            }
+        )
+        if isinstance(observed_run_configuration, Mapping):
+            context["observed_run_configuration"] = dict(
+                observed_run_configuration
+            )
+        return context
 
     def _get_action_authority(self) -> RuntimeActionAuthority:
         """Return the central authority, including for partial test instances."""
@@ -2131,6 +2256,10 @@ class App:
                     if continuity.recapture:
                         self._publish_action_authority()
                         continue
+                self._observe_terminal_run_binding(
+                    detection,
+                    continuity_pending=continuity_pending,
+                )
                 self._observe_exclusive_validation_battle_start(
                     detection,
                     battle_started=battle_started is True,
@@ -3524,32 +3653,11 @@ class App:
                     "using in-memory WAIT",
                     "WARN",
                 )
-            strategy = self._mission_mgr.strategy
             record = handle_tournament_results(
                 img,
-                battle_context={
-                    "strategy": strategy.name if strategy else None,
-                    "terminal_state": "TOURNAMENT_RESULTS",
-                    "run_configuration": (
-                        strategy.run_configuration() if strategy else {}
-                    ),
-                    "last_wave": self._last_wave_value,
-                    "last_wave_confidence": self._last_wave_conf,
-                    "coin_rate_samples": self._status_reporter.coin_rate_samples,
-                    "game_speed_control": (
-                        self._game_speed_control_snapshot()
-                    ),
-                    "survival_ability_activations": (
-                        self._activation_tracker().snapshot()
-                    ),
-                    "perk_selection_timeline": self._perk_timeline().snapshot(),
-                    "session_preflight_evidence": dict(
-                        self._mission_mgr.ctx.data.get("mission_vars", {}).get(
-                            "gc_session_preflight_evidence",
-                            {},
-                        )
-                    ),
-                },
+                battle_context=self._terminal_battle_context(
+                    "TOURNAMENT_RESULTS"
+                ),
             )
             if record is not None:
                 self._tournament_results_captured = True
@@ -3648,30 +3756,10 @@ class App:
                 before_terminal_action=finalize_run_boundary,
                 after_retry_started=mark_retry_started,
                 return_home_after_battle=(repair_in_progress or no_strategy_run),
-                battle_context={
-                    "strategy": strategy.name if strategy else None,
-                    "terminal_state": "GAME_OVER",
-                    "run_configuration": (
-                        strategy.run_configuration() if strategy else {}
-                    ),
-                    "last_wave": self._last_wave_value,
-                    "last_wave_confidence": self._last_wave_conf,
-                    "coin_rate_samples": self._status_reporter.coin_rate_samples,
-                    "game_speed_control": (
-                        self._game_speed_control_snapshot()
-                    ),
-                    "survival_ability_activations": (
-                        self._activation_tracker().snapshot()
-                    ),
-                    "perk_selection_timeline": self._perk_timeline().snapshot(),
-                    "observed_run_configuration": observed_run_configuration,
-                    "session_preflight_evidence": dict(
-                        self._mission_mgr.ctx.data.get("mission_vars", {}).get(
-                            "gc_session_preflight_evidence",
-                            {},
-                        )
-                    ),
-                },
+                battle_context=self._terminal_battle_context(
+                    "GAME_OVER",
+                    observed_run_configuration=observed_run_configuration,
+                ),
             )
             finalize_run_boundary()
             if no_strategy_run and completed_record is not None:

@@ -14,6 +14,7 @@ import numpy as np
 from core.battle_classification import (
     analyze_battle_type,
     observed_tier_for_record,
+    unbound_run_evidence_warning,
 )
 from core.battle_stats import (
     parse_more_stats_clipboard,
@@ -169,6 +170,9 @@ def build_tournament_result(
         and not identity["mismatch"]
     )
     runtime = dict(runtime_context or {})
+    run_binding_warning = unbound_run_evidence_warning(runtime)
+    if run_binding_warning is not None:
+        warnings.append(run_binding_warning)
     observed_tier = observed_tier_for_record(
         {"runtime": runtime, "detailed_stats": detailed}
     )

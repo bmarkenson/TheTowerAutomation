@@ -17,6 +17,7 @@ import numpy as np
 from core.battle_classification import (
     analyze_battle_type,
     observed_tier_for_record,
+    unbound_run_evidence_warning,
 )
 from utils.ocr_utils import ocr_text_and_conf
 
@@ -637,6 +638,9 @@ def _assemble_battle_record(
             "Game Stats/More Stats identity mismatch: "
             + ", ".join(item["field"] for item in identity["mismatches"])
         )
+    run_binding_warning = unbound_run_evidence_warning(runtime)
+    if run_binding_warning is not None:
+        warnings.append(run_binding_warning)
     valid = bool(
         more_stats["quality"]["valid"]
         and not missing_game_fields

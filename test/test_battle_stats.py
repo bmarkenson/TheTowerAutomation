@@ -860,6 +860,35 @@ def test_clipboard_record_is_identity_checked_and_drives_existing_derivations():
     assert record["derived"]["module_shards_per_real_hour_decimal"]
 
 
+def test_unbound_terminal_record_is_valid_but_warns_about_omitted_run_evidence():
+    record = build_battle_record_from_clipboard(
+        _frame(9),
+        CLIPBOARD_REPORT_PATH.read_text(encoding="utf-8"),
+        strategy_name=None,
+        run_configuration={},
+        runtime_context={
+            "terminal_state": "GAME_OVER",
+            "run_binding": {
+                "schema_version": 1,
+                "status": "unbound",
+                "reason": "terminal_without_observed_active_battle",
+                "activity_scope_run_id": "stale-scope",
+                "observed_active_scope_run_id": None,
+            },
+        },
+        game_stats_text_fn=_clipboard_game_text,
+    )
+
+    assert record["quality"]["valid"]
+    assert record["battle_type"] == "unknown"
+    assert record["strategy"] is None
+    assert record["run_configuration"] == {}
+    assert record["runtime"]["run_binding"]["status"] == "unbound"
+    warning = record["quality"]["warnings"][-1]
+    assert "Process-local run evidence was omitted" in warning
+    assert warning in render_battle_markdown(record)
+
+
 def test_live_clipboard_report_may_omit_historical_battle_date():
     text = CLIPBOARD_REPORT_PATH.read_text(encoding="utf-8").replace(
         "Battle Date\tJul 15, 2026 06:46\n",

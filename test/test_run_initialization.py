@@ -66,6 +66,11 @@ def _free_upgrade_lock_boundary_evidence():
     }
 
 
+def _bind_terminal_context(app: App, scope_id: str = "test-run") -> None:
+    app._current_run_scope_id = lambda: scope_id
+    app._observed_active_battle_scope_id = scope_id
+
+
 class _RunCountingStrategy(BaseStrategy):
     def __init__(self):
         super().__init__()
@@ -1970,6 +1975,7 @@ class GcFarmProfileTests(unittest.TestCase):
         app._strategy_boundary_confirmed = False
         app._handle_daily_gem_if_due = MagicMock(return_value=False)
         app._handle_mission_rewards_if_due = MagicMock(return_value=False)
+        _bind_terminal_context(app)
         frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
 
         with (
@@ -2014,6 +2020,7 @@ class GcFarmProfileTests(unittest.TestCase):
         app._strategy_boundary_confirmed = False
         app._handle_daily_gem_if_due = MagicMock(return_value=False)
         app._handle_mission_rewards_if_due = MagicMock(return_value=False)
+        _bind_terminal_context(app)
         frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
 
         with patch("core.app.handle_game_over") as game_over:
@@ -2042,6 +2049,7 @@ class GcFarmProfileTests(unittest.TestCase):
         app._strategy_boundary_confirmed = False
         app._handle_daily_gem_if_due = MagicMock(return_value=False)
         app._handle_mission_rewards_if_due = MagicMock(return_value=False)
+        _bind_terminal_context(app)
         frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
 
         with patch("core.app.handle_game_over") as game_over:
@@ -2050,6 +2058,92 @@ class GcFarmProfileTests(unittest.TestCase):
         battle_context = game_over.call_args.kwargs["battle_context"]
         self.assertEqual(battle_context["strategy"], "farm_t18")
         self.assertEqual(battle_context["run_configuration"]["profile"], "farm")
+
+    def test_terminal_only_restart_omits_unbound_strategy_and_tracker_evidence(self):
+        strategy = get_strategy("farm_t18")
+        manager = MagicMock()
+        manager.strategy = strategy
+        manager.ctx = MissionContext(
+            data={"mission_vars": {"gc_session_preflight_evidence": {"valid": True}}}
+        )
+        manager.session_preflight_repair_in_progress.return_value = False
+        app = App.__new__(App)
+        app._mission_mgr = manager
+        app._fast_game_over = False
+        app._last_wave_value = 4991
+        app._last_wave_conf = 99.0
+        app._supervisor = MagicMock()
+        app._status_reporter = MagicMock()
+        app._status_reporter.coin_rate_samples = [{"wave": 4991}]
+        app._pending_strategy_request = None
+        app._strategy_boundary_confirmed = False
+        app._handle_daily_gem_if_due = MagicMock(return_value=False)
+        app._handle_mission_rewards_if_due = MagicMock(return_value=False)
+        app._current_run_scope_id = lambda: "stale-scope"
+        app._observed_active_battle_scope_id = None
+        app._perk_timeline_observer = MagicMock()
+        app._battle_activation_tracker = MagicMock()
+        frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+        with patch("core.app.handle_game_over") as game_over:
+            app._handle_primary_states("GAME_OVER", set(), frame)
+
+        context = game_over.call_args.kwargs["battle_context"]
+        self.assertIsNone(context["strategy"])
+        self.assertEqual(context["run_configuration"], {})
+        self.assertEqual(
+            context["run_binding"],
+            {
+                "schema_version": 1,
+                "status": "unbound",
+                "reason": "terminal_without_observed_active_battle",
+                "activity_scope_run_id": "stale-scope",
+                "observed_active_scope_run_id": None,
+            },
+        )
+        self.assertNotIn("perk_selection_timeline", context)
+        self.assertNotIn("survival_ability_activations", context)
+        self.assertNotIn("session_preflight_evidence", context)
+        self.assertNotIn("coin_rate_samples", context)
+        app._perk_timeline_observer.reset.assert_called_once_with(
+            fresh_battle=False
+        )
+        app._perk_timeline_observer.snapshot.assert_not_called()
+        app._battle_activation_tracker.reset.assert_called_once_with()
+        app._battle_activation_tracker.snapshot.assert_not_called()
+
+    def test_terminal_binding_waits_for_continuity_and_clears_at_new_battle(self):
+        app = App.__new__(App)
+        scope = {"id": "run-1"}
+        app._current_run_scope_id = lambda: scope["id"]
+        app._observed_active_battle_scope_id = None
+
+        app._observe_terminal_run_binding(
+            {"state": "RUNNING"},
+            continuity_pending=True,
+        )
+        self.assertIsNone(app._observed_active_battle_scope_id)
+
+        app._observe_terminal_run_binding(
+            {"state": "RUNNING"},
+            continuity_pending=False,
+        )
+        self.assertEqual(app._observed_active_battle_scope_id, "run-1")
+
+        scope["id"] = "run-2"
+        self.assertEqual(
+            app._terminal_run_binding()["reason"],
+            "activity_scope_changed_after_active_observation",
+        )
+
+        app._observe_terminal_run_binding(
+            {
+                "state": "HOME_SCREEN",
+                "home_battle_control": "NEW_BATTLE",
+            },
+            continuity_pending=False,
+        )
+        self.assertIsNone(app._observed_active_battle_scope_id)
 
     def test_session_preflight_mismatch_blocks_without_correction(self):
         strategy = get_strategy("gc_farm_t19_experiment")

@@ -13,6 +13,24 @@ KNOWN_BATTLE_TYPES = {
     "unknown",
 }
 
+UNBOUND_RUN_EVIDENCE_WARNING = (
+    "Process-local run evidence was omitted because the terminal screen was "
+    "not bound to an active battle observed in this process and activity scope"
+)
+
+
+def unbound_run_evidence_warning(
+    runtime_context: Optional[Mapping[str, Any]],
+) -> Optional[str]:
+    """Return the operator warning for an explicitly unbound terminal context."""
+
+    if not isinstance(runtime_context, Mapping):
+        return None
+    binding = runtime_context.get("run_binding")
+    if isinstance(binding, Mapping) and binding.get("status") == "unbound":
+        return UNBOUND_RUN_EVIDENCE_WARNING
+    return None
+
 
 def analyze_battle_type(
     *,
@@ -285,7 +303,9 @@ def _normalize_observed_tier(value: object) -> int | None:
 
 __all__ = [
     "KNOWN_BATTLE_TYPES",
+    "UNBOUND_RUN_EVIDENCE_WARNING",
     "analyze_battle_type",
     "classification_for_record",
     "observed_tier_for_record",
+    "unbound_run_evidence_warning",
 ]
