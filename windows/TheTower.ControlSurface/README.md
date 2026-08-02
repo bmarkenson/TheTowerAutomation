@@ -352,9 +352,12 @@ operator's real `config/strategies/custom` directory:
    the same temporary root. Do not use process or activation endpoints.
 2. Connect the native client to that server and open **Strategy profiles...**.
    Confirm the window renders immediately with no `TwoWay`/read-only-property
-   binding exception. Confirm selections and dropdown items use light text on
-   the dark-blue ComboBox surface, including highlighted and selected items;
-   compilation alone does not exercise these boundaries.
+   binding exception. Select a bundled read-only Strategy and confirm disabled
+   ComboBoxes retain dark chrome with muted light text, and that the disabled
+   settings-filter RadioButton labels remain readable. Confirm editable
+   selections and dropdown items also use light text on the dark-blue surface,
+   including highlighted and selected items; compilation alone does not
+   exercise these boundaries.
 3. Create a disposable Base. With **Show all settings**, exercise fixed values,
    the true-only boolean, Card recharge choices, Free Upgrade reorder,
    fixed Guardian chips, Perk add/remove/limits/order, Ultimate Weapon

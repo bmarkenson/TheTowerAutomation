@@ -8,34 +8,46 @@ and actionable work lives in
 
 ## Resolved issues
 
-### Strategy Authoring combo boxes rendered black text on dark blue
+### Strategy Authoring choice controls rendered unreadably in the dark theme
 
 - **Observed:** 2026-08-01 when the operator opened the native Windows
-  Strategy Authoring window.
-- **Symptom:** Combo-box selections and dropdown text rendered nearly black on
-  dark-blue controls, making editor choices difficult to read.
-- **Evidence:** The application-wide `ComboBox` style paired background
-  `#182338` with foreground `#111827`. No explicit `ComboBoxItem` theme
-  protected dropdown entries or their highlighted and selected states.
+  Strategy Authoring window, then reproduced with a screenshot on 2026-08-02
+  after the first property-only correction.
+- **Symptom:** Combo-box selections and dropdown text initially rendered
+  nearly black on dark-blue controls. After correcting those declared colors,
+  disabled selectors still used Windows' light system chrome while the
+  disabled **Show active only** and **Show all settings** labels remained
+  nearly black against the dark editor panel.
+- **Evidence:** The initial application-wide `ComboBox` style paired
+  background `#182338` with foreground `#111827`. Commit `10853ee` corrected
+  that pair, but the follow-up Windows screenshot proved the default
+  `ComboBox` template was painting its own disabled chrome instead of the
+  styled surface. The screenshot also isolated the remaining dark text to
+  disabled RadioButton content whose foreground was owned by the framework
+  theme rather than an application style.
 - **Safety response:** The correction was WPF-only and did not inspect or
   change automation, control state, ADB, the emulator, battles, or profiles.
-- **Cause:** The global dark theme accidentally used the panel background
-  color as the ComboBox foreground and left dropdown items to framework theme
-  defaults.
-- **Resolution:** Combo boxes and their dropdown items now use light text on
-  the existing dark surface, with explicit high-contrast selected, highlighted,
-  and disabled states.
-- **Regression:**
-  `test/test_strategy_authoring_wpf.py::test_native_combo_theme_keeps_closed_and_dropdown_text_high_contrast`
-  asserts the closed and dropdown theme contract. The Windows smoke checklist
-  now requires visual confirmation because compilation cannot exercise native
-  theme rendering.
-- **Validation:** The focused WPF/control-surface suite passed all 49 tests;
+- **Cause:** There were two layers: one incorrect foreground value, followed
+  by reliance on Windows' default control templates. Style property setters
+  alone could not guarantee the rendered ComboBox surface or the disabled
+  RadioButton/CheckBox foreground.
+- **Resolution:** The application now owns explicit `ComboBox` and
+  `ComboBoxItem` templates. Their closed selection presenter, popup, arrow,
+  items, focus, hover, selected, and disabled states all bind to declared dark
+  surfaces and light foregrounds. RadioButton and CheckBox content now has
+  explicit readable enabled and disabled foregrounds.
+- **Regression:** `test/test_strategy_authoring_wpf.py` verifies that the
+  rendered ComboBox templates override the platform defaults and that disabled
+  RadioButton/CheckBox labels retain the declared light foreground. The
+  Windows smoke checklist requires visual confirmation because compilation
+  cannot exercise native theme rendering.
+- **Validation:** The focused WPF/control-surface suite passed all 50 tests;
   the native project built with zero warnings and errors; and Linux
   cross-publishing produced both expected executables. Windows visual
   confirmation remains pending after the operator replaces and reopens the
   client.
-- **Fixed by:** `10853ee`.
+- **Fixed by:** Initial color correction `10853ee`; complete template
+  correction `6e85c2c`.
 
 ### Card recharge verification rejected a valid post-toggle checkbox
 
