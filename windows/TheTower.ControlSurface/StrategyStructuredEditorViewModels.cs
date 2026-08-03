@@ -382,14 +382,31 @@ public sealed class AuthoringLocalFieldViewModel : INotifyPropertyChanged
             return;
         }
         var currentKey = SelectedOption?.ValueKey;
-        AvailableOptions.Clear();
-        foreach (var option in Definition.Options.Where(option =>
-                     option.ValueKey == currentKey
-                     || !selectedByOtherFields.Contains(option.ValueKey)))
+        var desiredOptions = Definition.Options.Where(option =>
+                option.ValueKey == currentKey
+                || !selectedByOtherFields.Contains(option.ValueKey))
+            .ToArray();
+        for (var desiredIndex = 0; desiredIndex < desiredOptions.Length; desiredIndex++)
         {
-            AvailableOptions.Add(option);
+            var option = desiredOptions[desiredIndex];
+            var currentIndex = AvailableOptions.IndexOf(option);
+            if (currentIndex < 0)
+            {
+                AvailableOptions.Insert(desiredIndex, option);
+            }
+            else if (currentIndex != desiredIndex)
+            {
+                AvailableOptions.Move(currentIndex, desiredIndex);
+            }
         }
-        Notify(nameof(AvailableOptions));
+        // The desired prefix includes the current selection. Trim only after it
+        // is in place so every collection event leaves SelectedOption available.
+        for (var index = AvailableOptions.Count - 1;
+             index >= desiredOptions.Length;
+             index--)
+        {
+            AvailableOptions.RemoveAt(index);
+        }
     }
 
     private void Notify([CallerMemberName] string? propertyName = null) =>

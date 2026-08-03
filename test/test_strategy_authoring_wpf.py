@@ -246,6 +246,10 @@ def test_portable_view_model_suite_covers_editors_states_and_round_trips():
     assert "PresetAndLocalDraftsSurviveSparseBaseTransitions" in tests
     assert "ModuleLocalEditorUsesEightFieldsAndPreventsRepeatedChoices" in tests
     assert (
+        "ChangingOneModuleSelectionKeepsEverySelectionAvailableDuringPeerRefresh"
+        in tests
+    )
+    assert (
         "TargetPriorityLocalEditorRetainsCompleteMembershipInChangedOrder"
         in tests
     )

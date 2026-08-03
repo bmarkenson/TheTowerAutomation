@@ -1,3 +1,4 @@
+using System.Collections.Specialized;
 using System.Text.Json;
 
 namespace TheTower.ControlSurface;
@@ -410,6 +411,84 @@ public sealed class StrategyAuthoringViewModelTests
         Assert.Same(original, first.SelectedOption);
         first.SelectedOption = first.AvailableOptions.Single(option =>
             option.Value.GetString()?.EndsWith("3", StringComparison.Ordinal) == true);
+
+        var definition = row.BuildDirective()?.Value?.GetProperty("local");
+        Assert.True(definition.HasValue);
+        var values = definition.Value.EnumerateObject()
+            .Select(property => property.Value.GetString())
+            .ToArray();
+        Assert.Equal(8, values.Length);
+        Assert.Equal(8, values.Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Fact]
+    public void ChangingOneModuleSelectionKeepsEverySelectionAvailableDuringPeerRefresh()
+    {
+        var row = ManagedRow(LocalDefinition("modules"));
+        row.SelectedDefinitionForm = row.DefinitionForms[1];
+        var local = Assert.IsType<AuthoringLocalDefinitionViewModel>(
+            row.LocalDefinitionEditor);
+        var changedField = local.Fields[0];
+        var compatiblePeer = local.Fields[1];
+        var replacement = changedField.AvailableOptions.Single(option =>
+            option.Value.GetString()?.EndsWith("3", StringComparison.Ordinal) == true);
+        var expectedSelections = local.Fields.ToDictionary(
+            field => field,
+            field => ReferenceEquals(field, changedField)
+                ? replacement
+                : Assert.IsType<StrategyEditorOption>(field.SelectedOption));
+        var collectionChangeCount = 0;
+
+        foreach (var field in local.Fields)
+        {
+            var expectedSelection = expectedSelections[field];
+            field.AvailableOptions.CollectionChanged += (_, args) =>
+            {
+                collectionChangeCount++;
+                Assert.NotEqual(NotifyCollectionChangedAction.Reset, args.Action);
+                Assert.Same(expectedSelection, field.SelectedOption);
+                Assert.Contains(expectedSelection, field.AvailableOptions);
+                if (args.Action == NotifyCollectionChangedAction.Remove
+                    && args.OldItems is not null)
+                {
+                    Assert.DoesNotContain(
+                        expectedSelection,
+                        args.OldItems.Cast<StrategyEditorOption>());
+                }
+            };
+        }
+
+        changedField.SelectedOption = replacement;
+
+        Assert.True(collectionChangeCount > 0);
+        Assert.All(local.Fields, field =>
+        {
+            var selected = Assert.IsType<StrategyEditorOption>(field.SelectedOption);
+            Assert.Contains(selected, field.AvailableOptions);
+            var selectedByOthers = local.Fields
+                .Where(candidate => !ReferenceEquals(candidate, field))
+                .Select(candidate => candidate.SelectedOption?.ValueKey)
+                .Where(key => key is not null)
+                .Cast<string>()
+                .ToHashSet(StringComparer.Ordinal);
+            Assert.Equal(
+                field.Definition.Options
+                    .Where(option => option.ValueKey == selected.ValueKey
+                        || !selectedByOthers.Contains(option.ValueKey))
+                    .Select(option => option.ValueKey),
+                field.AvailableOptions.Select(option => option.ValueKey));
+        });
+        Assert.DoesNotContain(
+            compatiblePeer.AvailableOptions,
+            option => option.ValueKey == replacement.ValueKey);
+
+        changedField.SelectedOption = null;
+        changedField.SelectedOption = new StrategyEditorOption
+        {
+            Value = Element("undeclared_module"),
+            DisplayName = "Undeclared module",
+        };
+        Assert.Same(replacement, changedField.SelectedOption);
 
         var definition = row.BuildDirective()?.Value?.GetProperty("local");
         Assert.True(definition.HasValue);
