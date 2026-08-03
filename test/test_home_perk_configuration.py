@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
@@ -8,6 +8,8 @@ from core.battle_lifecycle import HomeBattleControl
 from core.home_perk_configuration import (
     BAN_SELECTED_TOGGLE_X,
     HomePerkConfigurationError,
+    _capture_bans_with_ocr_retries,
+    _capture_ranked_order_with_ocr_retries,
     _close_to_home,
     _repair_auto_pick_order,
     _repair_bans,
@@ -264,15 +266,16 @@ def test_auto_pick_repair_confirms_delayed_local_swap():
             return_value=frame,
         ),
         patch(
-            "core.home_perk_configuration._capture_ranked_frames",
-            return_value=([frame], frame),
-        ),
-        patch(
-            "core.home_perk_configuration.extract_ranked_auto_pick_order",
-            return_value={
-                "quality": {"valid": True},
-                "selected": [{"key": key} for key in expected],
-            },
+            "core.home_perk_configuration."
+            "_capture_ranked_order_with_ocr_retries",
+            return_value=(
+                [frame],
+                frame,
+                {
+                    "quality": {"valid": True},
+                    "selected": [{"key": key} for key in expected],
+                },
+            ),
         ),
     ):
         _repair_auto_pick_order(
@@ -342,15 +345,16 @@ def test_auto_pick_repair_scrolls_up_locally_when_moved_row_leaves_viewport():
             return_value=frame,
         ),
         patch(
-            "core.home_perk_configuration._capture_ranked_frames",
-            return_value=([frame], frame),
-        ),
-        patch(
-            "core.home_perk_configuration.extract_ranked_auto_pick_order",
-            side_effect=lambda *_args, **_kwargs: {
-                "quality": {"valid": True},
-                "selected": [{"key": key} for key in order[:3]],
-            },
+            "core.home_perk_configuration."
+            "_capture_ranked_order_with_ocr_retries",
+            side_effect=lambda *_args, **_kwargs: (
+                [frame],
+                frame,
+                {
+                    "quality": {"valid": True},
+                    "selected": [{"key": key} for key in order[:3]],
+                },
+            ),
         ),
     ):
         _repair_auto_pick_order(
@@ -381,6 +385,113 @@ def test_auto_pick_repair_scrolls_up_locally_when_moved_row_leaves_viewport():
         "coin_tradeoff",
     ]
     assert swipe.call_count == 2
+
+
+def test_ban_ocr_retry_uses_fresh_capture_without_configuration_input():
+    initial = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    fresh = np.ones((1920, 1080, 3), dtype=np.uint8)
+    invalid = {
+        "quality": {
+            "valid": False,
+            "ocr_retry_recommended": True,
+            "closest_matches": [],
+            "warnings": ["Unrecognized banned perks: Cosh Bonvs"],
+        }
+    }
+    valid = {
+        "quality": {
+            "valid": True,
+            "ocr_retry_recommended": False,
+            "warnings": [],
+        }
+    }
+    capture = Mock(return_value=fresh)
+    sleeps = []
+
+    with patch(
+        "core.home_perk_configuration.extract_configured_perk_bans",
+        side_effect=[invalid, valid],
+    ) as extract:
+        frame, result = _capture_bans_with_ocr_retries(
+            initial,
+            capture_fn=capture,
+            detector=lambda _frame: {"state": "PERKS"},
+            visible_fn=lambda *_args, **_kwargs: True,
+            row_fn=lambda _frame: [],
+            sleep_fn=sleeps.append,
+        )
+
+    assert frame is fresh
+    assert result is valid
+    assert extract.call_count == 2
+    capture.assert_called_once_with()
+    assert sleeps == [0.6]
+
+
+def test_auto_pick_ocr_retry_rescans_locally_from_top_once():
+    initial = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    fresh = np.ones((1920, 1080, 3), dtype=np.uint8)
+    invalid = {
+        "quality": {
+            "valid": False,
+            "ocr_retry_recommended": True,
+            "closest_matches": [
+                {
+                    "display_text": "Chain lightninq damaqe x2",
+                    "suggested_label": "Chain Lightning Damage",
+                    "score": 0.91,
+                    "margin": 0.40,
+                    "retry_recommended": True,
+                }
+            ],
+            "warnings": [
+                "Unrecognized Auto Pick perks: Chain lightninq damaqe x2"
+            ],
+        }
+    }
+    valid = {
+        "quality": {
+            "valid": True,
+            "ocr_retry_recommended": False,
+            "warnings": [],
+        },
+        "selected": [{"key": "chain_lightning_damage"}],
+    }
+    capture = Mock(return_value=fresh)
+    sleeps = []
+
+    with (
+        patch(
+            "core.home_perk_configuration._capture_ranked_frames",
+            side_effect=[([initial], initial), ([fresh], fresh)],
+        ) as scan,
+        patch(
+            "core.home_perk_configuration.extract_ranked_auto_pick_order",
+            side_effect=[invalid, valid],
+        ),
+        patch(
+            "core.home_perk_configuration._scroll_configuration_top",
+            return_value=fresh,
+        ) as scroll_top,
+    ):
+        frames, current, result = _capture_ranked_order_with_ocr_retries(
+            initial,
+            ranking_count=1,
+            capture_fn=capture,
+            detector=lambda _frame: {"state": "PERKS"},
+            visible_fn=lambda *_args, **_kwargs: True,
+            swipe_fn=lambda _key: True,
+            row_fn=lambda _frame: [],
+            sleep_fn=sleeps.append,
+        )
+
+    assert frames == [fresh]
+    assert current is fresh
+    assert result is valid
+    assert scan.call_count == 2
+    capture.assert_called_once_with()
+    scroll_top.assert_called_once()
+    assert sleeps == [0.6]
 
 
 def test_close_to_home_waits_for_new_battle_control_after_home_appears():
@@ -552,8 +663,13 @@ def test_home_perk_repair_finishes_bans_before_opening_auto_pick():
             side_effect=repair,
         ),
         patch(
-            "core.home_perk_configuration._capture_ranked_frames",
-            return_value=([frame], frame),
+            "core.home_perk_configuration."
+            "_capture_ranked_order_with_ocr_retries",
+            return_value=(
+                [frame],
+                frame,
+                {"quality": {"valid": True}},
+            ),
         ),
         patch(
             "core.home_perk_configuration.evaluate_profile_perk_configuration",
@@ -656,8 +772,18 @@ def test_home_perk_does_not_repair_an_incomplete_auto_pick_capture():
             },
         ),
         patch(
-            "core.home_perk_configuration._capture_ranked_frames",
-            return_value=([frame], frame),
+            "core.home_perk_configuration."
+            "_capture_ranked_order_with_ocr_retries",
+            return_value=(
+                [frame],
+                frame,
+                {
+                    "quality": {
+                        "valid": False,
+                        "ocr_retry_recommended": True,
+                    }
+                },
+            ),
         ),
         patch(
             "core.home_perk_configuration.evaluate_profile_perk_configuration",

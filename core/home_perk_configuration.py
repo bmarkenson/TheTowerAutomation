@@ -52,6 +52,8 @@ MAX_BAN_SCAN_SWIPES = 14
 MAX_AUTO_PICK_SCAN_SWIPES = 20
 MAX_AUTO_PICK_MOVE_TAPS = 300
 MAX_AUTO_PICK_LOCAL_REACQUIRE_SWIPES = 4
+MAX_PERK_OCR_RETRIES = 2
+PERK_OCR_RETRY_SETTLE_SECONDS = 0.6
 AUTO_PICK_UP_X = 915
 BAN_SELECTED_TOGGLE_X = 540
 BAN_TOGGLE_X = 944
@@ -205,14 +207,26 @@ def ensure_home_perk_configuration(
         measure_selection_fn=measure_selection_fn,
         sleep_fn=sleep_fn,
     )
-    captured_bans = extract_configured_perk_bans(
+    bans_top, captured_bans = _capture_bans_with_ocr_retries(
         bans_top,
+        capture_fn=capture_fn,
+        detector=detector,
+        visible_fn=visible_fn,
         row_fn=row_fn,
+        sleep_fn=sleep_fn,
     )
     if (
         "perk_bans" not in waived
         and not _ban_capture_matches(required_bans, captured_bans)
     ):
+        ban_quality = captured_bans.get("quality")
+        if (
+            not isinstance(ban_quality, Mapping)
+            or ban_quality.get("valid") is not True
+        ):
+            raise HomePerkConfigurationError(
+                "Ban Perks remained non-authoritative after local OCR retries"
+            )
         log(
             "[HOME_PERKS] Verified Ban Perks differ from the strategy; "
             "starting guarded repair",
@@ -230,6 +244,14 @@ def ensure_home_perk_configuration(
             row_near_fn=row_near_fn,
             sleep_fn=sleep_fn,
         )
+        bans_top, captured_bans = _capture_bans_with_ocr_retries(
+            bans_top,
+            capture_fn=capture_fn,
+            detector=detector,
+            visible_fn=visible_fn,
+            row_fn=row_fn,
+            sleep_fn=sleep_fn,
+        )
         changed_fields.add("perk_bans")
 
     auto_top = _select_and_scroll_top(
@@ -243,19 +265,24 @@ def ensure_home_perk_configuration(
         measure_selection_fn=measure_selection_fn,
         sleep_fn=sleep_fn,
     )
-    auto_frames, current = _capture_ranked_frames(
-        auto_top,
-        ranking_count=len(required_auto_pick),
-        capture_fn=capture_fn,
-        visible_fn=visible_fn,
-        swipe_fn=swipe_fn,
-        row_fn=row_fn,
-        sleep_fn=sleep_fn,
+    auto_frames, current, captured_auto = (
+        _capture_ranked_order_with_ocr_retries(
+            auto_top,
+            ranking_count=len(required_auto_pick),
+            capture_fn=capture_fn,
+            detector=detector,
+            visible_fn=visible_fn,
+            swipe_fn=swipe_fn,
+            row_fn=row_fn,
+            sleep_fn=sleep_fn,
+        )
     )
     evidence = evaluate_profile_perk_configuration(
         requirements,
         bans_frame=bans_top,
         auto_pick_frames=auto_frames,
+        captured_bans=captured_bans,
+        captured_auto_pick=captured_auto,
         row_fn=row_fn,
     )
     if (
@@ -292,19 +319,24 @@ def ensure_home_perk_configuration(
             swipe_fn=swipe_fn,
             sleep_fn=sleep_fn,
         )
-        auto_frames, current = _capture_ranked_frames(
-            auto_top,
-            ranking_count=len(required_auto_pick),
-            capture_fn=capture_fn,
-            visible_fn=visible_fn,
-            swipe_fn=swipe_fn,
-            row_fn=row_fn,
-            sleep_fn=sleep_fn,
+        auto_frames, current, captured_auto = (
+            _capture_ranked_order_with_ocr_retries(
+                auto_top,
+                ranking_count=len(required_auto_pick),
+                capture_fn=capture_fn,
+                detector=detector,
+                visible_fn=visible_fn,
+                swipe_fn=swipe_fn,
+                row_fn=row_fn,
+                sleep_fn=sleep_fn,
+            )
         )
         evidence = evaluate_profile_perk_configuration(
             requirements,
             bans_frame=bans_top,
             auto_pick_frames=auto_frames,
+            captured_bans=captured_bans,
+            captured_auto_pick=captured_auto,
             row_fn=row_fn,
         )
 
@@ -547,7 +579,14 @@ def _repair_bans(
         swipe_fn=swipe_fn,
         sleep_fn=sleep_fn,
     )
-    final = extract_configured_perk_bans(final_top, row_fn=row_fn)
+    final_top, final = _capture_bans_with_ocr_retries(
+        final_top,
+        capture_fn=capture_fn,
+        detector=detector,
+        visible_fn=visible_fn,
+        row_fn=row_fn,
+        sleep_fn=sleep_fn,
+    )
     final_keys = [entry.get("key") for entry in final["selected"]]
     if (
         final["quality"]["valid"] is not True
@@ -726,19 +765,15 @@ def _repair_auto_pick_order(
         swipe_fn=swipe_fn,
         sleep_fn=sleep_fn,
     )
-    frames, _current = _capture_ranked_frames(
+    _frames, _current, final = _capture_ranked_order_with_ocr_retries(
         final_top,
         ranking_count=len(expected_keys),
         capture_fn=capture_fn,
+        detector=detector,
         visible_fn=visible_fn,
         swipe_fn=swipe_fn,
         row_fn=row_fn,
         sleep_fn=sleep_fn,
-    )
-    final = extract_ranked_auto_pick_order(
-        frames,
-        ranking_count=len(expected_keys),
-        row_fn=row_fn,
     )
     final_keys = [entry.get("key") for entry in final["selected"]]
     if final["quality"]["valid"] is not True or final_keys != list(expected_keys):
@@ -1149,6 +1184,156 @@ def _select_and_scroll_top(
         swipe_fn=swipe_fn,
         sleep_fn=sleep_fn,
     )
+
+
+def _capture_bans_with_ocr_retries(
+    current: Frame,
+    *,
+    capture_fn: Capture,
+    detector: Detector,
+    visible_fn: Callable[..., bool],
+    row_fn: RowsFn,
+    sleep_fn: Callable[[float], None],
+) -> tuple[Frame, dict[str, Any]]:
+    """Retry a non-authoritative Ban read without leaving its current tab."""
+
+    captured = extract_configured_perk_bans(current, row_fn=row_fn)
+    for retry in range(1, MAX_PERK_OCR_RETRIES + 1):
+        if not _capture_quality_requests_ocr_retry(captured):
+            break
+        log(
+            "[HOME_PERKS] Ban Perks OCR was non-authoritative; "
+            f"retrying a fresh local capture ({retry}/"
+            f"{MAX_PERK_OCR_RETRIES}) "
+            f"{_ocr_retry_detail(captured)}",
+            "DEBUG",
+        )
+        current = _fresh_perk_configuration_capture(
+            capture_fn=capture_fn,
+            detector=detector,
+            visible_fn=visible_fn,
+            sleep_fn=sleep_fn,
+        )
+        captured = extract_configured_perk_bans(current, row_fn=row_fn)
+    return current, captured
+
+
+def _capture_ranked_order_with_ocr_retries(
+    top: Frame,
+    *,
+    ranking_count: int,
+    capture_fn: Capture,
+    detector: Detector,
+    visible_fn: Callable[..., bool],
+    swipe_fn: Callable[[str], bool],
+    row_fn: RowsFn,
+    sleep_fn: Callable[[float], None],
+) -> tuple[list[Frame], Frame, dict[str, Any]]:
+    """Retry an uncertain ranked read locally before returning to Home."""
+
+    current_top = top
+    frames: list[Frame] = []
+    current = top
+    captured: dict[str, Any] = {}
+    for attempt in range(MAX_PERK_OCR_RETRIES + 1):
+        frames, current = _capture_ranked_frames(
+            current_top,
+            ranking_count=ranking_count,
+            capture_fn=capture_fn,
+            visible_fn=visible_fn,
+            swipe_fn=swipe_fn,
+            row_fn=row_fn,
+            sleep_fn=sleep_fn,
+        )
+        captured = extract_ranked_auto_pick_order(
+            frames,
+            ranking_count=ranking_count,
+            row_fn=row_fn,
+        )
+        if (
+            not _capture_quality_requests_ocr_retry(captured)
+            or attempt >= MAX_PERK_OCR_RETRIES
+        ):
+            break
+        retry = attempt + 1
+        log(
+            "[HOME_PERKS] Auto Pick OCR was non-authoritative; "
+            f"retrying locally from list top ({retry}/"
+            f"{MAX_PERK_OCR_RETRIES}) "
+            f"{_ocr_retry_detail(captured)}",
+            "DEBUG",
+        )
+        fresh = _fresh_perk_configuration_capture(
+            capture_fn=capture_fn,
+            detector=detector,
+            visible_fn=visible_fn,
+            sleep_fn=sleep_fn,
+        )
+        current_top = _scroll_configuration_top(
+            fresh,
+            capture_fn=capture_fn,
+            visible_fn=visible_fn,
+            swipe_fn=swipe_fn,
+            sleep_fn=sleep_fn,
+        )
+    return frames, current, captured
+
+
+def _fresh_perk_configuration_capture(
+    *,
+    capture_fn: Capture,
+    detector: Detector,
+    visible_fn: Callable[..., bool],
+    sleep_fn: Callable[[float], None],
+) -> Frame:
+    sleep_fn(PERK_OCR_RETRY_SETTLE_SECONDS)
+    fresh = capture_fn()
+    if (
+        fresh is None
+        or detector(fresh).get("state") != "PERKS"
+        or not visible_fn(PERK_CONFIGURATION_INDICATOR, screenshot=fresh)
+    ):
+        raise HomePerkConfigurationError(
+            "Perks configuration identity lost during local OCR retry"
+        )
+    return fresh
+
+
+def _capture_quality_requests_ocr_retry(
+    captured: Mapping[str, Any],
+) -> bool:
+    quality = captured.get("quality")
+    return bool(
+        isinstance(quality, Mapping)
+        and quality.get("valid") is not True
+        and quality.get("ocr_retry_recommended") is True
+    )
+
+
+def _ocr_retry_detail(captured: Mapping[str, Any]) -> str:
+    quality = captured.get("quality")
+    if not isinstance(quality, Mapping):
+        return "reason=capture_quality_unavailable"
+    candidates = [
+        item
+        for item in quality.get("closest_matches") or ()
+        if isinstance(item, Mapping)
+        and item.get("retry_recommended") is True
+    ]
+    closest = ", ".join(
+        f"{item.get('display_text')!r}->"
+        f"{item.get('suggested_label') or item.get('suggested_key')} "
+        f"score={float(item.get('score') or 0.0):.3f} "
+        f"margin={float(item.get('margin') or 0.0):.3f}"
+        for item in candidates[:3]
+    )
+    warnings = "; ".join(str(item) for item in quality.get("warnings") or ())
+    parts = []
+    if closest:
+        parts.append(f"closest=[{closest}]")
+    if warnings:
+        parts.append(f"warnings={warnings}")
+    return " ".join(parts) or "reason=uncertain_ocr"
 
 
 def _capture_ranked_frames(

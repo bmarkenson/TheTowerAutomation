@@ -21,6 +21,10 @@ RankingBoundaryFn = Callable[[Frame], int | None]
 # median V=83 for selected and V=137 for available rows.
 MAX_SELECTED_BACKGROUND_VALUE = 110.0
 DEFAULT_CONFIDENCE_THRESHOLD = 70.0
+CLOSEST_MATCH_MIN_SCORE = 0.84
+CLOSEST_MATCH_MIN_MARGIN = 0.12
+CLOSEST_MATCH_RETRY_SCORE = 0.70
+CLOSEST_MATCH_RETRY_MARGIN = 0.08
 PERK_BAN_CAPACITY = 6
 AUTO_PICK_DIVIDER_SCAN_TOP = 400
 AUTO_PICK_DIVIDER_SCAN_BOTTOM = 1700
@@ -96,6 +100,66 @@ PERK_CONFIGURATION_LABELS = {
     "spotlight_damage": "Spotlight Damage",
     "swamp_radius": "Swamp Radius",
     "damage": "Damage",
+}
+
+# Canonical value-bearing row text is deliberately separate from the concise
+# operator labels above.  It gives OCR recovery a comparable text shape after
+# volatile numbers are removed, without allowing the active profile's expected
+# values to narrow (and therefore bias) the candidate set.
+PERK_CONFIGURATION_OCR_EXEMPLARS = {
+    "cash_tradeoff": (
+        "x13.20 cash per wave, but enemy kills don't give cash"
+    ),
+    "enemies_damage_tradeoff": (
+        "Enemies damage -55.0%, but tower damage -50%"
+    ),
+    "lifesteal_knockback_tradeoff": (
+        "Lifesteal x2.75, but knockback force -70%"
+    ),
+    "interest": "Interest x1.88",
+    "defense_absolute": "x1.44 Defense Absolute",
+    "land_mine_damage": "Land Mine Damage x4.38",
+    "cash_bonus": "x1.44 Cash Bonus",
+    "perk_wave_requirement": "Perk wave requirement -25.00%",
+    "game_speed": "Increase max game speed by +1.25",
+    "coin_tradeoff": "x1.98 coins, but tower max health -70.0%",
+    "golden_tower_bonus": "Golden tower bonus x1.5",
+    "black_hole_duration": "Black Hole duration +12.0s",
+    "death_wave_quantity": "+1 wave on death wave",
+    "coins_bonus": "x1.44 all coins bonuses",
+    "free_upgrade_chance": "Free upgrade chance for all +6.25%",
+    "enemy_health_tradeoff": (
+        "Enemies have -55.0% health, but tower health regen and "
+        "lifesteal -90%"
+    ),
+    "boss_health_tradeoff": (
+        "Boss health -73.5%, but boss speed +50%"
+    ),
+    "tower_damage_boss_health_tradeoff": (
+        "x1.65 tower damage, but bosses have x8 health"
+    ),
+    "defense_percent": "Defense percent +5.00%",
+    "max_health": "x1.25 max health",
+    "health_regen": "x2.19 Health Regen",
+    "health_regen_tradeoff": (
+        "tower health regen x8.80, but tower max health -60%"
+    ),
+    "enemy_speed_tradeoff": (
+        "Enemies speed -44.0%, but enemies damage x2.5"
+    ),
+    "ranged_distance_tradeoff": (
+        "Ranged enemies attack distance reduced, but ranged enemies "
+        "damage x3"
+    ),
+    "orbs": "Orbs +1",
+    "bounce_shot": "Bounce Shot +2",
+    "chain_lightning_damage": "Chain lightning damage x2",
+    "inner_land_mines": "Extra set of inner mines",
+    "smart_missiles": "4 more smart missiles",
+    "spotlight_damage": "Spotlight damage bonus x1.5",
+    "swamp_radius": "Swamp radius x1.5",
+    "damage": "x1.44 Damage",
+    "empty_slot": "Empty Slot",
 }
 
 _SUPPORTED_PERK_KEYS = frozenset(PERK_CONFIGURATION_LABELS)
@@ -237,6 +301,67 @@ def classify_perk_configuration_text(text: str) -> str | None:
     return None
 
 
+def closest_perk_configuration_match(text: str) -> dict[str, Any]:
+    """Return a scored, margin-gated semantic candidate for failed OCR.
+
+    This is recovery evidence, not a single-read authority grant.  Callers may
+    accept an ``accepted`` candidate only after independent OCR crops agree.
+    A weaker but uniquely separated candidate requests a fresh local capture.
+    """
+
+    normalized = _semantic_comparison_text(text)
+    if len(normalized) < 6:
+        return {
+            "key": None,
+            "label": None,
+            "score": 0.0,
+            "margin": 0.0,
+            "accepted": False,
+            "retry_recommended": False,
+            "normalized_text": normalized,
+        }
+    scored = sorted(
+        (
+            (
+                SequenceMatcher(
+                    None,
+                    normalized,
+                    _semantic_comparison_text(exemplar),
+                ).ratio(),
+                key,
+            )
+            for key, exemplar in PERK_CONFIGURATION_OCR_EXEMPLARS.items()
+        ),
+        reverse=True,
+    )
+    best_score, best_key = scored[0]
+    second_score = scored[1][0] if len(scored) > 1 else 0.0
+    margin = max(0.0, best_score - second_score)
+    accepted = bool(
+        best_score >= CLOSEST_MATCH_MIN_SCORE
+        and margin >= CLOSEST_MATCH_MIN_MARGIN
+    )
+    retry_recommended = bool(
+        accepted
+        or (
+            best_score >= CLOSEST_MATCH_RETRY_SCORE
+            and margin >= CLOSEST_MATCH_RETRY_MARGIN
+        )
+    )
+    return {
+        "key": best_key,
+        "label": perk_configuration_label(
+            best_key,
+            PERK_CONFIGURATION_OCR_EXEMPLARS[best_key],
+        ),
+        "score": round(float(best_score), 4),
+        "margin": round(float(margin), 4),
+        "accepted": accepted,
+        "retry_recommended": retry_recommended,
+        "normalized_text": normalized,
+    }
+
+
 def extract_configured_perk_bans(
     frame: Frame,
     *,
@@ -266,6 +391,16 @@ def extract_configured_perk_bans(
             confidence_threshold=confidence_threshold,
         )
     ]
+    unrecognized = [
+        str(entry["display_text"])
+        for entry in selected
+        if entry.get("key") is None
+    ]
+    semantic_conflicts = [
+        str(entry["display_text"])
+        for entry in selected
+        if entry.get("semantic_conflict") is True
+    ]
     warnings = []
     if len(rows) < capacity:
         warnings.append(
@@ -277,6 +412,14 @@ def extract_configured_perk_bans(
         warnings.append(
             "Low-confidence banned perks: " + ", ".join(low_confidence)
         )
+    if unrecognized:
+        warnings.append(
+            "Unrecognized banned perks: " + ", ".join(unrecognized)
+        )
+    if semantic_conflicts:
+        warnings.append(
+            "Conflicting Ban Perks OCR: " + ", ".join(semantic_conflicts)
+        )
     return {
         "order_semantics": "display_order",
         "selected": selected,
@@ -286,6 +429,10 @@ def extract_configured_perk_bans(
             "capacity": int(capacity),
             "empty_slot_seen": empty_slot_seen,
             "low_confidence": low_confidence,
+            "unrecognized": unrecognized,
+            "semantic_conflicts": semantic_conflicts,
+            "closest_matches": _ocr_recovery_candidates(selected),
+            "ocr_retry_recommended": bool(warnings),
             "warnings": warnings,
         },
         "raw_rows": rows,
@@ -354,6 +501,16 @@ def extract_ranked_auto_pick_order(
             confidence_threshold=confidence_threshold,
         )
     ]
+    unrecognized = [
+        str(entry["display_text"])
+        for entry in selected
+        if entry.get("key") is None
+    ]
+    semantic_conflicts = [
+        str(entry["display_text"])
+        for entry in selected
+        if entry.get("semantic_conflict") is True
+    ]
     warnings = []
     if len(selected) != ranking_count:
         suffix = (
@@ -369,6 +526,14 @@ def extract_ranked_auto_pick_order(
         warnings.append(
             "Low-confidence Auto Pick perks: " + ", ".join(low_confidence)
         )
+    if unrecognized:
+        warnings.append(
+            "Unrecognized Auto Pick perks: " + ", ".join(unrecognized)
+        )
+    if semantic_conflicts:
+        warnings.append(
+            "Conflicting Auto Pick OCR: " + ", ".join(semantic_conflicts)
+        )
     return {
         "order_semantics": "top_to_bottom_priority",
         "selected": selected,
@@ -378,6 +543,10 @@ def extract_ranked_auto_pick_order(
             "ranking_count": ranking_count,
             "ranking_boundary_seen": ranking_boundary_seen,
             "low_confidence": low_confidence,
+            "unrecognized": unrecognized,
+            "semantic_conflicts": semantic_conflicts,
+            "closest_matches": _ocr_recovery_candidates(selected),
+            "ocr_retry_recommended": bool(warnings),
             "warnings": warnings,
         },
         "raw_pages": raw_pages,
@@ -433,6 +602,8 @@ def evaluate_profile_perk_configuration(
     *,
     bans_frame: Frame,
     auto_pick_frames: Sequence[Frame],
+    captured_bans: Mapping[str, Any] | None = None,
+    captured_auto_pick: Mapping[str, Any] | None = None,
     row_fn: Callable[[Frame], list[dict[str, Any]]] = (
         ocr_perk_configuration_rows
     ),
@@ -442,11 +613,19 @@ def evaluate_profile_perk_configuration(
     required_bans, required_auto_pick = (
         normalize_perk_configuration_requirements(requirements)
     )
-    bans = extract_configured_perk_bans(bans_frame, row_fn=row_fn)
-    auto_pick = extract_ranked_auto_pick_order(
-        auto_pick_frames,
-        ranking_count=len(required_auto_pick),
-        row_fn=row_fn,
+    bans = (
+        dict(captured_bans)
+        if isinstance(captured_bans, Mapping)
+        else extract_configured_perk_bans(bans_frame, row_fn=row_fn)
+    )
+    auto_pick = (
+        dict(captured_auto_pick)
+        if isinstance(captured_auto_pick, Mapping)
+        else extract_ranked_auto_pick_order(
+            auto_pick_frames,
+            ranking_count=len(required_auto_pick),
+            row_fn=row_fn,
+        )
     )
     checks = {
         "perk_bans": _compare_configuration_field(
@@ -763,6 +942,11 @@ def _observed_configuration_result(
         for item in selected
         if item.get("key") is None
     ]
+    semantic_conflicts = [
+        str(item.get("display_text") or "unknown")
+        for item in selected
+        if item.get("semantic_conflict") is True
+    ]
     warnings = []
     if not source_complete:
         warnings.append(f"Perks configuration capture was incomplete: {source_reason}")
@@ -777,6 +961,11 @@ def _observed_configuration_result(
     if unrecognized:
         warnings.append(
             "Unrecognized configured perks: " + ", ".join(unrecognized)
+        )
+    if semantic_conflicts:
+        warnings.append(
+            "Conflicting configured Perk OCR: "
+            + ", ".join(semantic_conflicts)
         )
     return {
         "source_method": "scrolling_screenshot_semantic_ocr",
@@ -796,6 +985,9 @@ def _observed_configuration_result(
             ),
             "low_confidence": low_confidence,
             "unrecognized": unrecognized,
+            "semantic_conflicts": semantic_conflicts,
+            "closest_matches": _ocr_recovery_candidates(selected),
+            "ocr_retry_recommended": bool(warnings),
             "warnings": warnings,
         },
     }
@@ -833,6 +1025,34 @@ def _normalize_perk_key_list(
     return normalized
 
 
+def _ocr_recovery_candidates(
+    entries: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    recovered = []
+    for entry in entries:
+        closest = entry.get("closest_match")
+        if not isinstance(closest, Mapping) or closest.get("key") is None:
+            continue
+        recovered.append(
+            {
+                "display_text": str(entry.get("display_text") or ""),
+                "semantic_key": entry.get("key"),
+                "match_method": str(
+                    entry.get("match_method") or "unrecognized"
+                ),
+                "suggested_key": str(closest["key"]),
+                "suggested_label": str(closest.get("label") or ""),
+                "score": float(closest.get("score") or 0.0),
+                "margin": float(closest.get("margin") or 0.0),
+                "accepted": closest.get("accepted") is True,
+                "retry_recommended": (
+                    entry.get("ocr_retry_recommended") is True
+                ),
+            }
+        )
+    return recovered
+
+
 def _semantic_entry(row: Mapping[str, Any]) -> dict[str, Any]:
     raw_candidates = row.get("text_candidates")
     source_candidates = (
@@ -850,50 +1070,131 @@ def _semantic_entry(row: Mapping[str, Any]) -> dict[str, Any]:
             "confidence": float(row.get("confidence") or -1.0),
         }
     )
-    recognized = [
-        (
-            classify_perk_configuration_text(
-                str(item.get("display_text") or item.get("text_raw") or "")
+    resolutions = []
+    for item in candidates:
+        text = str(
+            item.get("display_text") or item.get("text_raw") or ""
+        )
+        exact_key = classify_perk_configuration_text(text)
+        closest = closest_perk_configuration_match(text)
+        proposed_key = exact_key
+        if proposed_key is None and closest["accepted"] is True:
+            proposed_key = str(closest["key"])
+        resolutions.append(
+            {
+                "item": item,
+                "exact_key": exact_key,
+                "closest": closest,
+                "proposed_key": proposed_key,
+            }
+        )
+
+    source_resolutions = resolutions[: len(source_candidates)]
+    source_proposals = {
+        str(resolution["proposed_key"])
+        for resolution in source_resolutions
+        if resolution["proposed_key"] is not None
+    }
+    semantic_conflict = len(source_proposals) > 1
+    exact_known = [
+        resolution
+        for resolution in resolutions
+        if resolution["exact_key"] is not None
+    ]
+    semantic_key: str | None = None
+    match_method = "unrecognized"
+    if exact_known and not semantic_conflict:
+        best_resolution = max(
+            exact_known,
+            key=lambda resolution: float(
+                resolution["item"].get("confidence") or -1.0
             ),
-            item,
         )
-        for item in candidates
-    ]
-    known = [
-        (key, item)
-        for key, item in recognized
-        if key is not None
-    ]
-    if known:
-        semantic_key, best = max(
-            known,
-            key=lambda pair: float(pair[1].get("confidence") or -1.0),
-        )
+        semantic_key = str(best_resolution["exact_key"])
+        match_method = "exact"
     else:
-        best = max(
-            candidates,
-            key=lambda item: float(item.get("confidence") or -1.0),
-        )
-        semantic_key = None
+        fuzzy_sources: dict[str, set[int]] = {}
+        for resolution in source_resolutions:
+            if resolution["exact_key"] is not None:
+                continue
+            closest = resolution["closest"]
+            text_x1 = resolution["item"].get("text_x1")
+            if (
+                closest["accepted"] is not True
+                or closest["key"] is None
+                or not isinstance(text_x1, (int, float))
+            ):
+                continue
+            fuzzy_sources.setdefault(str(closest["key"]), set()).add(
+                int(text_x1)
+            )
+        agreed_fuzzy = [
+            key for key, crop_starts in fuzzy_sources.items()
+            if len(crop_starts) >= 2
+        ]
+        if len(agreed_fuzzy) == 1 and not semantic_conflict:
+            semantic_key = agreed_fuzzy[0]
+            match_method = "closest_agreement"
+
+    matching_resolutions = [
+        resolution
+        for resolution in resolutions
+        if semantic_key is not None
+        and resolution["proposed_key"] == semantic_key
+    ]
+    best_resolution = max(
+        matching_resolutions or resolutions,
+        key=lambda resolution: float(
+            resolution["item"].get("confidence") or -1.0
+        ),
+    )
+    best = best_resolution["item"]
+    closest_resolution = max(
+        resolutions,
+        key=lambda resolution: (
+            float(resolution["closest"].get("score") or 0.0),
+            float(resolution["closest"].get("margin") or 0.0),
+            float(resolution["item"].get("confidence") or -1.0),
+        ),
+    )
+    closest_match = dict(closest_resolution["closest"])
     display_text = str(
         best.get("display_text") or best.get("text_raw") or ""
     ).strip()
-    semantic_agreement = sum(
-        1
-        for item in source_candidates
-        if classify_perk_configuration_text(
-            str(item.get("display_text") or item.get("text_raw") or "")
-        )
-        == semantic_key
+    semantic_agreement = len(
+        {
+            int(resolution["item"]["text_x1"])
+            for resolution in source_resolutions
+            if semantic_key is not None
+            and resolution["proposed_key"] == semantic_key
+            and isinstance(resolution["item"].get("text_x1"), (int, float))
+        }
     )
+    if semantic_key is not None and source_candidates and not semantic_agreement:
+        semantic_agreement = sum(
+            1
+            for resolution in source_resolutions
+            if resolution["proposed_key"] == semantic_key
+        )
     if not source_candidates and semantic_key is not None:
         semantic_agreement = 1
+    ocr_retry_recommended = bool(
+        semantic_conflict
+        or (
+            semantic_key is None
+            and closest_match.get("retry_recommended") is True
+        )
+    )
     return {
         "key": semantic_key,
         "display_text": display_text,
         "text_raw": str(best.get("text_raw") or display_text),
         "confidence": float(best.get("confidence") or -1.0),
         "semantic_agreement": semantic_agreement,
+        "match_method": match_method,
+        "semantic_conflict": semantic_conflict,
+        "closest_match": closest_match,
+        "ocr_retry_recommended": ocr_retry_recommended,
         "top": int(row.get("top") or 0),
         "bottom": int(row.get("bottom") or 0),
         "background_value_median": float(
@@ -907,6 +1208,13 @@ def _semantic_entry_is_low_confidence(
     *,
     confidence_threshold: float,
 ) -> bool:
+    if entry.get("semantic_conflict") is True:
+        return True
+    if (
+        entry.get("match_method") == "closest_agreement"
+        and int(entry.get("semantic_agreement") or 0) < 2
+    ):
+        return True
     if float(entry.get("confidence") or -1.0) >= float(confidence_threshold):
         return False
     return int(entry.get("semantic_agreement") or 0) < 2
@@ -971,7 +1279,27 @@ def _comparison_text(text: str) -> str:
     return re.sub(r"[^a-z0-9.%+-]+", " ", str(text or "").casefold()).strip()
 
 
+def _semantic_comparison_text(text: str) -> str:
+    """Normalize OCR for semantic similarity while discarding perk values."""
+
+    tokens = []
+    for token in _comparison_text(text).split():
+        compact = token.strip(".%+-")
+        if (
+            not compact
+            or compact in {"x", "u"}
+            or any(character.isdigit() for character in compact)
+        ):
+            continue
+        tokens.append(compact)
+    return " ".join(tokens)
+
+
 __all__ = [
+    "CLOSEST_MATCH_MIN_MARGIN",
+    "CLOSEST_MATCH_MIN_SCORE",
+    "CLOSEST_MATCH_RETRY_MARGIN",
+    "CLOSEST_MATCH_RETRY_SCORE",
     "DEFAULT_CONFIDENCE_THRESHOLD",
     "FARM_AUTO_PICK_ORDER",
     "FARM_PERK_BANS",
@@ -979,7 +1307,9 @@ __all__ = [
     "ORDER_SEMANTICS",
     "PERK_BAN_CAPACITY",
     "PERK_CONFIGURATION_LABELS",
+    "PERK_CONFIGURATION_OCR_EXEMPLARS",
     "classify_perk_configuration_text",
+    "closest_perk_configuration_match",
     "detect_auto_pick_ranking_boundary",
     "evaluate_profile_perk_configuration",
     "extract_configured_perk_bans",

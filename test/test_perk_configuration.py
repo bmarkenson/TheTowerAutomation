@@ -8,7 +8,10 @@ from core.battle_perks import ocr_perk_configuration_rows
 from core.perk_configuration import (
     FARM_AUTO_PICK_ORDER,
     FARM_PERK_BANS,
+    PERK_CONFIGURATION_LABELS,
+    PERK_CONFIGURATION_OCR_EXEMPLARS,
     classify_perk_configuration_text,
+    closest_perk_configuration_match,
     detect_auto_pick_ranking_boundary,
     evaluate_profile_perk_configuration,
     extract_configured_perk_bans,
@@ -192,6 +195,129 @@ def test_auto_pick_overlap_deduplicates_clipped_enemy_speed_tradeoff():
         "inner_land_mines",
         "damage",
     ]
+
+
+def test_closest_match_uses_value_free_exemplars_and_requires_margin():
+    recovered = closest_perk_configuration_match(
+        "Chain lightninq damaqe x2"
+    )
+
+    assert recovered["key"] == "chain_lightning_damage"
+    assert recovered["accepted"] is True
+    assert recovered["retry_recommended"] is True
+    assert recovered["score"] >= 0.84
+    assert recovered["margin"] >= 0.12
+
+    ambiguous = closest_perk_configuration_match("tower health")
+    assert ambiguous["accepted"] is False
+    assert ambiguous["retry_recommended"] is False
+    assert set(PERK_CONFIGURATION_LABELS) <= set(
+        PERK_CONFIGURATION_OCR_EXEMPLARS
+    )
+
+
+def test_semantic_entry_accepts_only_two_crop_closest_match_agreement():
+    text = "Chain lightninq damaqe x2"
+    row = {
+        **_configuration_row(text, 500, 657, 130),
+        "text_candidates": [
+            {
+                "display_text": text,
+                "text_raw": text,
+                "confidence": confidence,
+                "text_x1": text_x1,
+            }
+            for text_x1, confidence in ((270, 91.0), (400, 88.0))
+        ],
+    }
+
+    recovered = semantic_perk_entry(row)
+    assert recovered["key"] == "chain_lightning_damage"
+    assert recovered["match_method"] == "closest_agreement"
+    assert recovered["semantic_agreement"] == 2
+    assert recovered["semantic_conflict"] is False
+    assert recovered["ocr_retry_recommended"] is False
+
+    row["text_candidates"] = row["text_candidates"][:1]
+    unconfirmed = semantic_perk_entry(row)
+    assert unconfirmed["key"] is None
+    assert unconfirmed["match_method"] == "unrecognized"
+    assert unconfirmed["closest_match"]["key"] == (
+        "chain_lightning_damage"
+    )
+    assert unconfirmed["ocr_retry_recommended"] is True
+
+
+def test_semantic_entry_rejects_conflicting_strong_crop_matches():
+    row = {
+        **_configuration_row("Chain lightninq damaqe x2", 500, 657, 130),
+        "text_candidates": [
+            {
+                "display_text": "Chain lightninq damaqe x2",
+                "text_raw": "Chain lightninq damaqe x2",
+                "confidence": 92.0,
+                "text_x1": 270,
+            },
+            {
+                "display_text": "Land mne damge x4.38",
+                "text_raw": "Land mne damge x4.38",
+                "confidence": 91.0,
+                "text_x1": 400,
+            },
+        ],
+    }
+
+    entry = semantic_perk_entry(row)
+    assert entry["key"] is None
+    assert entry["semantic_conflict"] is True
+    assert entry["ocr_retry_recommended"] is True
+
+    capture = extract_ranked_auto_pick_order(
+        [np.zeros((1920, 1080, 3), dtype=np.uint8)],
+        ranking_count=1,
+        row_fn=lambda _frame: [row],
+        ranking_boundary_fn=lambda _frame: None,
+    )
+    assert capture["quality"]["valid"] is False
+    assert capture["quality"]["ocr_retry_recommended"] is True
+    assert capture["quality"]["semantic_conflicts"] == [
+        "Chain lightninq damaqe x2"
+    ]
+
+
+def test_evaluation_reuses_confirmed_retry_capture_without_rerunning_ocr():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    captured_bans = {
+        "quality": {"valid": True, "warnings": []},
+        "selected": [{"key": "cash_bonus", "display_text": "Cash Bonus"}],
+    }
+    captured_auto = {
+        "quality": {"valid": True, "warnings": []},
+        "selected": [
+            {
+                "key": "perk_wave_requirement",
+                "display_text": "Perk Wave Requirement",
+            }
+        ],
+    }
+
+    def unexpected_ocr(_frame):
+        raise AssertionError("confirmed capture must not be OCRed again")
+
+    result = evaluate_profile_perk_configuration(
+        {
+            "perk_bans": ["cash_bonus"],
+            "perk_auto_pick_order": ["perk_wave_requirement"],
+        },
+        bans_frame=frame,
+        auto_pick_frames=[frame],
+        captured_bans=captured_bans,
+        captured_auto_pick=captured_auto,
+        row_fn=unexpected_ocr,
+    )
+
+    assert result["valid"] is True
+    assert result["failed_checks"] == []
 
 
 def test_ban_observation_uses_selected_outlines_not_category_brightness():
