@@ -1,0 +1,60 @@
+{
+  "schema_id": "thetower.player_save_perk_id_calibration.v1",
+  "game_version": 1073,
+  "observed_at": "2026-08-03",
+  "evidence": {
+    "method": "stable_two_identical_read_cross_channel_same_round_ui_timeline",
+    "raw_save_retained": false,
+    "decoded_root_retained": false,
+    "account_identifiers_retained": false
+  },
+  "mappings": [
+    {
+      "perk_id": 2,
+      "perk_key": "health_regen",
+      "pick_waves": [1300, 1760, 2771, 3026, 3280],
+      "final_level": 5
+    },
+    {
+      "perk_id": 4,
+      "perk_key": "bounce_shot",
+      "pick_waves": [1690, 2188, 2430],
+      "final_level": 3
+    },
+    {
+      "perk_id": 9,
+      "perk_key": "defense_percent",
+      "pick_waves": [1620, 1901, 2345, 2688, 2940],
+      "final_level": 5
+    },
+    {
+      "perk_id": 20,
+      "perk_key": "smart_missiles",
+      "pick_waves": [2116],
+      "final_level": 1
+    },
+    {
+      "perk_id": 26,
+      "perk_key": "chrono_field_duration",
+      "pick_waves": [1975],
+      "final_level": 1
+    },
+    {
+      "perk_id": 46,
+      "perk_key": "cash_tradeoff",
+      "pick_waves": [3450],
+      "final_level": 1
+    },
+    {
+      "perk_id": 47,
+      "perk_key": "health_regen_tradeoff",
+      "pick_waves": [3198],
+      "final_level": 1
+    }
+  ],
+  "auto_pick_order": {
+    "ranked_prefix_count": 18,
+    "unranked_inventory_tail_count": 16,
+    "semantics": "only_the_ranked_prefix_is_priority_evidence"
+  }
+}

@@ -37,6 +37,33 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-03 direct-Retry player-save audit repair
+
+- The first enabled ordinary Tier 19 collector sequence completed the core
+  exact-Home, stable active-revision, natural terminal clearing/tail, and
+  unchanged UI-pipeline validation. Its next direct Retry correctly failed
+  closed, but revealed that the audit state machine retained the completed
+  round identity and that seven legitimate version-1073 Perk IDs were absent
+  from the mapping.
+- `b137ea4` carries a valid terminal tail only into a tightly guarded
+  same-process Retry, resets all old-round identity and Perk progression, and
+  accepts the later active identity only after boundary, target, revision,
+  source, identity, and tail-continuity checks. Process restarts remain
+  isolated and terminal-only startup remains unbound.
+- The same change maps the seven cross-channel-calibrated Perks and encodes the
+  exact 18-ranked/16-unranked Auto Pick split so the inventory tail cannot be
+  mistaken for priority order. The retained calibration contains only
+  allowlisted Perk evidence; no raw save, decoded root, account identifier, or
+  arbitrary history field is retained.
+- Focused validation passed 134 tests and the complete Python suite passed all
+  1,263 tests. The repair was deployed at a preserved natural Game Over
+  boundary; normal `RUNNING / RETRY` operation resumed under the replacement
+  process. Its first five-minute receipt accepted the new counter-232 identity
+  at revision 46521/wave 290 with complete mapped Perks and the expected
+  terminal-only `pre_round_baseline_unavailable` outcome. One passive ordinary
+  direct-Retry receipt remains as rollout confirmation, not as an
+  implementation prerequisite or special-test battle.
+
 ### 2026-08-03 managed custom Module presets and native previews
 
 - Control-surface revision 25 adds

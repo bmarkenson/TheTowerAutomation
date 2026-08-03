@@ -8,6 +8,55 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Player-save audit quarantined valid observations after direct Retry
+
+- **Observed:** 2026-08-03 during the first explicitly enabled ordinary Tier
+  19 collector sequence on `localhost:5555`.
+- **Symptom:** Exact-Home through natural Game Over round/tail receipts were
+  healthy, but every stable save in the directly retried round reported
+  `fail_closed_identity_discontinuity`. Its Perk component independently
+  reported `unmapped_perk_id`, even though save revisions and waves continued
+  to advance normally.
+- **Evidence:** Privacy-safe receipts recorded the first run under per-tier
+  counter 230 through terminal clearing/tail publication, then rejected the
+  new counter-231 identity through revision 46517. A bounded stable
+  two-identical-read inspection correlated seven allowlisted `(Perk ID, pick
+  wave, level)` projections with the independent same-round UI timeline. It
+  also showed that the 34-entry `autoPickOrder` consists of an 18-entry ranked
+  prefix and a 16-entry unranked inventory tail. No raw save, decoded root,
+  account identifier, or arbitrary history value was retained.
+- **Safety response:** The collector remained observation-only and failed
+  closed; normal Strategy, UI terminal capture, Retry, and lifecycle behavior
+  continued unchanged. Deployment waited for the next natural Game Over, held
+  the terminal under acknowledged `PAUSED / WAIT`, replaced the managed
+  process without leaving the screen, and restored `RUNNING / RETRY` only after
+  fresh lock, target, process, control, and screen checks.
+- **Cause:** `PlayerSaveAuditStateMachine` had only exact-Home new-round
+  initialization. A direct Game Over Retry therefore left the completed round
+  identity installed and treated every new identity as discontinuous. The
+  version-1073 manifest also lacked seven naturally reached Perk IDs, and the
+  profile decoder had no explicit ranked-count boundary for the Auto Pick
+  inventory tail.
+- **Resolution:** A valid structural terminal tail may now seed one
+  same-session direct Retry. Rollover requires an advancing passive boundary,
+  unchanged target fingerprint, advancing save revision/source, a different
+  active identity, and exact tail continuity; it then clears all old-round
+  identity/Perk state. Restart inheritance remains forbidden. Seven
+  cross-channel Perk mappings and exact 18-ranked-prefix semantics were added.
+- **Regression:** `test/test_player_save_audit.py` covers accepted Retry
+  rollover plus target, tail, revision, source, identity, session, and boundary
+  rejection cases. `test/test_player_save.py` consumes the privacy-safe
+  `test/fixtures/player_save_perk_id_calibration_v1073.json` and covers Perk
+  mapping plus exclusion of the unranked Auto Pick tail.
+- **Validation:** The affected suites passed 134 tests and the complete Python
+  suite passed all 1,263 tests before deployment. The replacement process's
+  first five-minute receipt accepted revision 46521, counter 232, wave 290,
+  and a complete mapped two-pick checkpoint; it also correctly refused to
+  inherit a baseline from terminal-only startup. The prior natural battle
+  already satisfies the core collector validation; the next ordinary
+  same-process Retry is retained as rollout confirmation only.
+- **Fixed by:** `b137ea4`.
+
 ### Final Auto Pick verification duplicated clipped Enemy Speed text
 
 - **Observed:** 2026-08-03 during exact verification after the Tier 19 Farm

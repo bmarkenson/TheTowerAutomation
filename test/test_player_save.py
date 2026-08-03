@@ -28,6 +28,9 @@ VERSION_MAPPING = json.loads(
     )
 )
 CLIPBOARD_REPORT_PATH = ROOT / "test/fixtures/battle_report_clipboard.txt"
+PERK_ID_CALIBRATION_PATH = (
+    ROOT / "test/fixtures/player_save_perk_id_calibration_v1073.json"
+)
 
 
 def test_default_device_path_matches_operator_adb_pull():
@@ -414,33 +417,38 @@ def test_inactive_round_exposes_cleared_perks_without_active_identity(monkeypatc
 
 def test_live_cross_channel_perk_ids_are_mapped(monkeypatch):
     decoded = _decoded_save()
+    calibration = json.loads(PERK_ID_CALIBRATION_PATH.read_text(encoding="utf-8"))
     expected = [
-        (2, "health_regen"),
-        (4, "bounce_shot"),
-        (9, "defense_percent"),
-        (20, "smart_missiles"),
-        (26, "chrono_field_duration"),
-        (46, "cash_tradeoff"),
-        (47, "health_regen_tradeoff"),
+        (mapping["perk_id"], mapping["perk_key"]) for mapping in calibration["mappings"]
     ]
-    decoded["currentWave"] = 800
+    decoded["currentWave"] = max(
+        wave for mapping in calibration["mappings"] for wave in mapping["pick_waves"]
+    )
     decoded["perksPicked"] = [
-        {"wave": 100 * sequence, "perk": perk_id, "__class__": "PerkPick"}
-        for sequence, (perk_id, _key) in enumerate(expected, 1)
+        {"wave": wave, "perk": mapping["perk_id"], "__class__": "PerkPick"}
+        for mapping in calibration["mappings"]
+        for wave in mapping["pick_waves"]
     ]
-    decoded["perksPickedCount"] = len(expected)
+    decoded["perksPicked"].sort(key=lambda pick: pick["wave"])
+    decoded["perksPickedCount"] = len(decoded["perksPicked"])
     decoded["perkLevel"] = [0] * 50
-    for perk_id, _key in expected:
-        decoded["perkLevel"][perk_id] = 1
+    for mapping in calibration["mappings"]:
+        decoded["perkLevel"][mapping["perk_id"]] = mapping["final_level"]
 
     runtime = _snapshot(monkeypatch, decoded).runtime_save
 
     assert runtime is not None
     assert runtime.perks_status == "observed"
     assert runtime.perks is not None
-    assert [
-        (pick.perk_id, pick.perk_key) for pick in runtime.perks.picks
-    ] == expected
+    assert {(pick.perk_id, pick.perk_key) for pick in runtime.perks.picks} == set(
+        expected
+    )
+    assert calibration["evidence"] == {
+        "method": "stable_two_identical_read_cross_channel_same_round_ui_timeline",
+        "raw_save_retained": False,
+        "decoded_root_retained": False,
+        "account_identifiers_retained": False,
+    }
 
 
 def test_unknown_perk_id_fails_only_the_perk_component(monkeypatch):

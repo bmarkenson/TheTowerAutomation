@@ -1049,6 +1049,17 @@ never receipts. Confirmed activation-tracker events may add allowlisted
 metadata and a relative evidence-image reference; their wave is explicitly an
 approximate visual observation, not an exact activation wave.
 
+Within one process session, a direct Game Over Retry can carry the validated
+terminal tail candidate forward as the next structural baseline. Acceptance
+still requires a later passive `RUNNING` boundary, unchanged target ownership,
+an advancing revision/source, a different active identity, and an exact match
+between the new active save's tail and the carried terminal tail. The receipt
+reason is `terminal_retry_baseline_carried`. Any mismatch fails closed and
+retains no old-round Perk progression. A process started on a terminal cannot
+inherit this baseline from earlier receipt lines; the next fresh active round
+may be observed, but only a later same-session terminal/Retry pair can validate
+rollover continuity.
+
 The exact-version component gate is
 `config/player_save_audit/data_9_game_1073.json`. Treat it as code-reviewed
 policy: enabling a new normalized component requires its own promoted audit

@@ -343,17 +343,31 @@ receipt stores event metadata and an optional evidence reference, not the
 image. The passive compact Game Stats capture remains a separate optional
 base/ad coin-split augmentation.
 
+For a same-process direct Retry, a valid Game Over tail candidate may become
+the next round's structural baseline. The later `RUNNING` projection is
+accepted as a rollover only when the passive boundary time advances, target
+ownership is unchanged, revision/source evidence advances, the active identity
+changes, and its current tail exactly equals the carried terminal tail. The
+collector then clears all old identity and Perk progression before observing
+the new round. It never carries this evidence across a process session, and a
+process that starts on Game Over remains terminal-only and unbound.
+
 The authorized Tier 22 boundary supplies the collector's core natural-round
 evidence: new identity, ordinary-foreground revision progress, final
-Perk/clearing behavior, and Game Over tail serialization. The repository-local
-collector and its state-machine, privacy, target-handoff, Pause, and nonblocking
-tests are implemented; the first explicitly enabled ordinary-battle run remains
-a deployment validation owned by the master coordinator. No replacement
-purpose-built battle is required. Upgrade, survival-ability, and other
-candidate components remain independently unavailable until their own matrix
-rows are promoted, but they do not gate the core collector. The complete Game
-Stats, Perks, More Stats, continuity, terminal-binding, and terminal lifecycle
-paths remain authoritative and unchanged.
+Perk/clearing behavior, and Game Over tail serialization. The first explicitly
+enabled ordinary Tier 19 run subsequently validated exact Home through stable
+active revisions and natural terminal clearing/tail publication without
+changing the UI path. Its first direct Retry exposed fail-closed old-identity
+retention and seven missing exact-version Perk IDs; `b137ea4` repairs both and
+is deployed. Its fresh-session revision-46521 checkpoint accepted the new
+counter-232 identity and complete mapped Perk progression while correctly
+reporting that a terminal-only restart supplied no pre-round baseline. The next
+ordinary same-process Retry remains the passive rollover confirmation. No
+replacement purpose-built battle is required. Upgrade, survival-ability, and
+other candidate components remain independently unavailable until their own
+matrix rows are promoted, but they do not gate the core collector. The complete
+Game Stats, Perks, More Stats, continuity, terminal-binding, and terminal
+lifecycle paths remain authoritative and unchanged.
 
 Game speed is a global battle-only invariant with persistent operator intent
 independent of strategy and ADB target. Numeric selections from `x0.0` through
