@@ -149,7 +149,9 @@ def classify_perk_configuration_text(text: str) -> str | None:
         return "game_speed"
     if (
         "coins" in tokens
-        and "tower max health" in normalized
+        # The narrow Home row crop can truncate ``health`` to ``h`` while
+        # retaining the two phrases that uniquely identify Coin Trade-Off.
+        and "tower max h" in normalized
         and "but" in tokens
     ):
         return "coin_tradeoff"

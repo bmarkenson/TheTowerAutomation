@@ -337,6 +337,8 @@ def test_auto_pick_rows_have_value_independent_semantic_keys():
         ): "ranged_distance_tradeoff",
         "Land Mine Damage x4.38": "land_mine_damage",
         "x1.44 Cash Bonus": "cash_bonus",
+        "x1.98 coins, but tower max h -10.0%": "coin_tradeoff",
+        "coins, but tower max h -70.0%": "coin_tradeoff",
         "Swamp radius x1.5": "swamp_radius",
     }
 
