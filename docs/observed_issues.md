@@ -11,6 +11,32 @@ for a matching recurrence or historical investigation.
 
 ## Open
 
+### Ban Perks repair could not identify a truncated Coin Trade-Off row
+
+- **Observed:** 2026-08-03 while starting a Tier 19 Farm battle from verified
+  no-battle Home on `localhost:5555`.
+- **Symptom:** The selected Ban Perks block contained Coin Trade-Off in the
+  sixth slot instead of the required Cash Bonus. Automation detected that the
+  list differed, but blocked repair with `Ban Perks selected block was
+  ambiguous; an unrecognized row could be a required ban`.
+- **Evidence:** A bounded paused inspection read the first five selected rows
+  as the five expected Farm bans and read the sixth row's two OCR candidates
+  as `x1.98 coins, but tower max h -10.0%` and
+  `coins, but tower max h -70.0%`. Both retained the unique Coin Trade-Off
+  phrases, but the semantic classifier required the complete phrase
+  `tower max health`, leaving the row unrecognized. Reprocessing the same
+  capture after the repair identifies all six rows authoritatively and names
+  the sixth `coin_tradeoff`.
+- **Safety response:** The runtime remained under an acknowledged indefinite
+  Pause. The inspection only opened Ban Perks, captured the selected rows, and
+  returned to verified Home `NEW_BATTLE`; it did not toggle a Perk or start a
+  battle.
+- **Status:** Commit `18983ad` accepts the narrow OCR truncation only when the
+  same row also contains `coins` and `but`. Regression coverage is in
+  `test/test_perk_configuration.py`; 64 Perk and Home-setup tests pass. Keep
+  this issue open until the managed runtime repairs Coin Trade-Off to Cash
+  Bonus and completes exact live verification.
+
 ### Owned validation cleanup survived a later running-battle transition
 
 - **Observed:** 2026-08-02 during the one-shot ordinary-battle validation for
