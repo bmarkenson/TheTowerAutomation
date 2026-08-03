@@ -457,6 +457,9 @@ stages:
       review/publish, history comparison, and restore-as-new. Make only narrow
       repairs supported by that runtime evidence; publication must not activate
       or otherwise change automation state.
+      The 2026-08-03 attempt exposed the profile-local Module blank-selection
+      defect fixed by `7e4c7a2`; visible eight-slot revalidation with the
+      repaired package remains required after changing a Module choice.
   - [x] Refine running-battle validation into an explicit strategy gate so
     observation and allowlisted independent collectors can continue while
     strategy and lifecycle actions are blocked. Validate this authority split

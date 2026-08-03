@@ -8,6 +8,53 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Profile-local Module refresh blanked retained WPF selections
+
+- **Observed:** 2026-08-03 while the operator edited a Farm T19 custom Strategy
+  through the revision-24 native Windows profile-local Module editor.
+- **Symptom:** Changing one Module choice left most of the eight slot ComboBoxes
+  visibly blank. The affected draft had not been validated or published.
+- **Evidence:** The operator's Windows screenshot showed the eight-slot editor
+  immediately after the change, with only a minority of current selections
+  still rendered. Source inspection found that every peer refresh called
+  `AvailableOptions.Clear()` before repopulating the same
+  `ObservableCollection`. WPF therefore observed each selected item leave its
+  `ItemsSource`; the `SelectedOption` setter rejected the resulting null
+  assignment, allowing the displayed selection to diverge from its retained
+  backing value.
+- **Safety response:** The disposable-catalog smoke stopped before validation
+  or publication and remains unchecked. The repair and validation were
+  repository-local; no profile publication, activation, control, process, ADB,
+  emulator, game, or further Windows interaction occurred.
+- **Cause:** `AuthoringLocalFieldViewModel.RefreshAvailableOptions()` rebuilt
+  every field's options through a transient collection reset. Its final filter
+  correctly retained the current choice and excluded values used by compatible
+  peers, but WPF had already cleared the rendered selection during the
+  intermediate reset event.
+- **Resolution:** Option refresh now derives the desired choices in
+  server-declared order, incrementally inserts or moves that desired prefix,
+  and only then removes stale tail choices. Whenever a valid current selection
+  exists, the desired prefix includes it, so every collection event leaves that
+  selected object present. Peer duplicate exclusion and fail-closed null or
+  undeclared assignments remain intact. Schema 3, API revision 24,
+  capabilities, Linux normalization, publication, history, and activation are
+  unchanged.
+- **Regression:**
+  `windows/TheTower.ControlSurface.Authoring.Tests/StrategyAuthoringViewModelTests.cs::ChangingOneModuleSelectionKeepsEverySelectionAvailableDuringPeerRefresh`
+  changes one metadata-declared Module field and observes every
+  `AvailableOptions.CollectionChanged` event. It rejects reset events, requires
+  all eight non-null selections to remain present throughout and afterward,
+  verifies server order and peer exclusion, rejects null/undeclared choices,
+  and builds eight unique slot values. `test/test_strategy_authoring_wpf.py`
+  keeps that portable regression in the required native suite.
+- **Validation:** All 63 portable native authoring tests and all 61 focused
+  WPF/authoring/API Python tests passed. Linux cross-publishing produced both
+  self-contained executables; NuGet reported only sandbox user-cache write
+  warnings while checking vulnerability data. `git diff --check` passed.
+  Windows visual revalidation was not performed and remains required with the
+  repaired package.
+- **Fixed by:** `7e4c7a2`.
+
 ### Repeated systemd environment properties produced a false missing-config error
 
 - **Observed:** 2026-08-02 after the installed automation unit gained the

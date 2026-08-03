@@ -85,6 +85,14 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   control state, ADB target, emulator, game, or Windows runtime was inspected
   or changed. The disposable-catalog Windows runtime smoke remains the next
   unchecked worker.
+- Follow-up `7e4c7a2` replaces the Module editor's transient option-collection
+  reset with server-ordered incremental reconciliation. Every refresh event
+  now retains the field's selected object while continuing to exclude peer
+  selections; null and undeclared choices still fail closed. The portable
+  native suite passed all 63 tests, the 61 focused WPF/authoring/API Python
+  tests passed, and Linux cross-publishing produced both executables. The
+  2026-08-03 Windows attempt stopped before validation or publication, so the
+  visible eight-slot disposable-catalog retest remains pending.
 
 ### 2026-08-02 profile-local loadout definition backend
 

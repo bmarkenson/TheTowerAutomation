@@ -412,7 +412,9 @@ checks were completed with no blocking issue reported. This was not exhaustive
 Windows validation and predates the profile-local loadout editors. The bounded
 disposable-catalog checks below, including the new preset/local cases, remain
 the next unchecked worker and canonical coverage when the relevant environment
-is available.
+is available. A 2026-08-03 attempt exposed a profile-local Module rendering
+regression and stopped before validation or publication; the repaired package
+still requires the complete visible smoke below.
 
 1. Copy the repository to a temporary test root, empty only that copy's custom
    profile/Base catalog, and start the control-surface server with
@@ -432,6 +434,9 @@ is available.
    groups/toggles (including fixed Poison Swamp stun), all shared presets,
    profile-local Modules with all eight slots/no duplicate, complete reordered
    Target Priority, all three Orb Distance fields, and Damage percentage.
+   After changing any Module choice, confirm all eight current ComboBox
+   selections remain visibly populated and that the new value is unavailable
+   in the other compatible slot.
    Switch every loadout repeatedly between preset and local, omit/reinclude it,
    include each omitted setting, validate, publish, close, reopen, and verify
    exact active/dormant values and provenance. Submit one malformed local value
