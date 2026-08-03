@@ -44,24 +44,37 @@ earlier authority and compatibility dependency it names is deployed.
 - [ ] Phase 1 — establish source and observation identity.
   - Implement dirty-worktree registration/fingerprinting and the separate
     service, runtime, target, battle, frame-source, frame-sequence, lease, and
-    source namespaces.
+    source namespaces, including the separately named production action-catalog
+    revision/digest.
   - Add atomic immutable frame bundles, status invalidation, reader
     verification, and bounded retention before any broker input path.
 - [ ] Phase 2 — extend the production control service as the passive broker.
-  - Add the per-user Unix socket, service epoch, host-global coordinator,
-    additive status/capability surface, durable audit ledger, CLI read path,
-    and broker-coalesced direct-read/capture policy.
+  - Add the role-separated external-client and runtime-peer Unix sockets,
+    service epoch, host-global coordinator, additive status/capability surface,
+    durable audit ledger, CLI read path, and broker-coalesced
+    direct-read/capture policy.
+  - Establish the runtime-initiated persistent peer with `SO_PEERCRED`,
+    MainPID/session/target-lock authentication, target-generation binding,
+    protocol/capability negotiation, ordered framing, bounded queues,
+    heartbeat/status, backpressure, and disconnect/replay handling.
   - Keep all connection management and device input prohibited.
 - [ ] Phase 3 — implement external yield without external input.
   - Add the suppressive external-development hold, exact runtime
     acknowledgement, request state machine, fairness, deadlines, heartbeat,
     token redaction, revocation, and restart reconciliation.
+  - Route yield, acknowledgement, revocation, cleanup disposition, and shutdown
+    through the runtime-peer channel; add the wakeable App-owned mailbox and
+    shared production action serializer while keeping input commands disabled.
   - Prove Pause precedence and that neither `AuxiliaryRouteLease` nor existing
     exclusive-validation receipts can satisfy a development lease.
 - [ ] Phase 4 — add the production-mediated input gateway.
-  - Implement idempotent semantic action guards, pre-dispatch source/frame/
-    owner checks, action-log and durable-audit pairing, running-battle and Home
-    capability bounds, and fail-closed cleanup.
+  - Add the production-installed, runtime-published semantic action catalog
+    with stable action IDs, revisions/digests, bounded parameters, fixed guards
+    and postconditions, dependency digests, and disabled/allowlisted rollout.
+  - Implement ordered idempotent input-command/result messages, request- and
+    dispatch-time catalog/source/frame/owner checks, response-loss replay,
+    action-log and durable-audit pairing, running-battle and Home capability
+    bounds, and fail-closed cleanup.
 - [ ] Phase 5 — implement lifecycle continuation and owned validation.
   - Return natural Game Over authority to production, service eligible Home
     requests, and issue only a fresh next-battle token after initialization and
@@ -69,9 +82,14 @@ earlier authority and compatibility dependency it names is deployed.
   - Add the separate operator-authorized development-validation receipt,
     ordinary-battle claim, Tournament exclusion, and exact cleanup ownership.
 - [ ] Phase 6 — complete integration and promotion hardening.
-  - Run the contract's unit, fake-clock, fake-runtime/fake-ADB, retained-frame,
-    API, concurrency, crash/restart, source-drift, Pause, and terminal/Home
-    matrix.
+  - Run the contract's unit, fake-clock, fake-runtime/fake-ADB, peer-auth,
+    framing/ordering, disconnect/replay, backpressure, action-catalog,
+    retained-frame, API, concurrency, crash/restart, source-drift, Pause, and
+    terminal/Home matrix.
+  - Enforce worker-only feature commits, master-owned develop integration and
+    conflict resolution, clean/resolved checkout gates, reviewed exact range,
+    main ancestry, fast-forward-only exact-candidate promotion while production
+    remains on main, and emergency-hotfix back-integration.
   - After those gates pass, update the startup/operations guidance and perform
     only the separately authorized live-validation sequence before production
     promotion.

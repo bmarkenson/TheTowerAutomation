@@ -64,6 +64,9 @@ The inspected implementation has the right production anchor but does not yet
 provide this isolation contract:
 
 - both checked-in systemd units already execute the fixed production checkout;
+- those units run the broker and automation as separate processes; the current
+  HTTP service and App loop have no authenticated persistent peer channel or
+  App-owned external-command mailbox;
 - the control-surface service already owns loopback API policy, capability
   advertisement, systemd/PID/OS-lock evidence, and guarded process operations,
   which is why it is the broker extension point;
@@ -100,13 +103,24 @@ documentation, fixtures, and tests concurrently, but they do not merge
 themselves into `develop` or `main`.
 
 A feature branch starts from an inspected `develop` commit and ends in one or
-more coherent reviewed commits. A worker must not update the production
+more coherent worker commits. Workers commit only on their feature branches
+and return the exact commit IDs plus validation evidence to the master. They
+never commit on `develop` or `main`. A worker must not update the production
 checkout, repoint a systemd unit, copy files into production, or use a
-production runtime directory as its test root. Once a change is accepted, the
-master integrates it into `develop`, runs the combined non-live regression
-gate, and schedules any separately authorized emulator validation. Feature
-branches and worktrees are disposable only after their commits and needed
-evidence are retained.
+production runtime directory as its test root.
+
+Before integration, the master rechecks target-file ownership and the staged
+and unstaged state in the `develop` worktree. The master normally
+cherry-picks each accepted coherent worker commit into `develop`, reviews the
+resulting exact diff, and runs the combined non-live gate. Conflict resolution
+is performed and committed only by the master in `develop`; a worker instead
+revises its feature commit when the resolution belongs in feature scope.
+`main` is never a feature-development or conflict-resolution branch.
+
+Feature branches and worktrees are removed only after their accepted commits
+are integrated and every required validation or retained-evidence reference is
+durable. Rejection of a feature does not authorize deletion of evidence still
+needed to explain an integration or production decision.
 
 ### Validation and production promotion
 
@@ -124,11 +138,46 @@ Validation proceeds from least authoritative to most authoritative:
 
 An API response, successful broker lease, or live observation does not promote
 code. A `main` update does not itself restart automation or confer input
-authority. The master must review the exact integrated commit, validation
-evidence, source fingerprint, migration compatibility, and safe deployment
-boundary before promotion. Authority- or lifecycle-sensitive changes are
-promoted in dependency order and never bundled with an unrelated feature merely
-to reduce deployment count.
+authority. Let `M` be the exact current `main` object and `D` the exact
+`develop` commit that passed the combined gate and any separately authorized
+validation. Promotion is permitted only when all of the following are true:
+
+- the `develop` branch points at `D` and the master reviewed the complete
+  `M..D` commit range and aggregate diff;
+- the index and tracked working tree are clean in both the integration and
+  production checkouts, neither has an unmerged entry, and every nonignored
+  untracked file or modification has resolved ownership and disposition;
+- `git status --porcelain=v1 --untracked-files=all` is empty in both
+  checkouts immediately before promotion, after their normal ignore rules;
+- `git merge-base --is-ancestor M D` succeeds against those exact object IDs,
+  and the production `main` branch still resolves to `M`;
+- dependency, protocol, migration, rollback, and validation evidence for the
+  reviewed range is complete; and
+- the current runtime is at a safe deployment boundary under the existing
+  guarded deployment procedure.
+
+An existing user-owned or parallel modification in the production checkout
+blocks promotion until its ownership and disposition are resolved. It does not
+block unrelated feature or integration work in `develop`.
+
+The master promotes only by running the equivalent of
+`git merge --ff-only D` in the clean production checkout while it remains on
+`main`; the production checkout is never switched to `develop` or a feature
+branch. Afterward, the branch and `HEAD` must both resolve to exact object
+`D` and the clean-state check must still pass. A non-fast-forward result,
+different target object, new local change, or failed post-update check aborts
+deployment. Process replacement, when required, remains a separate guarded
+operation after the Git fast-forward.
+
+An emergency hotfix committed directly to `main` is the sole exception to the
+normal feature route. The master must immediately integrate the updated
+`main` history back into `develop`—fast-forward when possible, otherwise by
+a master-owned merge and conflict-resolution commit in `develop`—and rerun
+the combined gate. No later production promotion is eligible until the
+hotfixed `main` commit is again an ancestor of the exact validated `develop`
+candidate. Authority- or lifecycle-sensitive changes are promoted in
+dependency order and never bundled with an unrelated feature merely to reduce
+deployment count.
 
 ## Development Python and generated-state isolation
 
@@ -259,18 +308,19 @@ service already runs from the production checkout, survives automation-runtime
 replacement, owns loopback API policy, verifies systemd/PID/OS-lock evidence,
 advertises revisions and capabilities, and has an established audit path.
 
-The extension adds a per-user Unix-domain listener without exposing
-development authority through the Windows-forwarded TCP listener. It must not
-make the HTTP handler or the broker the device-input implementation. The
-broker schedules and binds authority; the production runtime acknowledges
+The extension adds two role-specific per-user Unix-domain listeners without
+exposing development authority through the Windows-forwarded TCP listener. It
+must not make the HTTP handler or the broker the device-input implementation.
+The broker schedules and binds authority; the production runtime acknowledges
 yield and its production-owned input gateway performs the final guarded
 dispatch.
 
-The Unix socket is mode `0600` inside a mode `0700` directory:
+Each Unix socket is mode `0600` inside a mode `0700` directory:
 
 ```text
 $XDG_RUNTIME_DIR/thetower/
     development-broker.sock
+    runtime-peer.sock
     service-epoch.json
     coordinator/
     clients/
@@ -288,6 +338,230 @@ the same Unix account. It is not a security boundary against a malicious
 process already running as that account. Mode restrictions, opaque tokens,
 fixed endpoints, source binding, and audit are still required because they make
 authority explicit and failures diagnosable.
+
+### Broker/runtime peer channel
+
+The control-surface broker and automation runtime are separate systemd
+processes. Their sole V1 authority channel is a runtime-initiated persistent
+`AF_UNIX` stream connection to
+`$XDG_RUNTIME_DIR/thetower/runtime-peer.sock`. The broker listens; after the
+automation process has acquired its production target lock and created a fresh
+runtime session ID, the runtime connects. The runtime never listens for a
+worker connection, and there is no file-polling, loopback HTTP, signal, or
+second-daemon alternative for yield or input.
+
+The two local roles are deliberately different:
+
+- an **external development client** uses
+  `development-broker.sock` and the documented request API. It can register
+  source, observe status/frames, and request a capability, but it never speaks
+  the runtime-peer protocol; and
+- the **internal runtime peer** is the one authenticated
+  `thetower-automation.service` MainPID on `runtime-peer.sock`. It publishes
+  runtime truth, installs/removes the external hold, and executes accepted
+  catalog actions through `App`.
+
+The broker accepts only one registered runtime peer. On every accept it reads
+Linux `SO_PEERCRED` before parsing an application message and requires:
+
+- the peer UID to equal the configured production service UID;
+- the kernel-reported peer PID to equal both the registration PID and the
+  freshly queried systemd `MainPID` for `thetower-automation.service`;
+- a fresh opaque `runtime_session_id` created by that process;
+- the broker-issued `service_epoch` challenge;
+- a production target-lock record naming the same PID and exact ADB target,
+  with the expected OS lock still held; and
+- agreement between the runtime's target snapshot and the broker-owned
+  `adb_target_generation` assigned after that target/lock evidence is
+  verified.
+
+The expected lock location/identity comes from production broker
+configuration; a path named in registration cannot redirect the check.
+Unavailable or ambiguous systemd or OS-lock evidence rejects registration.
+
+The broker repeats the MainPID, session, held-lock, service-epoch, target, and
+target-generation checks on registration, every heartbeat/status frame, before
+forwarding a yield or input command, and before accepting its result. A target
+handoff makes the peer temporarily ineligible: the runtime publishes the new
+owned target snapshot, the broker independently verifies the replacement
+lock, increments `adb_target_generation`, and acknowledges that generation
+before another development operation.
+
+Separate socket paths are necessary but not sufficient authentication. An
+external client cannot select `role=runtime` on its API connection, and a
+same-user process that opens `runtime-peer.sock` is rejected because its
+kernel PID is not the current systemd MainPID and it cannot establish that
+MainPID's runtime session plus held target-lock identity. The service-epoch
+challenge prevents a pre-restart registration replay. Compromise of the actual
+production process or Unix account remains outside this accidental-concurrency
+boundary.
+
+#### Framing, registration, and negotiation
+
+The runtime-peer stream uses a four-byte unsigned big-endian length followed by
+one UTF-8 JSON object. The maximum encoded object is 64 KiB. A zero/oversized
+length, invalid UTF-8/JSON, duplicate key, non-object top level, unknown
+field or required enum for the negotiated V1 schema, or frame not completed
+within two seconds is a protocol error. The receiver buffers a complete frame
+before validation and never acts on a prefix or partial object.
+
+Every frame has `schema_version=1`, `message_type`, `message_id`,
+`service_epoch`, and a canonical-payload SHA-256. `broker_hello` carries the
+supported protocol range and a null runtime session because negotiation has not
+yet occurred; `runtime_register` proposes the runtime's supported range and
+fresh session. Every later frame carries the selected
+`runtime_peer_protocol`, exact `runtime_session_id`, broker-assigned
+`runtime_peer_connection_id` for that accepted socket, and a
+`correlation_id` when it belongs to a request or operation. A broker frame
+carries the next strictly increasing `broker_sequence` and
+`runtime_sequence_ack`; a runtime frame carries the next strictly increasing
+`runtime_sequence` and `broker_sequence_ack`. Sequence numbers start at one
+for each connection and acknowledge only the highest contiguous peer frame.
+They are transport ordering, not the runtime action sequence or a lease
+generation.
+
+Normative peer deadlines are integer nanoseconds from Linux
+`CLOCK_MONOTONIC`, which is shared by processes on the same boot. The broker
+hello includes the host boot ID and current monotonic value; registration
+rejects a boot-ID mismatch. RFC 3339 timestamps may accompany messages for
+audit readability but never extend a monotonic deadline.
+
+Registration is ordered and must finish within two seconds:
+
+| Order | Message | Required payload |
+| --- | --- | --- |
+| 1, broker to runtime | `broker_hello` | Service epoch, random connection challenge, host boot ID/current monotonic time, supported protocol min/max, broker capabilities, frame/queue limits, and broker sequence 1 |
+| 2, runtime to broker | `runtime_register` | Echoed challenge/epoch, kernel PID as claimed PID, fresh runtime session ID, systemd unit name, supported protocol min/max, compiled runtime capabilities, exact target plus process-local target generation/owned flag, production target-lock identity, runtime action sequence, operator-control revision/state, cleanup/orphan summary, and the complete action-catalog object with revision/digest |
+| 3, broker to runtime | `runtime_registered` | Selected protocol, new runtime-peer connection ID, effective capability intersection, verified MainPID/session/lock/target, assigned ADB target generation, service epoch, broker limits, and accepted action-catalog revision/digest |
+| 4, runtime to broker | `runtime_status` | First authoritative status/heartbeat under the selected protocol; no yield is eligible before it |
+
+No lowest-common-denominator fallback may omit peer authentication, target
+generation, action-catalog binding, sequencing, idempotency, revocation, or
+cleanup. With no compatible protocol, the broker sends a bounded
+handshake-level `channel_shutdown` with no selected protocol, exposes external
+interactive capabilities as unavailable, and the production runtime continues
+without development authority.
+
+#### Ordered runtime messages
+
+After registration, these are the complete V1 authority messages. Every
+identity below is in addition to the common envelope and must match the active
+connection.
+
+| Message and direction | Required payload and ordering |
+| --- | --- |
+| `yield_request` broker → runtime | Request/lease-candidate IDs, capability, hold ID, source registration/fingerprint, complete expected runtime/target/battle/frame/catalog binding, operator-control revision, last known runtime action sequence, and acknowledgement deadline. Only one may be pending; it precedes its `yield_ack` and any token issue. |
+| `yield_ack` runtime → broker | Correlated request/hold IDs; `accepted` or stable rejection code; current operator state/revision; `in_flight_inputs=0`; installed external-hold identity; last completed runtime action sequence; fresh runtime/target/battle/frame/catalog binding; and acknowledgement time. An accepted acknowledgement is valid only after the App serializer has yielded as defined below. |
+| `input_command` broker → runtime | Request/lease IDs and generation, operation ID, idempotency key and canonical command digest, exact catalog revision/digest, existing action ID plus bounded parameters, full expected source/runtime/target/battle/frame/state binding, dispatch-not-after time, result deadline, and the catalog-owned postcondition ID. At most one command is in flight, it follows an accepted yield, and it precedes its result or revocation barrier. |
+| `input_result` runtime → broker | Operation ID and command digest; `not_dispatched`, `dispatched`, `no_op`, `failed`, or `outcome_unknown`; stable reason; runtime action sequence before/after; dispatch and completion times; catalog action ID; sanitized parameter summary; postcondition result; and resulting frame descriptor. The runtime records this before sending it. |
+| `revoke_authority` broker → runtime | Request/lease IDs, incremented lease generation, reason, last operation ID permitted to finish, revocation deadline, and whether cleanup evaluation is required. It is a barrier: later input commands for that lease are invalid, and pending undispatched commands are discarded. |
+| `cleanup_disposition` runtime → broker | Correlated revocation/hold IDs; `clean`, `production_cleanup`, `operator_required`, or `unknown`; whether the external hold was released; final runtime action sequence and in-flight count; authoritative state/frame binding when available; stable reason; and completion time. It is the terminal acknowledgement of revocation, not new input authority. |
+| `runtime_status` runtime → broker | One-second heartbeat time; MainPID/session; operator state/revision; target/lock and acknowledged ADB target generation; battle/frame identities; action-catalog revision/digest plus the complete catalog object when that revision first appears; external hold and in-flight input summary; runtime action sequence; cleanup state; queue pressure; and a bounded digest/result summary of recent operation IDs needed for reconciliation. It grants no authority. |
+| `broker_heartbeat` broker → runtime | One-second heartbeat time; service epoch; verified runtime session and acknowledged ADB target generation; active request/lease generation when any; broker queue pressure/audit health; and acknowledgement of the latest runtime sequence. It grants no authority. |
+| `channel_shutdown` either direction | Initiator, stable reason, final local and acknowledged peer sequences, active hold/operation summary, cleanup disposition if known, whether reconnect is expected, and a two-second close deadline. The peer responds with its own shutdown frame when possible. |
+
+`yield_ack`, `input_result`, and `cleanup_disposition` are created by the App
+orchestrator, not inferred by the socket thread. Broker request state changes
+still follow the canonical lifecycle below; runtime-peer message names are not
+additional public request states.
+
+#### Serialization, queues, and backpressure
+
+The runtime socket receiver may authenticate, validate framing/order, and place
+an immutable command in an App-owned mailbox. It must not import or call a tap,
+swipe, ADB-input, handler, lifecycle, recovery, or worker callback. A wakeable
+`App`/main orchestrator drains that mailbox at guarded action boundaries and
+owns one production action serializer shared by existing handler, strategy,
+auxiliary, lifecycle, blind-tapper, validation, and external-gateway input.
+No production or external input path may bypass that serializer.
+
+The orchestrator processes revocation/shutdown before normal commands, checks
+the mailbox before every prospective production input, and does not wait for a
+normal multi-second capture sleep to notice a peer command. To acknowledge
+yield it stops the blind tapper, prevents new production producers, waits for
+the serializer's current operation to finish, installs the distinct external
+hold, captures/publishes fresh evidence, and emits `yield_ack` only with zero
+input in flight. To execute `input_command`, the orchestrator rechecks every
+binding and catalog guard under the same serializer, durably records intent,
+dispatches at most once, records the result, and gives the socket writer the
+immutable `input_result`.
+
+Flow control is fail-closed and bounded:
+
+- each peer's socket-writer normal queue holds at most 32 messages and
+  256 KiB, plus a four-message control lane reserved for heartbeat,
+  revocation/result, cleanup, and shutdown; the broker permits at most one
+  yield and one input command outstanding;
+- the runtime App mailbox holds at most 16 normal commands and 256 KiB, plus a
+  four-message control lane reserved for revocation/shutdown;
+- the broker runtime-event mailbox holds at most 32 normal events and 256 KiB,
+  plus a four-message lane reserved for input result, cleanup, and shutdown;
+- one lease permits at most 128 input operations; reaching that bound rejects
+  another command with `lease_operation_limit` and begins normal completion
+  or revocation;
+- runtime status and broker heartbeat are latest-value coalesced rather than
+  accumulated;
+- both peers send their status/heartbeat every second; three seconds without a
+  valid peer liveness frame, or any MainPID/lock mismatch, loses the channel
+  and makes the runtime locally revoke external input;
+- a yield uses the existing five-second acknowledgement deadline; an input
+  must begin by its catalog-bounded dispatch deadline and report by its
+  catalog-bounded action timeout plus two seconds; and
+- full normal queues reject new external work with
+  `runtime_backpressure`. An accepted input command is never silently dropped.
+  Exhaustion of any reserved control lane closes the channel; the runtime
+  preserves any operation result in its idempotency cache and applies local
+  fail-closed revocation, while the broker treats an unreceived result as
+  uncertain.
+
+Each sender accepts only its next sequence. A repeated immediately prior
+sequence with the identical canonical digest is a duplicate: the receiver does
+not reapply it and returns/re-emits the cached correlated response. Reuse of a
+sequence, message ID, idempotency key, or operation ID with different content,
+or a gap/out-of-order sequence, is a protocol violation and closes the
+channel. The runtime cache retains every operation digest/result for the
+current nonterminal lease plus at least the most recent 256 terminal-lease
+operations until ten minutes after their deadlines. The per-lease operation
+cap makes that cache bounded. Reconnection never turns a duplicate into
+another input.
+
+#### Disconnect, restart, and uncertain-result behavior
+
+Loss of the peer channel immediately makes interactive capabilities
+unavailable and invalidates their external tokens at the broker. Exact failure
+handling is:
+
+- **Broker restart:** EOF invalidates the old service epoch. The runtime
+  cancels undispatched external commands, permits only an already-started
+  serialized input to finish once, records its result, retains the no-input
+  external hold, and performs cleanup classification. It reconnects to the new
+  runtime-peer socket and reports the old epoch, orphaned hold, cleanup
+  disposition, and cached operation result in registration/status. The new
+  broker issues no grant until reconciliation is safe.
+- **Runtime restart:** peer loss and a changed systemd MainPID/session revoke
+  all acknowledgements/tokens. A replacement runtime creates a new session and
+  cannot inherit a hold, operation cache, or cleanup authority. If the broker
+  cannot exclude possible old-process input, cleanup is `unknown`.
+- **Same-epoch channel loss:** the broker revokes rather than preserves the
+  lease. The still-running runtime locally blocks new external input, retains
+  the hold through cleanup, and may reconnect with the same session only to
+  reconcile sequences/results. Reactivation requires the public request
+  lifecycle to issue a fresh token and lease generation.
+- **Partial or malformed frame:** no partial frame dispatches. The receiver
+  closes at the framing deadline. Any earlier complete input already handed to
+  the App remains governed by its operation ID and cached result; the broker
+  treats its outcome as uncertain until exact reconciliation.
+- **Response loss after possible input:** the broker never blindly resends the
+  command. On the same connection it may repeat the identical message solely
+  to retrieve the runtime's cached result; after reconnect it uses the recent
+  operation summary in `runtime_status`. A matching command digest and cached
+  terminal result resolves the outcome without dispatch. Missing/mismatched
+  evidence produces `outcome_unknown`, fails the request, retains the hold,
+  and requires cleanup.
+- **Orderly shutdown:** the initiator sends `channel_shutdown` only after
+  revocation has begun. The channel closes after the peer response or the
+  two-second deadline; lack of the response is handled as channel loss, never
+  as proof of cleanup.
 
 ### Volatile and durable ownership
 
@@ -321,6 +595,7 @@ The implementation must not overload a generic “generation” field.
 | `frame_source_generation` | Monotonic within one service epoch and changes when the capture publisher, source geometry, target binding, or capture pipeline is replaced or reset. |
 | `frame_sequence` | Strictly increasing successful-frame sequence within one frame-source generation. |
 | `lease_generation` | Broker-owned monotonic grant/revocation counter within a service epoch. Every newly issued token gets a new value, including a resumed request. |
+| `action_catalog_revision` | Positive revision of the exact production-installed semantic action catalog published by the current runtime. Its separately named SHA-256 binds catalog content; it is not a lease, source, or frame generation. |
 | `development_source_fingerprint` | Exact registered Git/worktree state described above. It changes whenever relevant source state changes. |
 
 Control request IDs, broker status revisions, input operation IDs, and audit
@@ -407,38 +682,144 @@ pull arbitrary device files; foreground/restart the app; or send `adb shell
 input`. Those remain production-coordinator operations. No direct-read receipt
 can be upgraded into input authority.
 
-### Production-mediated input
+### Production action catalog and mediated input
 
 All state-changing development operations go to the production input gateway.
-The gateway accepts only versioned semantic action kinds backed by
-production-reviewed guards, such as a named clickmap action or a bounded
-template match whose asset digest belongs to the registered source. It does
-not accept a shell command, raw ADB command, arbitrary executable, blind tap,
-unbounded coordinate, or worker callback.
+V1 accepts only a stable action ID already present in the exact
+production-installed semantic action catalog published by the authenticated
+runtime peer. It does not accept a shell or raw ADB command, arbitrary
+executable, generic action kind, clickmap/template path, asset bytes or digest
+supplied by a worker, blind tap, unbounded coordinate, Python callback, or
+worker-defined postcondition.
+
+The runtime builds and validates the catalog only from code, configuration, and
+assets installed in the production checkout. It publishes the complete catalog
+through `runtime_register` and, whenever the catalog revision changes, in
+`runtime_status`. The broker verifies its digest and advertises only the
+effective catalog from the authenticated current runtime. The V1 catalog must
+fit in one 64 KiB peer frame; an oversized catalog makes catalog/input
+capabilities unavailable until a later chunking-capable protocol is
+negotiated. Schema 1 is:
+
+```json
+{
+  "action_catalog_schema": 1,
+  "action_catalog_revision": 12,
+  "action_catalog_digest": "sha256-of-canonical-catalog",
+  "production_commit": "git-object-id",
+  "actions": [
+    {
+      "action_id": "battle.menu.open_perks.v1",
+      "capabilities": ["interactive_running_battle"],
+      "allowed_states": {
+        "primary": ["RUNNING"],
+        "secondary": [],
+        "overlays": []
+      },
+      "guard": {
+        "guard_id": "production.visible_clickmap_label.v1",
+        "guard_revision": 3
+      },
+      "parameters": {
+        "json_schema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "maximum_encoded_bytes": 256
+      },
+      "postcondition": {
+        "postcondition_id": "production.perks_menu_visible.v1",
+        "timeout_milliseconds": 3000
+      },
+      "production_dependencies": [
+        {
+          "kind": "clickmap_entry",
+          "logical_id": "battle.buttons.perks",
+          "sha256": "production-digest"
+        },
+        {
+          "kind": "match_template",
+          "logical_id": "menus.perks",
+          "sha256": "production-digest"
+        }
+      ],
+      "rollout": {
+        "enabled": true,
+        "request_allowlist": "development-running-v1"
+      }
+    }
+  ]
+}
+```
+
+Every entry names its allowed capability, primary/secondary/overlay states,
+production guard identity and revision, closed parameter schema and encoded
+size/range/enum bounds, fixed production-owned postcondition and timeout,
+digests for every applicable production asset/config dependency, and
+disabled/allowlisted rollout state. Empty parameters are still explicitly
+closed as in the example. Catalog revision increases whenever any entry,
+guard, bound, dependency digest, postcondition, or rollout state changes; the
+catalog digest covers canonical JSON excluding only its digest field. A stable
+`action_id` is 1–128 lowercase ASCII letters, digits, dots, underscores, or
+hyphens, cannot encode a filesystem path, and is never reused for incompatible
+semantics. Such a change receives a new versioned ID.
+
+At lease-request time the worker supplies an expected catalog revision/digest
+and a nonempty set of at most 32 existing action IDs. The broker rejects an
+absent, disabled, capability-incompatible action, or one incompatible with the
+request's declared states before queueing/activation. Each input then selects
+exactly one ID from that granted set; when accepting that input request, the
+broker again checks the revision/digest, parameter bounds, expected state, and
+fixed postcondition. At dispatch time the runtime independently requires the
+same revision/digest, resolves the action ID only in its in-memory
+production-installed catalog, revalidates the production dependency digests,
+parameter bounds, current state, and guard, then runs the catalog-owned
+postcondition. A changed catalog invalidates pending input and returns
+`action_catalog_changed`; it is never silently rebound to the new revision.
+
+Source registration identifies and audits the requesting development state. It
+does not authorize the broker/runtime input path to import, execute, resolve,
+or read worker code, templates, clickmap/config paths, callbacks, or assets.
+The source registrar may perform only its separately specified Git and content
+hashing to establish the fingerprint. No worker path or content digest becomes
+an action-catalog dependency. Runtime-peer yield/input messages carry only the
+opaque source registration ID and fingerprint, never a worker path or worker
+content.
+
+A new worker matcher, template, or action is developed and tested offline
+against tracked retained fixtures or copies of atomically published frames.
+Novel live behavior becomes requestable only after master review, integration
+into `develop`, the combined gate, promotion to `main`, production deployment
+behind its disabled/allowlisted rollout boundary, and publication by the
+running production runtime in a new catalog revision. Until all steps complete,
+the broker reports the action unavailable regardless of the worker source
+fingerprint.
 
 Every operation supplies:
 
 - an active token and lease generation;
 - a unique idempotency/operation ID;
 - the complete current binding tuple;
-- an exact expected frame-source generation and frame sequence;
-- an expected primary state, battle identity, and optional allowed temporary
-  state;
-- a capability-allowlisted semantic action; and
-- bounded postcondition and timeout.
+- the exact action-catalog revision and digest;
+- one existing capability-compatible stable action ID and bounded parameters;
+- an exact expected frame-source generation and frame sequence; and
+- an expected primary state, battle identity, and optional catalog-allowed
+  temporary state.
 
 The gateway synchronizes operator control, source state, lease state, runtime
-owner, target generation, battle generation/identity, frame freshness, expected
-screen, and action guard immediately before dispatch. It writes and syncs the
-durable action intent before input. It records the individual input and result
-through the normal production action-log contract and the development audit
-ledger. The result includes the production input sequence and a fresh
-post-action frame or an explicit reason why no postcondition was proven.
+owner, target generation, battle generation/identity, frame freshness, catalog,
+expected screen, and catalog guard immediately before dispatch. It writes and
+syncs the durable action intent before input. It records the individual input
+and result through the normal production action-log contract and the
+development audit ledger. The result includes the production input sequence and
+a fresh post-action frame or an explicit reason why the catalog postcondition
+was not proven.
 
-An input response lost after dispatch is resolved by the idempotency record; a
-retry returns the original result and never dispatches twice. If the broker
-cannot prove whether dispatch occurred, it fails the request and requires
-cleanup rather than retrying.
+An input response lost after dispatch is resolved by the runtime-peer operation
+cache and idempotency record. A duplicate returns the original result and never
+dispatches twice. If the broker cannot prove whether dispatch occurred, it
+fails the request and requires cleanup rather than retrying.
 
 ### Explicitly owned validation battles
 
@@ -548,9 +929,10 @@ rolling expiry but never the hard active limit:
 
 Heartbeat and renewal recheck service epoch, source registration, operator
 control, runtime session/PID, target generation, battle identity/generation,
-frame source, request state, and client principal. A heartbeat is not input
-authority. A suspended Game Over continuation requires the client to keep a
-separate request heartbeat; it never keeps the old token alive.
+frame source, action-catalog revision/digest, request state, and client
+principal. A heartbeat is not input authority. A suspended Game Over
+continuation requires the client to keep a separate request heartbeat; it
+never keeps the old token alive.
 
 Pause-triggered suspension never automatically reactivates on Resume. The
 client must explicitly requeue after the operator's Resume is acknowledged.
@@ -569,6 +951,7 @@ The active interactive grant response contains:
   "lease_id": "opaque",
   "lease_generation": 42,
   "capability": "interactive_running_battle",
+  "allowed_action_ids": ["battle.menu.open_perks.v1"],
   "lease_token": "one-time-visible-opaque-secret",
   "issued_at": "RFC3339",
   "heartbeat_due_at": "RFC3339",
@@ -585,6 +968,8 @@ The active interactive grant response contains:
     "battle_identity": "opaque-or-unknown",
     "frame_source_generation": 4,
     "activation_frame_sequence": 880,
+    "action_catalog_revision": 12,
+    "action_catalog_digest": "sha256",
     "source_registration_id": "opaque",
     "development_source_fingerprint": "sha256"
   }
@@ -832,9 +1217,11 @@ successful.
 
 | Event | Required behavior |
 | --- | --- |
-| Broker/control-service restart | New service epoch; all tokens, direct-read receipts, acknowledgements, queued and suspended requests are invalid. Clients register and request again. Runtime rejects old-epoch gateway input and treats any old-epoch external hold as `cleanup_required` until fresh reconciliation proves its safe disposition; it never resumes ordinary input merely because the broker disappeared. |
-| Production runtime restart or PID change | Revoke acknowledged/active leases and fail any owned-validation receipt that cannot prove its old owner. A replacement cannot inherit external yield or cleanup authority. |
+| Broker/control-service restart | New service epoch; all tokens, direct-read receipts, acknowledgements, queued and suspended requests are invalid. Clients register and request again. The surviving runtime follows the peer-channel broker-restart sequence: reject old-epoch input, retain the no-input hold, reconnect, and report orphan/operation/cleanup evidence before any new grant. |
+| Production runtime restart or PID change | Peer-credential/MainPID loss revokes acknowledged/active leases and fails any owned-validation receipt that cannot prove its old owner. A replacement creates a new session and cannot inherit external yield, operation replay, or cleanup authority. |
 | Production runtime crash while externally yielded | Broker invalidates token immediately. The next runtime starts with no external authority and must verify current UI/target before normal actions; uncertainty publishes `cleanup_required`. |
+| Runtime-peer channel loss or partial/malformed frame | Stop accepting/dispatching external input, revoke the public lease, retain the external hold through cleanup, and reconcile only through a newly authenticated ordered channel. A partial frame is never dispatched. |
+| Input result or acknowledgement loss | Never infer success and never blindly redispatch. Resolve only from the exact operation digest and cached runtime result; otherwise return `dispatch_outcome_unknown` and require cleanup. |
 | Client exit or heartbeat loss | Expire token, stop gateway input, and run the fail-closed cleanup classification. The client's process PID is diagnostic, not the sole identity. |
 | ADB target generation change | Discard in-flight reads/captures, revoke every interactive lease, invalidate published-current action authority, and require new source registration/request expectations. |
 | ADB disconnect without target change | Mark publication unavailable/stale. No input or direct capture is granted; an active lease is suspended briefly only if no input uncertainty exists, otherwise revoked. Production alone reconnects. |
@@ -855,10 +1242,11 @@ manufacture a live runtime owner.
 ### Transport and compatibility
 
 Development endpoints are additive `/api/v1/development/...` resources served
-only on the per-user Unix socket. The existing loopback HTTP API may publish a
-non-secret summary, revision, and unavailable reason, but it must not issue
-tokens, accept development input, or expose source paths through the Windows
-tunnel.
+only on `$XDG_RUNTIME_DIR/thetower/development-broker.sock`. The existing
+loopback HTTP API may publish a non-secret summary, revision, and unavailable
+reason, but it must not issue tokens, accept development input, or expose
+source paths through the Windows tunnel. The external API cannot upgrade its
+connection to the framed `runtime-peer.sock` protocol.
 
 The service increments its monotonic server revision and advertises these
 independently gated capabilities as they land:
@@ -867,7 +1255,9 @@ independently gated capabilities as they land:
 - `atomic_frame_publication_v1`;
 - `development_source_fingerprint_v1`;
 - `coordinated_development_capture_v1`;
+- `runtime_peer_channel_v1`;
 - `external_development_authority_v1`;
+- `development_action_catalog_v1`;
 - `development_input_gateway_v1`;
 - `development_boundary_continuation_v1`; and
 - `owned_development_validation_battle_v1`.
@@ -876,8 +1266,8 @@ The production runtime separately advertises its broker protocol revision and
 effective capabilities. A client requires API version 1, its compiled minimum
 server revision, every capability it uses, and an overlapping runtime protocol.
 Unknown additive response fields are ignored. Unknown request fields, state
-values, action kinds, and capability names are rejected. Compatibility failure
-is read-only and cannot create or retain a lease.
+values, action IDs, parameter fields, and capability names are rejected.
+Compatibility failure is read-only and cannot create or retain a lease.
 
 ### Resources
 
@@ -893,6 +1283,7 @@ is read-only and cannot create or retain a lease.
 | `POST` | `/api/v1/development/requests/{request_id}/cancel` | Cancel without granting cleanup input |
 | `GET` | `/api/v1/development/frames/current` | Read the current pointer/metadata or a stale/unavailable disposition |
 | `GET` | `/api/v1/development/frames/{source_generation}/{sequence}/image` | Read one immutable published image |
+| `GET` | `/api/v1/development/actions` | Read the current runtime-published production action catalog and effective rollout availability |
 | `POST` | `/api/v1/development/captures` | Request a coalesced publisher capture or justified one-shot direct-capture receipt |
 | `POST` | `/api/v1/development/input` | Submit one idempotent production-mediated semantic action under an active lease |
 
@@ -947,11 +1338,14 @@ An exclusive request is shaped as:
   "requested_active_seconds": 120,
   "continuation": "none",
   "allowed_ui_states": ["RUNNING"],
+  "requested_action_ids": ["battle.menu.open_perks.v1"],
   "expected": {
     "service_epoch": "uuid",
     "adb_target_generation": 9,
     "battle_generation": 31,
-    "battle_identity": "opaque"
+    "battle_identity": "opaque",
+    "action_catalog_revision": 12,
+    "action_catalog_digest": "sha256"
   }
 }
 ```
@@ -1057,6 +1451,7 @@ uses illustrative positive revisions:
       "runtime_session_id": null,
       "runtime_pid": null,
       "protocol_revision": null,
+      "peer_authenticated": false,
       "yield": null
     },
     "operator_control": {
@@ -1079,6 +1474,11 @@ uses illustrative positive revisions:
       "source_generation": null,
       "sequence": null,
       "fresh": false
+    },
+    "action_catalog": {
+      "revision": null,
+      "digest": null,
+      "available_actions": []
     },
     "exclusive_queue": [],
     "active_lease": null,
@@ -1113,20 +1513,22 @@ wrong-epoch, or stale mirror has no authority.
     "battle_identity": "opaque",
     "frame_source_generation": 4,
     "frame_sequence": 884,
+    "action_catalog_revision": 12,
+    "action_catalog_digest": "sha256",
     "primary_state": "RUNNING"
   },
   "action": {
-    "kind": "tap_label",
-    "label": "allowlisted.dot.path",
-    "postcondition": "RUNNING"
+    "action_id": "battle.menu.open_perks.v1",
+    "parameters": {}
   }
 }
 ```
 
-The response distinguishes `accepted`, `dispatched`, `no_op`, and `failed`,
-and includes the stable operation ID, runtime action sequence before/after,
-dispatch time, sanitized action summary, postcondition status, and resulting
-frame descriptor. “Accepted” alone is never presented as evidence that input
+The response distinguishes `accepted`, `not_dispatched`, `dispatched`,
+`no_op`, `failed`, and `outcome_unknown`, and includes the stable operation
+ID, runtime action sequence before/after, dispatch time, catalog action ID,
+sanitized parameter summary, postcondition status, and resulting frame
+descriptor. “Accepted” alone is never presented as evidence that input
 occurred.
 
 ### Stable error envelope and codes
@@ -1147,19 +1549,25 @@ Initial stable codes are:
 
 | Code | Normal HTTP meaning |
 | --- | --- |
-| `development_broker_unavailable`, `runtime_unavailable` | `503` |
+| `development_broker_unavailable`, `runtime_unavailable`, `runtime_peer_unavailable` | `503` |
+| `runtime_peer_protocol_error` | `502` |
 | `unsupported_api_revision`, `capability_unavailable` | `409` |
 | `source_registration_required`, `source_drift` | `409` |
 | `request_conflict`, `idempotency_conflict` | `409` |
 | `operator_pause`, `initialization_in_progress`, `cleanup_required` | `423` |
 | `runtime_not_yielded`, `screen_not_authoritative` | `412` |
 | `lease_not_active`, `lease_binding_mismatch` | `409` |
+| `lease_operation_limit` | `409` |
 | `request_expired`, `lease_heartbeat_lost` | `410` |
 | `target_generation_changed`, `battle_generation_changed`, `frame_generation_changed` | `409` |
 | `frame_stale`, `input_precondition_failed` | `412` |
+| `action_catalog_changed` | `409` |
+| `action_not_catalogued` | `403` |
+| `action_parameters_invalid` | `422` |
 | `input_not_allowlisted`, `owned_validation_authorization_required` | `403` |
 | `direct_read_not_allowlisted`, `direct_capture_not_justified` | `403` |
 | `rate_limited` | `429` with `retry_after_seconds` |
+| `runtime_backpressure` | `503` with `retry_after_seconds` |
 | `audit_unavailable`, `dispatch_outcome_unknown` | `503` |
 
 Clients branch on codes, not message text. A new code is additive; changing the
@@ -1168,7 +1576,8 @@ meaning of an existing code requires a protocol revision.
 ### CLI
 
 A checked-in `tools/development_access.py` will be the supported client. It
-connects only to the Unix socket and offers machine-readable JSON for:
+connects only to `development-broker.sock`, never `runtime-peer.sock`, and
+offers machine-readable JSON for:
 
 ```text
 status
@@ -1194,9 +1603,11 @@ connections, and has no raw shell/input escape hatch.
 
 The broker serializes audit events with a monotonic event sequence and
 hash-chains complete JSONL records. Every request transition, yield
-acknowledgement, grant, renewal, direct read/capture, input intent/result,
-revocation, cleanup result, compatibility failure, source drift, restart
-reconciliation, and operator queue change is recorded.
+acknowledgement, grant, renewal, direct read/capture, runtime-peer
+authentication/registration/rejection, negotiation or sequence failure,
+backpressure/channel shutdown, input intent/result, revocation, cleanup result,
+compatibility failure, source drift, restart reconciliation, and operator
+queue change is recorded.
 
 Each applicable event contains:
 
@@ -1212,8 +1623,10 @@ Each applicable event contains:
 - battle generation/identity and detected state;
 - frame-source generation and exact frame sequence;
 - lease ID/generation and deadlines, never token material or token hash;
-- sanitized action kind/parameters, operation ID, and dispatch/postcondition
-  outcome; and
+- runtime-peer connection ID plus broker/runtime sequences for peer-channel
+  events;
+- action-catalog revision/digest, stable action ID, sanitized bounded
+  parameters, operation ID, and dispatch/postcondition outcome; and
 - cleanup classification and unresolved-operator reason.
 
 State-changing intent must be appended and synced before dispatch. Terminal
@@ -1231,11 +1644,16 @@ Implementation is not complete until the relevant phase proves these seams:
 | Environment/unit | Dependency fingerprint determinism, serialized two-builder race, failed-stage cleanup, immutable reuse, wrong-interpreter rejection, and proof production `.venv` is never resolved |
 | Frame/unit | Bundle metadata/hash validation, incomplete/black frame rejection, sequence/source changes, atomic pointer replacement, crash at every sync/rename boundary, no-follow behavior, and bounded retention |
 | Fake clock | Queue wait, acknowledgement, heartbeat, rolling lease, hard deadline, suspended-request heartbeat, rate limit, and coalescing boundaries |
-| Fake runtime | Yield only after zero in-flight input, existing production hold precedence, no generic owner authorization for the external hold, cleanup classification, and exact status ownership |
+| Fake runtime | Runtime-initiated registration, yield only after the App serializer reports zero in-flight input, socket receiver never dispatching input, existing production hold precedence, no generic owner authorization for the external hold, cleanup classification, and exact status ownership |
+| Runtime peer authentication | `SO_PEERCRED` UID/PID checks, systemd MainPID mismatch, stale/reused runtime session, wrong service epoch, missing/mismatched held target lock, target-generation change, second peer rejection, external-client protocol rejection, and proof a worker PID cannot register as the runtime |
+| Runtime peer ordering | Length/UTF-8/JSON limits, partial-frame deadline, negotiation failure, strict per-direction sequences/acknowledgements, duplicate same-digest replay, changed-payload duplicate rejection, gaps/out-of-order frames, revocation barriers, and orderly shutdown |
+| Runtime peer disconnect/replay | Broker restart, runtime restart, same-epoch reconnect, channel loss during each message, response loss before/after possible input, cached result reconciliation, unknown-outcome cleanup, and proof no operation dispatches twice |
+| Runtime peer backpressure | Broker/runtime byte and count limits, one input in flight, status coalescing, reserved revocation lane, full-queue rejection, heartbeat expiry, App wakeup, and fail-closed control-lane exhaustion |
 | Fake ADB | Exact-target argv, pre/post target-generation checks, direct-read coalescing, timeout, malformed capture, disconnect, handoff, and absolute rejection of connection/input commands |
-| API | Revision/capability gating, Unix-only mutation routes, schemas, unknown fields/enums, error codes, optimistic revisions, idempotent request/input replay, and token redaction |
+| API | Revision/capability gating, Unix-only mutation routes, schemas, action-catalog resource, unknown fields/enums, error codes, optimistic revisions, idempotent request/input replay, and token redaction |
 | Concurrency | Many passive readers, capture coalescing, FIFO eligible scheduling, one global interactive lease, competing worktrees, Pause racing activation/input, and Game Over racing heartbeat |
-| Authority | Published frames confer no input; external hold is distinct from Pause, `AuxiliaryRouteLease`, and exclusive-validation receipts; every gateway input rechecks all bindings |
+| Action catalog | Canonical digest/revision, stable ID compatibility, capability/state/guard/parameter/postcondition checks at request and dispatch, disabled/allowlisted rollout, production dependency digest drift, catalog change during a lease, unknown action rejection, and proof no worker path/asset/callback is opened by the input path |
+| Authority | Published frames confer no input; external hold is distinct from Pause, `AuxiliaryRouteLease`, and exclusive-validation receipts; every gateway input rechecks all bindings and resolves only a production-catalog action |
 | Source drift | Drift while requested, queued, acknowledged, active, and suspended; no input after drift and no inheritance after re-registration |
 | Crash/restart | Broker, runtime, client, publisher, and target-owner restart at each request state and before/after possible input; no old token or receipt replay |
 | Retained frame | Detection/analysis from immutable fixture and atomic bundle without ADB, including battle and frame-source boundary resets |
@@ -1243,6 +1661,7 @@ Implementation is not complete until the relevant phase proves these seams:
 | Terminal/Home | Natural Game Over revocation, production terminal handling, eligible Home request ordering, no Home request path, full initialization/preflight, fresh new token only at stable next-running readiness, and Home cleanup revalidation |
 | Owned validation | Separate authorization/receipt, atomic claim before ordinary New Battle, Tournament exclusion, exact owner/target/battle binding, permitted and prohibited Surrender cleanup, and orphan failure |
 | Failure cleanup | Unexpected menu, ambiguous screen, lost result, audit failure, postcondition failure, operator-required state, and queue blockage until safe resolution |
+| Git integration/promotion | Worker commits remain feature-only; master cherry-pick and develop-only conflict resolution; clean tracked/index and resolved-nonignored-file gates in both checkouts; exact reviewed range; main-ancestor check; fast-forward-only exact commit while production stays on main; parallel main change blocking only promotion; emergency-hotfix back-integration; and evidence-retained cleanup |
 | Separately authorized live | One master-scheduled target: verify passive publication first, then coordinated capture, Pause race, bounded running lease, natural boundary continuation, Home request, and—only with explicit authority—one owned validation battle and cleanup |
 
 Ordinary CI and worker validation must use fakes and retained frames. Live
@@ -1256,6 +1675,9 @@ The architecture intentionally resolves the design questions as follows:
 
 - Extend the existing production control-surface service; do not add a third
   daemon.
+- Connect the authenticated production runtime to that broker through the
+  single persistent runtime-peer Unix-socket protocol; do not let an external
+  client or socket thread dispatch input.
 - Represent development yield as a distinct suppressive external authority
   hold; never overwrite or borrow operator `PAUSED`.
 - Prefer published frames, permit audited exact-target passive reads and a
@@ -1265,6 +1687,8 @@ The architecture intentionally resolves the design questions as follows:
   development source identities separate.
 - Keep volatile broker material in `$XDG_RUNTIME_DIR` and durable audit under
   `$XDG_STATE_HOME`, never in a worktree-local lock tree.
+- Resolve live actions only from the production-installed, runtime-published
+  action catalog; source registration never supplies executable action assets.
 - Bootstrap reproducible content-addressed development environments shared
   read-only by workers; never share production's mutable `.venv`.
 
