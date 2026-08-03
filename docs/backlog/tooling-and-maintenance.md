@@ -29,6 +29,53 @@ work. Historical checked detail remains in the
 - [ ] Extract duplicated handler helpers only after the unused-code audit
   establishes their actual call sites.
 
+## Production and development isolation delivery
+
+Implement the canonical
+[production and development isolation contract](../architecture/development_isolation.md)
+as separately reviewable phases. Do not expose a later capability before every
+earlier authority and compatibility dependency it names is deployed.
+
+- [ ] Phase 0 — make development reproducible without production's `.venv`.
+  - Add the tracked interpreter/dependency locks and content-addressed,
+    serialized environment bootstrap.
+  - Make ordinary worker environments read-only and isolate every generated
+    cache, log, screenshot, custom configuration, and scratch path.
+- [ ] Phase 1 — establish source and observation identity.
+  - Implement dirty-worktree registration/fingerprinting and the separate
+    service, runtime, target, battle, frame-source, frame-sequence, lease, and
+    source namespaces.
+  - Add atomic immutable frame bundles, status invalidation, reader
+    verification, and bounded retention before any broker input path.
+- [ ] Phase 2 — extend the production control service as the passive broker.
+  - Add the per-user Unix socket, service epoch, host-global coordinator,
+    additive status/capability surface, durable audit ledger, CLI read path,
+    and broker-coalesced direct-read/capture policy.
+  - Keep all connection management and device input prohibited.
+- [ ] Phase 3 — implement external yield without external input.
+  - Add the suppressive external-development hold, exact runtime
+    acknowledgement, request state machine, fairness, deadlines, heartbeat,
+    token redaction, revocation, and restart reconciliation.
+  - Prove Pause precedence and that neither `AuxiliaryRouteLease` nor existing
+    exclusive-validation receipts can satisfy a development lease.
+- [ ] Phase 4 — add the production-mediated input gateway.
+  - Implement idempotent semantic action guards, pre-dispatch source/frame/
+    owner checks, action-log and durable-audit pairing, running-battle and Home
+    capability bounds, and fail-closed cleanup.
+- [ ] Phase 5 — implement lifecycle continuation and owned validation.
+  - Return natural Game Over authority to production, service eligible Home
+    requests, and issue only a fresh next-battle token after initialization and
+    session preflight.
+  - Add the separate operator-authorized development-validation receipt,
+    ordinary-battle claim, Tournament exclusion, and exact cleanup ownership.
+- [ ] Phase 6 — complete integration and promotion hardening.
+  - Run the contract's unit, fake-clock, fake-runtime/fake-ADB, retained-frame,
+    API, concurrency, crash/restart, source-drift, Pause, and terminal/Home
+    matrix.
+  - After those gates pass, update the startup/operations guidance and perform
+    only the separately authorized live-validation sequence before production
+    promotion.
+
 ## Codebase maintenance
 
 - [ ] Audit the repository for unused or obsolete code, configuration, assets,

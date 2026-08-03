@@ -991,6 +991,13 @@ derives gate authority from warning text in `actions.log`.
 
 ## Planned evolution
 
+Production/development isolation, host-global emulator coordination, atomic
+external frame publication, and external authority leases are governed by the
+canonical
+[development isolation architecture](development_isolation.md). That target
+keeps production as the sole long-lived runtime and input owner; current
+repository-local locks and screenshots do not grant cross-worktree authority.
+
 An app-owned frame source and short-lived UI-state action lease are the intended
 direction for multi-frame decisions and latency-sensitive scheduled actions.
 The observer should publish frame sequence, observation time, state, and

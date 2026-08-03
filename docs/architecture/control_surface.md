@@ -742,6 +742,13 @@ Process request examples:
 
 ## Deliberately deferred capabilities
 
+The production control-surface service is also the planned host-global broker
+for isolated development, through a local per-user Unix socket rather than the
+Windows-forwarded HTTP surface. Its complete source, lease, frame, Pause,
+terminal-boundary, and audit contract is defined in
+[development_isolation.md](development_isolation.md). No current endpoint or
+worktree-local lock grants that authority.
+
 These are the next useful additions, in approximate priority order:
 
 1. Publish a small atomic runtime-status JSON snapshot directly from the
