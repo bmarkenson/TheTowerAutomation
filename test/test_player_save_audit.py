@@ -168,6 +168,7 @@ def _observation(
     perks=None,
     tail=None,
     source_label: str | None = None,
+    target_label: str = "localhost:5555",
     captured_at: datetime | None = None,
 ):
     captured = captured_at or START + timedelta(seconds=revision)
@@ -187,7 +188,7 @@ def _observation(
             else _perks(state="active_round" if active else "cleared")
         ),
         history_tail=tail or _tail("baseline", count=29),
-        target_fingerprint=_sha("localhost:5555"),
+        target_fingerprint=_sha(target_label),
         acquisition_started_at=captured - timedelta(milliseconds=125),
         acquisition_completed_at=captured + timedelta(milliseconds=25),
     )
@@ -594,6 +595,263 @@ def test_duplicate_terminal_save_can_seed_the_next_exact_home_baseline():
     comparison = saves[-1]["history_tail"]["baseline_comparison"]
     assert comparison["status"] == "candidate_tail_change"
     assert comparison["baseline_fingerprint"] == _sha("tail:first-terminal")
+
+
+def test_direct_retry_starts_a_new_round_from_the_prior_terminal_tail():
+    receipts: list[dict] = []
+    machine = _machine(receipts)
+    first_identity = _identity(counter=4, seed=111)
+    retry_identity = _identity(counter=5, seed=222)
+    first_round_pick = _pick(1, wave=50, perk_id=0, perk_key="max_health")
+    retry_first_pick = _pick(1, wave=80, perk_id=41, perk_key="game_speed")
+    retry_second_pick = _pick(
+        2,
+        wave=120,
+        perk_id=10,
+        perk_key="perk_wave_requirement",
+    )
+    first_terminal = _observation(
+        3,
+        active=False,
+        wave=0,
+        perks=_perks(state="cleared"),
+        tail=_tail("first-terminal", count=2),
+    )
+
+    assert machine.observe_save(
+        _observation(1, active=False, wave=0, tail=_tail("before", count=1)),
+        _request("HOME_NEW_BATTLE"),
+    )
+    assert machine.observe_save(
+        _observation(
+            2,
+            active=True,
+            wave=100,
+            identity=first_identity,
+            perks=_perks([first_round_pick]),
+            tail=_tail("before", count=1),
+        ),
+        _request("RUNNING", offset=1),
+    )
+    assert machine.observe_save(first_terminal, _request("GAME_OVER", offset=2))
+
+    # A Retry can be visible before the save advances. The duplicate terminal
+    # projection must not consume the retained baseline.
+    assert not machine.observe_save(
+        first_terminal,
+        _request("RUNNING", offset=3),
+    )
+    assert machine.observe_save(
+        _observation(
+            4,
+            active=True,
+            wave=90,
+            identity=retry_identity,
+            perks=_perks([retry_first_pick]),
+            tail=_tail("first-terminal", count=2),
+        ),
+        _request("RUNNING", offset=3),
+    )
+    assert machine.observe_save(
+        _observation(
+            5,
+            active=True,
+            wave=150,
+            identity=retry_identity,
+            perks=_perks([retry_first_pick, retry_second_pick]),
+            tail=_tail("first-terminal", count=2),
+        ),
+        _request(None, offset=4),
+    )
+    assert machine.observe_save(
+        _observation(
+            6,
+            active=False,
+            wave=0,
+            perks=_perks(state="cleared"),
+            tail=_tail("second-terminal", count=3),
+        ),
+        _request("GAME_OVER", offset=5),
+    )
+
+    saves = _records(receipts, "save_observation")
+    retry_first = saves[3]
+    assert retry_first["round"]["identity_status"] == (
+        "first_naturally_serialized_identity"
+    )
+    assert retry_first["history_tail"]["baseline_comparison"] == {
+        "status": "terminal_retry_baseline_carried",
+        "fingerprint": _sha("tail:first-terminal"),
+        "entry_count": 2,
+        "capacity": 30,
+        "terminal_save_revision": 3,
+        "terminal_evidence_status": "candidate_tail_change",
+        "transition": "passive_game_over_to_running",
+    }
+    assert retry_first["perks"]["progression"]["status"] == (
+        "initial_complete_checkpoint"
+    )
+    assert retry_first["perks"]["progression"]["delta"] == [retry_first_pick]
+    assert saves[4]["round"]["identity_status"] == "same_identity_newer_revision"
+    assert saves[4]["perks"]["progression"]["delta"] == [retry_second_pick]
+    retry_terminal = saves[5]
+    comparison = retry_terminal["history_tail"]["baseline_comparison"]
+    assert comparison["status"] == "candidate_tail_change"
+    assert comparison["baseline_fingerprint"] == _sha("tail:first-terminal")
+    assert retry_terminal["perks"]["last_complete_same_identity"] == {
+        "save_revision": 5,
+        "saved_wave": 150,
+        "picked_count": 2,
+        "fingerprint": _perks([retry_first_pick, retry_second_pick])["fingerprint"],
+    }
+
+
+def test_midbattle_collector_start_can_seed_the_next_direct_retry_baseline():
+    receipts: list[dict] = []
+    machine = _machine(receipts)
+
+    assert machine.observe_save(
+        _observation(
+            1,
+            active=True,
+            wave=100,
+            identity=_identity(counter=4, seed=111),
+            tail=_tail("before", count=1),
+        ),
+        _request("RUNNING"),
+    )
+    assert machine.observe_save(
+        _observation(
+            2,
+            active=False,
+            wave=0,
+            perks=_perks(state="cleared"),
+            tail=_tail("first-terminal", count=2),
+        ),
+        _request("GAME_OVER", offset=1),
+    )
+    assert machine.observe_save(
+        _observation(
+            3,
+            active=True,
+            wave=50,
+            identity=_identity(counter=5, seed=222),
+            tail=_tail("first-terminal", count=2),
+        ),
+        _request("RUNNING", offset=2),
+    )
+
+    saves = _records(receipts, "save_observation")
+    assert saves[1]["history_tail"]["baseline_comparison"]["status"] == (
+        "baseline_unavailable"
+    )
+    retry = saves[2]
+    assert retry["round"]["identity_status"] == (
+        "first_naturally_serialized_identity"
+    )
+    assert retry["history_tail"]["baseline_comparison"] == {
+        "status": "terminal_retry_baseline_carried",
+        "fingerprint": _sha("tail:first-terminal"),
+        "entry_count": 2,
+        "capacity": 30,
+        "terminal_save_revision": 2,
+        "terminal_evidence_status": "baseline_unavailable",
+        "transition": "passive_game_over_to_running",
+    }
+
+
+def test_direct_retry_after_an_unchanged_terminal_tail_stays_fail_closed():
+    receipts: list[dict] = []
+    machine = _machine(receipts)
+
+    assert machine.observe_save(
+        _observation(1, active=False, wave=0, tail=_tail("before", count=1)),
+        _request("HOME_NEW_BATTLE"),
+    )
+    assert machine.observe_save(
+        _observation(
+            2,
+            active=True,
+            wave=100,
+            identity=_identity(counter=4, seed=111),
+            tail=_tail("before", count=1),
+        ),
+        _request("RUNNING", offset=1),
+    )
+    assert machine.observe_save(
+        _observation(
+            3,
+            active=False,
+            wave=0,
+            perks=_perks(state="cleared"),
+            tail=_tail("before", count=1),
+        ),
+        _request("GAME_OVER", offset=2),
+    )
+    assert machine.observe_save(
+        _observation(
+            4,
+            active=True,
+            wave=50,
+            identity=_identity(counter=5, seed=222),
+            tail=_tail("before", count=1),
+        ),
+        _request("RUNNING", offset=3),
+    )
+
+    saves = _records(receipts, "save_observation")
+    assert saves[2]["history_tail"]["baseline_comparison"]["status"] == "unchanged"
+    retry = saves[3]
+    assert retry["round"]["identity_status"] == ("fail_closed_identity_discontinuity")
+    assert retry["history_tail"]["baseline_comparison"] == {"status": "not_evaluated"}
+    assert {item["code"] for item in retry["audit_outcomes"]} == {
+        "active_identity_discontinuity"
+    }
+
+
+def test_direct_retry_baseline_cannot_cross_an_exact_target_change():
+    receipts: list[dict] = []
+    machine = _machine(receipts)
+
+    assert machine.observe_save(
+        _observation(1, active=False, wave=0, tail=_tail("before", count=1)),
+        _request("HOME_NEW_BATTLE"),
+    )
+    assert machine.observe_save(
+        _observation(
+            2,
+            active=True,
+            wave=100,
+            identity=_identity(counter=4, seed=111),
+            tail=_tail("before", count=1),
+        ),
+        _request("RUNNING", offset=1),
+    )
+    assert machine.observe_save(
+        _observation(
+            3,
+            active=False,
+            wave=0,
+            perks=_perks(state="cleared"),
+            tail=_tail("first-terminal", count=2),
+        ),
+        _request("GAME_OVER", offset=2),
+    )
+    assert machine.observe_save(
+        _observation(
+            4,
+            active=True,
+            wave=50,
+            identity=_identity(counter=5, seed=222),
+            tail=_tail("first-terminal", count=2),
+            target_label="localhost:5565",
+        ),
+        _request("RUNNING", offset=3),
+    )
+
+    retry = _records(receipts, "save_observation")[-1]
+    assert retry["round"]["identity_status"] == ("fail_closed_identity_discontinuity")
+    assert retry["history_tail"]["baseline_comparison"] == {"status": "not_evaluated"}
 
 
 def test_identity_discontinuity_and_perk_regression_fail_closed_without_merging():

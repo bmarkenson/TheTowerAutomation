@@ -399,6 +399,7 @@ class PlayerSaveAuditStateMachine:
         self._last_complete_perks: Optional[dict[str, Any]] = None
         self._first_clearing_recorded = False
         self._terminal_candidate_fingerprint: Optional[str] = None
+        self._pending_retry_round: Optional[dict[str, Any]] = None
 
     def start_session(self) -> None:
         """Append the explicit process-local collector session identity."""
@@ -538,6 +539,14 @@ class PlayerSaveAuditStateMachine:
                         "capacity": baseline["capacity"],
                     }
 
+        if normalized["round_active"] and boundary == "RUNNING":
+            retry_comparison = self._begin_proven_retry_round(
+                normalized,
+                request=request,
+            )
+            if retry_comparison is not None:
+                baseline_comparison = retry_comparison
+
         round_payload: dict[str, Any] = {
             "active": normalized["round_active"],
             "saved_wave": normalized["saved_wave"],
@@ -620,6 +629,11 @@ class PlayerSaveAuditStateMachine:
                 round_active=normalized["round_active"],
                 terminal_revision_valid=terminal_revision_valid,
                 outcomes=outcomes,
+            )
+            self._retain_retry_round_baseline(
+                normalized,
+                request=request,
+                baseline_comparison=baseline_comparison,
             )
         history_payload["baseline_comparison"] = baseline_comparison
 
@@ -968,6 +982,82 @@ class PlayerSaveAuditStateMachine:
             ],
         }
 
+    def _retain_retry_round_baseline(
+        self,
+        normalized: Mapping[str, Any],
+        *,
+        request: AuditRequest,
+        baseline_comparison: Mapping[str, Any],
+    ) -> None:
+        """Retain one session-bound terminal tail for a possible direct Retry."""
+
+        if _boundary_label(request.boundary_label) != "GAME_OVER":
+            return
+        terminal_evidence_status = baseline_comparison.get("status")
+        if terminal_evidence_status not in {
+            "baseline_unavailable",
+            "candidate_tail_change",
+            "candidate_tail_change_reobserved",
+        }:
+            return
+        boundary_at = request.boundary_observed_at
+        if boundary_at is None:
+            return
+        baseline = _baseline_from_tail(normalized["history_tail"])
+        if baseline is None:
+            return
+        self._pending_retry_round = {
+            "baseline": baseline,
+            "target_fingerprint": normalized["target_fingerprint"],
+            "terminal_save_revision": normalized["save_revision"],
+            "terminal_source_fingerprint": normalized["source_fingerprint"],
+            "terminal_boundary_observed_at": boundary_at,
+            "terminal_evidence_status": terminal_evidence_status,
+        }
+
+    def _begin_proven_retry_round(
+        self,
+        normalized: Mapping[str, Any],
+        *,
+        request: AuditRequest,
+    ) -> Optional[dict[str, Any]]:
+        """Reset round-local state only across a proven terminal -> Retry edge."""
+
+        pending = self._pending_retry_round
+        identity = normalized["active_identity"]
+        running_at = request.boundary_observed_at
+        if pending is None or identity is None or running_at is None:
+            return None
+        if running_at <= pending["terminal_boundary_observed_at"]:
+            return None
+        if normalized["target_fingerprint"] != pending["target_fingerprint"]:
+            return None
+        if normalized["save_revision"] <= pending["terminal_save_revision"]:
+            return None
+        if normalized["source_fingerprint"] == pending["terminal_source_fingerprint"]:
+            return None
+        if identity["fingerprint"] == self._active_identity_fingerprint:
+            return None
+
+        observed_baseline = _baseline_from_tail(normalized["history_tail"])
+        if observed_baseline != pending["baseline"]:
+            return None
+
+        baseline = dict(pending["baseline"])
+        terminal_save_revision = pending["terminal_save_revision"]
+        terminal_evidence_status = pending["terminal_evidence_status"]
+        self._reset_round_state()
+        self._baseline = baseline
+        return {
+            "status": "terminal_retry_baseline_carried",
+            "fingerprint": baseline["fingerprint"],
+            "entry_count": baseline["entry_count"],
+            "capacity": baseline["capacity"],
+            "terminal_save_revision": terminal_save_revision,
+            "terminal_evidence_status": terminal_evidence_status,
+            "transition": "passive_game_over_to_running",
+        }
+
     def _remember_observation(
         self,
         key: tuple[int, str],
@@ -991,6 +1081,7 @@ class PlayerSaveAuditStateMachine:
         self._last_complete_perks = None
         self._first_clearing_recorded = False
         self._terminal_candidate_fingerprint = None
+        self._pending_retry_round = None
 
     def _emit(self, record_type: str, **payload: Any) -> bool:
         self._sequence += 1

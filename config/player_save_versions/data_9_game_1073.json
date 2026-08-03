@@ -110,23 +110,32 @@
       "false_value": "ready_after_recharge"
     }
   },
+  "auto_pick_order": {
+    "ranked_count": 18,
+    "tail_semantics": "unranked_perk_inventory_not_priority"
+  },
   "perk_ids": {
     "0": "max_health",
     "1": "damage",
+    "2": "health_regen",
     "3": "coins_bonus",
+    "4": "bounce_shot",
     "5": "interest",
     "6": "land_mine_damage",
     "7": "orbs",
     "8": "free_upgrade_chance",
+    "9": "defense_percent",
     "10": "perk_wave_requirement",
     "12": "game_speed",
     "13": "cash_bonus",
     "14": "defense_absolute",
+    "20": "smart_missiles",
     "21": "swamp_radius",
     "22": "death_wave_quantity",
     "23": "inner_land_mines",
     "24": "golden_tower_bonus",
     "25": "chain_lightning_damage",
+    "26": "chrono_field_duration",
     "27": "black_hole_duration",
     "28": "spotlight_damage",
     "40": "tower_damage_boss_health_tradeoff",
@@ -135,6 +144,8 @@
     "43": "enemies_damage_tradeoff",
     "44": "ranged_distance_tradeoff",
     "45": "enemy_speed_tradeoff",
+    "46": "cash_tradeoff",
+    "47": "health_regen_tradeoff",
     "48": "boss_health_tradeoff",
     "49": "lifesteal_knockback_tradeoff"
   },

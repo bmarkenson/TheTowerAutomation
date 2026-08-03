@@ -86,6 +86,7 @@ def _decoded_save() -> dict:
             25,
             23,
             1,
+            28,
             4,
         ],
         "firstPerkIndex": 10,
@@ -236,7 +237,9 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
         "Summon",
         "Scout",
     ]
-    assert snapshot.checks["perk_auto_pick_order"].value[-1] == "damage"
+    assert snapshot.checks["perk_auto_pick_order"].value[-1] == (
+        "spotlight_damage"
+    )
     assert not snapshot.checks["perk_auto_pick_order"].complete
     assert snapshot.checks["tournament_conditions"].value["summary_codes"] == [
         "DR",
@@ -409,20 +412,56 @@ def test_inactive_round_exposes_cleared_perks_without_active_identity(monkeypatc
     assert runtime.perks.picks == ()
 
 
+def test_live_cross_channel_perk_ids_are_mapped(monkeypatch):
+    decoded = _decoded_save()
+    expected = [
+        (2, "health_regen"),
+        (4, "bounce_shot"),
+        (9, "defense_percent"),
+        (20, "smart_missiles"),
+        (26, "chrono_field_duration"),
+        (46, "cash_tradeoff"),
+        (47, "health_regen_tradeoff"),
+    ]
+    decoded["currentWave"] = 800
+    decoded["perksPicked"] = [
+        {"wave": 100 * sequence, "perk": perk_id, "__class__": "PerkPick"}
+        for sequence, (perk_id, _key) in enumerate(expected, 1)
+    ]
+    decoded["perksPickedCount"] = len(expected)
+    decoded["perkLevel"] = [0] * 50
+    for perk_id, _key in expected:
+        decoded["perkLevel"][perk_id] = 1
+
+    runtime = _snapshot(monkeypatch, decoded).runtime_save
+
+    assert runtime is not None
+    assert runtime.perks_status == "observed"
+    assert runtime.perks is not None
+    assert [
+        (pick.perk_id, pick.perk_key) for pick in runtime.perks.picks
+    ] == expected
+
+
 def test_unknown_perk_id_fails_only_the_perk_component(monkeypatch):
     decoded = _decoded_save()
+    unmapped_id = next(
+        perk_id
+        for perk_id in range(50)
+        if str(perk_id) not in VERSION_MAPPING["perk_ids"]
+    )
     decoded["perksPicked"].append(
-        {"wave": 440, "perk": 46, "__class__": "PerkPick"}
+        {"wave": 440, "perk": unmapped_id, "__class__": "PerkPick"}
     )
     decoded["perksPickedCount"] = 5
-    decoded["perkLevel"][46] = 1
+    decoded["perkLevel"][unmapped_id] = 1
 
     runtime = _snapshot(monkeypatch, decoded).runtime_save
 
     assert runtime is not None
     assert runtime.perks is None
     assert runtime.perks_status == "unavailable"
-    assert runtime.perks_reason == "unmapped_perk_id:46"
+    assert runtime.perks_reason == f"unmapped_perk_id:{unmapped_id}"
     assert runtime.active_round_identity is not None
     assert runtime.battle_history_tail.structural_status == "observed"
 
@@ -702,6 +741,9 @@ def test_live_calibrated_auto_pick_ids_follow_the_ui_rank_order(monkeypatch):
         "damage",
     ]
     assert snapshot.checks["perk_auto_pick_order"].complete is False
+    assert snapshot.checks["perk_auto_pick_order"].reason == (
+        "excluded 1 unranked Auto Pick tail item(s) from priority evidence"
+    )
 
 
 def test_unknown_game_version_decodes_metadata_but_requires_ui(monkeypatch):

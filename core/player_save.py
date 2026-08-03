@@ -618,22 +618,53 @@ def _build_checks(
         reason=_unknown_id_reason("perk", ban_unknown),
     )
 
-    auto_order, order_unknown = _map_id_sequence(
-        decoded.get("autoPickOrder"),
-        perk_ids,
-        stop_on_unknown=True,
+    raw_auto_order = decoded.get("autoPickOrder")
+    auto_order_spec = mapping.get("auto_pick_order")
+    ranked_count = (
+        _optional_int(auto_order_spec.get("ranked_count"))
+        if isinstance(auto_order_spec, Mapping)
+        else None
     )
+    auto_order: list[str] = []
+    order_unknown: list[int] = []
+    order_complete = False
+    order_reason = "ranked Auto Pick count is unavailable"
+    if (
+        ranked_count is not None
+        and ranked_count > 0
+        and _is_sequence(raw_auto_order)
+    ):
+        ranked_raw = list(raw_auto_order[:ranked_count])
+        auto_order, order_unknown = _map_id_sequence(
+            ranked_raw,
+            perk_ids,
+            stop_on_unknown=True,
+        )
+        if order_unknown:
+            order_reason = _unknown_id_reason("ranked perk", order_unknown)
+        elif len(ranked_raw) != ranked_count:
+            order_reason = (
+                "ranked Auto Pick order is shorter than the exact-version "
+                f"count of {ranked_count}"
+            )
+        else:
+            unranked_count = max(0, len(raw_auto_order) - ranked_count)
+            order_complete = unranked_count == 0
+            order_reason = (
+                ""
+                if order_complete
+                else (
+                    f"excluded {unranked_count} unranked Auto Pick tail "
+                    "item(s) from priority evidence"
+                )
+            )
     checks["perk_auto_pick_order"] = SaveCheckEvidence(
         check_id="perk_auto_pick_order",
         status="observed" if auto_order else "unmapped",
         value=auto_order,
         source_fields=("autoPickOrder",),
-        complete=not order_unknown,
-        reason=(
-            _unknown_id_reason("trailing perk", order_unknown)
-            if order_unknown
-            else ""
-        ),
+        complete=order_complete,
+        reason=order_reason,
     )
 
     locks, unknown_locks = _mapped_free_upgrade_locks(decoded, mapping)
