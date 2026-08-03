@@ -37,6 +37,42 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-03 managed custom Module presets and native previews
+
+- Control-surface revision 25 adds
+  `managed_custom_module_presets_v1`, authoritative rich details for every
+  bundled and custom Module preset, and authenticated immutable save-as-new
+  creation from either a selected preset or a profile-local definition. The
+  revision-24 preset option and nested local-editor shapes remain additive and
+  compatible.
+- `config/loadouts/modules.yaml` remains immutable. One injected, server-owned
+  custom store merges fixed-name operator files deterministically and enforces
+  safe IDs, bounded no-follow reads, durable atomic creation, locking,
+  deterministic crash recovery, collision/shadow rejection, and the existing
+  exact eight-slot Module normalizer. Registry options, legacy summaries,
+  resolution, publication, and preview metadata all use that merged catalog.
+- Native Strategy Authoring now shows every selected Module preset's eight slot
+  names and assigned Modules plus its bundled read-only or custom immutable
+  lifecycle. **Create variant...** is available from bundled or custom
+  selections, including read-only rows; **Save as preset...** uses the existing
+  metadata-driven local fields. Successful editable-row creation explicitly
+  selects the new preset while preserving the dormant local draft and ordinary
+  Validate → Review → Publish boundary. Read-only/inactive rows retain their
+  selection. Failure retains the complete draft and selections, and missing
+  capability hides management controls.
+- Custom-preset Base/Strategy publication, history comparison, restore-as-new,
+  and plan loading retain normalized evidence and remain valid after the later
+  catalog is unavailable. Preset creation cannot publish, select, or activate a
+  Base or Strategy; APIs expose neither expanded plans nor filesystem paths.
+- Focused authoring/storage/control-surface validation passed all 185 tests,
+  the post-hardening Module store/API run passed all 42 tests, and the complete
+  Python suite passed all 1,257 tests. The final portable native authoring suite
+  passed all 69 tests, WPF static coverage passed all 13 tests, `git diff
+  --check` passed, and Linux cross-publishing produced both standalone
+  executables. No process, control state, ADB target, emulator, game, or Windows
+  runtime was inspected or changed. The revision-25 package still requires the
+  expanded visible disposable-catalog Windows smoke.
+
 ### 2026-08-02 observation-only natural-boundary save audit collector
 
 - `V1073-RUNTIME-013` now provides a default-disabled CLI/environment opt-in,

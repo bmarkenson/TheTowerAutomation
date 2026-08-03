@@ -452,14 +452,28 @@ stages:
       the portable native suite covers exact values, malformed drafts,
       duplicate prevention, ordering, and dormant form/source-state round
       trips. Linux cross-publish passes.
+    - [x] Add managed installation-local custom Module presets without making
+      shared preset references mutable. Revision 25 and
+      `managed_custom_module_presets_v1` now expose one authoritative merged
+      bundled/custom catalog with full normalized eight-slot details, immutable
+      save-as-new creation from a selected preset or local definition, fixed
+      server-owned storage, collision/atomicity/concurrency protection, and
+      self-contained publication/history/restore regression coverage. The WPF
+      editor labels bundled/custom lifecycle, previews every slot, refreshes
+      options without transient selection loss, explicitly selects a created
+      preset, retains failed drafts, and leaves Validate → Review → Publish
+      pending. Linux cross-publish passes.
     - [ ] Run the disposable-catalog Windows runtime smoke for Base and Strategy
       preset/local editing, inheritance/override/Ignore, validation errors,
-      review/publish, history comparison, and restore-as-new. Make only narrow
-      repairs supported by that runtime evidence; publication must not activate
-      or otherwise change automation state.
+      complete Module preset previews, bundled/custom labels, Create variant,
+      Save as preset, catalog refresh/explicit selection, collision/failure
+      retention, review/publish, history comparison, and restore-as-new. Make
+      only narrow repairs supported by that runtime evidence; preset creation
+      and publication must not activate or otherwise change automation state.
       The 2026-08-03 attempt exposed the profile-local Module blank-selection
       defect fixed by `7e4c7a2`; visible eight-slot revalidation with the
-      repaired package remains required after changing a Module choice.
+      repaired revision-25 package remains required after changing a Module
+      choice and after creating each kind of custom preset.
   - [x] Refine running-battle validation into an explicit strategy gate so
     observation and allowlisted independent collectors can continue while
     strategy and lifecycle actions are blocked. Validate this authority split

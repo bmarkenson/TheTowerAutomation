@@ -13,7 +13,7 @@ from pathlib import Path
 import secrets
 import sys
 import threading
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 from urllib.parse import parse_qs, unquote, urlsplit
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -130,7 +130,12 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
             self._json_error(HTTPStatus.BAD_REQUEST, "Malformed JSON body")
             return
         except ControlSurfaceRequestError as exc:
-            self._json_error(exc.status, str(exc))
+            self._json_error(
+                exc.status,
+                str(exc),
+                code=exc.code,
+                details=exc.details,
+            )
             return
         self._send_json(HTTPStatus.OK, response)
 
@@ -270,8 +275,20 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _json_error(self, status: int, message: str) -> None:
-        self._send_json(status, {"error": message})
+    def _json_error(
+        self,
+        status: int,
+        message: str,
+        *,
+        code: Optional[str] = None,
+        details: Optional[Mapping[str, Any]] = None,
+    ) -> None:
+        payload: dict[str, Any] = {"error": message}
+        if code:
+            payload["code"] = code
+        if details:
+            payload["details"] = dict(details)
+        self._send_json(status, payload)
 
     def _security_headers(self) -> None:
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -342,6 +359,14 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--repository-root", default=str(PROJECT_ROOT))
     parser.add_argument("--control-file", default="logs/automation_ctl.json")
     parser.add_argument("--action-log", default="logs/actions.log")
+    parser.add_argument(
+        "--module-preset-directory",
+        default="config/loadouts/custom/modules",
+        help=(
+            "Server-owned custom Module preset directory, relative to the "
+            "repository root unless absolute"
+        ),
+    )
     parser.add_argument("--battles-dir", default="logs/battles")
     parser.add_argument("--tournaments-dir", default="logs/tournaments")
     parser.add_argument(
@@ -444,6 +469,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         stale_after_seconds=args.stale_after_seconds,
         process_manager=process_manager,
         strategy_profile_dir=strategy_profile_dir,
+        module_preset_dir=args.module_preset_directory,
     )
     try:
         server = ControlSurfaceHTTPServer(

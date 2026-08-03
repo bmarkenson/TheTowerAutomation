@@ -35,6 +35,10 @@ from core.free_upgrade_locks import (
 )
 from core.gate_decisions import PROFILE_SKIPPABLE_CHECKS, normalize_profile_skip_checks
 from core.gc_module_loadout import normalize_gc_module_requirements
+from core.module_presets import (
+    BUNDLED_MODULE_PRESETS_PATH,
+    MODULE_PRESET_CATALOG_ID,
+)
 from core.module_icon_index import load_module_icon_catalog
 from core.orb_distance import (
     normalize_orb_distance_preset,
@@ -56,7 +60,7 @@ FARM_RUN_PROFILE_PATH = PROJECT_ROOT / "config" / "run_profiles" / "farm.yaml"
 FARM_DEFAULT_STRATEGY_SOURCE_PATH = (
     PROJECT_ROOT / "config" / "strategies" / "farm_t18.source.yaml"
 )
-MODULE_PRESETS_PATH = PROJECT_ROOT / "config" / "loadouts" / "modules.yaml"
+MODULE_PRESETS_PATH = BUNDLED_MODULE_PRESETS_PATH
 ORB_DISTANCE_PRESETS_PATH = (
     PROJECT_ROOT / "config" / "loadouts" / "orb_distances.yaml"
 )
@@ -110,13 +114,25 @@ class SettingDefinition:
     observation_supported: bool
     repair_supported: bool
 
-    def catalog_item(self) -> dict[str, Any]:
+    def catalog_item(
+        self,
+        *,
+        module_preset_catalog: Optional[Mapping[str, Any]] = None,
+    ) -> dict[str, Any]:
         try:
             initial_value = self.normalizer(self.initial_value_factory())
+            raw_editor = self.editor_metadata_factory(
+                copy.deepcopy(initial_value)
+            )
+            if self.id == "modules" and module_preset_catalog is not None:
+                raw_editor = _merge_module_preset_editor_metadata(
+                    raw_editor,
+                    module_preset_catalog,
+                )
             editor = _validate_editor_metadata(
                 self,
                 initial_value,
-                self.editor_metadata_factory(copy.deepcopy(initial_value)),
+                raw_editor,
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise StrategyAuthoringError(
@@ -511,6 +527,47 @@ def _preset_editor(path: Path, setting_id: str) -> EditorMetadataFactory:
         }
 
     return metadata
+
+
+def _merge_module_preset_editor_metadata(
+    raw_editor: Mapping[str, Any],
+    module_preset_catalog: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Replace only Module option values from one validated merged snapshot.
+
+    The revision-24 field/option wire shape remains unchanged. Rich preset
+    details are returned separately by the authoring catalog.
+    """
+
+    editor = copy.deepcopy(dict(raw_editor))
+    fields = editor.get("fields")
+    items = module_preset_catalog.get("items")
+    if (
+        not isinstance(fields, list)
+        or len(fields) != 1
+        or not isinstance(fields[0], Mapping)
+        or not isinstance(items, list)
+        or not items
+    ):
+        raise ValueError("merged Module preset catalog is incomplete")
+    options: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in items:
+        if not isinstance(item, Mapping):
+            raise ValueError("merged Module preset items must be objects")
+        identifier = str(item.get("id") or "").strip()
+        display_name = str(item.get("display_name") or "").strip()
+        if not identifier or not display_name or identifier in seen:
+            raise ValueError("merged Module preset IDs and names must be unique")
+        options.append(_editor_option(identifier, display_name))
+        seen.add(identifier)
+    fields[0]["options"] = options
+    fields[0]["fixed"] = len(options) == 1
+    editor["fixed"] = len(options) == 1
+    if module_preset_catalog.get("id") != MODULE_PRESET_CATALOG_ID:
+        raise ValueError("merged Module preset catalog has the wrong identity")
+    editor["preset_catalog"] = MODULE_PRESET_CATALOG_ID
+    return editor
 
 
 def _local_definition_initial(setting_id: str, initial_value: Any) -> Any:
@@ -1390,6 +1447,7 @@ def _validate_editor_metadata(
         "groups",
         "server_normalized_text",
         "local_editor",
+        "preset_catalog",
     }
     unknown_top = sorted(set(raw_metadata) - allowed_top_fields)
     if unknown_top:
@@ -1427,6 +1485,15 @@ def _validate_editor_metadata(
         raise ValueError("initial_value is not in canonical normalized form")
     if "local_editor" in metadata and definition.editor_type != "preset":
         raise ValueError("local_editor metadata is supported only for preset editors")
+    if "preset_catalog" in metadata:
+        preset_catalog = str(metadata.get("preset_catalog") or "").strip()
+        if definition.editor_type != "preset" or "local_editor" not in metadata:
+            raise ValueError(
+                "preset_catalog metadata requires a preset editor with a local editor"
+            )
+        if not _SAFE_ID_RE.fullmatch(preset_catalog):
+            raise ValueError("preset_catalog must be a safe identifier")
+        metadata["preset_catalog"] = preset_catalog
 
     if definition.editor_type in {"fixed_value", "boolean"}:
         options = _validated_editor_options(
@@ -1854,10 +1921,16 @@ def _validate_editor_metadata(
     return copy.deepcopy(metadata)
 
 
-def setting_registry_catalog() -> list[dict[str, Any]]:
+def setting_registry_catalog(
+    *,
+    module_preset_catalog: Optional[Mapping[str, Any]] = None,
+) -> list[dict[str, Any]]:
     """Return the serializable, behavior-free view of the Farm registry."""
 
-    return [definition.catalog_item() for definition in _SETTING_DEFINITIONS]
+    return [
+        definition.catalog_item(module_preset_catalog=module_preset_catalog)
+        for definition in _SETTING_DEFINITIONS
+    ]
 
 
 def normalize_base_source(
@@ -2052,6 +2125,8 @@ def upgrade_authoring_source_schema(raw_source: object) -> dict[str, Any]:
 def _current_definition_snapshot(
     setting_id: str,
     selector: Mapping[str, Any],
+    *,
+    module_preset_definitions: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
     """Resolve one source selector against the current shared catalogs."""
 
@@ -2061,15 +2136,18 @@ def _current_definition_snapshot(
         )
     if set(selector) == {"preset"}:
         preset = str(selector["preset"])
-        catalog = _load_yaml_mapping(
-            _LOADOUT_PRESET_PATHS[setting_id],
-            f"{setting_id} preset catalog",
-        )
-        if catalog.get("schema_version") != 1:
-            raise StrategyAuthoringError(
-                f"{setting_id} preset catalog has an unsupported schema"
+        if setting_id == "modules" and module_preset_definitions is not None:
+            presets: object = module_preset_definitions
+        else:
+            catalog = _load_yaml_mapping(
+                _LOADOUT_PRESET_PATHS[setting_id],
+                f"{setting_id} preset catalog",
             )
-        presets = catalog.get("presets")
+            if catalog.get("schema_version") != 1:
+                raise StrategyAuthoringError(
+                    f"{setting_id} preset catalog has an unsupported schema"
+                )
+            presets = catalog.get("presets")
         if not isinstance(presets, Mapping) or preset not in presets:
             raise StrategyAuthoringError(
                 f"unknown {setting_id} preset {preset!r}"
@@ -2269,6 +2347,7 @@ def resolve_strategy_source(
     base_resolution_snapshot: object = None,
     retained_resolution: object = None,
     require_base_definition_snapshots: bool = False,
+    module_preset_definitions: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
     """Resolve one sparse source against zero or one exact base snapshot."""
 
@@ -2278,6 +2357,7 @@ def resolve_strategy_source(
         base_resolution_snapshot=base_resolution_snapshot,
         retained_resolution=retained_resolution,
         require_base_definition_snapshots=require_base_definition_snapshots,
+        module_preset_definitions=module_preset_definitions,
     )
     errors = analysis["errors"]
     if errors:
@@ -2292,6 +2372,7 @@ def analyze_strategy_source(
     base_resolution_snapshot: object = None,
     retained_resolution: object = None,
     require_base_definition_snapshots: bool = False,
+    module_preset_definitions: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
     """Resolve source intent while retaining dependency errors for review.
 
@@ -2385,7 +2466,11 @@ def analyze_strategy_source(
             # resolution.  Ordinary schema-2 drafts are migrated before
             # publication and still validate their current preset here.
             if retained_resolution is None:
-                _current_definition_snapshot(setting_id, selector)
+                _current_definition_snapshot(
+                    setting_id,
+                    selector,
+                    module_preset_definitions=module_preset_definitions,
+                )
             continue
 
         raw_retained_snapshot = _resolution_definition_snapshot(
@@ -2446,7 +2531,11 @@ def analyze_strategy_source(
         elif retained_snapshot is not None:
             snapshot = retained_snapshot
         else:
-            snapshot = _current_definition_snapshot(setting_id, selector)
+            snapshot = _current_definition_snapshot(
+                setting_id,
+                selector,
+                module_preset_definitions=module_preset_definitions,
+            )
         entry["definition_snapshot"] = snapshot
 
     errors: list[dict[str, Any]] = []
@@ -2487,6 +2576,8 @@ def analyze_strategy_source(
 def describe_base_resolution(
     base_source: object,
     retained_resolution: object = None,
+    *,
+    module_preset_definitions: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
     """Project sparse Base entries through the authoritative resolver.
 
@@ -2515,6 +2606,7 @@ def describe_base_resolution(
         base,
         base_resolution_snapshot=retained_resolution,
         retained_resolution=retained_resolution,
+        module_preset_definitions=module_preset_definitions,
     )
     return copy.deepcopy(analysis["resolution"])
 
@@ -2598,6 +2690,7 @@ def preview_strategy_rebase(
     *,
     current_base_resolution_snapshot: object = None,
     target_base_resolution_snapshot: object = None,
+    module_preset_definitions: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
     """Compute the complete semantic review for an explicit Base rebase."""
 
@@ -2641,6 +2734,7 @@ def preview_strategy_rebase(
         require_base_definition_snapshots=(
             current_base_resolution_snapshot is not None
         ),
+        module_preset_definitions=module_preset_definitions,
     )
     rebased_source = copy.deepcopy(source)
     rebased_source["base"] = {
@@ -2654,6 +2748,7 @@ def preview_strategy_rebase(
         require_base_definition_snapshots=(
             target_base_resolution_snapshot is not None
         ),
+        module_preset_definitions=module_preset_definitions,
     )
     current_resolution = current_analysis["resolution"]
     target_resolution = target_analysis["resolution"]
@@ -2946,10 +3041,20 @@ def farm_source_from_resolution(
 class StrategyBaseStore:
     """Publish and load immutable sparse base revisions from fixed names."""
 
-    def __init__(self, base_directory: Path | str) -> None:
+    def __init__(
+        self,
+        base_directory: Path | str,
+        *,
+        module_preset_definitions_factory: Optional[
+            Callable[[], Mapping[str, Any]]
+        ] = None,
+    ) -> None:
         expanded = Path(base_directory).expanduser()
         self.base_directory = Path(os.path.abspath(expanded))
         self._publish_lock = threading.Lock()
+        self._module_preset_definitions_factory = (
+            module_preset_definitions_factory
+        )
 
     def publish(
         self,
@@ -2996,7 +3101,14 @@ class StrategyBaseStore:
                         )
                     revision = int(latest["snapshot"]["revision"]) + 1
                 snapshot = normalize_base_source(upgraded, revision=revision)
-                resolution = describe_base_resolution(snapshot)
+                resolution = describe_base_resolution(
+                    snapshot,
+                    module_preset_definitions=(
+                        self._module_preset_definitions_factory()
+                        if self._module_preset_definitions_factory is not None
+                        else None
+                    ),
+                )
                 publication = {
                     "schema_version": BASE_PUBLICATION_SCHEMA_VERSION,
                     "kind": "strategy_base_revision",

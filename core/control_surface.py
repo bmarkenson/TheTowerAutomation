@@ -38,6 +38,7 @@ from core.host_performance import (
     HostPerformanceStorageError,
     HostPerformanceStore,
 )
+from core.module_presets import ModulePresetConflictError, ModulePresetError
 from core.strategy_profiles import (
     STRATEGY_AUTHORING_OPERATIONS,
     StrategyProfileConflictError,
@@ -52,7 +53,7 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 24
+CONTROL_SURFACE_REVISION = 25
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -65,6 +66,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "game_speed_target",
     "host_performance_gpu_v1",
     "host_performance_telemetry_v1",
+    "managed_custom_module_presets_v1",
     "observed_game_speed",
     "selected_strategy_process_start",
     "strategy_action_gate_v1",
@@ -138,9 +140,18 @@ _STRATEGY_ACK_RE = re.compile(
 class ControlSurfaceRequestError(ValueError):
     """A rejected GUI request with an HTTP-friendly status code."""
 
-    def __init__(self, message: str, *, status: int = 400) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int = 400,
+        code: Optional[str] = None,
+        details: Optional[Mapping[str, Any]] = None,
+    ) -> None:
         super().__init__(message)
         self.status = status
+        self.code = code
+        self.details = dict(details or {})
 
 
 class ControlSurfaceService:
@@ -169,6 +180,7 @@ class ControlSurfaceService:
         stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS,
         process_manager: Optional[SystemdAutomationManager] = None,
         strategy_profile_dir: Path | str = "config/strategies/custom",
+        module_preset_dir: Path | str = "config/loadouts/custom/modules",
     ) -> None:
         self.repository_root = Path(repository_root).resolve()
         self.control_path = self._resolve_path(control_file)
@@ -194,8 +206,10 @@ class ControlSurfaceService:
         )
         self.stale_after_seconds = max(1, int(stale_after_seconds))
         self.strategy_profile_dir = self._resolve_path(strategy_profile_dir)
+        self.module_preset_dir = self._resolve_path(module_preset_dir)
         self.profile_store = StrategyProfileStore(
             profile_directory=self.strategy_profile_dir,
+            module_preset_directory=self.module_preset_dir,
             audit_callback=self._append_audit,
         )
         self.control_store = ControlDirectiveStore(
@@ -292,6 +306,30 @@ class ControlSurfaceService:
                     request.get("source"),
                     request.get("target_base"),
                 )
+            elif operation == "create_module_preset":
+                if set(request) != {
+                    "operation",
+                    "id",
+                    "display_name",
+                    "source",
+                }:
+                    raise ModulePresetError(
+                        "Module preset creation requires exactly operation, id, "
+                        "display_name, and source",
+                        code="invalid_module_preset_request",
+                        field="request",
+                    )
+                preset = self.profile_store.create_module_preset(
+                    request.get("id"),
+                    request.get("display_name"),
+                    request.get("source"),
+                )
+                response = {
+                    "valid": True,
+                    "published": False,
+                    "preset": preset,
+                    "publication_activates_strategy": False,
+                }
             elif operation == "compare_strategy_revision":
                 response = self.profile_store.compare_strategy_revision(
                     request.get("strategy_id"),
@@ -380,6 +418,20 @@ class ControlSurfaceService:
                     "retired": True,
                     "retirement": retirement,
                 }
+        except ModulePresetConflictError as exc:
+            raise ControlSurfaceRequestError(
+                str(exc),
+                status=409,
+                code=exc.code,
+                details={"field": exc.field} if exc.field else None,
+            ) from exc
+        except ModulePresetError as exc:
+            raise ControlSurfaceRequestError(
+                str(exc),
+                status=400,
+                code=exc.code,
+                details={"field": exc.field} if exc.field else None,
+            ) from exc
         except StrategyProfileConflictError as exc:
             raise ControlSurfaceRequestError(str(exc), status=409) from exc
         except StrategyProfileError as exc:
@@ -439,6 +491,22 @@ class ControlSurfaceService:
             audit_warnings = [item for item in warnings if item]
             if audit_warnings:
                 response["warning"] = "; ".join(audit_warnings)
+        elif operation == "create_module_preset":
+            preset = response["preset"]
+            source = request.get("source")
+            source_kind = (
+                "selected preset"
+                if isinstance(source, Mapping) and set(source) == {"preset"}
+                else "profile-local definition"
+            )
+            audit_warning = self._append_audit(
+                "Created immutable custom Module preset "
+                f"{preset.get('id')} from {source_kind}; Base/Strategy "
+                "publication, selection, and activation unchanged"
+            )
+            response["catalog"] = self.profile_store.authoring_catalog()
+            if audit_warning:
+                response["warning"] = audit_warning
         return response
 
     def apply_strategy_profile(

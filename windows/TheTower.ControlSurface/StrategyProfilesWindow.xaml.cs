@@ -291,7 +291,8 @@ public partial class StrategyProfilesWindow : Window
                 dormantValues is not null
                     && dormantValues.TryGetValue(definition.Id, out var dormant)
                         ? dormant
-                        : null);
+                        : null,
+                _catalog.ModulePresets);
             row.PropertyChanged += Row_PropertyChanged;
             _rows.Add(row);
         }
@@ -1143,6 +1144,181 @@ public partial class StrategyProfilesWindow : Window
             row.LocalDefinitionEditor?.MoveListItem(
                 button.CommandParameter as StrategyEditorOption,
                 1);
+        }
+    }
+
+    private async void CreateModuleVariant_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext
+            is AuthoringSettingRowViewModel row)
+        {
+            await CreateManagedModulePresetAsync(row, fromLocalDefinition: false);
+        }
+    }
+
+    private async void SaveModulePreset_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext
+            is AuthoringSettingRowViewModel row)
+        {
+            await CreateManagedModulePresetAsync(row, fromLocalDefinition: true);
+        }
+    }
+
+    private async Task CreateManagedModulePresetAsync(
+        AuthoringSettingRowViewModel row,
+        bool fromLocalDefinition)
+    {
+        if (_busy
+            || _catalog is null
+            || (fromLocalDefinition
+                ? !row.CanSaveModulePreset
+                : !row.CanCreateModuleVariant))
+        {
+            ShowFailure(
+                "Managed Module preset creation is unavailable for the current editor selection.");
+            return;
+        }
+
+        string explanation;
+        string suggestedId;
+        string suggestedName;
+        var existingIds = _catalog.ModulePresets.Items.Select(item => item.Id);
+        if (fromLocalDefinition)
+        {
+            var ownerId = string.IsNullOrWhiteSpace(EntityIdBox.Text)
+                ? "custom"
+                : EntityIdBox.Text.Trim();
+            suggestedId = SuggestedId($"{ownerId}_modules", existingIds);
+            var ownerName = string.IsNullOrWhiteSpace(DisplayNameBox.Text)
+                ? "Custom"
+                : DisplayNameBox.Text.Trim();
+            suggestedName = $"{ownerName} Modules";
+            explanation =
+                "Save the current profile-local eight-slot definition as a new immutable custom preset. The open Base or Strategy will switch to the new preset only after Linux confirms creation.";
+        }
+        else if (row.SelectedModulePreset is { } selected)
+        {
+            suggestedId = SuggestedId($"{selected.Id}_variant", existingIds);
+            suggestedName = $"{selected.DisplayName} Variant";
+            explanation =
+                $"Create a new immutable custom variant of {selected.DisplayName}. The source preset remains read-only.";
+        }
+        else
+        {
+            ShowFailure("The selected Module preset has no authoritative preview metadata.");
+            return;
+        }
+        if (suggestedName.Length > 80)
+        {
+            suggestedName = suggestedName[..80].TrimEnd();
+        }
+
+        var dialog = new ModulePresetNameWindow(
+            explanation,
+            suggestedName,
+            suggestedId)
+        {
+            Owner = this,
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            StatusText.Text =
+                "Module preset creation cancelled; the current draft is unchanged.";
+            StatusText.Foreground = (Brush)FindResource("MutedBrush");
+            return;
+        }
+
+        ModulePresetCreationRequest request;
+        var selectCreatedPreset = row.CanSelectCreatedModulePreset;
+        try
+        {
+            request = fromLocalDefinition
+                ? row.BuildSaveModulePresetRequest(
+                    dialog.PresetId,
+                    dialog.PresetDisplayName)
+                : row.BuildCreateModuleVariantRequest(
+                    dialog.PresetId,
+                    dialog.PresetDisplayName);
+        }
+        catch (Exception exc)
+        {
+            ShowFailure(exc.Message);
+            return;
+        }
+
+        SetBusy(true, $"Creating immutable Module preset {request.Id}...");
+        try
+        {
+            using var cancellation = new CancellationTokenSource(
+                TimeSpan.FromSeconds(120));
+            var response = await _api.PostStrategyAuthoringAsync(
+                request,
+                cancellation.Token);
+            if (!response.Valid
+                || response.Published
+                || response.PublicationActivatesStrategy
+                || response.Preset is not { Origin: "custom" } created
+                || response.Catalog is null
+                || !string.Equals(created.Id, request.Id, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "Linux did not confirm an unpublished immutable custom Module preset.");
+            }
+            var refreshedDefinition = response.Catalog.SettingRegistry.Single(
+                definition => string.Equals(
+                    definition.Id,
+                    row.Id,
+                    StringComparison.Ordinal));
+            row.ReconcileModulePresetCatalog(
+                refreshedDefinition,
+                response.Catalog.ModulePresets,
+                created.Id,
+                selectCreatedPreset);
+            _catalog = response.Catalog;
+
+            var success =
+                $"Created custom Module preset {created.DisplayName} ({created.Id}). ";
+            if (selectCreatedPreset)
+            {
+                success +=
+                    "This row now explicitly selects it; Validate → Review → Publish "
+                    + "is still required. ";
+            }
+            else
+            {
+                success +=
+                    "The catalog refreshed immediately; this read-only or inactive "
+                    + "row remains unchanged. ";
+            }
+            success +=
+                "No Base or Strategy was published, selected, or activated.";
+            if (!string.IsNullOrWhiteSpace(response.Warning))
+            {
+                success += $" Audit warning: {response.Warning}";
+            }
+            StatusText.Text = success;
+            StatusText.Foreground = new SolidColorBrush(Color.FromRgb(101, 230, 166));
+            ValidationSummaryText.Text = selectCreatedPreset
+                ? "The Module preset catalog was refreshed. Validate the changed draft before review and publication."
+                : "The Module preset catalog was refreshed; the current Base or Strategy draft was not changed.";
+            ValidationSummaryText.Foreground = new SolidColorBrush(
+                Color.FromRgb(241, 191, 91));
+        }
+        catch (Exception exc)
+        {
+            ShowFailure(
+                $"Module preset was not created: {exc.Message} The current draft and selections remain open.");
+            ValidationSummaryText.Text =
+                "Preset creation failed; the Base or Strategy draft was retained and nothing was published or activated.";
+        }
+        finally
+        {
+            SetBusy(false);
         }
     }
 

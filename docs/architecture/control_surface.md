@@ -253,11 +253,11 @@ memory only. The API deliberately sends no CORS permission.
 | `POST` | `/api/v1/host-performance` | Bounded, idempotent batches of native Windows host/BlueStacks performance aggregates |
 | `GET` | `/api/v1/strategy-profiles` | Bundled/custom profile summaries plus the allowlisted Farm policy and preset catalogs |
 | `POST` | `/api/v1/strategy-profiles` | Validate a constrained Farm draft or atomically publish its source and generated plan |
-| `GET` | `/api/v1/strategy-authoring` | Registry metadata, separate Base/Strategy catalogs, editable source, effective resolution/provenance, compatible Base revisions, capabilities, and catalog errors |
+| `GET` | `/api/v1/strategy-authoring` | Registry metadata, separate Base/Strategy catalogs, authoritative merged Module preset details, editable source, effective resolution/provenance, compatible Base revisions, capabilities, and catalog errors |
 | `GET` | `/api/v1/strategy-authoring/history` | Newest-first immutable custom-Strategy lineage and revision summaries, including retired lineages, without expanded plans |
 | `GET` | `/api/v1/strategy-authoring/history/{id}` | One custom Strategy lineage and its ordered revision summaries |
 | `GET` | `/api/v1/strategy-authoring/history/{id}/{version}` | One retained revision's review-safe source, Base snapshot, resolution, fingerprints, audit identity, and validation state without its generated plan |
-| `POST` | `/api/v1/strategy-authoring` | Validate or publish Base/Strategy source, preview a Base pin, compare retained revisions, or review/confirm restore-as-new, without activation |
+| `POST` | `/api/v1/strategy-authoring` | Validate or publish Base/Strategy source, preview a Base pin, create an immutable custom Module preset, compare retained revisions, or review/confirm restore-as-new, without activation |
 | `GET` | `/api/v1/battles?limit=N` | Newest Battle and Tournament summaries |
 | `GET` | `/api/v1/battles/{battle_id}` | One full structured battle record |
 | `GET` | `/api/v1/activity?limit=N&levels=ERROR,WARN&scope=current_run&after=CURSOR` | Recent structured action-log entries, optionally filtered by level, explicit run scope, and opaque clear-view cursor |
@@ -314,24 +314,30 @@ existing process API and its normal next-boundary or active-battle semantics.
 
 ## Sparse strategy authoring
 
-Server revision 24 preserves `strategy_authoring_v1`,
+Server revision 25 preserves `strategy_authoring_v1`,
 `strategy_authoring_specialized_editors_v1`,
 `strategy_authoring_profile_lifecycle_v1`, `strategy_action_gate_v1`, and every
 older capability, retains `strategy_revision_history_v1`, and advertises
+`managed_custom_module_presets_v1` after revision 24 added
 `strategy_authoring_local_loadout_editors_v1`. The additive
 `/api/v1/strategy-authoring` endpoint implements the sparse Base/Strategy model
 without changing `/api/v1/strategy-profiles`, `strategy_profile_catalog_v1`, or
 `strategy_profile_editor_v2`. Pre-authoring native clients therefore keep using
 their existing latest-only facade. The revision-23 authoring client retains its exact
-preset-only metadata path against the newer service. The revision-24 client
-requires the retained authoring, Strategy Gate, history, and local-loadout
-capabilities and fails compatibility clearly against an older resident service.
+preset-only metadata path against the newer service. Revision-24 option and
+local-editor wire shapes remain unchanged. The revision-25 client requires the
+retained authoring, Strategy Gate, history, local-loadout, and managed Module
+preset capabilities and fails compatibility clearly against an older resident
+service.
 
 The GET response carries the setting registry, normalized initial values,
 behavior-free specialized-editor metadata, safe editor catalogs, separate Base
 and Strategy collections, normalized source documents, effective resolution
 and provenance, latest compatible Base revisions, structured capabilities, and
-catalog errors. Metadata declares choices, object fields, list constraints,
+catalog errors. The Module entry links to a merged detail catalog whose items
+carry ID, display name, bundled/custom origin, immutable editability state,
+normalized definition, and all eight ordered slot labels/families/roles/Module
+assignments. Metadata declares choices, object fields, list constraints,
 dependencies, defaults, and toggle restrictions; Python normalizers and action
 generation remain private. Modules, Target Priority, and Orb Distance retain
 their top-level revision-23 `preset` editor contract and add a schema-versioned
@@ -356,12 +362,36 @@ drafts, and validation-driven row reconstruction keeps those dormant values. A
 server-supplied initial value is used when an omitted setting or form is first
 materialized. The client does not implement a second normalizer or resolver.
 
+Bundled Module presets remain in immutable `config/loadouts/modules.yaml`.
+Custom presets use the server-owned, Git-ignored
+`config/loadouts/custom/modules` directory (or an injected disposable root)
+with fixed names, bounded no-follow reads, locking, durable atomic create, and
+collision rejection. One deterministic merged catalog supplies registry
+options, detail metadata, legacy summaries, and prospective resolution; custom
+IDs cannot shadow bundled IDs. Neither requests nor responses contain catalog
+paths.
+
+The WPF Module shared-preset form shows all eight authoritative slot
+assignments; it labels bundled presets read-only and custom presets immutable.
+**Create variant** can copy either origin and **Save as preset** submits the
+current metadata-driven local definition. Both are save-as-new: no overwrite,
+rename, deletion, or retirement exists. A successful create refreshes options
+incrementally, preserves every retained selection object, and explicitly moves
+the current row to the new preset while leaving Validate → Review → Publish
+pending. A failed create preserves the draft and selections. The controls are
+hidden without the managed capability.
+
 POST accepts `validate_base`, `publish_base`, `validate_strategy`,
 `publish_strategy`, `preview_rebase`, `retire_strategy`,
 `compare_strategy_revision`, `preview_restore_strategy`, and
-`publish_restore_strategy`. Validation returns normalized source, effective
-resolution, source/effective review data, fingerprints, summary, and rule count
-where applicable. Responses never include the expanded generated plan. Base
+`publish_restore_strategy`, plus `create_module_preset`. The creation payload
+contains a new safe ID, display name, and exactly one `{preset: id}` or
+`{local: definition}` source. Linux returns HTTP 400 structured validation or
+HTTP 409 collision errors without a partial file. Success returns the created
+detail and refreshed catalog with `published: false`; it never publishes,
+selects, or activates a Base or Strategy. Validation returns normalized source,
+effective resolution, source/effective review data, fingerprints, summary, and
+rule count where applicable. Responses never include the expanded generated plan. Base
 publication appends the next immutable revision under optimistic latest-
 fingerprint protection. Strategy publication embeds its pinned Base snapshot,
 appends the next immutable history revision, advances the fixed-name facade,
@@ -601,6 +631,11 @@ Process request examples:
   Linux remains normalization, resolution, review, history, and publication
   authority. This requires server revision 24 and capability
   `strategy_authoring_local_loadout_editors_v1`.
+- Authoritative eight-slot Module preset previews plus immutable custom
+  **Create variant** and local **Save as preset** workflows. Linux owns the
+  merged catalog and validation; native refresh keeps retained selections and
+  never bypasses ordinary draft review/publication. This requires server
+  revision 25 and capability `managed_custom_module_presets_v1`.
 - Persistent numeric game-speed selection from `x0.0` through `x6.0` in
   `x0.5` increments, plus `x6.3` for maximum available. Lower values are exact
   targets across live and future runs. Both clients keep the custom-target

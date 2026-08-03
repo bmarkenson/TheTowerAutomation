@@ -692,6 +692,9 @@ public sealed class StrategyAuthoringCatalogResponse
     [JsonPropertyName("strategies")]
     public StrategyAuthoringStrategyCatalog Strategies { get; set; } = new();
 
+    [JsonPropertyName("module_presets")]
+    public ModulePresetCatalog ModulePresets { get; set; } = new();
+
     [JsonPropertyName("latest_compatible_base_revisions")]
     public List<CompatibleBaseRevision> LatestCompatibleBaseRevisions { get; set; } = [];
 
@@ -724,6 +727,112 @@ public sealed class StrategyAuthoringCapabilities
 
     [JsonPropertyName("profile_local_loadout_editors")]
     public bool ProfileLocalLoadoutEditors { get; set; }
+
+    [JsonPropertyName("managed_custom_module_presets")]
+    public bool ManagedCustomModulePresets { get; set; }
+}
+
+public sealed class ModulePresetCatalog
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("items")]
+    public List<ModulePresetDetail> Items { get; set; } = [];
+
+    [JsonPropertyName("errors")]
+    public List<ModulePresetCatalogError> Errors { get; set; } = [];
+}
+
+public sealed class ModulePresetDetail
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("display_name")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("origin")]
+    public string Origin { get; set; } = "";
+
+    [JsonPropertyName("editable")]
+    public bool Editable { get; set; }
+
+    [JsonPropertyName("can_create_variant")]
+    public bool CanCreateVariant { get; set; }
+
+    [JsonPropertyName("definition")]
+    public Dictionary<string, string> Definition { get; set; } = [];
+
+    [JsonPropertyName("slots")]
+    public List<ModulePresetSlot> Slots { get; set; } = [];
+
+    [JsonIgnore]
+    public string LifecycleLabel => Origin switch
+    {
+        "bundled" => "Bundled preset • read-only",
+        "custom" => "Custom preset • immutable; changes save as a new variant",
+        _ => "Preset origin unavailable • read-only",
+    };
+}
+
+public sealed class ModulePresetSlot
+{
+    [JsonPropertyName("key")]
+    public string Key { get; set; } = "";
+
+    [JsonPropertyName("display_name")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("family")]
+    public string Family { get; set; } = "";
+
+    [JsonPropertyName("role")]
+    public string Role { get; set; } = "";
+
+    [JsonPropertyName("module")]
+    public string Module { get; set; } = "";
+}
+
+public sealed class ModulePresetCatalogError
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("code")]
+    public string Code { get; set; } = "";
+
+    [JsonPropertyName("error")]
+    public string Error { get; set; } = "";
+}
+
+public sealed class ModulePresetCreationRequest
+{
+    [JsonPropertyName("operation")]
+    public string Operation { get; set; } = "create_module_preset";
+
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = "";
+
+    [JsonPropertyName("display_name")]
+    public string DisplayName { get; set; } = "";
+
+    [JsonPropertyName("source")]
+    public ModulePresetCreationSource Source { get; set; } = new();
+}
+
+public sealed class ModulePresetCreationSource
+{
+    [JsonPropertyName("preset")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Preset { get; set; }
+
+    [JsonPropertyName("local")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? Local { get; set; }
 }
 
 public sealed class AuthoringSourceStateDefinition
@@ -838,6 +947,9 @@ public sealed class StrategyEditorMetadata
 
     [JsonPropertyName("local_editor")]
     public StrategyEditorMetadata? LocalEditor { get; set; }
+
+    [JsonPropertyName("preset_catalog")]
+    public string? PresetCatalog { get; set; }
 }
 
 public sealed class StrategyEditorOption
@@ -1238,6 +1350,9 @@ public sealed class StrategyAuthoringMutationResponse
 
     [JsonPropertyName("catalog")]
     public StrategyAuthoringCatalogResponse? Catalog { get; set; }
+
+    [JsonPropertyName("preset")]
+    public ModulePresetDetail? Preset { get; set; }
 
     [JsonPropertyName("retired")]
     public bool Retired { get; set; }

@@ -250,6 +250,18 @@ def test_portable_view_model_suite_covers_editors_states_and_round_trips():
         in tests
     )
     assert (
+        "ModulePresetPreviewUsesAuthoritativeEightSlotMetadataAndLifecycle"
+        in tests
+    )
+    assert "ManagedModulePresetRequestsUsePresetOrCurrentLocalDefinition" in tests
+    assert (
+        "ModuleCatalogRefreshPreservesSelectionsAndExplicitlySelectsCreatedPreset"
+        in tests
+    )
+    assert "MissingManagedCapabilityHidesCreationAndRetainsDraftOnFailure" in tests
+    assert "VariantCreationIsAvailableFromAReadOnlySelectedPreset" in tests
+    assert "ManagedModulePresetCreationResultRoundTripsWithoutPublication" in tests
+    assert (
         "TargetPriorityLocalEditorRetainsCompleteMembershipInChangedOrder"
         in tests
     )
@@ -282,7 +294,8 @@ def test_wpf_rebase_and_publish_reviews_keep_activation_separate():
     assert "Publishing will not activate this Strategy" in view_models
     assert "Bases cannot be activated" in view_models
     assert '"/api/v1/strategy-authoring"' in api_client
-    assert "MinimumServerRevision = 24" in compatibility
+    assert "MinimumServerRevision = 25" in compatibility
+    assert '"managed_custom_module_presets_v1"' in compatibility
     assert '"strategy_authoring_local_loadout_editors_v1"' in compatibility
     assert '"strategy_revision_history_v1"' in compatibility
     assert '"strategy_authoring_profile_lifecycle_v1"' in compatibility
@@ -300,6 +313,7 @@ def test_wpf_profile_local_loadout_controls_use_only_nested_server_metadata():
     assert 'JsonPropertyName("local_editor")' in models
     assert 'JsonPropertyName("unique_field_values")' in models
     assert 'JsonPropertyName("profile_local_loadout_editors")' in models
+    assert 'JsonPropertyName("preset_catalog")' in models
     assert "public int SchemaVersion { get; set; } = 3;" in models
     assert "_definition.Editor.LocalEditor is not null" in view_models
     assert "presetField.Key" in view_models
@@ -318,6 +332,71 @@ def test_wpf_profile_local_loadout_controls_use_only_nested_server_metadata():
     assert "MoveLocalDefinitionListItemDown_Click" in xaml
     assert "row.LocalDefinitionEditor?.MoveListItem" in code
     assert "raw json" not in xaml.lower()
+
+
+def test_wpf_module_preset_preview_and_save_as_new_flow_are_authoritative():
+    xaml = _text("StrategyProfilesWindow.xaml")
+    code = _text("StrategyProfilesWindow.xaml.cs")
+    models = _text("Models.cs")
+    view_models = _text("StrategyAuthoringViewModels.cs")
+    dialog_xaml = _text("ModulePresetNameWindow.xaml")
+    dialog_code = _text("ModulePresetNameWindow.xaml.cs")
+
+    assert 'Text="MODULE PRESET DEFINITION"' in xaml
+    assert (
+        'ItemsSource="{Binding ModulePresetPreviewSlots, Mode=OneWay}"'
+        in xaml
+    )
+    assert 'Text="{Binding Module, Mode=OneWay}"' in xaml
+    assert 'Content="Create variant..."' in xaml
+    assert 'Content="Save as preset..."' in xaml
+    assert 'Click="CreateModuleVariant_Click"' in xaml
+    assert 'Click="SaveModulePreset_Click"' in xaml
+    assert "ModulePresetManagementVisible" in xaml
+
+    for property_name in (
+        "module_presets",
+        "managed_custom_module_presets",
+        "origin",
+        "editable",
+        "can_create_variant",
+        "definition",
+        "slots",
+        "family",
+        "role",
+        "module",
+    ):
+        assert f'JsonPropertyName("{property_name}")' in models
+    assert "Bundled preset • read-only" in models
+    assert "Custom preset • immutable" in models
+    assert 'Operation { get; set; } = "create_module_preset"' in models
+    assert "JsonIgnoreCondition.WhenWritingNull" in models
+
+    assert "SelectedModulePreset?.Slots" in view_models
+    assert "BuildCreateModuleVariantRequest" in view_models
+    assert "BuildSaveModulePresetRequest" in view_models
+    assert "ReconcileModulePresetCatalog" in view_models
+    assert "PresetOptions.Move" in view_models
+    assert "PresetOptions.Clear" not in view_models
+    assert "NotifyCollectionChangedAction.Reset" not in view_models
+    assert "capabilities.ManagedCustomModulePresets" in view_models
+    assert '"create_module_preset"' in view_models
+
+    assert "response.Published" in code
+    assert "response.PublicationActivatesStrategy" in code
+    assert "response.Catalog.ModulePresets" in code
+    assert "row.ReconcileModulePresetCatalog" in code
+    assert "Validate → Review → Publish" in code
+    assert "current draft and selections remain open" in code
+    assert "No Base or Strategy was published" in code
+    creation_flow = code.split(
+        "private async Task CreateManagedModulePresetAsync", 1
+    )[1].split("private void RefreshAuthoringActionButtons", 1)[0]
+    assert "ApplyCatalog(response.Catalog)" not in creation_flow
+
+    assert 'Text="Safe stable ID"' in dialog_xaml
+    assert "IDs are immutable and must be new" in dialog_xaml
+    assert "^[a-z][a-z0-9_]{2,47}$" in dialog_code
 
 
 def test_wpf_custom_strategy_rename_and_delete_are_explicit_and_guarded():

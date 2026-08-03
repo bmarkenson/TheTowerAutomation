@@ -4,9 +4,11 @@ This document defines the contract for GUI-authored strategy bases and
 strategies. The sparse model, immutable Base revisions, immutable custom
 Strategy lineages, restore-as-new workflow, and current Farm editors are
 implemented. Profile-local Module, Target Priority, and Orb definitions now
-have additive API discovery and managed native editors; the disposable Windows
-runtime smoke remains. The original Farm profile format remains supported as a
-compatibility facade.
+have additive API discovery and managed native editors. Module presets also
+have one immutable installation-local custom catalog plus authoritative native
+eight-slot previews and save-as-new creation; the expanded disposable Windows
+runtime smoke remains. The original Farm profile format remains supported as
+a compatibility facade.
 
 The runtime architecture remains authoritative for action ownership and
 execution. This authoring layer resolves reusable, operator-friendly source
@@ -470,6 +472,48 @@ responses may contain schema-3 source values, `definition_snapshot`, Base
 `resolution_fingerprint`, and `base_resolution`; clients continue treating
 the latter three as server-owned review evidence rather than editable data.
 
+### Managed custom Module presets
+
+`config/loadouts/modules.yaml` remains the immutable bundled Module catalog.
+The server merges it with an operator-owned custom catalog under the fixed,
+Git-ignored `config/loadouts/custom/modules` root. That root is constructor- and
+CLI-injectable for isolated tests and disposable smoke environments, but no API
+request or response accepts or exposes a filesystem path. Each custom ID maps
+to one fixed immutable filename. Safe IDs, bounded no-follow reads, a catalog
+writer lock, same-directory staged durable creation, collision rejection, and
+deterministic stage reconciliation protect the store. A custom ID can never
+shadow a bundled ID.
+
+One merged catalog snapshot drives the Module registry options, legacy profile
+summaries, rich preset details, prospective Base/Strategy resolution, and
+publication. Every item exposes its stable ID, display name, bundled/custom
+origin, immutable editability state, complete normalized definition, and the
+authoritative ordered eight slots with slot label, family, role, and assigned
+Module. The existing Module normalizer remains the sole authority for exact
+slot membership, family compatibility, known Modules, and cross-slot
+uniqueness. Existing `{preset: id}` values are immutable references: there is
+no overwrite, rename, deletion, retirement, or mutable pointer in this slice.
+
+Server revision 25 adds `managed_custom_module_presets_v1` and the authenticated
+`create_module_preset` authoring operation while retaining the complete
+revision-24 option and nested-local-editor shapes. Creation accepts exactly one
+server-resolved source preset or one current profile-local definition, creates
+a new ID, returns structured validation/conflict errors, refreshes the merged
+catalog, and never publishes, selects, or activates a Base or Strategy. The WPF
+client shows the selected preset's eight-slot metadata and read-only bundled or
+immutable custom label. **Create variant** and **Save as preset** use the same
+metadata-driven row controls; after success, incremental option reconciliation
+keeps every retained selection object visible and explicitly selects the new
+preset in that row. The normal Validate → Review → Publish boundary remains.
+Failure leaves the open draft, dormant forms, and selections intact. Missing
+capability hides creation controls and the revision-25 compatibility check
+fails closed.
+
+Base revisions and Strategy publications continue retaining normalized
+definition snapshots. History comparison, restore-as-new validation, and plan
+loading therefore remain valid if the custom catalog later becomes unavailable;
+they do not acquire a new catalog dependency from custom preset authoring.
+
 ## Code ownership
 
 Implementation should introduce these responsibilities without moving them
@@ -481,6 +525,9 @@ into the runtime evaluator:
   into resolved values plus provenance.
 - A versioned base store owns immutable base revisions, catalog reads, stale
   write protection, and atomic publication.
+- A Module preset store owns the single merged bundled/custom catalog and its
+  immutable save-as-new lifecycle. It exposes definitions and path-free preview
+  metadata through the same snapshot used by resolution.
 - `StrategyProfileStore` (or a narrowly separated authoring store behind it)
   owns strategy drafts and publications, embeds the pinned base snapshot, and
   retains the existing fixed-directory and fixed-filename safety boundary. It
@@ -536,11 +583,12 @@ Each slice should be completed and validated in its own development thread.
 The actionable sequence is tracked in the
 [`runtime and validation backlog`](../backlog/runtime-and-validation.md).
 
-All four original slices and the later immutable-history/safe-fallback slice
-are implemented. Server revision 24 retains
+All four original slices, the immutable-history/safe-fallback slice, and managed
+custom Module preset creation are implemented. Server revision 25 retains
 `strategy_authoring_v1`, `strategy_authoring_specialized_editors_v1`, and
 `strategy_authoring_profile_lifecycle_v1`, `strategy_action_gate_v1`, and every
 older capability, retains revision-23 `strategy_revision_history_v1`, and adds
+`managed_custom_module_presets_v1` after revision 24 added
 `strategy_authoring_local_loadout_editors_v1`; the original profile endpoint
 remains the compatibility facade. The native shell handles every
 registered editor type with server-declared managed controls or an honest fixed
@@ -563,6 +611,6 @@ lineages; a successful explicit restore review publishes the historical intent
 as the next version and refreshes history/latest catalogs without selecting or
 activating it. The retirement archive remains evidence rather than a competing
 editable rollback model.
-The profile-local backend contract and additive API/WPF editing above are
-implemented. The disposable-catalog Windows runtime smoke remains the separate
-follow-up slice.
+The profile-local backend contract, custom Module catalog, and additive API/WPF
+editing above are implemented. The expanded disposable-catalog Windows runtime
+smoke remains the separate follow-up slice.

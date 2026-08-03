@@ -26,6 +26,12 @@ from core.perk_configuration import (
     PERK_CONFIGURATION_LABELS,
     normalize_perk_configuration_requirements,
 )
+from core.module_presets import (
+    DEFAULT_CUSTOM_MODULE_PRESET_DIRECTORY,
+    ModulePresetError,
+    ModulePresetStore,
+    module_preset_definitions,
+)
 from core.strategy_authoring import (
     AUTHORING_SCHEMA_VERSION,
     LEGACY_AUTHORING_SCHEMA_VERSION,
@@ -96,6 +102,7 @@ STRATEGY_AUTHORING_OPERATIONS = (
     "compare_strategy_revision",
     "preview_restore_strategy",
     "publish_restore_strategy",
+    "create_module_preset",
 )
 MAX_PROFILE_FILE_BYTES = 4 * 1024 * 1024
 STRATEGY_REVISION_SCHEMA_VERSION = 1
@@ -272,15 +279,27 @@ class StrategyProfileStore:
         profile_directory: Path | str | None = None,
         builtin_strategies_directory: Path | str = BUILTIN_STRATEGIES_DIR,
         base_directory: Path | str | None = None,
+        module_preset_directory: Path | str | None = None,
         audit_callback: Optional[Callable[[str], object]] = None,
         transaction_fault_hook: Optional[Callable[[str], None]] = None,
     ) -> None:
+        profile_directory_was_explicit = profile_directory is not None
         self.profile_directory = strategy_profile_directory(profile_directory)
         self.builtin_strategies_directory = Path(
             builtin_strategies_directory
         ).resolve()
+        self.module_preset_store = ModulePresetStore(
+            module_preset_directory
+            if module_preset_directory is not None
+            else (
+                self.profile_directory.parent / "module_presets"
+                if profile_directory_was_explicit
+                else DEFAULT_CUSTOM_MODULE_PRESET_DIRECTORY
+            )
+        )
         self.base_store = StrategyBaseStore(
-            base_directory or self.profile_directory / "bases"
+            base_directory or self.profile_directory / "bases",
+            module_preset_definitions_factory=self._module_preset_definitions,
         )
         self._audit_callback = audit_callback
         self._transaction_fault_hook = transaction_fault_hook
@@ -297,17 +316,64 @@ class StrategyProfileStore:
             allow_legacy_aliases=False,
         )
 
-    def setting_registry(self) -> list[dict[str, Any]]:
+    def setting_registry(
+        self,
+        module_preset_catalog: Optional[Mapping[str, Any]] = None,
+    ) -> list[dict[str, Any]]:
         """Return backend authoring metadata without exposing normalizers."""
 
-        return setting_registry_catalog()
+        selected_catalog = (
+            self.module_preset_store.catalog()
+            if module_preset_catalog is None
+            else module_preset_catalog
+        )
+        return setting_registry_catalog(
+            module_preset_catalog=selected_catalog,
+        )
+
+    def create_module_preset(
+        self,
+        preset_id: object,
+        display_name: object,
+        source: object,
+    ) -> dict[str, Any]:
+        """Create one immutable custom Module preset from a preset or local value."""
+
+        if not isinstance(source, Mapping):
+            raise ModulePresetError(
+                "Module preset source must select exactly one preset or local definition",
+                code="invalid_module_preset_source",
+                field="source",
+            )
+        if set(source) == {"preset"}:
+            definition = self.module_preset_store.definition(source.get("preset"))
+        elif set(source) == {"local"}:
+            definition = source.get("local")
+        else:
+            raise ModulePresetError(
+                "Module preset source must define exactly one of preset or local",
+                code="invalid_module_preset_source",
+                field="source",
+            )
+        return self.module_preset_store.create(
+            preset_id,
+            display_name,
+            definition,
+        )
+
+    def _module_preset_definitions(self) -> dict[str, dict[str, str]]:
+        return module_preset_definitions(self.module_preset_store.catalog())
 
     def authoring_catalog(self) -> dict[str, Any]:
         """Return the additive Base/Strategy editor contract."""
 
+        module_preset_catalog = self.module_preset_store.catalog()
         history_errors = self._prepare_history()
         base_catalog = self.base_store.catalog()
-        legacy_catalog = self.catalog(_history_prepared=True)
+        legacy_catalog = self.catalog(
+            _history_prepared=True,
+            _module_preset_catalog=module_preset_catalog,
+        )
         strategy_items: list[dict[str, Any]] = []
         strategy_errors = [
             {"id": item["id"], "error": item["error"]}
@@ -330,10 +396,13 @@ class StrategyProfileStore:
         ] + [
             {"catalog": "strategy_history", **error}
             for error in history_errors
+        ] + [
+            {"catalog": "module_presets", **error}
+            for error in module_preset_catalog["errors"]
         ]
         return {
             "schema_version": STRATEGY_AUTHORING_API_SCHEMA_VERSION,
-            "setting_registry": self.setting_registry(),
+            "setting_registry": self.setting_registry(module_preset_catalog),
             "capabilities": {
                 "operations": list(STRATEGY_AUTHORING_OPERATIONS),
                 "base_source_states": [
@@ -382,6 +451,7 @@ class StrategyProfileStore:
                 "immutable_strategy_history": True,
                 "restore_as_new": True,
                 "profile_local_loadout_editors": True,
+                "managed_custom_module_presets": True,
             },
             "editor_options": {
                 "presets": legacy_catalog["presets"],
@@ -402,6 +472,7 @@ class StrategyProfileStore:
                 }
                 for item in base_catalog["items"]
             ],
+            "module_presets": module_preset_catalog,
             "catalog_errors": catalog_errors,
         }
 
@@ -594,7 +665,10 @@ class StrategyProfileStore:
         )
         review = diff_source_documents(before, source)
         review["created"] = latest is None
-        resolution = describe_base_resolution(source)
+        resolution = describe_base_resolution(
+            source,
+            module_preset_definitions=self._module_preset_definitions(),
+        )
         source_fingerprint = fingerprint_document(source)
         resolution_fingerprint = fingerprint_document(resolution)
         return {
@@ -669,9 +743,10 @@ class StrategyProfileStore:
                 "settings": {},
             }
             before_source.pop("base", None)
-            before_resolution = analyze_strategy_source(before_source)[
-                "resolution"
-            ]
+            before_resolution = analyze_strategy_source(
+                before_source,
+                module_preset_definitions=self._module_preset_definitions(),
+            )["resolution"]
         else:
             before_source = current["source"]
             before_resolution = current["resolution"]
@@ -810,6 +885,7 @@ class StrategyProfileStore:
                 target_base_resolution_snapshot=base_publication_resolution(
                     target_publication
                 ),
+                module_preset_definitions=self._module_preset_definitions(),
             )
         except StrategyAuthoringError as exc:
             raise StrategyProfileError(str(exc)) from exc
@@ -902,7 +978,12 @@ class StrategyProfileStore:
             display_name=publication["display_name"],
         )
 
-    def catalog(self, *, _history_prepared: bool = False) -> dict[str, Any]:
+    def catalog(
+        self,
+        *,
+        _history_prepared: bool = False,
+        _module_preset_catalog: Optional[Mapping[str, Any]] = None,
+    ) -> dict[str, Any]:
         """Return editor metadata without exposing expanded runtime plans."""
 
         history_errors = (
@@ -938,7 +1019,11 @@ class StrategyProfileStore:
         return {
             "schema_version": STRATEGY_PROFILE_SCHEMA_VERSION,
             "policy_modes": list(POLICY_MODES),
-            "presets": self._preset_catalogs(),
+            "presets": self._preset_catalogs(
+                _module_preset_catalog
+                if _module_preset_catalog is not None
+                else self.module_preset_store.catalog()
+            ),
             "setup_checks": [
                 {
                     "id": check_id,
@@ -993,6 +1078,7 @@ class StrategyProfileStore:
                     source["schema_version"] == AUTHORING_SCHEMA_VERSION
                     and base_snapshot is not None
                 ),
+                module_preset_definitions=self._module_preset_definitions(),
             )
             compact_source = farm_source_from_resolution(source, resolution)
             plan = build_strategy_yaml(compact_source)
@@ -3043,7 +3129,9 @@ class StrategyProfileStore:
         }
 
     @staticmethod
-    def _preset_catalogs() -> dict[str, list[dict[str, str]]]:
+    def _preset_catalogs(
+        module_preset_catalog: Mapping[str, Any],
+    ) -> dict[str, list[dict[str, str]]]:
         catalogs = {
             "modules": PROJECT_ROOT / "config" / "loadouts" / "modules.yaml",
             "orb_distance": (
@@ -3058,6 +3146,21 @@ class StrategyProfileStore:
         }
         response: dict[str, list[dict[str, str]]] = {}
         for name, path in catalogs.items():
+            if name == "modules":
+                items = module_preset_catalog.get("items")
+                if not isinstance(items, list):
+                    raise StrategyProfileError(
+                        "modules preset catalog has no items"
+                    )
+                response[name] = [
+                    {
+                        "id": str(item.get("id") or ""),
+                        "display_name": str(item.get("display_name") or ""),
+                    }
+                    for item in items
+                    if isinstance(item, Mapping)
+                ]
+                continue
             data = _load_yaml_mapping(path, f"{name} preset catalog")
             presets = data.get("presets")
             if not isinstance(presets, Mapping):

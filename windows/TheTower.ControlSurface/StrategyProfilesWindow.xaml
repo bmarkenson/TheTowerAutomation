@@ -268,6 +268,43 @@
                                   Visibility="{Binding IsPresetDefinitionSelected, Mode=OneWay, Converter={StaticResource BoolVisibility}}"
                                   Margin="0,4,0,0"
                                   AutomationProperties.Name="Shared preset" />
+                        <Border Background="#111C2D" BorderBrush="#324661"
+                                BorderThickness="1" CornerRadius="4" Padding="9"
+                                Margin="0,6,0,0"
+                                Visibility="{Binding ShowsModulePresetPreview, Mode=OneWay, Converter={StaticResource BoolVisibility}}">
+                          <StackPanel>
+                            <TextBlock Text="MODULE PRESET DEFINITION" Foreground="#62D5FF"
+                                       FontSize="10" FontWeight="Bold" />
+                            <TextBlock Text="{Binding ModulePresetPreviewTitle, Mode=OneWay}"
+                                       FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,2,0,0" />
+                            <TextBlock Text="{Binding ModulePresetLifecycleDisplay, Mode=OneWay}"
+                                       Foreground="#93A4BB" FontSize="10"
+                                       TextWrapping="Wrap" Margin="0,1,0,5" />
+                            <ItemsControl ItemsSource="{Binding ModulePresetPreviewSlots, Mode=OneWay}"
+                                          AutomationProperties.Name="Normalized eight-slot Module preset definition">
+                              <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                  <Grid Margin="0,1">
+                                    <Grid.ColumnDefinitions>
+                                      <ColumnDefinition Width="165" />
+                                      <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding DisplayName, Mode=OneWay}"
+                                               Foreground="#AAB8CB" />
+                                    <TextBlock Grid.Column="1" Text="{Binding Module, Mode=OneWay}"
+                                               FontWeight="SemiBold" TextWrapping="Wrap" />
+                                  </Grid>
+                                </DataTemplate>
+                              </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <Button Content="Create variant..."
+                                    Click="CreateModuleVariant_Click"
+                                    IsEnabled="{Binding CanCreateModuleVariant, Mode=OneWay}"
+                                    Visibility="{Binding ModulePresetManagementVisible, Mode=OneWay, Converter={StaticResource BoolVisibility}}"
+                                    HorizontalAlignment="Left" Margin="0,7,0,0"
+                                    AutomationProperties.Name="Create Module preset variant" />
+                          </StackPanel>
+                        </Border>
                         <StackPanel IsEnabled="{Binding LocalDefinitionControlEnabled, Mode=OneWay}"
                                     Visibility="{Binding IsLocalDefinitionSelected, Mode=OneWay, Converter={StaticResource BoolVisibility}}"
                                     Margin="0,5,0,0">
@@ -327,6 +364,12 @@
                           <TextBlock Text="{Binding LocalDefinitionEditor.HelpText, Mode=OneWay}"
                                      Foreground="#93A4BB" FontSize="10"
                                      TextWrapping="Wrap" Margin="0,4,0,0" />
+                          <Button Content="Save as preset..."
+                                  Click="SaveModulePreset_Click"
+                                  IsEnabled="{Binding CanSaveModulePreset, Mode=OneWay}"
+                                  Visibility="{Binding ModulePresetManagementVisible, Mode=OneWay, Converter={StaticResource BoolVisibility}}"
+                                  HorizontalAlignment="Left" Margin="0,7,0,0"
+                                  AutomationProperties.Name="Save profile-local Modules as preset" />
                         </StackPanel>
                       </StackPanel>
                       <TextBox Text="{Binding ValueText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"

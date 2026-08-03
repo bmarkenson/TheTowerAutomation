@@ -34,6 +34,8 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
     private bool _configuring;
     private bool _dirty;
     private StrategyResolvedSetting? _resolution;
+    private Dictionary<string, ModulePresetDetail> _modulePresetDetails = [];
+    private readonly bool _managedModulePresetCreation;
     private readonly Dictionary<string, JsonElement> _ultimateUnknownGroups = [];
 
     public AuthoringSettingRowViewModel(
@@ -43,7 +45,8 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         StrategyAuthoringDirective? directive,
         StrategyResolvedSetting? resolution,
         StrategyAuthoringCapabilities capabilities,
-        AuthoringDormantValue? dormantValue = null)
+        AuthoringDormantValue? dormantValue = null,
+        ModulePresetCatalog? modulePresetCatalog = null)
     {
         _definition = definition;
         _isBase = isBase;
@@ -55,7 +58,25 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         _retainedValue = suppliedValue?.Clone();
         _hasDormantValue = directive?.Value.HasValue == true
             || dormantValue?.Materialized == true;
-        PresetOptions = definition.Editor.Fields.FirstOrDefault()?.Options ?? [];
+        PresetOptions = new ObservableCollection<StrategyEditorOption>(
+            definition.Editor.Fields.FirstOrDefault()?.Options ?? []);
+        var catalogMatches = !string.IsNullOrWhiteSpace(
+                definition.Editor.PresetCatalog)
+            && string.Equals(
+                definition.Editor.PresetCatalog,
+                modulePresetCatalog?.Id,
+                StringComparison.Ordinal);
+        if (catalogMatches && modulePresetCatalog is not null)
+        {
+            _modulePresetDetails = modulePresetCatalog.Items.ToDictionary(
+                item => item.Id,
+                StringComparer.Ordinal);
+        }
+        _managedModulePresetCreation = catalogMatches
+            && capabilities.ManagedCustomModulePresets
+            && capabilities.Operations.Contains(
+                "create_module_preset",
+                StringComparer.Ordinal);
         ConfigureDefinitionForms(suppliedValue, dormantValue);
         AllListOptions = definition.Editor.Options;
         ListValues.CollectionChanged += (_, _) =>
@@ -94,7 +115,7 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
     public string Section => _definition.Section;
     public string EditorType => _definition.EditorType;
     public IReadOnlyList<AuthoringSourceStateDefinition> AvailableSourceStates { get; }
-    public IReadOnlyList<StrategyEditorOption> PresetOptions { get; }
+    public ObservableCollection<StrategyEditorOption> PresetOptions { get; }
     public IReadOnlyList<AuthoringDefinitionForm> DefinitionForms { get; private set; } = [];
     public IReadOnlyList<StrategyEditorOption> AllListOptions { get; }
     public ObservableCollection<StrategyEditorOption> ListValues { get; } = [];
@@ -127,6 +148,9 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
             Notify(nameof(DefinitionFormControlEnabled));
             Notify(nameof(DefinitionPresetControlEnabled));
             Notify(nameof(LocalDefinitionControlEnabled));
+            Notify(nameof(CanCreateModuleVariant));
+            Notify(nameof(CanSelectCreatedModulePreset));
+            Notify(nameof(CanSaveModulePreset));
             Notify(nameof(CanAddListItem));
             Notify(nameof(CanRemoveListItem));
             Notify(nameof(CanReorderListItems));
@@ -157,6 +181,7 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
             Notify(nameof(IsLocalDefinitionSelected));
             Notify(nameof(DefinitionPresetControlEnabled));
             Notify(nameof(LocalDefinitionControlEnabled));
+            NotifyModulePresetState();
             Notify(nameof(EffectiveValueDisplay));
         }
     }
@@ -175,6 +200,7 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
             _selectedPreset = value;
             MarkValueChanged();
             Notify();
+            NotifyModulePresetState();
             Notify(nameof(EffectiveValueDisplay));
         }
     }
@@ -285,6 +311,46 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         && !_definition.Editor.Fixed;
     public bool LocalDefinitionControlEnabled =>
         ValueEditorEnabled && IsLocalDefinitionSelected;
+    public bool UsesManagedPresetCatalog =>
+        UsesPresetOrLocalEditor
+        && !string.IsNullOrWhiteSpace(_definition.Editor.PresetCatalog);
+    public ModulePresetDetail? SelectedModulePreset
+    {
+        get
+        {
+            var identifier = SelectedPreset?.Value.ValueKind == JsonValueKind.String
+                ? SelectedPreset.Value.GetString()
+                : null;
+            if (identifier is null
+                || !_modulePresetDetails.TryGetValue(identifier, out var detail))
+            {
+                return null;
+            }
+            return detail;
+        }
+    }
+    public bool ShowsModulePresetPreview =>
+        UsesManagedPresetCatalog
+        && IsPresetDefinitionSelected
+        && SelectedModulePreset is not null;
+    public string ModulePresetPreviewTitle => SelectedModulePreset is { } detail
+        ? $"{detail.DisplayName} ({detail.Id})"
+        : "Preset details unavailable";
+    public string ModulePresetLifecycleDisplay =>
+        SelectedModulePreset?.LifecycleLabel ?? "Preset details unavailable";
+    public IReadOnlyList<ModulePresetSlot> ModulePresetPreviewSlots =>
+        SelectedModulePreset?.Slots ?? [];
+    public bool ModulePresetManagementVisible =>
+        UsesManagedPresetCatalog && _managedModulePresetCreation;
+    public bool CanCreateModuleVariant =>
+        ModulePresetManagementVisible
+        && SelectedModulePreset?.CanCreateVariant == true;
+    public bool CanSelectCreatedModulePreset =>
+        DefinitionPresetControlEnabled;
+    public bool CanSaveModulePreset =>
+        ModulePresetManagementVisible
+        && LocalDefinitionControlEnabled
+        && LocalDefinitionEditor?.CurrentValue is not null;
     public bool IsFixedPresentation => _definition.Editor.Fixed;
     public bool CanAddListItem =>
         ValueEditorEnabled
@@ -488,6 +554,145 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
                 : null);
     }
 
+    public ModulePresetCreationRequest BuildCreateModuleVariantRequest(
+        string identifier,
+        string displayName)
+    {
+        if (!CanCreateModuleVariant || SelectedModulePreset is not { } selected)
+        {
+            throw new InvalidOperationException(
+                "Managed Module preset variants are unavailable for this selection.");
+        }
+        return CreateModulePresetRequest(
+            identifier,
+            displayName,
+            new ModulePresetCreationSource { Preset = selected.Id });
+    }
+
+    public ModulePresetCreationRequest BuildSaveModulePresetRequest(
+        string identifier,
+        string displayName)
+    {
+        if (!CanSaveModulePreset
+            || LocalDefinitionEditor?.CurrentValue is not { } local)
+        {
+            throw new InvalidOperationException(
+                "The current profile-local Module definition cannot be saved as a preset.");
+        }
+        return CreateModulePresetRequest(
+            identifier,
+            displayName,
+            new ModulePresetCreationSource { Local = local.Clone() });
+    }
+
+    public void ReconcileModulePresetCatalog(
+        StrategySettingDefinition refreshedDefinition,
+        ModulePresetCatalog catalog,
+        string createdPresetId,
+        bool selectCreatedPreset = true)
+    {
+        if (!UsesManagedPresetCatalog
+            || !string.Equals(refreshedDefinition.Id, Id, StringComparison.Ordinal)
+            || !string.Equals(
+                refreshedDefinition.Editor.PresetCatalog,
+                _definition.Editor.PresetCatalog,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                catalog.Id,
+                _definition.Editor.PresetCatalog,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "Linux returned Module preset metadata for the wrong editor catalog.");
+        }
+
+        var refreshedOptions = refreshedDefinition.Editor.Fields
+            .FirstOrDefault()?.Options
+            ?? throw new InvalidOperationException(
+                "Linux returned no Module preset selector options.");
+        var optionIds = new List<string>();
+        foreach (var option in refreshedOptions)
+        {
+            if (option.Value.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(option.Value.GetString()))
+            {
+                throw new InvalidOperationException(
+                    "Linux returned an invalid Module preset selector option.");
+            }
+            optionIds.Add(option.Value.GetString()!);
+        }
+        if (optionIds.Count != optionIds.Distinct(StringComparer.Ordinal).Count())
+        {
+            throw new InvalidOperationException(
+                "Linux returned duplicate Module preset selector options.");
+        }
+
+        var details = catalog.Items.ToDictionary(
+            item => item.Id,
+            StringComparer.Ordinal);
+        if (!optionIds.ToHashSet(StringComparer.Ordinal).SetEquals(details.Keys)
+            || !details.ContainsKey(createdPresetId))
+        {
+            throw new InvalidOperationException(
+                "Linux returned inconsistent Module preset selector and preview metadata.");
+        }
+        var selectedKey = SelectedPreset?.ValueKey;
+        var desiredKeys = refreshedOptions
+            .Select(option => option.ValueKey)
+            .ToHashSet(StringComparer.Ordinal);
+        if (selectedKey is not null && !desiredKeys.Contains(selectedKey))
+        {
+            throw new InvalidOperationException(
+                "The refreshed Module preset catalog omitted the current selection.");
+        }
+
+        for (var desiredIndex = 0; desiredIndex < refreshedOptions.Count; desiredIndex++)
+        {
+            var desired = refreshedOptions[desiredIndex];
+            var currentIndex = PresetOptions
+                .Select((option, index) => (option, index))
+                .FirstOrDefault(item => item.option.ValueKey == desired.ValueKey)
+                .index;
+            var found = currentIndex < PresetOptions.Count
+                && PresetOptions[currentIndex].ValueKey == desired.ValueKey;
+            if (!found)
+            {
+                PresetOptions.Insert(desiredIndex, desired);
+            }
+            else if (currentIndex != desiredIndex)
+            {
+                PresetOptions.Move(currentIndex, desiredIndex);
+            }
+        }
+        for (var index = PresetOptions.Count - 1; index >= 0; index--)
+        {
+            if (!desiredKeys.Contains(PresetOptions[index].ValueKey))
+            {
+                PresetOptions.RemoveAt(index);
+            }
+        }
+
+        _definition.Editor.Fields[0].Options = PresetOptions.ToList();
+        _modulePresetDetails = details;
+        NotifyModulePresetState();
+
+        if (!selectCreatedPreset)
+        {
+            return;
+        }
+
+        var selectedOption = PresetOptions.Single(option =>
+            option.Value.ValueKind == JsonValueKind.String
+            && string.Equals(
+                option.Value.GetString(),
+                createdPresetId,
+                StringComparison.Ordinal));
+        var presetForm = DefinitionForms.First(form =>
+            form.Key == _definition.Editor.Fields[0].Key);
+        SelectedDefinitionForm = presetForm;
+        SelectedPreset = selectedOption;
+    }
+
     public void ApplyResolution(StrategyResolvedSetting? resolution)
     {
         _resolution = resolution;
@@ -497,6 +702,26 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         Notify(nameof(ProvenanceDisplay));
         Notify(nameof(PendingEffectiveDisplay));
         Notify(nameof(IsActive));
+    }
+
+    private static ModulePresetCreationRequest CreateModulePresetRequest(
+        string identifier,
+        string displayName,
+        ModulePresetCreationSource source)
+    {
+        var normalizedId = identifier.Trim();
+        var normalizedName = displayName.Trim();
+        if (normalizedId.Length == 0 || normalizedName.Length == 0)
+        {
+            throw new InvalidOperationException(
+                "A stable ID and display name are required for a Module preset.");
+        }
+        return new ModulePresetCreationRequest
+        {
+            Id = normalizedId,
+            DisplayName = normalizedName,
+            Source = source,
+        };
     }
 
     private bool StateCanBeRepresented(
@@ -567,10 +792,10 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         var presetDraft = activePreset
             ?? dormantValue?.PresetValue
             ?? presetField.InitialValue;
-        _selectedPreset = EditorJson.FindOption(presetField.Options, presetDraft)
+        _selectedPreset = EditorJson.FindOption(PresetOptions, presetDraft)
             ?? (activePreset.HasValue || dormantValue?.PresetValue.HasValue == true
                 ? null
-                : presetField.Options.FirstOrDefault());
+                : PresetOptions.FirstOrDefault());
 
         var localDraft = activeLocal
             ?? dormantValue?.LocalValue
@@ -607,8 +832,8 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
             if (field is not null
                 && element.TryGetProperty(field.Key, out var preset))
             {
-                _selectedPreset = EditorJson.FindOption(field.Options, preset)
-                    ?? field.Options.FirstOrDefault();
+                _selectedPreset = EditorJson.FindOption(PresetOptions, preset)
+                    ?? PresetOptions.FirstOrDefault();
             }
         }
         else if (UsesTextEditor)
@@ -806,6 +1031,20 @@ public sealed class AuthoringSettingRowViewModel : INotifyPropertyChanged
         }
         _hasDormantValue = true;
         Dirty = true;
+        Notify(nameof(CanCreateModuleVariant));
+        Notify(nameof(CanSelectCreatedModulePreset));
+        Notify(nameof(CanSaveModulePreset));
+    }
+
+    private void NotifyModulePresetState()
+    {
+        Notify(nameof(SelectedModulePreset));
+        Notify(nameof(ShowsModulePresetPreview));
+        Notify(nameof(ModulePresetPreviewTitle));
+        Notify(nameof(ModulePresetLifecycleDisplay));
+        Notify(nameof(ModulePresetPreviewSlots));
+        Notify(nameof(CanCreateModuleVariant));
+        Notify(nameof(CanSaveModulePreset));
     }
 
     private static string FormatJson(JsonElement? value)

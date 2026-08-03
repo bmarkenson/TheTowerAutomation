@@ -500,6 +500,198 @@ public sealed class StrategyAuthoringViewModelTests
     }
 
     [Fact]
+    public void ModulePresetPreviewUsesAuthoritativeEightSlotMetadataAndLifecycle()
+    {
+        var catalog = ModuleCatalog();
+        var row = ManagedRow(LocalDefinition("modules"), catalog);
+
+        Assert.True(row.ShowsModulePresetPreview);
+        Assert.Equal("Shared One (shared_one)", row.ModulePresetPreviewTitle);
+        Assert.Equal("Bundled preset • read-only", row.ModulePresetLifecycleDisplay);
+        Assert.Equal(8, row.ModulePresetPreviewSlots.Count);
+        Assert.Equal(
+            Enumerable.Range(1, 8).Select(index => $"Slot {index}"),
+            row.ModulePresetPreviewSlots.Select(slot => slot.DisplayName));
+        Assert.Equal(
+            Enumerable.Range(1, 8).Select(index => $"Module {index}"),
+            row.ModulePresetPreviewSlots.Select(slot => slot.Module));
+
+        row.SelectedPreset = row.PresetOptions[1];
+
+        Assert.Equal(
+            "Custom preset • immutable; changes save as a new variant",
+            row.ModulePresetLifecycleDisplay);
+        Assert.Equal(
+            "shared_two",
+            row.BuildCreateModuleVariantRequest(
+                "custom_variant",
+                "Custom Variant").Source.Preset);
+    }
+
+    [Fact]
+    public void ManagedModulePresetRequestsUsePresetOrCurrentLocalDefinition()
+    {
+        var row = ManagedRow(LocalDefinition("modules"), ModuleCatalog());
+        var selectedBefore = row.SelectedPreset;
+        var variant = row.BuildCreateModuleVariantRequest(
+            "shared_variant",
+            "Shared Variant");
+        var variantJson = JsonSerializer.Serialize(variant);
+
+        Assert.Equal("create_module_preset", variant.Operation);
+        Assert.Equal("shared_one", variant.Source.Preset);
+        Assert.Null(variant.Source.Local);
+        Assert.Contains("\"preset\":\"shared_one\"", variantJson);
+        Assert.DoesNotContain("\"local\"", variantJson);
+        Assert.Same(selectedBefore, row.SelectedPreset);
+
+        row.SelectedDefinitionForm = row.DefinitionForms[1];
+        MutateLocalDefinition(row, "modules");
+        var localBefore = row.BuildDirective()?.Value;
+        var saved = row.BuildSaveModulePresetRequest(
+            "local_variant",
+            "Local Variant");
+        var savedJson = JsonSerializer.Serialize(saved);
+
+        Assert.Null(saved.Source.Preset);
+        Assert.True(saved.Source.Local.HasValue);
+        Assert.Contains("\"local\"", savedJson);
+        Assert.DoesNotContain("\"preset\"", savedJson);
+        AssertJson(
+            localBefore?.GetProperty("local"),
+            saved.Source.Local);
+        AssertJson(localBefore, row.BuildDirective()?.Value);
+    }
+
+    [Fact]
+    public void ModuleCatalogRefreshPreservesSelectionsAndExplicitlySelectsCreatedPreset()
+    {
+        var definition = LocalDefinition("modules");
+        var row = ManagedRow(definition, ModuleCatalog());
+        row.SelectedDefinitionForm = row.DefinitionForms[1];
+        MutateLocalDefinition(row, "modules");
+        var dormantLocal = row.BuildDirective()?.Value;
+        var retainedOptions = row.PresetOptions.ToDictionary(
+            option => option.Value.GetString()!,
+            StringComparer.Ordinal);
+        var selectionDuringRefresh = row.SelectedPreset;
+        var collectionChanges = 0;
+        row.PresetOptions.CollectionChanged += (_, args) =>
+        {
+            collectionChanges++;
+            Assert.NotEqual(NotifyCollectionChangedAction.Reset, args.Action);
+            Assert.Same(selectionDuringRefresh, row.SelectedPreset);
+            Assert.Contains(selectionDuringRefresh, row.PresetOptions);
+        };
+
+        var refreshedDefinition = LocalDefinition("modules");
+        refreshedDefinition.Editor.Fields[0].Options.Add(
+            Option("shared_three", "Shared Three"));
+        var refreshedCatalog = ModuleCatalog(includeCreated: true);
+        row.ReconcileModulePresetCatalog(
+            refreshedDefinition,
+            refreshedCatalog,
+            "shared_three");
+
+        Assert.True(collectionChanges > 0);
+        Assert.Same(retainedOptions["shared_one"], row.PresetOptions[0]);
+        Assert.Same(retainedOptions["shared_two"], row.PresetOptions[1]);
+        Assert.Equal("shared_three", row.SelectedPreset?.Value.GetString());
+        Assert.True(row.IsPresetDefinitionSelected);
+        Assert.Equal("Shared Three (shared_three)", row.ModulePresetPreviewTitle);
+        Assert.True(row.Dirty);
+
+        row.SelectedDefinitionForm = row.DefinitionForms[1];
+        AssertJson(dormantLocal, row.BuildDirective()?.Value);
+    }
+
+    [Fact]
+    public void MissingManagedCapabilityHidesCreationAndRetainsDraftOnFailure()
+    {
+        var capabilities = Capabilities();
+        capabilities.ManagedCustomModulePresets = false;
+        capabilities.Operations = [];
+        var row = Row(
+            LocalDefinition("modules"),
+            isBase: false,
+            capabilities: capabilities,
+            modulePresetCatalog: ModuleCatalog());
+        row.SelectedSourceState = State(row, "override_enforce");
+        var selected = row.SelectedPreset;
+        var directive = row.BuildDirective()?.Value;
+
+        Assert.True(row.ShowsModulePresetPreview);
+        Assert.False(row.ModulePresetManagementVisible);
+        Assert.False(row.CanCreateModuleVariant);
+        Assert.False(row.CanSaveModulePreset);
+        Assert.Throws<InvalidOperationException>(() =>
+            row.BuildCreateModuleVariantRequest("blocked_variant", "Blocked"));
+        Assert.Same(selected, row.SelectedPreset);
+        AssertJson(directive, row.BuildDirective()?.Value);
+    }
+
+    [Fact]
+    public void VariantCreationIsAvailableFromAReadOnlySelectedPreset()
+    {
+        var definition = LocalDefinition("modules");
+        var catalog = ModuleCatalog();
+        var row = Row(
+            definition,
+            isBase: false,
+            entityEditable: false,
+            modulePresetCatalog: catalog);
+        var selected = row.SelectedPreset;
+
+        Assert.True(row.CanCreateModuleVariant);
+        Assert.False(row.CanSelectCreatedModulePreset);
+        Assert.Equal(
+            "shared_one",
+            row.BuildCreateModuleVariantRequest(
+                "read_only_variant",
+                "Read-only Variant").Source.Preset);
+
+        var refreshed = LocalDefinition("modules");
+        refreshed.Editor.Fields[0].Options.Add(
+            Option("shared_three", "Shared Three"));
+        row.ReconcileModulePresetCatalog(
+            refreshed,
+            ModuleCatalog(includeCreated: true),
+            "shared_three",
+            selectCreatedPreset: false);
+
+        Assert.Same(selected, row.SelectedPreset);
+        Assert.Equal(3, row.PresetOptions.Count);
+        Assert.False(row.Dirty);
+    }
+
+    [Fact]
+    public void ManagedModulePresetCreationResultRoundTripsWithoutPublication()
+    {
+        var response = new StrategyAuthoringMutationResponse
+        {
+            Operation = "create_module_preset",
+            Valid = true,
+            Published = false,
+            PublicationActivatesStrategy = false,
+            Preset = ModuleCatalog(includeCreated: true).Items[^1],
+            Catalog = new StrategyAuthoringCatalogResponse
+            {
+                ModulePresets = ModuleCatalog(includeCreated: true),
+            },
+        };
+
+        var reopened = JsonSerializer.Deserialize<StrategyAuthoringMutationResponse>(
+            JsonSerializer.Serialize(response));
+
+        Assert.NotNull(reopened);
+        Assert.True(reopened.Valid);
+        Assert.False(reopened.Published);
+        Assert.False(reopened.PublicationActivatesStrategy);
+        Assert.Equal("shared_three", reopened.Preset?.Id);
+        Assert.Equal(3, reopened.Catalog?.ModulePresets.Items.Count);
+    }
+
+    [Fact]
     public void TargetPriorityLocalEditorRetainsCompleteMembershipInChangedOrder()
     {
         var definition = LocalDefinition("target_priority");
@@ -729,9 +921,13 @@ public sealed class StrategyAuthoringViewModelTests
     }
 
     private static AuthoringSettingRowViewModel ManagedRow(
-        StrategySettingDefinition definition)
+        StrategySettingDefinition definition,
+        ModulePresetCatalog? modulePresetCatalog = null)
     {
-        var row = Row(definition, isBase: false);
+        var row = Row(
+            definition,
+            isBase: false,
+            modulePresetCatalog: modulePresetCatalog);
         row.SelectedSourceState = State(row, "override_enforce");
         return row;
     }
@@ -740,14 +936,18 @@ public sealed class StrategyAuthoringViewModelTests
         StrategySettingDefinition definition,
         bool isBase,
         StrategyAuthoringDirective? directive = null,
-        AuthoringDormantValue? dormantValue = null) => new(
+        AuthoringDormantValue? dormantValue = null,
+        StrategyAuthoringCapabilities? capabilities = null,
+        ModulePresetCatalog? modulePresetCatalog = null,
+        bool entityEditable = true) => new(
             definition,
             isBase,
-            entityEditable: true,
+            entityEditable,
             directive,
             resolution: null,
-            Capabilities(),
-            dormantValue);
+            capabilities ?? Capabilities(),
+            dormantValue,
+            modulePresetCatalog);
 
     private static AuthoringSourceStateDefinition State(
         AuthoringSettingRowViewModel row,
@@ -778,6 +978,8 @@ public sealed class StrategyAuthoringViewModelTests
 
     private static StrategyAuthoringCapabilities Capabilities() => new()
     {
+        ManagedCustomModulePresets = true,
+        Operations = ["create_module_preset"],
         BaseSourceStates =
         [
             new() { Id = "not_included", DisplayName = "Not included" },
@@ -939,6 +1141,10 @@ public sealed class StrategyAuthoringViewModelTests
             "orb_distance" => OrbDistanceLocalMetadata(),
             _ => throw new ArgumentOutOfRangeException(nameof(kind)),
         };
+        if (kind == "modules")
+        {
+            definition.Editor.PresetCatalog = "module_presets";
+        }
         return definition;
     }
 
@@ -1018,6 +1224,61 @@ public sealed class StrategyAuthoringViewModelTests
                 Required = true,
                 InitialValue = Element(item.Value),
             }).ToList(),
+        };
+    }
+
+    private static ModulePresetCatalog ModuleCatalog(bool includeCreated = false)
+    {
+        var items = new List<ModulePresetDetail>
+        {
+            ModulePreset("shared_one", "Shared One", "bundled", "Module"),
+            ModulePreset("shared_two", "Shared Two", "custom", "Custom Module"),
+        };
+        if (includeCreated)
+        {
+            items.Add(
+                ModulePreset(
+                    "shared_three",
+                    "Shared Three",
+                    "custom",
+                    "Created Module"));
+        }
+        return new ModulePresetCatalog
+        {
+            Id = "module_presets",
+            SchemaVersion = 1,
+            Items = items,
+        };
+    }
+
+    private static ModulePresetDetail ModulePreset(
+        string identifier,
+        string displayName,
+        string origin,
+        string modulePrefix)
+    {
+        var slots = Enumerable.Range(1, 8)
+            .Select(index => new ModulePresetSlot
+            {
+                Key = $"slot_{index}",
+                DisplayName = $"Slot {index}",
+                Family = $"family_{(index - 1) / 2}",
+                Role = index % 2 == 0 ? "primary" : "assist",
+                Module = $"{modulePrefix} {index}",
+            })
+            .ToList();
+        return new ModulePresetDetail
+        {
+            Id = identifier,
+            DisplayName = displayName,
+            Origin = origin,
+            Editable = false,
+            CanCreateVariant = true,
+            Definition = slots.ToDictionary(
+                slot => slot.Key,
+                slot => slot.Module,
+                StringComparer.Ordinal),
+            Slots = slots,
         };
     }
 

@@ -280,10 +280,11 @@ are displayed under the button, are consumed by the next applicable run, and
 are cleared if the selected strategy changes.
 
 **Strategy profiles...** opens the shared Strategy Authoring shell. Linux
-server revision 24 preserves `strategy_authoring_v1`,
+server revision 25 preserves `strategy_authoring_v1`,
 `strategy_authoring_specialized_editors_v1`,
 `strategy_authoring_profile_lifecycle_v1`, `strategy_action_gate_v1`, and every
 older capability, retains `strategy_revision_history_v1`, and adds
+`managed_custom_module_presets_v1` after revision 24 added
 `strategy_authoring_local_loadout_editors_v1`. It provides separate **Bases**
 and **Strategies** catalogs plus immutable custom-Strategy History while
 retaining the older latest-only profile endpoint for older clients. A Base is
@@ -321,6 +322,23 @@ and Workshop text fields; the client submits their text to Linux without
 duplicating its distance parser or canonicalizer. The inactive preset and
 local drafts both survive form changes, Base omission/reinclusion, Strategy
 Inherit/Override/Ignore changes, and validation refreshes.
+
+Whenever the Module shared-preset form is selected, the editor shows the
+Linux-supplied normalized eight-slot definition with each slot label and
+assigned Module. Bundled presets are labelled read-only; custom presets are
+labelled immutable and save-as-new. **Create variant...** copies any selected
+bundled or custom preset to a new safe ID, while **Save as preset...** submits
+the current profile-local Module fields. Linux validates both through the
+authoritative Module normalizer and stores custom presets only under its fixed
+installation-local catalog. The client never supplies a path or duplicates
+family validation.
+
+After creation, the row refreshes its preset options without resetting the
+collection, explicitly selects the new preset, and keeps the local draft
+dormant. Validate → Review → Publish is still required; creating a preset never
+publishes, selects, or activates a Base or Strategy. Collision or validation
+failure leaves the current form, selections, and draft open. These controls are
+hidden if managed preset creation is not advertised.
 
 Ultimate Weapons use managed group, toggle, and on/off controls. Poison Swamp
 stun is intentionally fixed to **Off**, the only value currently accepted by
@@ -417,9 +435,10 @@ regression and stopped before validation or publication; the repaired package
 still requires the complete visible smoke below.
 
 1. Copy the repository to a temporary test root, empty only that copy's custom
-   profile/Base catalog, and start the control-surface server with
-   `--repository-root` plus control, log, history, and telemetry paths inside
-   the same temporary root. Do not use process or activation endpoints.
+   profile/Base and custom Module preset catalogs, and start the control-surface
+   server with `--repository-root`, `--module-preset-directory`, plus control,
+   log, history, and telemetry paths inside the same temporary root. Do not use
+   process or activation endpoints.
 2. Connect the native client to that server and open **Strategy profiles...**.
    Confirm the window renders immediately with no `TwoWay`/read-only-property
    binding exception. Select a bundled read-only Strategy and confirm disabled
@@ -434,6 +453,16 @@ still requires the complete visible smoke below.
    groups/toggles (including fixed Poison Swamp stun), all shared presets,
    profile-local Modules with all eight slots/no duplicate, complete reordered
    Target Priority, all three Orb Distance fields, and Damage percentage.
+   Select Farm Standard and Tournament Standard in turn; verify the preview
+   visibly lists exactly eight named slot/Module pairs and labels both bundled
+   and read-only. Create a variant of one bundled preset, verify it appears
+   immediately with a custom immutable label and becomes the explicit current
+   row selection, then cancel before publication. In local form, change one
+   Module, use **Save as preset...**, and verify the second custom preset is
+   immediately selectable while the local draft remains dormant. Retry an
+   existing ID and one invalid ID; verify the useful error leaves the complete
+   draft and every visible selection unchanged. Confirm no preset operation
+   creates a Base/Strategy publication or changes selection/activation.
    After changing any Module choice, confirm all eight current ComboBox
    selections remain visibly populated and that the new value is unavailable
    in the other compatible slot.
@@ -618,7 +647,8 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current profile-local-authoring build requires revision 24,
+current managed-Module-authoring build requires revision 25,
+`managed_custom_module_presets_v1`,
 `strategy_authoring_local_loadout_editors_v1`, and
 `strategy_revision_history_v1` while retaining all earlier required
 capabilities. The banner reports the actual revision/capability mismatch and

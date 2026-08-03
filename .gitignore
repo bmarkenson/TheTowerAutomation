@@ -38,6 +38,9 @@ tmp/
 # Operator-published strategy profiles and their advisory writer lock
 config/strategies/custom/
 
+# Operator-created immutable Module presets and their advisory writer lock
+config/loadouts/custom/
+
 # Native Windows build output
 windows/**/bin/
 windows/**/obj/

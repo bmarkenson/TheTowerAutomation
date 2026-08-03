@@ -155,6 +155,7 @@ def test_authoring_catalog_separates_bases_strategies_and_registry(tmp_path):
     assert catalog["strategies"]["items"][2]["authoring_supported"] is False
     assert catalog["capabilities"]["publication_activates_strategy"] is False
     assert catalog["capabilities"]["profile_local_loadout_editors"] is True
+    assert catalog["capabilities"]["managed_custom_module_presets"] is True
     assert catalog["capabilities"]["operations"] == [
         "validate_base",
         "publish_base",
@@ -165,6 +166,7 @@ def test_authoring_catalog_separates_bases_strategies_and_registry(tmp_path):
         "compare_strategy_revision",
         "preview_restore_strategy",
         "publish_restore_strategy",
+        "create_module_preset",
     ]
     assert [state["id"] for state in catalog["capabilities"]["base_source_states"]] == [
         "not_included",
@@ -209,6 +211,15 @@ def test_authoring_catalog_separates_bases_strategies_and_registry(tmp_path):
         if "local_editor" in item["editor"]
     }
     assert set(local_editors) == {"modules", "target_priority", "orb_distance"}
+    modules_registry = next(
+        item for item in catalog["setting_registry"] if item["id"] == "modules"
+    )
+    assert modules_registry["editor"]["preset_catalog"] == "module_presets"
+    assert catalog["module_presets"]["id"] == "module_presets"
+    assert all(
+        set(option) == {"value", "display_name"}
+        for option in modules_registry["editor"]["fields"][0]["options"]
+    )
     assert len(local_editors["modules"]["fields"]) == 8
     assert local_editors["modules"]["unique_field_values"] is True
     assert local_editors["target_priority"]["list_constraints"][
@@ -217,6 +228,16 @@ def test_authoring_catalog_separates_bases_strategies_and_registry(tmp_path):
     assert [
         field["key"] for field in local_editors["orb_distance"]["fields"]
     ] == ["range_basis", "extra", "workshop"]
+    assert [item["id"] for item in catalog["module_presets"]["items"]] == [
+        "farm_standard",
+        "tournament_standard",
+    ]
+    assert all(
+        len(item["slots"]) == 8
+        and item["editable"] is False
+        and item["can_create_variant"] is True
+        for item in catalog["module_presets"]["items"]
+    )
     _assert_no_expanded_plan(catalog)
 
 
@@ -260,6 +281,152 @@ def test_api_local_editor_initial_values_validate_exactly_without_control_mutati
     assert service.control_store.status() == before_control
     assert not (tmp_path / "profiles" / "bases").exists()
     _assert_no_expanded_plan(response)
+
+
+def test_managed_module_preset_creation_refreshes_all_catalogs_without_publication(
+    tmp_path,
+):
+    service = _service(tmp_path)
+    before_control = service.control_store.status()
+    initial = service.strategy_authoring()
+    farm_definition = copy.deepcopy(
+        next(
+            item
+            for item in initial["module_presets"]["items"]
+            if item["id"] == "farm_standard"
+        )["definition"]
+    )
+
+    bundled_variant = service.apply_strategy_authoring(
+        {
+            "operation": "create_module_preset",
+            "id": "farm_visible_variant",
+            "display_name": "Farm Visible Variant",
+            "source": {"preset": "farm_standard"},
+        }
+    )
+    local_definition = copy.deepcopy(farm_definition)
+    local_definition["generator_primary"] = "Project Funding"
+    local_variant = service.apply_strategy_authoring(
+        {
+            "operation": "create_module_preset",
+            "id": "project_local_variant",
+            "display_name": "Project Local Variant",
+            "source": {"local": local_definition},
+        }
+    )
+
+    assert bundled_variant["valid"] is True
+    assert bundled_variant["published"] is False
+    assert bundled_variant["publication_activates_strategy"] is False
+    assert bundled_variant["preset"]["definition"] == farm_definition
+    assert local_variant["preset"]["definition"] == local_definition
+    assert local_variant["preset"]["origin"] == "custom"
+    refreshed = local_variant["catalog"]
+    module_ids = [item["id"] for item in refreshed["module_presets"]["items"]]
+    assert module_ids == [
+        "farm_standard",
+        "tournament_standard",
+        "farm_visible_variant",
+        "project_local_variant",
+    ]
+    module_registry = next(
+        item for item in refreshed["setting_registry"] if item["id"] == "modules"
+    )
+    assert [
+        option["value"]
+        for option in module_registry["editor"]["fields"][0]["options"]
+    ] == module_ids
+    assert [
+        item["id"] for item in service.strategy_profiles()["presets"]["modules"]
+    ] == module_ids
+    assert service.control_store.status() == before_control
+    assert not list((tmp_path / "profiles").glob("*.profile.yaml"))
+    assert not list((tmp_path / "profiles" / "bases").glob("*.yaml"))
+    _assert_no_expanded_plan(refreshed)
+    assert "path" not in json.dumps(refreshed).lower()
+
+
+def test_module_preset_api_returns_structured_validation_and_conflict_errors(
+    tmp_path,
+):
+    service = _service(tmp_path)
+    server = ControlSurfaceHTTPServer(
+        ("127.0.0.1", 0),
+        service=service,
+        token="module-preset-secret",
+        static_dir=STATIC_DIR,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    connection = http.client.HTTPConnection(
+        "127.0.0.1",
+        server.server_port,
+        timeout=5,
+    )
+
+    def create(payload: object) -> tuple[int, dict[str, Any]]:
+        body = json.dumps(payload)
+        connection.request(
+            "POST",
+            "/api/v1/strategy-authoring",
+            body=body,
+            headers={
+                "Authorization": "Bearer module-preset-secret",
+                "Content-Type": "application/json",
+                "Content-Length": str(len(body.encode("utf-8"))),
+            },
+        )
+        response = connection.getresponse()
+        return response.status, json.loads(response.read())
+
+    try:
+        invalid_status, invalid = create(
+            {
+                "operation": "create_module_preset",
+                "id": "Bad-ID",
+                "display_name": "Bad",
+                "source": {"preset": "farm_standard"},
+            }
+        )
+        collision_status, collision = create(
+            {
+                "operation": "create_module_preset",
+                "id": "farm_standard",
+                "display_name": "Shadow",
+                "source": {"preset": "farm_standard"},
+            }
+        )
+        path_status, path_error = create(
+            {
+                "operation": "create_module_preset",
+                "id": "path_variant",
+                "display_name": "Path Variant",
+                "source": {"preset": "farm_standard"},
+                "filesystem_path": str(tmp_path / "outside"),
+            }
+        )
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert invalid_status == 400
+    assert invalid["code"] == "invalid_module_preset_id"
+    assert invalid["details"] == {"field": "id"}
+    assert collision_status == 409
+    assert collision["code"] == "bundled_module_preset_collision"
+    assert collision["details"] == {"field": "id"}
+    assert path_status == 400
+    assert path_error["code"] == "invalid_module_preset_request"
+    assert path_error["details"] == {"field": "request"}
+    combined = json.dumps(
+        {"invalid": invalid, "collision": collision, "path": path_error}
+    )
+    assert str(tmp_path) not in combined
+    assert "expanded" not in combined
+    assert not (tmp_path / "profiles" / "bases").exists()
 
 
 @pytest.mark.parametrize(
@@ -1089,11 +1256,12 @@ def test_authoring_http_status_codes_auth_compatibility_and_no_plan(tmp_path):
 
         status, server_status = request("GET", "/api/v1/status")
         assert status == 200
-        assert server_status["server_revision"] == CONTROL_SURFACE_REVISION == 24
+        assert server_status["server_revision"] == CONTROL_SURFACE_REVISION == 25
         assert (
             "strategy_authoring_local_loadout_editors_v1"
             in CONTROL_SURFACE_CAPABILITIES
         )
+        assert "managed_custom_module_presets_v1" in CONTROL_SURFACE_CAPABILITIES
         assert "strategy_revision_history_v1" in CONTROL_SURFACE_CAPABILITIES
         assert (
             "strategy_authoring_profile_lifecycle_v1"
