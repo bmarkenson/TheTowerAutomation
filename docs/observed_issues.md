@@ -11,6 +11,36 @@ for a matching recurrence or historical investigation.
 
 ## Open
 
+### Owned validation cleanup survived a later running-battle transition
+
+- **Observed:** 2026-08-02 during the one-shot ordinary-battle validation for
+  the Tournament Strategy on `localhost:5555`.
+- **Symptom:** Automation Surrendered its claimed validation battle and
+  conclusively reached Game Over, but the screen changed to another running
+  Tier 21 battle before verified New-Battle Home cleanup completed. The
+  same-owner receipt remained in `cleanup` for approximately 97 minutes. Its
+  exclusive authority blocked game-speed enforcement and independent gem
+  collection even after No Strategy was adopted for the active battle.
+- **Evidence:** `logs/actions.log` records the durable claim at 15:49:22,
+  verified Surrender at 15:54:43, and `Owned validation battle reached Game
+  Over` at 15:54:46. At 15:55:20 it records `GAME_OVER -> RUNNING` without an
+  intervening automation `INPUT`; the receipt remained `cleanup` until guarded
+  owner replacement failed it at 17:32:07. During that interval status
+  repeatedly detected x6.3 or x3.0 and `AD_GEMS_AVAILABLE`, but emitted no
+  corresponding speed-adjustment or ad-gem action.
+- **Safety response:** Recovery did not Surrender, exit, or restart the active
+  battle. The control-surface parser was repaired first, then guarded attached
+  reload failed the old receipt without device input. Commit `bba06e9` also
+  fixed the replacement-runtime hold after authoritative later-battle
+  continuity; live daily- and ad-gem collection resumed at x3.0.
+- **Status:** Confirmed and unresolved at the original same-runtime boundary.
+  The source of the unlogged transition into the later battle is not
+  authoritative. Once the owner has conclusively observed its claimed
+  validation battle reach Game Over, a later `RUNNING` transition should close
+  the cleanup receipt fail-closed, release validation authority, and perform no
+  further battle input. The active repair is tracked in the
+  [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
+
 ### T19 Farm retained near-normal game-clock speed while entity throughput collapsed
 
 - **Observed:** 2026-07-29 during a main-PC Tier 19 Farm Retry sequence on

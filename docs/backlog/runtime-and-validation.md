@@ -390,6 +390,12 @@ stages:
 
 ## Runtime control
 
+- [ ] Close an owned exclusive-validation `cleanup` receipt when the same
+  runtime has already proved that its validation battle reached Game Over and
+  later observes `RUNNING` before verified Home cleanup. Fail closed, release
+  action authority, and perform no Retry, Surrender, or other recovery input,
+  as recorded in
+  [`../observed_issues.md`](../observed_issues.md#owned-validation-cleanup-survived-a-later-running-battle-transition).
 - [ ] Make `STOPPED` interrupt an in-progress Home setup without another device
   input, as recorded in
   [`../observed_issues.md`](../observed_issues.md#stopped-control-could-not-interrupt-an-in-progress-home-setup-guard).

@@ -8,6 +8,84 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Repeated systemd environment properties produced a false missing-config error
+
+- **Observed:** 2026-08-02 after the installed automation unit gained the
+  optional player-save audit environment file and the native Windows control
+  surface refreshed process status.
+- **Symptom:** The client reported that installed
+  `thetower-automation.service` did not load
+  `~/.config/thetower/automation-adb.env`, recommended reinstalling the unit,
+  and rejected guarded active-battle reload. The running automation still used
+  the configured ADB target, Strategy, startup policy, and x3.0 target.
+- **Evidence:** Both the checked-in and installed units contained separate
+  `EnvironmentFile=` directives for `automation-adb.env` and
+  `player-save-audit.env`. The live API exposed only the latter path and
+  synthesized ADB, Strategy, and startup-policy errors even though the running
+  process retained their environment-driven values.
+- **Safety response:** The unit and environment files were inspected without
+  modification. Deployment restarted only the Linux control-surface API; the
+  battle automation and its ADB lock remained untouched until a separately
+  guarded attached-battle reload was requested from fresh live evidence.
+- **Cause:** `core.automation_process._parse_properties` stored
+  `systemctl show` output in a dictionary by assignment. systemd emits one
+  `EnvironmentFiles=` property line per directive, so the later audit file
+  overwrote the required automation file.
+- **Resolution:** Repeated `EnvironmentFiles` values are concatenated before
+  service configuration is interpreted. The live API now reports both paths,
+  `automation_environment_file_loaded=true`, and null ADB, Strategy, and
+  startup-policy errors. The installed unit was already correct and required
+  neither reinstall nor daemon reload.
+- **Regression:**
+  `test/test_automation_process.py::test_systemd_manager_retains_repeated_environment_files`
+  reproduces systemd's repeated property lines and requires both files and all
+  derived configuration fields to remain valid.
+- **Validation:** All 57 automation-process tests and 44 control-surface tests
+  passed. After the API-only restart, live revision-24 status exposed both
+  environment files and cleared every false configuration error while the
+  original automation PID continued running.
+- **Fixed by:** `e022394`.
+
+### Orphaned validation recovery kept blocking a proven later battle
+
+- **Observed:** 2026-08-02 while recovering the active Tier 21 battle from a
+  stale Tournament exclusive-validation receipt.
+- **Symptom:** Guarded reload correctly failed the prior runtime's receipt and
+  Battle History authoritatively identified the attachment as a later run, but
+  the replacement runtime continued publishing an `exclusive_ownership` hold.
+  Detection remained active at x3.0 with `AD_GEMS_AVAILABLE`, while daily- and
+  ad-gem collection remained unauthorized.
+- **Evidence:** The receipt transitioned from `cleanup` to failed `result` at
+  17:32:07 without a Surrender or battle action. Continuity then compared the
+  retained Tier 21 wave-20 History baseline with the newly completed wave-360
+  entry and created a new activity scope. Despite both facts, API status still
+  exposed `holds=[exclusive_ownership]` for the new PID.
+- **Safety response:** No manual device input, Retry, Exit Battle, or Surrender
+  was used for recovery. Each reload first verified `RUNNING`, the exact
+  `localhost:5555` target, the held PID lock, a fresh screenshot, recent action
+  logs, and x3.0. The control surface paused and replaced only the attached
+  owner, then restored `RUNNING`.
+- **Cause:** Orphan reconciliation intentionally latched an in-memory ownership
+  hold, but that hold could clear only on a directly observed no-battle primary
+  state. The equally authoritative continuity result that proved a later
+  battle was not connected to action authority.
+- **Resolution:** Attachment continuity now returns a distinct
+  `confirmed_later_battle_scope_id`. The app clears an orphaned-validation hold
+  only when that proof is present; same-battle continuity deliberately keeps
+  the hold. This preserves fail-closed behavior for ambiguous attachments while
+  allowing independent collectors in a proven later battle.
+- **Regression:**
+  `test/test_activity_continuity.py::test_advanced_history_starts_scope_at_continuity_action`
+  requires the later-battle proof, and
+  `test/test_run_initialization.py::DeferredStartupGateTests::test_later_battle_continuity_clears_orphaned_validation_hold`
+  covers release. The adjacent same-battle test requires the hold to remain.
+- **Validation:** The continuity, Tournament-validation, run-initialization,
+  and action-authority suites passed all 144 tests. The fixed attached runtime
+  replaced PID `1696867` with `1703006`, retained `RUNNING` and x3.0, published
+  no authority holds, claimed the daily Store reward, collected the visible
+  in-battle five-gem reward, and observed the ad-gem overlay disappear.
+- **Fixed by:** `bba06e9`.
+
 ### Terminal-only restart attached stale Strategy and Perk history to a manual battle
 
 - **Observed:** 2026-08-02 at the natural Game Over boundary of the authorized
