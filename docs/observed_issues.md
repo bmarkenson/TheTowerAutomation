@@ -37,6 +37,32 @@ for a matching recurrence or historical investigation.
   this issue open until the managed runtime repairs Coin Trade-Off to Cash
   Bonus and completes exact live verification.
 
+### Auto Pick reconstruction duplicated a clipped overlapping row
+
+- **Observed:** 2026-08-03 during the resumed Tier 19 Farm Home setup after
+  the Ban Perks repair completed.
+- **Symptom:** Auto Pick priority reconstruction reported one unrecognized row
+  and stopped after 17 apparent ranks, so automation blocked rather than
+  correcting the genuinely mismatched priority list.
+- **Evidence:** A bounded paused capture retained four overlapping pages
+  through the visible `18 Rankings Unlocked` boundary. The first page clipped
+  the bottom row to `Enemies have -55.0% health, but tower health`; the next
+  page read the same physical row completely as the Enemy Health / Tower Regen
+  and Lifesteal Trade-Off. Because only the complete text had a semantic key,
+  overlap deduplication counted both observations. Reprocessing the same four
+  pages after the repair produces 17 unique authoritative ranks, with the
+  first real mismatch at rank 3.
+- **Safety response:** The live setup was placed under an acknowledged
+  agent-owned Pause before the capture. The diagnostic only scrolled the Auto
+  Pick panel and restored verified Home `NEW_BATTLE`; it did not tap an order
+  arrow or start a battle.
+- **Status:** Commit `22af0b0` recognizes the clipped phrase only when the row
+  still contains `enemies have`, `health`, `but`, and `tower health`, allowing
+  the overlapping complete observation to share its identity. Regression
+  coverage is in `test/test_perk_configuration.py`; 65 Perk and Home-setup
+  tests pass. Keep this issue open until the managed runtime completes the
+  live Auto Pick repair and exact final verification.
+
 ### Owned validation cleanup survived a later running-battle transition
 
 - **Observed:** 2026-08-02 during the one-shot ordinary-battle validation for
