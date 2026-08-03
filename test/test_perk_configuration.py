@@ -99,6 +99,52 @@ def test_auto_pick_observation_reads_all_category_colors_until_rank_boundary():
     assert len(result["selected"][1]["observations"]) == 2
 
 
+def test_auto_pick_overlap_deduplicates_truncated_enemy_health_tradeoff():
+    frames = [
+        np.zeros((1920, 1080, 3), dtype=np.uint8),
+        np.zeros((1920, 1080, 3), dtype=np.uint8),
+    ]
+    pages = iter(
+        (
+            [
+                _configuration_row(
+                    "Perk wave requirement -25.00%", 500, 657, 137
+                ),
+                _configuration_row(
+                    "Enemies have -55.0% health, but tower health",
+                    1500,
+                    1657,
+                    130,
+                ),
+            ],
+            [
+                _configuration_row(
+                    "Enemies have -55.0% health, but tower health regen "
+                    "and lifesteal -90%",
+                    500,
+                    657,
+                    130,
+                ),
+                _configuration_row("x1.44 Damage", 700, 857, 137),
+            ],
+        )
+    )
+
+    result = extract_ranked_auto_pick_order(
+        frames,
+        ranking_count=3,
+        row_fn=lambda _frame: next(pages),
+        ranking_boundary_fn=lambda _frame: None,
+    )
+
+    assert result["quality"]["valid"] is True
+    assert [entry["key"] for entry in result["selected"]] == [
+        "perk_wave_requirement",
+        "enemy_health_tradeoff",
+        "damage",
+    ]
+
+
 def test_ban_observation_uses_selected_outlines_not_category_brightness():
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
     rows = [
@@ -339,6 +385,12 @@ def test_auto_pick_rows_have_value_independent_semantic_keys():
         "x1.44 Cash Bonus": "cash_bonus",
         "x1.98 coins, but tower max h -10.0%": "coin_tradeoff",
         "coins, but tower max h -70.0%": "coin_tradeoff",
+        (
+            "Enemies have -55.0% health, but tower health"
+        ): "enemy_health_tradeoff",
+        (
+            "ay Enemies have -55.0% Ca health, but tower health"
+        ): "enemy_health_tradeoff",
         "Swamp radius x1.5": "swamp_radius",
     }
 

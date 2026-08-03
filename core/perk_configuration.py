@@ -170,8 +170,11 @@ def classify_perk_configuration_text(text: str) -> str | None:
     if (
         "enemies have" in normalized
         and "health" in tokens
-        and "tower health regen" in normalized
-        and "lifesteal" in tokens
+        # A row clipped at the bottom of the viewport can retain only the
+        # ``tower health`` prefix; the overlapping page supplies the complete
+        # regen/lifesteal suffix and both observations must share one identity.
+        and "tower health" in normalized
+        and "but" in tokens
     ):
         return "enemy_health_tradeoff"
     if "boss health" in normalized and "boss speed" in normalized:
