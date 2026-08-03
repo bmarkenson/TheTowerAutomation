@@ -128,6 +128,7 @@ def test_advanced_history_starts_scope_at_continuity_action(
     assert outcome.recapture
     assert outcome.confirmed_same_battle_scope_id is None
     assert current is not None
+    assert outcome.confirmed_later_battle_scope_id == current["run_id"]
     assert current["run_id"] != original["run_id"]
     assert current["reason"] == "battle_history_changed_on_attachment"
     assert (

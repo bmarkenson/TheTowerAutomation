@@ -32,6 +32,7 @@ class ActivityContinuityOutcome:
     pending: bool = False
     recapture: bool = False
     confirmed_same_battle_scope_id: Optional[str] = None
+    confirmed_later_battle_scope_id: Optional[str] = None
 
 
 class ActivityContinuityCoordinator:
@@ -346,6 +347,7 @@ class ActivityContinuityCoordinator:
             )
 
         confirmed_same_battle_scope_id = None
+        confirmed_later_battle_scope_id = None
         if (
             updated is not None
             and self._pending_mode == "compare"
@@ -353,6 +355,8 @@ class ActivityContinuityCoordinator:
             and not changed
         ):
             confirmed_same_battle_scope_id = run_id
+        elif changed:
+            confirmed_later_battle_scope_id = run_id
 
         self._checked_scope_id = run_id
         self._reset_pending()
@@ -360,6 +364,9 @@ class ActivityContinuityCoordinator:
             recapture=True,
             confirmed_same_battle_scope_id=(
                 confirmed_same_battle_scope_id
+            ),
+            confirmed_later_battle_scope_id=(
+                confirmed_later_battle_scope_id
             ),
         )
 

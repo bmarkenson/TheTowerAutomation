@@ -707,6 +707,7 @@ class DeferredStartupGateTests(unittest.TestCase):
     def test_app_applies_same_battle_continuity_before_recapture(self):
         app = App.__new__(App)
         app._mission_mgr = MagicMock()
+        app._exclusive_validation_ownership_hold = True
 
         app._apply_activity_continuity_outcome(
             SimpleNamespace(
@@ -718,6 +719,25 @@ class DeferredStartupGateTests(unittest.TestCase):
             app._mission_mgr.reuse_session_preflight_for_confirmed_attachment
         )
         reuse.assert_called_once_with("current-run")
+        self.assertTrue(app._exclusive_validation_ownership_hold)
+
+    def test_later_battle_continuity_clears_orphaned_validation_hold(self):
+        app = App.__new__(App)
+        app._mission_mgr = MagicMock()
+        app._exclusive_validation_ownership_hold = True
+
+        with patch("core.app.log"):
+            app._apply_activity_continuity_outcome(
+                SimpleNamespace(
+                    confirmed_later_battle_scope_id="later-run"
+                )
+            )
+
+        self.assertFalse(app._exclusive_validation_ownership_hold)
+        reuse = (
+            app._mission_mgr.reuse_session_preflight_for_confirmed_attachment
+        )
+        reuse.assert_not_called()
 
     def test_explicit_skip_suppresses_even_profile_attached_checks(self):
         strategy = self._strategy()

@@ -2160,7 +2160,7 @@ class App:
         return True
 
     def _apply_activity_continuity_outcome(self, outcome: object) -> None:
-        """Reuse session checks after continuity proves the same run scope."""
+        """Apply run identity facts established by attachment continuity."""
 
         confirmed_scope_id = getattr(
             outcome,
@@ -2170,6 +2170,23 @@ class App:
         if confirmed_scope_id:
             self._mission_mgr.reuse_session_preflight_for_confirmed_attachment(
                 str(confirmed_scope_id)
+            )
+
+        confirmed_later_scope_id = getattr(
+            outcome,
+            "confirmed_later_battle_scope_id",
+            None,
+        )
+        if (
+            confirmed_later_scope_id
+            and getattr(self, "_exclusive_validation_ownership_hold", False)
+        ):
+            self._exclusive_validation_ownership_hold = False
+            log(
+                "[TOURNAMENT_VALIDATION] Cleared stale exclusive ownership "
+                "hold after Battle History confirmed the attached battle is "
+                "a later run",
+                "INFO",
             )
 
     def run(self) -> None:
