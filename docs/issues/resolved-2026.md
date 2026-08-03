@@ -8,6 +8,140 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Final Auto Pick verification duplicated clipped Enemy Speed text
+
+- **Observed:** 2026-08-03 during exact verification after the Tier 19 Farm
+  Auto Pick reorder completed on `localhost:5555`.
+- **Symptom:** One final verification pass inserted the unrecognized text
+  `cnemies speed -44.U%, but enemies damage x2.5` between Chain Lightning
+  Damage and Inner Land Mines. A later pass consequently reported that one or
+  more configured perks were not recognized even though the list had been
+  repaired.
+- **Evidence:** `logs/actions.log` records the complete local repair, followed
+  by the clipped Enemy Speed observation and fail-closed result at 02:27:11.
+  A bounded paused four-page recapture of the unchanged list then read all 17
+  required ranks exactly, proving the failure was intermittent OCR overlap
+  rather than an incorrect order.
+- **Safety response:** The automatic full-setup retry was placed under an
+  acknowledged agent-owned Pause before it returned to Perks. The diagnostic
+  closed the interrupted Card detail, opened Auto Pick, captured scroll-only
+  evidence, and returned to verified Home without an order-arrow input.
+- **Cause:** The semantic classifier required the full leading `enemies speed`
+  phrase, so the exact leading-`c` OCR clip had no identity and could not
+  deduplicate against its complete overlapping observation.
+- **Resolution:** The exact observed leading-`c` alias maps to Enemy Speed only
+  when the same row retains the `enemies damage` clause. Its clipped and
+  complete observations therefore share one semantic identity without
+  broadening unrelated OCR matches.
+- **Regression:** `test/test_perk_configuration.py` covers the exact clipped
+  text and proves that clipped and complete Enemy Speed observations dedup.
+- **Validation:** All 82 focused Home, Perk, setup, and clickmap tests passed.
+  Fresh managed PID `2288436` then verified the exact 17-row Farm Auto Pick
+  order at 02:36:07, completed session preflight with no deferred checks or
+  waivers, and entered steady Tier 19 Farm state.
+- **Fixed by:** `25a7b8f`.
+
+### Auto Pick repair rescanned the full list after each move
+
+- **Observed:** 2026-08-03 during the guarded Tier 19 Farm Auto Pick repair on
+  `localhost:5555`.
+- **Symptom:** After one verified Coin Trade-Off up-arrow tap, automation
+  scrolled all the way to the list top and reconstructed the complete list
+  before attempting another move. The reconstruction changed its estimate
+  from rank 29 to rank 27, so the repair failed with `expected exactly
+  one-rank upward progress` even though only one arrow input had occurred.
+- **Evidence:** `logs/actions.log` records the single arrow tap at 01:16:03,
+  three topward swipes followed by five downward scan swipes, and the guarded
+  rank-delta failure at 01:16:38. The operator independently identified the
+  inefficient click/screenshot/full-rescan sequence while it was visible.
+- **Safety response:** The repair failed closed before a second arrow tap. Its
+  automatic full-setup retry was placed under an acknowledged agent-owned
+  Pause at 01:17:07, before that retry reached Auto Pick or issued another
+  order input.
+- **Cause:** Each adjacent arrow input was followed by a complete list
+  reconstruction and a global rank-delta assertion. Overlap and clipping
+  variance could change that global estimate even when the single local swap
+  was correct.
+- **Resolution:** Each arrow click is now followed by an immediate screenshot
+  that verifies the exact adjacent swap, then the same visible row is clicked
+  again. A short reverse swipe reacquires the row only when it leaves the
+  viewport; one final top-to-bottom reconstruction remains authoritative.
+- **Regression:** `test/test_home_perk_configuration.py` covers repeated local
+  swaps, displaced-neighbor verification, viewport reacquisition, and final
+  reconstruction. `test/test_clickmap_access.py` covers the added short
+  reverse-swipe target.
+- **Validation:** All 82 focused Home, Perk, setup, and clickmap tests passed.
+  The managed runtime moved Coin Trade-Off, Coins Bonus, and Damage through
+  locally verified adjacent swaps, using only short reverse swipes at viewport
+  edges. The fresh final pass verified all 17 ranks exactly.
+- **Fixed by:** `9f77011`.
+
+### Auto Pick reconstruction duplicated a clipped overlapping row
+
+- **Observed:** 2026-08-03 during the resumed Tier 19 Farm Home setup after
+  the Ban Perks repair completed.
+- **Symptom:** Auto Pick priority reconstruction reported one unrecognized row
+  and stopped after 17 apparent ranks, so automation blocked rather than
+  correcting the genuinely mismatched priority list.
+- **Evidence:** A bounded paused capture retained four overlapping pages
+  through the visible `18 Rankings Unlocked` boundary. The first page clipped
+  the bottom row to `Enemies have -55.0% health, but tower health`; the next
+  page read the same physical row completely as the Enemy Health / Tower Regen
+  and Lifesteal Trade-Off. Because only the complete text had a semantic key,
+  overlap deduplication counted both observations. Reprocessing the same four
+  pages after the repair produces 17 unique authoritative ranks, with the
+  first real mismatch at rank 3.
+- **Safety response:** The live setup was placed under an acknowledged
+  agent-owned Pause before the capture. The diagnostic only scrolled the Auto
+  Pick panel and restored verified Home `NEW_BATTLE`; it did not tap an order
+  arrow or start a battle.
+- **Cause:** The clipped observation had no semantic identity, so overlap
+  deduplication could not associate it with the complete observation of the
+  same physical Enemy Health trade-off row.
+- **Resolution:** The clipped phrase is recognized only when the row retains
+  `enemies have`, `health`, `but`, and `tower health`, allowing the overlapping
+  complete observation to share its identity.
+- **Regression:** `test/test_perk_configuration.py` covers the clipped Enemy
+  Health phrase and overlapping-row deduplication.
+- **Validation:** All 82 focused Home, Perk, setup, and clickmap tests passed.
+  Live reconstruction produced 17 authoritative ranks, enabled the guarded
+  reorder, and the fresh managed runtime verified the final order exactly.
+- **Fixed by:** `22af0b0`.
+
+### Ban Perks repair could not identify a truncated Coin Trade-Off row
+
+- **Observed:** 2026-08-03 while starting a Tier 19 Farm battle from verified
+  no-battle Home on `localhost:5555`.
+- **Symptom:** The selected Ban Perks block contained Coin Trade-Off in the
+  sixth slot instead of the required Cash Bonus. Automation detected that the
+  list differed, but blocked repair with `Ban Perks selected block was
+  ambiguous; an unrecognized row could be a required ban`.
+- **Evidence:** A bounded paused inspection read the first five selected rows
+  as the five expected Farm bans and read the sixth row's two OCR candidates
+  as `x1.98 coins, but tower max h -10.0%` and
+  `coins, but tower max h -70.0%`. Both retained the unique Coin Trade-Off
+  phrases, but the semantic classifier required the complete phrase
+  `tower max health`, leaving the row unrecognized. Reprocessing the same
+  capture after the repair identifies all six rows authoritatively and names
+  the sixth `coin_tradeoff`.
+- **Safety response:** The runtime remained under an acknowledged indefinite
+  Pause. The inspection only opened Ban Perks, captured the selected rows, and
+  returned to verified Home `NEW_BATTLE`; it did not toggle a Perk or start a
+  battle.
+- **Cause:** The semantic classifier required the complete `tower max health`
+  clause even when OCR preserved the row's otherwise unique Coin Trade-Off
+  structure.
+- **Resolution:** The narrow `tower max h` truncation is accepted only when
+  the same row also contains `coins` and `but`, preserving fail-closed
+  classification for unrelated text.
+- **Regression:** `test/test_perk_configuration.py` covers the two retained
+  clipped candidates and the required contextual terms.
+- **Validation:** All 82 focused Home, Perk, setup, and clickmap tests passed.
+  The managed repair replaced Coin Trade-Off with Cash Bonus, and fresh PID
+  `2288436` verified the exact six-ban Farm order at 02:36:07 before starting
+  Tier 19 with no startup waivers.
+- **Fixed by:** `18983ad`.
+
 ### Profile-local Module refresh blanked retained WPF selections
 
 - **Observed:** 2026-08-03 while the operator edited a Farm T19 custom Strategy
