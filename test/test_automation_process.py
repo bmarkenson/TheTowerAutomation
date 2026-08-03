@@ -466,6 +466,37 @@ def test_systemd_manager_reports_installed_unit_missing_managed_environment(tmp_
         manager.set_adb_port(5565)
 
 
+def test_systemd_manager_retains_repeated_environment_files(tmp_path):
+    environment_file = tmp_path / "automation-adb.env"
+    environment_file.write_text("", encoding="utf-8")
+    audit_environment_file = tmp_path / "player-save-audit.env"
+
+    def runner(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            "LoadState=loaded\nActiveState=active\nSubState=running\n"
+            "UnitFileState=disabled\nMainPID=1234\nExecMainStatus=0\n"
+            f"EnvironmentFiles={environment_file} (ignore_errors=yes)\n"
+            f"EnvironmentFiles={audit_environment_file} (ignore_errors=yes)\n",
+            "",
+        )
+
+    manager = SystemdAutomationManager(
+        runner=runner,
+        adb_environment_file=environment_file,
+    )
+
+    status = manager.status()
+
+    assert status["automation_environment_file_loaded"] is True
+    assert str(environment_file) in status["service_environment_files"]
+    assert str(audit_environment_file) in status["service_environment_files"]
+    assert status["adb_port_error"] is None
+    assert status["strategy_error"] is None
+    assert status["startup_gate_policy_error"] is None
+
+
 def test_checked_in_systemd_unit_loads_managed_automation_environment():
     repository_root = Path(__file__).resolve().parents[1]
     unit = (

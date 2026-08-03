@@ -567,7 +567,13 @@ def _parse_properties(output: str) -> dict[str, str]:
     for line in (output or "").splitlines():
         key, separator, value = line.partition("=")
         if separator and key:
-            properties[key] = value
+            if key == "EnvironmentFiles" and key in properties:
+                # systemd emits one EnvironmentFiles= line per configured
+                # directive. Preserve every path so deployment validation does
+                # not mistake an earlier entry for a missing environment file.
+                properties[key] = f"{properties[key]} {value}".strip()
+            else:
+                properties[key] = value
     return properties
 
 
