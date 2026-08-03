@@ -63,6 +63,31 @@ for a matching recurrence or historical investigation.
   tests pass. Keep this issue open until the managed runtime completes the
   live Auto Pick repair and exact final verification.
 
+### Auto Pick repair rescanned the full list after each move
+
+- **Observed:** 2026-08-03 during the guarded Tier 19 Farm Auto Pick repair on
+  `localhost:5555`.
+- **Symptom:** After one verified Coin Trade-Off up-arrow tap, automation
+  scrolled all the way to the list top and reconstructed the complete list
+  before attempting another move. The reconstruction changed its estimate
+  from rank 29 to rank 27, so the repair failed with `expected exactly
+  one-rank upward progress` even though only one arrow input had occurred.
+- **Evidence:** `logs/actions.log` records the single arrow tap at 01:16:03,
+  three topward swipes followed by five downward scan swipes, and the guarded
+  rank-delta failure at 01:16:38. The operator independently identified the
+  inefficient click/screenshot/full-rescan sequence while it was visible.
+- **Safety response:** The repair failed closed before a second arrow tap. Its
+  automatic full-setup retry was placed under an acknowledged agent-owned
+  Pause at 01:17:07, before that retry reached Auto Pick or issued another
+  order input.
+- **Status:** A local repair now verifies each immediate screenshot as one
+  adjacent swap, repeats the arrow tap while the same row remains visible,
+  and uses a short reverse swipe only when the row leaves the viewport. Final
+  top-to-bottom reconstruction remains authoritative. Regression coverage is
+  in `test/test_home_perk_configuration.py`; 81 Home, Perk, setup, and
+  clickmap tests pass. Keep this issue open until a managed runtime completes
+  the live reorder and exact final verification.
+
 ### Owned validation cleanup survived a later running-battle transition
 
 - **Observed:** 2026-08-02 during the one-shot ordinary-battle validation for

@@ -51,6 +51,7 @@ BAN_AVAILABLE_START_SWIPES = 2
 MAX_BAN_SCAN_SWIPES = 14
 MAX_AUTO_PICK_SCAN_SWIPES = 20
 MAX_AUTO_PICK_MOVE_TAPS = 300
+MAX_AUTO_PICK_LOCAL_REACQUIRE_SWIPES = 4
 AUTO_PICK_UP_X = 915
 BAN_SELECTED_TOGGLE_X = 540
 BAN_TOGGLE_X = 944
@@ -605,13 +606,59 @@ def _repair_auto_pick_order(
                 f"{perk_configuration_label(key)} appeared above its guarded "
                 f"target rank {desired_rank}"
             )
-        remaining = rank - desired_rank
-        while remaining > 0:
+        estimated_rank = rank
+        anchor_key = (
+            expected_keys[desired_rank - 2]
+            if desired_rank > 1
+            else None
+        )
+        while True:
+            (
+                current,
+                row,
+                previous,
+                _following,
+                at_top,
+            ) = _reacquire_auto_pick_move_context(
+                current,
+                key,
+                capture_fn=capture_fn,
+                visible_fn=visible_fn,
+                swipe_fn=swipe_fn,
+                row_fn=row_fn,
+                sleep_fn=sleep_fn,
+            )
+            if anchor_key is not None and previous is not None and (
+                previous.get("key") == anchor_key
+            ):
+                if estimated_rank != desired_rank:
+                    log(
+                        "[HOME_PERKS] Auto Pick local adjacency reconciled "
+                        f"{perk_configuration_label(key)} rank estimate "
+                        f"{estimated_rank} to target {desired_rank}",
+                        "DEBUG",
+                    )
+                rank = desired_rank
+                break
+            if anchor_key is None and at_top:
+                rank = 1
+                break
+            if at_top:
+                raise HomePerkConfigurationError(
+                    f"{perk_configuration_label(key)} reached the top before "
+                    f"its guarded predecessor "
+                    f"{perk_configuration_label(anchor_key)}"
+                )
+            if previous is None:
+                raise HomePerkConfigurationError(
+                    f"could not identify the row immediately above "
+                    f"{perk_configuration_label(key)}"
+                )
             if total_taps >= MAX_AUTO_PICK_MOVE_TAPS:
                 raise HomePerkConfigurationError(
                     "Auto Pick repair exceeded its bounded move budget"
                 )
-            before_rank = rank
+            displaced = previous
             current = _tap_configuration_row(
                 current,
                 row,
@@ -627,39 +674,44 @@ def _repair_auto_pick_order(
                 require_identity_after=False,
             )
             total_taps += 1
-            observed_rank, current, row = _locate_auto_pick_key(
+            (
                 current,
+                row,
+                previous,
+                _following,
+                at_top,
+            ) = _confirm_auto_pick_local_swap(
                 key,
+                displaced,
+                current=current,
                 capture_fn=capture_fn,
+                detector=detector,
                 visible_fn=visible_fn,
                 swipe_fn=swipe_fn,
                 row_fn=row_fn,
                 sleep_fn=sleep_fn,
             )
-            if observed_rank == before_rank:
-                log(
-                    "[HOME_PERKS] Auto Pick rank was unchanged on the first "
-                    "post-input read; confirming from a fresh complete scan",
-                    "DEBUG",
-                )
-                sleep_fn(0.8)
-                observed_rank, current, row = _locate_auto_pick_key(
-                    current,
-                    key,
-                    capture_fn=capture_fn,
-                    visible_fn=visible_fn,
-                    swipe_fn=swipe_fn,
-                    row_fn=row_fn,
-                    sleep_fn=sleep_fn,
-                )
-            if observed_rank != before_rank - 1:
-                raise HomePerkConfigurationError(
-                    f"{perk_configuration_label(key)} moved from rank "
-                    f"{before_rank} to {observed_rank}; expected exactly "
-                    "one-rank upward progress"
-                )
-            rank = observed_rank
-            remaining = rank - desired_rank
+            prior_estimate = estimated_rank
+            estimated_rank = max(1, estimated_rank - 1)
+            displaced_label = perk_configuration_label(
+                str(displaced.get("key") or "") or None,
+                str(displaced.get("display_text") or ""),
+            )
+            log(
+                "[HOME_PERKS] Auto Pick locally verified one upward swap; "
+                f"perk={perk_configuration_label(key)} "
+                f"rank_estimate={prior_estimate}->{estimated_rank} "
+                f"displaced={displaced_label}",
+                "DEBUG",
+            )
+            if anchor_key is not None and previous is not None and (
+                previous.get("key") == anchor_key
+            ):
+                rank = desired_rank
+                break
+            if anchor_key is None and at_top:
+                rank = 1
+                break
 
         if rank != desired_rank:
             raise HomePerkConfigurationError(
@@ -694,6 +746,155 @@ def _repair_auto_pick_order(
             "Auto Pick order remained different after guarded moves"
         )
     return _current
+
+
+def _visible_auto_pick_move_context(
+    frame: Frame,
+    key: str,
+    *,
+    row_fn: RowsFn,
+) -> tuple[
+    dict[str, Any],
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+] | None:
+    """Return a target row and its immediate visible neighbors."""
+
+    rows = sorted(
+        (semantic_perk_entry(raw) for raw in row_fn(frame)),
+        key=lambda entry: int(entry.get("top") or 0),
+    )
+    matches = [
+        index
+        for index, entry in enumerate(rows)
+        if entry.get("key") == key
+    ]
+    if len(matches) != 1:
+        return None
+    index = matches[0]
+    return (
+        rows[index],
+        rows[index - 1] if index > 0 else None,
+        rows[index + 1] if index + 1 < len(rows) else None,
+    )
+
+
+def _reacquire_auto_pick_move_context(
+    current: Frame,
+    key: str,
+    *,
+    capture_fn: Capture,
+    visible_fn: Callable[..., bool],
+    swipe_fn: Callable[[str], bool],
+    row_fn: RowsFn,
+    sleep_fn: Callable[[float], None],
+    require_previous: bool = True,
+) -> tuple[
+    Frame,
+    dict[str, Any],
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+    bool,
+]:
+    """Reacquire a moving row locally, scrolling upward only as needed."""
+
+    for _attempt in range(MAX_AUTO_PICK_LOCAL_REACQUIRE_SWIPES + 1):
+        context = _visible_auto_pick_move_context(current, key, row_fn=row_fn)
+        if context is not None and (
+            context[1] is not None or not require_previous
+        ):
+            return current, *context, False
+        previous_frame = _swipe_configuration(
+            current,
+            "gesture_targets.goto_previous:perks",
+            capture_fn=capture_fn,
+            visible_fn=visible_fn,
+            swipe_fn=swipe_fn,
+            sleep_fn=sleep_fn,
+        )
+        if _content_difference(current, previous_frame) <= 1.0:
+            if context is not None:
+                return current, *context, True
+            break
+        current = previous_frame
+    raise HomePerkConfigurationError(
+        "Auto Pick local repair could not reacquire "
+        f"{perk_configuration_label(key)} while scrolling upward"
+    )
+
+
+def _confirm_auto_pick_local_swap(
+    key: str,
+    displaced: Mapping[str, Any],
+    *,
+    current: Frame,
+    capture_fn: Capture,
+    detector: Detector,
+    visible_fn: Callable[..., bool],
+    swipe_fn: Callable[[str], bool],
+    row_fn: RowsFn,
+    sleep_fn: Callable[[float], None],
+) -> tuple[
+    Frame,
+    dict[str, Any],
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+    bool,
+]:
+    """Confirm one local adjacent swap without rescanning from list top."""
+
+    for attempt in range(2):
+        context = _visible_auto_pick_move_context(current, key, row_fn=row_fn)
+        if (
+            context is not None
+            and context[2] is not None
+            and perk_entries_match(displaced, context[2])
+        ):
+            return current, *context, context[1] is None
+        if attempt == 0:
+            log(
+                "[HOME_PERKS] Auto Pick local swap was not settled on the "
+                "first post-input read; confirming from a fresh screenshot",
+                "DEBUG",
+            )
+            sleep_fn(0.8)
+            fresh = capture_fn()
+            if (
+                fresh is None
+                or detector(fresh).get("state") != "PERKS"
+                or not visible_fn(
+                    PERK_CONFIGURATION_INDICATOR,
+                    screenshot=fresh,
+                )
+            ):
+                raise HomePerkConfigurationError(
+                    "Perks configuration identity lost while confirming an "
+                    "Auto Pick move"
+                )
+            current = fresh
+
+    (
+        current,
+        row,
+        previous,
+        following,
+        at_top,
+    ) = _reacquire_auto_pick_move_context(
+        current,
+        key,
+        capture_fn=capture_fn,
+        visible_fn=visible_fn,
+        swipe_fn=swipe_fn,
+        row_fn=row_fn,
+        sleep_fn=sleep_fn,
+        require_previous=False,
+    )
+    if following is None or not perk_entries_match(displaced, following):
+        raise HomePerkConfigurationError(
+            f"{perk_configuration_label(key)} did not make one verified "
+            "local upward swap"
+        )
+    return current, row, previous, following, at_top
 
 
 def _locate_auto_pick_key(

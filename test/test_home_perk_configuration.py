@@ -59,6 +59,8 @@ def test_auto_pick_repair_inserts_missing_coin_tradeoff_at_strategy_rank():
         "perk_wave_requirement",
         "game_speed",
         "golden_tower_bonus",
+        "max_health",
+        "cash_bonus",
         "coin_tradeoff",
     ]
 
@@ -108,9 +110,11 @@ def test_auto_pick_repair_inserts_missing_coin_tradeoff_at_strategy_rank():
         "game_speed",
         "coin_tradeoff",
     ]
-    assert tap.call_count == 1
+    assert tap.call_count == 3
     assert tap.call_args.kwargs["action"] == "auto_pick_move_up:coin_tradeoff"
-    assert scroll_top.call_count == 3
+    # One initial locate plus one final verification scroll. The repair does
+    # not return to list top between adjacent moves.
+    assert scroll_top.call_count == 2
 
 
 def test_auto_pick_repair_rechecks_rank_after_viewport_reflow():
@@ -201,7 +205,7 @@ def test_auto_pick_repair_refuses_move_without_one_rank_progress():
     ):
         with pytest.raises(
             HomePerkConfigurationError,
-            match="expected exactly one-rank upward progress",
+            match="did not make one verified local upward swap",
         ):
             _repair_auto_pick_order(
                 frame,
@@ -221,32 +225,39 @@ def test_auto_pick_repair_refuses_move_without_one_rank_progress():
             )
 
 
-def test_auto_pick_repair_confirms_delayed_rank_progress_before_failing():
+def test_auto_pick_repair_confirms_delayed_local_swap():
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
     expected = [
         "perk_wave_requirement",
         "game_speed",
         "coin_tradeoff",
     ]
-    coin_row = {
-        **_row("coin_tradeoff", 2),
-        "key": "coin_tradeoff",
-    }
-    locate_results = [
-        (4, frame, coin_row),
-        (4, frame, coin_row),
-        (3, frame, coin_row),
+    order = [
+        "perk_wave_requirement",
+        "game_speed",
+        "golden_tower_bonus",
+        "coin_tradeoff",
     ]
     sleeps = []
+    pending_move = {"value": False}
+
+    def rows(_frame):
+        return [_row(key, index) for index, key in enumerate(order)]
+
+    def move_up(current, _row, **_kwargs):
+        pending_move["value"] = True
+        return current
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        if seconds == 0.8 and pending_move["value"]:
+            order[2], order[3] = order[3], order[2]
+            pending_move["value"] = False
 
     with (
         patch(
-            "core.home_perk_configuration._locate_auto_pick_key",
-            side_effect=locate_results,
-        ) as locate,
-        patch(
             "core.home_perk_configuration._tap_configuration_row",
-            return_value=frame,
+            side_effect=move_up,
         ) as tap,
         patch(
             "core.home_perk_configuration._scroll_configuration_top",
@@ -272,19 +283,104 @@ def test_auto_pick_repair_confirms_delayed_rank_progress_before_failing():
             safe_tap_fn=lambda *_args, **_kwargs: True,
             visible_fn=lambda *_args, **_kwargs: True,
             swipe_fn=lambda _key: True,
-            row_fn=lambda _frame: [],
+            row_fn=rows,
             row_near_fn=lambda *_args, **_kwargs: None,
             observed_keys=[
                 "perk_wave_requirement",
                 "game_speed",
                 "golden_tower_bonus",
             ],
-            sleep_fn=sleeps.append,
+            sleep_fn=sleep,
         )
 
-    assert locate.call_count == 3
     assert tap.call_count == 1
     assert 0.8 in sleeps
+
+
+def test_auto_pick_repair_scrolls_up_locally_when_moved_row_leaves_viewport():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    order = [
+        "perk_wave_requirement",
+        "game_speed",
+        "golden_tower_bonus",
+        "coin_tradeoff",
+    ]
+    viewport_start = {"value": 2}
+
+    def rows(_frame):
+        visible = order[viewport_start["value"] : viewport_start["value"] + 2]
+        return [_row(key, index) for index, key in enumerate(visible)]
+
+    def move_up(current, row, **_kwargs):
+        key = classify_perk_configuration_text(row["display_text"])
+        index = order.index(key)
+        order[index - 1], order[index] = order[index], order[index - 1]
+        # The moved row is now just above the retained viewport.
+        viewport_start["value"] = 3
+        return current
+
+    def previous(current, key, **_kwargs):
+        assert key == "gesture_targets.goto_previous:perks"
+        viewport_start["value"] = max(0, viewport_start["value"] - 1)
+        return np.full_like(current, 10 * viewport_start["value"])
+
+    with (
+        patch(
+            "core.home_perk_configuration._locate_auto_pick_key",
+            return_value=(4, frame, _row("coin_tradeoff", 1)),
+        ),
+        patch(
+            "core.home_perk_configuration._tap_configuration_row",
+            side_effect=move_up,
+        ),
+        patch(
+            "core.home_perk_configuration._swipe_configuration",
+            side_effect=previous,
+        ) as swipe,
+        patch(
+            "core.home_perk_configuration._scroll_configuration_top",
+            return_value=frame,
+        ),
+        patch(
+            "core.home_perk_configuration._capture_ranked_frames",
+            return_value=([frame], frame),
+        ),
+        patch(
+            "core.home_perk_configuration.extract_ranked_auto_pick_order",
+            side_effect=lambda *_args, **_kwargs: {
+                "quality": {"valid": True},
+                "selected": [{"key": key} for key in order[:3]],
+            },
+        ),
+    ):
+        _repair_auto_pick_order(
+            frame,
+            [
+                "perk_wave_requirement",
+                "game_speed",
+                "coin_tradeoff",
+            ],
+            capture_fn=lambda: frame,
+            detector=lambda _frame: {"state": "PERKS"},
+            safe_tap_fn=lambda *_args, **_kwargs: True,
+            visible_fn=lambda *_args, **_kwargs: True,
+            swipe_fn=lambda _key: True,
+            row_fn=rows,
+            row_near_fn=lambda *_args, **_kwargs: None,
+            observed_keys=[
+                "perk_wave_requirement",
+                "game_speed",
+                "golden_tower_bonus",
+            ],
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert order[:3] == [
+        "perk_wave_requirement",
+        "game_speed",
+        "coin_tradeoff",
+    ]
+    assert swipe.call_count == 2
 
 
 def test_close_to_home_waits_for_new_battle_control_after_home_appears():
