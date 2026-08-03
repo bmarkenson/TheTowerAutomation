@@ -88,6 +88,31 @@ for a matching recurrence or historical investigation.
   clickmap tests pass. Keep this issue open until a managed runtime completes
   the live reorder and exact final verification.
 
+### Final Auto Pick verification duplicated clipped Enemy Speed text
+
+- **Observed:** 2026-08-03 during exact verification after the Tier 19 Farm
+  Auto Pick reorder completed on `localhost:5555`.
+- **Symptom:** One final verification pass inserted the unrecognized text
+  `cnemies speed -44.U%, but enemies damage x2.5` between Chain Lightning
+  Damage and Inner Land Mines. A later pass consequently reported that one or
+  more configured perks were not recognized even though the list had been
+  repaired.
+- **Evidence:** `logs/actions.log` records the complete local repair, followed
+  by the clipped Enemy Speed observation and fail-closed result at 02:27:11.
+  A bounded paused four-page recapture of the unchanged list then read all 17
+  required ranks exactly, proving the failure was intermittent OCR overlap
+  rather than an incorrect order.
+- **Safety response:** The automatic full-setup retry was placed under an
+  acknowledged agent-owned Pause before it returned to Perks. The diagnostic
+  closed the interrupted Card detail, opened Auto Pick, captured scroll-only
+  evidence, and returned to verified Home without an order-arrow input.
+- **Status:** Commit `25a7b8f` maps the exact observed leading-`c` OCR alias to
+  Enemy Speed only when the same row retains the `enemies damage` clause, so
+  its clipped and complete observations deduplicate. Regression coverage is
+  in `test/test_perk_configuration.py`; 82 Home, Perk, setup, and clickmap
+  tests pass. Keep this issue open until the managed runtime completes exact
+  live verification.
+
 ### Owned validation cleanup survived a later running-battle transition
 
 - **Observed:** 2026-08-02 during the one-shot ordinary-battle validation for
