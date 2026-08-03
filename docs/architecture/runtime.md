@@ -177,16 +177,20 @@ The in-battle Perk projection requires exact agreement among the 50-entry
 `perkLevel` array, `perksPickedCount`, and every ordered `PerkPick(wave, perk)`
 entry. It publishes canonical Perk IDs, selection waves, level-after values,
 and a stable snapshot fingerprint. Perk ID `0` is `max_health` (Max Health).
-Unknown IDs, changed entry shape/class, non-monotonic waves, or any
-count/list/level inconsistency publish no Perk snapshot. An inactive zero/empty
-projection is explicitly `cleared`; later runtime ownership must retain the
-newest complete same-round snapshot rather than treating that cleared save as
-final-Perk evidence. At the Tier 22 boundary, the last complete active snapshot
-contained 15 internally consistent ordered picks that exactly represented the
-terminal UI's 11 collapsed rows, and the immediate stable post-death projection
-was inactive/cleared. The normalized exact-version snapshot is therefore ready
-for a future fail-closed consumer, but that same-round cache and navigation
-decision do not exist yet.
+The 50 positions are storage capacity, not evidence that every index names a
+possible Perk; the exact-version table currently maps 33 observed semantic IDs.
+Changed entry shape/class, non-monotonic waves, or any count/list/level
+inconsistency publishes no Perk snapshot. A structurally consistent unknown ID
+retains a private numeric calibration projection for the audit sidecar, but it
+does not appear in the public runtime dictionary and does not create a partial
+semantic snapshot. An inactive zero/empty projection is explicitly `cleared`;
+later runtime ownership must retain the newest complete same-round snapshot
+rather than treating that cleared save as final-Perk evidence. At the Tier 22
+boundary, the last complete active snapshot contained 15 internally consistent
+ordered picks that exactly represented the terminal UI's 11 collapsed rows,
+and the immediate stable post-death projection was inactive/cleared. The
+normalized exact-version snapshot is therefore ready for a future fail-closed
+consumer, but that same-round cache and navigation decision do not exist yet.
 
 The same privacy boundary will expose additional active-round components only
 through exact-version manifests. In-battle Attack, Defense, and Utility levels
@@ -314,6 +318,9 @@ session. Its exact-version manifest and receipt schema retain only:
 - active identity and wave, including the per-tier counter value;
 - complete Perk status/count/fingerprint, reconstructable same-identity pick
   deltas, and the last complete checkpoint across terminal clearing;
+- unique same-wave Perk-ID calibration receipts containing only numeric ID,
+  semantic key, wave/level, confidence, evidence fingerprint, and explicit
+  collector-session scope;
 - structural tail status/identity/fingerprint, count/capacity, and semantic
   completed-entry status/fingerprint; and
 - passive boundary labels, observation-latency bounds, and strict metadata from
@@ -327,6 +334,19 @@ merge semantics; no survival state or exact activation wave is guessed. A
 disabled or rejected optional component cannot erase a valid core receipt.
 Visual waves are explicitly approximate observations, never exact activation
 waves.
+
+The existing Perk timeline may also feed a stripped calibration batch after it
+has independently accepted a complete exact selection boundary. Display text,
+OCR output, colors, pixels, and restored timeline checkpoints never cross this
+queue. When a stable save is structurally complete but contains an unmapped
+numeric ID, a pure resolver groups save picks and UI selections by exact wave,
+cancels already mapped semantics, and applies singleton constraint propagation.
+It restores the semantic Perk projection only if every needed assignment is
+unique, uses an already allowlisted Perk family at at least 80% confidence, and
+successfully appends the calibration receipt. Multi-wave aggregates, visibility
+gaps, count differences, duplicate semantics, conflicting later evidence, and
+ambiguous assignments stay unavailable. The static exact-version manifest is
+never rewritten.
 
 The collector begins with a pre-round structural-tail baseline, records the
 first naturally serialized active identity, samples only stable revision
@@ -351,6 +371,10 @@ changes, and its current tail exactly equals the carried terminal tail. The
 collector then clears all old identity and Perk progression before observing
 the new round. It never carries this evidence across a process session, and a
 process that starts on Game Over remains terminal-only and unbound.
+Perk-ID overlays have a narrower but compatible lifetime: accepted semantics
+survive UI correlation-window resets and ordinary direct Retries on the same
+owned target generation, while per-round UI batches do not. A target handoff,
+generation change, collector restart, or exact conflict discards the overlay.
 
 The authorized Tier 22 boundary supplies the collector's core natural-round
 evidence: new identity, ordinary-foreground revision progress, final

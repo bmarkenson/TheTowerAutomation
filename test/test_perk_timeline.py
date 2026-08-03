@@ -70,6 +70,119 @@ def _stabilize(
     return tracker.observe(progress, wave=wave)
 
 
+def _mapping_request(*waves: int) -> PerkCaptureRequest:
+    return PerkCaptureRequest(
+        kind="selection",
+        scheduled_wave=waves[0],
+        observed_wave=waves[-1] + 1,
+        progress_after=_progress(waves[-1], waves[-1] + 42),
+        snapshot_mode="until_first_unchanged",
+        scheduled_waves=tuple(waves),
+        observed_wave_end=waves[-1] + 1,
+    )
+
+
+def test_mapping_evidence_drain_is_allowlisted_and_exactly_once():
+    tracker = PerkTimelineTracker()
+    tracker._append_batch(
+        _mapping_request(200),
+        [
+            {
+                "family": "interest",
+                "confidence": 95.0,
+                "change": "added",
+                "display_text": "Interest +hidden value",
+                "before_display_text": "must not cross",
+                "color": "green",
+            }
+        ],
+        observed_at=datetime(2026, 8, 3, 12, 0, tzinfo=timezone.utc),
+    )
+
+    evidence = tracker.drain_mapping_evidence()
+
+    assert evidence == (
+        {
+            "schema_version": 1,
+            "sequence": 1,
+            "scheduled_wave": 200,
+            "scheduled_waves": [200],
+            "boundary_coverage": "complete",
+            "selection_model": "simultaneous_batch",
+            "observed_at": "2026-08-03T12:00:00+00:00",
+            "selections": [
+                {
+                    "family": "interest",
+                    "confidence_percent": 95.0,
+                    "change": "added",
+                }
+            ],
+        },
+    )
+    assert tracker.drain_mapping_evidence() == ()
+
+
+def test_mapping_evidence_reset_and_checkpoint_restore_never_replay():
+    source = PerkTimelineTracker()
+    source._append_batch(
+        _mapping_request(200),
+        [{"family": "interest", "confidence": 95.0, "change": "added"}],
+        observed_at=datetime(2026, 8, 3, 12, 0, tzinfo=timezone.utc),
+    )
+    checkpoint = source.checkpoint()
+
+    restored = PerkTimelineTracker()
+    assert restored.restore_checkpoint(checkpoint) is True
+    assert restored.drain_mapping_evidence() == ()
+
+    source.reset(fresh_battle=True)
+    assert source.drain_mapping_evidence() == ()
+
+
+def test_mapping_evidence_uses_existing_semantic_classifier_before_redaction():
+    tracker = PerkTimelineTracker()
+    tracker._append_batch(
+        _mapping_request(200),
+        [
+            {
+                "family": "x1_defense_absolute",
+                "confidence": 95.0,
+                "change": "added",
+                "display_text": "x1.44 Defense Absolute",
+            }
+        ],
+        observed_at=datetime(2026, 8, 3, 12, 0, tzinfo=timezone.utc),
+    )
+
+    evidence = tracker.drain_mapping_evidence()
+
+    assert evidence[0]["selections"][0]["family"] == "defense_absolute"
+    assert "display_text" not in repr(evidence)
+
+
+def test_reconstructed_singletons_emit_independent_exact_mapping_batches():
+    tracker = PerkTimelineTracker()
+    tracker._append_ordered_post_pwr_batches(
+        _mapping_request(200, 242),
+        [
+            {"family": "orbs", "confidence": 96.0, "change": "added"},
+            {"family": "interest", "confidence": 95.0, "change": "added"},
+        ],
+        observed_at=datetime(2026, 8, 3, 12, 0, tzinfo=timezone.utc),
+    )
+
+    evidence = tracker.drain_mapping_evidence()
+
+    assert [batch["scheduled_wave"] for batch in evidence] == [200, 242]
+    assert [batch["selections"][0]["family"] for batch in evidence] == [
+        "interest",
+        "orbs",
+    ]
+    assert {
+        batch["selection_model"] for batch in evidence
+    } == {"singleton_after_pwr_max_reconstructed"}
+
+
 def test_recorded_selection_summary_uses_singular_for_one_perk():
     assert _recorded_selection_summary(["Bounce Shot +2"]) == (
         "Perk timeline selection recorded — Bounce Shot +2"

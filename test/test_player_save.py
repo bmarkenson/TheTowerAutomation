@@ -18,6 +18,7 @@ from core.player_save import (
     pull_player_save_bytes,
     reconcile_requirements,
 )
+from core.runtime_save import runtime_with_perk_id_overrides
 
 
 CAPTURED_AT = datetime(2026, 7, 31, 20, 0, tzinfo=timezone.utc)
@@ -470,8 +471,50 @@ def test_unknown_perk_id_fails_only_the_perk_component(monkeypatch):
     assert runtime.perks is None
     assert runtime.perks_status == "unavailable"
     assert runtime.perks_reason == f"unmapped_perk_id:{unmapped_id}"
+    assert runtime.perk_calibration is not None
+    assert runtime.perk_calibration.picks[-1].perk_id == unmapped_id
+    assert "perk_calibration" not in runtime.as_dict()
     assert runtime.active_round_identity is not None
     assert runtime.battle_history_tail.structural_status == "observed"
+
+    resolved = runtime_with_perk_id_overrides(
+        runtime,
+        {unmapped_id: "new_observed_perk"},
+    )
+    assert resolved.perks_status == "observed"
+    assert resolved.perks is not None
+    assert resolved.perks.picks[-1].perk_key == "new_observed_perk"
+
+
+def test_perk_id_overlay_cannot_replace_static_or_duplicate_semantics(monkeypatch):
+    decoded = _decoded_save()
+    unmapped_id = next(
+        perk_id
+        for perk_id in range(50)
+        if str(perk_id) not in VERSION_MAPPING["perk_ids"]
+    )
+    decoded["perksPicked"].append(
+        {"wave": 440, "perk": unmapped_id, "__class__": "PerkPick"}
+    )
+    decoded["perksPickedCount"] = 5
+    decoded["perkLevel"][unmapped_id] = 1
+    runtime = _snapshot(monkeypatch, decoded).runtime_save
+    assert runtime is not None
+
+    static_id = 10
+    replaced = runtime_with_perk_id_overrides(
+        runtime,
+        {static_id: "different_semantics", unmapped_id: "new_observed_perk"},
+    )
+    duplicated = runtime_with_perk_id_overrides(
+        runtime,
+        {unmapped_id: VERSION_MAPPING["perk_ids"][str(static_id)]},
+    )
+
+    assert replaced.perks is None
+    assert replaced.perks_reason == f"perk_override_static_conflict:{static_id}"
+    assert duplicated.perks is None
+    assert duplicated.perks_reason == f"perk_override_key_conflict:{unmapped_id}"
 
 
 @pytest.mark.parametrize(

@@ -34,6 +34,59 @@
       "fields": {},
       "unavailable_reason": "not_applicable"
     },
+    "perk_id_calibration": {
+      "enabled": true,
+      "schema_version": 1,
+      "audit_ids": [
+        "V1073-RUNTIME-005",
+        "V1073-RUNTIME-013"
+      ],
+      "fields": {
+        "status": {
+          "type": "enum",
+          "values": [
+            "resolved"
+          ]
+        },
+        "game_version": {
+          "type": "positive_int"
+        },
+        "perk_id": {
+          "type": "nonnegative_int"
+        },
+        "perk_key": {
+          "type": "safe_code"
+        },
+        "save_pick_wave": {
+          "type": "nonnegative_int"
+        },
+        "save_level_after": {
+          "type": "positive_int"
+        },
+        "ui_batch_sequence": {
+          "type": "positive_int"
+        },
+        "ui_confidence_percent": {
+          "type": "nonnegative_int"
+        },
+        "evidence_fingerprint": {
+          "type": "sha256"
+        },
+        "evidence_semantics": {
+          "type": "enum",
+          "values": [
+            "unique_exact_wave_cross_channel"
+          ]
+        },
+        "mapping_scope": {
+          "type": "enum",
+          "values": [
+            "collector_session_only"
+          ]
+        }
+      },
+      "unavailable_reason": "perk_id_calibration_manifest_disabled"
+    },
     "visual_activation_events": {
       "enabled": true,
       "schema_version": 1,

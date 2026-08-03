@@ -23,6 +23,7 @@ from core.battle_perks import (
 )
 from core.input import safe_tap, swipe_now, tap_if_visible
 from core.label_tapper import is_visible
+from core.perk_configuration import classify_perk_configuration_text
 from core.run_perk_selector import canonical_perk_family
 from core.scrolling import capture_scroll_to_edge, scroll_to_edge
 from core.ss_capture import capture_adb_screenshot
@@ -249,6 +250,7 @@ class PerkTimelineTracker:
         self._selected_by_family: dict[str, dict[str, Any]] = {}
         self._pwr_maxed = False
         self._batches: list[dict[str, Any]] = []
+        self._mapping_evidence: list[dict[str, Any]] = []
         self._warnings: list[str] = []
         self._candidate_token: Optional[tuple[str, Optional[int]]] = None
         self._candidate_count = 0
@@ -413,6 +415,7 @@ class PerkTimelineTracker:
         self._selected_by_family = restored["selected_by_family"]
         self._pwr_maxed = restored["pwr_maxed"]
         self._batches = restored["batches"]
+        self._mapping_evidence = []
         self._warnings = restored["warnings"]
         self._armed_next_wave = restored["armed_next_wave"]
         self._pending = restored["pending"]
@@ -652,6 +655,18 @@ class PerkTimelineTracker:
             ),
         }
 
+    def drain_mapping_evidence(self) -> tuple[dict[str, Any], ...]:
+        """Return new privacy-safe calibration batches exactly once.
+
+        Restored timeline checkpoints never repopulate this process-local
+        buffer, so a new save-audit session cannot inherit UI calibration
+        evidence from an earlier process.
+        """
+
+        evidence = tuple(copy.deepcopy(self._mapping_evidence))
+        self._mapping_evidence.clear()
+        return evidence
+
     def _append_batch(
         self,
         request: PerkCaptureRequest,
@@ -665,31 +680,31 @@ class PerkTimelineTracker:
             len(request.scheduled_waves) > 1
             or request.boundary_coverage != BOUNDARY_COVERAGE_COMPLETE
         )
-        self._batches.append(
-            {
-                "sequence": len(self._batches) + 1,
-                "scheduled_wave": request.scheduled_wave,
-                "scheduled_waves": list(request.scheduled_waves),
-                "observed_wave": request.observed_wave,
-                "observed_wave_end": request.observed_wave_end,
-                "boundary_coverage": request.boundary_coverage,
-                "observed_at": when.isoformat(),
-                "selection_model": (
-                    selection_model
-                    or (
-                        "interval_aggregate"
-                        if interval_aggregate
-                        else (
-                            "singleton_after_pwr_max"
-                            if self._pwr_maxed and len(changes) == 1
-                            else "simultaneous_batch"
-                        )
+        batch = {
+            "sequence": len(self._batches) + 1,
+            "scheduled_wave": request.scheduled_wave,
+            "scheduled_waves": list(request.scheduled_waves),
+            "observed_wave": request.observed_wave,
+            "observed_wave_end": request.observed_wave_end,
+            "boundary_coverage": request.boundary_coverage,
+            "observed_at": when.isoformat(),
+            "selection_model": (
+                selection_model
+                or (
+                    "interval_aggregate"
+                    if interval_aggregate
+                    else (
+                        "singleton_after_pwr_max"
+                        if self._pwr_maxed and len(changes) == 1
+                        else "simultaneous_batch"
                     )
-                ),
-                "snapshot_mode": request.snapshot_mode,
-                "selections": [copy.deepcopy(dict(change)) for change in changes],
-            }
-        )
+                )
+            ),
+            "snapshot_mode": request.snapshot_mode,
+            "selections": [copy.deepcopy(dict(change)) for change in changes],
+        }
+        self._batches.append(batch)
+        self._mapping_evidence.append(_mapping_evidence_from_batch(batch))
 
     def _append_ordered_post_pwr_batches(
         self,
@@ -1055,6 +1070,12 @@ class PerkTimelineObserver:
     def snapshot(self) -> dict[str, Any]:
         self._sync_persistence_scope(restore=True)
         return self.tracker.snapshot()
+
+    def drain_mapping_evidence(self) -> tuple[dict[str, Any], ...]:
+        """Drain only calibration batches accepted by this live process."""
+
+        self._sync_persistence_scope(restore=True)
+        return self.tracker.drain_mapping_evidence()
 
     def _current_scope_id(self) -> Optional[str]:
         if self._state_path is None:
@@ -1822,6 +1843,41 @@ def _index_selected_perks(
         if entry is not None:
             indexed[entry["family"]] = entry
     return indexed
+
+
+def _mapping_evidence_from_batch(batch: Mapping[str, Any]) -> dict[str, Any]:
+    """Strip a timeline batch to the fields needed for ID calibration."""
+
+    raw_selections = batch.get("selections")
+    selections = []
+    if isinstance(raw_selections, Sequence) and not isinstance(
+        raw_selections,
+        (str, bytes, bytearray),
+    ):
+        for raw in raw_selections:
+            if not isinstance(raw, Mapping):
+                continue
+            classified_family = classify_perk_configuration_text(
+                str(raw.get("display_text") or "")
+            )
+            selections.append(
+                {
+                    "family": classified_family
+                    or str(raw.get("family") or ""),
+                    "confidence_percent": raw.get("confidence"),
+                    "change": str(raw.get("change") or ""),
+                }
+            )
+    return {
+        "schema_version": 1,
+        "sequence": batch.get("sequence"),
+        "scheduled_wave": batch.get("scheduled_wave"),
+        "scheduled_waves": copy.deepcopy(batch.get("scheduled_waves")),
+        "boundary_coverage": batch.get("boundary_coverage"),
+        "selection_model": batch.get("selection_model"),
+        "observed_at": batch.get("observed_at"),
+        "selections": selections,
+    }
 
 
 def _timeline_entry(perk: Mapping[str, Any]) -> Optional[dict[str, Any]]:

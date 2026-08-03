@@ -1049,6 +1049,25 @@ never receipts. Confirmed activation-tracker events may add allowlisted
 metadata and a relative evidence-image reference; their wave is explicitly an
 approximate visual observation, not an exact activation wave.
 
+If an otherwise valid active save contains a numeric Perk ID absent from the
+exact-version table, the enabled collector automatically attempts a passive
+same-round mapping. It uses only newly accepted, complete, exact-wave batches
+from the existing Perk timeline; it does not open Perks or schedule a capture
+for calibration. A mapping is accepted only when known picks can be cancelled
+and the remaining save IDs and allowlisted UI families have one assignment at
+at least 80% confidence. The append-only `perk_id_calibration` receipt is
+written before the session overlay is used. There is no manifest self-edit.
+
+The overlay remains available across ordinary direct Retries in the same
+collector process and owned ADB target generation. Per-round UI evidence is
+cleared at new-round/reset boundaries. Process restart, target-generation
+change, conflicting exact evidence, an ambiguous batch, a visibility gap,
+multi-wave aggregation, unknown semantic family, count mismatch, low
+confidence, or receipt failure leaves the complete Perk projection unavailable
+and preserves the existing UI path. The 50-entry `perkLevel` array is capacity;
+for version 1073, 33 numeric IDs currently have observed semantic mappings and
+the other 17 positions are not presumed valid Perks.
+
 Within one process session, a direct Game Over Retry can carry the validated
 terminal tail candidate forward as the next structural baseline. Acceptance
 still requires a later passive `RUNNING` boundary, unchanged target ownership,

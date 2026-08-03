@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import hashlib
 import inspect
@@ -24,8 +25,11 @@ from core.player_save_audit import (
     load_player_save_audit_manifest,
 )
 from core.runtime_save import (
+    ActiveRoundIdentity,
     BattleHistoryTail,
     NormalizedRuntimeSave,
+    RuntimePerkCalibration,
+    RuntimePerkCalibrationPick,
     RuntimePerkSnapshot,
 )
 
@@ -228,6 +232,67 @@ def _records(receipts, record_type):
     return [record for record in receipts if record["record_type"] == record_type]
 
 
+def _unmapped_runtime(revision: int) -> NormalizedRuntimeSave:
+    return NormalizedRuntimeSave(
+        mapping_id="data-9-game-1073",
+        audit_matrix_id="data-9-game-1073-runtime-audit-v2",
+        capture={
+            "captured_at": (START + timedelta(seconds=revision)).isoformat(),
+            "source_sha256": _sha(f"unmapped-save:{revision}"),
+        },
+        save_revision=revision,
+        round_active=True,
+        current_wave=250 + revision,
+        active_round_identity=ActiveRoundIdentity(
+            game_version=1073,
+            current_tier=19,
+            rounds_started_this_tier=232,
+            round_seed=123456,
+            fingerprint=_sha("active-round"),
+        ),
+        perks_status="unavailable",
+        perks_reason="unmapped_perk_id:11",
+        perks=None,
+        battle_history_tail=BattleHistoryTail(
+            structural_status="empty",
+            structural_reason="battle_history_empty",
+            entry_count=0,
+            capacity=30,
+            identity=None,
+            completed_entry_status="not_applicable",
+            completed_entry_reason="battle_history_empty",
+            entry=None,
+        ),
+        perk_calibration=RuntimePerkCalibration(
+            state="active_round",
+            picked_count=1,
+            levels=((11, 1),),
+            picks=(RuntimePerkCalibrationPick(1, 200, 11, 1),),
+            known_ids=((10, "perk_wave_requirement"),),
+            fingerprint=_sha("numeric-perk-calibration"),
+        ),
+    )
+
+
+def _mapping_batch(*, family: str = "interest") -> dict:
+    return {
+        "schema_version": 1,
+        "sequence": 1,
+        "scheduled_wave": 200,
+        "scheduled_waves": [200],
+        "boundary_coverage": "complete",
+        "selection_model": "simultaneous_batch",
+        "observed_at": START.isoformat(),
+        "selections": [
+            {
+                "family": family,
+                "confidence_percent": 95.0,
+                "change": "added",
+            }
+        ],
+    }
+
+
 def test_cli_and_environment_opt_in_are_default_disabled_and_bounded(monkeypatch):
     monkeypatch.delenv("THETOWER_PLAYER_SAVE_AUDIT", raising=False)
     monkeypatch.delenv("THETOWER_PLAYER_SAVE_AUDIT_INTERVAL_SECONDS", raising=False)
@@ -287,6 +352,8 @@ def test_disabled_collector_performs_zero_acquisition_and_creates_zero_files(
     )
     collector.request_observation("periodic_interval")
     collector.observe_visual_events([{"ability": "nuke"}])
+    collector.observe_perk_mapping_evidence([_mapping_batch()])
+    collector.reset_perk_mapping_evidence()
     collector.close(wait=True)
 
     pulls.assert_not_called()
@@ -401,6 +468,216 @@ def test_enabled_worker_projects_only_normalized_runtime_evidence(tmp_path):
         "inactive_home_baseline_recorded"
     )
     assert raw_payload.decode() not in json.dumps(records)
+
+
+def test_collector_maps_unknown_perk_and_keeps_mapping_across_retry_reset(tmp_path):
+    receipt = tmp_path / "receipts.jsonl"
+    decode_count = {"value": 0}
+
+    def decode(_payload, **_kwargs):
+        decode_count["value"] += 1
+        return SimpleNamespace(
+            runtime_save=_unmapped_runtime(decode_count["value"]),
+            mapping_supported=True,
+            shape_valid=True,
+            game_version=1073,
+        )
+
+    collector = PlayerSaveAuditCollector(
+        enabled=True,
+        interval_seconds=300,
+        target_snapshot_fn=lambda: SimpleNamespace(
+            target="localhost:5555",
+            generation=1,
+            owned=True,
+        ),
+        receipt_path=receipt,
+        pull_fn=lambda **_kwargs: b"stable",
+        decode_fn=decode,
+    )
+    collector.observe_screen({"state": "RUNNING"})
+    assert collector.wait_until_idle(2.0)
+
+    collector.observe_perk_mapping_evidence([_mapping_batch()])
+    collector.request_observation("mapping_followup")
+    assert collector.wait_until_idle(2.0)
+
+    collector.reset_perk_mapping_evidence()
+    collector.request_observation("retry_followup")
+    assert collector.wait_until_idle(2.0)
+    collector.close(wait=True, timeout=1.0)
+
+    records = [json.loads(line) for line in receipt.read_text().splitlines()]
+    calibration = [
+        record
+        for record in records
+        if record["record_type"] == "normalized_component"
+        and record["component"]["name"] == "perk_id_calibration"
+    ]
+    assert len(calibration) == 1
+    evidence = calibration[0]["component"]["evidence"]
+    assert evidence == {
+        "status": "resolved",
+        "game_version": 1073,
+        "perk_id": 11,
+        "perk_key": "interest",
+        "save_pick_wave": 200,
+        "save_level_after": 1,
+        "ui_batch_sequence": 1,
+        "ui_confidence_percent": 95,
+        "evidence_fingerprint": evidence["evidence_fingerprint"],
+        "evidence_semantics": "unique_exact_wave_cross_channel",
+        "mapping_scope": "collector_session_only",
+    }
+    assert len(evidence["evidence_fingerprint"]) == 64
+
+    saves = [
+        record for record in records if record["record_type"] == "save_observation"
+    ]
+    assert [save["perks"]["status"] for save in saves] == [
+        "unavailable",
+        "observed",
+        "observed",
+    ]
+    assert saves[1]["perks"]["progression"]["delta"] == [
+        {
+            "sequence": 1,
+            "saved_wave": 200,
+            "perk_id": 11,
+            "perk_key": "interest",
+            "level_after": 1,
+        }
+    ]
+    assert saves[-1]["perks"]["progression"]["status"] == (
+        "complete_unchanged_prefix"
+    )
+    rendered = json.dumps(records).lower()
+    assert "display_text" not in rendered
+    assert "private" not in rendered
+
+
+def test_target_generation_change_discards_learned_perk_mapping(tmp_path):
+    receipt = tmp_path / "receipts.jsonl"
+    holder = {"generation": 1, "decode_count": 0}
+
+    def target_snapshot():
+        return SimpleNamespace(
+            target=f"localhost:{5545 + holder['generation'] * 10}",
+            generation=holder["generation"],
+            owned=True,
+        )
+
+    def decode(_payload, **_kwargs):
+        holder["decode_count"] += 1
+        return SimpleNamespace(
+            runtime_save=_unmapped_runtime(holder["decode_count"]),
+            mapping_supported=True,
+            shape_valid=True,
+            game_version=1073,
+        )
+
+    collector = PlayerSaveAuditCollector(
+        enabled=True,
+        interval_seconds=300,
+        target_snapshot_fn=target_snapshot,
+        receipt_path=receipt,
+        pull_fn=lambda **_kwargs: b"stable",
+        decode_fn=decode,
+    )
+    collector.observe_screen({"state": "RUNNING"})
+    assert collector.wait_until_idle(2.0)
+    collector.observe_perk_mapping_evidence([_mapping_batch()])
+    collector.request_observation("mapping_followup")
+    assert collector.wait_until_idle(2.0)
+
+    holder["generation"] = 2
+    collector.request_observation("target_handoff_followup")
+    assert collector.wait_until_idle(2.0)
+    collector.close(wait=True, timeout=1.0)
+
+    records = [json.loads(line) for line in receipt.read_text().splitlines()]
+    saves = [
+        record for record in records if record["record_type"] == "save_observation"
+    ]
+    assert [save["perks"]["status"] for save in saves] == [
+        "unavailable",
+        "observed",
+        "unavailable",
+    ]
+
+
+def test_mapping_receipt_requires_exact_manifest_context(tmp_path):
+    receipt = tmp_path / "receipts.jsonl"
+    revision = {"value": 0}
+
+    def decode(_payload, **_kwargs):
+        revision["value"] += 1
+        runtime = replace(
+            _unmapped_runtime(revision["value"]),
+            mapping_id="different-exact-version",
+        )
+        return SimpleNamespace(
+            runtime_save=runtime,
+            mapping_supported=True,
+            shape_valid=True,
+            game_version=1073,
+        )
+
+    collector = PlayerSaveAuditCollector(
+        enabled=True,
+        interval_seconds=300,
+        target_snapshot_fn=lambda: SimpleNamespace(
+            target="localhost:5555",
+            generation=1,
+            owned=True,
+        ),
+        receipt_path=receipt,
+        pull_fn=lambda **_kwargs: b"stable",
+        decode_fn=decode,
+    )
+    collector.observe_screen({"state": "RUNNING"})
+    assert collector.wait_until_idle(2.0)
+    collector.observe_perk_mapping_evidence([_mapping_batch()])
+    collector.request_observation("mapping_followup")
+    assert collector.wait_until_idle(2.0)
+    collector.close(wait=True, timeout=1.0)
+
+    records = [json.loads(line) for line in receipt.read_text().splitlines()]
+    assert not _records(records, "normalized_component")
+    assert any(
+        record.get("outcome", {}).get("code") == "malformed_normalized_evidence"
+        for record in records
+    )
+
+
+def test_collector_rejects_unallowlisted_perk_mapping_before_queue(tmp_path):
+    receipt = tmp_path / "receipts.jsonl"
+    collector = PlayerSaveAuditCollector(
+        enabled=True,
+        interval_seconds=300,
+        target_snapshot_fn=lambda: SimpleNamespace(
+            target="localhost:5555",
+            generation=1,
+            owned=True,
+        ),
+        receipt_path=receipt,
+        pull_fn=lambda **_kwargs: (_ for _ in ()).throw(
+            PlayerSavePullError("unused")
+        ),
+    )
+    unsafe = _mapping_batch()
+    unsafe["selections"][0]["display_text"] = "must not queue"
+
+    collector.observe_perk_mapping_evidence([unsafe])
+    assert collector.wait_until_idle(2.0)
+    collector.close(wait=True, timeout=1.0)
+
+    records = [json.loads(line) for line in receipt.read_text().splitlines()]
+    outcomes = _records(records, "audit_outcome")
+    assert outcomes[-1]["outcome"]["code"] == (
+        "perk_id_mapping_evidence_rejected"
+    )
+    assert "must not queue" not in json.dumps(records)
 
 
 def test_natural_boundary_state_machine_retains_perk_deltas_clear_and_tail_candidate():
@@ -1460,6 +1737,56 @@ def test_pause_does_not_block_passive_boundary_forwarding():
     assert app._observe_player_save_audit_screen(detection) is None
 
     collector.observe_screen.assert_called_once_with(detection)
+
+
+def test_app_forwards_new_perk_mapping_batches_without_a_dispatch_result():
+    app = App.__new__(App)
+    collector = Mock(enabled=True)
+    observer = Mock()
+    batches = (_mapping_batch(),)
+    observer.drain_mapping_evidence.return_value = batches
+    app._player_save_audit_collector = collector
+    app._perk_timeline_observer = observer
+
+    assert app._observe_player_save_audit_perk_mapping_evidence() is None
+
+    observer.drain_mapping_evidence.assert_called_once_with()
+    collector.observe_perk_mapping_evidence.assert_called_once_with(batches)
+
+
+def test_app_does_not_drain_mapping_evidence_when_collector_is_disabled():
+    app = App.__new__(App)
+    collector = Mock(enabled=False)
+    observer = Mock()
+    app._player_save_audit_collector = collector
+    app._perk_timeline_observer = observer
+
+    assert app._observe_player_save_audit_perk_mapping_evidence() is None
+
+    observer.drain_mapping_evidence.assert_not_called()
+    collector.observe_perk_mapping_evidence.assert_not_called()
+
+
+def test_app_forwards_mapping_window_reset_without_affecting_dispatch():
+    app = App.__new__(App)
+    collector = Mock(enabled=True)
+    app._player_save_audit_collector = collector
+
+    assert app._reset_player_save_audit_perk_mapping_evidence() is None
+
+    collector.reset_perk_mapping_evidence.assert_called_once_with()
+
+
+def test_perk_mapping_evidence_is_drained_before_timeline_route_recapture():
+    source = inspect.getsource(App.run)
+    handle = source.index("perk_timeline_handled = self._perk_timeline().handle")
+    forward = source.index(
+        "self._observe_player_save_audit_perk_mapping_evidence()"
+    )
+    route_recapture = source.index("if perk_timeline_handled:")
+    visual_observer = source.index("activation_tracker = self._activation_tracker()")
+
+    assert handle < forward < route_recapture < visual_observer
 
 
 def test_receipt_write_or_decoder_failure_cannot_escape_into_normal_runtime(

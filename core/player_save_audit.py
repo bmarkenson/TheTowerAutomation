@@ -33,7 +33,14 @@ from core.player_save import (
     decode_player_save_bytes,
     pull_player_save_bytes,
 )
-from core.runtime_save import NormalizedRuntimeSave
+from core.perk_id_resolver import (
+    normalize_timeline_mapping_batch,
+    resolve_runtime_perk_ids,
+)
+from core.runtime_save import (
+    NormalizedRuntimeSave,
+    runtime_with_perk_id_overrides,
+)
 from utils.logger import log
 
 
@@ -51,6 +58,8 @@ MAX_AUDIT_PERK_PICKS = 512
 MAX_RECEIPT_BYTES = 128 * 1024
 _WARNING_REMINDER_SECONDS = 15 * 60.0
 _QUEUE_CAPACITY = 128
+_MAX_PERK_MAPPING_BATCHES = 512
+_MAX_PERK_MAPPING_BATCHES_PER_COMMAND = 64
 _DEFAULT_INTERVAL_SECONDS = 300
 _MIN_INTERVAL_SECONDS = 30
 _MAX_INTERVAL_SECONDS = 3600
@@ -204,6 +213,16 @@ class _OutcomeCommand:
 
 
 @dataclass(frozen=True)
+class _PerkMappingCommand:
+    batches: tuple[Mapping[str, Any], ...]
+
+
+@dataclass(frozen=True)
+class _PerkMappingResetCommand:
+    pass
+
+
+@dataclass(frozen=True)
 class _StopCommand:
     pass
 
@@ -297,6 +316,7 @@ def load_player_save_audit_manifest(
 
     for required in (
         "core_runtime",
+        "perk_id_calibration",
         "visual_activation_events",
         "survival_checkpoints",
     ):
@@ -737,7 +757,11 @@ class PlayerSaveAuditStateMachine:
                 component="optional_component",
             )
             return False
-        if normalized_name in {"core_runtime", "visual_activation_events"}:
+        if normalized_name in {
+            "core_runtime",
+            "perk_id_calibration",
+            "visual_activation_events",
+        }:
             self.record_outcome(
                 "normalized_component_reserved",
                 component="optional_component",
@@ -757,7 +781,7 @@ class PlayerSaveAuditStateMachine:
                 component=normalized_name,
             )
             return False
-        self._emit(
+        return self._emit(
             "normalized_component",
             component={
                 "name": normalized_name,
@@ -767,7 +791,35 @@ class PlayerSaveAuditStateMachine:
             },
             authority=_observation_only_authority(),
         )
-        return True
+
+    def _record_perk_id_mapping(self, payload: Mapping[str, Any]) -> bool:
+        """Record one internally resolved ID without exposing a public bypass."""
+
+        component = self.manifest.components["perk_id_calibration"]
+        if not component.enabled:
+            self.record_outcome(
+                component.unavailable_reason,
+                component="perk_id_calibration",
+            )
+            return False
+        try:
+            normalized = _normalize_manifest_component(payload, component)
+        except PlayerSaveAuditError:
+            self.record_outcome(
+                "perk_id_mapping_evidence_rejected",
+                component="perk_id_calibration",
+            )
+            return False
+        return self._emit(
+            "normalized_component",
+            component={
+                "name": "perk_id_calibration",
+                "schema_version": component.schema_version,
+                "audit_ids": list(component.audit_ids),
+                "evidence": normalized,
+            },
+            authority=_observation_only_authority(),
+        )
 
     def _accept_same_identity_revision(
         self,
@@ -1147,6 +1199,9 @@ class PlayerSaveAuditCollector:
         self._warning_times: dict[str, float] = {}
         self._active_failure_code: Optional[str] = None
         self._state_machine: Optional[PlayerSaveAuditStateMachine] = None
+        self._perk_mapping_batches: list[Mapping[str, Any]] = []
+        self._perk_id_overrides: dict[int, str] = {}
+        self._perk_mapping_scope: Optional[tuple[str, int]] = None
         if not self.enabled:
             return
         if interval_invalid:
@@ -1253,6 +1308,50 @@ class PlayerSaveAuditCollector:
         if normalized_events or rejected_count:
             self._enqueue(_VisualCommand(tuple(normalized_events), rejected_count))
 
+    def observe_perk_mapping_evidence(
+        self,
+        batches: Sequence[Mapping[str, Any]],
+    ) -> None:
+        """Queue only exact, privacy-safe UI batches for passive correlation."""
+
+        if not self.enabled or self._closed or not batches:
+            return
+        if isinstance(batches, (str, bytes, bytearray)):
+            self._enqueue(
+                _OutcomeCommand(
+                    "perk_id_mapping_evidence_rejected",
+                    "perk_id_calibration",
+                )
+            )
+            return
+        normalized: list[dict[str, Any]] = []
+        rejected = False
+        for index, batch in enumerate(batches):
+            if index >= _MAX_PERK_MAPPING_BATCHES_PER_COMMAND:
+                rejected = True
+                break
+            safe_batch = normalize_timeline_mapping_batch(batch)
+            if safe_batch is None:
+                rejected = True
+                continue
+            normalized.append(safe_batch)
+        if rejected:
+            self._enqueue(
+                _OutcomeCommand(
+                    "perk_id_mapping_evidence_rejected",
+                    "perk_id_calibration",
+                )
+            )
+        if normalized:
+            self._enqueue(_PerkMappingCommand(tuple(normalized)))
+
+    def reset_perk_mapping_evidence(self) -> None:
+        """End one UI/save correlation window without discarding learned IDs."""
+
+        if not self.enabled or self._closed:
+            return
+        self._enqueue(_PerkMappingResetCommand())
+
     def observe_normalized_component(
         self,
         name: str,
@@ -1280,7 +1379,11 @@ class PlayerSaveAuditCollector:
                 )
             )
             return
-        if safe_name in {"core_runtime", "visual_activation_events"}:
+        if safe_name in {
+            "core_runtime",
+            "perk_id_calibration",
+            "visual_activation_events",
+        }:
             self._enqueue(
                 _OutcomeCommand(
                     "normalized_component_reserved",
@@ -1353,6 +1456,8 @@ class PlayerSaveAuditCollector:
                 if isinstance(command, _StopCommand):
                     return
                 if isinstance(command, _BoundaryCommand):
+                    if _starts_perk_mapping_round(command.request):
+                        self._perk_mapping_batches.clear()
                     state.record_boundary(command.request)
                     self._acquire_and_process(command.request)
                     next_periodic = self._monotonic_fn() + self._interval_seconds
@@ -1371,6 +1476,10 @@ class PlayerSaveAuditCollector:
                         command.code,
                         component=command.component,
                     )
+                elif isinstance(command, _PerkMappingCommand):
+                    self._append_perk_mapping_batches(command.batches, state)
+                elif isinstance(command, _PerkMappingResetCommand):
+                    self._perk_mapping_batches.clear()
             except Exception:
                 self._rate_limited_warning("collector_worker_failed")
             finally:
@@ -1386,6 +1495,7 @@ class PlayerSaveAuditCollector:
             self._rate_limited_warning("exact_target_unavailable")
             return
         target, generation = target_before
+        self._sync_perk_mapping_scope((target, generation))
         target_fingerprint = _target_fingerprint(target)
         started_at = self._now_fn()
         try:
@@ -1422,13 +1532,7 @@ class PlayerSaveAuditCollector:
                 )
                 self._rate_limited_warning(code)
                 return
-            observation = _audit_observation_from_runtime(
-                runtime,
-                game_version=snapshot.game_version,
-                target_fingerprint=target_fingerprint,
-                acquisition_started_at=started_at,
-                acquisition_completed_at=self._now_fn(),
-            )
+            game_version = snapshot.game_version
             del snapshot
         except PlayerSavePullError:
             code = "stable_read_unavailable"
@@ -1463,6 +1567,7 @@ class PlayerSaveAuditCollector:
 
         target_after = self._target_snapshot()
         if target_after != (target, generation):
+            self._sync_perk_mapping_scope(target_after)
             state.record_outcome(
                 "target_handoff_discarded",
                 request=request,
@@ -1475,6 +1580,55 @@ class PlayerSaveAuditCollector:
                 "INFO",
             )
             return
+        resolution = None
+        mapping_context_matches = bool(
+            game_version == state.manifest.game_version
+            and runtime.mapping_id == state.manifest.mapping_id
+            and runtime.audit_matrix_id == state.manifest.audit_matrix_id
+        )
+        if mapping_context_matches:
+            try:
+                resolution = resolve_runtime_perk_ids(
+                    runtime,
+                    self._perk_mapping_batches,
+                    self._perk_id_overrides,
+                )
+            except Exception:
+                state.record_outcome(
+                    "perk_id_mapping_resolution_failed",
+                    request=request,
+                    target_fingerprint=target_fingerprint,
+                    component="perk_id_calibration",
+                )
+        if resolution is not None:
+            accepted_overrides = dict(resolution.overrides)
+            for evidence in resolution.learned:
+                accepted_overrides.pop(evidence.perk_id, None)
+            for evidence in resolution.learned:
+                if state._record_perk_id_mapping(
+                    evidence.component_payload(game_version=game_version)
+                ):
+                    accepted_overrides[evidence.perk_id] = evidence.perk_key
+            if resolution.conflicts:
+                state.record_outcome(
+                    "perk_id_mapping_conflict",
+                    request=request,
+                    target_fingerprint=target_fingerprint,
+                    component="perk_id_calibration",
+                )
+            self._perk_id_overrides = dict(sorted(accepted_overrides.items()))
+            runtime = runtime_with_perk_id_overrides(
+                runtime,
+                self._perk_id_overrides,
+            )
+
+        observation = _audit_observation_from_runtime(
+            runtime,
+            game_version=game_version,
+            target_fingerprint=target_fingerprint,
+            acquisition_started_at=started_at,
+            acquisition_completed_at=self._now_fn(),
+        )
         state.observe_save(observation, request)
         if self._active_failure_code is not None:
             log(
@@ -1483,6 +1637,31 @@ class PlayerSaveAuditCollector:
                 "INFO",
             )
             self._active_failure_code = None
+
+    def _sync_perk_mapping_scope(
+        self,
+        scope: Optional[tuple[str, int]],
+    ) -> None:
+        if scope == self._perk_mapping_scope:
+            return
+        self._perk_mapping_scope = scope
+        self._perk_mapping_batches.clear()
+        self._perk_id_overrides.clear()
+
+    def _append_perk_mapping_batches(
+        self,
+        batches: Sequence[Mapping[str, Any]],
+        state: PlayerSaveAuditStateMachine,
+    ) -> None:
+        self._perk_mapping_batches.extend(batches)
+        overflow = len(self._perk_mapping_batches) - _MAX_PERK_MAPPING_BATCHES
+        if overflow <= 0:
+            return
+        del self._perk_mapping_batches[:overflow]
+        state.record_outcome(
+            "perk_id_mapping_evidence_truncated",
+            component="perk_id_calibration",
+        )
 
     def _target_snapshot(self) -> Optional[tuple[str, int]]:
         provider = self._target_snapshot_fn
@@ -2124,6 +2303,13 @@ def _boundary_from_detection(detection: Mapping[str, Any]) -> Optional[str]:
     if state in {"RUNNING", "GAME_OVER", "TOURNAMENT_RESULTS"}:
         return state
     return None
+
+
+def _starts_perk_mapping_round(request: AuditRequest) -> bool:
+    return bool(
+        {"home_new_battle", "first_running_observation"}
+        & set(request.reasons)
+    )
 
 
 def _boundary_label(value: Any) -> Optional[str]:

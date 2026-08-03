@@ -9,7 +9,7 @@ unavailable in full so callers can retain the existing UI route.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, localcontext
 import hashlib
@@ -114,6 +114,28 @@ class RuntimePerkSnapshot:
             "picks": [pick.as_dict() for pick in self.picks],
             "fingerprint": self.fingerprint,
         }
+
+
+@dataclass(frozen=True)
+class RuntimePerkCalibrationPick:
+    """One structurally valid numeric pick retained for semantic calibration."""
+
+    sequence: int
+    wave: int
+    perk_id: int
+    level_after: int
+
+
+@dataclass(frozen=True)
+class RuntimePerkCalibration:
+    """Private numeric Perk evidence that never claims a semantic mapping."""
+
+    state: str
+    picked_count: int
+    levels: tuple[tuple[int, int], ...]
+    picks: tuple[RuntimePerkCalibrationPick, ...]
+    known_ids: tuple[tuple[int, str], ...]
+    fingerprint: str
 
 
 @dataclass(frozen=True)
@@ -316,6 +338,10 @@ class NormalizedRuntimeSave:
     perks_reason: str
     perks: Optional[RuntimePerkSnapshot]
     battle_history_tail: BattleHistoryTail
+    perk_calibration: Optional[RuntimePerkCalibration] = field(
+        default=None,
+        repr=False,
+    )
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -410,20 +436,29 @@ def normalize_runtime_save(
             fingerprint=_fingerprint(identity_projection),
         )
 
+    perk_calibration: Optional[RuntimePerkCalibration]
     try:
-        perks = _normalize_perks(
+        perk_calibration = _normalize_perk_calibration(
             decoded,
             mapping,
             runtime_spec,
             round_active=round_active,
             current_wave=current_wave,
         )
-        perks_status = "observed"
-        perks_reason = ""
     except _ComponentUnavailable as exc:
+        perk_calibration = None
         perks = None
         perks_status = "unavailable"
         perks_reason = str(exc)
+    else:
+        try:
+            perks = _map_perk_calibration(perk_calibration, {})
+            perks_status = "observed"
+            perks_reason = ""
+        except _ComponentUnavailable as exc:
+            perks = None
+            perks_status = "unavailable"
+            perks_reason = str(exc)
 
     try:
         history_tail = _normalize_history_tail(
@@ -463,10 +498,11 @@ def normalize_runtime_save(
         perks_reason=perks_reason,
         perks=perks,
         battle_history_tail=history_tail,
+        perk_calibration=perk_calibration,
     )
 
 
-def _normalize_perks(
+def _normalize_perk_calibration(
     decoded: Mapping[str, Any],
     mapping: Mapping[str, Any],
     runtime_spec: Mapping[str, Any],
@@ -508,7 +544,7 @@ def _normalize_perks(
     entry_class = str(perk_spec.get("entry_class") or "")
     expected_entry_fields = {"__class__", "wave", "perk"}
     seen_levels: dict[int, int] = {}
-    picks: list[RuntimePerkPick] = []
+    picks: list[RuntimePerkCalibrationPick] = []
     previous_wave = -1
     for index, raw_pick in enumerate(raw_picks):
         if not isinstance(raw_pick, Mapping):
@@ -530,50 +566,159 @@ def _normalize_perks(
         if round_active and wave > current_wave:
             raise _ComponentUnavailable("perk_pick_wave_exceeds_current_wave")
         previous_wave = wave
-        perk_key = perk_ids.get(str(perk_id))
-        if not isinstance(perk_key, str) or not perk_key:
-            raise _ComponentUnavailable(f"unmapped_perk_id:{perk_id}")
         if perk_id >= len(levels):
             raise _ComponentUnavailable(f"perk_id_outside_levels:{perk_id}")
         level_after = seen_levels.get(perk_id, 0) + 1
         seen_levels[perk_id] = level_after
         picks.append(
-            RuntimePerkPick(
+            RuntimePerkCalibrationPick(
                 sequence=index + 1,
                 wave=wave,
                 perk_id=perk_id,
-                perk_key=perk_key,
                 level_after=level_after,
             )
         )
 
     if sum(levels) != picked_count:
         raise _ComponentUnavailable("perk_count_levels_mismatch")
-    normalized_levels: list[tuple[int, str, int]] = []
+    normalized_levels: list[tuple[int, int]] = []
     for perk_id, level in enumerate(levels):
         if level == 0:
             continue
-        perk_key = perk_ids.get(str(perk_id))
-        if not isinstance(perk_key, str) or not perk_key:
-            raise _ComponentUnavailable(f"unmapped_perk_level_id:{perk_id}")
         if seen_levels.get(perk_id, 0) != level:
             raise _ComponentUnavailable(f"perk_list_level_mismatch:{perk_id}")
-        normalized_levels.append((perk_id, perk_key, level))
+        normalized_levels.append((perk_id, level))
     if round_active:
         state = "active_round"
     elif picked_count:
         state = "post_round_retained"
     else:
         state = "cleared"
-    projection = {
+    known_ids: list[tuple[int, str]] = []
+    seen_known_ids: set[int] = set()
+    seen_known_keys: set[str] = set()
+    for raw_id, raw_key in perk_ids.items():
+        try:
+            perk_id = int(raw_id)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeSaveNormalizationError(
+                "versioned Perk ID changed shape"
+            ) from exc
+        if (
+            perk_id < 0
+            or perk_id >= len(levels)
+            or not isinstance(raw_key, str)
+            or re.fullmatch(r"[a-z][a-z0-9_]{0,95}", raw_key) is None
+            or perk_id in seen_known_ids
+            or raw_key in seen_known_keys
+        ):
+            raise RuntimeSaveNormalizationError(
+                "versioned Perk ID changed shape"
+            )
+        known_ids.append((perk_id, raw_key))
+        seen_known_ids.add(perk_id)
+        seen_known_keys.add(raw_key)
+    known_ids.sort()
+    structural_projection = {
         "state": state,
         "picked_count": picked_count,
+        "levels": [list(item) for item in normalized_levels],
+        "picks": [
+            [pick.sequence, pick.wave, pick.perk_id, pick.level_after]
+            for pick in picks
+        ],
+    }
+    return RuntimePerkCalibration(
+        state=state,
+        picked_count=picked_count,
+        levels=tuple(normalized_levels),
+        picks=tuple(picks),
+        known_ids=tuple(known_ids),
+        fingerprint=_fingerprint(structural_projection),
+    )
+
+
+def runtime_with_perk_id_overrides(
+    runtime: NormalizedRuntimeSave,
+    overrides: Mapping[int, str],
+) -> NormalizedRuntimeSave:
+    """Return ``runtime`` with a complete session-only semantic Perk overlay.
+
+    Static exact-version mappings cannot be replaced.  The overlay is useful
+    only when every picked/nonzero ID becomes known; partial or conflicting
+    evidence leaves the caller on the existing fail-closed path.
+    """
+
+    calibration = runtime.perk_calibration
+    if calibration is None:
+        return runtime
+    try:
+        perks = _map_perk_calibration(calibration, overrides)
+    except _ComponentUnavailable as exc:
+        return replace(
+            runtime,
+            perks_status="unavailable",
+            perks_reason=str(exc),
+            perks=None,
+        )
+    return replace(
+        runtime,
+        perks_status="observed",
+        perks_reason="",
+        perks=perks,
+    )
+
+
+def _map_perk_calibration(
+    calibration: RuntimePerkCalibration,
+    overrides: Mapping[int, str],
+) -> RuntimePerkSnapshot:
+    known = dict(calibration.known_ids)
+    keys_to_ids = {key: perk_id for perk_id, key in known.items()}
+    for raw_id, raw_key in overrides.items():
+        if type(raw_id) is not int or raw_id < 0:
+            raise _ComponentUnavailable("perk_override_id_invalid")
+        if not isinstance(raw_key, str) or not re.fullmatch(
+            r"[a-z][a-z0-9_]{0,95}", raw_key
+        ):
+            raise _ComponentUnavailable("perk_override_key_invalid")
+        if raw_id in known and known[raw_id] != raw_key:
+            raise _ComponentUnavailable(f"perk_override_static_conflict:{raw_id}")
+        prior_id = keys_to_ids.get(raw_key)
+        if prior_id is not None and prior_id != raw_id:
+            raise _ComponentUnavailable(f"perk_override_key_conflict:{raw_id}")
+        known[raw_id] = raw_key
+        keys_to_ids[raw_key] = raw_id
+
+    picks: list[RuntimePerkPick] = []
+    for pick in calibration.picks:
+        perk_key = known.get(pick.perk_id)
+        if perk_key is None:
+            raise _ComponentUnavailable(f"unmapped_perk_id:{pick.perk_id}")
+        picks.append(
+            RuntimePerkPick(
+                sequence=pick.sequence,
+                wave=pick.wave,
+                perk_id=pick.perk_id,
+                perk_key=perk_key,
+                level_after=pick.level_after,
+            )
+        )
+    normalized_levels: list[tuple[int, str, int]] = []
+    for perk_id, level in calibration.levels:
+        perk_key = known.get(perk_id)
+        if perk_key is None:
+            raise _ComponentUnavailable(f"unmapped_perk_level_id:{perk_id}")
+        normalized_levels.append((perk_id, perk_key, level))
+    projection = {
+        "state": calibration.state,
+        "picked_count": calibration.picked_count,
         "levels": [list(item) for item in normalized_levels],
         "picks": [pick.as_dict() for pick in picks],
     }
     return RuntimePerkSnapshot(
-        state=state,
-        picked_count=picked_count,
+        state=calibration.state,
+        picked_count=calibration.picked_count,
         levels=tuple(normalized_levels),
         picks=tuple(picks),
         fingerprint=_fingerprint(projection),
@@ -1119,8 +1264,11 @@ __all__ = [
     "BattleHistoryTailIdentity",
     "CompletedBattleHistoryEntry",
     "NormalizedRuntimeSave",
+    "RuntimePerkCalibration",
+    "RuntimePerkCalibrationPick",
     "RuntimePerkPick",
     "RuntimePerkSnapshot",
     "RuntimeSaveNormalizationError",
     "normalize_runtime_save",
+    "runtime_with_perk_id_overrides",
 ]

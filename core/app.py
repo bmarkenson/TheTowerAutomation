@@ -350,6 +350,38 @@ class App:
                 "DEBUG",
             )
 
+    def _observe_player_save_audit_perk_mapping_evidence(self) -> None:
+        """Forward newly accepted UI batches to the passive save sidecar."""
+
+        collector = getattr(self, "_player_save_audit_collector", None)
+        if collector is None or not getattr(collector, "enabled", False):
+            return
+        try:
+            batches = self._perk_timeline().drain_mapping_evidence()
+            if batches:
+                collector.observe_perk_mapping_evidence(batches)
+        except Exception:
+            log(
+                "[PLAYER_SAVE_AUDIT] Perk ID calibration evidence was "
+                "rejected; normal automation is unaffected",
+                "DEBUG",
+            )
+
+    def _reset_player_save_audit_perk_mapping_evidence(self) -> None:
+        """Close a passive UI/save correlation window at a run boundary."""
+
+        collector = getattr(self, "_player_save_audit_collector", None)
+        if collector is None:
+            return
+        try:
+            collector.reset_perk_mapping_evidence()
+        except Exception:
+            log(
+                "[PLAYER_SAVE_AUDIT] Perk ID calibration reset was rejected; "
+                "normal automation is unaffected",
+                "DEBUG",
+            )
+
     def _perk_timeline(self) -> PerkTimelineObserver:
         """Return the run-scoped perk observer, including in partial test apps."""
 
@@ -434,6 +466,7 @@ class App:
             )
             if getattr(self, "_last_unbound_terminal_signature", None) != signature:
                 self._perk_timeline().reset(fresh_battle=False)
+                self._reset_player_save_audit_perk_mapping_evidence()
                 self._activation_tracker().reset()
                 log(
                     "[RUN_BINDING] Terminal battle was not observed active in "
@@ -2271,6 +2304,7 @@ class App:
                 if battle_started is True:
                     self._activation_tracker().reset()
                     self._perk_timeline().reset(fresh_battle=True)
+                    self._reset_player_save_audit_perk_mapping_evidence()
                     self._steady_run_entry_pending = False
                     if game_speed_guard is not None:
                         game_speed_guard.reset_battle()
@@ -2684,16 +2718,17 @@ class App:
                     if self._last_wave_ts > 0
                     else None
                 )
-                if (
-                    self._perk_timeline_enabled()
-                    and self._perk_timeline().handle(
+                perk_timeline_handled = False
+                if self._perk_timeline_enabled():
+                    perk_timeline_handled = self._perk_timeline().handle(
                         img,
                         detection,
                         wave=wave_val,
                         actions_allowed=strategy_action_allowed,
                         action_guard_fn=self._runtime_action_guard,
                     )
-                ):
+                    self._observe_player_save_audit_perk_mapping_evidence()
+                if perk_timeline_handled:
                     # The observer owns its Perks modal route. Re-enter through
                     # capture before any consumer uses the pre-route frame.
                     continue

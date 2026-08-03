@@ -37,6 +37,31 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-03 fail-closed automatic player-save Perk-ID mapping
+
+- A structurally valid unknown numeric Perk ID no longer has only a static
+  failure path. The enabled observation-only collector now correlates the
+  numeric save picks with newly accepted exact-wave Perk timeline batches,
+  cancels static mappings, and resolves only unique allowlisted assignments.
+  Ambiguity, low confidence, visibility gaps, interval aggregation, duplicate
+  semantics, conflicts, and incomplete projections remain unavailable.
+- The exact-version manifest remains authoritative and immutable. A learned
+  mapping is written as a privacy-safe append-only component receipt before a
+  collector-session overlay may restore the complete semantic projection. The
+  overlay survives ordinary same-target Retry boundaries but not process or
+  target-generation changes; restored UI checkpoints cannot replay evidence.
+- The new route retains no display/OCR text, decoded save root, raw save,
+  account data, arbitrary history, or pixels and grants no input, navigation,
+  dispatch, lifecycle, attachment, record-construction, Strategy, or UI
+  suppression authority. The 50-entry level array remains storage capacity;
+  version 1073 currently has 33 observed numeric/semantic mappings rather than
+  invented names for the 17 unobserved positions.
+- Focused save, timeline, collector, App, Perk configuration, process, and
+  single-instance validation passed 249 tests. The complete Python suite
+  passed all 1,300 tests; compilation, manifest parsing, and whitespace checks
+  also passed. No live process, control state, ADB target, emulator, or game
+  interaction was needed or performed.
+
 ### 2026-08-03 direct-Retry player-save audit repair
 
 - The first enabled ordinary Tier 19 collector sequence completed the core
