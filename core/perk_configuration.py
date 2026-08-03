@@ -192,7 +192,16 @@ def classify_perk_configuration_text(text: str) -> str | None:
         and "tower max health" in normalized
     ):
         return "health_regen_tradeoff"
-    if "enemies speed" in normalized and "enemies damage" in normalized:
+    if (
+        # A row clipped at the viewport edge has been observed with the
+        # leading ``E`` misread as ``c``.  The unchanged damage clause keeps
+        # this alias specific to the Enemy Speed trade-off.
+        (
+            "enemies speed" in normalized
+            or "cnemies speed" in normalized
+        )
+        and "enemies damage" in normalized
+    ):
         return "enemy_speed_tradeoff"
     if (
         "ranged enemies attack distance reduced" in normalized

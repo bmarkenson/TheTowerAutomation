@@ -145,6 +145,55 @@ def test_auto_pick_overlap_deduplicates_truncated_enemy_health_tradeoff():
     ]
 
 
+def test_auto_pick_overlap_deduplicates_clipped_enemy_speed_tradeoff():
+    frames = [
+        np.zeros((1920, 1080, 3), dtype=np.uint8),
+        np.zeros((1920, 1080, 3), dtype=np.uint8),
+    ]
+    pages = iter(
+        (
+            [
+                _configuration_row(
+                    "Enemies speed -44.0%, but enemies damage x2.5",
+                    500,
+                    657,
+                    130,
+                ),
+                _configuration_row(
+                    "Chain lightning damage x2", 1500, 1657, 130
+                ),
+            ],
+            [
+                _configuration_row(
+                    "cnemies speed -44.U%, but enemies damage x2.5",
+                    420,
+                    577,
+                    130,
+                ),
+                _configuration_row(
+                    "Extra set of inner mines", 700, 857, 130
+                ),
+                _configuration_row("x1.44 Damage", 900, 1057, 137),
+            ],
+        )
+    )
+
+    result = extract_ranked_auto_pick_order(
+        frames,
+        ranking_count=4,
+        row_fn=lambda _frame: next(pages),
+        ranking_boundary_fn=lambda _frame: None,
+    )
+
+    assert result["quality"]["valid"] is True
+    assert [entry["key"] for entry in result["selected"]] == [
+        "enemy_speed_tradeoff",
+        "chain_lightning_damage",
+        "inner_land_mines",
+        "damage",
+    ]
+
+
 def test_ban_observation_uses_selected_outlines_not_category_brightness():
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
     rows = [
@@ -376,6 +425,9 @@ def test_auto_pick_rows_have_value_independent_semantic_keys():
         ): "health_regen_tradeoff",
         (
             "Enemies speed -44.0%, but enemies damage x2.5"
+        ): "enemy_speed_tradeoff",
+        (
+            "cnemies speed -44.U%, but enemies damage x2.5"
         ): "enemy_speed_tradeoff",
         (
             "Ranged enemies attack distance reduced, "
