@@ -58,12 +58,22 @@ checked-item detail remains in the
     audit supplies its natural-boundary evidence prerequisite;
     `V1073-RUNTIME-015`/`016` survival extensions remain manifest-disabled and
     do not gate this collector.
-    - [ ] In the master-owned deployment, explicitly enable the collector for
-      the first ordinary natural battle and inspect the session receipts from
-      exact Home `NEW_BATTLE` through first `RUNNING`, multiple stable active
-      revisions, natural terminal clearing, and the tail candidate. Confirm
-      normal UI/terminal behavior remains unchanged, then disable it unless
-      continued passive collection is intended.
+    - [x] The first master-owned enabled ordinary Tier 19 battle was observed
+      from exact Home `NEW_BATTLE` through `RUNNING`, stable revisions
+      `46418`–`46465` (waves 70–5091), and the natural wave-5182 Tank terminal
+      at revision `46467`. Its cleared Perks and structural/semantic tail
+      candidate were recorded, while the unchanged UI path still captured the
+      complete terminal evidence.
+    - [ ] Confirm the deployed direct-Retry repair on the next ordinary
+      `GAME_OVER -> RUNNING` pair. The first continuation exposed two
+      fail-closed gaps—old-identity retention and seven unmapped Perk IDs—now
+      fixed by `b137ea4`. The deployed fresh session has already accepted
+      counter 232 at revision `46521`, wave 290, with a complete mapped
+      two-pick checkpoint; it correctly did not inherit a pre-round baseline
+      from the terminal-only restart. The next same-process Retry should emit
+      `terminal_retry_baseline_carried` and accept the first advancing active
+      revision under the new identity. This is passive confirmation during
+      normal farming, not a request for a special battle.
   - [ ] Extend the exact-version runtime projection with independently failing
     active-upgrade, survival-ability, and allowlisted live-tally components.
     For upgrades, map all three current-level arrays to their Workshop
