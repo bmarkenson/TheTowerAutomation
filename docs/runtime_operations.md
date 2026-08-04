@@ -46,6 +46,16 @@ any claim about the established ADB server, tunnel, emulator, or target. The
 complete decision and error-classification procedure is in
 [`sandbox_boundaries.md`](sandbox_boundaries.md#adb-reads-and-connection-management).
 
+Production screenshots, logs, and other generated runtime artifacts are
+ordinary development evidence, not confidential material. A worker may read or
+copy an existing file without a lease or live inspection, but that historical
+file does not prove current device or runtime state. Any current-state claim
+and every direct ADB operation still require the applicable live inspection
+below. After that inspection, bounded exact-target `get-state`, screenshot, and
+other non-mutating reads do not require an interactive development lease.
+Production continues to own ADB connection management and long-lived capture;
+workers must not start a competing continuous capture stream.
+
 Project screenshot helpers accept native portrait framebuffers at `1080x1920`
 or `720x1280` and normalize them into the canonical `1080x1920` vision space.
 Runtime taps and swipes are converted back into the observed native geometry at

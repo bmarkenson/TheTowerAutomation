@@ -55,6 +55,13 @@ an already valid immutable environment and rejects an invalid final path rather
 than repairing it in place. `checkpoint` is the normal repository-local gate;
 it does not start runtime code or access ADB.
 
+This is the current interim entrypoint, not the long-term complexity target.
+Continue to use it until its replacement is integrated, but do not extend its
+immutable-manifest, relocation, hostile-filesystem, or host-tool-blocking
+machinery. The trusted-single-user rationale and simpler replacement contract
+are in the
+[development coordination architecture](architecture/development_isolation.md#development-python-environment).
+
 ## Lightweight read-only questions
 
 A simple explanatory question may use this reduced startup path when its answer

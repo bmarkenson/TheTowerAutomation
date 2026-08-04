@@ -742,12 +742,16 @@ Process request examples:
 
 ## Deliberately deferred capabilities
 
-The production control-surface service is also the planned host-global broker
-for isolated development, through a local per-user Unix socket rather than the
-Windows-forwarded HTTP surface. Its complete source, lease, frame, Pause,
-terminal-boundary, and audit contract is defined in
-[development_isolation.md](development_isolation.md). No current endpoint or
-worktree-local lock grants that authority.
+The production control-surface service is the planned coordinator for one
+cooperative interactive development lease. It should extend the existing local
+JSON/HTTP and runtime-directive model rather than add an authenticated Unix
+peer protocol or another daemon. Production must acknowledge a distinct
+suppressive development hold before the lease permits exact-target worker
+input; heartbeat expiry, Pause/Stop, runtime or target replacement, and a battle
+boundary end that authority. Bounded read-only ADB operations need no lease
+after the normal live startup inspection. The complete coordination contract is
+defined in [development_isolation.md](development_isolation.md). No current
+endpoint or worktree-local lock grants interactive authority.
 
 These are the next useful additions, in approximate priority order:
 

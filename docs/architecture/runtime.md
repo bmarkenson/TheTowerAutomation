@@ -991,12 +991,20 @@ derives gate authority from warning text in `actions.log`.
 
 ## Planned evolution
 
-Production/development isolation, host-global emulator coordination, atomic
-external frame publication, and external authority leases are governed by the
-canonical
-[development isolation architecture](development_isolation.md). That target
-keeps production as the sole long-lived runtime and input owner; current
-repository-local locks and screenshots do not grant cross-worktree authority.
+Production/development coordination, shared screenshots, and the planned
+interactive lease are governed by the canonical
+[development coordination architecture](development_isolation.md). Production
+remains the sole long-lived runtime and normal input owner. Cooperative workers
+may read or copy production artifacts and, after the live startup inspection,
+run bounded exact-target ADB reads or captures without an interactive lease.
+Connection management and continuous capture remain production-owned.
+
+Interactive development will use the existing control-surface/directive path,
+one exclusive expiring lease, and a distinct suppressive runtime hold that
+production acknowledges before worker input. It is a coordination boundary,
+not a same-user security boundary: no source attestation, secret token,
+authenticated peer protocol, semantic action catalog, or cryptographic audit
+is planned. A worktree-local lock or screenshot never grants input authority.
 
 An app-owned frame source and short-lived UI-state action lease are the intended
 direction for multi-frame decisions and latency-sensitive scheduled actions.

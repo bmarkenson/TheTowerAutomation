@@ -16,6 +16,19 @@ scope expands, complete the newly applicable checklist before proceeding. Do
 not rely on a handoff's runtime facts until they have been verified against the
 current process and device.
 
+## Project trust model
+
+TheTower is a trusted-single-user hobby project. The operator and Codex worker
+threads are cooperative participants running under the same account. Design
+safeguards for mistakes, concurrent work, stale runtime state, partial writes,
+and recoverable failures—not for malicious same-user behavior or data secrecy.
+Production screenshots, logs, and other runtime artifacts may be read or copied
+for development when the normal ownership and live-action rules are followed.
+Do not add authentication protocols, secret-token machinery, cryptographic
+audit, hostile-worktree defenses, or similar security complexity unless the
+operator explicitly changes this threat model. Locks, leases, and ordinary
+permissions in this repository are coordination tools, not security boundaries.
+
 ## Non-negotiable rules
 
 - Production's `.venv` is production-owned. A development worktree must use

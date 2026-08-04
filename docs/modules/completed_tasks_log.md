@@ -37,9 +37,9 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
-### 2026-08-04 reproducible development bootstrap
+### 2026-08-04 initial development-bootstrap prototype
 
-- `0a17fef` implements Phase 0 of production/development isolation without
+- `0a17fef` implemented the initial Phase-0 prototype without
   reading packages from or mutating production's `.venv`. Exact CPython 3.12.3
   and Linux x86_64 configuration, the grouped direct dependency declaration,
   complete runtime/development locks, and the pinned bootstrap toolchain are
@@ -66,6 +66,14 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   `git diff --check` passed. The final complete suite reported 1,276 passed and
   43 host-Tesseract skips. No runtime process, control state, systemd unit,
   ADB target, emulator, or volatile production state was inspected or changed.
+- Later the same day, the operator clarified that TheTower is a trusted-
+  single-user hobby project with no malicious-same-user or data-secrecy threat.
+  The prototype remains a usable interim development entrypoint, but its
+  immutable manifest, relocation, permission hardening, hostile-filesystem
+  checks, and host-tool blocker are not production-promotion requirements and
+  are scheduled for forward simplification. The current decision and retained
+  outcomes are recorded in the
+  [development coordination architecture](../architecture/development_isolation.md).
 
 ### 2026-08-03 fail-closed automatic player-save Perk-ID mapping
 
