@@ -134,7 +134,7 @@ Production's `.venv` remains production-owned. Development worktrees never
 execute, copy, link, install into, or mutate it, and the production systemd
 units never use a development environment.
 
-### Useful Phase-0 results
+### Retained Phase-0 results
 
 The Phase-0 prototype on `develop` established several worthwhile contracts:
 
@@ -148,14 +148,13 @@ The Phase-0 prototype on `develop` established several worthwhile contracts:
 Those outcomes remain. The prototype's immutable manifest, whole-tree
 permission changes, staging-prefix relocation, installed `RECORD` rewriting,
 no-follow adversarial checks, host-tool blockers, and special Tesseract skip
-policy are not required by the clarified trust model. They must be simplified
-before this tooling is promoted to production.
+policy were not required by the clarified trust model and have been removed.
 
-### Simpler target bootstrap
+### Current compact bootstrap
 
-The replacement should remain content-selected so two branches with different
-dependency inputs do not silently share the wrong packages, but it can be
-small:
+The bootstrap remains content-selected so two branches with different
+dependency inputs do not silently share the wrong packages. Its complete
+publication path is deliberately small:
 
 1. hash the tracked interpreter and dependency inputs;
 2. choose a sibling development-environment path from that digest;
@@ -167,20 +166,21 @@ small:
 6. point the worktree's ignored `.venv` symlink at the completed environment.
 
 If a build is interrupted before the completion marker, the next serialized
-builder may rebuild that incomplete environment. There is no requirement to
-make the environment immutable, inventory every installed byte, defend against
-a malicious same-user path replacement, or relocate a completed virtual
-environment. Ad-hoc `pip install` remains unsupported because it causes
-accidental dependency drift, not because the environment is a security asset.
+builder may remove and rebuild only that exact validated child of the
+development-environment store. A completed valid environment is reused. A
+completed environment that fails validation is reported clearly and is never
+automatically removed or repaired while another worktree may be using it.
+There is no requirement to make the environment immutable, inventory every
+installed byte, defend against a malicious same-user path replacement, or
+relocate a completed virtual environment. Ad-hoc `pip install` remains
+unsupported because it causes accidental dependency drift, not because the
+environment is a security asset.
 
-The checkpoint should isolate ordinary generated test output and run the full
+The checkpoint isolates ordinary generated test output and runs the full
 repository-local suite. Installed host tools such as Tesseract may run in
-non-live tests. ADB-facing tests must use fakes or mocks unless the thread has
+non-live tests. ADB-facing tests use fakes or mocks unless a thread has
 completed the live-runtime startup path and deliberately requested live
-validation.
-
-Until this simplification is implemented and integrated, the current tracked
-bootstrap remains the supported development entrypoint documented in
+validation. The supported entrypoint and operator workflow are documented in
 `docs/new_thread.md`.
 
 ## Screenshots, fixtures, and read-only ADB
@@ -340,7 +340,7 @@ The earlier work is modified forward rather than erased or history-rewritten:
 | Area | Keep | Simplify, remove, or defer |
 | --- | --- | --- |
 | Git topology | `main`, `develop`, feature worktrees, master integration and fast-forward promotion | No independent repository per worker; no source attestation |
-| Python isolation | Separate production environment, tracked pins, content-selected development environments, one builder lock, checkpoint | Replace immutable manifests, relocation, no-follow hardening, whole-tree fsync/permissions, and host-tool blocking |
+| Python isolation | Separate production environment, tracked pins, content-selected development environments, one builder lock, checkpoint | Compact completion-marker bootstrap; immutable manifests, relocation, no-follow hardening, whole-tree fsync/permissions, and host-tool blocking removed |
 | Screenshots | Complete-frame validation and atomic latest replacement | No confidential-data treatment, immutable bundle hierarchy, hash identity chain, or broker receipt |
 | Read-only ADB | Bounded exact-target reads after live inspection; production owns connection management | No lease or source registration for reads/capture |
 | Interactive coordination | One production-acknowledged exclusive lease, distinct hold, heartbeat/expiry, exact target, fresh release check | No secret tokens, peer authentication, source fingerprint, capability negotiation, fairness queue, or automatic continuation |
@@ -355,9 +355,9 @@ mechanisms should be implemented merely because it was previously documented.
 
 Implementation proceeds in small reviewable steps:
 
-1. **Correct the contract and simplify Phase 0.** Replace the prototype runner
-   with the compact bootstrap/checkpoint described above and run the full
-   non-live suite, including normal host-backed OCR tests.
+1. **Completed: correct the contract and simplify Phase 0.** The prototype
+   runner has been replaced by the compact bootstrap/checkpoint described above
+   and the full non-live suite includes normal host-backed OCR tests.
 2. **Make screenshots convenient.** Atomically publish or expose the latest
    complete production screenshot with minimal metadata and document direct
    bounded read-only capture.
@@ -379,10 +379,18 @@ live validation remains a separately inspected master action.
 
 The useful regression seams are correspondingly small:
 
-- development never resolves or mutates production's `.venv`;
+- development never executes, copies, links to, installs into, or mutates
+  production's `.venv`;
 - dependency-input changes select the correct development environment;
-- concurrent bootstrap attempts serialize and an interrupted build recovers;
-- the normal checkpoint runs the full repository-local test suite;
+- concurrent bootstrap attempts serialize and a marker-absent interrupted
+  build recovers;
+- completed valid environments are reused while completed invalid environments
+  are reported without automatic mutation;
+- worktree selection is atomic and status rejects missing, mismatched,
+  incomplete, or broken selections;
+- lock verification and regeneration remain deterministic;
+- the normal checkpoint isolates generated state, runs the full
+  repository-local test suite, and returns a failing command's status;
 - a shared screenshot reader sees an old or new complete image, never a partial
   write;
 - read-only ADB commands are exact-target and bounded;

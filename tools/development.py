@@ -1,22 +1,19 @@
 #!/usr/bin/python3.12
 """Reproduce and validate an isolated TheTower development environment.
 
-This module is deliberately standard-library-only so the configured host
+The entrypoint is deliberately standard-library-only so the configured host
 interpreter can run ``bootstrap``, ``status``, ``verify-locks``, and ``lock``
-before a worktree ``.venv`` exists.  ``checkpoint`` additionally requires the
-published environment selected by the current worktree.
+before a worktree ``.venv`` exists. ``checkpoint`` additionally requires the
+completed environment selected by the current worktree.
 """
 
 from __future__ import annotations
 
 import argparse
-import base64
 from contextlib import contextmanager
-import csv
 from dataclasses import dataclass
 import fcntl
 import hashlib
-import io
 import json
 import os
 from pathlib import Path
@@ -30,11 +27,12 @@ import sys
 import sysconfig
 import tempfile
 import tomllib
-from typing import Callable, Iterable, Iterator, Mapping, Sequence
+from typing import Callable, Iterator, Mapping, Sequence
 
 
 CONFIG_RELATIVE_PATH = Path("requirements/development-environment.json")
-MANIFEST_NAME = "THE_TOWER_ENVIRONMENT_MANIFEST.json"
+COMPLETION_MARKER_NAME = "THE_TOWER_ENVIRONMENT_COMPLETE.json"
+COMPLETION_MARKER_SCHEMA = 1
 WRITER_LOCK_NAME = "development-environment.write.lock"
 LOCK_REGENERATION_COMMAND = ".venv/bin/python tools/development.py lock"
 LOCK_SOURCES = {
@@ -42,7 +40,6 @@ LOCK_SOURCES = {
     "requirements/runtime.lock": "pyproject.toml (runtime + player-save)",
     "requirements/development.lock": "pyproject.toml (all optional groups)",
 }
-CHECKPOINT_TOOL_BLOCKLIST = ("adb", "ffmpeg", "scrcpy", "tesseract")
 _LOCKED_REQUIREMENT = re.compile(
     r"^([A-Za-z0-9][A-Za-z0-9_.-]*)==([^\s;\\]+)(?:\s|$)"
 )
@@ -50,7 +47,11 @@ _SHA256_HASH = re.compile(r"--hash=sha256:([0-9a-f]{64})(?:\s|$)")
 
 
 class DevelopmentEnvironmentError(RuntimeError):
-    """A fail-closed development bootstrap or checkpoint error."""
+    """A development bootstrap, lock, or checkpoint error."""
+
+
+class IncompleteEnvironmentError(DevelopmentEnvironmentError):
+    """A fingerprinted environment has not published its completion marker."""
 
 
 @dataclass(frozen=True)
@@ -107,7 +108,6 @@ class CheckpointPaths:
     screenshots: Path
     custom_configuration: Path
     scratch: Path
-    blocked_tools: Path
 
     @classmethod
     def beneath(cls, root: Path) -> "CheckpointPaths":
@@ -120,8 +120,15 @@ class CheckpointPaths:
             screenshots=root / "screenshots",
             custom_configuration=root / "custom-configuration",
             scratch=root / "scratch",
-            blocked_tools=root / "blocked-tools",
         )
+
+
+BuildEnvironment = Callable[
+    [EnvironmentConfig, InterpreterIdentity, EnvironmentFingerprint, Path], None
+]
+VerifyEnvironmentContents = Callable[
+    [Path, EnvironmentConfig, InterpreterIdentity, EnvironmentFingerprint], None
+]
 
 
 def repository_root() -> Path:
@@ -137,7 +144,7 @@ def load_config(
     root = Path(os.path.abspath(root))
     config_path = root / CONFIG_RELATIVE_PATH
     try:
-        raw = json.loads(_read_regular_no_follow(config_path).decode("utf-8"))
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise DevelopmentEnvironmentError(
             f"Unable to read {CONFIG_RELATIVE_PATH}: {exc}"
@@ -154,14 +161,12 @@ def load_config(
         production_environment = Path(str(raw["production_environment"]))
         platform_config = raw["platform"]
         dependency_inputs = tuple(str(item) for item in raw["dependency_inputs"])
-        version = _read_regular_no_follow(root / ".python-version").decode(
-            "utf-8"
-        ).strip()
+        version = (root / ".python-version").read_text(encoding="utf-8").strip()
     except (KeyError, TypeError, ValueError, OSError, UnicodeError) as exc:
         raise DevelopmentEnvironmentError(
             f"{CONFIG_RELATIVE_PATH} is incomplete: {exc}"
         ) from exc
-    if schema != 2:
+    if schema != 3:
         raise DevelopmentEnvironmentError(
             f"Unsupported development bootstrap schema {schema!r}"
         )
@@ -208,7 +213,7 @@ def load_config(
 def validate_repository_root(config: EnvironmentConfig) -> None:
     root = config.repository_root
     development_root = config.environment_root.parent
-    if _same_lexical_path(root, config.production_environment.parent):
+    if _same_path(root, config.production_environment.parent):
         raise DevelopmentEnvironmentError(
             "The development bootstrap cannot run from the production checkout"
         )
@@ -219,6 +224,17 @@ def validate_repository_root(config: EnvironmentConfig) -> None:
     if _path_is_within(root, config.environment_root):
         raise DevelopmentEnvironmentError(
             "The repository worktree cannot be inside the environment store"
+        )
+    if _same_path(config.environment_root, config.production_environment) or (
+        _path_is_within(config.environment_root, config.production_environment)
+        or _path_is_within(config.production_environment, config.environment_root)
+    ):
+        raise DevelopmentEnvironmentError(
+            "Development and production environment roots must be separate"
+        )
+    if _path_is_within(config.interpreter, config.production_environment):
+        raise DevelopmentEnvironmentError(
+            "The configured development interpreter cannot come from production .venv"
         )
 
 
@@ -235,13 +251,7 @@ def current_interpreter_identity() -> InterpreterIdentity:
 def query_interpreter_identity(interpreter: Path) -> InterpreterIdentity:
     if not interpreter.is_absolute():
         raise DevelopmentEnvironmentError("Interpreter path must be absolute")
-    try:
-        details = interpreter.lstat()
-    except OSError as exc:
-        raise DevelopmentEnvironmentError(
-            f"Configured interpreter {interpreter} is unavailable: {exc}"
-        ) from exc
-    if not stat.S_ISREG(details.st_mode) or interpreter.is_symlink():
+    if not interpreter.is_file():
         raise DevelopmentEnvironmentError(
             f"Configured interpreter {interpreter} must be a regular file"
         )
@@ -306,7 +316,12 @@ def compute_environment_fingerprint(
             raise DevelopmentEnvironmentError(
                 f"Dependency input path {relative!r} is not repository-relative"
             )
-        payload = _read_regular_no_follow(config.repository_root / candidate)
+        try:
+            payload = (config.repository_root / candidate).read_bytes()
+        except OSError as exc:
+            raise DevelopmentEnvironmentError(
+                f"Unable to read dependency input {relative}: {exc}"
+            ) from exc
         input_hashes[relative] = hashlib.sha256(payload).hexdigest()
     fingerprint_payload = {
         "bootstrap_schema": config.bootstrap_schema,
@@ -356,35 +371,42 @@ def validate_final_path(
     final: Path,
 ) -> None:
     expected = expected_environment_path(config, identity, fingerprint)
-    if not _same_lexical_path(final, expected):
+    if not _same_path(final, expected):
         raise DevelopmentEnvironmentError(
             f"Environment path {final} does not match expected {expected}"
         )
-    if _same_lexical_path(final, config.production_environment) or _path_is_within(
+    if not _same_path(final.parent, config.environment_root):
+        raise DevelopmentEnvironmentError(
+            "Development environment is not a direct child of its configured store"
+        )
+    if _same_path(final, config.production_environment) or _path_is_within(
         final, config.production_environment
     ):
         raise DevelopmentEnvironmentError("Production .venv is never a development path")
 
 
-def validate_stage_path(final: Path, stage: Path) -> None:
-    expected_prefix = f".{final.name}.stage-"
-    if not _same_lexical_path(stage.parent, final.parent):
-        raise DevelopmentEnvironmentError("Environment stage is not a final-path sibling")
-    if not stage.name.startswith(expected_prefix):
-        raise DevelopmentEnvironmentError("Environment stage name is not owned by this build")
+def _validate_existing_environment(
+    config: EnvironmentConfig,
+    identity: InterpreterIdentity,
+    fingerprint: EnvironmentFingerprint,
+    final: Path,
+) -> None:
+    validate_final_path(config, identity, fingerprint.digest, final)
     try:
-        details = stage.lstat()
+        details = final.lstat()
     except OSError as exc:
-        raise DevelopmentEnvironmentError(f"Environment stage is unavailable: {exc}") from exc
-    if not stat.S_ISDIR(details.st_mode) or stage.is_symlink():
-        raise DevelopmentEnvironmentError("Environment stage must be a no-follow directory")
-    if details.st_uid != os.getuid():
-        raise DevelopmentEnvironmentError("Environment stage has the wrong owner")
+        raise DevelopmentEnvironmentError(
+            f"Development environment {final} is unavailable: {exc}"
+        ) from exc
+    if not stat.S_ISDIR(details.st_mode) or final.is_symlink():
+        raise DevelopmentEnvironmentError(
+            f"Development environment {final} must be a real directory"
+        )
 
 
 def parse_lock_file(path: Path) -> dict[str, str]:
     try:
-        text = _read_regular_no_follow(path).decode("utf-8")
+        text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as exc:
         raise DevelopmentEnvironmentError(f"Unable to read lock {path}: {exc}") from exc
     logical_lines: list[str] = []
@@ -407,8 +429,6 @@ def parse_lock_file(path: Path) -> dict[str, str]:
         raise DevelopmentEnvironmentError(f"Lock {path} has an incomplete continuation")
     requirements: dict[str, str] = {}
     for line in logical_lines:
-        if line.startswith("#"):
-            continue
         match = _LOCKED_REQUIREMENT.match(line)
         if match is None:
             raise DevelopmentEnvironmentError(
@@ -416,8 +436,7 @@ def parse_lock_file(path: Path) -> dict[str, str]:
             )
         name = canonical_distribution_name(match.group(1))
         version = match.group(2)
-        hashes = _SHA256_HASH.findall(line)
-        if not hashes:
+        if not _SHA256_HASH.findall(line):
             raise DevelopmentEnvironmentError(
                 f"Lock {path} requirement {name} has no SHA-256 artifact hash"
             )
@@ -433,7 +452,12 @@ def validate_lock_inputs(config: EnvironmentConfig) -> dict[str, dict[str, str]]
     locks: dict[str, dict[str, str]] = {}
     for relative, source in LOCK_SOURCES.items():
         path = config.repository_root / relative
-        text = _read_regular_no_follow(path).decode("utf-8")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise DevelopmentEnvironmentError(
+                f"Unable to read lock {relative}: {exc}"
+            ) from exc
         if f"# Source declaration: {source}" not in text:
             raise DevelopmentEnvironmentError(
                 f"Lock {relative} does not identify source {source}"
@@ -446,9 +470,7 @@ def validate_lock_inputs(config: EnvironmentConfig) -> dict[str, dict[str, str]]
 
     try:
         project = tomllib.loads(
-            _read_regular_no_follow(config.repository_root / "pyproject.toml").decode(
-                "utf-8"
-            )
+            (config.repository_root / "pyproject.toml").read_text(encoding="utf-8")
         )["project"]
         base = _direct_requirements(project["dependencies"])
         extras = project["optional-dependencies"]
@@ -458,7 +480,7 @@ def validate_lock_inputs(config: EnvironmentConfig) -> dict[str, dict[str, str]]
         bootstrap_direct = _requirements_from_input(
             config.repository_root / "requirements/bootstrap.in"
         )
-    except (KeyError, TypeError, tomllib.TOMLDecodeError, UnicodeError) as exc:
+    except (KeyError, TypeError, OSError, tomllib.TOMLDecodeError, UnicodeError) as exc:
         raise DevelopmentEnvironmentError(
             f"Canonical dependency declaration is invalid: {exc}"
         ) from exc
@@ -497,13 +519,16 @@ def _direct_requirements(items: object) -> dict[str, str]:
             raise DevelopmentEnvironmentError(
                 f"Direct dependency must use an exact pin: {item!r}"
             )
-        result[canonical_distribution_name(match.group(1))] = match.group(2)
+        name = canonical_distribution_name(match.group(1))
+        if name in result:
+            raise DevelopmentEnvironmentError(f"Direct dependency repeats {name}")
+        result[name] = match.group(2)
     return result
 
 
 def _requirements_from_input(path: Path) -> dict[str, str]:
     entries = []
-    for line in _read_regular_no_follow(path).decode("utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if line and not line.startswith("#"):
             entries.append(line)
@@ -539,27 +564,16 @@ def _runtime_root(config: EnvironmentConfig) -> Path:
 @contextmanager
 def development_writer_lock(config: EnvironmentConfig) -> Iterator[None]:
     root = _runtime_root(config)
-    _ensure_private_directory(root, create=True)
-    lock_path = root / WRITER_LOCK_NAME
-    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
     try:
-        descriptor = os.open(lock_path, flags, 0o600)
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        handle = (root / WRITER_LOCK_NAME).open("a+b")
     except OSError as exc:
         raise DevelopmentEnvironmentError(
-            f"Unable to open development writer lock {lock_path}: {exc}"
+            f"Unable to open development writer lock {root / WRITER_LOCK_NAME}: {exc}"
         ) from exc
-    try:
-        details = os.fstat(descriptor)
-        if not stat.S_ISREG(details.st_mode):
-            raise DevelopmentEnvironmentError("Development writer lock is not regular")
-        if details.st_uid != os.getuid() or stat.S_IMODE(details.st_mode) & 0o077:
-            raise DevelopmentEnvironmentError(
-                "Development writer lock has unsafe ownership or permissions"
-            )
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
+    with handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         yield
-    finally:
-        os.close(descriptor)
 
 
 def provision_environment(
@@ -567,70 +581,90 @@ def provision_environment(
     identity: InterpreterIdentity,
     fingerprint: EnvironmentFingerprint,
     *,
-    build_stage: Callable[
-        [EnvironmentConfig, InterpreterIdentity, EnvironmentFingerprint, Path, Path],
-        None,
-    ]
-    | None = None,
-    verify_final: Callable[
-        [Path, EnvironmentConfig, InterpreterIdentity, EnvironmentFingerprint], None
-    ]
-    | None = None,
+    build: BuildEnvironment | None = None,
+    verify_contents: VerifyEnvironmentContents | None = None,
 ) -> ProvisionResult:
-    builder = build_stage or build_environment_stage
-    verifier = verify_final or verify_published_environment
+    builder = build or build_environment
+    verifier = verify_contents or verify_environment_contents
     final = expected_environment_path(config, identity, fingerprint.digest)
     validate_final_path(config, identity, fingerprint.digest, final)
     with development_writer_lock(config):
-        _ensure_environment_root(config.environment_root)
+        _ensure_environment_root(config)
         if os.path.lexists(final):
-            verifier(final, config, identity, fingerprint)
-            replace_worktree_environment_link(config, final)
-            return ProvisionResult(final, fingerprint.digest, True)
+            _validate_existing_environment(config, identity, fingerprint, final)
+            marker = final / COMPLETION_MARKER_NAME
+            if not os.path.lexists(marker):
+                remove_incomplete_environment(config, identity, fingerprint, final)
+            else:
+                try:
+                    verify_completion_marker(
+                        final, config=config, identity=identity, fingerprint=fingerprint
+                    )
+                    verifier(final, config, identity, fingerprint)
+                except Exception as exc:
+                    raise DevelopmentEnvironmentError(
+                        f"Completed development environment {final} is invalid; "
+                        f"refusing to modify it automatically: {exc}"
+                    ) from exc
+                replace_worktree_environment_link(config, final)
+                return ProvisionResult(final, fingerprint.digest, True)
 
-        stage = _create_stage_directory(config.environment_root, final)
-        published = False
         try:
-            validate_stage_path(final, stage)
-            builder(config, identity, fingerprint, stage, final)
-            verify_environment_manifest(
-                stage,
-                expected_final=final,
-                config=config,
-                identity=identity,
-                fingerprint=fingerprint,
-            )
-            _sync_tree(stage)
-            _publish_stage(config.environment_root, stage, final)
-            published = True
-        except Exception:
-            if not published:
-                cleanup_owned_stage(stage, final)
-            raise
+            final.mkdir(mode=0o700)
+        except OSError as exc:
+            raise DevelopmentEnvironmentError(
+                f"Unable to create development environment {final}: {exc}"
+            ) from exc
+        builder(config, identity, fingerprint, final)
         verifier(final, config, identity, fingerprint)
+        write_completion_marker(
+            final, config=config, identity=identity, fingerprint=fingerprint
+        )
         replace_worktree_environment_link(config, final)
         return ProvisionResult(final, fingerprint.digest, False)
 
 
-def build_environment_stage(
+def remove_incomplete_environment(
     config: EnvironmentConfig,
     identity: InterpreterIdentity,
     fingerprint: EnvironmentFingerprint,
-    stage: Path,
+    final: Path,
+) -> None:
+    """Remove only the exact incomplete child selected by current inputs."""
+
+    _validate_existing_environment(config, identity, fingerprint, final)
+    marker = final / COMPLETION_MARKER_NAME
+    if os.path.lexists(marker):
+        raise DevelopmentEnvironmentError(
+            f"Refusing to remove {final}: a completion marker is present"
+        )
+    try:
+        shutil.rmtree(final)
+    except OSError as exc:
+        raise DevelopmentEnvironmentError(
+            f"Unable to remove incomplete development environment {final}: {exc}"
+        ) from exc
+
+
+def build_environment(
+    config: EnvironmentConfig,
+    identity: InterpreterIdentity,
+    fingerprint: EnvironmentFingerprint,
     final: Path,
 ) -> None:
     require_supported_identity(config, identity)
-    validate_stage_path(final, stage)
-    environment = _isolated_subprocess_environment(stage / ".artifact-cache")
+    _validate_existing_environment(config, identity, fingerprint, final)
+    cache = final / ".artifact-cache"
+    environment = _isolated_subprocess_environment(cache)
     _run_checked(
-        [str(config.interpreter), "-I", "-m", "venv", str(stage)],
+        [str(config.interpreter), "-I", "-m", "venv", str(final)],
         description="development virtual-environment creation",
         env=environment,
     )
-    stage_python = stage / "bin/python"
+    python = final / "bin/python"
     _run_checked(
         [
-            str(stage_python),
+            str(python),
             "-I",
             "-m",
             "pip",
@@ -649,7 +683,7 @@ def build_environment_stage(
     )
     _run_checked(
         [
-            str(stage_python),
+            str(python),
             "-I",
             "-m",
             "pip",
@@ -666,341 +700,117 @@ def build_environment_stage(
         env=environment,
     )
     _run_checked(
-        [str(stage_python), "-I", "-m", "pip", "check"],
+        [str(python), "-I", "-m", "pip", "check"],
         description="installed dependency consistency check",
         env=environment,
     )
-    cache = stage / ".artifact-cache"
     if cache.exists():
         shutil.rmtree(cache)
-    remove_generated_bytecode(stage)
-    normalize_relocated_environment(stage, final)
-    expected = _expected_installed_distributions(config)
-    _verify_environment_python(
-        stage,
-        expected_prefix=stage,
-        identity=identity,
-        expected_distributions=expected,
-        execute_console_script=False,
-    )
-    _make_contents_immutable(stage)
-    manifest = _environment_manifest(
-        stage,
-        final=final,
-        config=config,
-        identity=identity,
-        fingerprint=fingerprint,
-    )
-    manifest_path = stage / MANIFEST_NAME
-    _write_json_no_follow(manifest_path, manifest)
-    os.chmod(manifest_path, 0o444)
-    os.chmod(stage, 0o555)
 
 
-def remove_generated_bytecode(root: Path) -> None:
-    directories: list[Path] = []
-    for relative, details in _iter_tree(root):
-        path = root / relative
-        if stat.S_ISDIR(details.st_mode) and path.name == "__pycache__":
-            directories.append(path)
-        elif stat.S_ISREG(details.st_mode) and path.suffix in {".pyc", ".pyo"}:
-            path.unlink()
-    for directory in sorted(directories, key=lambda item: len(item.parts), reverse=True):
-        if directory.exists() and not directory.is_symlink():
-            shutil.rmtree(directory)
-
-
-def normalize_relocated_environment(stage: Path, final: Path) -> None:
-    stage_bytes = os.fsencode(str(stage))
-    final_bytes = os.fsencode(str(final))
-    for relative, details in list(_iter_tree(stage)):
-        path = stage / relative
-        if stat.S_ISLNK(details.st_mode):
-            target = os.readlink(path)
-            if str(stage) in target:
-                replacement = target.replace(str(stage), str(final))
-                path.unlink()
-                os.symlink(replacement, path)
-            continue
-        if not stat.S_ISREG(details.st_mode):
-            continue
-        if not _file_contains(path, stage_bytes):
-            continue
-        payload = _read_regular_no_follow(path)
-        if b"\x00" in payload:
-            raise DevelopmentEnvironmentError(
-                f"Unsupported binary staging-prefix reference in {relative}"
-            )
-        path.write_bytes(payload.replace(stage_bytes, final_bytes))
-    _rewrite_distribution_records(stage)
-    for relative, details in _iter_tree(stage):
-        path = stage / relative
-        if stat.S_ISLNK(details.st_mode):
-            if str(stage) in os.readlink(path):
-                raise DevelopmentEnvironmentError(
-                    f"Staging prefix remains in symlink {relative}"
-                )
-        elif stat.S_ISREG(details.st_mode) and _file_contains(path, stage_bytes):
-            raise DevelopmentEnvironmentError(
-                f"Staging prefix remains in environment file {relative}"
-            )
-    _validate_console_script_shebangs(stage, final)
-
-
-def _rewrite_distribution_records(root: Path) -> None:
-    records = [
-        root / relative
-        for relative, details in _iter_tree(root)
-        if stat.S_ISREG(details.st_mode)
-        and Path(relative).name == "RECORD"
-        and Path(relative).parent.name.endswith(".dist-info")
-    ]
-    for record in records:
-        rows: list[list[str]] = []
-        with record.open("r", encoding="utf-8", newline="") as handle:
-            source_rows = list(csv.reader(handle))
-        for row in source_rows:
-            if not row:
-                continue
-            # PEP 376 RECORD paths are relative to the installation root
-            # containing the ``*.dist-info`` directory, not to that directory.
-            candidate = Path(os.path.abspath(record.parent.parent / row[0]))
-            if not _path_is_within(candidate, root):
-                raise DevelopmentEnvironmentError(
-                    f"Distribution RECORD escapes environment: {row[0]!r}"
-                )
-            if _same_lexical_path(candidate, record):
-                _require_no_symlink_ancestors(candidate, root)
-                rows.append([row[0], "", ""])
-                continue
-            try:
-                details = candidate.lstat()
-            except FileNotFoundError:
-                continue
-            _require_no_symlink_ancestors(candidate, root)
-            if not stat.S_ISREG(details.st_mode):
-                raise DevelopmentEnvironmentError(
-                    f"Distribution RECORD target is not regular: {row[0]!r}"
-                )
-            payload = _read_regular_no_follow(candidate)
-            digest = base64.urlsafe_b64encode(hashlib.sha256(payload).digest()).rstrip(
-                b"="
-            )
-            rows.append([row[0], f"sha256={digest.decode('ascii')}", str(len(payload))])
-        rendered = io.StringIO(newline="")
-        writer = csv.writer(rendered, lineterminator="\n")
-        writer.writerows(rows)
-        temporary = record.with_name(".RECORD.thetower-stage")
-        if os.path.lexists(temporary):
-            raise DevelopmentEnvironmentError(
-                f"Unexpected RECORD stage already exists: {temporary}"
-            )
-        temporary.write_text(rendered.getvalue(), encoding="utf-8")
-        os.replace(temporary, record)
-
-
-def _validate_console_script_shebangs(root: Path, final: Path) -> None:
-    bin_directory = root / "bin"
-    for entry in sorted(os.scandir(bin_directory), key=lambda item: item.name):
-        details = entry.stat(follow_symlinks=False)
-        if not stat.S_ISREG(details.st_mode):
-            continue
-        with open(entry.path, "rb") as handle:
-            first_line = handle.readline(4096).rstrip(b"\r\n")
-        if first_line.startswith(b"#!") and b"python" in first_line.lower():
-            expected_prefix = os.fsencode(f"#!{final}/bin/python")
-            if not first_line.startswith(expected_prefix):
-                raise DevelopmentEnvironmentError(
-                    f"Console script {entry.name} does not target the final environment"
-                )
-
-
-def _environment_manifest(
-    root: Path,
-    *,
-    final: Path,
+def _completion_marker_payload(
     config: EnvironmentConfig,
-    identity: InterpreterIdentity,
     fingerprint: EnvironmentFingerprint,
 ) -> dict[str, object]:
     return {
-        "schema_version": 1,
         "bootstrap_schema": config.bootstrap_schema,
         "environment_fingerprint": fingerprint.digest,
-        "environment_path": str(final),
-        "input_hashes": dict(sorted(fingerprint.input_hashes.items())),
-        "interpreter": {
-            "implementation": identity.implementation,
-            "version": identity.version,
-        },
-        "platform": {
-            "machine": identity.machine,
-            "platform_tag": identity.platform_tag,
-            "system": identity.system,
-        },
-        "relocation": _relocation_contract(final),
-        "files": _inventory_tree(root),
+        "schema_version": COMPLETION_MARKER_SCHEMA,
     }
 
 
-def _inventory_tree(root: Path) -> list[dict[str, object]]:
-    inventory: list[dict[str, object]] = []
-    for relative, details in _iter_tree(root):
-        if relative.as_posix() == MANIFEST_NAME:
-            continue
-        item: dict[str, object] = {
-            "path": relative.as_posix(),
-            "owner": details.st_uid,
-        }
-        mode = stat.S_IMODE(details.st_mode)
-        if stat.S_ISDIR(details.st_mode):
-            item.update(type="directory", mode=mode)
-        elif stat.S_ISREG(details.st_mode):
-            payload = _read_regular_no_follow(root / relative)
-            item.update(
-                type="file",
-                mode=mode,
-                size=len(payload),
-                sha256=hashlib.sha256(payload).hexdigest(),
-            )
-        elif stat.S_ISLNK(details.st_mode):
-            item.update(type="symlink", target=os.readlink(root / relative))
-        else:
-            raise DevelopmentEnvironmentError(
-                f"Unsupported environment entry type: {relative}"
-            )
-        inventory.append(item)
-    inventory.sort(key=lambda item: str(item["path"]))
-    return inventory
-
-
-def verify_environment_manifest(
-    actual_root: Path,
+def write_completion_marker(
+    final: Path,
     *,
-    expected_final: Path,
     config: EnvironmentConfig,
     identity: InterpreterIdentity,
     fingerprint: EnvironmentFingerprint,
 ) -> None:
-    try:
-        root_details = actual_root.lstat()
-    except OSError as exc:
+    _validate_existing_environment(config, identity, fingerprint, final)
+    marker = final / COMPLETION_MARKER_NAME
+    if os.path.lexists(marker):
         raise DevelopmentEnvironmentError(
-            f"Environment {actual_root} is unavailable: {exc}"
-        ) from exc
-    if not stat.S_ISDIR(root_details.st_mode) or actual_root.is_symlink():
-        raise DevelopmentEnvironmentError("Environment root must be a no-follow directory")
-    if root_details.st_uid != os.getuid():
-        raise DevelopmentEnvironmentError("Environment root has the wrong owner")
-    if stat.S_IMODE(root_details.st_mode) & 0o222:
-        raise DevelopmentEnvironmentError("Published environment root is writable")
-    manifest_path = actual_root / MANIFEST_NAME
-    try:
-        manifest_details = manifest_path.lstat()
-        manifest = json.loads(_read_regular_no_follow(manifest_path).decode("utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise DevelopmentEnvironmentError(f"Environment manifest is unreadable: {exc}") from exc
-    if (
-        not stat.S_ISREG(manifest_details.st_mode)
-        or manifest_details.st_uid != os.getuid()
-        or stat.S_IMODE(manifest_details.st_mode) & 0o222
-    ):
-        raise DevelopmentEnvironmentError(
-            "Environment manifest has unsafe type, owner, or permissions"
+            f"Completion marker already exists in new environment {final}"
         )
-    expected_fields = {
-        "schema_version": 1,
-        "bootstrap_schema": config.bootstrap_schema,
-        "environment_fingerprint": fingerprint.digest,
-        "environment_path": str(expected_final),
-        "input_hashes": dict(sorted(fingerprint.input_hashes.items())),
-        "interpreter": {
-            "implementation": identity.implementation,
-            "version": identity.version,
-        },
-        "platform": {
-            "machine": identity.machine,
-            "platform_tag": identity.platform_tag,
-            "system": identity.system,
-        },
-        "relocation": _relocation_contract(expected_final),
-    }
-    if not isinstance(manifest, dict):
-        raise DevelopmentEnvironmentError("Environment manifest is not an object")
-    for key, expected in expected_fields.items():
-        if manifest.get(key) != expected:
-            raise DevelopmentEnvironmentError(
-                f"Environment manifest {key} does not match the lock fingerprint"
+    temporary = final / f".{COMPLETION_MARKER_NAME}.tmp-{secrets.token_hex(8)}"
+    try:
+        temporary.write_text(
+            json.dumps(
+                _completion_marker_payload(config, fingerprint),
+                ensure_ascii=True,
+                indent=2,
+                sort_keys=True,
             )
-    actual_inventory = _inventory_tree(actual_root)
-    if manifest.get("files") != actual_inventory:
-        raise DevelopmentEnvironmentError("Environment installed-file manifest mismatch")
-    for item in actual_inventory:
-        relative = Path(str(item["path"]))
-        if int(item["owner"]) != os.getuid():
-            raise DevelopmentEnvironmentError(
-                f"Environment entry has the wrong owner: {item['path']}"
-            )
-        if item["type"] in {"directory", "file"} and int(item["mode"]) & 0o222:
-            raise DevelopmentEnvironmentError(
-                f"Environment entry is writable: {item['path']}"
-            )
-        if item["type"] == "symlink":
-            _validate_environment_symlink(actual_root, item)
-        if relative.name == "__pycache__" or relative.suffix in {".pyc", ".pyo"}:
-            raise DevelopmentEnvironmentError(
-                f"Published environment contains generated bytecode: {relative}"
-            )
-    _verify_no_staging_prefix(actual_root, expected_final)
+            + "\n",
+            encoding="utf-8",
+        )
+        os.replace(temporary, marker)
+    finally:
+        if os.path.lexists(temporary):
+            temporary.unlink()
 
 
-def _relocation_contract(final: Path) -> dict[str, str]:
-    return {
-        "final_prefix": str(final),
-        "forbidden_stage_prefix": str(final.parent / f".{final.name}.stage-"),
-    }
+def verify_completion_marker(
+    final: Path,
+    *,
+    config: EnvironmentConfig,
+    identity: InterpreterIdentity,
+    fingerprint: EnvironmentFingerprint,
+) -> None:
+    _validate_existing_environment(config, identity, fingerprint, final)
+    marker = final / COMPLETION_MARKER_NAME
+    if not os.path.lexists(marker):
+        raise IncompleteEnvironmentError(
+            f"Development environment {final} is incomplete: completion marker is absent"
+        )
+    try:
+        details = marker.lstat()
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise DevelopmentEnvironmentError(
+            f"Environment completion marker is unreadable: {exc}"
+        ) from exc
+    if not stat.S_ISREG(details.st_mode) or marker.is_symlink():
+        raise DevelopmentEnvironmentError(
+            "Environment completion marker must be a regular file"
+        )
+    if payload != _completion_marker_payload(config, fingerprint):
+        raise DevelopmentEnvironmentError(
+            "Environment completion marker does not match the expected fingerprint"
+        )
 
 
-def _verify_no_staging_prefix(root: Path, final: Path) -> None:
-    forbidden = os.fsencode(_relocation_contract(final)["forbidden_stage_prefix"])
-    forbidden_text = os.fsdecode(forbidden)
-    for relative, details in _iter_tree(root):
-        path = root / relative
-        if relative.as_posix() == MANIFEST_NAME:
-            continue
-        if stat.S_ISLNK(details.st_mode):
-            if forbidden_text in os.readlink(path):
-                raise DevelopmentEnvironmentError(
-                    f"Published symlink retains a staging prefix: {relative}"
-                )
-        elif stat.S_ISREG(details.st_mode) and _file_contains(path, forbidden):
-            raise DevelopmentEnvironmentError(
-                f"Published file retains a staging prefix: {relative}"
-            )
-
-
-def verify_published_environment(
+def verify_environment_contents(
     final: Path,
     config: EnvironmentConfig,
     identity: InterpreterIdentity,
     fingerprint: EnvironmentFingerprint,
 ) -> None:
-    validate_final_path(config, identity, fingerprint.digest, final)
-    verify_environment_manifest(
-        final,
-        expected_final=final,
-        config=config,
-        identity=identity,
-        fingerprint=fingerprint,
-    )
+    _validate_existing_environment(config, identity, fingerprint, final)
     expected = _expected_installed_distributions(config)
     _verify_environment_python(
         final,
-        expected_prefix=final,
         identity=identity,
         expected_distributions=expected,
-        execute_console_script=True,
     )
+    with tempfile.TemporaryDirectory(prefix="thetower-environment-check-") as cache:
+        _run_checked(
+            [str(final / "bin/python"), "-I", "-m", "pip", "check"],
+            description="completed environment dependency check",
+            env=_isolated_subprocess_environment(Path(cache)),
+        )
+
+
+def verify_completed_environment(
+    final: Path,
+    config: EnvironmentConfig,
+    identity: InterpreterIdentity,
+    fingerprint: EnvironmentFingerprint,
+) -> None:
+    verify_completion_marker(
+        final, config=config, identity=identity, fingerprint=fingerprint
+    )
+    verify_environment_contents(final, config, identity, fingerprint)
 
 
 def _expected_installed_distributions(config: EnvironmentConfig) -> dict[str, str]:
@@ -1019,13 +829,11 @@ def _expected_installed_distributions(config: EnvironmentConfig) -> dict[str, st
 def _verify_environment_python(
     root: Path,
     *,
-    expected_prefix: Path,
     identity: InterpreterIdentity,
     expected_distributions: Mapping[str, str],
-    execute_console_script: bool,
 ) -> None:
     program = (
-        "import importlib.metadata,json,os,platform,sys,sysconfig;"
+        "import importlib.metadata,json,os,platform,re,sys,sysconfig;"
         "installed={};"
         "[(installed.setdefault(re.sub(r'[-_.]+','-',d.metadata['Name']).lower(),d.version)) "
         "for d in importlib.metadata.distributions() if d.metadata.get('Name')];"
@@ -1034,20 +842,18 @@ def _verify_environment_python(
         "'system':platform.system(),'machine':platform.machine(),"
         "'platform_tag':sysconfig.get_platform(),'installed':installed},sort_keys=True))"
     )
-    # Keep the one-line verifier self-contained without importing repository code.
-    program = "import re;" + program
     with tempfile.TemporaryDirectory(prefix="thetower-environment-check-") as cache:
         environment = _isolated_subprocess_environment(Path(cache))
         completed = _run_checked(
             [str(root / "bin/python"), "-I", "-B", "-c", program],
-            description="published environment interpreter check",
+            description="completed environment interpreter check",
             env=environment,
         )
         try:
             payload = json.loads(completed.stdout)
         except json.JSONDecodeError as exc:
             raise DevelopmentEnvironmentError(
-                "Published environment returned invalid identity data"
+                "Completed environment returned invalid identity data"
             ) from exc
         observed = InterpreterIdentity(
             implementation=str(payload.get("implementation")),
@@ -1057,33 +863,20 @@ def _verify_environment_python(
             platform_tag=str(payload.get("platform_tag")),
         )
         if observed != identity:
-            raise DevelopmentEnvironmentError("Published environment identity mismatch")
-        if payload.get("prefix") != os.path.realpath(expected_prefix):
+            raise DevelopmentEnvironmentError("Completed environment identity mismatch")
+        if payload.get("prefix") != os.path.realpath(root):
             raise DevelopmentEnvironmentError(
-                "Published environment interpreter resolves to the wrong prefix"
+                "Completed environment interpreter resolves to the wrong prefix"
             )
         if payload.get("installed") != dict(sorted(expected_distributions.items())):
             raise DevelopmentEnvironmentError(
-                "Published environment distribution set does not match the locks"
+                "Completed environment distribution set does not match the locks"
             )
         _run_checked(
-            [
-                str(root / "bin/python"),
-                "-I",
-                "-B",
-                "-m",
-                "pytest",
-                "--version",
-            ],
-            description="published pytest module check",
+            [str(root / "bin/python"), "-I", "-B", "-m", "pytest", "--version"],
+            description="completed pytest module check",
             env=environment,
         )
-        if execute_console_script:
-            _run_checked(
-                [str(root / "bin/pytest"), "--version"],
-                description="relocated pytest console-script check",
-                env=environment,
-            )
 
 
 def replace_worktree_environment_link(config: EnvironmentConfig, final: Path) -> None:
@@ -1093,12 +886,13 @@ def replace_worktree_environment_link(config: EnvironmentConfig, final: Path) ->
             f"Refusing to replace non-symlink worktree environment {link}"
         )
     temporary = config.repository_root / f".venv.link-{secrets.token_hex(8)}"
-    if os.path.lexists(temporary):
-        raise DevelopmentEnvironmentError("Unexpected temporary .venv link collision")
     try:
         os.symlink(str(final), temporary, target_is_directory=True)
         os.replace(temporary, link)
-        _fsync_directory(config.repository_root)
+    except OSError as exc:
+        raise DevelopmentEnvironmentError(
+            f"Unable to select development environment through {link}: {exc}"
+        ) from exc
     finally:
         if os.path.lexists(temporary):
             temporary.unlink()
@@ -1110,16 +904,22 @@ def verify_worktree_environment_link(config: EnvironmentConfig, final: Path) -> 
     try:
         details = link.lstat()
     except OSError as exc:
-        raise DevelopmentEnvironmentError(f"Worktree .venv link is unavailable: {exc}") from exc
+        raise DevelopmentEnvironmentError(
+            f"Worktree .venv link is unavailable: {exc}"
+        ) from exc
     if not stat.S_ISLNK(details.st_mode):
         raise DevelopmentEnvironmentError("Worktree .venv must be a symlink")
     target = os.readlink(link)
-    if not os.path.isabs(target) or not _same_lexical_path(Path(target), final):
+    target_path = Path(target)
+    if target_path.is_absolute() and (
+        _same_path(target_path, config.production_environment)
+        or _path_is_within(target_path, config.production_environment)
+    ):
+        raise DevelopmentEnvironmentError("Worktree .venv points at production")
+    if not target_path.is_absolute() or not _same_path(target_path, final):
         raise DevelopmentEnvironmentError(
             f"Worktree .venv targets {target!r}, expected {final}"
         )
-    if _same_lexical_path(Path(target), config.production_environment):
-        raise DevelopmentEnvironmentError("Worktree .venv points at production")
 
 
 def require_active_development_environment(
@@ -1130,19 +930,18 @@ def require_active_development_environment(
     final = expected_environment_path(config, identity, fingerprint.digest)
     verify_worktree_environment_link(config, final)
     running_prefix = Path(os.path.realpath(sys.prefix))
-    if _same_lexical_path(running_prefix, config.production_environment):
+    if _same_path(running_prefix, config.production_environment):
         raise DevelopmentEnvironmentError("Checkpoint cannot run in production .venv")
-    if not _same_lexical_path(running_prefix, final):
+    if not _same_path(running_prefix, final):
         raise DevelopmentEnvironmentError(
             f"Checkpoint interpreter resolves to {running_prefix}, expected {final}"
         )
-    verify_environment_manifest(
-        final,
-        expected_final=final,
-        config=config,
-        identity=identity,
-        fingerprint=fingerprint,
-    )
+    try:
+        verify_completed_environment(final, config, identity, fingerprint)
+    except DevelopmentEnvironmentError as exc:
+        raise DevelopmentEnvironmentError(
+            f"Selected development environment is invalid: {exc}"
+        ) from exc
     return final
 
 
@@ -1151,6 +950,7 @@ def checkpoint_commands(
     environment: Path,
     paths: CheckpointPaths,
 ) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    del config
     python = str(environment / "bin/python")
     return (
         (
@@ -1168,10 +968,7 @@ def checkpoint_commands(
                 "main.py",
             ),
         ),
-        (
-            "state definitions",
-            (python, "test/validate_state_defs.py"),
-        ),
+        ("state definitions", (python, "test/validate_state_defs.py")),
         (
             "clickmap integrity",
             (python, "test/clickmap_integrity.py", "--show-orphans"),
@@ -1183,8 +980,6 @@ def checkpoint_commands(
                 "-m",
                 "pytest",
                 "-q",
-                "-p",
-                "tools.development_pytest",
                 "-o",
                 f"cache_dir={paths.pytest_cache}",
             ),
@@ -1202,20 +997,23 @@ def checkpoint_environment(
     for key in (
         "ADB_DEVICE",
         "ANDROID_SERIAL",
+        "COVERAGE_PROCESS_START",
         "PYTHONHOME",
         "PYTHONPATH",
+        "PYTEST_ADDOPTS",
         "THETOWER_ADB_PORT",
         "THETOWER_CONTROL_TOKEN",
         "THETOWER_PLAYER_SAVE_AUDIT",
         "THETOWER_PLAYER_SAVE_AUDIT_INTERVAL_SECONDS",
         "THETOWER_STARTUP_GATES",
         "THETOWER_STRATEGY",
+        "VIRTUAL_ENV",
     ):
         result.pop(key, None)
     result.update(
         {
             "COVERAGE_FILE": str(paths.coverage_file),
-            "PATH": f"{paths.blocked_tools}:{environment / 'bin'}:/usr/bin:/bin",
+            "PATH": f"{environment / 'bin'}:/usr/local/bin:/usr/bin:/bin",
             "PYTHONNOUSERSITE": "1",
             "PYTHONPYCACHEPREFIX": str(paths.bytecode),
             "TMPDIR": str(paths.scratch),
@@ -1223,7 +1021,6 @@ def checkpoint_environment(
             "THETOWER_DEVELOPMENT_LOG_DIR": str(paths.logs),
             "THETOWER_DEVELOPMENT_SCREENSHOT_DIR": str(paths.screenshots),
             "THETOWER_DEVELOPMENT_SCRATCH_DIR": str(paths.scratch),
-            "THETOWER_CHECKPOINT_EXCLUDE_HOST_TOOLS": "1",
             "THETOWER_STRATEGY_PROFILE_DIR": str(paths.custom_configuration),
             "VIRTUAL_ENV": str(environment),
             "XDG_CACHE_HOME": str(paths.root / "cache"),
@@ -1251,16 +1048,8 @@ def run_checkpoint(
             paths.screenshots,
             paths.custom_configuration,
             paths.scratch,
-            paths.blocked_tools,
         ):
             directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-        _create_blocked_host_tools(paths.blocked_tools)
-        for name, available in host_prerequisite_inventory(os.environ).items():
-            print(
-                "[checkpoint] host prerequisite "
-                f"{name}={'present' if available else 'missing'} (excluded)",
-                flush=True,
-            )
         environment_variables = checkpoint_environment(
             os.environ,
             environment=environment,
@@ -1283,15 +1072,7 @@ def run_checkpoint(
         print("[checkpoint] PASS")
         return 0
     finally:
-        shutil.rmtree(state_root, ignore_errors=False)
-
-
-def host_prerequisite_inventory(base: Mapping[str, str]) -> dict[str, bool]:
-    search_path = base.get("PATH")
-    return {
-        name: shutil.which(name, path=search_path) is not None
-        for name in CHECKPOINT_TOOL_BLOCKLIST
-    }
+        shutil.rmtree(state_root)
 
 
 def regenerate_locks(config: EnvironmentConfig) -> None:
@@ -1314,7 +1095,7 @@ def regenerate_locks(config: EnvironmentConfig) -> None:
             source = config.repository_root / relative
             destination = source_root / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_bytes(_read_regular_no_follow(source))
+            destination.write_bytes(source.read_bytes())
         environment = _isolated_subprocess_environment(cache)
         _run_checked(
             [str(config.interpreter), "-I", "-m", "venv", str(resolver)],
@@ -1356,11 +1137,7 @@ def regenerate_locks(config: EnvironmentConfig) -> None:
             "--no-emit-trusted-host",
         ]
         jobs = (
-            (
-                "requirements/bootstrap.lock",
-                "requirements/bootstrap.in",
-                (),
-            ),
+            ("requirements/bootstrap.lock", "requirements/bootstrap.in", ()),
             (
                 "requirements/runtime.lock",
                 "pyproject.toml",
@@ -1390,7 +1167,7 @@ def regenerate_locks(config: EnvironmentConfig) -> None:
             _annotate_lock(generated, LOCK_SOURCES[output])
             _atomic_replace_regular_file(
                 config.repository_root / output,
-                _read_regular_no_follow(generated),
+                generated.read_bytes(),
             )
     validate_lock_inputs(config)
 
@@ -1403,67 +1180,29 @@ def _annotate_lock(path: Path, source: str) -> None:
         if not line.startswith("# Source declaration:")
         and not line.startswith("# Regenerate:")
     ]
-    rendered = (
+    path.write_text(
         f"# Source declaration: {source}\n"
         f"# Regenerate: {LOCK_REGENERATION_COMMAND}\n"
         + "\n".join(lines)
-        + "\n"
+        + "\n",
+        encoding="utf-8",
     )
-    path.write_text(rendered, encoding="utf-8")
-
-
-def _prepare_checkpoint_parent(repository: Path, parent: Path) -> None:
-    if not _path_is_within(parent, repository):
-        raise DevelopmentEnvironmentError(
-            "Checkpoint state root must remain inside its worktree"
-        )
-    for directory in (repository, repository / "tmp", parent):
-        try:
-            details = directory.lstat()
-        except FileNotFoundError:
-            try:
-                os.mkdir(directory, 0o700)
-            except OSError as exc:
-                raise DevelopmentEnvironmentError(
-                    f"Unable to create checkpoint directory {directory}: {exc}"
-                ) from exc
-            details = directory.lstat()
-        if not stat.S_ISDIR(details.st_mode) or directory.is_symlink():
-            raise DevelopmentEnvironmentError(
-                f"Checkpoint directory is not no-follow: {directory}"
-            )
-        if details.st_uid != os.getuid() or (
-            directory != repository and stat.S_IMODE(details.st_mode) & 0o022
-        ):
-            raise DevelopmentEnvironmentError(
-                f"Checkpoint directory has unsafe ownership or permissions: {directory}"
-            )
 
 
 def _atomic_replace_regular_file(destination: Path, payload: bytes) -> None:
     temporary = destination.with_name(
         f".{destination.name}.replace-{secrets.token_hex(8)}"
     )
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(temporary, flags, 0o644)
     try:
-        view = memoryview(payload)
-        while view:
-            written = os.write(descriptor, view)
-            view = view[written:]
-        os.fchmod(descriptor, 0o644)
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-    try:
+        temporary.write_bytes(payload)
         os.replace(temporary, destination)
-        _fsync_directory(destination.parent)
     finally:
         if os.path.lexists(temporary):
             temporary.unlink()
 
 
-def _ensure_environment_root(root: Path) -> None:
+def _ensure_environment_root(config: EnvironmentConfig) -> None:
+    root = config.environment_root
     parent = root.parent
     try:
         parent_details = parent.lstat()
@@ -1472,179 +1211,50 @@ def _ensure_environment_root(root: Path) -> None:
             f"Environment-store parent {parent} is unavailable: {exc}"
         ) from exc
     if not stat.S_ISDIR(parent_details.st_mode) or parent.is_symlink():
-        raise DevelopmentEnvironmentError("Environment-store parent is not no-follow")
+        raise DevelopmentEnvironmentError(
+            f"Environment-store parent {parent} must be a real directory"
+        )
     try:
-        os.mkdir(root, 0o700)
-    except FileExistsError:
-        pass
-    _ensure_private_directory(root, create=False, require_owner_write=True)
-
-
-def _ensure_private_directory(
-    path: Path,
-    *,
-    create: bool,
-    require_owner_write: bool = False,
-) -> None:
-    if create:
-        try:
-            os.mkdir(path, 0o700)
-        except FileExistsError:
-            pass
-        except FileNotFoundError as exc:
-            raise DevelopmentEnvironmentError(
-                f"Private directory parent is unavailable for {path}"
-            ) from exc
-        except OSError as exc:
-            raise DevelopmentEnvironmentError(
-                f"Unable to create private directory {path}: {exc}"
-            ) from exc
-    try:
-        details = path.lstat()
+        root.mkdir(mode=0o700, exist_ok=True)
+        root_details = root.lstat()
     except OSError as exc:
-        raise DevelopmentEnvironmentError(f"Private directory {path} is unavailable: {exc}") from exc
-    mode = stat.S_IMODE(details.st_mode)
-    if not stat.S_ISDIR(details.st_mode) or path.is_symlink():
-        raise DevelopmentEnvironmentError(f"Private directory {path} is not no-follow")
-    if details.st_uid != os.getuid() or mode & 0o022:
         raise DevelopmentEnvironmentError(
-            f"Private directory {path} has unsafe ownership or permissions"
+            f"Unable to prepare environment store {root}: {exc}"
+        ) from exc
+    if not stat.S_ISDIR(root_details.st_mode) or root.is_symlink():
+        raise DevelopmentEnvironmentError(
+            f"Environment store {root} must be a real directory"
         )
-    if require_owner_write and not mode & 0o200:
-        raise DevelopmentEnvironmentError(f"Private directory {path} is not owner-writable")
 
 
-def _create_stage_directory(root: Path, final: Path) -> Path:
-    descriptor = _open_directory_no_follow(root)
-    try:
-        for _ in range(32):
-            name = f".{final.name}.stage-{secrets.token_hex(8)}"
-            try:
-                os.mkdir(name, 0o700, dir_fd=descriptor)
-            except FileExistsError:
-                continue
-            stage = root / name
-            validate_stage_path(final, stage)
-            return stage
-    finally:
-        os.close(descriptor)
-    raise DevelopmentEnvironmentError("Unable to allocate a unique environment stage")
-
-
-def cleanup_owned_stage(stage: Path, final: Path) -> None:
-    validate_stage_path(final, stage)
-    for relative, details in _iter_tree(stage):
-        if stat.S_ISDIR(details.st_mode):
-            os.chmod(stage / relative, 0o700)
-    os.chmod(stage, 0o700)
-    shutil.rmtree(stage)
-    _fsync_directory(stage.parent)
-
-
-def _publish_stage(root: Path, stage: Path, final: Path) -> None:
-    validate_stage_path(final, stage)
-    descriptor = _open_directory_no_follow(root)
-    try:
-        try:
-            os.stat(final.name, dir_fd=descriptor, follow_symlinks=False)
-        except FileNotFoundError:
-            pass
-        else:
-            raise DevelopmentEnvironmentError(
-                f"Final environment appeared during build: {final}"
-            )
-        os.rename(
-            stage.name,
-            final.name,
-            src_dir_fd=descriptor,
-            dst_dir_fd=descriptor,
+def _prepare_checkpoint_parent(repository: Path, parent: Path) -> None:
+    if not _path_is_within(parent, repository):
+        raise DevelopmentEnvironmentError(
+            "Checkpoint state root must remain inside its worktree"
         )
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-
-
-def _make_contents_immutable(root: Path) -> None:
-    entries = list(_iter_tree(root))
-    for relative, details in entries:
-        path = root / relative
-        if stat.S_ISREG(details.st_mode):
-            executable = bool(stat.S_IMODE(details.st_mode) & 0o111)
-            os.chmod(path, 0o555 if executable else 0o444)
-    for relative, details in sorted(
-        entries, key=lambda item: len(item[0].parts), reverse=True
-    ):
-        if stat.S_ISDIR(details.st_mode):
-            os.chmod(root / relative, 0o555)
-
-
-def _sync_tree(root: Path) -> None:
-    directories = [root]
-    for relative, details in _iter_tree(root):
-        path = root / relative
-        if stat.S_ISREG(details.st_mode):
-            descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-            try:
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
-        elif stat.S_ISDIR(details.st_mode):
-            directories.append(path)
-    for directory in sorted(directories, key=lambda item: len(item.parts), reverse=True):
-        _fsync_directory(directory)
-
-
-def _iter_tree(root: Path) -> Iterator[tuple[Path, os.stat_result]]:
-    stack: list[tuple[Path, Path]] = [(root, Path())]
-    while stack:
-        directory, relative_directory = stack.pop()
+    try:
+        parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except OSError as exc:
+        raise DevelopmentEnvironmentError(
+            f"Unable to create checkpoint directory {parent}: {exc}"
+        ) from exc
+    for directory in (repository, repository / "tmp", parent):
         try:
-            entries = sorted(os.scandir(directory), key=lambda item: item.name, reverse=True)
+            details = directory.lstat()
         except OSError as exc:
             raise DevelopmentEnvironmentError(
-                f"Unable to scan environment directory {directory}: {exc}"
+                f"Checkpoint directory {directory} is unavailable: {exc}"
             ) from exc
-        for entry in entries:
-            relative = relative_directory / entry.name
-            details = entry.stat(follow_symlinks=False)
-            yield relative, details
-            if stat.S_ISDIR(details.st_mode):
-                stack.append((Path(entry.path), relative))
-
-
-def _validate_environment_symlink(root: Path, item: Mapping[str, object]) -> None:
-    relative = Path(str(item["path"]))
-    target = str(item["target"])
-    if os.path.isabs(target):
-        configured = str((root / "bin/python").resolve(strict=False))
-        if target != configured and target != "/usr/bin/python3.12":
+        if not stat.S_ISDIR(details.st_mode) or directory.is_symlink():
             raise DevelopmentEnvironmentError(
-                f"Environment symlink escapes to unsupported target: {relative}"
+                f"Checkpoint directory must be a real directory: {directory}"
             )
-        return
-    destination = Path(os.path.abspath(root / relative.parent / target))
-    if not _path_is_within(destination, root):
-        raise DevelopmentEnvironmentError(
-            f"Environment symlink escapes its root: {relative}"
-        )
-
-
-def _create_blocked_host_tools(directory: Path) -> None:
-    for name in CHECKPOINT_TOOL_BLOCKLIST:
-        path = directory / name
-        path.write_text(
-            "#!/bin/sh\n"
-            f"echo 'development checkpoint forbids host tool: {name}' >&2\n"
-            "exit 97\n",
-            encoding="utf-8",
-        )
-        path.chmod(0o500)
 
 
 def _isolated_subprocess_environment(cache: Path) -> dict[str, str]:
     result = dict(os.environ)
     for key in list(result):
-        if key.startswith("PIP_") or key in {"PYTHONHOME", "PYTHONPATH"}:
+        if key.startswith("PIP_") or key in {"PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV"}:
             result.pop(key, None)
     result.update(
         {
@@ -1685,76 +1295,7 @@ def _run_checked(
     return completed
 
 
-def _read_regular_no_follow(path: Path) -> bytes:
-    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    try:
-        details = os.fstat(descriptor)
-        if not stat.S_ISREG(details.st_mode):
-            raise DevelopmentEnvironmentError(f"Expected regular file: {path}")
-        chunks: list[bytes] = []
-        while True:
-            chunk = os.read(descriptor, 1024 * 1024)
-            if not chunk:
-                break
-            chunks.append(chunk)
-        return b"".join(chunks)
-    finally:
-        os.close(descriptor)
-
-
-def _write_json_no_follow(path: Path, payload: object) -> None:
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(path, flags, 0o600)
-    try:
-        rendered = (
-            json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n"
-        ).encode("utf-8")
-        view = memoryview(rendered)
-        while view:
-            written = os.write(descriptor, view)
-            view = view[written:]
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-
-
-def _file_contains(path: Path, needle: bytes) -> bool:
-    if not needle:
-        return False
-    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    try:
-        overlap = b""
-        while True:
-            chunk = os.read(descriptor, 1024 * 1024)
-            if not chunk:
-                return False
-            combined = overlap + chunk
-            if needle in combined:
-                return True
-            overlap = combined[-(len(needle) - 1) :] if len(needle) > 1 else b""
-    finally:
-        os.close(descriptor)
-
-
-def _open_directory_no_follow(path: Path) -> int:
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(path, flags)
-    details = os.fstat(descriptor)
-    if not stat.S_ISDIR(details.st_mode):
-        os.close(descriptor)
-        raise DevelopmentEnvironmentError(f"Expected directory: {path}")
-    return descriptor
-
-
-def _fsync_directory(path: Path) -> None:
-    descriptor = _open_directory_no_follow(path)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-
-
-def _same_lexical_path(left: Path, right: Path) -> bool:
+def _same_path(left: Path, right: Path) -> bool:
     return os.path.normpath(os.path.abspath(left)) == os.path.normpath(
         os.path.abspath(right)
     )
@@ -1769,27 +1310,6 @@ def _path_is_within(path: Path, parent: Path) -> bool:
         return False
 
 
-def _require_no_symlink_ancestors(path: Path, root: Path) -> None:
-    if not _path_is_within(path, root):
-        raise DevelopmentEnvironmentError(f"Path escapes no-follow root: {path}")
-    current = path.parent
-    while not _same_lexical_path(current, root):
-        try:
-            details = current.lstat()
-        except OSError as exc:
-            raise DevelopmentEnvironmentError(
-                f"No-follow ancestor is unavailable for {path}: {exc}"
-            ) from exc
-        if not stat.S_ISDIR(details.st_mode) or current.is_symlink():
-            raise DevelopmentEnvironmentError(
-                f"Path has a symlink or non-directory ancestor: {path}"
-            )
-        parent = current.parent
-        if _same_lexical_path(parent, current):
-            raise DevelopmentEnvironmentError(f"Unable to bound no-follow path: {path}")
-        current = parent
-
-
 def _print_status(
     config: EnvironmentConfig,
     identity: InterpreterIdentity,
@@ -1799,7 +1319,16 @@ def _print_status(
     if not os.path.lexists(final):
         print(f"status=missing\nfingerprint={fingerprint.digest}\nenvironment={final}")
         return 1
-    verify_published_environment(final, config, identity, fingerprint)
+    if not os.path.lexists(final / COMPLETION_MARKER_NAME):
+        raise IncompleteEnvironmentError(
+            f"Development environment {final} is incomplete: completion marker is absent"
+        )
+    try:
+        verify_completed_environment(final, config, identity, fingerprint)
+    except DevelopmentEnvironmentError as exc:
+        raise DevelopmentEnvironmentError(
+            f"Completed development environment {final} is invalid: {exc}"
+        ) from exc
     verify_worktree_environment_link(config, final)
     print(f"status=ready\nfingerprint={fingerprint.digest}\nenvironment={final}")
     return 0
@@ -1808,11 +1337,21 @@ def _print_status(
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("bootstrap", help="build or reuse the locked development environment")
-    subparsers.add_parser("status", help="verify the expected environment and worktree link")
-    subparsers.add_parser("checkpoint", help="run the complete ordinary non-live checkpoint")
-    subparsers.add_parser("verify-locks", help="validate exact pins and artifact hashes")
-    subparsers.add_parser("lock", help="regenerate all hash-checked locks deterministically")
+    subparsers.add_parser(
+        "bootstrap", help="build or reuse the locked development environment"
+    )
+    subparsers.add_parser(
+        "status", help="verify the expected environment and worktree link"
+    )
+    subparsers.add_parser(
+        "checkpoint", help="run the complete ordinary non-live checkpoint"
+    )
+    subparsers.add_parser(
+        "verify-locks", help="validate exact pins and artifact hashes"
+    )
+    subparsers.add_parser(
+        "lock", help="regenerate all hash-checked locks deterministically"
+    )
     return parser
 
 

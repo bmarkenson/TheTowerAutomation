@@ -25,20 +25,22 @@ production-owned `.venv`; never run the development bootstrap there and never
 use that environment from another worktree.
 
 In the `develop` integration checkout or a feature worktree, use the tracked
-Phase-0 environment contract. When `.venv` is absent, the only supported
+development-environment contract. When `.venv` is absent, the only supported
 pre-environment invocation is:
 
 ```bash
 /usr/bin/python3.12 tools/development.py bootstrap
 ```
 
-The entrypoint verifies exact CPython and platform identity, acquires the
-host-global writer lock under `$XDG_RUNTIME_DIR/thetower`, installs only
-hash-checked locked artifacts into a sibling stage, publishes an immutable
-content-addressed environment, and atomically selects it through the ignored
-worktree `.venv` symlink. The writer lock may require the approved host path
-when the normal sandbox cannot write `$XDG_RUNTIME_DIR`; dependency network
-access is limited to the declared locked artifacts.
+The entrypoint verifies exact CPython and platform identity, selects a shared
+environment path from the tracked schema and dependency inputs, and acquires
+the host-global writer lock under `$XDG_RUNTIME_DIR/thetower`. It builds
+directly at that fingerprinted path, installs only hash-checked locked
+artifacts, runs `pip check`, publishes a small completion marker, and atomically
+selects the completed environment through the ignored worktree `.venv`
+symlink. The writer lock may require the approved host path when the normal
+sandbox cannot write `$XDG_RUNTIME_DIR`; dependency network access is limited
+to the declared locked artifacts.
 
 Once `.venv` exists, including after a dependency-input change, run the same
 entrypoint and every other project command through it:
@@ -49,17 +51,15 @@ entrypoint and every other project command through it:
 .venv/bin/python tools/development.py checkpoint
 ```
 
-`status` rejects a missing, writable, wrong-owner, wrong-platform,
-manifest-invalid, or incorrectly linked environment. `bootstrap` safely reuses
-an already valid immutable environment and rejects an invalid final path rather
-than repairing it in place. `checkpoint` is the normal repository-local gate;
-it does not start runtime code or access ADB.
-
-This is the current interim entrypoint, not the long-term complexity target.
-Continue to use it until its replacement is integrated, but do not extend its
-immutable-manifest, relocation, hostile-filesystem, or host-tool-blocking
-machinery. The trusted-single-user rationale and simpler replacement contract
-are in the
+`status` rejects a missing, mismatched, incomplete, broken, or incorrectly
+linked environment. `bootstrap` safely reuses a completed valid environment.
+Under the writer lock it may remove and rebuild only the exact fingerprinted
+child whose completion marker is absent; it reports a completed-but-invalid
+environment without modifying it. Do not install packages ad hoc into a shared
+environment. `checkpoint` isolates generated state and runs the complete
+repository-local gate, including installed OCR tools, without starting runtime
+code or accessing ADB. The trusted-single-user rationale and retained
+correctness boundaries are in the
 [development coordination architecture](architecture/development_isolation.md#development-python-environment).
 
 ## Lightweight read-only questions

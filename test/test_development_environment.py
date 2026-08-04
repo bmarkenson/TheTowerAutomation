@@ -5,7 +5,7 @@ import json
 import multiprocessing
 import os
 from pathlib import Path
-import stat
+import shutil
 import subprocess
 
 import pytest
@@ -36,23 +36,21 @@ def _config(tmp_path: Path) -> development.EnvironmentConfig:
         "requirements/runtime.lock",
         "requirements/development.lock",
     )
-    config_path.write_text('{"bootstrap_schema":2}\n', encoding="utf-8")
+    config_path.write_text('{"bootstrap_schema":3}\n', encoding="utf-8")
     for relative in inputs:
         path = repository / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"input={relative}\n", encoding="utf-8")
-    runtime_parent = tmp_path / "runtime"
-    runtime_parent.mkdir()
     return development.EnvironmentConfig(
         repository_root=repository,
         config_path=config_path,
-        bootstrap_schema=2,
+        bootstrap_schema=3,
         dependency_inputs=inputs,
         environment_root=worktrees / ".environments",
         production_environment=tmp_path / "production" / ".venv",
         interpreter=Path("/usr/bin/python3.12"),
         supported_identity=IDENTITY,
-        runtime_root=runtime_parent / "thetower",
+        runtime_root=tmp_path / "runtime" / "thetower",
     )
 
 
@@ -62,37 +60,37 @@ def _fingerprint(
     return development.compute_environment_fingerprint(config, IDENTITY)
 
 
-def _create_manifest_environment(
+def _final(
     config: development.EnvironmentConfig,
     fingerprint: development.EnvironmentFingerprint,
-    root: Path,
 ) -> Path:
-    root.mkdir(parents=True)
-    (root / "payload.txt").write_text("locked payload\n", encoding="utf-8")
-    development._make_contents_immutable(root)
-    manifest = development._environment_manifest(
-        root,
-        final=root,
+    return development.expected_environment_path(
+        config,
+        IDENTITY,
+        fingerprint.digest,
+    )
+
+
+def _write_marker(
+    config: development.EnvironmentConfig,
+    fingerprint: development.EnvironmentFingerprint,
+    final: Path,
+) -> None:
+    development.write_completion_marker(
+        final,
         config=config,
         identity=IDENTITY,
         fingerprint=fingerprint,
     )
-    development._write_json_no_follow(root / development.MANIFEST_NAME, manifest)
-    os.chmod(root / development.MANIFEST_NAME, 0o444)
-    os.chmod(root, 0o555)
-    return root
 
 
-def _restore_writable(root: Path) -> None:
-    if not root.exists() or root.is_symlink():
-        return
-    os.chmod(root, 0o700)
-    for relative, details in development._iter_tree(root):
-        path = root / relative
-        if stat.S_ISDIR(details.st_mode):
-            os.chmod(path, 0o700)
-        elif stat.S_ISREG(details.st_mode):
-            os.chmod(path, 0o600)
+def _verify_test_payload(
+    final: Path,
+    _config: development.EnvironmentConfig,
+    _identity: development.InterpreterIdentity,
+    _fingerprint: development.EnvironmentFingerprint,
+) -> None:
+    assert (final / "payload.txt").read_text(encoding="utf-8") == "complete\n"
 
 
 def _lock_worker(
@@ -103,6 +101,22 @@ def _lock_worker(
     with development.development_writer_lock(config):
         entered.set()
         release.wait(5)
+
+
+def _copy_lock_contract(tmp_path: Path) -> development.EnvironmentConfig:
+    config = _config(tmp_path)
+    source_root = development.repository_root()
+    for relative in (
+        "pyproject.toml",
+        "requirements/bootstrap.in",
+        "requirements/bootstrap.lock",
+        "requirements/runtime.lock",
+        "requirements/development.lock",
+    ):
+        destination = config.repository_root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source_root / relative, destination)
+    return config
 
 
 def test_dependency_environment_fingerprint_is_deterministic(tmp_path: Path) -> None:
@@ -139,14 +153,35 @@ def test_interpreter_and_platform_mismatches_are_rejected(
         development.require_supported_identity(config, observed)
 
 
-def test_production_venv_target_is_rejected(tmp_path: Path) -> None:
+def test_production_checkout_interpreter_and_venv_target_are_rejected(
+    tmp_path: Path,
+) -> None:
     config = _config(tmp_path)
+
+    with pytest.raises(
+        development.DevelopmentEnvironmentError,
+        match="production checkout",
+    ):
+        development.validate_repository_root(
+            replace(config, repository_root=config.production_environment.parent)
+        )
+
+    with pytest.raises(
+        development.DevelopmentEnvironmentError,
+        match="cannot come from production",
+    ):
+        development.validate_repository_root(
+            replace(
+                config,
+                interpreter=config.production_environment / "bin/python",
+            )
+        )
+
     config.production_environment.parent.mkdir(parents=True)
     (config.repository_root / ".venv").symlink_to(
         config.production_environment,
         target_is_directory=True,
     )
-
     with pytest.raises(
         development.DevelopmentEnvironmentError,
         match="points at production",
@@ -157,30 +192,21 @@ def test_production_venv_target_is_rejected(tmp_path: Path) -> None:
         )
 
 
-def test_stage_and_final_paths_are_exact_and_no_follow(tmp_path: Path) -> None:
+def test_final_path_must_be_the_exact_fingerprinted_store_child(
+    tmp_path: Path,
+) -> None:
     config = _config(tmp_path)
     fingerprint = _fingerprint(config)
-    config.environment_root.mkdir(mode=0o700)
-    final = development.expected_environment_path(
-        config,
-        IDENTITY,
-        fingerprint.digest,
-    )
-    development.validate_final_path(config, IDENTITY, fingerprint.digest, final)
-    stage = config.environment_root / f".{final.name}.stage-owned"
-    stage.mkdir()
-    development.validate_stage_path(final, stage)
+    final = _final(config, fingerprint)
 
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    stage.rmdir()
-    stage.symlink_to(outside, target_is_directory=True)
-    with pytest.raises(development.DevelopmentEnvironmentError, match="no-follow"):
-        development.validate_stage_path(final, stage)
-    wrong_sibling = tmp_path / stage.name
-    wrong_sibling.mkdir()
-    with pytest.raises(development.DevelopmentEnvironmentError, match="sibling"):
-        development.validate_stage_path(final, wrong_sibling)
+    development.validate_final_path(config, IDENTITY, fingerprint.digest, final)
+    with pytest.raises(development.DevelopmentEnvironmentError, match="does not match"):
+        development.validate_final_path(
+            config,
+            IDENTITY,
+            fingerprint.digest,
+            config.environment_root / "another-child",
+        )
 
 
 def test_concurrent_builders_are_serialized_by_host_global_lock(
@@ -221,190 +247,161 @@ def test_concurrent_builders_are_serialized_by_host_global_lock(
     assert second.exitcode == 0
 
 
-def test_failed_stage_is_cleaned_without_touching_other_paths(
+def test_marker_absent_interrupted_build_is_rebuilt_without_touching_siblings(
     tmp_path: Path,
 ) -> None:
     config = _config(tmp_path)
     fingerprint = _fingerprint(config)
-    untouched = config.environment_root.parent / "untouched"
-    untouched.write_text("owner data\n", encoding="utf-8")
+    final = _final(config, fingerprint)
+    config.environment_root.mkdir(mode=0o700)
+    other = config.environment_root / f"cpython-3.12-{'f' * 64}"
+    other.mkdir()
+    (other / development.COMPLETION_MARKER_NAME).write_text(
+        "preserved completed environment\n",
+        encoding="utf-8",
+    )
+    events: list[str] = []
 
-    def fail_build(
+    def interrupted_build(
         _config: development.EnvironmentConfig,
         _identity: development.InterpreterIdentity,
         _fingerprint: development.EnvironmentFingerprint,
-        stage: Path,
-        _final: Path,
+        environment: Path,
     ) -> None:
-        (stage / "partial").write_text("partial\n", encoding="utf-8")
-        raise RuntimeError("injected build failure")
+        (environment / "partial.txt").write_text("partial\n", encoding="utf-8")
+        raise RuntimeError("injected interruption")
 
-    with pytest.raises(RuntimeError, match="injected build failure"):
+    with pytest.raises(RuntimeError, match="injected interruption"):
         development.provision_environment(
             config,
             IDENTITY,
             fingerprint,
-            build_stage=fail_build,
+            build=interrupted_build,
+            verify_contents=_verify_test_payload,
         )
+    assert (final / "partial.txt").is_file()
+    assert not (final / development.COMPLETION_MARKER_NAME).exists()
 
-    assert list(config.environment_root.iterdir()) == []
-    assert untouched.read_text(encoding="utf-8") == "owner data\n"
-    assert not os.path.lexists(config.repository_root / ".venv")
-
-
-def test_immutable_valid_environment_is_reused_without_building(
-    tmp_path: Path,
-) -> None:
-    config = _config(tmp_path)
-    fingerprint = _fingerprint(config)
-    config.environment_root.mkdir(mode=0o700)
-    final = development.expected_environment_path(
-        config,
-        IDENTITY,
-        fingerprint.digest,
-    )
-    final.mkdir(mode=0o555)
-    before = final.stat()
-    verified: list[Path] = []
-
-    def no_build(*_args: object) -> None:
-        raise AssertionError("valid immutable environment must be reused")
-
-    def verify(
-        path: Path,
+    def completed_build(
         _config: development.EnvironmentConfig,
         _identity: development.InterpreterIdentity,
         _fingerprint: development.EnvironmentFingerprint,
+        environment: Path,
     ) -> None:
-        assert stat.S_IMODE(path.stat().st_mode) == 0o555
-        verified.append(path)
+        events.append("build")
+        assert not (environment / "partial.txt").exists()
+        assert not (environment / development.COMPLETION_MARKER_NAME).exists()
+        (environment / "payload.txt").write_text("complete\n", encoding="utf-8")
+
+    def verify_before_marker(
+        environment: Path,
+        environment_config: development.EnvironmentConfig,
+        identity: development.InterpreterIdentity,
+        environment_fingerprint: development.EnvironmentFingerprint,
+    ) -> None:
+        events.append("verify")
+        assert not (environment / development.COMPLETION_MARKER_NAME).exists()
+        _verify_test_payload(
+            environment,
+            environment_config,
+            identity,
+            environment_fingerprint,
+        )
 
     result = development.provision_environment(
         config,
         IDENTITY,
         fingerprint,
-        build_stage=no_build,
-        verify_final=verify,
+        build=completed_build,
+        verify_contents=verify_before_marker,
     )
 
-    after = final.stat()
-    assert result.reused is True
-    assert verified == [final]
-    assert (before.st_mode, before.st_mtime_ns) == (after.st_mode, after.st_mtime_ns)
+    assert result.reused is False
+    assert events == ["build", "verify"]
+    development.verify_completion_marker(
+        final,
+        config=config,
+        identity=IDENTITY,
+        fingerprint=fingerprint,
+    )
+    assert (other / development.COMPLETION_MARKER_NAME).read_text(
+        encoding="utf-8"
+    ) == "preserved completed environment\n"
     assert os.readlink(config.repository_root / ".venv") == str(final)
 
 
-def test_writable_published_environment_is_rejected(tmp_path: Path) -> None:
+def test_completed_valid_environment_is_reused_without_building(
+    tmp_path: Path,
+) -> None:
     config = _config(tmp_path)
     fingerprint = _fingerprint(config)
-    root = _create_manifest_environment(
+    final = _final(config, fingerprint)
+    final.mkdir(parents=True)
+    (final / "payload.txt").write_text("complete\n", encoding="utf-8")
+    _write_marker(config, fingerprint, final)
+    before = {
+        path.name: path.read_bytes()
+        for path in final.iterdir()
+        if path.is_file()
+    }
+
+    def no_build(*_args: object) -> None:
+        raise AssertionError("a completed valid environment must be reused")
+
+    result = development.provision_environment(
         config,
+        IDENTITY,
         fingerprint,
-        tmp_path / "published-writable",
+        build=no_build,
+        verify_contents=_verify_test_payload,
     )
-    try:
-        os.chmod(root, 0o755)
-        with pytest.raises(
-            development.DevelopmentEnvironmentError,
-            match="root is writable",
-        ):
-            development.verify_environment_manifest(
-                root,
-                expected_final=root,
-                config=config,
-                identity=IDENTITY,
-                fingerprint=fingerprint,
-            )
-    finally:
-        _restore_writable(root)
+
+    after = {
+        path.name: path.read_bytes()
+        for path in final.iterdir()
+        if path.is_file()
+    }
+    assert result.reused is True
+    assert before == after
+    assert os.readlink(config.repository_root / ".venv") == str(final)
 
 
-def test_manifest_content_mismatch_is_rejected(tmp_path: Path) -> None:
+def test_completed_invalid_environment_is_reported_without_mutation(
+    tmp_path: Path,
+) -> None:
     config = _config(tmp_path)
     fingerprint = _fingerprint(config)
-    root = _create_manifest_environment(
-        config,
-        fingerprint,
-        tmp_path / "published-mismatch",
-    )
-    try:
-        payload = root / "payload.txt"
-        os.chmod(payload, 0o644)
-        payload.write_text("tampered payload\n", encoding="utf-8")
-        os.chmod(payload, 0o444)
-        with pytest.raises(
-            development.DevelopmentEnvironmentError,
-            match="manifest mismatch",
-        ):
-            development.verify_environment_manifest(
-                root,
-                expected_final=root,
-                config=config,
-                identity=IDENTITY,
-                fingerprint=fingerprint,
-            )
-    finally:
-        _restore_writable(root)
-
-
-def test_staging_prefix_relocation_is_normalized(tmp_path: Path) -> None:
-    final = tmp_path / f"cpython-3.12-{'a' * 64}"
-    stage = tmp_path / f".{final.name}.stage-owned"
-    (stage / "bin").mkdir(parents=True)
-    script = stage / "bin/check-tool"
-    script.write_text(
-        f"#!{stage}/bin/python\nprint({str(stage)!r})\n",
-        encoding="utf-8",
-    )
-    script.chmod(0o755)
-    (stage / "bin/python").symlink_to("/usr/bin/python3.12")
-    (stage / "pyvenv.cfg").write_text(
-        f"command = /usr/bin/python3.12 -m venv {stage}\n",
-        encoding="utf-8",
-    )
-    site_packages = stage / "lib/python3.12/site-packages"
-    dist_info = site_packages / "demo-1.0.dist-info"
-    dist_info.mkdir(parents=True)
-    (site_packages / "demo.py").write_text("VALUE = 1\n", encoding="utf-8")
-    record = dist_info / "RECORD"
-    record.write_text(
-        "demo-1.0.dist-info/RECORD,,\n"
-        "demo.py,,\n"
-        "missing/nested/generated.pyc,,\n"
-        "../../../bin/check-tool,,\n",
-        encoding="utf-8",
-    )
-
-    development.normalize_relocated_environment(stage, final)
-
-    assert str(stage) not in script.read_text(encoding="utf-8")
-    assert script.read_text(encoding="utf-8").startswith(f"#!{final}/bin/python")
-    assert str(final) in (stage / "pyvenv.cfg").read_text(encoding="utf-8")
-    assert record.read_text(encoding="utf-8").count("sha256=") == 2
-
-
-def test_binary_staging_prefix_reference_is_rejected(tmp_path: Path) -> None:
-    final = tmp_path / f"cpython-3.12-{'b' * 64}"
-    stage = tmp_path / f".{final.name}.stage-owned"
-    (stage / "bin").mkdir(parents=True)
-    (stage / "bin/python").symlink_to("/usr/bin/python3.12")
-    (stage / "embedded.bin").write_bytes(b"binary\x00" + os.fsencode(str(stage)))
+    final = _final(config, fingerprint)
+    final.mkdir(parents=True)
+    broken = final / "payload.txt"
+    broken.write_text("broken\n", encoding="utf-8")
+    _write_marker(config, fingerprint, final)
+    before = {path.name: path.read_bytes() for path in final.iterdir()}
 
     with pytest.raises(
         development.DevelopmentEnvironmentError,
-        match="binary staging-prefix",
+        match="Completed development environment.*refusing to modify",
     ):
-        development.normalize_relocated_environment(stage, final)
+        development.provision_environment(
+            config,
+            IDENTITY,
+            fingerprint,
+            build=lambda *_args: pytest.fail("completed environment was rebuilt"),
+            verify_contents=_verify_test_payload,
+        )
+
+    assert {path.name: path.read_bytes() for path in final.iterdir()} == before
 
 
-def test_worktree_venv_symlink_is_replaced_atomically(
+def test_worktree_venv_selection_is_atomic_and_preserves_real_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _config(tmp_path)
     old = tmp_path / "old-environment"
     final = tmp_path / "new-environment"
-    (config.repository_root / ".venv").symlink_to(old, target_is_directory=True)
+    link = config.repository_root / ".venv"
+    link.symlink_to(old, target_is_directory=True)
     calls: list[tuple[Path, Path]] = []
     real_replace = os.replace
 
@@ -415,16 +412,127 @@ def test_worktree_venv_symlink_is_replaced_atomically(
         real_replace(source, destination)
 
     monkeypatch.setattr(development.os, "replace", observe_replace)
-
     development.replace_worktree_environment_link(config, final)
 
     assert len(calls) == 1
-    assert calls[0][1] == config.repository_root / ".venv"
-    assert os.readlink(config.repository_root / ".venv") == str(final)
+    assert calls[0][1] == link
+    assert os.readlink(link) == str(final)
     assert not list(config.repository_root.glob(".venv.link-*"))
 
+    link.unlink()
+    link.mkdir()
+    with pytest.raises(
+        development.DevelopmentEnvironmentError,
+        match="Refusing to replace non-symlink",
+    ):
+        development.replace_worktree_environment_link(config, final)
+    assert link.is_dir() and not link.is_symlink()
 
-def test_checkpoint_generated_state_and_host_tools_are_isolated(
+
+def test_status_rejects_missing_and_incomplete_environments(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = _config(tmp_path)
+    fingerprint = _fingerprint(config)
+    final = _final(config, fingerprint)
+
+    assert development._print_status(config, IDENTITY, fingerprint) == 1
+    assert "status=missing" in capsys.readouterr().out
+
+    final.mkdir(parents=True)
+    with pytest.raises(
+        development.IncompleteEnvironmentError,
+        match="incomplete.*completion marker is absent",
+    ):
+        development._print_status(config, IDENTITY, fingerprint)
+
+
+def test_status_rejects_mismatched_marker_selection_and_broken_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path)
+    fingerprint = _fingerprint(config)
+    final = _final(config, fingerprint)
+    final.mkdir(parents=True)
+    marker = final / development.COMPLETION_MARKER_NAME
+    marker.write_text(
+        json.dumps(
+            {
+                "bootstrap_schema": config.bootstrap_schema,
+                "environment_fingerprint": "0" * 64,
+                "schema_version": development.COMPLETION_MARKER_SCHEMA,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (config.repository_root / ".venv").symlink_to(final, target_is_directory=True)
+
+    with pytest.raises(
+        development.DevelopmentEnvironmentError,
+        match="Completed development environment.*does not match",
+    ):
+        development._print_status(config, IDENTITY, fingerprint)
+
+    marker.unlink()
+    _write_marker(config, fingerprint, final)
+    monkeypatch.setattr(
+        development,
+        "verify_completed_environment",
+        lambda *_args: None,
+    )
+    link = config.repository_root / ".venv"
+    link.unlink()
+    link.symlink_to(tmp_path / "wrong-environment", target_is_directory=True)
+    with pytest.raises(development.DevelopmentEnvironmentError, match="targets"):
+        development._print_status(config, IDENTITY, fingerprint)
+
+    link.unlink()
+    link.symlink_to(final, target_is_directory=True)
+
+    def broken(*_args: object) -> None:
+        raise development.DevelopmentEnvironmentError("missing bin/python")
+
+    monkeypatch.setattr(development, "verify_completed_environment", broken)
+    with pytest.raises(
+        development.DevelopmentEnvironmentError,
+        match="Completed development environment.*missing bin/python",
+    ):
+        development._print_status(config, IDENTITY, fingerprint)
+
+
+def test_lock_verification_and_regeneration_are_deterministic(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _copy_lock_contract(tmp_path)
+    locks = development.validate_lock_inputs(config)
+    before = {
+        relative: (config.repository_root / relative).read_bytes()
+        for relative in development.LOCK_SOURCES
+    }
+
+    def successful_command(
+        command: list[str],
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(development, "verify_interpreters", lambda _config: IDENTITY)
+    monkeypatch.setattr(development, "_run_checked", successful_command)
+    development.regenerate_locks(config)
+    development.regenerate_locks(config)
+
+    after = {
+        relative: (config.repository_root / relative).read_bytes()
+        for relative in development.LOCK_SOURCES
+    }
+    assert all(locks.values())
+    assert after == before
+
+
+def test_checkpoint_generated_state_is_isolated_while_host_tools_are_available(
     tmp_path: Path,
 ) -> None:
     config = _config(tmp_path)
@@ -436,8 +544,10 @@ def test_checkpoint_generated_state_and_host_tools_are_isolated(
         {
             "ADB_DEVICE": "production-target",
             "ANDROID_SERIAL": "production-target",
+            "PATH": f"{config.production_environment}/bin:/usr/bin",
             "PYTHONPATH": "/production/source",
             "THETOWER_ADB_PORT": "5555",
+            "VIRTUAL_ENV": str(config.production_environment),
         },
         environment=environment,
         paths=paths,
@@ -458,11 +568,11 @@ def test_checkpoint_generated_state_and_host_tools_are_isolated(
         for value in isolated_values
     )
     assert str(config.production_environment) not in json.dumps(result, sort_keys=True)
-    assert result["PATH"].startswith(f"{paths.blocked_tools}:")
-    assert result["THETOWER_CHECKPOINT_EXCLUDE_HOST_TOOLS"] == "1"
+    assert result["PATH"] == f"{environment / 'bin'}:/usr/local/bin:/usr/bin:/bin"
+    assert "THETOWER_CHECKPOINT_EXCLUDE_HOST_TOOLS" not in result
 
 
-def test_checkpoint_commands_include_only_offline_maintained_validators(
+def test_checkpoint_commands_cover_full_offline_repository_gate(
     tmp_path: Path,
 ) -> None:
     config = _config(tmp_path)
@@ -479,8 +589,17 @@ def test_checkpoint_commands_include_only_offline_maintained_validators(
         "pytest",
     ]
     assert any("test/validate_state_defs.py" in command for command in rendered)
-    assert any("test/clickmap_integrity.py --show-orphans" in command for command in rendered)
-    assert any("-p tools.development_pytest" in command for command in rendered)
+    assert any(
+        "test/clickmap_integrity.py --show-orphans" in command for command in rendered
+    )
+    pytest_command = commands[-1][1]
+    assert pytest_command[:4] == (
+        str(environment / "bin/python"),
+        "-m",
+        "pytest",
+        "-q",
+    )
+    assert "tools.development_pytest" not in " ".join(pytest_command)
     assert all("adb" not in command.lower() for command in rendered)
     assert all(
         not (len(command) == 2 and command[1] == "main.py")
@@ -488,7 +607,7 @@ def test_checkpoint_commands_include_only_offline_maintained_validators(
     )
 
 
-def test_checkpoint_stops_and_propagates_failing_exit_code(
+def test_checkpoint_stops_and_returns_failing_exit_code(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -497,7 +616,10 @@ def test_checkpoint_stops_and_propagates_failing_exit_code(
     return_codes = iter((0, 9, 0))
     calls: list[list[str]] = []
 
-    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+    def fake_run(
+        command: list[str],
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
         calls.append(command)
         return subprocess.CompletedProcess(command, next(return_codes))
 
@@ -506,3 +628,5 @@ def test_checkpoint_stops_and_propagates_failing_exit_code(
     assert result == 9
     assert len(calls) == 2
     assert "FAILED state definitions (exit 9)" in capsys.readouterr().err
+    checkpoint_parent = config.repository_root / "tmp" / "development-checkpoint"
+    assert list(checkpoint_parent.iterdir()) == []

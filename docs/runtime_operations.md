@@ -14,14 +14,17 @@ OS-lock, user-systemd, ADB, localhost-socket, or execution-wrapper evidence.
   development environment.
 - In production, use `.venv/bin/python`; do not fall back to a system
   interpreter or user-level package installation.
-- Integration and feature worktrees must use the content-addressed bootstrap
-  route in [`new_thread.md`](new_thread.md#development-python-environment).
-  They must never execute, copy, link, install into, or mutate production's
-  `.venv`.
+- Integration and feature worktrees must use the fingerprinted
+  completion-marker bootstrap route in
+  [`new_thread.md`](new_thread.md#development-python-environment). They must
+  never execute, copy, link, install into, or mutate production's `.venv`, and
+  must not install packages ad hoc into a completed shared development
+  environment.
 - After a development `.venv` is selected, run project Python through
   `.venv/bin/python`. The normal non-live gate is
   `.venv/bin/python tools/development.py checkpoint`; it isolates generated
-  state and does not start the runtime or access ADB.
+  state, runs the full repository-local suite with installed OCR tools
+  available, and does not start the runtime or access ADB.
 - Repair a broken dependency through the applicable locked environment and
   promotion path rather than bypassing its ownership boundary.
 

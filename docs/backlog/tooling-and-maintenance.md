@@ -47,18 +47,6 @@ malicious same-account process.
     production, and use a recorded pre-deployment commit plus a normal revert
     or fix-forward when rollback is needed; no second staging runtime is
     currently justified.
-- [ ] Simplify the initial development-bootstrap prototype before production
-  promotion.
-  - Keep the tracked interpreter/dependency declarations, pinned locks,
-    content-selected development environment, one writer lock, worktree-local
-    `.venv` symlink, and full non-live checkpoint.
-  - Replace the immutable installed-file manifest, staged-environment
-    relocation and `RECORD` rewriting, whole-tree fsync/permission scheme,
-    hostile-symlink/no-follow checks, and host-tool blocking with a compact
-    completion-marker bootstrap and ordinary interrupted-build recovery.
-  - Run the complete repository-local suite normally, including installed
-    Tesseract/OCR coverage; continue to fake ADB unless a thread deliberately
-    enters the live-runtime path.
 - [ ] Make production screenshots convenient development evidence.
   - Permit workers to read or copy existing production screenshots and other
     generated artifacts. Historical files do not claim current runtime state.

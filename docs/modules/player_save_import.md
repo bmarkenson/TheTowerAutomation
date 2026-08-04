@@ -343,7 +343,8 @@ logs, commits, or retained runtime evidence.
 
 The optional decoder is owned by the `player-save` group in `pyproject.toml`
 and is already present in the complete locked development environment. Do not
-install into an immutable environment. From a development worktree whose
+install packages ad hoc into a completed shared environment; update the tracked
+dependency contract and locks instead. From a development worktree whose
 `.venv` is absent, provision it with:
 
 ```bash
