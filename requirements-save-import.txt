@@ -1,3 +1,0 @@
-# Optional dependency for the read-only playerInfo.dat importer.
-# Source: https://github.com/crognlie/python-nrbf (MIT)
-nrbf==0.1.2

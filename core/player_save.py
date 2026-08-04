@@ -181,8 +181,8 @@ def decode_player_save_bytes(
         import nrbf
     except ImportError as exc:  # pragma: no cover - environment guard
         raise PlayerSaveDecodeError(
-            "player save decoding requires nrbf==0.1.2; install "
-            "requirements-save-import.txt into .venv"
+            "player save decoding requires the nrbf==0.1.2 player-save "
+            "dependency; bootstrap the complete development environment"
         ) from exc
     try:
         decoded = nrbf.loads(raw)

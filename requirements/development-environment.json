@@ -1,0 +1,20 @@
+{
+  "bootstrap_schema": 2,
+  "dependency_inputs": [
+    ".python-version",
+    "pyproject.toml",
+    "requirements/bootstrap.in",
+    "requirements/bootstrap.lock",
+    "requirements/runtime.lock",
+    "requirements/development.lock"
+  ],
+  "environment_root": "/home/brianm/dev/python/TheTower-worktrees/.environments",
+  "implementation": "cpython",
+  "interpreter": "/usr/bin/python3.12",
+  "platform": {
+    "machine": "x86_64",
+    "platform_tag": "linux-x86_64",
+    "system": "Linux"
+  },
+  "production_environment": "/home/brianm/dev/python/TheTower/.venv"
+}

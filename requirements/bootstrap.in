@@ -1,0 +1,3 @@
+# Pinned resolver/bootstrap toolchain used to regenerate all checked-in locks.
+pip==24.0
+pip-tools==7.4.1

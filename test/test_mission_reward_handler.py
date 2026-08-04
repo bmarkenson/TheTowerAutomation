@@ -327,10 +327,7 @@ def test_weekly_chest_search_normalizes_then_finds_offscreen_target():
 
 
 def test_event_missions_tab_navigation_is_visible_from_retained_bots_tab():
-    bots = cv2.imread(
-        str(ROOT / "screenshots" / "ui_traversal_2026-07-19" / "no_battle_event.png")
-    )
-    assert bots is not None
+    bots = _load("event_bots_farm_inactive_20260715.png")
 
     point, confidence = get_match(rewards.EVENT_MISSIONS_TAB, screenshot=bots)
 
