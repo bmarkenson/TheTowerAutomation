@@ -111,14 +111,25 @@ complete decision and error-classification procedure is in
 [`sandbox_boundaries.md`](sandbox_boundaries.md#adb-reads-and-connection-management).
 
 Production screenshots, logs, and other generated runtime artifacts are
-ordinary development evidence, not confidential material. A worker may read or
-copy an existing file without a lease or live inspection, but that historical
-file does not prove current device or runtime state. Any current-state claim
-and every direct ADB operation still require the applicable live inspection
-below. After that inspection, bounded exact-target `get-state`, screenshot, and
-other non-mutating reads do not require an interactive development lease.
-Production continues to own ADB connection management and long-lived capture;
-workers must not start a competing continuous capture stream.
+ordinary development evidence, not confidential material. The stable shared
+reader paths are
+`/home/brianm/dev/python/TheTower/screenshots/latest.png` and
+`/home/brianm/dev/python/TheTower/screenshots/latest.json`. The PNG is an
+atomically replaced complete canonical frame. The separately atomically
+replaced schema-1 JSON records its UTC capture time, exact resolved ADB target,
+and native/canonical geometry. It is advisory, may briefly lag the PNG, is not
+a transactional bundle or current-state proof, and grants no input authority.
+See [Shared latest frame](architecture/development_isolation.md#shared-latest-frame)
+for the exact schema and failure contract.
+
+A worker may read or copy either existing file without a lease or live
+inspection, but those historical artifacts do not prove current device or
+runtime state. Any current-state claim and every direct ADB operation still
+require the applicable live inspection below. After that inspection, bounded
+exact-target `get-state`, screenshot, and other non-mutating reads do not
+require an interactive development lease. Production continues to own ADB
+connection management and long-lived capture; workers must not start a
+competing continuous capture stream.
 
 Project screenshot helpers accept native portrait framebuffers at `1080x1920`
 or `720x1280` and normalize them into the canonical `1080x1920` vision space.
@@ -1037,6 +1048,10 @@ the API, authority boundaries, and planned capabilities.
 
 - Runtime actions and state: `logs/actions.log`
 - Persistent control: `logs/automation_ctl.json`
+- Stable latest production frame:
+  `/home/brianm/dev/python/TheTower/screenshots/latest.png`
+- Advisory latest-frame capture/target/geometry metadata:
+  `/home/brianm/dev/python/TheTower/screenshots/latest.json`
 - Per-battle records: `logs/battles/Battle*.json` and `Battle*.md`
 - No Strategy post-run Perks pages:
   `logs/battle_observations/<battle-id>/perk_configuration/`

@@ -4,10 +4,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
+import json
+import os
 from pathlib import Path
 import struct
-from typing import Optional
+import tempfile
+from typing import BinaryIO, Optional
 
 import cv2
 import numpy as np
@@ -40,9 +44,14 @@ class ScreenshotCaptureResult:
     frame: Optional[Frame]
     failure: Optional[ScreenshotFailure] = None
     detail: Optional[str] = None
+    captured_at: Optional[datetime] = None
+    adb_target: Optional[str] = None
+    native_width: Optional[int] = None
+    native_height: Optional[int] = None
 
 
 LATEST_SCREENSHOT = Path("screenshots/latest.png")
+LATEST_SCREENSHOT_METADATA = Path("screenshots/latest.json")
 INCOMPLETE_CAPTURE_ATTEMPTS = 2
 
 
@@ -150,7 +159,10 @@ def capture_adb_screenshot_result(
     try:
         device_id = resolve_adb_device()
         for attempt in range(1, INCOMPLETE_CAPTURE_ATTEMPTS + 1):
-            png_data = screencap_png(report_errors=report_adb_errors)
+            png_data = screencap_png(
+                device_id=device_id,
+                report_errors=report_adb_errors,
+            )
             if not png_data:
                 detail = "empty screenshot data"
                 if log_empty:
@@ -169,9 +181,17 @@ def capture_adb_screenshot_result(
             if img is None:
                 raise ValueError("OpenCV failed to decode image")
 
+            captured_at = datetime.now(timezone.utc)
+            native_height, native_width = img.shape[:2]
             img = normalize_device_screenshot(img, device_id=device_id)
             if img is not None:
-                return ScreenshotCaptureResult(img)
+                return ScreenshotCaptureResult(
+                    img,
+                    captured_at=captured_at,
+                    adb_target=device_id,
+                    native_width=native_width,
+                    native_height=native_height,
+                )
             _log_incomplete_capture("PNG", attempt)
         return ScreenshotCaptureResult(
             None,
@@ -229,6 +249,99 @@ def _log_incomplete_capture(source: str, attempt: int) -> None:
     )
 
 
+def _atomic_replace_bytes(target: Path, payload: bytes) -> None:
+    """Write bytes beside ``target`` and publish them with one replacement."""
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Optional[Path] = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=target.parent,
+            prefix=f".{target.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            _write_temporary_payload(temporary, payload)
+        os.replace(temporary_path, target)
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def _write_temporary_payload(temporary: BinaryIO, payload: bytes) -> None:
+    written = temporary.write(payload)
+    if written != len(payload):
+        raise OSError(
+            f"Incomplete temporary screenshot write: {written}/{len(payload)} bytes"
+        )
+    temporary.flush()
+
+
+def _atomic_write_png(target: Path, frame: Frame) -> None:
+    """Encode and atomically publish one canonical screenshot frame."""
+
+    canonical_width, canonical_height = CANONICAL_SCREEN_SIZE
+    if (
+        not isinstance(frame, np.ndarray)
+        or frame.ndim != 3
+        or frame.shape[0] != canonical_height
+        or frame.shape[1] != canonical_width
+        or frame.shape[2] < 3
+    ):
+        raise ValueError("Published screenshot must use canonical screen geometry")
+
+    encoded_ok, encoded = cv2.imencode(".png", frame)
+    if not encoded_ok or encoded is None:
+        raise OSError(f"OpenCV failed to encode screenshot for {target}")
+    _atomic_replace_bytes(target, encoded.tobytes())
+
+
+def _capture_metadata(result: ScreenshotCaptureResult) -> dict[str, object]:
+    if (
+        result.captured_at is None
+        or result.captured_at.tzinfo is None
+        or result.captured_at.utcoffset() is None
+    ):
+        raise ValueError("capture time is unavailable or not timezone-aware")
+    if not result.adb_target:
+        raise ValueError("resolved ADB target is unavailable")
+    if result.native_width is None or result.native_height is None:
+        raise ValueError("native screenshot geometry is unavailable")
+
+    canonical_width, canonical_height = CANONICAL_SCREEN_SIZE
+    captured_at = result.captured_at.astimezone(timezone.utc)
+    return {
+        "schema_version": 1,
+        "captured_at": captured_at.isoformat().replace("+00:00", "Z"),
+        "adb_target": result.adb_target,
+        "native_width": int(result.native_width),
+        "native_height": int(result.native_height),
+        "canonical_width": canonical_width,
+        "canonical_height": canonical_height,
+    }
+
+
+def _is_latest_screenshot_path(target: Path) -> bool:
+    return target.resolve(strict=False) == LATEST_SCREENSHOT.resolve(strict=False)
+
+
+def _publish_latest_metadata(
+    target: Path,
+    result: ScreenshotCaptureResult,
+) -> None:
+    payload = json.dumps(
+        _capture_metadata(result),
+        indent=2,
+        sort_keys=True,
+    ).encode("utf-8") + b"\n"
+    _atomic_replace_bytes(target, payload)
+
+
 def capture_and_save_screenshot_result(
     path: Path | str = LATEST_SCREENSHOT,
     *,
@@ -244,13 +357,22 @@ def capture_and_save_screenshot_result(
         report_adb_errors=report_adb_errors,
     )
     if result.frame is not None:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(str(target), result.frame)
+        _atomic_write_png(target, result.frame)
         if log_capture:
             log(
                 f"Captured screenshot: shape={result.frame.shape}, path={target}",
                 level="DEBUG",
             )
+        if _is_latest_screenshot_path(target):
+            metadata_target = target.with_name(LATEST_SCREENSHOT_METADATA.name)
+            try:
+                _publish_latest_metadata(metadata_target, result)
+            except Exception as exc:
+                log(
+                    "Captured a usable screenshot but could not publish "
+                    f"advisory metadata to {metadata_target}: {exc}",
+                    "ERROR",
+                )
     return result
 
 
@@ -266,13 +388,14 @@ def capture_and_save_screenshot(
       s: ["adb", "cv2", "fs", "log"]
       e:
         - "Returns None if capture fails"
-        - "OSError may propagate from os.makedirs/cv2.imwrite on filesystem errors"
+        - "PNG encoding or atomic publication errors may propagate"
       params:
         path: "str — output PNG path (parents created)"
         log_capture: "bool — when False, suppress DEBUG log after save"
       notes:
         - "Delegates capture to capture_adb_screenshot()"
-        - "Writes PNG to disk if capture succeeds"
+        - "Atomically replaces the PNG if capture succeeds"
+        - "The default latest path also gets best-effort advisory JSON metadata"
     ---
     Capture a screenshot and save it to disk.
 

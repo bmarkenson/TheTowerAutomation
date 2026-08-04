@@ -215,18 +215,51 @@ continuous screenrecord pipeline merely to answer a read-only question.
 
 ### Shared latest frame
 
-The initial shared-frame feature should be deliberately small. Production
-publishes a complete canonical PNG by writing a sibling temporary file and
-using `os.replace`, so readers see either the previous complete image or the
-new complete image. A small sidecar may record capture time, target, native and
-canonical geometry, and the latest detected state when readily available.
+Production's stable reader paths are
+`/home/brianm/dev/python/TheTower/screenshots/latest.png` and
+`/home/brianm/dev/python/TheTower/screenshots/latest.json`. The writer remains
+checkout-relative: the existing default capture path resolves there because
+production runs with `/home/brianm/dev/python/TheTower` as its working
+directory.
 
-The shared frame is test and observation data, not input authority. It does not
-need immutable bundle directories, cryptographic identity chains, source and
-battle generations, a broker receipt, or complex global retention. A short
-best-effort rotation may be added if actual debugging use demonstrates that it
-is valuable. Workers may always copy a useful frame into their own task output
-or a reviewed tracked fixture.
+The normal capture/save boundary publishes only a successfully decoded,
+complete, normalized frame. It encodes the complete PNG in memory, writes a
+task-owned sibling temporary file, and calls `os.replace`, so a concurrent
+reader sees either the previous complete PNG or the new complete PNG. Custom
+output paths use the same atomic PNG writer, while only the canonical latest
+path gets the sidecar. Capture, encoding, temporary-write, and replacement
+failures cannot truncate or remove the previously published PNG, and owned
+temporary files are removed after success or handled failure.
+
+Schema 1 of `latest.json` contains exactly these observation fields:
+
+```json
+{
+  "schema_version": 1,
+  "captured_at": "2026-08-04T18:19:20.123456Z",
+  "adb_target": "localhost:5555",
+  "native_width": 720,
+  "native_height": 1280,
+  "canonical_width": 1080,
+  "canonical_height": 1920
+}
+```
+
+`captured_at` is an RFC 3339 UTC timestamp and `adb_target` is the exact target
+resolved for that capture. The JSON is atomically replaced as its own file
+after the PNG. It may therefore briefly lag the PNG and is neither a
+transactional frame bundle nor input authority. Metadata failure leaves the
+valid in-memory observation and atomically published PNG usable; capture
+failure changes neither published artifact.
+
+The shared files are test and observation data. Existing files may be read or
+copied without a lease or live inspection, but they do not prove current
+runtime state. Treating them as current-state evidence still requires the live
+startup inspection, and the sidecar grants no input authority. The feature
+does not need immutable bundle directories, cryptographic identity chains,
+source or battle generations, a broker receipt, history/retention machinery,
+or an interactive lease. Workers may copy a useful frame into their own task
+output or a reviewed tracked fixture.
 
 ## Interactive emulator coordination
 
@@ -358,9 +391,10 @@ Implementation proceeds in small reviewable steps:
 1. **Completed: correct the contract and simplify Phase 0.** The prototype
    runner has been replaced by the compact bootstrap/checkpoint described above
    and the full non-live suite includes normal host-backed OCR tests.
-2. **Make screenshots convenient.** Atomically publish or expose the latest
-   complete production screenshot with minimal metadata and document direct
-   bounded read-only capture.
+2. **Completed: make screenshots convenient.** The existing runtime capture
+   path atomically publishes the latest complete canonical PNG and its small
+   advisory capture/target/geometry sidecar. Direct bounded read-only capture
+   is documented separately from interactive input authority.
 3. **Add the suppressive hold and minimal lease.** Reuse the existing control
    surface/directive path and prove that production input is quiescent before
    acknowledgement.
@@ -392,7 +426,11 @@ The useful regression seams are correspondingly small:
 - the normal checkpoint isolates generated state, runs the full
   repository-local test suite, and returns a failing command's status;
 - a shared screenshot reader sees an old or new complete image, never a partial
-  write;
+  write, and failed publication preserves the prior image and cleans owned
+  temporary files;
+- the advisory sidecar is valid atomically replaced schema-1 JSON with capture,
+  target, and native/canonical geometry, while sidecar failure does not discard
+  the usable frame or corrupt the published PNG;
 - read-only ADB commands are exact-target and bounded;
 - only one interactive lease becomes active;
 - production acknowledges its external hold before development input;

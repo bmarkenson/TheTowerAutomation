@@ -47,15 +47,16 @@ malicious same-account process.
     production, and use a recorded pre-deployment commit plus a normal revert
     or fix-forward when rollback is needed; no second staging runtime is
     currently justified.
-- [ ] Make production screenshots convenient development evidence.
-  - Permit workers to read or copy existing production screenshots and other
-    generated artifacts. Historical files do not claim current runtime state.
-  - Publish or expose one atomically replaced complete latest PNG with minimal
-    capture/target/geometry metadata. Do not build immutable bundle trees,
-    receipt machinery, or cryptographic frame identity.
-  - Document bounded exact-target `get-state`, screenshot, and other
-    non-mutating ADB reads after the live startup inspection. They require no
-    interactive lease; production continues to own connection management and
+- [x] Make production screenshots convenient development evidence.
+  - Workers may read or copy existing production screenshots and other
+    generated artifacts; historical files do not claim current runtime state.
+  - The existing capture writer atomically replaces the complete canonical
+    latest PNG and separately publishes advisory schema-1
+    capture/target/geometry metadata. It adds no bundle tree, receipt, history,
+    retention, or cryptographic frame identity.
+  - Bounded exact-target `get-state`, screenshot, and other non-mutating ADB
+    reads remain available after the live startup inspection without an
+    interactive lease. Production still owns connection management and
     long-lived capture.
 - [ ] Add one cooperative interactive lease and production hold.
   - Extend the existing control surface/directive path rather than adding an
