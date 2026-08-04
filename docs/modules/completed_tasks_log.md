@@ -37,6 +37,35 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-04 atomic shared latest production frame
+
+- `dd44c0171c6dd1e5b0e5d090b7c08e5376e7ed3d` extended the existing screenshot
+  capture/save boundary so every successful complete canonical frame is
+  encoded before a task-owned sibling temporary file is atomically replaced
+  over the destination. Encoding, temporary-write, and replacement failures
+  preserve the prior PNG, and owned temporary files are cleaned after success
+  or handled failure. Custom output paths retain support without acquiring an
+  advisory sidecar.
+- The default production publication remains checkout-relative and resolves to
+  `/home/brianm/dev/python/TheTower/screenshots/latest.png`. Its independently
+  atomic `/home/brianm/dev/python/TheTower/screenshots/latest.json` sidecar uses
+  schema 1 fields `schema_version`, `captured_at`, `adb_target`,
+  `native_width`, `native_height`, `canonical_width`, and `canonical_height`.
+  `ScreenshotCaptureResult` now carries the UTC capture time, exact resolved
+  target, and native geometry without another ADB call.
+- The sidecar is advisory, may briefly lag the PNG, and grants no input or
+  current-state authority. Sidecar failure preserves the valid in-memory frame
+  and new PNG; capture failure leaves both prior artifacts untouched. The
+  normal App call path acquired the behavior without an App change or new
+  success-log noise when `log_capture=False`.
+- All 19 focused screenshot-capture tests passed. The complete non-live
+  checkpoint passed compilation, state-definition validation, clickmap
+  integrity with zero errors, and all 1,326 pytest tests. Changed local
+  Markdown links and anchors and the complete task-range whitespace check also
+  passed. No production file or environment, runtime process, systemd unit,
+  ADB target, emulator, merge, push, rebase, deployment, or worktree topology
+  was inspected or changed.
+
 ### 2026-08-04 compact trusted-user development bootstrap
 
 - `39dacb17d8dc8aca4e6d96073d5cf88911e6d373` replaced the provisional
