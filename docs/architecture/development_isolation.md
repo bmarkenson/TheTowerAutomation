@@ -79,6 +79,55 @@ There is no need to fingerprint or attest a worker's complete source tree for
 emulator access. Branch, HEAD, and an ordinary dirty summary are sufficient
 diagnostic context in a handoff or lease log.
 
+### Staging, promotion, and rollback
+
+`develop` is the project's only standing staging layer. It provides a clean
+integration point, its own Python environment, the complete non-live
+checkpoint, retained-frame testing, and a place to identify one exact release
+candidate. A permanent `staging` branch, another long-lived checkout, or a
+second staging runtime would not provide meaningful live isolation: there is
+only one emulator, so a second runtime would still have to displace production
+to test it. A temporary clean checkout may be created for a specific
+reproducibility test, but it is not another promotion stage and receives no
+special emulator authority.
+
+Feature and integration work never modify the production checkout, production
+`.venv`, or installed services. The fixed systemd units therefore continue to
+stop and restart the currently deployed `main` revision throughout ordinary
+development.
+
+The normal release path is deliberately direct:
+
+1. integrate reviewed feature commits into `develop` and run the combined
+   non-live gate there;
+2. record the exact current production commit `M` and candidate commit `D`,
+   require `M` to be an ancestor of `D`, and require the production checkout to
+   have no unresolved local work;
+3. create a uniquely named pre-deployment tag at `M` so the prior source is
+   easy to identify;
+4. stop each affected long-lived service before changing any file it may import
+   or read, then fast-forward the production checkout—while it remains on
+   `main`—to exact commit `D`;
+5. update production dependencies only when their tracked inputs changed,
+   restart each affected service, and perform a bounded production smoke test;
+   and
+6. if the smoke test fails, stop the affected service, create a normal rollback
+   commit that reverses the reviewed `M..D` range, restore any separately
+   changed environment or installed unit, restart, and bring the rollback back
+   into `develop` before another promotion.
+
+Documentation-only promotion does not require a runtime stop. Dependency,
+persistent-state format, and installed-systemd-unit changes require an explicit
+rollback plan for those non-Git effects; ordinary code changes do not acquire
+extra ceremony merely because they will be tested in production. Rewriting
+`main` backward is not the normal rollback mechanism, because a revert preserves
+what was deployed and why.
+
+The executable checklist is in
+[runtime operations](../runtime_operations.md#production-promotion-and-rollback).
+Add a separate release/staging layer only after repeated direct-promotion
+failures demonstrate a concrete capability it would provide.
+
 ## Development Python environment
 
 Production's `.venv` remains production-owned. Development worktrees never

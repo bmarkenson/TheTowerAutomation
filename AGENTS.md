@@ -35,6 +35,10 @@ permissions in this repository are coordination tools, not security boundaries.
   the supported bootstrap route in [`docs/new_thread.md`](docs/new_thread.md)
   when its ignored `.venv` is absent or mismatched; it must never execute,
   copy, symlink, or mutate production's environment.
+- `main` is production, `develop` is integration, and workers commit only to
+  feature branches. Only the master updates `develop` or promotes to `main`,
+  following the
+  [production promotion procedure](docs/runtime_operations.md#production-promotion-and-rollback).
 - Once the checkout's supported `.venv` is selected, run all project Python
   through `.venv/bin/python`, including tests.
 - Follow [`docs/sandbox_boundaries.md`](docs/sandbox_boundaries.md) for host

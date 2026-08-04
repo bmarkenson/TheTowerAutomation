@@ -42,6 +42,11 @@ malicious same-account process.
     integration worktree, and give each worker a temporary feature worktree.
   - Workers commit only feature changes; the master owns integration,
     authority-sensitive work, validation, and exact fast-forward promotion.
+  - Treat `develop` as the only standing staging layer. Normal releases
+    fast-forward one exact validated candidate to `main`, smoke-test it in
+    production, and use a recorded pre-deployment commit plus a normal revert
+    or fix-forward when rollback is needed; no second staging runtime is
+    currently justified.
 - [ ] Simplify the initial development-bootstrap prototype before production
   promotion.
   - Keep the tracked interpreter/dependency declarations, pinned locks,

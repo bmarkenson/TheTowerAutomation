@@ -25,6 +25,67 @@ OS-lock, user-systemd, ADB, localhost-socket, or execution-wrapper evidence.
 - Repair a broken dependency through the applicable locked environment and
   promotion path rather than bypassing its ownership boundary.
 
+## Production promotion and rollback
+
+`develop` is the normal staging area; there is no separate staging runtime.
+The architectural rationale and branch contract are in
+[production and development coordination](architecture/development_isolation.md#staging-promotion-and-rollback).
+The production systemd units remain fixed to the `main` checkout, so feature
+and integration work cannot change what an ordinary production restart loads.
+
+Promotion is master-owned. Before changing `main`:
+
+1. Complete the repository-change checklist in the feature, integration, and
+   production worktrees. Preserve unrelated work; any staged or unstaged
+   production change, unmerged entry, or unresolved nonignored untracked file
+   blocks promotion.
+2. Record the current production commit as `M` and the exact validated
+   `develop` candidate as `D`. Recheck that both branches still point to those
+   objects and that `M` is an ancestor of `D`.
+3. Run the complete combined checkpoint at `D` and review the aggregate
+   `M..D` commits and diff. Retained fixtures are sufficient unless live
+   uncertainty remains.
+4. Create a unique annotated local tag at `M`, using a name such as
+   `production-before-20260804T210500Z-fe3c83b`. Do not move or reuse an old
+   deployment tag. Pushing any tag remains a separate operator decision.
+5. Choose the production boundary from the table below. Any service or device
+   interaction first requires the mandatory live inspection in this runbook.
+6. Fast-forward the production checkout to exact object `D` while it remains
+   on `main`. A non-fast-forward result, branch/object mismatch, or newly dirty
+   checkout aborts the deployment. Verify `HEAD == main == D` afterward.
+7. Apply only the separately reviewed non-Git changes, start or restart the
+   affected services, and perform a short production smoke test proportionate
+   to the change. Record the deployed commit and result in the task's handoff or
+   deployment report.
+
+| Candidate contents | Required production boundary |
+| --- | --- |
+| Documentation only | Fast-forward without stopping automation. |
+| Runtime Python, YAML, templates, or runtime-read assets | Stop automation before updating the checkout; restart and smoke-test it afterward. |
+| Control-surface code or shared modules | Stop the control-surface service before updating the checkout and restart it afterward; also stop/restart automation when shared runtime code is affected. |
+| Interpreter or locked Python dependencies | Stop every affected service and retain the prior production environment, or a proven exact rebuild path, until the smoke test passes. |
+| Installed systemd unit or persistent-state format | Treat installation or migration as a separate reviewed operation with the prior unit/data recovery method recorded before promotion. A checked-in unit change alone does not update the installed unit. |
+
+If the production smoke test fails:
+
+1. Stop the affected service before changing files or environments again.
+2. Reinspect the production checkout and use recorded `M`, `D`, and the
+   pre-deployment tag. Preserve any new operator-owned change.
+3. Create and review a normal commit on `main` that reverses the exact promoted
+   `M..D` range, rather than silently moving `main` backward. A smaller targeted
+   revert or fix-forward is acceptable when its scope is clearer and equally
+   quick.
+4. Restore the prior production environment, installed unit, or persistent
+   data only when that item changed during deployment.
+5. Restart and repeat the bounded smoke test. Integrate the rollback commit into
+   `develop`, or apply the validated fix there, before preparing another
+   candidate so the failed behavior is not promoted again.
+
+This workflow accepts short hobby-project downtime and production smoke testing
+in exchange for a small, understandable release mechanism. Add a separate
+release checkout or staged runtime only when it solves an observed problem that
+`develop`, retained evidence, and direct rollback do not solve.
+
 ## ADB access
 
 The usual BlueStacks target is `localhost:5555`, but confirm it from the active

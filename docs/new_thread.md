@@ -112,9 +112,10 @@ live-validated unless the applicable inspection and validation occurred.
 Read these only when their condition applies:
 
 - [`runtime_operations.md`](runtime_operations.md): read the relevant sections
-  when changing runtime, control, process, or ADB behavior; read the complete
-  runbook before process/device interaction, live validation, or runtime
-  diagnosis.
+  when changing runtime, control, process, or ADB behavior; read
+  [production promotion and rollback](runtime_operations.md#production-promotion-and-rollback)
+  before updating `main` or deploying a candidate; read the complete runbook
+  before process/device interaction, live validation, or runtime diagnosis.
 - [`sandbox_boundaries.md`](sandbox_boundaries.md): read before host-process,
   PID-lock, user-systemd, ADB, localhost-socket, or long-lived-process work.
   Sandbox process and bus visibility are not host liveness evidence.
