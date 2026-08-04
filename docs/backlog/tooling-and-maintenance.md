@@ -36,11 +36,14 @@ Implement the canonical
 as separately reviewable phases. Do not expose a later capability before every
 earlier authority and compatibility dependency it names is deployed.
 
-- [ ] Phase 0 — make development reproducible without production's `.venv`.
-  - Add the tracked interpreter/dependency locks and content-addressed,
-    serialized environment bootstrap.
-  - Make ordinary worker environments read-only and isolate every generated
-    cache, log, screenshot, custom configuration, and scratch path.
+- [x] Phase 0 — make development reproducible without production's `.venv`.
+  - `0a17fef` added exact CPython/platform configuration, one grouped direct
+    dependency declaration, complete hash-checked runtime/development locks,
+    and the pinned lock/bootstrap toolchain.
+  - The serialized content-addressed bootstrap publishes only relocated,
+    manifested, immutable environments; the non-live checkpoint isolates
+    bytecode, pytest/coverage caches, logs, screenshots, custom configuration,
+    and scratch state while blocking runtime/ADB/host-tool execution.
 - [ ] Phase 1 — establish source and observation identity.
   - Implement dirty-worktree registration/fingerprinting and the separate
     service, runtime, target, battle, frame-source, frame-sequence, lease, and

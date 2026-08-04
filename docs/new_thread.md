@@ -18,6 +18,43 @@ file-ownership rules. For any repository change:
 - Continue around unrelated changes. Stop and coordinate only when edits overlap
   or ownership is unclear.
 
+## Development Python environment
+
+The production checkout at `/home/brianm/dev/python/TheTower` keeps its
+production-owned `.venv`; never run the development bootstrap there and never
+use that environment from another worktree.
+
+In the `develop` integration checkout or a feature worktree, use the tracked
+Phase-0 environment contract. When `.venv` is absent, the only supported
+pre-environment invocation is:
+
+```bash
+/usr/bin/python3.12 tools/development.py bootstrap
+```
+
+The entrypoint verifies exact CPython and platform identity, acquires the
+host-global writer lock under `$XDG_RUNTIME_DIR/thetower`, installs only
+hash-checked locked artifacts into a sibling stage, publishes an immutable
+content-addressed environment, and atomically selects it through the ignored
+worktree `.venv` symlink. The writer lock may require the approved host path
+when the normal sandbox cannot write `$XDG_RUNTIME_DIR`; dependency network
+access is limited to the declared locked artifacts.
+
+Once `.venv` exists, including after a dependency-input change, run the same
+entrypoint and every other project command through it:
+
+```bash
+.venv/bin/python tools/development.py status
+.venv/bin/python tools/development.py bootstrap
+.venv/bin/python tools/development.py checkpoint
+```
+
+`status` rejects a missing, writable, wrong-owner, wrong-platform,
+manifest-invalid, or incorrectly linked environment. `bootstrap` safely reuses
+an already valid immutable environment and rejects an invalid final path rather
+than repairing it in place. `checkpoint` is the normal repository-local gate;
+it does not start runtime code or access ADB.
+
 ## Lightweight read-only questions
 
 A simple explanatory question may use this reduced startup path when its answer

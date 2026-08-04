@@ -341,10 +341,13 @@ logs, commits, or retained runtime evidence.
 
 ## Inspection tool
 
-Install the optional decoder into the project environment:
+The optional decoder is owned by the `player-save` group in `pyproject.toml`
+and is already present in the complete locked development environment. Do not
+install into an immutable environment. From a development worktree whose
+`.venv` is absent, provision it with:
 
 ```bash
-.venv/bin/python -m pip install -r requirements-save-import.txt
+/usr/bin/python3.12 tools/development.py bootstrap
 ```
 
 Inspect a local save and compare it with the Farm requirements:

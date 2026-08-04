@@ -8,11 +8,22 @@ OS-lock, user-systemd, ADB, localhost-socket, or execution-wrapper evidence.
 
 ## Python and repository
 
-- Repository: `/home/brianm/dev/python/TheTower`
-- Use `.venv/bin/python`; do not fall back to the system interpreter.
-- Run tests as `.venv/bin/python -m pytest`.
-- A broken virtual-environment dependency should be repaired rather than
-  bypassed with a different interpreter or user-level package installation.
+- The production repository is `/home/brianm/dev/python/TheTower`; its
+  `.venv` is production-owned and remains the environment used by the fixed
+  production service definitions. Never repoint those services to a
+  development environment.
+- In production, use `.venv/bin/python`; do not fall back to a system
+  interpreter or user-level package installation.
+- Integration and feature worktrees must use the content-addressed bootstrap
+  route in [`new_thread.md`](new_thread.md#development-python-environment).
+  They must never execute, copy, link, install into, or mutate production's
+  `.venv`.
+- After a development `.venv` is selected, run project Python through
+  `.venv/bin/python`. The normal non-live gate is
+  `.venv/bin/python tools/development.py checkpoint`; it isolates generated
+  state and does not start the runtime or access ADB.
+- Repair a broken dependency through the applicable locked environment and
+  promotion path rather than bypassing its ownership boundary.
 
 ## ADB access
 

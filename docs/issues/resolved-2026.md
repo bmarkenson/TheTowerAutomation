@@ -8,6 +8,32 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Clean-checkout Mission test depended on an ignored screenshot
+
+- **Observed:** 2026-08-04 while running the first development-isolation
+  checkpoint from a clean feature worktree.
+- **Symptom:** The complete suite had one repository-local failure after host
+  prerequisites were excluded because
+  `test_event_missions_tab_navigation_is_visible_from_retained_bots_tab`
+  attempted to read the absent ignored path
+  `screenshots/ui_traversal_2026-07-19/no_battle_event.png`.
+- **Evidence:** OpenCV returned no image for that path. The tracked fixture
+  `test/fixtures/event_bots_farm_inactive_20260715.png` contains the same Bots
+  tab and matches `navigation.event:missions_tab` at `(169, 309)` with
+  confidence `0.9999995`.
+- **Safety response:** No production or volatile screenshot path was inspected
+  or copied. Diagnosis used only the clean checkout and tracked fixture.
+- **Cause:** The test bypassed its module's tracked-fixture loader and relied on
+  ignored worktree state, so it could pass only in a checkout retaining that
+  historical screenshot.
+- **Resolution:** The test now uses the existing tracked Bots fixture through
+  `_load`, preserving the exact navigation assertion in clean worktrees.
+- **Regression:**
+  `test/test_mission_reward_handler.py::test_event_missions_tab_navigation_is_visible_from_retained_bots_tab`.
+- **Validation:** The focused test passed, followed by the complete non-live
+  checkpoint with 1,276 passes and 43 explicit excluded-Tesseract skips.
+- **Fixed by:** `0a17fef`.
+
 ### Player-save audit quarantined valid observations after direct Retry
 
 - **Observed:** 2026-08-03 during the first explicitly enabled ordinary Tier

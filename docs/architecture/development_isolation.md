@@ -2,9 +2,9 @@
 
 This document is the canonical target architecture for isolated TheTower
 development, concurrent feature worktrees, production frame publication, and
-coordinated access to the single emulator. It defines a contract to implement;
-it does not describe capabilities that are already available. The current
-runtime and control service remain governed by the
+coordinated access to the single emulator. Phase 0 of this contract is
+implemented; Phases 1–6 remain target architecture and are not available. The
+current runtime and control service remain governed by the
 [runtime architecture](runtime.md), the
 [control-surface architecture](control_surface.md), and the
 [runtime runbook](../runtime_operations.md) until the corresponding delivery
@@ -60,8 +60,10 @@ The following invariants apply throughout the migration:
 
 ## Current implementation boundary
 
-The inspected implementation has the right production anchor but does not yet
-provide this isolation contract:
+Commit `0a17fef` implements only the Phase-0 Python and generated-state
+bootstrap boundary. The implementation has the right production anchor but
+does not yet provide any later broker, frame-publication, lease, input, or
+promotion capability:
 
 - both checked-in systemd units already execute the fixed production checkout;
 - those units run the broker and automation as separate processes; the current
@@ -78,8 +80,8 @@ provide this isolation contract:
 - `RuntimeActionAuthority`, `AuxiliaryRouteLease`, and exclusive-validation
   receipts are process- or profile-scoped production mechanisms, not
   host-global development leases; and
-- there is no tracked complete dependency lock or provisioned development
-  environment for a worker to reproduce independently.
+- the Phase-0 environment writer lock serializes dependency publication only;
+  it grants no runtime, ADB, emulator, frame, broker, or input authority.
 
 These are migration facts, not permission to approximate the target with a
 second runtime, a copied production environment, a worktree-local lock, or raw
@@ -187,11 +189,28 @@ Conversely, systemd must never execute a development environment.
 
 ### Phase-0 reproducible bootstrap
 
-Phase 0 must add a tracked supported-CPython declaration, complete locked
-runtime and development dependency inputs, and a checked-in bootstrap/check
-runner before later phases rely on development execution. The current
-repository cannot be reproduced from its tracked dependency files, so copying
-the production environment is not an acceptable bootstrap.
+Phase 0 is implemented by `0a17fef`:
+
+- `.python-version` declares exact CPython 3.12.3, while `pyproject.toml` is the
+  single direct-dependency declaration with runtime, optional player-save,
+  developer-tool, and test ownership;
+- `requirements/runtime.lock` contains the runtime plus player-save closure,
+  `requirements/development.lock` contains the complete development closure,
+  and `requirements/bootstrap.lock` pins the resolver/bootstrap toolchain;
+  every artifact is exact and SHA-256 checked;
+- `requirements/development-environment.json` owns bootstrap schema 2, the
+  supported Linux x86_64 platform, configured interpreter, canonical store,
+  production exclusion, and fingerprint inputs; and
+- `tools/development.py` is the standard-library-only bootstrap, status, lock,
+  and checkpoint entrypoint. `tools/development_pytest.py` classifies tests
+  that cross into an explicitly excluded host executable without hiding
+  repository-local failures.
+
+`requirements-save-import.txt` was deliberately retired. `nrbf` remains owned
+by the `player-save` group, is included in both supported environment locks,
+and is installed in the complete development environment for its regression
+suite. Environment presence alone did not retain `psutil`, `pyautogui`, or the
+PyPI `tesseract` package because the source graph does not import them.
 
 Development environments are immutable and content-addressed:
 
@@ -214,6 +233,15 @@ exact final environment and have no supported `pip install` path into it. A
 dependency change creates another environment; it cannot mutate workers still
 using the prior fingerprint.
 
+Before publication the implementation removes bytecode, rewrites supported
+text and console-script staging references, rejects unsupported binary
+references, rebuilds installed `RECORD` hashes, scans for the deterministic
+staging prefix, verifies the exact installed distribution set, manifests every
+remaining directory/file/symlink, removes all write bits, syncs the tree, and
+atomically renames the sibling stage. Only then may the worktree `.venv`
+symlink be replaced. Reuse revalidates the manifest, permissions, ownership,
+platform, relocation contract, module execution, and console script.
+
 The checked-in runner must:
 
 - fail clearly when the expected environment or lock input is absent;
@@ -224,6 +252,19 @@ The checked-in runner must:
 - set no production control, log, screenshot, custom-profile, socket, or ADB
   path; and
 - run all project Python through the selected development `.venv/bin/python`.
+
+The implemented checkpoint runs compilation, `test/validate_state_defs.py`,
+`test/clickmap_integrity.py --show-orphans`, and the complete pytest
+collection. ADB, Tesseract, ffmpeg, and scrcpy are host prerequisites rather
+than Python dependencies: the checkpoint reports their path presence without
+executing them, blocks their executables, and reports tests that actually
+request excluded Tesseract as explicit host-prerequisite skips. It does not
+invent a live/configuration validator list; the GC and Tournament validators
+remain retained-screen or live workflows outside this ordinary non-live gate.
+
+No Phase-1 source identity, atomic production frame publication, broker
+transport, lease, production yield, mediated input, owned validation battle,
+or promotion enforcement is implemented by Phase 0.
 
 ### Ignored and generated state
 

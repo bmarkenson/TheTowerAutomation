@@ -37,6 +37,36 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-04 reproducible development bootstrap
+
+- `0a17fef` implements Phase 0 of production/development isolation without
+  reading packages from or mutating production's `.venv`. Exact CPython 3.12.3
+  and Linux x86_64 configuration, the grouped direct dependency declaration,
+  complete runtime/development locks, and the pinned bootstrap toolchain are
+  tracked. The legacy standalone player-save requirement was migrated into the
+  canonical `player-save` group.
+- The standard-library entrypoint serializes builders beneath
+  `$XDG_RUNTIME_DIR/thetower`, builds in a no-follow sibling stage, installs
+  only checked lock artifacts, normalizes virtual-environment relocation,
+  verifies a complete installed-file manifest, publishes an immutable
+  content-addressed environment atomically, and replaces only the current
+  worktree's ignored `.venv` symlink. Invalid final environments are rejected
+  without in-place repair.
+- The non-live checkpoint uses worktree-owned unique generated-state roots,
+  blocks ADB and excluded host executables, and runs compilation, the maintained
+  state/clickmap validators, and complete pytest collection. Host-prerequisite
+  presence is reported by path lookup without execution; tests that actually
+  require excluded Tesseract are explicit skips.
+- Provisioning from an absent worktree `.venv` succeeded. After the lock
+  headers were normalized, the resulting environment fingerprint was
+  `776af549a562085644adb1b31d4c2d245f9d2a06caaad8cb52ce8c4712bba6b3`,
+  and a second invocation safely reused it. The two-builder serialization test,
+  all 19 focused bootstrap/runner tests, lock regeneration with byte-identical
+  outputs, manifest/status checks, compilation, both static validators, and
+  `git diff --check` passed. The final complete suite reported 1,276 passed and
+  43 host-Tesseract skips. No runtime process, control state, systemd unit,
+  ADB target, emulator, or volatile production state was inspected or changed.
+
 ### 2026-08-03 fail-closed automatic player-save Perk-ID mapping
 
 - A structurally valid unknown numeric Perk ID no longer has only a static

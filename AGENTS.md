@@ -18,7 +18,12 @@ current process and device.
 
 ## Non-negotiable rules
 
-- Run project Python through `.venv/bin/python`, including tests.
+- Production's `.venv` is production-owned. A development worktree must use
+  the supported bootstrap route in [`docs/new_thread.md`](docs/new_thread.md)
+  when its ignored `.venv` is absent or mismatched; it must never execute,
+  copy, symlink, or mutate production's environment.
+- Once the checkout's supported `.venv` is selected, run all project Python
+  through `.venv/bin/python`, including tests.
 - Follow [`docs/sandbox_boundaries.md`](docs/sandbox_boundaries.md) for host
   process, PID-lock, user-systemd, ADB, local-socket, and long-lived-process
   checks. Sandbox `ps`, `/proc`, `pgrep`, `kill -0`, or `systemctl --user`
