@@ -8,6 +8,37 @@ and actionable work lives in
 
 ## Resolved issues
 
+### First Perk Choice compared a value-bearing OCR slug to its semantic key
+
+- **Observed:** 2026-08-05 during the first ordinary Farm Home boundary after
+  the save-first changes were promoted to production.
+- **Symptom:** Home preflight recognized the configured First Perk row as
+  `perk_wave_requirement_25_00`, compared it with the strategy key
+  `perk_wave_requirement`, and treated the valid selection as a mismatch. Each
+  complete retry then toggled between that row and Empty Slot before the
+  three-attempt gate blocked Battle start.
+- **Evidence:** `logs/actions.log` records the guarded First Perk repair taps,
+  final observations alternating between `empty_slot` and
+  `perk_wave_requirement_25_00`, and the terminal `perk_first_choice` gate
+  decision. The retained Home Perks fixture reproduces the same value-bearing
+  display text.
+- **Safety response:** The mandatory Home gate held throughout, no battle was
+  launched or terminated, and the managed runtime was stopped only after a
+  fresh Home `NEW_BATTLE` observation. No waiver or one-off input bypass was
+  used.
+- **Cause:** First Perk parsing copied the generic battle-perk OCR slug directly
+  into configuration evidence. Ban Perks and Auto Pick already translated OCR
+  rows through the value-independent semantic classifier, but the independent
+  First Perk path did not.
+- **Resolution:** First Perk parsing now uses the shared semantic-entry and
+  conservative quality result paths. Numeric perk values remain in display
+  evidence while comparison uses the stable strategy-facing key.
+- **Regression:**
+  `test/test_perk_configuration.py::test_first_perk_fixture_separates_selected_row_from_available_rows`
+  now requires the retained value-bearing row to produce
+  `perk_wave_requirement`. The focused Home Perks suites passed all 34 tests.
+- **Fixed by:** `6612801825f8cbdfdf8b5ed5060c0b593e7877c6`.
+
 ### Tournament Module values were not available to the save decoder
 
 - **Observed:** 2026-08-05 during an operator-authorized read-only inspection
