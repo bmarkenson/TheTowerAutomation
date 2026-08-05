@@ -34,11 +34,12 @@ not reach the user bus" until host-backed evidence supports a stronger claim.
 
 The preferred read-only process source is the Linux control-surface API. It
 runs in the host environment and reports the OS-lock probe, PID liveness,
-systemd service state and `MainPID`, and the latest runtime observation:
+systemd service state and `MainPID`, persistent ADB registration, and the latest
+runtime observation:
 
 ```bash
 curl --fail --silent --show-error http://127.0.0.1:8787/api/v1/status \
-  | jq '{runtime, process_service, observation, acknowledgements}'
+  | jq '{runtime, process_service, adb_connection, observation, acknowledgements}'
 ```
 
 This endpoint is host-backed even when the `curl` client runs in a sandbox. A
@@ -106,10 +107,12 @@ when more than one target can exist.
 
 `adb connect`, `adb start-server`, and `adb kill-server` are daemon or
 connection management, not availability probes. Do not run them from an
-isolated sandbox to decide whether ADB is available. The managed runtime owns
-normal reconnects and guarded target handoffs. When explicit connection
-management is actually required by the task, run it through approved host
-execution against the exact target.
+isolated sandbox to decide whether ADB is available. For systemd-managed
+automation, the persistent control-surface service owns normal exact-target
+registration and reconnects; the runtime observes that connection and verifies
+fresh frame evidence. A direct manual runtime owns its own reconnect fallback.
+When explicit development connection management is actually required by the
+task, run it through approved host execution against the exact target.
 
 If a bounded read fails with an invocation-level error such as a smartsocket
 permission failure, inability to contact or start the daemon, or denied

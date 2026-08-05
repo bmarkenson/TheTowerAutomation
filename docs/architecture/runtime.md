@@ -1003,19 +1003,22 @@ derives gate authority from warning text in `actions.log`.
 - Pause blocks every strategy and handler action while allowing observation and
   status reporting.
 - Control synchronization precedes capture, so an ADB outage cannot prevent a
-  Pause acknowledgement or a paused target-handoff request. The watchdog may
-  retry connectivity while paused but may not foreground or restart the game.
-- Frame capture and the watchdog share one thread-safe, target-keyed ADB
-  connection coordinator. A known disconnection suppresses screenshot commands
-  and repeated low-level failure entries while reconnect attempts follow a
-  bounded schedule; the main loop continues its short control-poll cadence.
-  Persistent degradation produces transition/reminder warnings, and recovery
-  is complete only after a supported fresh frame succeeds. An ADB command's
-  `connected` or `already connected` text is not transport authority: the exact
-  target must freshly report state `device`. Offline and unauthorized rows are
-  outages; a due retry refreshes only the selected TCP transport before
-  rechecking it. Malformed captures while transport remains connected retain
-  their normal diagnostics.
+  Pause acknowledgement or a paused target-handoff request. Connection recovery
+  may continue while paused but may not foreground or restart the game.
+- The persistent Linux control service owns normal ADB TCP registration for a
+  systemd-managed runtime. Its thread-safe, target-keyed coordinator follows
+  bounded retries, refreshes only the selected transport, and remains alive
+  across automation stop/start cycles. The installed automation unit explicitly
+  selects observer mode, preventing two reconnect owners. A direct manual
+  runtime combines registration and observation in its own coordinator.
+- Managed frame capture and the watchdog share an observe-only coordinator. A
+  known disconnection suppresses screenshot commands and repeated low-level
+  failure entries while the main loop continues its short control-poll cadence.
+  Registration recovery requires the exact target to freshly report `device`;
+  command text such as `connected` or `already connected` is not authority.
+  Offline and unauthorized rows are outages. Runtime recovery is complete only
+  after a supported fresh frame succeeds, and malformed captures while the
+  transport remains connected retain their normal diagnostics.
 - The native Windows control surface owns API local forwarding and ADB reverse
   forwarding as separate OpenSSH processes. The ADB process requests only
   `127.0.0.1:<linux-port>` and targets the independently configured Windows
@@ -1027,11 +1030,13 @@ derives gate authority from warning text in `actions.log`.
   port, Linux-exposed per-PC port, and managed runtime ADB target remain
   explicit independent settings even when all three normally use 5555.
 - An acknowledged paused runtime may migrate its localhost ADB target without
-  process replacement. It acquires the new per-target lock first, temporarily
-  selects that endpoint, requires successful connection and supported capture,
-  then releases the old lock and acknowledges the directive. Failure restores
-  the previous target, its independent reconnect state, and Pause. Existing
-  mission, strategy, and gate state stays in memory throughout.
+  process replacement. The control service persists and refreshes the new
+  registration before publishing the directive. The runtime acquires the new
+  per-target lock, temporarily selects that endpoint, requires exact `device`
+  state and a supported capture, then releases the old lock and acknowledges
+  the directive. Failure restores the previous runtime target and Pause while
+  bounded registration retries continue for the saved next-start target.
+  Existing mission, strategy, and gate state stays in memory throughout.
 - Process startup has an explicit gate policy. `immediate` retains the normal
   behavior in which the first observed active battle is a new-run boundary.
   `next_run` adopts the first active/resumable battle and structurally

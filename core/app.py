@@ -158,7 +158,11 @@ class App:
         self._config = config
         self._adb_target_session = adb_target_session
         self._adb_connection_coordinator = (
-            adb_connection_coordinator or AdbConnectionCoordinator()
+            adb_connection_coordinator
+            or AdbConnectionCoordinator(
+                manage_connections=config.adb_connection_owner == "runtime",
+                emit_events=config.adb_connection_owner == "runtime",
+            )
         )
         set_mission_log_path(config.mission_log_path)
         self._supervisor = AutomationSupervisor(

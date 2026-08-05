@@ -1001,6 +1001,7 @@ def checkpoint_environment(
         "PYTHONHOME",
         "PYTHONPATH",
         "PYTEST_ADDOPTS",
+        "THETOWER_ADB_CONNECTION_OWNER",
         "THETOWER_ADB_PORT",
         "THETOWER_CONTROL_TOKEN",
         "THETOWER_PLAYER_SAVE_AUDIT",

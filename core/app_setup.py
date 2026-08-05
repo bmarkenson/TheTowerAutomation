@@ -15,6 +15,9 @@ DEFAULT_COINS_MAX_JUMP_FACTOR = 8.0
 DEFAULT_COINS_JUMP_CONF_FLOOR = 90.0
 DEFAULT_ADB_PORT = 5555
 ADB_PORT_ENVIRONMENT_VARIABLE = "THETOWER_ADB_PORT"
+ADB_CONNECTION_OWNER_ENVIRONMENT_VARIABLE = "THETOWER_ADB_CONNECTION_OWNER"
+ADB_CONNECTION_OWNERS = ("runtime", "control-surface")
+DEFAULT_ADB_CONNECTION_OWNER = "runtime"
 DEFAULT_STRATEGY = "farm"
 STRATEGY_ENVIRONMENT_VARIABLE = "THETOWER_STRATEGY"
 DEFAULT_STARTUP_GATE_POLICY = "auto_validate"
@@ -59,6 +62,7 @@ class AppConfig:
     full_game_over: bool
     mission_log_path: Optional[str]
     adb_port: int
+    adb_connection_owner: str
     startup_gate_policy: str
     player_save_audit_enabled: bool
     player_save_audit_interval_seconds: int
@@ -73,6 +77,18 @@ def _adb_port(value: str) -> int:
     if not 1 <= port <= 65535:
         raise argparse.ArgumentTypeError("ADB port must be between 1 and 65535")
     return port
+
+
+def _adb_connection_owner(value: str) -> str:
+    """Parse the explicit reconnect owner used at the process boundary."""
+
+    owner = str(value).strip().lower()
+    if owner not in ADB_CONNECTION_OWNERS:
+        raise argparse.ArgumentTypeError(
+            "ADB connection owner must be one of: "
+            + ", ".join(ADB_CONNECTION_OWNERS)
+        )
+    return owner
 
 
 def _player_save_audit_interval(value: str) -> int:
@@ -128,6 +144,21 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help=(
             "BlueStacks ADB TCP port "
             f"(default: ${ADB_PORT_ENVIRONMENT_VARIABLE} or {DEFAULT_ADB_PORT})"
+        ),
+    )
+    parser.add_argument(
+        "--adb-connection-owner",
+        type=_adb_connection_owner,
+        choices=ADB_CONNECTION_OWNERS,
+        default=os.getenv(
+            ADB_CONNECTION_OWNER_ENVIRONMENT_VARIABLE,
+            DEFAULT_ADB_CONNECTION_OWNER,
+        ),
+        help=(
+            "ADB reconnect owner: runtime for direct launches or control-surface "
+            "for the managed service "
+            f"(default: ${ADB_CONNECTION_OWNER_ENVIRONMENT_VARIABLE} or "
+            f"{DEFAULT_ADB_CONNECTION_OWNER})"
         ),
     )
     parser.add_argument("--no-restart", action="store_true", help="Disable auto restart on home screen")
@@ -262,6 +293,7 @@ def config_from_args(args: argparse.Namespace) -> AppConfig:
         full_game_over=bool(args.full_game_over),
         mission_log_path=args.mission_log,
         adb_port=args.adb_port,
+        adb_connection_owner=args.adb_connection_owner,
         startup_gate_policy=args.startup_gates,
         player_save_audit_enabled=bool(args.player_save_audit),
         player_save_audit_interval_seconds=int(
@@ -271,8 +303,11 @@ def config_from_args(args: argparse.Namespace) -> AppConfig:
 
 
 __all__ = [
+    "ADB_CONNECTION_OWNER_ENVIRONMENT_VARIABLE",
+    "ADB_CONNECTION_OWNERS",
     "ADB_PORT_ENVIRONMENT_VARIABLE",
     "AppConfig",
+    "DEFAULT_ADB_CONNECTION_OWNER",
     "DEFAULT_ADB_PORT",
     "DEFAULT_PLAYER_SAVE_AUDIT_INTERVAL_SECONDS",
     "DEFAULT_STRATEGY",

@@ -1,5 +1,5 @@
 [Unit]
-Description=TheTower loopback control-surface API
+Description=TheTower control-surface API and persistent ADB registration
 After=network-online.target
 Wants=network-online.target
 

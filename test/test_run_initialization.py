@@ -139,6 +139,30 @@ class AdbPortTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             parse_args(["--adb-port", "65536"])
 
+    def test_direct_runtime_owns_adb_connection_by_default(self):
+        with patch.dict("os.environ", {}, clear=True):
+            config = config_from_args(parse_args([]))
+        self.assertEqual(config.adb_connection_owner, "runtime")
+
+    def test_connection_owner_accepts_explicit_managed_service_value(self):
+        config = config_from_args(
+            parse_args(["--adb-connection-owner", "control-surface"])
+        )
+        self.assertEqual(config.adb_connection_owner, "control-surface")
+
+    def test_connection_owner_rejects_unknown_value(self):
+        with self.assertRaises(SystemExit):
+            parse_args(["--adb-connection-owner", "other"])
+
+    def test_connection_owner_rejects_unknown_managed_environment_value(self):
+        with patch.dict(
+            "os.environ",
+            {"THETOWER_ADB_CONNECTION_OWNER": "other"},
+            clear=True,
+        ):
+            with self.assertRaises(SystemExit):
+                parse_args([])
+
 
 class DefaultStrategyTests(unittest.TestCase):
     def test_farm_is_the_default_strategy(self):

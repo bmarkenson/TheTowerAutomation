@@ -5,13 +5,16 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import tempfile
 import threading
 from typing import Any, Callable, Optional, Sequence
 
 from core.app_setup import (
+    ADB_CONNECTION_OWNER_ENVIRONMENT_VARIABLE,
     ADB_PORT_ENVIRONMENT_VARIABLE,
+    DEFAULT_ADB_CONNECTION_OWNER,
     DEFAULT_ADB_PORT,
     DEFAULT_STARTUP_GATE_POLICY,
     DEFAULT_STRATEGY,
@@ -33,7 +36,7 @@ DEFAULT_ADB_ENVIRONMENT_FILE = (
 _SERVICE_NAME_RE = re.compile(r"[A-Za-z0-9_.@-]+\.service")
 _SHOW_PROPERTIES = (
     "LoadState,ActiveState,SubState,UnitFileState,MainPID,ExecMainStatus,"
-    "EnvironmentFiles"
+    "EnvironmentFiles,Environment"
 )
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -114,10 +117,19 @@ class SystemdAutomationManager:
         status.update(
             self._automation_configuration_status(
                 properties.get("EnvironmentFiles"),
+                service_environment=properties.get("Environment"),
                 verify_service_configuration=available,
             )
         )
         return status
+
+    def adb_connection_target(self) -> str:
+        """Return the persisted exact target without querying systemd."""
+
+        status = self._automation_configuration_status()
+        if status.get("adb_port_error"):
+            raise AutomationProcessError(str(status["adb_port_error"]))
+        return str(status["adb_target"])
 
     def set_adb_port(self, port: object) -> dict[str, Any]:
         """Persist the ADB port for the next start of an inactive service."""
@@ -363,6 +375,7 @@ class SystemdAutomationManager:
         self,
         service_environment_files: Optional[str] = None,
         *,
+        service_environment: Optional[str] = None,
         verify_service_configuration: bool = False,
     ) -> dict[str, Any]:
         path = self.adb_environment_file
@@ -370,6 +383,18 @@ class SystemdAutomationManager:
         environment_file_loaded = (
             str(path) in environment_files
             if path is not None and verify_service_configuration
+            else None
+        )
+        configured_connection_owner = _environment_assignment(
+            service_environment,
+            ADB_CONNECTION_OWNER_ENVIRONMENT_VARIABLE,
+        )
+        connection_owner = (
+            configured_connection_owner or DEFAULT_ADB_CONNECTION_OWNER
+        )
+        connection_owner_configured = (
+            configured_connection_owner == "control-surface"
+            if verify_service_configuration
             else None
         )
         status = {
@@ -380,6 +405,9 @@ class SystemdAutomationManager:
             "service_environment_files": environment_files or None,
             "automation_environment_file_loaded": environment_file_loaded,
             "adb_port_error": None,
+            "adb_connection_owner": connection_owner,
+            "adb_connection_owner_configured": connection_owner_configured,
+            "adb_connection_owner_error": None,
             "strategy": DEFAULT_STRATEGY,
             "strategy_source": "default",
             "strategy_environment_file": str(path) if path is not None else None,
@@ -390,6 +418,13 @@ class SystemdAutomationManager:
             "startup_gate_policy_options": list(STARTUP_GATE_POLICIES),
             "startup_gate_policy_error": None,
         }
+        if verify_service_configuration and not connection_owner_configured:
+            status["adb_connection_owner_error"] = (
+                f"Installed {self.service_name} must set "
+                f"{ADB_CONNECTION_OWNER_ENVIRONMENT_VARIABLE}=control-surface; "
+                "reinstall deploy/systemd/thetower-automation.service and run "
+                "systemctl --user daemon-reload"
+            )
         if path is not None and environment_file_loaded is False:
             configuration_error = (
                 f"Installed {self.service_name} does not load {path}; reinstall "
@@ -567,14 +602,30 @@ def _parse_properties(output: str) -> dict[str, str]:
     for line in (output or "").splitlines():
         key, separator, value = line.partition("=")
         if separator and key:
-            if key == "EnvironmentFiles" and key in properties:
-                # systemd emits one EnvironmentFiles= line per configured
-                # directive. Preserve every path so deployment validation does
-                # not mistake an earlier entry for a missing environment file.
+            if key in {"Environment", "EnvironmentFiles"} and key in properties:
+                # systemd may emit one line per configured directive. Preserve
+                # every entry so deployment validation does not mistake an
+                # earlier value for missing configuration.
                 properties[key] = f"{properties[key]} {value}".strip()
             else:
                 properties[key] = value
     return properties
+
+
+def _environment_assignment(value: object, name: str) -> Optional[str]:
+    """Read one systemd Environment= assignment without shell evaluation."""
+
+    try:
+        entries = shlex.split(str(value or ""))
+    except ValueError:
+        return None
+    prefix = f"{name}="
+    assignments = [
+        entry[len(prefix) :]
+        for entry in entries
+        if entry.startswith(prefix)
+    ]
+    return assignments[-1] if assignments else None
 
 
 def _integer(value: object) -> Optional[int]:

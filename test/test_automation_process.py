@@ -17,10 +17,17 @@ from core.automation_process import (
 )
 from core.app_setup import parse_args
 from core.control_surface import ControlSurfaceRequestError, ControlSurfaceService
+from tools.control_surface_server import _persistent_adb_target_provider
 
 
 class FakeManager:
-    def __init__(self, *, active: bool = False, fail_start: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        active: bool = False,
+        fail_start: bool = False,
+        adb_connection_owner_error: str | None = None,
+    ) -> None:
         self.active = active
         self.fail_start = fail_start
         self.adb_port = 5555
@@ -30,6 +37,7 @@ class FakeManager:
         self.calls: list[str] = []
         self.on_start = None
         self.on_stop = None
+        self.adb_connection_owner_error = adb_connection_owner_error
 
     def status(self):
         return {
@@ -42,6 +50,11 @@ class FakeManager:
             "main_pid": self.pid if self.active else None,
             "adb_port": self.adb_port,
             "adb_target": f"localhost:{self.adb_port}",
+            "adb_connection_owner": "control-surface",
+            "adb_connection_owner_configured": (
+                self.adb_connection_owner_error is None
+            ),
+            "adb_connection_owner_error": self.adb_connection_owner_error,
             "strategy": self.strategy,
             "startup_gate_policy": self.startup_gate_policy,
             "error": None,
@@ -55,6 +68,9 @@ class FakeManager:
             )
         self.adb_port = port
         return self.status()
+
+    def adb_connection_target(self):
+        return f"localhost:{self.adb_port}"
 
     def persist_adb_port(self, port):
         self.calls.append(f"persist_adb_port:{port}")
@@ -125,10 +141,38 @@ class FakeManager:
         return self.status()
 
 
-def _service(tmp_path, manager=None):
+class FakePersistentAdbConnectionManager:
+    def __init__(self) -> None:
+        self.calls: list[tuple[object, bool]] = []
+        self.target = None
+        self.on_ensure = None
+
+    def ensure_target(self, target, *, force=False):
+        self.calls.append((target, force))
+        if self.on_ensure:
+            self.on_ensure()
+        self.target = target
+        return True
+
+    def status(self):
+        return {
+            "owner": "control-surface",
+            "target": self.target,
+            "state": "device" if self.target else "unknown",
+            "connected": True if self.target else None,
+            "failures": 0,
+            "warning_active": False,
+            "retry_in_seconds": 0.0,
+            "last_checked_at": None,
+            "error": None,
+        }
+
+
+def _service(tmp_path, manager=None, adb_connection_manager=None):
     return ControlSurfaceService(
         repository_root=tmp_path,
         process_manager=manager,
+        adb_connection_manager=adb_connection_manager,
     )
 
 
@@ -171,6 +215,27 @@ def test_startup_gate_policy_defaults_to_automatic_attached_validation(monkeypat
     monkeypatch.delenv("THETOWER_STARTUP_GATES", raising=False)
 
     assert parse_args([]).startup_gates == "auto_validate"
+
+
+def test_runtime_adb_connection_owner_defaults_from_managed_environment(monkeypatch):
+    monkeypatch.setenv("THETOWER_ADB_CONNECTION_OWNER", "control-surface")
+
+    assert parse_args([]).adb_connection_owner == "control-surface"
+
+
+def test_control_service_target_provider_requires_the_installed_owner():
+    provider = _persistent_adb_target_provider(FakeManager())
+    assert provider() == "localhost:5555"
+
+    outdated_manager = FakeManager(
+        adb_connection_owner_error="runtime still owns reconnects"
+    )
+    provider = _persistent_adb_target_provider(outdated_manager)
+    with pytest.raises(AutomationProcessError, match="runtime still owns"):
+        provider()
+
+    outdated_manager.adb_connection_owner_error = None
+    assert provider() == "localhost:5555"
 
 
 def test_systemd_manager_uses_only_the_fixed_named_service(tmp_path):
@@ -477,6 +542,8 @@ def test_systemd_manager_retains_repeated_environment_files(tmp_path):
             0,
             "LoadState=loaded\nActiveState=active\nSubState=running\n"
             "UnitFileState=disabled\nMainPID=1234\nExecMainStatus=0\n"
+            "Environment=PYTHONUNBUFFERED=1\n"
+            "Environment=THETOWER_ADB_CONNECTION_OWNER=control-surface\n"
             f"EnvironmentFiles={environment_file} (ignore_errors=yes)\n"
             f"EnvironmentFiles={audit_environment_file} (ignore_errors=yes)\n",
             "",
@@ -495,6 +562,59 @@ def test_systemd_manager_retains_repeated_environment_files(tmp_path):
     assert status["adb_port_error"] is None
     assert status["strategy_error"] is None
     assert status["startup_gate_policy_error"] is None
+    assert status["adb_connection_owner_configured"] is True
+
+
+def test_systemd_manager_verifies_control_surface_connection_ownership(tmp_path):
+    environment_file = tmp_path / "automation-adb.env"
+
+    def runner(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            "LoadState=loaded\nActiveState=inactive\nSubState=dead\n"
+            "UnitFileState=enabled\nMainPID=0\nExecMainStatus=0\n"
+            "Environment=PYTHONUNBUFFERED=1 "
+            "THETOWER_ADB_CONNECTION_OWNER=control-surface\n"
+            f"EnvironmentFiles={environment_file} (ignore_errors=yes)\n",
+            "",
+        )
+
+    manager = SystemdAutomationManager(
+        runner=runner,
+        adb_environment_file=environment_file,
+    )
+
+    status = manager.status()
+
+    assert status["adb_connection_owner"] == "control-surface"
+    assert status["adb_connection_owner_configured"] is True
+    assert status["adb_connection_owner_error"] is None
+
+
+def test_systemd_manager_reports_outdated_runtime_connection_ownership(tmp_path):
+    environment_file = tmp_path / "automation-adb.env"
+
+    def runner(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            "LoadState=loaded\nActiveState=inactive\nSubState=dead\n"
+            "UnitFileState=enabled\nMainPID=0\nExecMainStatus=0\n"
+            f"EnvironmentFiles={environment_file} (ignore_errors=yes)\n",
+            "",
+        )
+
+    manager = SystemdAutomationManager(
+        runner=runner,
+        adb_environment_file=environment_file,
+    )
+
+    status = manager.status()
+
+    assert status["adb_connection_owner"] == "runtime"
+    assert status["adb_connection_owner_configured"] is False
+    assert "reinstall deploy/systemd" in status["adb_connection_owner_error"]
 
 
 def test_checked_in_systemd_unit_loads_managed_automation_environment():
@@ -507,6 +627,7 @@ def test_checked_in_systemd_unit_loads_managed_automation_environment():
     assert (
         "EnvironmentFile=-%h/.config/thetower/player-save-audit.env" in unit
     )
+    assert "Environment=THETOWER_ADB_CONNECTION_OWNER=control-surface" in unit
 
 
 @pytest.mark.parametrize(
@@ -520,7 +641,8 @@ def test_systemd_manager_rejects_non_unit_names(name):
 
 def test_start_running_crosses_new_process_boundary_paused(tmp_path):
     manager = FakeManager()
-    service = _service(tmp_path, manager)
+    connection_manager = FakePersistentAdbConnectionManager()
+    service = _service(tmp_path, manager, connection_manager)
     manager.on_start = lambda: (
         service.control_store.read()["state"] == "PAUSED"
         or pytest.fail("service was not paused before process start")
@@ -531,6 +653,7 @@ def test_start_running_crosses_new_process_boundary_paused(tmp_path):
     )
 
     assert manager.calls == ["set_startup_gate_policy:auto_validate", "start"]
+    assert connection_manager.calls == [("localhost:5555", True)]
     assert service.control_store.read()["state"] == "RUNNING"
     assert response["process_service"]["active"]
     assert response["request"] == {
@@ -538,6 +661,24 @@ def test_start_running_crosses_new_process_boundary_paused(tmp_path):
         "action": "start",
         "startup_gate_policy": "auto_validate",
     }
+    assert response["adb_connection"]["state"] == "device"
+
+
+def test_start_rejects_an_installed_runtime_that_still_owns_reconnects(tmp_path):
+    manager = FakeManager(
+        adb_connection_owner_error="installed runtime still owns ADB reconnects"
+    )
+    connection_manager = FakePersistentAdbConnectionManager()
+
+    with pytest.raises(ControlSurfaceRequestError) as exc_info:
+        _service(tmp_path, manager, connection_manager).apply_process_action(
+            {"action": "start", "run_state": "PAUSED"}
+        )
+
+    assert exc_info.value.status == 503
+    assert exc_info.value.code == "persistent_adb_owner_not_configured"
+    assert manager.calls == []
+    assert connection_manager.calls == []
 
 
 def test_start_can_attach_current_battle_and_persists_policy_before_start(tmp_path):
@@ -679,13 +820,19 @@ def test_start_rejects_selected_strategy_when_process_is_already_active(tmp_path
 
 def test_start_paused_and_complete_stop_preserve_safe_ordering(tmp_path):
     manager = FakeManager()
-    service = _service(tmp_path, manager)
+    connection_manager = FakePersistentAdbConnectionManager()
+    service = _service(tmp_path, manager, connection_manager)
     service.apply_process_action({"action": "start", "run_state": "PAUSED"})
     assert service.control_store.read()["state"] == "PAUSED"
+    connection_manager.calls.clear()
 
     manager.on_stop = lambda: (
         service.control_store.read()["state"] == "STOPPED"
         or pytest.fail("STOPPED was not persisted before systemd stop")
+    )
+    connection_manager.on_ensure = lambda: (
+        not manager.active
+        or pytest.fail("ADB registration refreshed before systemd stopped")
     )
     response = service.apply_process_action({"action": "stop"})
 
@@ -694,13 +841,15 @@ def test_start_paused_and_complete_stop_preserve_safe_ordering(tmp_path):
         "start",
         "stop",
     ]
+    assert connection_manager.calls == [("localhost:5555", True)]
     assert service.control_store.read()["state"] == "STOPPED"
     assert response["process_service"]["active"] is False
 
 
 def test_attached_restart_pauses_replaces_and_restores_running_intent(tmp_path):
     manager = FakeManager(active=True)
-    service = _service(tmp_path, manager)
+    connection_manager = FakePersistentAdbConnectionManager()
+    service = _service(tmp_path, manager, connection_manager)
     service.control_store.set_state("RUNNING", source="test")
     lock_path = _write_running_runtime_evidence(tmp_path, pid=manager.pid)
     acknowledgements: list[str] = []
@@ -741,6 +890,7 @@ def test_attached_restart_pauses_replaces_and_restores_running_intent(tmp_path):
         "start",
         "persist_startup_gate_policy:auto_validate",
     ]
+    assert connection_manager.calls == [("localhost:5555", True)]
     assert len(pause_checks) == 1
     assert pause_checks[0][0] == manager.pid - 1
     assert pause_checks[0][1] > 0
@@ -916,13 +1066,15 @@ def test_start_failure_falls_back_to_stopped_intent(tmp_path):
 
 def test_control_surface_configures_adb_port_only_while_stopped(tmp_path):
     manager = FakeManager()
-    service = _service(tmp_path, manager)
+    connection_manager = FakePersistentAdbConnectionManager()
+    service = _service(tmp_path, manager, connection_manager)
 
     response = service.apply_process_action(
         {"action": "set_adb_port", "adb_port": 5565}
     )
 
     assert manager.calls == ["set_adb_port:5565"]
+    assert connection_manager.calls == [("localhost:5565", True)]
     assert response["process_service"]["adb_target"] == "localhost:5565"
     assert response["request"] == {
         "accepted": True,
@@ -940,7 +1092,8 @@ def test_control_surface_configures_adb_port_only_while_stopped(tmp_path):
 
 def test_control_surface_requests_live_adb_handoff_only_after_pause_ack(tmp_path):
     manager = FakeManager(active=True)
-    service = _service(tmp_path, manager)
+    connection_manager = FakePersistentAdbConnectionManager()
+    service = _service(tmp_path, manager, connection_manager)
     service.apply_control({"action": "pause"})
     requested_at = service.control_store.read()["state_updated_at"]
     timestamp = datetime.fromisoformat(requested_at).strftime("%Y-%m-%d %H:%M:%S")
@@ -955,6 +1108,7 @@ def test_control_surface_requests_live_adb_handoff_only_after_pause_ack(tmp_path
     )
 
     assert manager.calls == ["persist_adb_port:5575"]
+    assert connection_manager.calls == [("localhost:5575", True)]
     assert service.control_store.read()["adb_port"] == 5575
     assert response["request"]["adb_port"] == 5575
 

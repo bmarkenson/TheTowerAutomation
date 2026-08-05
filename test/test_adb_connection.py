@@ -3,7 +3,11 @@ import subprocess
 import threading
 from unittest.mock import Mock, call, patch
 
-from core.adb_connection import AdbConnectionCoordinator, _adb_connect
+from core.adb_connection import (
+    AdbConnectionCoordinator,
+    PersistentAdbConnectionManager,
+    _adb_connect,
+)
 
 
 def test_long_outage_uses_bounded_backoff_and_rate_limited_warnings():
@@ -191,3 +195,170 @@ def test_target_switch_has_independent_schedule_and_retains_old_outage():
     old_snapshot = coordinator.snapshot(target="localhost:5555")
     assert old_snapshot.connected is False
     assert old_snapshot.failures == 1
+
+
+def test_observer_does_not_manage_or_emit_for_a_missing_target():
+    connect = Mock(return_value=False)
+    coordinator = AdbConnectionCoordinator(
+        clock=lambda: 10.0,
+        is_connected=lambda _target: False,
+        connect=connect,
+        reconnect_delays_s=(0.0,),
+        warning_after_failures=1,
+        manage_connections=False,
+        emit_events=False,
+    )
+
+    with patch("core.adb_connection.log") as runtime_log:
+        assert not coordinator.ensure_connected(target="localhost:5555")
+
+    connect.assert_not_called()
+    runtime_log.assert_not_called()
+    assert coordinator.snapshot(target="localhost:5555").failures == 1
+
+
+def test_persistent_owner_records_recovery_from_exact_device_state():
+    now = {"value": 0.0}
+    connected = {"value": False}
+    coordinator = AdbConnectionCoordinator(
+        clock=lambda: now["value"],
+        is_connected=lambda _target: connected["value"],
+        connect=lambda _target: False,
+        reconnect_delays_s=(0.0,),
+        warning_after_failures=1,
+        recovery_requires_capture=False,
+    )
+
+    with (
+        patch("core.adb_connection.log"),
+        patch("core.adb_connection.log_result") as runtime_result,
+    ):
+        assert not coordinator.ensure_connected(target="localhost:5555")
+        connected["value"] = True
+        now["value"] = 2.0
+        assert coordinator.ensure_connected(target="localhost:5555")
+
+    runtime_result.assert_called_once()
+    assert "Connection registration recovered" in runtime_result.call_args.args[0]
+    snapshot = coordinator.snapshot(target="localhost:5555")
+    assert snapshot.connected is True
+    assert snapshot.failures == 0
+
+
+def test_persistent_manager_registers_and_reports_configured_target():
+    is_connected = Mock(side_effect=[False, True])
+    connect = Mock(return_value=True)
+    coordinator = AdbConnectionCoordinator(
+        is_connected=is_connected,
+        connect=connect,
+        reconnect_delays_s=(30.0,),
+        recovery_requires_capture=False,
+    )
+    manager = PersistentAdbConnectionManager(
+        lambda: "localhost:5555",
+        coordinator=coordinator,
+        timestamp=lambda: "2026-08-05T12:00:00-07:00",
+    )
+
+    assert manager.ensure_configured_target(force=True)
+
+    connect.assert_called_once_with("localhost:5555")
+    assert manager.status() == {
+        "owner": "control-surface",
+        "target": "localhost:5555",
+        "state": "device",
+        "connected": True,
+        "failures": 0,
+        "warning_active": False,
+        "retry_in_seconds": 0.0,
+        "last_checked_at": "2026-08-05T12:00:00-07:00",
+        "error": None,
+    }
+
+
+def test_persistent_manager_follows_only_the_new_persisted_target():
+    configured_target = {"value": "localhost:5555"}
+    connect = Mock(return_value=False)
+    coordinator = AdbConnectionCoordinator(
+        is_connected=lambda _target: False,
+        connect=connect,
+        reconnect_delays_s=(30.0,),
+        recovery_requires_capture=False,
+    )
+    manager = PersistentAdbConnectionManager(
+        lambda: configured_target["value"],
+        coordinator=coordinator,
+    )
+
+    with patch("core.adb_connection.log"):
+        assert not manager.ensure_configured_target(force=True)
+        configured_target["value"] = "localhost:5565"
+        assert not manager.ensure_configured_target(force=True)
+
+    assert connect.call_args_list == [
+        call("localhost:5555"),
+        call("localhost:5565"),
+    ]
+    status = manager.status()
+    assert status["target"] == "localhost:5565"
+    assert status["state"] == "unavailable"
+    assert status["failures"] == 1
+
+
+def test_persistent_manager_reports_configuration_error_and_recovers():
+    configured_target = {"value": "invalid"}
+    coordinator = AdbConnectionCoordinator(
+        is_connected=lambda _target: True,
+        reconnect_delays_s=(30.0,),
+        recovery_requires_capture=False,
+    )
+    manager = PersistentAdbConnectionManager(
+        lambda: configured_target["value"],
+        coordinator=coordinator,
+    )
+
+    with (
+        patch("core.adb_connection.log") as runtime_log,
+        patch("core.adb_connection.log_result") as runtime_result,
+    ):
+        assert not manager.ensure_configured_target()
+        assert not manager.ensure_configured_target()
+        status = manager.status()
+        assert status["state"] == "configuration_error"
+        assert status["target"] is None
+        assert "localhost:PORT" in status["error"]
+        assert runtime_log.call_count == 1
+
+        configured_target["value"] = "localhost:5555"
+        assert manager.ensure_configured_target(force=True)
+
+    runtime_result.assert_called_once_with(
+        "[ADB] Connection configuration recovered — monitoring localhost:5555"
+    )
+    assert manager.status()["state"] == "device"
+
+
+def test_persistent_manager_runs_until_its_service_owner_stops():
+    stop_event = threading.Event()
+    observations = {"count": 0}
+
+    def is_connected(_target):
+        observations["count"] += 1
+        if observations["count"] == 2:
+            stop_event.set()
+        return True
+
+    manager = PersistentAdbConnectionManager(
+        lambda: "localhost:5555",
+        coordinator=AdbConnectionCoordinator(
+            is_connected=is_connected,
+            reconnect_delays_s=(30.0,),
+            recovery_requires_capture=False,
+        ),
+        poll_interval_s=0.1,
+    )
+
+    manager.run(stop_event)
+
+    assert observations["count"] == 2
+    assert manager.status()["state"] == "device"

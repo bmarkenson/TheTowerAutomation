@@ -19,6 +19,7 @@ Linux loopback HTTP server
       ├── write ──► ~/.config/thetower/automation-adb.env ──► next-start config
       ├── write ──► logs/host_performance.sqlite3
       ├── manage ► fixed thetower-automation.service
+      ├── manage ► persisted localhost ADB registration
       ├── read  ──► logs/actions.log
       ├── read  ──► logs/activity_scope.json
       ├── read  ──► logs/automation-*.lock
@@ -72,6 +73,17 @@ agnostic.
 - Complete stop persists `STOPPED` before asking the fixed systemd user service
   to stop. Start always crosses the service boundary under `PAUSED`; a requested
   `RUNNING` directive is saved only after systemd reports the unit active.
+- For managed launches, the long-lived Linux control service is the sole ADB
+  reconnect owner. It reads the same persisted port, starts or reuses the ADB
+  server inside its own service lifetime, and maintains only that exact
+  `localhost:PORT` across automation stop/start cycles. The automation unit
+  explicitly selects observer mode and cannot start through the API if its
+  installed unit does not advertise that ownership boundary. Direct manual
+  runtimes retain their self-managed fallback. Complete Stop and guarded
+  replacement synchronously refresh registration after the old process exits,
+  covering a daemon that had originally been created inside its cgroup.
+  Registration never grants frame or input authority; the runtime still
+  requires its target lock and supported fresh capture.
 - Guarded active-battle reload never persists ordinary `STOPPED`. It refreshes
   same-state Pause intent so the runtime acknowledges the request and forces a
   new detection/status sample, requires fresh `RUNNING` evidence from the
@@ -174,6 +186,15 @@ distinguishing starting, active, retry-waiting, conflict, faulted, and stopped
 observation. A forwarding bind or policy conflict pauses retry only for that
 tunnel; ordinary unexpected exits use independent 5/10/20/30-second capped
 backoff.
+
+Forward persistence and target-registration persistence are independent. The
+Windows tunnel host keeps a desired reverse SSH listener alive after the GUI
+closes. The Linux control service keeps its ADB daemon and selected TCP target
+registered after automation stops. API status exposes the latter as
+`adb_connection` (`unknown`, `device`, `unavailable`, or
+`configuration_error`) with the exact target, bounded retry state, last check,
+and configuration error. Neither an active forward nor a `device` row proves a
+valid emulator frame.
 
 The always-visible UI treats systemd API-service state, HTTP reachability, API
 forward state, and ADB-forward state as four different signals. A fixed

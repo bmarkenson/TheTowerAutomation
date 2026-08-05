@@ -13,16 +13,18 @@ from pathlib import Path
 import secrets
 import sys
 import threading
-from typing import Any, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional
 from urllib.parse import parse_qs, unquote, urlsplit
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from core.adb_connection import PersistentAdbConnectionManager
 from core.automation_process import (
     DEFAULT_ADB_ENVIRONMENT_FILE,
     DEFAULT_AUTOMATION_SERVICE,
+    AutomationProcessError,
     SystemdAutomationManager,
 )
 from core.control_surface import (
@@ -350,6 +352,31 @@ def _discard_retention_loop(
             return
 
 
+def _persistent_adb_target_provider(
+    process_manager: SystemdAutomationManager,
+) -> Callable[[], str]:
+    """Bind connection ownership to the installed managed-runtime contract."""
+
+    owner_verified = False
+
+    def configured_target() -> str:
+        nonlocal owner_verified
+        if not owner_verified:
+            installation_status = process_manager.status()
+            owner_error = installation_status.get("adb_connection_owner_error")
+            if installation_status.get("available") is not True:
+                owner_error = installation_status.get("error") or (
+                    "Unable to verify the installed automation service's "
+                    "persistent ADB connection owner"
+                )
+            if owner_error:
+                raise AutomationProcessError(str(owner_error))
+            owner_verified = True
+        return process_manager.adb_connection_target()
+
+    return configured_target
+
+
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Serve TheTower's browser control surface"
@@ -456,6 +483,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         adb_environment_file=args.automation_adb_environment_file,
         strategy_profile_dir=strategy_profile_dir,
     )
+    adb_connection_manager = PersistentAdbConnectionManager(
+        _persistent_adb_target_provider(process_manager),
+    )
     service = ControlSurfaceService(
         repository_root=args.repository_root,
         control_file=args.control_file,
@@ -468,6 +498,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         host_performance_retention_days=args.host_performance_retention_days,
         stale_after_seconds=args.stale_after_seconds,
         process_manager=process_manager,
+        adb_connection_manager=adb_connection_manager,
         strategy_profile_dir=strategy_profile_dir,
         module_preset_dir=args.module_preset_directory,
     )
@@ -496,21 +527,29 @@ def main(argv: Optional[list[str]] = None) -> int:
             "only on a protected network.",
             file=sys.stderr,
         )
-    retention_stop = threading.Event()
+    background_stop = threading.Event()
     retention_thread = threading.Thread(
         target=_discard_retention_loop,
-        args=(service, retention_stop),
+        args=(service, background_stop),
         daemon=True,
         name="discard-retention",
     )
+    adb_connection_thread = threading.Thread(
+        target=adb_connection_manager.run,
+        args=(background_stop,),
+        daemon=True,
+        name="persistent-adb-connection",
+    )
     retention_thread.start()
+    adb_connection_thread.start()
     try:
         server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:
         print("Stopping TheTower control surface.")
     finally:
-        retention_stop.set()
+        background_stop.set()
         retention_thread.join(timeout=2)
+        adb_connection_thread.join(timeout=2)
         server.server_close()
     return 0
 

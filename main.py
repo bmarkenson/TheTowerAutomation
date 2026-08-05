@@ -22,6 +22,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     os.environ["ADB_DEVICE"] = f"localhost:{config.adb_port}"
     log(f"ADB target = {os.environ['ADB_DEVICE']}", "DEBUG")
+    log(f"ADB connection owner = {config.adb_connection_owner}", "DEBUG")
 
     try:
         with AdbTargetSession(os.environ["ADB_DEVICE"]) as target_session:

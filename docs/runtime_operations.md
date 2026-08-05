@@ -103,11 +103,15 @@ timeout 10s adb -s localhost:5555 exec-out screencap -p > /tmp/thetower_current.
 The expected connection response is `device`. A bounded exact-target read may
 use the normal sandbox only when the current session declares working project
 loopback access. Never use sandbox `adb connect`, `start-server`, or
-`kill-server` as a preflight. The managed runtime owns normal reconnection and
-target handoff; explicit connection management uses approved host execution.
-Retry an invocation-environment failure once on that host path before making
-any claim about the established ADB server, tunnel, emulator, or target. The
-complete decision and error-classification procedure is in
+`kill-server` as a preflight. For managed launches, the persistent
+`thetower-control-surface.service` owns Linux-side target registration and
+bounded reconnects for the exact persisted `localhost:PORT`; the automation
+runtime observes that registration and still requires a supported fresh frame
+before acting. A direct manual `main.py` launch retains its own reconnect
+fallback. Explicit development connection management uses approved host
+execution. Retry an invocation-environment failure once on that host path
+before making any claim about the established ADB server, tunnel, emulator, or
+target. The complete decision and error-classification procedure is in
 [`sandbox_boundaries.md`](sandbox_boundaries.md#adb-reads-and-connection-management).
 
 Production screenshots, logs, and other generated runtime artifacts are
@@ -162,7 +166,7 @@ for lock in logs/automation-*.lock; do
   sed -n '1,160p' "$lock"
 done
 curl --fail --silent --show-error http://127.0.0.1:8787/api/v1/status \
-  | jq '{runtime, process_service, observation, acknowledgements}'
+  | jq '{runtime, process_service, adb_connection, observation, acknowledgements}'
 tail -120 logs/actions.log
 timeout 8s adb -s localhost:5555 get-state
 ```
@@ -284,18 +288,21 @@ operation, or a persistent degradation worth surfacing to the operator.
 Scrolling outcomes and ordinary OCR repair remain diagnostic. Repeated
 game-speed verification failures become warnings only after three consecutive
 failures, reminders are limited to once every five minutes, and recovery is
-recorded. ADB capture and watchdog callers share one target-keyed reconnect
-schedule with bounded backoff. Once disconnection is known, capture commands
-and per-attempt failure entries are suppressed; the initial persistent warning
-still appears after three actual reconnect attempts, reminders remain limited
-to once every five minutes, and one `RESULT` records recovery after a supported
-fresh frame. Connection authority requires the exact target to report `device`,
-including after `adb connect`; command text such as `already connected` is not
-authority. An `offline`, `unauthorized`, or absent target follows the same quiet
-outage path. Each due TCP retry refreshes only that target with a bounded
-disconnect/connect before rechecking its state. Connected malformed or
-incomplete frames retain their capture diagnostics. An intentional custom exact
-game-speed target is different: warn immediately when it becomes active and
+recorded. For a managed launch, the persistent control service owns the
+target-keyed TCP reconnect schedule with bounded backoff. Its initial warning
+appears after three actual reconnect attempts, reminders remain limited to once
+every five minutes, and one `RESULT` records registration recovery. Runtime
+capture and watchdog callers share an observe-only schedule: once disconnection
+is known, capture commands and repeated low-level failure entries are
+suppressed, and only a supported fresh frame completes runtime recovery. A
+direct manual launch combines those roles. Connection authority requires the
+exact target to report `device`, including after `adb connect`; command text
+such as `already connected` is not authority. An `offline`, `unauthorized`, or
+absent target follows the same quiet outage path. Each due owner retry refreshes
+only that target with a bounded disconnect/connect before rechecking its state.
+Connected malformed or incomplete frames retain their capture diagnostics. An
+intentional custom exact game-speed target is different: warn immediately when
+it becomes active and
 every 15 minutes until the maximum-available target is restored so an
 experimental setting cannot be forgotten.
 
@@ -667,6 +674,15 @@ systemctl --user daemon-reload
 systemctl --user enable --now thetower-control-surface.service
 ```
 
+For an existing installation, use the production promotion procedure so any
+active old runtime is replaced at its authorized boundary, copy both current
+units, run `daemon-reload`, and restart `thetower-control-surface.service`
+before the next managed automation start. The automation unit explicitly
+declares `THETOWER_ADB_CONNECTION_OWNER=control-surface`; the API refuses a
+stopped managed start when the installed unit does not advertise that
+boundary. This prevents the service and runtime from simultaneously refreshing
+the same TCP transport.
+
 Do not enable `thetower-automation.service` unless automation should launch
 automatically at Linux login. The control surface can start that fixed service
 paused or running and can completely stop it. Stop persists `STOPPED` before
@@ -683,6 +699,19 @@ selection's Home-only gates. The API persists the validated settings in
 start. An absent file defaults to port `5555`, strategy `farm`, and automatic
 attachment with read-only validation. Explicit manual `main.py --adb-port
 PORT --strategy NAME --startup-gates POLICY` arguments still win.
+
+While the control service is running, it also owns the Linux ADB server and
+keeps the persisted exact target registered with bounded retries whether
+automation is running, stopped, or being replaced. Stopping
+`thetower-automation.service` therefore no longer removes the registration by
+killing the daemon that created it: complete Stop and guarded replacement force
+one registration refresh after the old process has exited, before returning or
+starting its replacement. `/api/v1/status` exposes this independently as
+`adb_connection`; `state=device` is transport evidence only, not proof of a
+current screen or input authority. Restarting the control service may replace
+its ADB daemon, but the new instance immediately resumes registration. The
+manager never uses a global `adb kill-server` and never connects an endpoint
+other than the configured `localhost:PORT`.
 
 The game-speed dropdown is the authoritative way to make a manual speed change
 persistent. A new selection is acknowledged by the runtime, enforced on the
@@ -899,10 +928,13 @@ rerunning its in-memory startup/session gates:
    acknowledged.
 4. Verify the fresh observed screen, then select **Resume** when appropriate.
 
-The runtime acquires ownership of the new target before attempting `adb
-connect`, accepts it only after a supported screenshot succeeds, and releases
-the old target lock only after that validation. A failed handoff remains paused
-and retains the old target.
+The control service persists and immediately refreshes registration for the
+new target before publishing the handoff directive. The paused runtime then
+acquires that target's lock, observes its exact `device` state, accepts it only
+after a supported screenshot succeeds, and releases the old target lock only
+after that validation. A failed handoff remains paused and retains the old
+runtime target while the service continues bounded retries for the newly saved
+next-start target.
 
 Bundled strategy selection also works without replacing an active process.
 The GUI reports whether the request was accepted and shows current and pending
@@ -981,12 +1013,13 @@ or restores verified Home and repeats the current read-only stage. A failed
 step leaves the next battle held with a logged reason and a bounded retry
 instead of skipping the evidence boundary.
 
-The API also verifies that the installed unit advertises this file through
-systemd. If it reports that the unit does not load the file, copy the current
-checked-in automation unit over the installed user unit and run
-`systemctl --user daemon-reload` before starting automation. At runtime, the
-automation attempts `adb connect localhost:PORT` before its first capture and
-retries a disconnected target without changing the configured port.
+The API also verifies through systemd that the installed unit advertises both
+this file and control-surface ADB ownership. If either check fails, copy the
+current checked-in automation unit over the installed user unit, run
+`systemctl --user daemon-reload`, and restart the control service before
+starting automation. The persistent control service attempts exact-target
+registration before and during managed runtime use; the managed runtime
+observes the resulting `device` state without changing the configured port.
 
 Build the native WPF application on Windows with the .NET 8 SDK by running
 `windows\TheTower.ControlSurface\publish.ps1`, or cross-publish the same
@@ -1013,6 +1046,14 @@ ports. The resulting topology is:
 Windows API client -> 127.0.0.1:8787 -L-> Linux 127.0.0.1:8787
 Linux automation -> 127.0.0.1:<linux-adb-port> -R-> Windows 127.0.0.1:<windows-bluestacks-port>
 ```
+
+The reverse SSH listener and Linux ADB registration are separate persistent
+layers. `TheTower.TunnelHost.exe` preserves the desired reverse forward after
+the GUI closes. On Linux, `thetower-control-surface.service` preserves the ADB
+daemon and exact-target registration after automation stops. An active forward
+does not itself prove that the target is registered or that an emulator screen
+is available; the Linux `adb_connection` status supplies the registration
+signal.
 
 The reverse listener is always requested on Linux `127.0.0.1`, never a LAN
 interface. The API and ADB forwards are independently startable and stoppable,

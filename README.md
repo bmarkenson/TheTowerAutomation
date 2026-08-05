@@ -333,8 +333,9 @@ A standalone native Windows GUI now exposes these controls, managed automation
 start/stop, runtime health, recent activity, filters, and structured completed
 Battle/Tournament records through a loopback Linux service. It can own
 independent passwordless OpenSSH processes for the API tunnel and the
-loopback-only ADB reverse forward; the browser client remains available as a
-fallback. See the
+loopback-only ADB reverse forward. The persistent Linux control service also
+keeps the selected exact ADB target registered across managed automation
+stop/start cycles; the browser client remains available as a fallback. See the
 [`native Windows control surface`](docs/runtime_operations.md#native-windows-control-surface)
 procedure.
 

@@ -546,6 +546,7 @@ def test_checkpoint_generated_state_is_isolated_while_host_tools_are_available(
             "ANDROID_SERIAL": "production-target",
             "PATH": f"{config.production_environment}/bin:/usr/bin",
             "PYTHONPATH": "/production/source",
+            "THETOWER_ADB_CONNECTION_OWNER": "control-surface",
             "THETOWER_ADB_PORT": "5555",
             "VIRTUAL_ENV": str(config.production_environment),
         },
@@ -553,7 +554,13 @@ def test_checkpoint_generated_state_is_isolated_while_host_tools_are_available(
         paths=paths,
     )
 
-    for key in ("ADB_DEVICE", "ANDROID_SERIAL", "PYTHONPATH", "THETOWER_ADB_PORT"):
+    for key in (
+        "ADB_DEVICE",
+        "ANDROID_SERIAL",
+        "PYTHONPATH",
+        "THETOWER_ADB_CONNECTION_OWNER",
+        "THETOWER_ADB_PORT",
+    ):
         assert key not in result
     isolated_values = (
         result["PYTHONPYCACHEPREFIX"],
@@ -600,7 +607,10 @@ def test_checkpoint_commands_cover_full_offline_repository_gate(
         "-q",
     )
     assert "tools.development_pytest" not in " ".join(pytest_command)
-    assert all("adb" not in command.lower() for command in rendered)
+    assert all(
+        command[0] == str(environment / "bin/python")
+        for _, command in commands
+    )
     assert all(
         not (len(command) == 2 and command[1] == "main.py")
         for _, command in commands

@@ -13,6 +13,7 @@ KillSignal=SIGINT
 TimeoutStopSec=30
 Restart=no
 Environment=PYTHONUNBUFFERED=1
+Environment=THETOWER_ADB_CONNECTION_OWNER=control-surface
 
 [Install]
 WantedBy=default.target

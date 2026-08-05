@@ -594,6 +594,11 @@ stages:
     localhost ADB port without replacing the process or recreating strategy
     startup/session gates. Retain Pause and the former target on validation
     failure.
+  - [x] Keep the configured Linux ADB target registered across managed
+    automation stop/start cycles. The persistent control service owns exact-
+    target bounded reconnects; the managed runtime is observe-only, direct
+    launches retain a self-managed fallback, and an outdated installed unit is
+    rejected before a stopped managed start.
   - [x] Allow a stopped managed start to attach to an existing battle without
     replaying startup/session gates, then re-arm those gates at the next
     authoritative run boundary without seeding completion state.

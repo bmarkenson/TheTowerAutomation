@@ -14,6 +14,7 @@ import threading
 import time
 from typing import Any, Mapping, Optional, Sequence
 
+from core.adb_connection import PersistentAdbConnectionManager
 from core.app_setup import (
     DEFAULT_STARTUP_GATE_POLICY,
     STARTUP_GATE_POLICIES,
@@ -68,6 +69,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "host_performance_telemetry_v1",
     "managed_custom_module_presets_v1",
     "observed_game_speed",
+    "persistent_adb_connection_v1",
     "selected_strategy_process_start",
     "strategy_action_gate_v1",
     "strategy_authoring_profile_lifecycle_v1",
@@ -179,6 +181,7 @@ class ControlSurfaceService:
         ),
         stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS,
         process_manager: Optional[SystemdAutomationManager] = None,
+        adb_connection_manager: Optional[PersistentAdbConnectionManager] = None,
         strategy_profile_dir: Path | str = "config/strategies/custom",
         module_preset_dir: Path | str = "config/loadouts/custom/modules",
     ) -> None:
@@ -217,6 +220,7 @@ class ControlSurfaceService:
             strategy_profile_dir=self.strategy_profile_dir,
         )
         self.process_manager = process_manager
+        self.adb_connection_manager = adb_connection_manager
         self._process_action_lock = threading.Lock()
         self._battle_mutation_lock = threading.RLock()
 
@@ -610,6 +614,11 @@ class ControlSurfaceService:
         process_service = (
             self.process_manager.status() if self.process_manager is not None else None
         )
+        adb_connection = (
+            self.adb_connection_manager.status()
+            if self.adb_connection_manager is not None
+            else None
+        )
         control["startup_gate_context"] = self._startup_gate_context(
             control,
             process_service,
@@ -640,6 +649,7 @@ class ControlSurfaceService:
             "strategy_action_gate": strategy_action_gate,
             "runtime": runtime,
             "process_service": process_service,
+            "adb_connection": adb_connection,
         }
 
     def publish_host_performance(
@@ -942,6 +952,15 @@ class ControlSurfaceService:
                         + ", ".join(self.profile_store.strategy_ids())
                     )
             before = manager.status()
+            if (
+                not before.get("active")
+                and before.get("adb_connection_owner_error")
+            ):
+                raise ControlSurfaceRequestError(
+                    str(before["adb_connection_owner_error"]),
+                    status=503,
+                    code="persistent_adb_owner_not_configured",
+                )
             if before.get("active") and requested_strategy is not None:
                 raise ControlSurfaceRequestError(
                     "Completely stop automation before starting with a selected "
@@ -1003,6 +1022,11 @@ class ControlSurfaceService:
                     self.control_store.set_state(
                         "PAUSED", source="control-surface-process-start"
                     )
+                    if self.adb_connection_manager is not None:
+                        self.adb_connection_manager.ensure_target(
+                            before.get("adb_target"),
+                            force=True,
+                        )
                     manager.start()
                 self.control_store.set_state(
                     requested_state,
@@ -1037,7 +1061,12 @@ class ControlSurfaceService:
                 self.control_store.set_state(
                     "STOPPED", source="control-surface-process-stop"
                 )
-                manager.stop()
+                stopped = manager.stop()
+                if self.adb_connection_manager is not None:
+                    self.adb_connection_manager.ensure_target(
+                        stopped.get("adb_target"),
+                        force=True,
+                    )
             except (AutomationProcessError, ControlDirectiveError) as exc:
                 self._append_audit(f"Failed to stop service cleanly: {exc}")
                 raise ControlSurfaceRequestError(str(exc), status=503) from exc
@@ -1080,6 +1109,11 @@ class ControlSurfaceService:
                         manager.persist_adb_port(adb_port)
                     else:
                         manager.set_adb_port(adb_port)
+                    if self.adb_connection_manager is not None:
+                        self.adb_connection_manager.ensure_target(
+                            f"localhost:{adb_port}",
+                            force=True,
+                        )
                     self.control_store.set_adb_port(
                         adb_port,
                         source="control-surface-adb-handoff",
@@ -1239,7 +1273,12 @@ class ControlSurfaceService:
             )
 
             log_offset = _file_size(self.action_log)
-            manager.stop()
+            stopped = manager.stop()
+            if self.adb_connection_manager is not None:
+                self.adb_connection_manager.ensure_target(
+                    stopped.get("adb_target"),
+                    force=True,
+                )
             manager.set_startup_gate_policy("next_run")
             try:
                 started = manager.start()

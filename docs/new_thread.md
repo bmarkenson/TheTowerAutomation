@@ -166,7 +166,7 @@ for lock in logs/automation-*.lock; do
   sed -n '1,160p' "$lock"
 done
 curl --fail --silent --show-error http://127.0.0.1:8787/api/v1/status \
-  | jq '{runtime, process_service, observation, acknowledgements}'
+  | jq '{runtime, process_service, adb_connection, observation, acknowledgements}'
 tail -120 logs/actions.log
 timeout 8s adb -s localhost:5555 get-state
 ```
