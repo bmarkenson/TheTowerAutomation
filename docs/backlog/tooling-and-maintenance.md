@@ -67,7 +67,7 @@ malicious same-account process.
   - Installs a distinct suppressive `external_development` hold before
     acknowledgement. Operator Pause/Stop, runtime replacement, target change,
     heartbeat loss, and battle boundaries end input authority.
-- [ ] Add a small lease-aware exact-target ADB input helper.
+- [x] Add a small lease-aware exact-target ADB input helper.
   - Recheck the active acknowledged lease, target, and expiry before each
     bounded tap or swipe; use the existing action log for intent and result.
   - Never automatically replay uncertain input. Do not add secret tokens,

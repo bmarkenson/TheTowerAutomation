@@ -232,6 +232,34 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   validation, clickmap integrity with zero errors, and all 1,357 pytest tests.
   No live or production inspection was performed.
 
+### 2026-08-05 lease-aware development ADB input
+
+- `b96531fd6c282132d33cba7418e5d41006255b31` implemented coordination
+  delivery step 4 as a development-side module and thin CLI. One invocation
+  accepts one canonical-coordinate tap or swipe, requires the caller's
+  ordinary active lease ID, validates the complete production-owned composite
+  status, establishes supported `1080x1920` or `720x1280` native geometry
+  through one bounded exact-target screenshot, and rechecks the unchanged
+  lease/runtime/target binding immediately before one finite-timeout input
+  attempt.
+- The helper never selects a default device, manages an ADB connection,
+  requests or revives a lease, resumes automation, or retries uncertain input.
+  It records one `ACTION`, the attempted `INPUT` with canonical/device
+  coordinates and outcome detail, and one terminal `RESULT`. Its default audit
+  destination is production's fixed `logs/actions.log`; an absolute-path
+  override exists only for isolated tests.
+- Focused helper, control-status, geometry, ADB, screenshot, and logging
+  validation passed all 141 tests. The complete non-live checkpoint passed
+  compilation, state-definition validation, clickmap integrity with zero
+  errors and 44 established orphans, and all 1,529 pytest tests. All 31 local
+  links across the six changed documents, including the new helper
+  runbook anchor, resolved; staged and feature-range whitespace checks passed.
+- No production checkout or environment, live runtime or process, systemd
+  service, ADB server or target, emulator, current screen, production log, or
+  battle was inspected or changed. Combined fake-runtime/fake-ADB coordination
+  validation remains an open delivery item, and any bounded live lease remains
+  separately authorized master coordination work.
+
 ### 2026-08-04 atomic shared latest production frame
 
 - `dd44c0171c6dd1e5b0e5d090b7c08e5376e7ed3d` extended the existing screenshot
