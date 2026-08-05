@@ -126,6 +126,54 @@ def test_explicit_tournament_requests_get_distinct_durable_receipts(tmp_path):
     assert second_receipt["status"] == "pending"
 
 
+def test_running_tournament_cancels_pending_pre_tournament_validation(tmp_path):
+    app, store, _manager = _app_for_pending_validation(tmp_path)
+    result_log = Mock()
+
+    with patch("core.app.log_result", new=result_log):
+        cancelled = app._cancel_pending_tournament_validation_after_boundary(
+            {"state": "RUNNING", "secondary_states": ["TOURNAMENT"]}
+        )
+
+    assert cancelled
+    receipt = _current_receipt(store)
+    assert receipt["status"] == "result"
+    assert receipt["outcome"] == "cancelled"
+    assert "already running" in receipt["reason"]
+    assert "only before a Tournament begins" in receipt["reason"]
+    result_log.assert_called_once()
+    assert result_log.call_args.args[0].startswith(
+        "No Tournament validation is planned"
+    )
+    assert not app._maybe_start_exclusive_validation(
+        home_control=HomeBattleControl.NEW_BATTLE
+    )
+
+
+def test_tournament_results_cancel_pending_validation_as_a_failsafe(tmp_path):
+    app, store, _manager = _app_for_pending_validation(tmp_path)
+
+    with patch("core.app.log_result"):
+        cancelled = app._cancel_pending_tournament_validation_after_boundary(
+            {"state": "TOURNAMENT_RESULTS", "secondary_states": []}
+        )
+
+    assert cancelled
+    receipt = _current_receipt(store)
+    assert receipt["status"] == "result"
+    assert receipt["outcome"] == "cancelled"
+    assert "already completed" in receipt["reason"]
+
+
+def test_non_tournament_battle_keeps_pre_tournament_validation_pending(tmp_path):
+    app, store, _manager = _app_for_pending_validation(tmp_path)
+
+    assert not app._cancel_pending_tournament_validation_after_boundary(
+        {"state": "RUNNING", "secondary_states": []}
+    )
+    assert _current_receipt(store)["status"] == "pending"
+
+
 def test_ready_receipt_offers_one_durable_start_or_cancel_decision(tmp_path):
     store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
     ready, definition = _ready_validation(store)

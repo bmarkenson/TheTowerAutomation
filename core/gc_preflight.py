@@ -38,6 +38,13 @@ _CHECK_LABELS = {
     "ultimate_weapons": "Ultimate Weapons",
 }
 
+_CONFIGURATION_CHECK_SECTIONS = {
+    "cards_deck": "cards",
+    "workshop_preset": "workshop",
+    "bots_preset": "bots",
+    "guardian_chips": "guardians",
+}
+
 
 def summarize_gc_preflight_mismatch(
     evidence: Mapping[str, Any],
@@ -317,24 +324,41 @@ class GcSessionPreflightEvidence:
     auto_pick_perks_required: bool
     auto_pick_perks: AutoPickPerksEvidence
     ultimate_weapons: UltimateWeaponEvidence
+    deferred_configuration_checks: tuple[str, ...] = ()
+    accepted_configuration_sections: Mapping[str, Mapping[str, Any]] = field(
+        default_factory=dict
+    )
     auto_pick_perks_source: str = "ui"
     waivers: Mapping[str, Any] = field(default_factory=dict)
 
     def is_waived(self, check_id: str) -> bool:
         return str(check_id) in self.waivers
 
+    def is_deferred(self, check_id: str) -> bool:
+        return str(check_id) in self.deferred_configuration_checks
+
     @property
     def configuration_valid(self) -> bool:
         return (
-            (self.configuration.cards.valid or self.is_waived("cards_deck"))
+            (
+                self.configuration.cards.valid
+                or self.is_waived("cards_deck")
+                or self.is_deferred("cards_deck")
+            )
             and (
                 self.configuration.workshop.valid
                 or self.is_waived("workshop_preset")
+                or self.is_deferred("workshop_preset")
             )
-            and (self.configuration.bots.valid or self.is_waived("bots_preset"))
+            and (
+                self.configuration.bots.valid
+                or self.is_waived("bots_preset")
+                or self.is_deferred("bots_preset")
+            )
             and (
                 self.configuration.guardians.valid
                 or self.is_waived("guardian_chips")
+                or self.is_deferred("guardian_chips")
             )
         )
 
@@ -394,15 +418,20 @@ class GcSessionPreflightEvidence:
                 or self.is_waived("ultimate_weapons"),
             ),
         ):
-            if not valid and not self.is_waived(check_id):
+            if (
+                not valid
+                and not self.is_waived(check_id)
+                and not self.is_deferred(check_id)
+            ):
                 failures.append(check_id)
         return tuple(failures)
 
     @property
     def deferred_checks(self) -> tuple[str, ...]:
+        checks = list(self.deferred_configuration_checks)
         if self.free_upgrade_locks.get("status") == "unavailable_deferred":
-            return ("free_upgrade_locks",)
-        return ()
+            checks.append("free_upgrade_locks")
+        return tuple(dict.fromkeys(checks))
 
     @property
     def requires_no_battle_repair(self) -> bool:
@@ -420,7 +449,15 @@ class GcSessionPreflightEvidence:
 
     def as_dict(self) -> dict[str, Any]:
         payload = asdict(self)
+        accepted_sections = payload.pop(
+            "accepted_configuration_sections",
+            {},
+        )
         payload["configuration"]["valid"] = self.configuration.valid
+        if accepted_sections:
+            payload["configuration"]["save_backed_sections"] = (
+                accepted_sections
+            )
         payload["free_upgrade_locks"] = dict(self.free_upgrade_locks)
         payload["free_upgrade_locks"]["blocking_valid"] = True
         if self.modules is None:
@@ -446,6 +483,9 @@ class GcSessionPreflightEvidence:
         )
         payload["ultimate_weapons"]["valid"] = self.ultimate_weapons.valid
         payload["configuration"]["blocking_valid"] = self.configuration_valid
+        payload["deferred_configuration_checks"] = list(
+            self.deferred_configuration_checks
+        )
         payload["failed_checks"] = list(self.failed_checks)
         payload["deferred_checks"] = list(self.deferred_checks)
         payload["valid"] = self.valid
@@ -542,12 +582,16 @@ def validate_gc_preflight_screens(
     detector: Detector = detect_state_and_overlays,
     section_specs: Mapping[str, GcSectionSpec] = GC_SECTION_SPECS,
     accepted_sections: Optional[Mapping[str, Mapping[str, Any]]] = None,
+    deferred_sections: Optional[Iterable[str]] = None,
 ) -> GcPreflightEvidence:
-    """Validate captured sections or exact save-backed omissions without input.
+    """Validate captured, save-backed, or explicitly deferred sections.
 
     A missing screen is accepted only when that exact section has explicit
-    ``save_match`` provenance.  A supplied screen is always evaluated, even if
-    save provenance also exists, so an observed contradiction cannot be hidden.
+    ``save_match`` provenance or the caller explicitly marks that section as
+    deferred. A deferred section remains invalid in raw configuration evidence
+    so it cannot be mistaken for an observation. A supplied screen is always
+    evaluated, even if save provenance or a deferral also exists, so an
+    observed contradiction cannot be hidden.
     """
 
     required_names = {"cards", "workshop", "bots", "guardians"}
@@ -558,29 +602,59 @@ def validate_gc_preflight_screens(
         )
 
     accepted = dict(accepted_sections or {})
+    unsupported_accepted = sorted(set(accepted) - required_names)
+    if unsupported_accepted:
+        raise ValueError(
+            "preflight has unsupported accepted sections: "
+            + ", ".join(unsupported_accepted)
+        )
+    deferred = {str(name).strip() for name in deferred_sections or ()}
+    unsupported_deferred = sorted(deferred - required_names)
+    if unsupported_deferred:
+        raise ValueError(
+            "preflight has unsupported deferred sections: "
+            + ", ".join(unsupported_deferred)
+        )
 
     def section_detection(name: str, screen):
         spec = section_specs[name]
         if screen is not None:
             return _detect_section_selection(screen, spec, detector)
         provenance = accepted.get(name)
-        if not (
+        if (
             isinstance(provenance, Mapping)
             and provenance.get("disposition") == "save_match"
         ):
+            detection = {
+                "state": spec.expected_state,
+                "secondary_states": sorted(spec.required_secondary),
+            }
+            selection = (
+                PresetSlotSelection(
+                    region=spec.selection_region,
+                    valid_region=True,
+                    selected=True,
+                    green_pixels=0,
+                    cyan_pixels=0,
+                )
+                if spec.selection_region is not None
+                else None
+            )
+            return detection, selection
+        if name not in deferred:
             raise ValueError(
                 f"preflight section {name} has neither a screen nor accepted "
                 "save provenance"
             )
         detection = {
-            "state": spec.expected_state,
-            "secondary_states": sorted(spec.required_secondary),
+            "state": "DEFERRED",
+            "secondary_states": [],
         }
         selection = (
             PresetSlotSelection(
                 region=spec.selection_region,
-                valid_region=True,
-                selected=True,
+                valid_region=False,
+                selected=False,
                 green_pixels=0,
                 cyan_pixels=0,
             )
@@ -796,8 +870,63 @@ def validate_gc_session_preflight_screens(
     waivers: Optional[Mapping[str, Any]] = None,
     configuration_boundary_evidence: Optional[Mapping[str, Any]] = None,
     module_boundary_evidence: Optional[Mapping[str, Any]] = None,
+    accepted_sections: Optional[Mapping[str, Mapping[str, Any]]] = None,
+    deferred_checks: Optional[Sequence[Any]] = None,
 ) -> GcSessionPreflightEvidence:
     """Validate every currently implemented read-only session requirement."""
+
+    normalized_deferred_checks = tuple(
+        dict.fromkeys(
+            str(check_id).strip()
+            for check_id in deferred_checks or ()
+            if str(check_id).strip()
+        )
+    )
+    unsupported_deferred = sorted(
+        set(normalized_deferred_checks) - set(_CONFIGURATION_CHECK_SECTIONS)
+    )
+    if unsupported_deferred:
+        raise ValueError(
+            "session preflight has unsupported deferred checks: "
+            + ", ".join(unsupported_deferred)
+        )
+    active_accepted_sections = dict(accepted_sections or {})
+    if configuration_boundary_evidence is not None and (
+        normalized_deferred_checks or active_accepted_sections
+    ):
+        raise ValueError(
+            "session preflight cannot combine complete boundary evidence "
+            "with individual accepted or deferred configuration checks"
+        )
+    accepted_check_ids = {
+        check_id
+        for check_id, section in _CONFIGURATION_CHECK_SECTIONS.items()
+        if section in active_accepted_sections
+    }
+    duplicate_dispositions = sorted(
+        accepted_check_ids.intersection(normalized_deferred_checks)
+    )
+    if duplicate_dispositions:
+        raise ValueError(
+            "session preflight cannot both accept and defer checks: "
+            + ", ".join(duplicate_dispositions)
+        )
+    supplied_screens = {
+        "cards_deck": cards_screen,
+        "workshop_preset": workshop_screen,
+        "bots_preset": bots_screen,
+        "guardian_chips": guardians_screen,
+    }
+    observed_deferrals = sorted(
+        check_id
+        for check_id in normalized_deferred_checks
+        if supplied_screens[check_id] is not None
+    )
+    if observed_deferrals:
+        raise ValueError(
+            "session preflight cannot defer observed checks: "
+            + ", ".join(observed_deferrals)
+        )
 
     normalized_free_upgrade_locks = (
         normalize_free_upgrade_lock_requirements(free_upgrade_lock_requirements)
@@ -821,6 +950,11 @@ def validate_gc_session_preflight_screens(
             guardians_screen=guardians_screen,
             detector=detector,
             section_specs=section_specs,
+            accepted_sections=active_accepted_sections,
+            deferred_sections=(
+                _CONFIGURATION_CHECK_SECTIONS[check_id]
+                for check_id in normalized_deferred_checks
+            ),
         )
     )
     auto_pick = measure_auto_pick_perks(perks_screen)
@@ -883,6 +1017,8 @@ def validate_gc_session_preflight_screens(
             ultimate_requirements,
             ultimate_observations,
         ),
+        deferred_configuration_checks=normalized_deferred_checks,
+        accepted_configuration_sections=active_accepted_sections,
         auto_pick_perks_source=auto_pick_source,
         waivers=active_waivers,
     )

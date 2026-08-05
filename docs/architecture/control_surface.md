@@ -109,11 +109,14 @@ agnostic.
   identifies the same battle and that scope holds a matching completed-check
   receipt, the attached session checks are reused instead of repeated.
   Missing, stale, unreadable, or configuration-mismatched evidence retains the
-  declared attachment validation. `auto` skips all strategy setup checks for
-  only that attached battle. A terminal result or verified Home `NEW_BATTLE`
-  clears the attachment choice, so the next battle runs its real gates without
-  fabricated completion state. `next_run` remains the guarded-reload policy
-  and `immediate` is the explicit forced-first-battle policy.
+  declared attachment validation. Tournament attachment validation is strictly
+  in-battle and never invokes Exit Battle → Go Home → Resume Battle; its
+  Home-only Workshop check uses exact bound save evidence or remains explicitly
+  deferred. `auto` skips all strategy setup checks for only that attached
+  battle. A terminal result or verified Home `NEW_BATTLE` clears the attachment
+  choice, so the next battle runs its real gates without fabricated completion
+  state. `next_run` remains the guarded-reload policy and `immediate` is the
+  explicit forced-first-battle policy.
 - An active strategy request persists the next-start setting and a versioned
   control directive. By default it remains pending during a battle. The
   current strategy first finalizes the terminal report and its Game Over hook;
@@ -133,6 +136,11 @@ agnostic.
   arbitrary tap authority and never grants Surrender authority. A replacement
   process reports an active validation or launch receipt owned by the former
   runtime as failed and cannot replay, continue, clean up, or Surrender it.
+  Fresh evidence that a Tournament already started cancels an unclaimed
+  receipt as obsolete; Tournament Results repeats that fail-safe. A managed
+  Start therefore cannot leave validation planned after the attached
+  Tournament completes. An attached non-Tournament battle retains the request
+  for a later verified Home boundary before Tournament start.
 - An explicit `apply_to_active_run` strategy request may instead be adopted
   after fresh `RUNNING` or Home `RESUME_BATTLE` evidence. Adoption changes
   normal strategy behavior and the strategy/profile identity used by Battle

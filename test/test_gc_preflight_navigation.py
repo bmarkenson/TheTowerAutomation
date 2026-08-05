@@ -367,6 +367,118 @@ def test_guarded_route_corrects_declared_in_run_controls_and_returns_to_running(
     assert ui.event_swipes == ["gesture_targets.goto_top:event_bots"]
 
 
+def test_attached_route_defers_workshop_without_going_home():
+    ui = _FakeUi()
+    boxes = [
+        UpgradeBox(
+            "left",
+            (0, 0, 1, 1),
+            text=label,
+            toggles={name: "on" for name in toggles if name != "stun"},
+        )
+        for label, toggles in ULTIMATE_REQUIREMENTS.items()
+    ]
+    validated = {}
+
+    def validate(**kwargs):
+        validated.update(kwargs)
+        return SimpleNamespace(
+            valid=True,
+            deferred_checks=("workshop_preset",),
+        )
+
+    result = run_read_only_gc_preflight(
+        PREFLIGHT_REQUIREMENTS,
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.safe_tap,
+        tap_visible_fn=ui.visible_tap,
+        go_home_fn=lambda: (_ for _ in ()).throw(
+            AssertionError("attached validation must stay in battle")
+        ),
+        swipe_fn=ui.swipe,
+        event_swipe_fn=ui.event_swipe,
+        detect_boxes_fn=lambda _frame, **_kwargs: {
+            "left": boxes,
+            "right": [],
+        },
+        ensure_poison_swamp_stun_fn=lambda **_kwargs: _stun_off_result(ui),
+        stay_in_battle=True,
+        sleep_fn=lambda _seconds: None,
+        validate_fn=validate,
+    )
+
+    assert result.status is GcPreflightNavigationStatus.COMPLETE
+    assert result.reason == "active requirements verified; boundary checks deferred"
+    assert ui.state == "RUNNING"
+    assert validated["workshop_screen"] is None
+    assert validated["deferred_checks"] == ("workshop_preset",)
+    assert "navigation.Cards" in ui.visible_taps
+    assert "navigation.menu_modules" in ui.visible_taps
+    assert "navigation.menu_event" in ui.visible_taps
+    assert "navigation.menu_guild" in ui.visible_taps
+    assert "navigation.goto_workshop_home" not in ui.static_taps
+    assert "navigation.goto_home" not in ui.static_taps
+    assert "buttons.battle_control:home" not in ui.static_taps
+
+
+def test_attached_route_uses_bound_workshop_save_evidence_without_going_home():
+    ui = _FakeUi()
+    boxes = [
+        UpgradeBox(
+            "left",
+            (0, 0, 1, 1),
+            text=label,
+            toggles={name: "on" for name in toggles if name != "stun"},
+        )
+        for label, toggles in ULTIMATE_REQUIREMENTS.items()
+    ]
+
+    class BoundSave:
+        def consume(self, check_id):
+            return "Tourney" if check_id == "workshop_preset" else None
+
+    validated = {}
+
+    def validate(**kwargs):
+        validated.update(kwargs)
+        return SimpleNamespace(valid=True, deferred_checks=())
+
+    result = run_read_only_gc_preflight(
+        {**PREFLIGHT_REQUIREMENTS, "workshop_preset": "Tourney"},
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.safe_tap,
+        tap_visible_fn=ui.visible_tap,
+        go_home_fn=lambda: (_ for _ in ()).throw(
+            AssertionError("bound save evidence must avoid the Home route")
+        ),
+        swipe_fn=ui.swipe,
+        event_swipe_fn=ui.event_swipe,
+        detect_boxes_fn=lambda _frame, **_kwargs: {
+            "left": boxes,
+            "right": [],
+        },
+        ensure_poison_swamp_stun_fn=lambda **_kwargs: _stun_off_result(ui),
+        player_save_preflight=BoundSave(),
+        stay_in_battle=True,
+        sleep_fn=lambda _seconds: None,
+        validate_fn=validate,
+    )
+
+    assert result.status is GcPreflightNavigationStatus.COMPLETE
+    assert result.reason == "all requirements verified"
+    assert validated["accepted_sections"] == {
+        "workshop": {
+            "disposition": "save_match",
+            "source": "bound_player_save_preflight",
+        }
+    }
+    assert "deferred_checks" not in validated
+    assert "navigation.goto_workshop_home" not in ui.static_taps
+    assert "buttons.battle_control:home" not in ui.static_taps
+
+
 def test_farm_route_consumes_home_boundary_evidence_without_revisiting_sections():
     ui = _FakeUi()
     boxes = [

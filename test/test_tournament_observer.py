@@ -95,6 +95,9 @@ def test_tournament_strategy_declares_exclusive_validation_then_observes():
     assert attached_validation["attached_validation_only"] is True
     assert attached_validation["do"][0]["type"] == "session_preflight"
     assert attached_validation["do"][0]["allow_repair"] is False
+    assert (
+        attached_validation["do"][0]["stay_in_battle_when_attached"] is True
+    )
     level_skip_rule = next(
         rule
         for rule in strategy.rules
@@ -163,6 +166,7 @@ def test_tournament_strategy_declares_exclusive_validation_then_observes():
     }
     assert action["allow_repair"] is False
     assert action["mismatch_policy"] == "notify"
+    assert action["stay_in_battle_when_attached"] is True
     assert action["requirements"]["loadout_policies"] == {
         "modules": "observe"
     }
@@ -291,6 +295,40 @@ def test_tournament_module_variation_completes_and_is_logged_as_information():
         "[SESSION_PREFLIGHT] completed_evidence="
         + json.dumps(evidence_payload, sort_keys=True),
         "DEBUG",
+    )
+
+
+def test_attached_tournament_executor_requests_an_in_battle_only_route():
+    strategy = get_strategy("tournament")
+    action = strategy.rules[0]["do"][0]
+    ctx = MissionContext(
+        data={
+            "startup_gates_deferred": True,
+            "mission_vars": {"last_detection_state": "RUNNING"},
+        }
+    )
+    evidence = SimpleNamespace(
+        as_dict=lambda: {
+            "valid": True,
+            "deferred_checks": ["workshop_preset"],
+        }
+    )
+    result = GcLivePreflightResult(
+        GcPreflightNavigationStatus.COMPLETE,
+        "active requirements verified; boundary checks deferred",
+        evidence,
+    )
+
+    with patch(
+        "core.action_executor.run_read_only_gc_preflight",
+        return_value=result,
+    ) as run_preflight:
+        execute_actions(object(), [{**action, "_strategy": True}], ctx)
+
+    run_preflight.assert_called_once_with(
+        action["requirements"],
+        validate_fn=validate_tournament_session_preflight_screens,
+        stay_in_battle=True,
     )
 
 

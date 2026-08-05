@@ -588,6 +588,15 @@ receipt records `pending`, `claimed`, `running`, `cleanup`, and terminal result
 states, with the runtime ID, PID, ADB target, and deadline attached before the
 first battle input.
 
+That authorization exists only before a Tournament begins. Fresh
+`RUNNING` plus Tournament identity cancels an unclaimed pending request as
+obsolete, whether the runtime attached to the battle or observed a manual
+start. `TOURNAMENT_RESULTS` repeats the cancellation as a terminal fail-safe.
+The cancelled result is non-actionable: it cannot carry validation work across
+the completed Tournament into the next Home boundary. An attached ordinary
+battle does not cancel the request, because validation may still run at the
+following verified Home `NEW_BATTLE` before any Tournament begins.
+
 At verified Home `NEW_BATTLE`, the profile first completes every declared
 no-battle check: Tournament Cards, the Demon Mode/Nuke recharge activation
 modes, Tourney Workshop, Amplify Bots, Attack/Ally/Scout Guardians, the
@@ -652,18 +661,22 @@ not run an independent or continuous floating-gem handler. No Tournament
 battle gains validation-battle Surrender authority.
 
 Automatic validation of an already-running Tournament does not use the
-exclusive validation receipt. Without Home boundary evidence, it first
-inspects Cards, Ultimate Weapons, Modules, Bots, and Guardians in battle.
-Workshop is the only check that takes resumable Exit Battle → Go Home. Once
-that inventory pass reaches a conclusive result, the explicitly
+exclusive validation receipt. Any still-pending pre-Tournament request is
+cancelled before attachment work begins. Without Home boundary evidence, the
+runtime inspects Cards, Ultimate Weapons, Modules, Bots, and Guardians in
+battle. It never invokes Exit Battle → Go Home → Resume Battle. Exact bound
+save evidence may satisfy the Home-only Workshop preset check; without that
+evidence, Workshop is recorded explicitly as deferred rather than observed or
+waived. A future attachment-safe save acquisition may fill that deferral
+without changing this in-battle-only authority. Once that inventory pass
+reaches a conclusive result, the explicitly
 `run_when_attached` battle-only rules enforce Damage Slider `100%` and the
 configured Orb Distance for an authoritative configured Attack Range; a
 readable unconfigured Range is preserved without opening Distance Adjuster.
 The attachment path never selects a Home preset, equips a loadout, requests
-Home repair, or gains Surrender authority, and it must verify that Resume
-returns to the same Tournament. The separate guarded process-reload workflow
-retains its explicit `next_run` compatibility policy; it is not the user-facing
-validation choice.
+Home repair, or gains Surrender authority. The separate guarded process-reload
+workflow retains its explicit `next_run` compatibility policy; it is not the
+user-facing validation choice.
 A mismatch is retained as session evidence but cannot request Home repair or
 block result capture. Observation-only mismatches complete the one-shot pass
 without an operator decision or run-scoped waiver; they cannot make the

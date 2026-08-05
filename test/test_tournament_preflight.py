@@ -74,6 +74,67 @@ def test_complete_tournament_fixture_set_passes_every_requirement():
     assert evidence.ultimate_weapons.valid
 
 
+def test_attached_tournament_can_defer_home_only_workshop_evidence():
+    requirements = load_tournament_requirements()
+    evidence = validate_tournament_session_preflight_screens(
+        cards_screen=_load(TOURNAMENT_FIXTURES["cards"]),
+        workshop_screen=None,
+        bots_screen=_load(TOURNAMENT_FIXTURES["bots"]),
+        guardians_screen=_load(TOURNAMENT_FIXTURES["guardians"]),
+        modules_screen=_load(TOURNAMENT_FIXTURES["modules"]),
+        module_requirements=requirements["modules"],
+        module_mode=requirements["loadout_policies"]["modules"],
+        ultimate_requirements=requirements["ultimate_weapons"],
+        ultimate_observations=_ultimate_observations(requirements),
+        deferred_checks=("workshop_preset",),
+    )
+
+    assert evidence.valid
+    assert not evidence.configuration.valid
+    assert not evidence.configuration.workshop.valid
+    assert evidence.configuration.workshop.detected_state == "DEFERRED"
+    assert evidence.deferred_checks == ("workshop_preset",)
+    assert evidence.failed_checks == ()
+    assert not evidence.requires_no_battle_repair
+    payload = evidence.as_dict()
+    assert payload["configuration"]["blocking_valid"] is True
+    assert payload["deferred_checks"] == ["workshop_preset"]
+    assert payload["failed_checks"] == []
+
+
+def test_attached_tournament_accepts_exact_bound_workshop_save_evidence():
+    requirements = load_tournament_requirements()
+    evidence = validate_tournament_session_preflight_screens(
+        cards_screen=_load(TOURNAMENT_FIXTURES["cards"]),
+        workshop_screen=None,
+        bots_screen=_load(TOURNAMENT_FIXTURES["bots"]),
+        guardians_screen=_load(TOURNAMENT_FIXTURES["guardians"]),
+        modules_screen=_load(TOURNAMENT_FIXTURES["modules"]),
+        module_requirements=requirements["modules"],
+        module_mode=requirements["loadout_policies"]["modules"],
+        ultimate_requirements=requirements["ultimate_weapons"],
+        ultimate_observations=_ultimate_observations(requirements),
+        accepted_sections={
+            "workshop": {
+                "disposition": "save_match",
+                "source": "bound_player_save_preflight",
+            }
+        },
+    )
+
+    assert evidence.valid
+    assert evidence.configuration.valid
+    assert evidence.configuration.workshop.valid
+    assert evidence.deferred_checks == ()
+    assert evidence.failed_checks == ()
+    assert evidence.as_dict()["configuration"]["save_backed_sections"] == {
+        "workshop": {
+            "disposition": "save_match",
+            "source": "bound_player_save_preflight",
+        }
+    }
+
+
 def test_confident_tournament_module_variation_is_observed_without_failing():
     fixtures = {**TOURNAMENT_FIXTURES, "modules": FARM_FIXTURES["modules"]}
     evidence = _validate(fixtures)

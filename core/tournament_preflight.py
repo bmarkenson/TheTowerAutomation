@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 import yaml
 
@@ -279,6 +279,8 @@ def validate_tournament_session_preflight_screens(
     waivers: Mapping[str, Any] | None = None,
     configuration_boundary_evidence: Mapping[str, Any] | None = None,
     module_boundary_evidence: Mapping[str, Any] | None = None,
+    accepted_sections: Mapping[str, Mapping[str, Any]] | None = None,
+    deferred_checks: Sequence[Any] | None = None,
 ) -> GcSessionPreflightEvidence:
     """Validate Tournament presets, loadouts, and controls without Perks."""
 
@@ -301,6 +303,8 @@ def validate_tournament_session_preflight_screens(
         waivers=waivers,
         configuration_boundary_evidence=configuration_boundary_evidence,
         module_boundary_evidence=module_boundary_evidence,
+        accepted_sections=accepted_sections,
+        deferred_checks=deferred_checks,
     )
 
 

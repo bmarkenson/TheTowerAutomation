@@ -192,6 +192,7 @@ rules:
     validator: tournament
     allow_repair: false
     mismatch_policy: notify
+    stay_in_battle_when_attached: true
     requirements:
       cards_deck: Tournament
       card_recharge_modes:

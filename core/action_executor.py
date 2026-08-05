@@ -661,6 +661,11 @@ def execute_actions(
                         preflight_kwargs["player_save_preflight"] = (
                             save_coordinator
                         )
+                if (
+                    act.get("stay_in_battle_when_attached") is True
+                    and ctx.data.get("startup_gates_deferred") is True
+                ):
+                    preflight_kwargs["stay_in_battle"] = True
                 if validator == "tournament":
                     result = run_read_only_gc_preflight(
                         effective_requirements,

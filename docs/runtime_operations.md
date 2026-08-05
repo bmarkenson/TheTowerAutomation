@@ -933,10 +933,14 @@ Battle**. The status panel then reports either readiness and a
 Tournament-launch prompt or the validation failure reason.
 
 Each later explicit Tournament selection or managed Start creates a new
-request. Restarting an unattended runtime does not: a claimed, running, or
-cleanup receipt owned by the former process is failed without a tap or
-Surrender. A changed plan fingerprint likewise requires another explicit
-selection.
+request. If fresh runtime evidence instead shows that a Tournament is already
+running, the unclaimed request is cancelled immediately because validation is
+valid only before Tournament start. Tournament Results performs the same
+fail-safe cancellation, so no validation remains planned after that
+Tournament. Restarting an unattended runtime does not recreate owned work: a
+claimed, running, or cleanup receipt owned by the former process is failed
+without a tap or Surrender. A changed plan fingerprint likewise requires
+another explicit selection.
 
 After readiness, review the reminder to set Target Priorities to suit the
 current Tournament Battle Conditions when the battle begins. Those controls
@@ -983,15 +987,23 @@ does not reuse it. Attachment checks are read-only unless the profile
 explicitly declares a guarded battle-only `run_when_attached` action.
 Tournament uses that contract to enforce Damage Slider `100%` and its
 configured Orb Distance after the read-only inventory pass; it does not select
-Home presets, equip loadouts, restart, or Surrender the battle. If another
-profile's read-only validation finds a Home-repairable mismatch, the decision
-dialog may offer **Restart battle and repair setup**; only selecting that
-response authorizes the guarded repair route. At verified Home **New Battle**,
-the selection is ignored and normal pre-battle checks run without asking.
+Home presets, equip loadouts, restart, or Surrender the battle. Its attached
+inventory route is strictly in-battle: it never uses Exit Battle → Go Home →
+Resume Battle. The Home-only Workshop preset is accepted from exact bound save
+evidence when available and otherwise appears as an explicit deferred check;
+it is not reported as observed or waived. If another profile's read-only
+validation finds a Home-repairable mismatch, the decision dialog may offer
+**Restart battle and repair setup**; only selecting that response authorizes
+the guarded repair route. At verified Home **New Battle**, the selection is
+ignored and normal pre-battle checks run without asking.
 Attachment state survives transient Unknown screens and Home `RESUME_BATTLE`.
 It ends at Game Over, Tournament Results, or verified Home `NEW_BATTLE`;
 the following battle then performs the real gates. Do not select this for a
 process that is expected to configure a newly started battle immediately.
+For an attached Tournament, fresh Tournament identity also cancels the
+unclaimed pre-Tournament validation request created by managed Start. That
+request is never deferred until after the current Tournament; Tournament
+Results repeats the cancellation if active-battle identity was not observed.
 
 For a checked-in Python update during a running battle, prefer **Reload
 automation for current battle** over a separate Stop/Start sequence. The

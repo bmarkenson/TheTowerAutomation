@@ -203,6 +203,7 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
                         "validator": "tournament",
                         "allow_repair": False,
                         "mismatch_policy": "notify",
+                        "stay_in_battle_when_attached": True,
                         "requirements": copy.deepcopy(requirements),
                     }
                 ],

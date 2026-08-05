@@ -1638,6 +1638,44 @@ class App:
             self._announce_exclusive_validation_result(result)
         return result
 
+    def _cancel_pending_tournament_validation_after_boundary(
+        self,
+        detection: Mapping[str, object],
+    ) -> bool:
+        """Retire pre-Tournament work once the Tournament has started or ended."""
+
+        state = str(detection.get("state") or "").upper()
+        if self._tournament_battle_guard(detection):
+            reason = (
+                "the Tournament was already running when automation observed it; "
+                "validation applies only before a Tournament begins"
+            )
+        elif state == "TOURNAMENT_RESULTS":
+            reason = (
+                "Tournament Results prove that the Tournament already completed; "
+                "validation applies only before a Tournament begins"
+            )
+        else:
+            return False
+
+        receipt = self._reconcile_exclusive_validation()
+        if (
+            not isinstance(receipt, Mapping)
+            or str(receipt.get("status") or "") != "pending"
+        ):
+            return False
+        result = self._supervisor.finish_exclusive_validation(
+            str(receipt.get("request_id") or ""),
+            outcome="cancelled",
+            reason=reason,
+            allowed_statuses=("pending",),
+        )
+        if result is None:
+            return False
+        self._active_exclusive_validation_request_id = None
+        self._announce_exclusive_validation_result(result)
+        return True
+
     def _prepare_exclusive_validation_home_request(
         self,
         definition: ExclusiveValidationDefinition,
@@ -1969,6 +2007,15 @@ class App:
                 f"Tournament validation complete — {definition.ready_message}",
                 detail=(
                     f"[TOURNAMENT_VALIDATION] result=ready "
+                    f"request_id={receipt.get('request_id')} reason={reason}"
+                ),
+            )
+            return
+        if outcome == "cancelled":
+            log_result(
+                "No Tournament validation is planned — " + reason,
+                detail=(
+                    f"[TOURNAMENT_VALIDATION] result=cancelled "
                     f"request_id={receipt.get('request_id')} reason={reason}"
                 ),
             )
@@ -2343,13 +2390,21 @@ class App:
                     console=True,
                 )
         elif validation_status == "result":
-            log(
-                "[TOURNAMENT_VALIDATION_FAILED] "
-                f"{definition.failure_prefix}: "
-                f"{validation_reason or 'reason unavailable'}",
-                "ERROR",
-                console=True,
-            )
+            if validation_outcome == "cancelled":
+                log(
+                    "[TOURNAMENT_VALIDATION] No validation is planned — "
+                    f"{validation_reason or 'the request was cancelled'}",
+                    "INFO",
+                    console=True,
+                )
+            else:
+                log(
+                    "[TOURNAMENT_VALIDATION_FAILED] "
+                    f"{definition.failure_prefix}: "
+                    f"{validation_reason or 'reason unavailable'}",
+                    "ERROR",
+                    console=True,
+                )
         elif requirements_pending:
             log(
                 "[TOURNAMENT_VALIDATION] Home preflight is pending; the ordinary "
@@ -3055,6 +3110,9 @@ class App:
                 # authority. No overlay handler, recovery tap, mission action,
                 # or blind tapper may run before this gate clears.
                 battle_started = self._mission_mgr.maybe_run_start(detection)
+                self._cancel_pending_tournament_validation_after_boundary(
+                    detection
+                )
                 if battle_started is True:
                     self._activation_tracker().reset()
                     self._perk_timeline().reset(fresh_battle=True)

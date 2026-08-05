@@ -78,7 +78,8 @@ def _log_gc_preflight_workflow(func):
             ),
             detail=(
                 f"[GC_PREFLIGHT] requirements={sorted(requirements)} "
-                f"uses_home_evidence={kwargs.get('no_battle_setup_evidence') is not None}"
+                f"uses_home_evidence={kwargs.get('no_battle_setup_evidence') is not None} "
+                f"stay_in_battle={kwargs.get('stay_in_battle') is True}"
             ),
         )
         try:
@@ -666,13 +667,19 @@ def run_read_only_gc_preflight(
     no_battle_setup_evidence: Optional[Mapping[str, Any]] = None,
     free_upgrade_lock_boundary_evidence: Optional[Mapping[str, Any]] = None,
     player_save_preflight: Any = None,
+    stay_in_battle: bool = False,
     detect_home_control_fn: HomeControlDetector = detect_home_battle_control,
     sleep_fn: Callable[[float], None] = time.sleep,
     validate_fn: Callable[
         ..., GcSessionPreflightEvidence
     ] = validate_gc_session_preflight_screens,
 ) -> GcLivePreflightResult:
-    """Verify GC requirements, apply safe in-run corrections, and return."""
+    """Verify session requirements and return to the original battle.
+
+    When ``stay_in_battle`` is true, the route never invokes the resumable game
+    Home path. Any Home-only Workshop preset check is reported as deferred
+    unless complete boundary evidence was already supplied.
+    """
 
     route_completed = False
     try:
@@ -1240,60 +1247,86 @@ def run_read_only_gc_preflight(
             sleep_fn=sleep_fn,
         )
 
-        # The Workshop preset remains an active session requirement, so it is
-        # inspected through the verified resumable Home route. Free Upgrade
-        # locks are deliberately excluded: only NEW_BATTLE no-battle setup can
-        # inspect or enforce them authoritatively.
-        if not go_home_fn():
-            _capture_detection(capture_fn, detector)
-            raise _NavigationFailure("guarded Go Home failed")
-        home = _wait_for(
-            state="HOME_SCREEN",
-            capture_fn=capture_fn,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
-        _verify_active_home(home, detect_home_control_fn)
+        accepted_sections: dict[str, dict[str, Any]] = {}
+        deferred_checks: tuple[str, ...] = ()
+        workshop = None
+        if stay_in_battle:
+            # Attached validation must not leave the current battle merely to
+            # inspect a Home-only preset. Consume exact save evidence only when
+            # it is already bound to this active run; otherwise defer the check.
+            expected_workshop = str(
+                requirements.get("workshop_preset") or ""
+            ).strip()
+            carried_workshop = (
+                consume_save("workshop_preset")
+                if expected_workshop and callable(consume_save)
+                else None
+            )
+            if (
+                expected_workshop
+                and str(carried_workshop or "").strip()
+                == expected_workshop
+            ):
+                accepted_sections["workshop"] = {
+                    "disposition": "save_match",
+                    "source": "bound_player_save_preflight",
+                }
+            else:
+                deferred_checks = ("workshop_preset",)
+        else:
+            # A normal session preflight may inspect the Workshop preset through
+            # the verified resumable Home route. Free Upgrade locks remain
+            # exclusive to NEW_BATTLE no-battle setup.
+            if not go_home_fn():
+                _capture_detection(capture_fn, detector)
+                raise _NavigationFailure("guarded Go Home failed")
+            home = _wait_for(
+                state="HOME_SCREEN",
+                capture_fn=capture_fn,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
+            _verify_active_home(home, detect_home_control_fn)
 
-        _guarded_static_tap(
-            "navigation.goto_workshop_home",
-            allowed_states={"HOME_SCREEN"},
-            capture_fn=capture_fn,
-            detector=detector,
-            safe_tap_fn=safe_tap_fn,
-        )
-        workshop = _wait_for(
-            state="WORKSHOP",
-            capture_fn=capture_fn,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
-        _guarded_static_tap(
-            "navigation.goto_home",
-            allowed_states={"WORKSHOP"},
-            capture_fn=capture_fn,
-            detector=detector,
-            safe_tap_fn=safe_tap_fn,
-        )
-        home = _wait_for(
-            state="HOME_SCREEN",
-            capture_fn=capture_fn,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
-        _verify_active_home(home, detect_home_control_fn)
-        _guarded_resume_battle(
-            capture_fn=capture_fn,
-            detector=detector,
-            safe_tap_fn=safe_tap_fn,
-            detect_home_control_fn=detect_home_control_fn,
-        )
-        _wait_for(
-            state="RUNNING",
-            capture_fn=capture_fn,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
+            _guarded_static_tap(
+                "navigation.goto_workshop_home",
+                allowed_states={"HOME_SCREEN"},
+                capture_fn=capture_fn,
+                detector=detector,
+                safe_tap_fn=safe_tap_fn,
+            )
+            workshop = _wait_for(
+                state="WORKSHOP",
+                capture_fn=capture_fn,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
+            _guarded_static_tap(
+                "navigation.goto_home",
+                allowed_states={"WORKSHOP"},
+                capture_fn=capture_fn,
+                detector=detector,
+                safe_tap_fn=safe_tap_fn,
+            )
+            home = _wait_for(
+                state="HOME_SCREEN",
+                capture_fn=capture_fn,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
+            _verify_active_home(home, detect_home_control_fn)
+            _guarded_resume_battle(
+                capture_fn=capture_fn,
+                detector=detector,
+                safe_tap_fn=safe_tap_fn,
+                detect_home_control_fn=detect_home_control_fn,
+            )
+            _wait_for(
+                state="RUNNING",
+                capture_fn=capture_fn,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
         route_completed = True
 
         validation_args = dict(
@@ -1309,6 +1342,10 @@ def run_read_only_gc_preflight(
             ultimate_observations=ultimate_observations,
             detector=detector,
         )
+        if deferred_checks:
+            validation_args["deferred_checks"] = deferred_checks
+        if accepted_sections:
+            validation_args["accepted_sections"] = accepted_sections
         waivers = requirements.get("_gate_waivers")
         if isinstance(waivers, Mapping) and waivers:
             validation_args["waivers"] = dict(waivers)

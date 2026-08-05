@@ -257,10 +257,12 @@ Every explicit Tournament selection or Start with Tournament selected creates
 one durable validation request. The panel reports Home preflight, ownership of
 the one ordinary New Battle used for battle-only checks, cleanup, and the
 terminal readiness or failure reason. Validation itself never enters or starts
-the Tournament. Once ready, the app opens **Tournament is ready** and reminds
-you to set Target Priorities for the current Tournament Battle Conditions when
-the battle begins. Target Priorities are not yet inspected or changed
-automatically.
+the Tournament. If the runtime observes that a Tournament is already running,
+it cancels the unclaimed request rather than carrying validation past that
+battle; Tournament Results repeats the same fail-safe. Once ready, the app
+opens **Tournament is ready** and reminds you to set Target Priorities for the
+current Tournament Battle Conditions when the battle begins. Target Priorities
+are not yet inspected or changed automatically.
 
 **Start Tournament** performs lightweight current-receipt, configuration,
 runtime, and screen checks, then authorizes one verified Tournament launch; it
@@ -527,7 +529,10 @@ preflight warning. **Pause for manual changes** persists Pause without ending
 the Tournament, **Retry the read-only check** captures fresh evidence, and
 **Continue despite...** waives only the displayed mismatch for the current
 run. **Decide later** leaves the warning pending while Tournament result
-observation continues.
+observation continues. The attached Tournament check remains strictly inside
+the battle; it never uses Exit Battle → Go Home → Resume Battle. Its Home-only
+Workshop preset is reported as deferred unless exact bound save evidence is
+already available.
 
 Recent Activity refreshes independently once per second, follows the newest
 entry, and defaults to the concise `ACTION`, `RESULT`, `WARN`, `ERROR`, and
@@ -622,14 +627,16 @@ Attachment is automatic when Start first finds an active battle or Home
 **Resume Battle**. The Process tab offers two explicit choices:
 **Validate current battle if attached** runs one read-only strategy check;
 **Skip checks for current battle** suppresses all strategy setup checks for
-that battle. A repairable validation mismatch offers **Restart battle and
-repair setup**, but does not restart or change configuration unless the
-operator chooses it. At verified Home **New Battle**, this choice is ignored
-and normal pre-battle checks always run. Game Over, Tournament Results, or a
-verified Home **New Battle** boundary clears the attached-battle choice so the
-following battle performs complete gates. Both Start actions persist the
-strategy currently visible in the Strategy dropdown before launching the Linux
-process.
+that battle. Tournament validation on this attachment path never leaves the
+battle for the game Home screen; its Workshop preset check uses exact bound
+save evidence or remains explicitly deferred. A repairable validation mismatch
+offers **Restart battle and repair setup**, but does not restart or change
+configuration unless the operator chooses it. At verified Home **New Battle**,
+this choice is ignored and normal pre-battle checks always run. Game Over,
+Tournament Results, or a verified Home **New Battle** boundary clears the
+attached-battle choice so the following battle performs complete gates. Both
+Start actions persist the strategy currently visible in the Strategy dropdown
+before launching the Linux process.
 
 The managed runtime ADB port, bundled strategy, and startup-gate policy share
 the Linux environment file while remaining independent settings. The Process

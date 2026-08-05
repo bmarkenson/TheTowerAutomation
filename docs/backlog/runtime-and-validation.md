@@ -140,6 +140,13 @@ checked-item detail remains in the
     cost and staleness tolerance, then validate and adopt one independent claim
     at a time. Enforcement, mutation confirmation, and transition authority
     remain visual.
+  - [ ] Bind exact-version Workshop-preset save evidence to an already-active
+    Tournament attachment without game-Home or Android-Home input. Require a
+    stable read, exact target/version, selected Strategy fingerprint, and
+    authoritative active-run identity; stale, ambiguous, or unsupported saves
+    leave `workshop_preset` explicitly deferred while the in-battle checks
+    continue. This must not broaden attachment authority or reintroduce Exit
+    Battle → Go Home → Resume Battle.
   - [ ] Add any normal-runtime consumer of the observation-only polling and
     same-round audit cache only after its own matrix evidence is complete.
     Attachment, record construction, Perks-navigation decisions, Strategy
