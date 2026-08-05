@@ -702,19 +702,10 @@ def run_read_only_gc_preflight(
             if isinstance(no_battle_setup_evidence, Mapping)
             else None
         )
-        configuration_save_backed = bool(
-            isinstance(configuration_boundary_evidence, Mapping)
-            and configuration_boundary_evidence.get("save_backed_sections")
-        )
         module_boundary_evidence = (
             no_battle_setup_evidence.get("modules")
             if isinstance(no_battle_setup_evidence, Mapping)
             else None
-        )
-        module_boundary_save_backed = bool(
-            isinstance(module_boundary_evidence, Mapping)
-            and module_boundary_evidence.get("source")
-            == "bound_player_save_preflight"
         )
         ultimate_boundary_observations = _home_ultimate_weapon_observations(
             no_battle_setup_evidence
@@ -737,12 +728,21 @@ def run_read_only_gc_preflight(
             )
         )
         free_upgrade_lock_requirements = requirements.get("free_upgrade_locks")
-        free_upgrade_lock_save_backed = bool(
-            isinstance(free_upgrade_lock_boundary_evidence, Mapping)
-            and free_upgrade_lock_boundary_evidence.get("source")
-            == "bound_player_save_preflight"
+        record_save_ui_verification = getattr(
+            player_save_preflight,
+            "record_ui_verification",
+            None,
         )
-        save_snapshot_invalidated = False
+
+        def record_ui_verification(check_id: str, *, changed: bool) -> None:
+            if callable(record_save_ui_verification) and (
+                record_save_ui_verification(check_id, changed=changed) is False
+            ):
+                raise _NavigationFailure(
+                    "trusted player-save evidence contradicted current UI for "
+                    f"{check_id}"
+                )
+
         _wait_for(
             state="RUNNING",
             capture_fn=capture_fn,
@@ -801,15 +801,10 @@ def run_read_only_gc_preflight(
                 sleep_fn=sleep_fn,
                 measure_fn=measure_auto_pick_fn,
             )
-            if (
-                not auto_pick_before.enabled
-                and callable(getattr(player_save_preflight, "invalidate", None))
-            ):
-                player_save_preflight.invalidate("in_battle_auto_pick_repair")
-            if not auto_pick_before.enabled:
-                save_snapshot_invalidated = True
-                if ultimate_boundary_save_backed:
-                    ultimate_boundary_observations = {}
+            record_ui_verification(
+                "auto_pick_perks",
+                changed=not auto_pick_before.enabled,
+            )
             _guarded_visible_tap(
                 "buttons.close:perks",
                 allowed_states={"PERKS"},
@@ -828,7 +823,14 @@ def run_read_only_gc_preflight(
             label: dict(toggles)
             for label, toggles in ultimate_boundary_observations.items()
         }
-        ui_ultimate_observations: dict[str, dict[str, str]] = {}
+        save_ultimate_observations: dict[str, dict[str, str]] = (
+            {
+                label: dict(toggles)
+                for label, toggles in ultimate_boundary_observations.items()
+            }
+            if ultimate_boundary_save_backed
+            else {}
+        )
         consume_save = getattr(player_save_preflight, "consume", None)
         carried_primaries = (
             consume_save("ultimate_weapon_primaries")
@@ -844,6 +846,15 @@ def run_read_only_gc_preflight(
                             for toggle, state in toggles.items()
                         }
                     )
+                    save_ultimate_observations.setdefault(
+                        str(label),
+                        {},
+                    ).update(
+                        {
+                            str(toggle): str(state)
+                            for toggle, state in toggles.items()
+                        }
+                    )
         carried_stun = (
             consume_save("poison_swamp_stun")
             if callable(consume_save)
@@ -853,6 +864,9 @@ def run_read_only_gc_preflight(
             ultimate_observations.setdefault("Poison Swamp", {})["stun"] = (
                 str(carried_stun)
             )
+            save_ultimate_observations.setdefault("Poison Swamp", {})[
+                "stun"
+            ] = str(carried_stun)
         carried_missiles = (
             consume_save("spotlight_missiles")
             if callable(consume_save)
@@ -860,10 +874,20 @@ def run_read_only_gc_preflight(
         )
         if carried_missiles == "on":
             ultimate_observations.setdefault("Spotlight", {})["missiles"] = "on"
+            save_ultimate_observations.setdefault("Spotlight", {})[
+                "missiles"
+            ] = "on"
         ultimate_ui_required = not _ultimate_observations_complete(
             ultimate_requirements,
             ultimate_observations,
         )
+        normalized_save_ultimate_observations = {
+            str(label).strip().casefold(): {
+                str(toggle).strip().casefold(): str(state).strip().casefold()
+                for toggle, state in toggles.items()
+            }
+            for label, toggles in save_ultimate_observations.items()
+        }
         if ultimate_ui_required:
             _select_running_menu(
                 "navigation.goto_uw",
@@ -919,8 +943,45 @@ def run_read_only_gc_preflight(
                 for box in (column or [])
             ]
             visible_observations = merge_ultimate_weapon_observations(visible)
+            contradiction_checks: set[str] = set()
             for label, toggles in visible_observations.items():
-                ui_ultimate_observations.setdefault(label, {}).update(toggles)
+                normalized_label = str(label).strip().casefold()
+                saved_toggles = normalized_save_ultimate_observations.get(
+                    normalized_label,
+                    {},
+                )
+                for toggle, state in toggles.items():
+                    normalized_toggle = str(toggle).strip().casefold()
+                    normalized_state = str(state).strip().casefold()
+                    saved_state = saved_toggles.get(normalized_toggle)
+                    if saved_state is None or saved_state == normalized_state:
+                        continue
+                    if normalized_toggle == "primary":
+                        contradiction_checks.add("ultimate_weapon_primaries")
+                    elif normalized_label == "poison swamp" and (
+                        normalized_toggle == "stun"
+                    ):
+                        contradiction_checks.add("poison_swamp_stun")
+                    elif normalized_label == "spotlight" and (
+                        normalized_toggle == "missiles"
+                    ):
+                        contradiction_checks.add("spotlight_missiles")
+            if contradiction_checks:
+                invalidate = getattr(player_save_preflight, "invalidate", None)
+                if callable(invalidate):
+                    invalidate("save_ui_contradiction")
+                log(
+                    "[PLAYER_SAVE_PREFLIGHT] Current Ultimate Weapon UI "
+                    "contradicted accepted save evidence: checks="
+                    f"{sorted(contradiction_checks)}",
+                    "ERROR",
+                    console=True,
+                )
+                raise _NavigationFailure(
+                    "accepted player-save Ultimate Weapon evidence "
+                    "contradicted current UI"
+                )
+            for label, toggles in visible_observations.items():
                 ultimate_observations.setdefault(label, {}).update(toggles)
             poison_boxes = [
                 box
@@ -949,36 +1010,10 @@ def run_read_only_gc_preflight(
                     {},
                 )["stun"] = result.evidence.state.value
                 poison_swamp_stun_observed = True
-                if (
-                    result.changed
-                    and callable(
-                        getattr(player_save_preflight, "invalidate", None)
-                    )
-                ):
-                    player_save_preflight.invalidate(
-                        "in_battle_poison_stun_repair"
-                    )
-                if result.changed:
-                    save_snapshot_invalidated = True
-                    if ultimate_boundary_save_backed:
-                        ultimate_boundary_observations = {}
-                    # A mutation ends the authority of every pre-action save
-                    # observation.  Preserve only independently acquired Home
-                    # UI proof plus values actually seen on this UW route.
-                    ultimate_observations = {
-                        label: dict(toggles)
-                        for label, toggles in (
-                            ultimate_boundary_observations.items()
-                        )
-                    }
-                    for label, toggles in ui_ultimate_observations.items():
-                        ultimate_observations.setdefault(label, {}).update(
-                            toggles
-                        )
-                    ultimate_observations.setdefault(
-                        poison_swamp_label or "Poison Swamp",
-                        {},
-                    )["stun"] = result.evidence.state.value
+                record_ui_verification(
+                    "poison_swamp_stun",
+                    changed=result.changed,
+                )
                 log(
                     "[GC_PREFLIGHT] Poison Swamp Stun verified "
                     f"{poison_swamp_stun_required}"
@@ -996,21 +1031,6 @@ def run_read_only_gc_preflight(
             if position < 5:
                 swipe_fn("towards_bottom", "medium")
                 sleep_fn(0.5)
-
-        if save_snapshot_invalidated:
-            if configuration_save_backed:
-                configuration_boundary_evidence = None
-            if free_upgrade_lock_save_backed:
-                free_upgrade_lock_boundary_evidence = None
-            if module_boundary_save_backed:
-                module_boundary_evidence = None
-            use_no_battle_evidence = bool(
-                isinstance(configuration_boundary_evidence, Mapping)
-                and (
-                    module_mode == "preserve"
-                    or isinstance(module_boundary_evidence, Mapping)
-                )
-            )
 
         cards = None
         if not use_no_battle_evidence:

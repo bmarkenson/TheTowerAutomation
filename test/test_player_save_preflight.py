@@ -192,6 +192,61 @@ def test_one_authoritative_snapshot_reconciles_all_checks(monkeypatch):
     assert result.provenance["save_version"] == {"data": 9, "game": 1073}
 
 
+def test_trusted_mismatch_queues_ui_without_erasing_unrelated_carry(monkeypatch):
+    coordinator = _coordinator(monkeypatch)
+
+    result = coordinator.acquire(
+        {"cards_deck": "Tournament", "auto_pick_perks": True},
+        initial_frame=object(),
+    )
+
+    assert result.accepted_checks == ("auto_pick_perks",)
+    assert result.trusted_mismatch_checks == ("cards_deck",)
+    assert result.decisions["cards_deck"]["disposition"] == "save_mismatch"
+    assert result.decisions["cards_deck"]["repair_queued"] is True
+    assert result.carry is not None
+    assert result.carry.values == {"auto_pick_perks": True}
+
+    assert coordinator.record_ui_verification("cards_deck", changed=True)
+    assert coordinator.record_ui_verification("cards_deck", changed=False)
+    assert coordinator.ui_verified_checks == {
+        "cards_deck": "ui_verified_repair"
+    }
+    assert result.carry.values == {"auto_pick_perks": True}
+    assert "cards_deck" not in result.carry.values
+
+    assert coordinator.mark_runtime_launch(
+        control=HomeBattleControl.NEW_BATTLE,
+        action_authorized=True,
+        dispatched=True,
+    )
+    assert coordinator.bind_running(
+        battle_started=True,
+        stable_running=True,
+        action_authorized=True,
+    )
+    assert coordinator.consume("auto_pick_perks") is True
+
+
+def test_save_mismatch_ui_already_matches_invalidates_snapshot(monkeypatch):
+    coordinator = _coordinator(monkeypatch)
+    result = coordinator.acquire(
+        {"cards_deck": "Tournament", "auto_pick_perks": True},
+        initial_frame=object(),
+    )
+    assert result.carry is not None
+
+    assert not coordinator.record_ui_verification(
+        "cards_deck",
+        changed=False,
+    )
+
+    assert coordinator.snapshot_invalidated
+    assert result.carry.state is CarriedEvidenceState.INVALIDATED
+    assert result.carry.values == {}
+    assert result.carry.invalidation_reason == "save_ui_contradiction"
+
+
 def test_observation_only_modules_are_accepted_and_carried(monkeypatch):
     expected = {
         "cannon_primary": "Amplifying Strike",

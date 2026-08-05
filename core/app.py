@@ -3833,8 +3833,11 @@ class App:
             )
             carry = coordinator.carry if coordinator is not None else None
             save_still_valid = bool(
-                carry is None
-                or carry.state is not CarriedEvidenceState.INVALIDATED
+                getattr(coordinator, "snapshot_invalidated", False) is not True
+                and (
+                    carry is None
+                    or carry.state is not CarriedEvidenceState.INVALIDATED
+                )
             )
             if save_preflight is not None and save_still_valid:
                 setup_kwargs["save_decisions"] = dict(
@@ -3844,6 +3847,15 @@ class App:
                     setup_kwargs["snapshot_invalidation_fn"] = (
                         coordinator.invalidate
                     )
+                    record_ui_verification = getattr(
+                        coordinator,
+                        "record_ui_verification",
+                        None,
+                    )
+                    if callable(record_ui_verification):
+                        setup_kwargs["save_ui_verification_fn"] = (
+                            record_ui_verification
+                        )
             setup = run_gc_no_battle_setup(requirements, **setup_kwargs)
             if (
                 setup.complete

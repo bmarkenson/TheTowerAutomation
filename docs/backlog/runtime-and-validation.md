@@ -26,10 +26,10 @@ checked-item detail remains in the
     the overall mapping `candidate`.
   - [x] Reuse the accepted version-1073 calibration to implement all eligible
     save-first configuration checks atomically. The guarded exact-target Home
-    acquisition now drives independent per-check UI omission/fallback, first
-    repair invalidation, exact-next-battle carry, and `save_first` / `force_ui`
-    / `comparison_audit` runtime policy without depending on the observation
-    collector. First Perk Choice is an independent Farm requirement;
+    acquisition now drives independent per-check UI omission/fallback, targeted
+    trusted-mismatch repair queues, exact-next-battle carry, and `save_first` /
+    `force_ui` / `comparison_audit` runtime policy without depending on the
+    observation collector. First Perk Choice is an independent Farm requirement;
     Tournament invents no Perk requirement. The adopted scope is the ranked
     Auto Pick prefix, the current three-lock Farm required subset, complete
     exact Target Priority order, both Poison Stun polarities,
@@ -49,6 +49,20 @@ checked-item detail remains in the
     fresh stable exact-target save. This reused coordinator-supplied evidence,
     performed no duplicate campaign, and was code-only; deployment and
     ordinary-boundary observation remain coordinator work.
+  - [x] Correct save-first repair reconciliation after the first
+    Tournament-to-Farm production transition. A complete validated exact
+    mismatch is now explicit `save_mismatch` evidence that queues only its own
+    existing guarded UI path. Cards repair therefore preserves accepted First
+    Perk Choice, Bans, Auto Pick order, other Home decisions, and unrelated
+    exact-next-battle carry. Verified Home, Target Priority, Poison Stun,
+    Damage Slider, and Orb Distance repairs no longer cause blanket carry
+    invalidation; the repaired check remains UI-proven and is not promoted into
+    save carry. Save/UI contradictions plus acquisition, serialization,
+    freshness, version/structure, ownership, boundary, context, control,
+    requirement, launch, and binding failures still invalidate globally.
+    Mixed save-backed and UI-repaired final validation remains fail-closed for
+    every supplied UI screen. This correction used fakes and retained fixtures
+    only; deployment and ordinary-boundary observation remain coordinator work.
   - [x] Consolidate every profile and runtime save claim into the authoritative
     `data-9-game-1073` audit matrix. Implement the repository-local
     normalized runtime foundation: guarded round identity, exact consistent

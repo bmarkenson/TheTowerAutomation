@@ -117,8 +117,10 @@ not inherit configuration or branch on a Farm strategy name.
 authority. A decoder is selected only by an exact `(dataVersion,
 versionNumber)` tuple and must also pass that mapping's root-class, required
 field, and array-length signature. Unknown tuples, changed signatures,
-incomplete mappings, stale snapshots, and save/profile differences all route
-the affected setting through its existing UI check.
+incomplete mappings, and stale snapshots are non-authoritative and route the
+affected setting through its existing UI check. A complete, validated, exact
+save/profile difference is instead a trusted mismatch: it queues only that
+check's guarded UI verification/repair path.
 
 Mappings have an explicit `candidate` or `validated` maturity and an exact
 per-check validation allowlist. A candidate mapping may supply authority only
@@ -133,10 +135,12 @@ The implemented Home-preflight decision is per check:
 
 ```text
 verified NEW_BATTLE -> proven app-pause flush -> stable exact-version pull
-    complete + allowlisted + matching -> accept the saved state; skip that UI route
-    otherwise                         -> run the existing UI check
-                                           |-- match: continue
-                                           `-- repair: verify in UI and invalidate the snapshot
+    global trust failure                 -> invalidate the snapshot; UI or block by failure class
+    complete + allowlisted + exact match -> accept the saved state; skip that UI route
+    complete + allowlisted + mismatch    -> queue only that check's existing UI path
+                                               |-- UI also mismatches: guarded repair + UI verify
+                                               `-- UI already matches: contradiction; invalidate
+    unsupported/incomplete/forced audit  -> run that check's existing UI path
 ```
 
 `PlayerSavePreflightCoordinator` owns that decision at an ordinary exact Home
@@ -210,18 +214,32 @@ remain mandatory. Runtime/preflight/activity identity, target generation,
 strategy and configuration fingerprint, action/control authority, launch dispatch, and
 first-RUNNING transition must all remain unchanged. Restart, attachment,
 unrelated Retry, manual/ambiguous launch, WAIT/Pause/Stop, target/configuration
-change, repair, or a later battle rejects every carried decision.
+change, a requirement change after acquisition, a save/UI contradiction, or a
+later battle rejects every carried decision. A verified independent Home or
+in-battle configuration repair does not reject unrelated carry.
 
-A pre-action snapshot never confirms the result of an input. The first UI
-repair is verified through fresh UI evidence and invalidates every remaining
-save decision; subsequent checks use UI unless a complete new guarded
-serialization is deliberately performed. Read-only inspection does not erase
-unrelated matches, while UI evidence from any screen that was actually opened
-still detects contradictions. Missing later-session screenshots are accepted
-only for the exact section/component carrying bound accepted provenance:
-`save_match`, or `save_observation` solely for observation-policy Modules.
-Neither disposition authorizes a tap, repair, lifecycle transition, battle
-start, attachment, terminal binding, dispatch, or strategy action.
+A pre-action snapshot never confirms the result of an input. The reconciliation
+plan is frozen before setup input as independent accepted matches/observations,
+trusted mismatches, and non-authoritative UI requirements. A trusted mismatch
+selects only its existing UI path; that path must independently observe the
+current value, establish a mismatch before mutation, repair under its normal
+guards, and verify the result. The repaired check is `ui_verified`, is not
+reclassified as save-confirmed, and is not added to save carry. Unrelated
+accepted decisions and carry survive verified Cards, Target Priority, Poison
+Swamp Stun, Damage Slider, Orb Distance, and other independent UI-only repairs.
+
+Global acquisition, serialization, freshness, version/structure, ownership,
+Home-boundary, context, control, launch/binding, and requirement-continuity
+failures still invalidate the complete snapshot. So does authoritative UI that
+contradicts a `save_match`, or UI that already matches a trusted saved mismatch
+before this coordinator repaired it. Final consistency may combine unchanged
+sections proven by accepted save evidence with repaired/inspected sections
+proven by current UI evidence. A supplied UI screen is always evaluated;
+missing screenshots are accepted only for the exact section/component carrying
+bound `save_match` provenance, or `save_observation` solely for
+observation-policy Modules. No disposition authorizes a tap, repair, lifecycle
+transition, battle start, attachment, terminal binding, dispatch, or strategy
+action.
 
 ADB acquisition requires two identical consecutive reads before decoding. The
 container size, gzip integrity, NRBF root, exact version identity, and

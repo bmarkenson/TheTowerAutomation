@@ -23,6 +23,7 @@ from core.home_battle import detect_home_battle_control
 from core.player_save import (
     PlayerSaveSnapshot,
     SAVE_ACCEPTED_DISPOSITIONS,
+    SAVE_MISMATCH_DISPOSITION,
     decode_player_save_bytes,
     pull_player_save_bytes,
     reconcile_requirements,
@@ -241,6 +242,26 @@ class PlayerSavePreflightResult:
             )
         )
 
+    @property
+    def trusted_mismatch_checks(self) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                check_id
+                for check_id, decision in self.decisions.items()
+                if decision.get("disposition") == SAVE_MISMATCH_DISPOSITION
+            )
+        )
+
+    @property
+    def ui_required_checks(self) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                check_id
+                for check_id, decision in self.decisions.items()
+                if decision.get("ui_required") is True
+            )
+        )
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "schema_version": 1,
@@ -254,6 +275,8 @@ class PlayerSavePreflightResult:
                 for key, value in sorted(self.decisions.items())
             },
             "accepted_checks": list(self.accepted_checks),
+            "trusted_mismatch_checks": list(self.trusted_mismatch_checks),
+            "ui_required_checks": list(self.ui_required_checks),
             "history_tail": dict(self.history_tail),
             "carry": self.carry.as_dict() if self.carry is not None else None,
         }
@@ -301,10 +324,24 @@ class PlayerSavePreflightCoordinator:
         self._decode_fn = decode_fn
         self._sleep_fn = sleep_fn
         self._carry: Optional[CarriedPlayerSaveEvidence] = None
+        self._decisions: dict[str, dict[str, Any]] = {}
+        self._ui_verified_checks: dict[str, str] = {}
+        self._snapshot_invalidation_reason = ""
 
     @property
     def carry(self) -> Optional[CarriedPlayerSaveEvidence]:
         return self._carry
+
+    @property
+    def snapshot_invalidated(self) -> bool:
+        return bool(self._snapshot_invalidation_reason)
+
+    @property
+    def ui_verified_checks(self) -> Mapping[str, str]:
+        return dict(self._ui_verified_checks)
+
+    def decision(self, check_id: str) -> Mapping[str, Any]:
+        return dict(self._decisions.get(str(check_id), {}))
 
     def acquire(
         self,
@@ -318,13 +355,28 @@ class PlayerSavePreflightCoordinator:
         if self._carry is not None:
             self._carry.invalidate("superseded_by_new_home_preflight")
             self._carry = None
+        self._decisions = {}
+        self._ui_verified_checks = {}
+        self._snapshot_invalidation_reason = ""
         provenance: dict[str, Any] = {
             "context": {"status": "not_acquired"},
             "serialization": "not_attempted",
             "freshness": "unverified",
+            "snapshot_trust": {
+                "status": "not_acquired",
+                "reason": "not_attempted",
+            },
         }
         if selected_mode == "force_ui":
             decisions = _all_ui_decisions(requested, "force_ui_policy")
+            provenance["snapshot_trust"] = {
+                "status": "not_acquired",
+                "reason": "force_ui_policy",
+            }
+            self._decisions = {
+                check_id: dict(decision)
+                for check_id, decision in decisions.items()
+            }
             return PlayerSavePreflightResult(
                 PlayerSavePreflightStatus.READY,
                 "force_ui_policy",
@@ -516,6 +568,14 @@ class PlayerSavePreflightCoordinator:
         provenance["freshness"] = "verified"
         if snapshot is None:
             decisions = _all_ui_decisions(requested, acquisition_reason)
+            provenance["snapshot_trust"] = {
+                "status": "invalidated",
+                "reason": acquisition_reason,
+            }
+            self._decisions = {
+                check_id: dict(decision)
+                for check_id, decision in decisions.items()
+            }
             return self._ready_result(
                 acquisition_reason,
                 selected_mode,
@@ -542,6 +602,16 @@ class PlayerSavePreflightCoordinator:
         decisions = {
             str(key): dict(value)
             for key, value in (plan.get("checks") or {}).items()
+        }
+        provenance["snapshot_trust"] = dict(
+            plan.get("snapshot_trust") or {
+                "status": "invalidated",
+                "reason": "snapshot_trust_unavailable",
+            }
+        )
+        self._decisions = {
+            check_id: dict(decision)
+            for check_id, decision in decisions.items()
         }
         history_observation = history_metadata_from_snapshot(
             snapshot,
@@ -580,17 +650,77 @@ class PlayerSavePreflightCoordinator:
             carry=carry,
         )
 
-    def invalidate(self, reason: str) -> None:
+    def invalidate(
+        self,
+        reason: str,
+        *,
+        check_ids: tuple[str, ...] = (),
+    ) -> None:
+        normalized_reason = str(reason or "continuity_invalidated")
+        first_invalidation = not self._snapshot_invalidation_reason
+        if first_invalidation:
+            self._snapshot_invalidation_reason = normalized_reason
         carry = self._carry
-        if carry is None:
-            return
-        carry.invalidate(reason)
-        log(
-            "[PLAYER_SAVE_PREFLIGHT] Carried evidence invalidated: "
-            f"reason={carry.invalidation_reason}",
-            "INFO",
-            console=True,
+        if carry is not None:
+            carry.invalidate(normalized_reason)
+        if first_invalidation:
+            log(
+                "[PLAYER_SAVE_PREFLIGHT] Snapshot authority invalidated: "
+                f"reason={normalized_reason} "
+                f"checks={sorted({str(value) for value in check_ids})} "
+                "remaining_accepted_carry=[]",
+                "WARN" if normalized_reason == "save_ui_contradiction" else "INFO",
+                console=True,
+            )
+
+    def record_ui_verification(
+        self,
+        check_id: str,
+        *,
+        changed: bool,
+    ) -> bool:
+        """Record normalized UI proof without promoting it into save carry.
+
+        A first inspection that finds a trusted saved mismatch already matching
+        is contradictory.  A later retry may find an unchanged value only when
+        this coordinator already recorded its own verified repair.
+        """
+
+        normalized = str(check_id)
+        decision = self._decisions.get(normalized, {})
+        trusted_mismatch = (
+            decision.get("disposition") == SAVE_MISMATCH_DISPOSITION
         )
+        prior_repair = self._ui_verified_checks.get(normalized) == (
+            "ui_verified_repair"
+        )
+        if trusted_mismatch and not changed and not prior_repair:
+            self.invalidate(
+                "save_ui_contradiction",
+                check_ids=(normalized,),
+            )
+            log(
+                "[PLAYER_SAVE_PREFLIGHT] UI contradicted the trusted saved "
+                f"mismatch: check={normalized} disposition=contradiction",
+                "ERROR",
+                console=True,
+            )
+            return False
+
+        status = "ui_verified_repair" if changed else "ui_verified"
+        if prior_repair and not changed:
+            status = "ui_verified_after_repair"
+        if changed or normalized not in self._ui_verified_checks:
+            self._ui_verified_checks[normalized] = status
+        log(
+            "[PLAYER_SAVE_PREFLIGHT] Current UI evidence recorded: "
+            f"check={normalized} disposition={status} "
+            f"save_disposition={decision.get('disposition') or 'none'} "
+            "carry_promoted=False remaining_accepted_carry="
+            f"{sorted(self._carry.values) if self._carry is not None else []}",
+            "INFO",
+        )
+        return True
 
     def mark_runtime_launch(
         self,
@@ -707,12 +837,22 @@ class PlayerSavePreflightCoordinator:
         operation_id: str,
     ) -> PlayerSavePreflightResult:
         self.invalidate(reason)
+        blocked_provenance = dict(provenance)
+        blocked_provenance["snapshot_trust"] = {
+            "status": "invalidated",
+            "reason": reason,
+        }
+        decisions = _all_ui_decisions(requested, reason)
+        self._decisions = {
+            check_id: dict(decision)
+            for check_id, decision in decisions.items()
+        }
         result = PlayerSavePreflightResult(
             PlayerSavePreflightStatus.BLOCKED,
             reason,
             mode,
-            _all_ui_decisions(requested, reason),
-            dict(provenance),
+            decisions,
+            blocked_provenance,
             False,
             _history_ui_decision(reason, safe_ui_fallback=False),
         )
@@ -741,10 +881,15 @@ class PlayerSavePreflightCoordinator:
             for check_id, decision in decisions.items()
             if decision.get("disposition") in SAVE_ACCEPTED_DISPOSITIONS
         )
+        trusted_mismatches = sorted(
+            check_id
+            for check_id, decision in decisions.items()
+            if decision.get("disposition") == SAVE_MISMATCH_DISPOSITION
+        )
         fallback = sorted(
             check_id
             for check_id, decision in decisions.items()
-            if decision.get("ui_required") is True
+            if decision.get("disposition") == "ui_required"
         )
         result = PlayerSavePreflightResult(
             PlayerSavePreflightStatus.READY,
@@ -786,7 +931,12 @@ class PlayerSavePreflightCoordinator:
             "reconciled",
             detail=(
                 f"[PLAYER_SAVE_PREFLIGHT] result=ready reason={reason} "
-                f"mode={mode} accepted={accepted} ui_fallback={fallback}"
+                f"mode={mode} "
+                "snapshot_trust="
+                f"{dict(provenance.get('snapshot_trust') or {})} "
+                f"accepted={accepted} "
+                f"trusted_mismatches={trusted_mismatches} "
+                f"ui_fallback={fallback}"
             ),
             operation_id=operation_id,
         )
@@ -830,6 +980,8 @@ def _all_ui_decisions(
             "mapping_id": None,
             "disposition": "ui_required",
             "reason": reason,
+            "snapshot_trusted": False,
+            "save_evidence_authoritative": False,
             "save_evidence_status": "unmapped",
             "matches": None,
             "observed": None,
@@ -838,6 +990,8 @@ def _all_ui_decisions(
             "save_requirement_supported": False,
             "diagnostics": {},
             "ui_required": True,
+            "ui_requirement_kind": "fallback",
+            "repair_queued": False,
             "fallback": "existing_ui_check",
         }
         for check_id in sorted(check_ids)

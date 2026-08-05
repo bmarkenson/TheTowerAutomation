@@ -1040,8 +1040,10 @@ def test_missing_required_free_upgrade_lock_retains_ui_fallback(monkeypatch):
 
     decision = plan["checks"]["free_upgrade_locks"]
     assert snapshot.checks["free_upgrade_locks"].status == "observed"
-    assert decision["disposition"] == "ui_required"
+    assert decision["disposition"] == "save_mismatch"
     assert decision["reason"] == "save_mismatch"
+    assert decision["ui_requirement_kind"] == "trusted_mismatch"
+    assert decision["repair_queued"] is True
     assert decision["fallback"] == "existing_ui_check"
 
 
@@ -1082,7 +1084,7 @@ def test_target_priority_order_mismatch_retains_ui_fallback(monkeypatch):
         freshness_verified=True,
     )["checks"]["target_priority"]
 
-    assert decision["disposition"] == "ui_required"
+    assert decision["disposition"] == "save_mismatch"
     assert decision["reason"] == "save_mismatch"
 
 
@@ -1232,7 +1234,7 @@ def test_tournament_variation_is_reported_without_enforcement(monkeypatch):
     assert observed["matches"] is False
     assert observed["observed"] == CURRENT_TOURNAMENT_MODULES
     assert observed["ui_required"] is False
-    assert enforced["disposition"] == "ui_required"
+    assert enforced["disposition"] == "save_mismatch"
     assert enforced["reason"] == "save_mismatch"
     rendered = json.dumps(snapshot.checks["modules"].as_dict())
     for private_marker in (
@@ -1546,6 +1548,35 @@ def test_candidate_mapping_can_use_only_validated_complete_fresh_checks(monkeypa
     assert plan["summary"]["save_matches"] == 3
 
 
+def test_mismatch_requires_global_trust_and_complete_validated_evidence(monkeypatch):
+    snapshot = _snapshot(monkeypatch)
+
+    unverified_freshness = reconcile_requirements(
+        snapshot,
+        {"cards_deck": "Tournament"},
+    )["checks"]["cards_deck"]
+    assert unverified_freshness["disposition"] == "ui_required"
+    assert unverified_freshness["reason"] == "save_freshness_unverified"
+    assert unverified_freshness["snapshot_trusted"] is False
+
+    incomplete_cards = replace(
+        snapshot.checks["cards_deck"],
+        complete=False,
+    )
+    incomplete_snapshot = replace(
+        snapshot,
+        checks={**snapshot.checks, "cards_deck": incomplete_cards},
+    )
+    incomplete = reconcile_requirements(
+        incomplete_snapshot,
+        {"cards_deck": "Tournament"},
+        freshness_verified=True,
+    )["checks"]["cards_deck"]
+    assert incomplete["disposition"] == "ui_required"
+    assert incomplete["reason"] == "save_evidence_incomplete"
+    assert incomplete["save_evidence_authoritative"] is False
+
+
 def test_auto_pick_enabled_requires_an_exact_boolean_true_requirement(monkeypatch):
     snapshot = _snapshot(monkeypatch)
 
@@ -1631,7 +1662,12 @@ def test_validated_mapping_can_skip_only_exact_complete_matches(monkeypatch):
 def test_mismatch_audit_and_staleness_each_restore_ui(monkeypatch):
     snapshot = replace(_snapshot(monkeypatch), mapping_maturity="validated")
 
-    mismatch = reconcile_requirements(snapshot, {"cards_deck": "Tournament"})
+    mismatch = reconcile_requirements(
+        snapshot,
+        {"cards_deck": "Tournament"},
+        freshness_verified=True,
+    )
+    assert mismatch["checks"]["cards_deck"]["disposition"] == "save_mismatch"
     assert mismatch["checks"]["cards_deck"]["reason"] == "save_mismatch"
 
     audit = reconcile_requirements(

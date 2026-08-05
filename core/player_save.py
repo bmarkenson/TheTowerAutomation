@@ -37,6 +37,8 @@ MAX_PLAYER_SAVE_BYTES = 512 * 1024
 MAX_DECOMPRESSED_SAVE_BYTES = 4 * 1024 * 1024
 SNAPSHOT_SCHEMA_VERSION = 2
 SAVE_ACCEPTED_DISPOSITIONS = frozenset({"save_match", "save_observation"})
+SAVE_MISMATCH_DISPOSITION = "save_mismatch"
+SAVE_UI_REQUIRED_DISPOSITION = "ui_required"
 
 
 class PlayerSaveError(RuntimeError):
@@ -360,6 +362,17 @@ def reconcile_requirements(
         max_snapshot_age_s=max_snapshot_age_s,
         now=now,
     )
+    snapshot_trust_reason: Optional[str] = None
+    if not snapshot.mapping_supported:
+        snapshot_trust_reason = "unsupported_save_version"
+    elif not snapshot.shape_valid:
+        snapshot_trust_reason = "save_shape_changed"
+    elif stale:
+        snapshot_trust_reason = "save_snapshot_stale"
+    elif not freshness_verified:
+        snapshot_trust_reason = "save_freshness_unverified"
+    snapshot_trusted = snapshot_trust_reason is None
+
     decisions: dict[str, dict[str, Any]] = {}
     for check_id, expected_value in expected.items():
         check_policy = _requirement_policy(requirements, str(check_id))
@@ -386,47 +399,52 @@ def reconcile_requirements(
             str(check_id) == "modules" and check_policy == "observe"
         )
 
-        if not snapshot.mapping_supported:
-            disposition = "ui_required"
-            reason = "unsupported_save_version"
-        elif not snapshot.shape_valid:
-            disposition = "ui_required"
-            reason = "save_shape_changed"
-        elif stale:
-            disposition = "ui_required"
-            reason = "save_snapshot_stale"
+        if force_ui_audit:
+            disposition = SAVE_UI_REQUIRED_DISPOSITION
+            reason = "scheduled_ui_audit"
+        elif not snapshot_trusted:
+            disposition = SAVE_UI_REQUIRED_DISPOSITION
+            reason = str(snapshot_trust_reason)
         elif evidence is None or evidence.status != "observed":
-            disposition = "ui_required"
+            disposition = SAVE_UI_REQUIRED_DISPOSITION
             reason = evidence.reason if evidence is not None else "check_unmapped"
-        elif not requirement_supported:
-            disposition = "ui_required"
-            reason = "save_requirement_outside_validated_scope"
-        elif matches is not True and not observation_only:
-            disposition = "ui_required"
-            reason = "save_mismatch"
         elif not evidence.complete:
-            disposition = "ui_required"
+            disposition = SAVE_UI_REQUIRED_DISPOSITION
             reason = "save_evidence_incomplete"
         elif not check_validated:
-            disposition = "ui_required"
+            disposition = SAVE_UI_REQUIRED_DISPOSITION
             reason = "mapping_candidate_audit"
-        elif force_ui_audit:
-            disposition = "ui_required"
-            reason = "scheduled_ui_audit"
-        elif not freshness_verified:
-            disposition = "ui_required"
-            reason = "save_freshness_unverified"
+        elif not requirement_supported:
+            disposition = SAVE_UI_REQUIRED_DISPOSITION
+            reason = "save_requirement_outside_validated_scope"
         elif observation_only:
             disposition = "save_observation"
             reason = "exact_version_save_observation"
-        else:
+        elif matches is True:
             disposition = "save_match"
             reason = "exact_version_save_match"
+        elif matches is False:
+            disposition = SAVE_MISMATCH_DISPOSITION
+            reason = "save_mismatch"
+        else:
+            disposition = SAVE_UI_REQUIRED_DISPOSITION
+            reason = "save_comparison_unavailable"
+
+        save_authoritative = disposition in {
+            *SAVE_ACCEPTED_DISPOSITIONS,
+            SAVE_MISMATCH_DISPOSITION,
+        }
+        ui_required = disposition in {
+            SAVE_MISMATCH_DISPOSITION,
+            SAVE_UI_REQUIRED_DISPOSITION,
+        }
 
         decisions[str(check_id)] = {
             "mapping_id": snapshot.mapping_id,
             "disposition": disposition,
             "reason": reason,
+            "snapshot_trusted": snapshot_trusted,
+            "save_evidence_authoritative": save_authoritative,
             "save_evidence_status": (
                 evidence.status if evidence is not None else "unmapped"
             ),
@@ -445,7 +463,15 @@ def reconcile_requirements(
                 observed,
                 evidence,
             ),
-            "ui_required": disposition == "ui_required",
+            "ui_required": ui_required,
+            "ui_requirement_kind": (
+                "trusted_mismatch"
+                if disposition == SAVE_MISMATCH_DISPOSITION
+                else "fallback"
+                if disposition == SAVE_UI_REQUIRED_DISPOSITION
+                else "none"
+            ),
+            "repair_queued": disposition == SAVE_MISMATCH_DISPOSITION,
             "fallback": "existing_ui_check",
         }
 
@@ -454,12 +480,21 @@ def reconcile_requirements(
         for check_id, decision in decisions.items()
         if decision["ui_required"]
     ]
+    trusted_mismatches = [
+        check_id
+        for check_id, decision in decisions.items()
+        if decision["disposition"] == SAVE_MISMATCH_DISPOSITION
+    ]
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "mapping_id": snapshot.mapping_id,
         "mapping_maturity": snapshot.mapping_maturity,
         "validated_checks": list(snapshot.validated_checks),
         "freshness_verified": bool(freshness_verified),
+        "snapshot_trust": {
+            "status": "trusted" if snapshot_trusted else "invalidated",
+            "reason": snapshot_trust_reason or "verified",
+        },
         "save_revision": snapshot.save_revision,
         "ui_backup_preserved": True,
         "checks": decisions,
@@ -468,7 +503,10 @@ def reconcile_requirements(
             "matching_observations": sum(
                 decision["matches"] is True for decision in decisions.values()
             ),
-            "save_acceptances": len(decisions) - len(ui_required),
+            "save_acceptances": sum(
+                decision["disposition"] in SAVE_ACCEPTED_DISPOSITIONS
+                for decision in decisions.values()
+            ),
             "save_matches": sum(
                 decision["disposition"] == "save_match"
                 for decision in decisions.values()
@@ -477,6 +515,8 @@ def reconcile_requirements(
                 decision["disposition"] == "save_observation"
                 for decision in decisions.values()
             ),
+            "trusted_mismatches": len(trusted_mismatches),
+            "trusted_mismatch_checks": trusted_mismatches,
             "ui_required": len(ui_required),
             "ui_required_checks": ui_required,
         },
@@ -1759,6 +1799,8 @@ __all__ = [
     "PlayerSavePullError",
     "PlayerSaveSnapshot",
     "SAVE_ACCEPTED_DISPOSITIONS",
+    "SAVE_MISMATCH_DISPOSITION",
+    "SAVE_UI_REQUIRED_DISPOSITION",
     "SaveCheckEvidence",
     "decode_player_save_bytes",
     "pull_player_save_bytes",

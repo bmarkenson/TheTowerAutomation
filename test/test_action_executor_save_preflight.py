@@ -115,8 +115,9 @@ def test_target_priority_carried_mismatch_invalidates_then_runs_existing_ui():
     assert callable(ensure.call_args.kwargs["repair_observer_fn"])
 
 
-def test_target_priority_ui_repair_invalidates_other_carried_checks():
+def test_target_priority_ui_repair_preserves_other_carried_checks():
     invalidations = []
+    verifications = []
 
     class BoundSave:
         def consume(self, _check_id):
@@ -124,6 +125,14 @@ def test_target_priority_ui_repair_invalidates_other_carried_checks():
 
         def invalidate(self, reason):
             invalidations.append(reason)
+
+        def record_ui_verification(self, check_id, *, changed):
+            verifications.append((check_id, changed))
+            return True
+
+        def decision(self, check_id):
+            assert check_id == "target_priority"
+            return {"disposition": "save_mismatch"}
 
     ctx = MissionContext(
         data={
@@ -147,7 +156,55 @@ def test_target_priority_ui_repair_invalidates_other_carried_checks():
             action_guard_fn=lambda: True,
         )
 
-    assert invalidations == ["in_battle_target_priority_repair"]
+    assert invalidations == []
+    assert verifications == [("target_priority", True)]
+    assert ctx.data["mission_vars"]["target_priority_evidence"] == {
+        "source": "ui",
+        "checked": True,
+        "valid": True,
+        "status": "ui_verified_repair",
+        "changed": True,
+        "save_disposition": "save_mismatch",
+    }
+
+
+def test_target_priority_save_mismatch_ui_match_fails_as_contradiction():
+    verifications = []
+
+    class BoundSave:
+        def consume(self, _check_id):
+            return None
+
+        def record_ui_verification(self, check_id, *, changed):
+            verifications.append((check_id, changed))
+            return False
+
+        def decision(self, _check_id):
+            return {"disposition": "save_mismatch"}
+
+    ctx = MissionContext(
+        data={
+            "mission_vars": {"last_detection_state": "RUNNING"},
+            "player_save_preflight_coordinator": BoundSave(),
+        }
+    )
+
+    with patch(
+        "core.action_executor.ensure_target_priority_order",
+        return_value=True,
+    ):
+        execute_actions(
+            None,
+            [{"type": "target_priority_ensure", "order": list(ORDER)}],
+            ctx,
+            action_guard_fn=lambda: True,
+        )
+
+    assert verifications == [("target_priority", False)]
+    assert ctx.data["mission_vars"]["target_priority_checked"] is False
+    assert ctx.data["mission_vars"]["target_priority_evidence"]["status"] == (
+        "contradiction"
+    )
 
 
 def test_bound_save_locks_preserve_required_subset_with_unmanaged_extra():
@@ -330,7 +387,7 @@ def test_unbound_home_uw_copy_is_not_reused_by_session_preflight():
     assert "ultimate_weapons" not in bound
 
 
-def test_ui_only_configuration_repairs_invalidate_remaining_carried_checks():
+def test_ui_only_configuration_repairs_preserve_remaining_carried_checks():
     invalidations = []
 
     class BoundSave:
@@ -400,7 +457,4 @@ def test_ui_only_configuration_repairs_invalidate_remaining_carried_checks():
             action_guard_fn=lambda: True,
         )
 
-    assert invalidations == [
-        "in_battle_damage_slider_repair",
-        "in_battle_orb_distance_repair",
-    ]
+    assert invalidations == []

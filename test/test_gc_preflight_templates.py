@@ -179,6 +179,45 @@ def test_live_farm_configuration_fixtures_form_complete_preflight_evidence():
     assert evidence.guardians.missing_secondary == ()
 
 
+def test_mixed_ui_repaired_and_save_backed_sections_form_complete_evidence():
+    evidence = validate_gc_preflight_screens(
+        cards_screen=_load(FARM_ACTIVE_FIXTURE),
+        workshop_screen=None,
+        bots_screen=None,
+        guardians_screen=None,
+        accepted_sections={
+            "workshop": {"disposition": "save_match"},
+            "bots": {"disposition": "save_match"},
+            "guardians": {"disposition": "save_match"},
+        },
+    )
+
+    assert evidence.valid
+    assert evidence.cards_selection.selected
+    assert evidence.workshop.valid
+    assert evidence.bots.valid
+    assert evidence.guardians.valid
+
+
+def test_supplied_ui_section_cannot_be_hidden_by_save_match_provenance():
+    evidence = validate_gc_preflight_screens(
+        cards_screen=_load(FARM_INACTIVE_FIXTURE),
+        workshop_screen=None,
+        bots_screen=None,
+        guardians_screen=None,
+        accepted_sections={
+            "cards": {"disposition": "save_match"},
+            "workshop": {"disposition": "save_match"},
+            "bots": {"disposition": "save_match"},
+            "guardians": {"disposition": "save_match"},
+        },
+    )
+
+    assert not evidence.valid
+    assert not evidence.cards.valid
+    assert not evidence.cards_selection.selected
+
+
 def test_inactive_farm_bot_slot_is_not_claimed_as_active():
     screen = _load(BOT_INACTIVE_FIXTURE)
     detection = detect_state_and_overlays(screen)

@@ -43,7 +43,10 @@ from core.perk_configuration import (
     normalize_perk_first_choice_requirement,
     perk_configuration_label,
 )
-from core.player_save import SAVE_ACCEPTED_DISPOSITIONS
+from core.player_save import (
+    SAVE_ACCEPTED_DISPOSITIONS,
+    SAVE_MISMATCH_DISPOSITION,
+)
 from core.poison_swamp_stun import (
     PoisonSwampStunResult,
     ensure_poison_swamp_stun,
@@ -216,7 +219,8 @@ def run_gc_no_battle_setup(
     screenshot=None,
     waivers: Mapping[str, Any] | None = None,
     save_decisions: Mapping[str, Mapping[str, Any]] | None = None,
-    snapshot_invalidation_fn: Callable[[str], None] | None = None,
+    snapshot_invalidation_fn: Callable[..., None] | None = None,
+    save_ui_verification_fn: Callable[..., bool] | None = None,
     capture_fn: Callable[[], Any] = capture_adb_screenshot,
     detector: Callable[[Any], Mapping[str, Any]] = detect_state_and_overlays,
     detect_home_control_fn: Callable[[Any], Any] = detect_home_battle_control,
@@ -256,12 +260,27 @@ def run_gc_no_battle_setup(
             GcNoBattleSetupStatus.UNSUPPORTED,
             unsupported,
         )
-    logged_save_acceptances = sorted(
-        str(check_id)
+    frozen_save_decisions = {
+        str(check_id): dict(decision)
         for check_id, decision in (save_decisions or {}).items()
         if isinstance(decision, Mapping)
-        and decision.get("disposition") in SAVE_ACCEPTED_DISPOSITIONS
-    )
+    }
+    accepted_save_decisions = {
+        check_id: decision
+        for check_id, decision in frozen_save_decisions.items()
+        if decision.get("disposition") in SAVE_ACCEPTED_DISPOSITIONS
+    }
+    trusted_mismatch_decisions = {
+        check_id: decision
+        for check_id, decision in frozen_save_decisions.items()
+        if decision.get("disposition") == SAVE_MISMATCH_DISPOSITION
+    }
+    fallback_ui_decisions = {
+        check_id: decision
+        for check_id, decision in frozen_save_decisions.items()
+        if decision.get("disposition") == "ui_required"
+    }
+    logged_save_acceptances = sorted(accepted_save_decisions)
     log_action_intent(
         "Verifying Home-only run configuration",
         reason=(
@@ -271,7 +290,9 @@ def run_gc_no_battle_setup(
         detail=(
             f"[GC_NO_BATTLE] requirements={sorted(requirements)} "
             f"waivers={sorted((waivers or {}).keys())} "
-            f"save_acceptances={logged_save_acceptances}"
+            f"save_acceptances={logged_save_acceptances} "
+            f"trusted_mismatches={sorted(trusted_mismatch_decisions)} "
+            f"ui_fallback={sorted(fallback_ui_decisions)}"
         ),
     )
 
@@ -329,23 +350,25 @@ def run_gc_no_battle_setup(
     module_mode = _module_policy(requirements)
     target_priority_mode = _target_priority_policy(requirements)
     active_waivers = dict(waivers or {})
-    active_save_decisions = {
-        str(check_id): dict(decision)
-        for check_id, decision in (save_decisions or {}).items()
-        if isinstance(decision, Mapping)
-        and decision.get("disposition") in SAVE_ACCEPTED_DISPOSITIONS
-    }
     repairs: list[str] = []
     snapshot_invalidated = False
+    ui_verified_checks: dict[str, str] = {}
+    contradictions: list[str] = []
 
     def save_accepted(check_id: str) -> bool:
-        return check_id in active_save_decisions
+        return not snapshot_invalidated and check_id in accepted_save_decisions
+
+    def trusted_mismatch(check_id: str) -> bool:
+        return (
+            not snapshot_invalidated
+            and check_id in trusted_mismatch_decisions
+        )
 
     def resolved_without_ui(check_id: str) -> bool:
         return check_id in active_waivers or save_accepted(check_id)
 
     def save_evidence(check_id: str) -> dict[str, Any]:
-        decision = active_save_decisions[check_id]
+        decision = accepted_save_decisions[check_id]
         return {
             "status": str(decision.get("disposition") or "save_match"),
             "source": "player_save_preflight",
@@ -364,20 +387,73 @@ def run_gc_no_battle_setup(
             "diagnostics": dict(decision.get("diagnostics") or {}),
         }
 
-    def record_repair(description: str) -> None:
+    def invalidate_snapshot(reason: str, *check_ids: str) -> None:
         nonlocal snapshot_invalidated
-        repairs.append(description)
-        if active_save_decisions and not snapshot_invalidated:
-            active_save_decisions.clear()
-            snapshot_invalidated = True
-            if snapshot_invalidation_fn is not None:
-                snapshot_invalidation_fn("home_ui_repair")
-            log(
-                "[PLAYER_SAVE_PREFLIGHT] First Home repair invalidated all "
-                "remaining pre-action save decisions",
-                "INFO",
-                console=True,
+        snapshot_invalidated = True
+        contradictions.extend(
+            check_id for check_id in check_ids if check_id not in contradictions
+        )
+        if snapshot_invalidation_fn is not None:
+            snapshot_invalidation_fn(reason)
+        log(
+            "[PLAYER_SAVE_PREFLIGHT] Snapshot authority invalidated during "
+            f"Home setup: reason={reason} checks={sorted(check_ids)}",
+            "ERROR" if reason == "save_ui_contradiction" else "INFO",
+            console=True,
+        )
+
+    def record_ui_verification(check_id: str, *, changed: bool) -> None:
+        callback_result: bool | None = None
+        if save_ui_verification_fn is not None:
+            callback_result = save_ui_verification_fn(
+                check_id,
+                changed=changed,
             )
+        contradiction = callback_result is False or (
+            trusted_mismatch(check_id)
+            and not changed
+            and save_ui_verification_fn is None
+        )
+        if contradiction:
+            if not snapshot_invalidated:
+                invalidate_snapshot("save_ui_contradiction", check_id)
+            elif check_id not in contradictions:
+                contradictions.append(check_id)
+            raise _SetupFailure(
+                "Trusted saved mismatch contradicted authoritative UI for "
+                f"{check_id}"
+            )
+        ui_verified_checks[check_id] = (
+            "ui_verified_repair" if changed else "ui_verified"
+        )
+
+    def ui_evidence(
+        check_id: str,
+        payload: Any,
+        *,
+        changed: bool,
+    ) -> Any:
+        if not trusted_mismatch(check_id):
+            return payload
+        normalized = dict(payload) if isinstance(payload, Mapping) else {
+            "observed": payload,
+        }
+        normalized.update(
+            status=("ui_verified_repair" if changed else "ui_verified"),
+            source="ui",
+            disposition=(
+                "ui_verified_repair" if changed else "ui_verified"
+            ),
+            checked=True,
+            valid=True,
+            required=requirements.get(check_id),
+            save_disposition=SAVE_MISMATCH_DISPOSITION,
+            changed=changed,
+        )
+        return normalized
+
+    def record_repair(description: str) -> None:
+        repairs.append(description)
         log(
             f"[HOME_PREFLIGHT] Repair completed; {description}",
             "INFO",
@@ -391,10 +467,40 @@ def run_gc_no_battle_setup(
         },
         "waivers": active_waivers,
         "save_preflight": {
-            "accepted_checks": sorted(active_save_decisions),
+            "snapshot_trust": (
+                "trusted"
+                if any(
+                    decision.get("snapshot_trusted") is True
+                    for decision in frozen_save_decisions.values()
+                )
+                or bool(accepted_save_decisions or trusted_mismatch_decisions)
+                else "not_trusted"
+            ),
+            "accepted_checks": sorted(accepted_save_decisions),
+            "trusted_mismatch_checks": sorted(trusted_mismatch_decisions),
+            "ui_required_checks": sorted(fallback_ui_decisions),
             "invalidated": False,
         },
     }
+
+    def update_save_preflight_evidence() -> None:
+        save_payload = evidence["save_preflight"]
+        save_payload["invalidated"] = snapshot_invalidated
+        save_payload["contradictions"] = sorted(contradictions)
+        save_payload["ui_verified_checks"] = {
+            check_id: status
+            for check_id, status in sorted(ui_verified_checks.items())
+        }
+        save_payload["remaining_accepted_checks"] = (
+            [] if snapshot_invalidated else sorted(accepted_save_decisions)
+        )
+        save_payload["remaining_checks"] = list(
+            save_payload["remaining_accepted_checks"]
+        )
+        save_payload["remaining_carry"] = list(
+            save_payload["remaining_accepted_checks"]
+        )
+
     current = screenshot if screenshot is not None else capture_fn()
     section_specs = _configuration_section_specs(requirements)
     accepted_sections: dict[str, Mapping[str, Any]] = {}
@@ -429,7 +535,7 @@ def run_gc_no_battle_setup(
                 )
                 log_check(check_id)
             if save_accepted("cards_deck"):
-                accepted_sections["cards"] = active_save_decisions["cards_deck"]
+                accepted_sections["cards"] = accepted_save_decisions["cards_deck"]
         else:
             current_check = "cards_deck"
             cards = _open_static(
@@ -464,11 +570,19 @@ def run_gc_no_battle_setup(
                     measure_selection_fn=measure_selection_fn,
                     sleep_fn=sleep_fn,
                 )
+                record_ui_verification(
+                    current_check,
+                    changed=preset_changed,
+                )
                 if preset_changed:
                     record_repair(
                         f"Cards deck selected {requirements[current_check]}"
                     )
-                evidence[current_check] = requirements[current_check]
+                evidence[current_check] = ui_evidence(
+                    current_check,
+                    requirements[current_check],
+                    changed=preset_changed,
+                )
             log_check(current_check)
             cards_configuration = cards
 
@@ -493,12 +607,28 @@ def run_gc_no_battle_setup(
                     sleep_fn=sleep_fn,
                 )
                 recharge_payload = recharge_result.as_dict()
-                evidence[current_check] = recharge_payload
+                recharge_changed = bool(
+                    getattr(
+                        recharge_result,
+                        "changed",
+                        recharge_payload.get("changed")
+                        or recharge_payload.get("changed_labels"),
+                    )
+                )
                 cards = recharge_result.screenshot
                 if not recharge_result.valid:
                     raise _SetupFailure(
                         "Card recharge modes remained invalid after correction"
                     )
+                record_ui_verification(
+                    current_check,
+                    changed=recharge_changed,
+                )
+                evidence[current_check] = ui_evidence(
+                    current_check,
+                    recharge_payload,
+                    changed=recharge_changed,
+                )
                 normalized_recharge_modes = normalize_card_recharge_modes(
                     card_recharge_requirements
                 )
@@ -590,6 +720,19 @@ def run_gc_no_battle_setup(
                             "changed",
                             perk_result.changed,
                         )
+                        if field_evidence.get("valid") is True:
+                            field_changed = (
+                                field_evidence.get("changed") is True
+                            )
+                            record_ui_verification(
+                                check_id,
+                                changed=field_changed,
+                            )
+                            field_evidence = ui_evidence(
+                                check_id,
+                                field_evidence,
+                                changed=field_changed,
+                            )
                     evidence[check_id] = field_evidence
                     _log_home_preflight_evidence(
                         check_id,
@@ -649,7 +792,7 @@ def run_gc_no_battle_setup(
         elif save_accepted(current_check):
             evidence[current_check] = save_evidence(current_check)
             if workshop is None:
-                accepted_sections["workshop"] = active_save_decisions[
+                accepted_sections["workshop"] = accepted_save_decisions[
                     current_check
                 ]
         else:
@@ -666,11 +809,19 @@ def run_gc_no_battle_setup(
                 measure_selection_fn=measure_selection_fn,
                 sleep_fn=sleep_fn,
             )
+            record_ui_verification(
+                current_check,
+                changed=preset_changed,
+            )
             if preset_changed:
                 record_repair(
                     f"Workshop preset selected {requirements[current_check]}"
                 )
-            evidence[current_check] = requirements[current_check]
+            evidence[current_check] = ui_evidence(
+                current_check,
+                requirements[current_check],
+                changed=preset_changed,
+            )
         log_check(current_check)
         workshop_configuration = workshop
         current_check = "free_upgrade_locks"
@@ -732,6 +883,15 @@ def run_gc_no_battle_setup(
                     "Free Upgrade locks remained invalid after correction"
                 )
             changed_locks = lock_payload["changed_labels"]
+            record_ui_verification(
+                current_check,
+                changed=bool(changed_locks),
+            )
+            evidence["free_upgrade_locks"] = ui_evidence(
+                current_check,
+                lock_payload,
+                changed=bool(changed_locks),
+            )
             if changed_locks:
                 record_repair(
                     "Free Upgrade locks enabled for "
@@ -797,6 +957,24 @@ def run_gc_no_battle_setup(
                     f"{stun_state} after Home correction to "
                     f"{home_stun_required}"
                 )
+            record_ui_verification(
+                "poison_swamp_stun",
+                changed=stun_result.changed,
+            )
+            stun_component = ui_evidence(
+                "poison_swamp_stun",
+                {"observed": stun_state},
+                changed=stun_result.changed,
+            )
+            if (
+                trusted_mismatch("poison_swamp_stun")
+                and isinstance(stun_component, dict)
+            ):
+                stun_component["required"] = home_stun_required
+                evidence[current_check]["components"] = {
+                    "poison_swamp_stun": stun_component,
+                }
+                evidence[current_check]["source"] = "ui"
             if stun_result.changed:
                 record_repair(
                     f"Poison Swamp Stun set to {home_stun_required}"
@@ -830,7 +1008,7 @@ def run_gc_no_battle_setup(
                 active_waivers[current_check],
             ) if current_check in active_waivers else save_evidence(current_check)
             if save_accepted(current_check):
-                accepted_sections["bots"] = active_save_decisions[current_check]
+                accepted_sections["bots"] = accepted_save_decisions[current_check]
         else:
             event = _open_visible(
                 current,
@@ -872,11 +1050,19 @@ def run_gc_no_battle_setup(
                 measure_selection_fn=measure_selection_fn,
                 sleep_fn=sleep_fn,
             )
+            record_ui_verification(
+                current_check,
+                changed=preset_changed,
+            )
             if preset_changed:
                 record_repair(
                     f"Bot preset selected {requirements[current_check]}"
                 )
-            evidence[current_check] = requirements[current_check]
+            evidence[current_check] = ui_evidence(
+                current_check,
+                requirements[current_check],
+                changed=preset_changed,
+            )
             bots_configuration = bots
             current = _return_home(
                 bots,
@@ -898,7 +1084,7 @@ def run_gc_no_battle_setup(
                 active_waivers[current_check],
             ) if current_check in active_waivers else save_evidence(current_check)
             if save_accepted(current_check):
-                accepted_sections["guardians"] = active_save_decisions[
+                accepted_sections["guardians"] = accepted_save_decisions[
                     current_check
                 ]
         else:
@@ -931,12 +1117,20 @@ def run_gc_no_battle_setup(
                 tap_visible_fn,
                 sleep_fn,
             )
+            record_ui_verification(
+                current_check,
+                changed=bool(changed_guardians),
+            )
             if changed_guardians:
                 record_repair(
                     "Guardian Chips equipped "
                     + ", ".join(changed_guardians)
                 )
-            evidence[current_check] = list(requirements[current_check])
+            evidence[current_check] = ui_evidence(
+                current_check,
+                list(requirements[current_check]),
+                changed=bool(changed_guardians),
+            )
             guardians_configuration = guardians
             current = _return_home(
                 guardians,
@@ -957,7 +1151,7 @@ def run_gc_no_battle_setup(
                 active_waivers[current_check],
             )
         elif save_accepted(current_check):
-            module_decision = active_save_decisions[current_check]
+            module_decision = accepted_save_decisions[current_check]
             observed_assignments = module_decision.get("observed")
             if not isinstance(observed_assignments, Mapping):
                 raise _SetupFailure(
@@ -1023,6 +1217,10 @@ def run_gc_no_battle_setup(
                 raise _SetupFailure(
                     "module loadout remained invalid after correction"
                 )
+            record_ui_verification(
+                current_check,
+                changed=bool(module_repairs),
+            )
             if module_repairs:
                 assignments = ", ".join(
                     f"{slot.slot_key}={slot.expected}"
@@ -1031,7 +1229,11 @@ def run_gc_no_battle_setup(
                 record_repair(f"Module loadout restored ({assignments})")
             module_payload = module_evidence.as_dict()
             module_payload.update(mode=module_mode, checked=True)
-            evidence["modules"] = module_payload
+            evidence["modules"] = ui_evidence(
+                current_check,
+                module_payload,
+                changed=bool(module_repairs),
+            )
             current = _return_home(
                 capture_fn(),
                 capture_fn,
@@ -1058,6 +1260,7 @@ def run_gc_no_battle_setup(
             )
             module_payload = module_evidence.as_dict()
             module_payload.update(mode=module_mode, checked=True)
+            record_ui_verification(current_check, changed=False)
             evidence["modules"] = module_payload
             current = _return_home(
                 modules,
@@ -1159,6 +1362,16 @@ def run_gc_no_battle_setup(
             }
             for section, decision in sorted(accepted_sections.items())
         }
+        configuration_payload["ui_verified_sections"] = {
+            section: ui_verified_checks[check_id]
+            for section, check_id in (
+                ("cards", "cards_deck"),
+                ("workshop", "workshop_preset"),
+                ("bots", "bots_preset"),
+                ("guardians", "guardian_chips"),
+            )
+            if check_id in ui_verified_checks
+        }
         section_checks = (
             ("cards", "cards_deck"),
             ("workshop", "workshop_preset"),
@@ -1175,24 +1388,27 @@ def run_gc_no_battle_setup(
         configuration_payload["blocking_valid"] = not configuration_failures
         evidence["configuration"] = configuration_payload
         if configuration_failures:
-            if any(
-                save_accepted(check_id) for check_id in configuration_failures
-            ):
-                active_save_decisions.clear()
-                snapshot_invalidated = True
-                if snapshot_invalidation_fn is not None:
-                    snapshot_invalidation_fn("save_ui_contradiction")
+            save_contradictions = [
+                check_id
+                for check_id in configuration_failures
+                if save_accepted(check_id)
+            ]
+            if save_contradictions:
+                invalidate_snapshot(
+                    "save_ui_contradiction",
+                    *save_contradictions,
+                )
             current_check = configuration_failures[0]
             raise _SetupFailure(
                 "Home boundary configuration evidence contradicted the "
                 "completed checks: "
                 + ", ".join(configuration_failures)
             )
-        evidence["save_preflight"]["invalidated"] = snapshot_invalidated
-        evidence["save_preflight"]["remaining_checks"] = sorted(
-            active_save_decisions
-        )
+        update_save_preflight_evidence()
     except _SetupControlInterrupted as exc:
+        if not snapshot_invalidated:
+            invalidate_snapshot("home_setup_control_interrupted", current_check)
+        update_save_preflight_evidence()
         log(
             "[GC_NO_BATTLE] Home setup control interruption ended; "
             "restoring verified Home before a fresh retry",
@@ -1217,6 +1433,7 @@ def run_gc_no_battle_setup(
             repairs=repairs,
         )
     except Exception as exc:
+        update_save_preflight_evidence()
         _log_home_preflight_failure(
             current_check,
             requirements.get(current_check, "valid no-battle Home"),

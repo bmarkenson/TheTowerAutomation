@@ -393,6 +393,7 @@ def _run(
     waivers=None,
     save_decisions=None,
     snapshot_invalidation_fn=None,
+    save_ui_verification_fn=None,
     ensure_perk_configuration_fn=None,
     action_guard_fn=None,
 ):
@@ -405,6 +406,7 @@ def _run(
         waivers=waivers,
         save_decisions=save_decisions,
         snapshot_invalidation_fn=snapshot_invalidation_fn,
+        save_ui_verification_fn=save_ui_verification_fn,
         capture_fn=router.capture,
         detector=router.detect,
         detect_home_control_fn=router.home_control,
@@ -432,6 +434,25 @@ def _save_matches(requirements, *check_ids):
             "expected": requirements.get(check_id),
             "observed": requirements.get(check_id),
             "ui_required": False,
+        }
+        for check_id in check_ids
+    }
+
+
+def _save_mismatches(requirements, *check_ids):
+    return {
+        check_id: {
+            "disposition": "save_mismatch",
+            "reason": "save_mismatch",
+            "expected": requirements.get(check_id),
+            "observed": f"different-{check_id}",
+            "snapshot_trusted": True,
+            "save_evidence_complete": True,
+            "save_check_validated": True,
+            "save_requirement_supported": True,
+            "ui_required": True,
+            "ui_requirement_kind": "trusted_mismatch",
+            "repair_queued": True,
         }
         for check_id in check_ids
     }
@@ -655,13 +676,16 @@ def test_save_backed_required_locks_ignore_unmanaged_health_without_input():
     assert locks["diagnostics"]["unmanaged_locks"] == ["Health"]
 
 
-def test_first_ui_repair_invalidates_later_save_decisions():
+def test_cards_mismatch_repair_preserves_save_backed_perk_decisions():
     router = _NoBattleRouter(selected=False, correct_guardians=True)
     requirements = {
         "cards_deck": "Farm",
         "workshop_preset": "Farm",
         "bots_preset": "Farm",
         "guardian_chips": ["Fetch", "Summon", "Scout"],
+        "perk_first_choice": "perk_wave_requirement",
+        "perk_bans": list(FARM_PERK_BANS),
+        "perk_auto_pick_order": list(FARM_AUTO_PICK_ORDER),
         "loadout_policies": {
             "modules": "preserve",
             "target_priority": "preserve",
@@ -673,6 +697,13 @@ def test_first_ui_repair_invalidates_later_save_decisions():
         "workshop_preset",
         "bots_preset",
         "guardian_chips",
+        "perk_first_choice",
+        "perk_bans",
+        "perk_auto_pick_order",
+    )
+    save_decisions.update(_save_mismatches(requirements, "cards_deck"))
+    ensure_perks = Mock(
+        side_effect=AssertionError("accepted Perks tabs must remain closed")
     )
 
     result = _run(
@@ -680,15 +711,112 @@ def test_first_ui_repair_invalidates_later_save_decisions():
         requirements,
         save_decisions=save_decisions,
         snapshot_invalidation_fn=invalidations.append,
+        ensure_perk_configuration_fn=ensure_perks,
     )
 
     assert result.complete
-    assert invalidations == ["home_ui_repair"]
+    assert invalidations == []
+    ensure_perks.assert_not_called()
+    assert "navigation.goto_cards_home" in router.static_actions
+    assert "navigation.goto_workshop_home" not in router.static_actions
+    assert "navigation.event:bots_tab" not in router.static_actions
+    assert "navigation.guild:guardian_tab" not in router.static_actions
+    assert result.evidence["cards_deck"]["status"] == "ui_verified_repair"
+    assert result.evidence["cards_deck"]["source"] == "ui"
+    assert result.evidence["cards_deck"]["save_disposition"] == "save_mismatch"
+    assert result.evidence["save_preflight"]["invalidated"] is False
+    assert result.evidence["save_preflight"]["remaining_accepted_checks"] == [
+        "bots_preset",
+        "guardian_chips",
+        "perk_auto_pick_order",
+        "perk_bans",
+        "perk_first_choice",
+        "workshop_preset",
+    ]
+    for check_id in (
+        "perk_first_choice",
+        "perk_bans",
+        "perk_auto_pick_order",
+    ):
+        assert result.evidence[check_id]["source"] == "player_save_preflight"
+
+
+def test_multiple_trusted_mismatches_run_only_their_ui_repair_paths():
+    router = _NoBattleRouter(selected=False, correct_guardians=True)
+    requirements = {
+        "cards_deck": "Farm",
+        "workshop_preset": "Farm",
+        "bots_preset": "Farm",
+        "guardian_chips": ["Fetch", "Summon", "Scout"],
+        "loadout_policies": {
+            "modules": "preserve",
+            "target_priority": "preserve",
+        },
+    }
+    decisions = _save_matches(requirements, "guardian_chips")
+    decisions.update(
+        _save_mismatches(
+            requirements,
+            "cards_deck",
+            "workshop_preset",
+            "bots_preset",
+        )
+    )
+
+    result = _run(router, requirements, save_decisions=decisions)
+
+    assert result.complete
+    assert "navigation.goto_cards_home" in router.static_actions
     assert "navigation.goto_workshop_home" in router.static_actions
     assert "navigation.event:bots_tab" in router.static_actions
-    assert "navigation.guild:guardian_tab" in router.static_actions
+    assert "navigation.guild:guardian_tab" not in router.static_actions
+    assert result.evidence["save_preflight"]["ui_verified_checks"] == {
+        "bots_preset": "ui_verified_repair",
+        "cards_deck": "ui_verified_repair",
+        "workshop_preset": "ui_verified_repair",
+    }
+    assert result.evidence["save_preflight"]["remaining_accepted_checks"] == [
+        "guardian_chips"
+    ]
+
+
+def test_save_mismatch_ui_already_matches_is_a_contradiction():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+    requirements = {
+        "cards_deck": "Farm",
+        "workshop_preset": "Farm",
+        "bots_preset": "Farm",
+        "guardian_chips": ["Fetch", "Summon", "Scout"],
+        "loadout_policies": {
+            "modules": "preserve",
+            "target_priority": "preserve",
+        },
+    }
+    decisions = _save_matches(
+        requirements,
+        "workshop_preset",
+        "bots_preset",
+        "guardian_chips",
+    )
+    decisions.update(_save_mismatches(requirements, "cards_deck"))
+    invalidations = []
+
+    result = _run(
+        router,
+        requirements,
+        save_decisions=decisions,
+        snapshot_invalidation_fn=invalidations.append,
+    )
+
+    assert not result.complete
+    assert result.failed_check == "cards_deck"
+    assert "contradicted authoritative UI" in result.reason
+    assert invalidations == ["save_ui_contradiction"]
     assert result.evidence["save_preflight"]["invalidated"] is True
-    assert result.evidence["save_preflight"]["remaining_checks"] == []
+    assert result.evidence["save_preflight"]["contradictions"] == [
+        "cards_deck"
+    ]
+    assert result.evidence["save_preflight"]["remaining_accepted_checks"] == []
 
 
 def test_mixed_perk_decisions_visit_only_ui_required_tabs():
@@ -861,6 +989,58 @@ def test_no_battle_setup_blocks_contradictory_boundary_evidence():
     assert not result.complete
     assert result.failed_check == "cards_deck"
     assert "contradicted the completed checks: cards_deck" in result.reason
+
+
+def test_ui_contradiction_to_save_match_invalidates_the_snapshot():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+    requirements = {
+        "cards_deck": "Farm",
+        "card_recharge_modes": {
+            "Demon Mode": "auto_reactivate",
+            "Nuke": "ready_after_recharge",
+        },
+        "workshop_preset": "Farm",
+        "bots_preset": "Farm",
+        "guardian_chips": ["Fetch", "Summon", "Scout"],
+        "loadout_policies": {
+            "modules": "preserve",
+            "target_priority": "preserve",
+        },
+    }
+    decisions = _save_matches(
+        requirements,
+        "cards_deck",
+        "workshop_preset",
+        "bots_preset",
+        "guardian_chips",
+    )
+    invalidations = []
+
+    router.validate_configuration = lambda **_kwargs: SimpleNamespace(
+        valid=False,
+        as_dict=lambda: {
+            "cards": {"valid": False},
+            "workshop": {"valid": True},
+            "bots": {"valid": True},
+            "guardians": {"valid": True},
+            "valid": False,
+        },
+    )
+
+    result = _run(
+        router,
+        requirements,
+        save_decisions=decisions,
+        snapshot_invalidation_fn=invalidations.append,
+    )
+
+    assert not result.complete
+    assert result.failed_check == "cards_deck"
+    assert invalidations == ["save_ui_contradiction"]
+    assert result.evidence["save_preflight"]["invalidated"] is True
+    assert result.evidence["save_preflight"]["contradictions"] == [
+        "cards_deck"
+    ]
 
 
 def test_no_battle_setup_allows_waived_boundary_mismatch():
@@ -1733,6 +1913,7 @@ def test_app_binds_save_preflight_to_only_an_exact_new_battle_launch():
         action_guard_fn=app._runtime_action_guard,
         save_decisions=preflight.decisions,
         snapshot_invalidation_fn=coordinator.invalidate,
+        save_ui_verification_fn=coordinator.record_ui_verification,
     )
     handle_home.assert_called_once_with(
         restart_enabled=True,

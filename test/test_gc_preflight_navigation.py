@@ -509,7 +509,7 @@ def test_bound_save_components_skip_redundant_auto_pick_and_uw_navigation():
     assert ui.swipes == []
 
 
-def test_uw_repair_discards_pre_action_carried_component_observations():
+def test_poison_stun_repair_preserves_unrelated_carried_evidence():
     ui = _FakeUi()
     setup_evidence = {
         "configuration": {
@@ -531,6 +531,7 @@ def test_uw_repair_discards_pre_action_carried_component_observations():
         "spotlight_missiles": "on",
     }
     invalidations = []
+    ui_verifications = []
 
     class BoundSave:
         def consume(self, check_id):
@@ -538,6 +539,10 @@ def test_uw_repair_discards_pre_action_carried_component_observations():
 
         def invalidate(self, reason):
             invalidations.append(reason)
+
+        def record_ui_verification(self, check_id, *, changed):
+            ui_verifications.append((check_id, changed))
+            return True
 
     poison_box = UpgradeBox(
         "left",
@@ -582,13 +587,77 @@ def test_uw_repair_discards_pre_action_carried_component_observations():
     )
 
     assert result.status is GcPreflightNavigationStatus.COMPLETE
-    assert invalidations == ["in_battle_poison_stun_repair"]
+    assert invalidations == []
+    assert ui_verifications == [("poison_swamp_stun", True)]
     assert validated["ultimate_observations"] == {
+        "Golden Tower": {"primary": "on"},
+        "Black Hole": {"primary": "on"},
         "Poison Swamp": {"primary": "on", "stun": "off"},
+        "Spotlight": {"primary": "on", "missiles": "on"},
     }
-    assert "configuration_boundary_evidence" not in validated
-    assert validated["free_upgrade_lock_boundary_evidence"] is None
-    assert "navigation.Cards" in ui.visible_taps
+    assert validated["configuration_boundary_evidence"] == setup_evidence[
+        "configuration"
+    ]
+    assert validated["free_upgrade_lock_boundary_evidence"] == {
+        "status": "save_match",
+        "source": "bound_player_save_preflight",
+    }
+    assert "navigation.Cards" not in ui.visible_taps
+
+
+def test_uw_ui_contradiction_to_carried_save_match_invalidates_snapshot():
+    ui = _FakeUi()
+    carried = {
+        "auto_pick_perks": True,
+        "ultimate_weapon_primaries": {
+            label: {"primary": "on"}
+            for label in ULTIMATE_REQUIREMENTS
+        },
+        "poison_swamp_stun": None,
+        "spotlight_missiles": "on",
+    }
+    invalidations = []
+
+    class BoundSave:
+        def consume(self, check_id):
+            return carried.get(check_id)
+
+        def invalidate(self, reason):
+            invalidations.append(reason)
+
+    result = run_read_only_gc_preflight(
+        PREFLIGHT_REQUIREMENTS,
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.safe_tap,
+        tap_visible_fn=ui.visible_tap,
+        go_home_fn=ui.go_home,
+        swipe_fn=ui.swipe,
+        detect_boxes_fn=lambda *_args, **_kwargs: {
+            "left": [
+                UpgradeBox(
+                    "left",
+                    (0, 0, 1, 1),
+                    text="Golden Tower",
+                    toggles={"primary": "off"},
+                ),
+                UpgradeBox(
+                    "left",
+                    (0, 0, 1, 1),
+                    text="Poison Swamp",
+                    toggles={"primary": "on"},
+                ),
+            ],
+            "right": [],
+        },
+        player_save_preflight=BoundSave(),
+        detect_home_control_fn=lambda _frame: _home_evidence(),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.status is GcPreflightNavigationStatus.FAILED
+    assert "contradicted current UI" in result.reason
+    assert invalidations == ["save_ui_contradiction"]
 
 
 def test_home_boundary_accepts_tournament_poison_swamp_stun_on():

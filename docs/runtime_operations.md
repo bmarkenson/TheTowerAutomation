@@ -605,15 +605,29 @@ evidence instead of the misleading `observed=unavailable`. Raw save values,
 GUIDs, module records/effects/levels, target identity, and private fields are
 not logged.
 
-The first actual UI repair invalidates every remaining pre-action save
-decision; the changed setting is still verified through its normal UI path and
-later checks continue through UI. Read-only UI inspection leaves unrelated
-matches intact, but an observed contradiction fails closed. Free Upgrade locks
-are a required subset: all requested bits must be set, while extra normalized
-locks such as `Health` are reported as unmanaged and never changed. Exact
-enforced Farm Modules and complete mapped observation-only Tournament Modules
-may be save-backed; unsupported or partial Modules, Damage Slider, and Orb
-Distance retain UI authority.
+The coordinator freezes the complete reconciliation plan before any setup
+input. `save_match` and observation-policy `save_observation` decisions remain
+independent from `save_mismatch` and ordinary `ui_required` decisions. A
+`save_mismatch` exists only for a globally trusted snapshot and a complete,
+validated, supported exact value that differs from the resolved requirement.
+It queues that check's existing guarded UI path; unsupported, incomplete,
+unknown, stale, or forced-audit evidence remains an ordinary UI requirement.
+
+The queued mismatch does not authorize a mutation. The UI path must observe a
+current mismatch, perform its normal guarded repair, and verify the result. The
+result is UI-verified, never save-confirmed, and is not inserted into save
+carry. Verified Cards, Target Priority, Poison Swamp Stun, Damage Slider, Orb
+Distance, and other independent UI-only repairs preserve unrelated accepted
+decisions and exact-next-battle carry. An inspected `save_match` that disagrees
+with UI, or a trusted mismatch that UI already shows as matching before this
+coordinator repaired it, is a contradiction that invalidates the complete
+snapshot and fails closed.
+
+Free Upgrade locks are a required subset: all requested bits must be set, while
+extra normalized locks such as `Health` are reported as unmanaged and never
+changed. Exact enforced Farm Modules and complete mapped observation-only
+Tournament Modules may be save-backed; unsupported or partial Modules, Damage
+Slider, and Orb Distance retain UI authority.
 
 Session-only accepted decisions may continue only through the exact next battle
 that this same runtime starts with a freshly verified `NEW_BATTLE` control. The
@@ -621,12 +635,15 @@ runtime binds them once at the first stable `RUNNING` boundary, then may consume
 Pick enabled `true`, the complete exact Target Priority order, all nine
 primaries on, Spotlight Missiles on, Poison Swamp Stun, an exact enforced Farm
 Module assignment or fully decoded observation-only Tournament assignment,
-and save-backed Home sections without reopening redundant screens. Restart,
-attachment, unrelated
-Retry, strategy/configuration/target change, operator/manual or ambiguous
-launch, WAIT/Pause/Stop, repair, or a later battle rejects the entire carry.
-An accepted save decision never authorizes an input, mutation, lifecycle
-transition, attachment, terminal binding, dispatch, or strategy action.
+and save-backed Home sections without reopening redundant screens. Final
+consistency accepts that save provenance alongside current UI proof for repaired
+or inspected sections; any supplied screen is still evaluated. Restart,
+attachment, unrelated Retry, strategy/configuration/target or requirement
+change, operator/manual or ambiguous launch, WAIT/Pause/Stop, a save/UI
+contradiction, failed exact-next-battle/first-`RUNNING` binding, or a later
+battle rejects the entire carry. An accepted save decision never authorizes an
+input, mutation, lifecycle transition, attachment, terminal binding, dispatch,
+or strategy action.
 
 When an active Farm session preflight authoritatively appears to require a
 supported Home-only repair, the runtime retries the same read-only validation

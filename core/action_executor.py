@@ -99,22 +99,6 @@ def _reset_repair_mismatch_attempts(mv: Dict[str, Any]) -> None:
     mv["gc_session_preflight_repair_failure_key"] = ""
 
 
-def _invalidate_bound_player_save(
-    ctx: Optional[MissionContext],
-    reason: str,
-) -> None:
-    """Invalidate remaining carried decisions after a configuration mutation."""
-
-    coordinator = (
-        ctx.data.get("player_save_preflight_coordinator")
-        if ctx is not None
-        else None
-    )
-    invalidate = getattr(coordinator, "invalidate", None)
-    if callable(invalidate):
-        invalidate(reason)
-
-
 def _bind_save_backed_home_evidence(
     setup_evidence: Mapping[str, Any],
     player_save_preflight: Any,
@@ -425,11 +409,6 @@ def execute_actions(
                     act.get("value"),
                     mode=mode,
                 )
-                if result.changed:
-                    _invalidate_bound_player_save(
-                        ctx,
-                        "in_battle_damage_slider_repair",
-                    )
                 payload = result.as_dict()
                 if mv is not None:
                     mv["damage_slider_observation"] = payload
@@ -471,11 +450,6 @@ def execute_actions(
                 result = configure_orb_distance(
                     **orb_distance_kwargs,
                 )
-                if result.changed:
-                    _invalidate_bound_player_save(
-                        ctx,
-                        "in_battle_orb_distance_repair",
-                    )
                 payload = result.as_dict()
                 if mv is not None:
                     mv["orb_distance_observation"] = payload
@@ -512,13 +486,23 @@ def execute_actions(
                     else None
                 )
                 target_kwargs: Dict[str, Any] = {}
-                if callable(getattr(save_coordinator, "invalidate", None)):
-                    target_kwargs["repair_observer_fn"] = lambda: (
-                        _invalidate_bound_player_save(
-                            ctx,
-                            "in_battle_target_priority_repair",
-                        )
-                    )
+                target_repaired = False
+
+                def observe_target_repair() -> None:
+                    nonlocal target_repaired
+                    target_repaired = True
+
+                record_ui_verification = getattr(
+                    save_coordinator,
+                    "record_ui_verification",
+                    None,
+                )
+                if callable(record_ui_verification) or callable(
+                    getattr(save_coordinator, "invalidate", None)
+                ):
+                    target_kwargs["repair_observer_fn"] = observe_target_repair
+                used_ui = False
+                ui_contradiction = False
                 if (
                     isinstance(carried_order, list)
                     and isinstance(expected_order, list)
@@ -537,17 +521,50 @@ def execute_actions(
                         save_coordinator.invalidate(
                             "target_priority_action_requirement_changed"
                         )
+                    used_ui = True
                     ok = ensure_target_priority_order(
                         expected=expected_order,
                         **target_kwargs,
                     )
                 elif expected_order is None:
+                    used_ui = True
                     ok = ensure_target_priority_order(**target_kwargs)
                 else:
+                    used_ui = True
                     ok = ensure_target_priority_order(
                         expected=expected_order,
                         **target_kwargs,
                     )
+                if used_ui and ok and callable(record_ui_verification):
+                    ui_verified = record_ui_verification(
+                        "target_priority",
+                        changed=target_repaired,
+                    ) is not False
+                    ui_contradiction = not ui_verified
+                    ok = ui_verified
+                if used_ui and mv is not None:
+                    decision_fn = getattr(save_coordinator, "decision", None)
+                    save_decision = (
+                        decision_fn("target_priority")
+                        if callable(decision_fn)
+                        else {}
+                    )
+                    mv["target_priority_evidence"] = {
+                        "source": "ui",
+                        "checked": True,
+                        "valid": bool(ok),
+                        "status": (
+                            "contradiction"
+                            if ui_contradiction
+                            else "ui_verified_repair"
+                            if ok and target_repaired
+                            else "ui_verified"
+                            if ok
+                            else "ui_verification_failed"
+                        ),
+                        "changed": target_repaired,
+                        "save_disposition": save_decision.get("disposition"),
+                    }
                 if mv is not None:
                     mv["target_priority_checked"] = ok
                 log_mission(f"[EXEC] target_priority_ensure verified={ok}", "INFO" if ok else "WARN")
