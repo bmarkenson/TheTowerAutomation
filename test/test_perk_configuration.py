@@ -47,6 +47,9 @@ def test_first_perk_fixture_separates_selected_row_from_available_rows():
     assert [item["display_text"] for item in result["selected"]] == [
         "Perk wave requirement -25.00%"
     ]
+    assert [item["key"] for item in result["selected"]] == [
+        "perk_wave_requirement"
+    ]
     assert result["raw_pages"][0]["rows"][0]["background_value_median"] < 110
     assert result["raw_pages"][0]["rows"][1]["background_value_median"] > 110
 

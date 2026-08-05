@@ -743,67 +743,43 @@ def parse_perk_configuration_selection(
         for row in rows:
             if float(row["background_value_median"]) > MAX_SELECTED_BACKGROUND_VALUE:
                 continue
-            existing = _find_duplicate(selected, str(row["display_text"]))
+            entry = _semantic_entry(row)
+            existing = next(
+                (
+                    item
+                    for item in selected
+                    if perk_entries_match(item, entry)
+                ),
+                None,
+            )
             observation = {
                 "page": page,
-                "top": row["top"],
-                "confidence": row["confidence"],
+                "top": entry["top"],
+                "confidence": entry["confidence"],
             }
             if existing is not None:
                 existing["observations"].append(observation)
-                if float(row["confidence"]) > float(existing["confidence"]):
-                    existing.update(
-                        text_raw=row["text_raw"],
-                        display_text=row["display_text"],
-                        key=row["key"],
-                        confidence=row["confidence"],
-                    )
+                if entry["confidence"] > existing["confidence"]:
+                    observations = existing["observations"]
+                    existing.update(entry)
+                    existing["observations"] = observations
                 continue
-            selected.append(
-                {
-                    "rank": len(selected) + 1,
-                    "display_text": row["display_text"],
-                    "text_raw": row["text_raw"],
-                    "key": row["key"],
-                    "confidence": row["confidence"],
-                    "observations": [observation],
-                }
+            entry.update(
+                rank=len(selected) + 1,
+                page=page,
+                observations=[observation],
             )
-
-    low_confidence = [
-        item["key"]
-        for item in selected
-        if float(item["confidence"]) < float(confidence_threshold)
-    ]
-    warnings = []
-    if not source_complete:
-        warnings.append(f"Perks configuration capture was incomplete: {source_reason}")
-    if low_confidence:
-        warnings.append("Low-confidence configured perks: " + ", ".join(low_confidence))
-    if field == "perk_first_choice" and len(selected) != 1:
-        warnings.append(
-            f"First Perk capture contained {len(selected)} selected rows instead of one"
-        )
-    if field == "perk_auto_pick_order" and not selected:
-        warnings.append("Auto Pick capture contained no selected priority rows")
-    valid = bool(source_complete and not low_confidence and not warnings)
-    return {
-        "source_method": "scrolling_screenshot_ocr",
-        "page_count": len(frames),
-        "order_semantics": ORDER_SEMANTICS[field],
-        "selected": selected,
-        "evidence_images": list(evidence_images),
-        "raw_pages": raw_pages,
-        "quality": {
-            "valid": valid,
-            "source_complete": bool(source_complete),
-            "source_reason": source_reason,
-            "confidence_threshold": float(confidence_threshold),
-            "selected_count": len(selected),
-            "low_confidence": low_confidence,
-            "warnings": warnings,
-        },
-    }
+            selected.append(entry)
+    return _observed_configuration_result(
+        field="perk_first_choice",
+        selected=selected,
+        raw_pages=raw_pages,
+        source_complete=source_complete,
+        source_reason=source_reason,
+        evidence_images=evidence_images,
+        confidence_threshold=confidence_threshold,
+        boundary_seen=True,
+    )
 
 
 def _parse_observed_ban_selection(
@@ -968,6 +944,10 @@ def _observed_configuration_result(
     warnings = []
     if not source_complete:
         warnings.append(f"Perks configuration capture was incomplete: {source_reason}")
+    if field == "perk_first_choice" and len(selected) != 1:
+        warnings.append(
+            f"First Perk capture contained {len(selected)} selected rows instead of one"
+        )
     if field == "perk_auto_pick_order" and not boundary_seen:
         warnings.append("Auto Pick ranking boundary was not recognized")
     if field == "perk_auto_pick_order" and not selected:
