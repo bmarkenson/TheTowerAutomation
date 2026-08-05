@@ -148,6 +148,76 @@ and actionable work lives in
 - **Follow-up:** The 2026-08-05 operator-authorized Tournament pairing above
   subsequently closed the Project Funding/Harmony Conductor gap without
   changing Tournament's observation-only policy.
+### Stopping managed automation removed the only localhost ADB registration
+
+- **Observed:** 2026-08-05 at a post-automation invocation boundary for the
+  configured `localhost:5555` target.
+- **Symptom:** Two bounded checks reached an ADB daemon but found no registered
+  `localhost:5555` row even though control and service configuration still
+  selected that exact port and both automation locks were released. The
+  documented host connection-management path had to restore registration
+  before read-only device work could continue.
+- **Evidence:** The Windows tunnel host persisted the desired reverse SSH
+  forward independently of the GUI, and the Linux control configuration
+  persisted the port. Linux target registration was different: reconnects were
+  owned only by `main.py`, and the automation unit used systemd's control-group
+  process lifetime. An ADB daemon first created by that runtime could therefore
+  leave with the unit, while no stopped-runtime component was responsible for
+  reconnecting the saved target.
+- **Safety response:** Recovery used the documented approved-host, exact-target
+  connection path. It changed ADB connectivity only; it did not inspect or
+  mutate the game, battle, control intent, or emulator state.
+- **Cause:** The persistence design covered Windows SSH-forward desired state,
+  Linux port configuration, and the control service, but not the Linux ADB
+  daemon/target-registration lifecycle. Documentation described the layers
+  incompletely and could not create the missing owner.
+- **Resolution:** The long-lived Linux control service now owns bounded,
+  exact-target registration and exposes its state through
+  `adb_connection`. Managed automation explicitly uses an observe-only
+  coordinator; direct launches retain the self-managed fallback. Start
+  validates the installed unit's owner contract, port changes refresh the new
+  target, and Stop or guarded replacement forces a registration refresh after
+  the old process exits. No path uses global `adb kill-server` or connects an
+  endpoint other than the persisted `localhost:PORT`.
+- **Regression:** `test/test_adb_connection.py` covers persistent service
+  polling, exact-target changes, observer behavior, bounded outage/recovery,
+  and status. `test/test_automation_process.py` covers installed-unit ownership,
+  stopped-start rejection, pre-start refresh, port handoff, and post-stop or
+  guarded-replacement refresh. `test/test_run_initialization.py` covers direct
+  and managed owner selection.
+- **Validation:** The complete non-live development checkpoint passed compile,
+  state-definition validation, clickmap integrity with zero errors and 44
+  existing orphans, and all 1,400 pytest tests. No live automation runtime,
+  user service, ADB, emulator, game, or battle interaction was used for
+  implementation validation.
+- **Fixed by:** `cd78104`.
+
+### Development checkpoint mistook an ADB-named worktree for an ADB command
+
+- **Observed:** 2026-08-05 while validating from the isolated
+  `persistent-adb-connection` feature worktree.
+- **Symptom:** The complete checkpoint reported one failure in
+  `test_checkpoint_commands_cover_full_offline_repository_gate` even though it
+  launched no ADB command and the other 1,399 tests passed.
+- **Evidence:** The assertion searched every fully rendered command for the
+  substring `adb`. The selected Python executable and pytest cache paths both
+  inherited the feature worktree name, so ordinary development paths triggered
+  the live-tool guard.
+- **Safety response:** The failing checkpoint was allowed to finish. No ADB
+  availability probe, process/service mutation, or device interaction was used
+  to bypass it.
+- **Cause:** The test inspected arbitrary path text instead of the executable
+  boundary it intended to constrain.
+- **Resolution:** The test now requires every checkpoint command to use the
+  selected isolated environment's Python executable. The checkpoint environment
+  also removes `THETOWER_ADB_CONNECTION_OWNER`, preventing a host-managed value
+  from changing development runtime behavior.
+- **Regression:** `test/test_development_environment.py::
+  test_checkpoint_commands_cover_full_offline_repository_gate` and
+  `test_checkpoint_generated_state_is_isolated_while_host_tools_are_available`.
+- **Validation:** The corrected focused test passed, followed by the complete
+  1,400-test non-live checkpoint.
+- **Fixed by:** `cd78104`.
 
 ### Clean-checkout Mission test depended on an ignored screenshot
 

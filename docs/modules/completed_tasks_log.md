@@ -128,6 +128,32 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   unbound, audit, or unresolved-final evidence. It must not background an
   active battle by default; forced serialization requires explicit policy and
   preserved lifecycle/control authority.
+### 2026-08-05 persistent managed ADB registration
+
+- Commit `cd78104` moved managed TCP registration/reconnect ownership from the
+  automation runtime into the long-lived Linux control service. The selected
+  exact `localhost:PORT` now remains maintained while automation is stopped or
+  replaced, and Stop/guarded replacement synchronously refresh registration
+  after the old process exits.
+- The managed unit explicitly selects observe-only runtime behavior. Direct
+  `main.py` launches preserve their self-managed fallback, an outdated
+  installed unit is rejected before a stopped managed start, and neither path
+  uses a global daemon kill or guesses another endpoint. API status publishes
+  connection owner, target, state, retry/warning details, last check, and
+  configuration errors.
+- Windows reverse-forward persistence, Linux registration persistence, and
+  frame/input authority are now documented as separate layers. New-thread and
+  runbook inspections include `adb_connection`, while exact `device` state
+  remains insufficient without a supported fresh frame and runtime ownership.
+- The same commit made the development checkpoint path-safe for feature names
+  containing `adb` and scrubs the new managed-owner environment setting from
+  isolated checkpoints.
+- Focused ADB, process/control, initialization, and development-environment
+  suites passed. The complete non-live checkpoint passed compile,
+  state-definition validation, clickmap integrity with zero errors and 44
+  existing orphans, and all 1,400 pytest tests. No live automation runtime,
+  user-systemd service, ADB, emulator, game, or battle interaction was
+  performed, and the changed units were not installed or deployed.
 
 ### 2026-08-04 save-first Home configuration preflight
 
