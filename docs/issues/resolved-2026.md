@@ -8,6 +8,65 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Save-first Cards repair discarded unrelated accepted decisions
+
+- **Observed:** 2026-08-05 during an ordinary Home transition from Tournament
+  configuration to Farm configuration.
+- **Symptom:** One authoritative version-1073 snapshot accepted First Perk
+  Choice, Ban Perks, Auto Pick order, Free Upgrade locks, and other checks while
+  reporting several exact strategy mismatches. Cards Deck was repaired first,
+  but the generic Home-repair callback cleared every remaining save decision.
+  First Perk Choice therefore reopened through UI unnecessarily and exposed the
+  independent value-bearing OCR defect fixed by
+  `6612801825f8cbdfdf8b5ed5060c0b593e7877c6`. A later clean ordinary Home
+  boundary accepted every supported check from the save without UI fallback.
+- **Evidence:** Privacy-safe action diagnostics showed the same authoritative
+  snapshot's accepted decisions and mismatches, the verified Cards selection,
+  blanket invalidation, and the resulting Perks navigation. The later boundary
+  supplied the control comparison. No raw save, decoded root, account field,
+  arbitrary history, or Module record was needed or retained.
+- **Cause:** Reconciliation represented both a complete trusted mismatch and
+  unsupported/incomplete evidence as `ui_required`, while every Home or
+  in-battle repair used blanket snapshot/carry invalidation. The system
+  therefore could not preserve independent per-check authority after one
+  verified mutation.
+- **Resolution:** Reconciliation now emits explicit `save_mismatch` evidence
+  only when acquisition, serialization, freshness, ownership, restored Home
+  boundary, exact version/mapping, per-check completeness, validation, and
+  value support are all authoritative. The complete plan is frozen before
+  setup input. Each mismatch queues only its existing guarded UI path, whose
+  own observation, mutation guard, and post-action verification remain
+  authoritative. The repair is UI-proven and never added to save carry;
+  unrelated accepted Home and exact-next-battle values survive independent
+  repairs.
+- **Contradictions and continuity:** UI already matching a trusted saved
+  mismatch before coordinator-owned repair, or inspected UI disagreeing with a
+  `save_match`, invalidates the complete snapshot and fails closed. Global
+  acquisition, serialization, freshness, version/structure, target, boundary,
+  context, control, requirement, launch, and binding failures remain unchanged.
+  Mixed final validation accepts save provenance only for omitted sections and
+  still evaluates every supplied UI screen.
+- **Regression:** `test/test_gc_no_battle_setup.py` covers the Cards/Perks
+  motivating sequence, multiple mismatch queues, UI provenance, and both Home
+  contradiction directions. `test/test_player_save.py` and
+  `test/test_player_save_preflight.py` cover trust classification, preserved
+  carry, repair provenance, contradiction invalidation, policy modes, and
+  continuity failures. `test/test_action_executor_save_preflight.py` and
+  `test/test_gc_preflight_navigation.py` cover Target Priority, Poison Stun,
+  Damage Slider, Orb Distance, carried-UW contradictions, and unrelated carry.
+  `test/test_gc_preflight_templates.py` covers mixed save/UI final consistency
+  and mandatory evaluation of supplied screens. The independent First Perk
+  semantic normalization regression remains in `test/test_perk_configuration.py`.
+- **Validation:** The focused affected suite passed all 223 tests, the broader
+  relevant set passed all 414 tests, and the isolated checkpoint passed
+  compilation, state definitions, clickmap integrity with zero errors and 44
+  known orphans, and all 1,495 tests. Dependency locks and changed local
+  documentation links/anchors passed validation.
+- **Safety:** This correction used only fakes and retained fixtures. It did not
+  inspect or interact with the production process, systemd, ADB, emulator,
+  shared live frame, or battle, and did not deploy or modify installed files.
+- **Fixed by:** `b9c229a77d2fbc5efe16a7cdcb6681d469751a0b`.
+
 ### First Perk Choice compared a value-bearing OCR slug to its semantic key
 
 - **Observed:** 2026-08-05 during the first ordinary Farm Home boundary after

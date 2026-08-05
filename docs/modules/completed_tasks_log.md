@@ -37,6 +37,47 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-05 save-first targeted repair reconciliation
+
+- `b9c229a77d2fbc5efe16a7cdcb6681d469751a0b` separates global snapshot
+  trust from each check's configuration disposition. A complete, validated,
+  supported exact difference is now `save_mismatch`; unsupported, incomplete,
+  unknown, stale, and forced-audit evidence remains ordinary `ui_required`.
+  The complete plan is frozen before setup input.
+- A trusted mismatch queues only its existing guarded UI path and supplies no
+  mutation authority. The path must observe a current mismatch, perform its
+  normal guarded repair, and verify the result. The repaired check is recorded
+  as UI-verified, is never called save-confirmed, and is not inserted into save
+  carry. Multiple mismatches retain independent queues.
+- The motivating Cards repair now preserves accepted First Perk Choice, Ban
+  Perks, Auto Pick order, and other Home decisions, so their Perks tabs remain
+  closed. Verified Home, Target Priority, Poison Swamp Stun, Damage Slider, Orb
+  Distance, and other independent UI-only repairs also preserve unrelated
+  exact-next-battle carry.
+- Authoritative UI that disagrees with a `save_match`, or that already matches
+  a trusted saved mismatch before this coordinator repaired it, is a
+  contradiction that invalidates the complete snapshot and fails closed.
+  Acquisition, serialization, freshness, version/structure, target, boundary,
+  context, control, requirement, launch, and first-`RUNNING` continuity
+  failures retain global invalidation. Final consistency accepts mixed
+  save-backed omissions and current UI proof while evaluating every supplied
+  screen.
+- Diagnostics expose only normalized trust, disposition, affected-check,
+  repair, contradiction, and remaining-carry evidence. Raw save bytes, decoded
+  roots, account identifiers, private fields, arbitrary history, and raw Module
+  records remain unpublished.
+- The focused affected suite passed all 223 tests, the broader configuration,
+  initialization, carry, and First Perk normalization set passed all 414 tests,
+  and the complete isolated checkpoint passed compilation, state definitions,
+  clickmap integrity with zero errors and 44 known orphans, and all 1,495
+  tests. Dependency locks and changed local documentation links/anchors also
+  passed validation.
+- This was strictly code-only work using fakes and retained fixtures. It did
+  not inspect or interact with the production process, systemd, ADB, emulator,
+  shared live frame, or battle; nothing was deployed, merged, rebased, pushed,
+  or installed. Deployment and first ordinary-boundary observation remain
+  coordinator work.
+
 ### 2026-08-05 observation-only Tournament Module save mapping
 
 - `2dcde8bdd3717af93239a464901b77bf4578f366` makes version 1073 decode
@@ -173,8 +214,10 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   `NEW_BATTLE` and its first stable `RUNNING` boundary. It covers Auto Pick
   enabled `true`, a complete exact ten-ID Target Priority order, all nine
   primaries on, Spotlight Missiles on, Poison Swamp Stun in either calibrated
-  polarity, and accepted Home sections. Every continuity break or first UI
-  repair invalidates remaining evidence; actual UI observations still detect
+  polarity, and accepted Home sections. Every continuity break invalidates
+  remaining evidence; the later targeted-repair correction above supersedes
+  the original blanket first-repair invalidation so verified independent
+  repairs preserve unrelated evidence. Actual UI observations still detect
   contradictions.
 - The monolithic Ultimate Weapon check remains unvalidated; its supported
   value-scoped components fail independently. Mixed/off primaries and
