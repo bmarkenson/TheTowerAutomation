@@ -53,6 +53,7 @@ def test_tournament_strategy_declares_exclusive_validation_then_observes():
     assert strategy is not None
     assert strategy.name == "tournament"
     assert strategy.runtime_policy() == {
+        "player_save_preflight": "save_first",
         "handlers": ["ad_gem", "game_over", "game_speed"],
         "auto_return": False,
         "game_over_mode": "wait",

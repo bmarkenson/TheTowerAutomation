@@ -29,6 +29,7 @@ session_preflight:
     - Summon
     - Scout
     auto_pick_perks: true
+    perk_first_choice: perk_wave_requirement
     perk_bans:
     - lifesteal_knockback_tradeoff
     - enemies_damage_tradeoff
@@ -441,6 +442,7 @@ rules:
       - Summon
       - Scout
       auto_pick_perks: true
+      perk_first_choice: perk_wave_requirement
       perk_bans:
       - lifesteal_knockback_tradeoff
       - enemies_damage_tradeoff
@@ -511,6 +513,8 @@ rules:
       - Ranged
       - Basic
     repair_mismatch_attempts: 3
+runtime_policy:
+  player_save_preflight: save_first
 run_configuration:
   schema_version: 2
   profile: farm
@@ -532,6 +536,7 @@ run_configuration:
     - Summon
     - Scout
     auto_pick_perks: true
+    perk_first_choice: perk_wave_requirement
     perk_bans:
     - lifesteal_knockback_tradeoff
     - enemies_damage_tradeoff

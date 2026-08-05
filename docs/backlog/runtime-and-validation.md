@@ -24,6 +24,18 @@ checked-item detail remains in the
     recharge booleans through isolated app-pause flushes and restorations.
     Allowlist the complete Cards preset and recharge-mode checks while keeping
     the overall mapping `candidate`.
+  - [x] Reuse the accepted version-1073 calibration to implement all eligible
+    save-first configuration checks atomically. The guarded exact-target Home
+    acquisition now drives independent per-check UI omission/fallback, first
+    repair invalidation, exact-next-battle carry, and `save_first` / `force_ui`
+    / `comparison_audit` runtime policy without depending on the observation
+    collector. First Perk Choice is an independent Farm requirement;
+    Tournament invents no Perk requirement. The adopted scope is the ranked
+    Auto Pick prefix, the exact current three-lock Farm set, complete exact
+    Target Priority order, both Poison Stun polarities, all-nine-primaries-on,
+    and Spotlight-Missiles-on. Modules, Damage Slider, Orb Distance, mixed/off
+    primaries, and Spotlight Missiles off remain UI-authoritative. This was
+    code-only validation, not a repeated live-preflight campaign.
   - [x] Consolidate every profile and runtime save claim into the authoritative
     `data-9-game-1073` audit matrix. Implement the repository-local
     normalized runtime foundation: guarded round identity, exact consistent
@@ -114,17 +126,33 @@ checked-item detail remains in the
   - [ ] Add the versioned raw-field disposition manifest and explicit
     validation status/provenance for every normalized profile group. Keep
     private, ignored, and unknown fields unpublished.
-  - [ ] Cross-validate Auto Pick enabled and full ranked-order semantics,
-    Target Priority, every supported Free Upgrade lock, every Ultimate Weapon
-    primary/detail polarity, Modules, Damage Slider, and Orb Distance according
-    to the matrix. Do not manufacture cost-bearing Bot or Module changes.
-  - [ ] Integrate the proven flush plus stable pull into preflight in audit-only
-    mode, run a clean forced audit for each resolved Farm/Tournament
-    configuration fingerprint, and retain normalized discrepancy evidence.
-  - [ ] Enable per-check navigation suppression incrementally. Invalidate the
-    snapshot after the first UI repair, preserve visual post-action
-    verification, and force audits on version/fingerprint changes,
-    discrepancies, repairs, and a configurable periodic cadence.
+  - [ ] After deployment, observe the first ordinary save-first Home boundary
+    and exact-next-battle bind. Confirm operator-facing ACTION / INPUT / RESULT
+    logging, the expected omitted versus fallback UI routes, and unchanged
+    production authority. This is ordinary rollout observation, not a request
+    for a special battle or duplicate field-validation campaign.
+  - [ ] Use natural UI fallbacks and explicit/periodic `comparison_audit` runs
+    for future privacy-safe candidates. Candidates never self-promote; mapping
+    promotion remains a reviewed code/documentation change.
+    - [ ] During an ordinary Farm T18 start, compare its distinct complete
+      Target Priority order with the mapped save sequence. A second nontrivial
+      full order confirms generic serialization; do not test all permutations.
+    - [ ] Before supporting mixed Ultimate Weapon primaries, validate one
+      weapon index's off/on polarity at a time with normalized
+      before/change/restore evidence. Validate Spotlight Missiles off through
+      one explicitly authorized reversible transition. Do not enumerate every
+      boolean combination.
+    - [ ] Prefer a natural Farm `30.00m / 30.00m / 39.00m` → Tournament
+      `98.38m / 87.16m / 80.37m` → Farm Orb Distance sequence. Pair UI and
+      guarded stable saves to establish field identity, units/rounding,
+      selected-preset versus derived semantics, serialization timing, Home
+      versus active behavior, and restoration. Only if natural transitions are
+      insufficient may a later coordinator authorize one owned bounded
+      calibration.
+    - [ ] Continue routing unknown versions, shapes, IDs, values, Modules, and
+      Damage Slider through UI. A unique exact-evidence mapping attempt may use
+      the existing fail-closed resolver; ambiguity/conflict remains UI-only,
+      and the observation collector never supplies preflight authority.
 - [ ] Capture the numeric level of every equipped Module from authoritative
   overview evidence, retain it with preflight and completed-run records, and
   surface threshold violations without confusing an intentional Tournament

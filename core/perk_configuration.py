@@ -192,6 +192,20 @@ def normalize_perk_configuration_requirements(
     return bans, auto_pick
 
 
+def normalize_perk_first_choice_requirement(requirements: Mapping[str, Any]) -> str:
+    """Validate the independent strategy-owned First Perk choice."""
+
+    raw = requirements.get("perk_first_choice")
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError("perk_first_choice must be one supported perk key")
+    normalized = raw.strip().lower()
+    if normalized not in _SUPPORTED_PERK_KEYS:
+        raise ValueError(
+            f"perk_first_choice contains unsupported perk: {normalized!r}"
+        )
+    return normalized
+
+
 def classify_perk_configuration_text(text: str) -> str | None:
     """Map OCR display text to a value-independent semantic perk key."""
 
@@ -1315,6 +1329,7 @@ __all__ = [
     "extract_configured_perk_bans",
     "extract_ranked_auto_pick_order",
     "normalize_perk_configuration_requirements",
+    "normalize_perk_first_choice_requirement",
     "parse_perk_configuration_selection",
     "perk_configuration_label",
     "perk_entries_match",

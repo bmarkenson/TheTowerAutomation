@@ -39,6 +39,7 @@ from core.input import (
 )
 from core.perk_configuration import (
     normalize_perk_configuration_requirements,
+    normalize_perk_first_choice_requirement,
     perk_configuration_label,
 )
 from core.poison_swamp_stun import (
@@ -127,6 +128,7 @@ _HOME_PREFLIGHT_LABELS = {
     "damage_slider": "Damage Slider",
     "auto_pick_perks": "Auto Pick Perks",
     "perk_configuration": "Perk configuration",
+    "perk_first_choice": "First Perk Choice",
     "perk_bans": "Perk Bans",
     "perk_auto_pick_order": "Auto Pick priority",
 }
@@ -211,6 +213,8 @@ def run_gc_no_battle_setup(
     *,
     screenshot=None,
     waivers: Mapping[str, Any] | None = None,
+    save_decisions: Mapping[str, Mapping[str, Any]] | None = None,
+    snapshot_invalidation_fn: Callable[[str], None] | None = None,
     capture_fn: Callable[[], Any] = capture_adb_screenshot,
     detector: Callable[[Any], Mapping[str, Any]] = detect_state_and_overlays,
     detect_home_control_fn: Callable[[Any], Any] = detect_home_battle_control,
@@ -250,6 +254,12 @@ def run_gc_no_battle_setup(
             GcNoBattleSetupStatus.UNSUPPORTED,
             unsupported,
         )
+    logged_save_matches = sorted(
+        str(check_id)
+        for check_id, decision in (save_decisions or {}).items()
+        if isinstance(decision, Mapping)
+        and decision.get("disposition") == "save_match"
+    )
     log_action_intent(
         "Verifying Home-only run configuration",
         reason=(
@@ -258,7 +268,8 @@ def run_gc_no_battle_setup(
         ),
         detail=(
             f"[GC_NO_BATTLE] requirements={sorted(requirements)} "
-            f"waivers={sorted((waivers or {}).keys())}"
+            f"waivers={sorted((waivers or {}).keys())} "
+            f"save_matches={logged_save_matches}"
         ),
     )
 
@@ -316,10 +327,46 @@ def run_gc_no_battle_setup(
     module_mode = _module_policy(requirements)
     target_priority_mode = _target_priority_policy(requirements)
     active_waivers = dict(waivers or {})
+    active_save_decisions = {
+        str(check_id): dict(decision)
+        for check_id, decision in (save_decisions or {}).items()
+        if isinstance(decision, Mapping)
+        and decision.get("disposition") == "save_match"
+    }
     repairs: list[str] = []
+    snapshot_invalidated = False
+
+    def save_match(check_id: str) -> bool:
+        return check_id in active_save_decisions
+
+    def resolved_without_ui(check_id: str) -> bool:
+        return check_id in active_waivers or save_match(check_id)
+
+    def save_evidence(check_id: str) -> dict[str, Any]:
+        decision = active_save_decisions[check_id]
+        return {
+            "status": "save_match",
+            "source": "player_save_preflight",
+            "checked": False,
+            "required": decision.get("expected"),
+            "observed": decision.get("observed"),
+            "reason": decision.get("reason"),
+        }
 
     def record_repair(description: str) -> None:
+        nonlocal snapshot_invalidated
         repairs.append(description)
+        if active_save_decisions and not snapshot_invalidated:
+            active_save_decisions.clear()
+            snapshot_invalidated = True
+            if snapshot_invalidation_fn is not None:
+                snapshot_invalidation_fn("home_ui_repair")
+            log(
+                "[PLAYER_SAVE_PREFLIGHT] First Home repair invalidated all "
+                "remaining pre-action save decisions",
+                "INFO",
+                console=True,
+            )
         log(
             f"[HOME_PREFLIGHT] Repair completed; {description}",
             "INFO",
@@ -332,9 +379,14 @@ def run_gc_no_battle_setup(
             "target_priority": target_priority_mode,
         },
         "waivers": active_waivers,
+        "save_preflight": {
+            "accepted_checks": sorted(active_save_decisions),
+            "invalidated": False,
+        },
     }
     current = screenshot if screenshot is not None else capture_fn()
     section_specs = _configuration_section_specs(requirements)
+    accepted_sections: dict[str, Mapping[str, Any]] = {}
     current_check = "home_boundary"
 
     def log_check(check_id: str) -> None:
@@ -348,105 +400,141 @@ def run_gc_no_battle_setup(
     try:
         _require_no_battle_home(current, detector, detect_home_control_fn)
 
-        current_check = "cards_deck"
-        cards = _open_static(
-            current,
-            "navigation.goto_cards_home",
-            "HOME_SCREEN",
-            "CARDS",
-            capture_fn,
-            detector,
-            safe_tap_fn,
-            sleep_fn,
-        )
-        if current_check in active_waivers:
-            evidence[current_check] = _waived_evidence(
-                current_check,
-                requirements.get(current_check),
-                active_waivers[current_check],
-            )
-        else:
-            preset = _preset_spec(current_check, requirements)
-            cards, preset_changed = _ensure_preset(
-                cards,
-                state="CARDS",
-                slot_secondary=preset.secondary,
-                slot_label=preset.label,
-                slot_region=preset.region,
-                capture_fn=capture_fn,
-                detector=detector,
-                tap_visible_fn=tap_visible_fn,
-                measure_selection_fn=measure_selection_fn,
-                sleep_fn=sleep_fn,
-            )
-            if preset_changed:
-                record_repair(
-                    f"Cards deck selected {requirements[current_check]}"
-                )
-            evidence[current_check] = requirements[current_check]
-        log_check(current_check)
-        cards_configuration = cards
-
-        current_check = "card_recharge_modes"
-        card_recharge_requirements = requirements.get(current_check)
-        if current_check in active_waivers:
-            evidence[current_check] = _waived_evidence(
-                current_check,
-                card_recharge_requirements,
-                active_waivers[current_check],
-            )
-        elif card_recharge_requirements is not None:
-            recharge_result = ensure_card_recharge_modes_fn(
-                card_recharge_requirements,
-                cards_screenshot=cards,
-                capture_fn=capture_fn,
-                detector=detector,
-                safe_long_press_fn=safe_long_press_fn,
-                safe_tap_fn=safe_tap_fn,
-                swipe_fn=swipe_fn,
-                sleep_fn=sleep_fn,
-            )
-            recharge_payload = recharge_result.as_dict()
-            evidence[current_check] = recharge_payload
-            cards = recharge_result.screenshot
-            if not recharge_result.valid:
-                raise _SetupFailure(
-                    "Card recharge modes remained invalid after correction"
-                )
-            normalized_recharge_modes = normalize_card_recharge_modes(
-                card_recharge_requirements
-            )
-            for label in recharge_payload.get("changed_labels") or ():
-                required_mode = normalized_recharge_modes.get(str(label))
-                target = (
-                    required_mode.value.replace("_", " ")
-                    if required_mode is not None
-                    else "the required mode"
-                )
-                record_repair(f"{label} recharge mode set to {target}")
-        if card_recharge_requirements is not None:
-            log_check(current_check)
-        current = _return_home(
-            cards,
-            capture_fn,
-            detector,
-            detect_home_control_fn,
-            safe_tap_fn,
-            tap_visible_fn,
-            sleep_fn,
-        )
-
-        if (
-            "perk_bans" in requirements
-            or "perk_auto_pick_order" in requirements
-        ):
-            perk_fields = ("perk_bans", "perk_auto_pick_order")
-            if all(check_id in active_waivers for check_id in perk_fields):
-                for check_id in perk_fields:
-                    field_evidence = _waived_evidence(
+        card_recharge_requirements = requirements.get("card_recharge_modes")
+        card_fields = ["cards_deck"]
+        if "card_recharge_modes" in requirements:
+            card_fields.append("card_recharge_modes")
+        cards_configuration = None
+        if all(resolved_without_ui(check_id) for check_id in card_fields):
+            for check_id in card_fields:
+                evidence[check_id] = (
+                    _waived_evidence(
                         check_id,
                         requirements.get(check_id),
                         active_waivers[check_id],
+                    )
+                    if check_id in active_waivers
+                    else save_evidence(check_id)
+                )
+                log_check(check_id)
+            if save_match("cards_deck"):
+                accepted_sections["cards"] = active_save_decisions["cards_deck"]
+        else:
+            current_check = "cards_deck"
+            cards = _open_static(
+                current,
+                "navigation.goto_cards_home",
+                "HOME_SCREEN",
+                "CARDS",
+                capture_fn,
+                detector,
+                safe_tap_fn,
+                sleep_fn,
+            )
+            if current_check in active_waivers:
+                evidence[current_check] = _waived_evidence(
+                    current_check,
+                    requirements.get(current_check),
+                    active_waivers[current_check],
+                )
+            elif save_match(current_check):
+                evidence[current_check] = save_evidence(current_check)
+            else:
+                preset = _preset_spec(current_check, requirements)
+                cards, preset_changed = _ensure_preset(
+                    cards,
+                    state="CARDS",
+                    slot_secondary=preset.secondary,
+                    slot_label=preset.label,
+                    slot_region=preset.region,
+                    capture_fn=capture_fn,
+                    detector=detector,
+                    tap_visible_fn=tap_visible_fn,
+                    measure_selection_fn=measure_selection_fn,
+                    sleep_fn=sleep_fn,
+                )
+                if preset_changed:
+                    record_repair(
+                        f"Cards deck selected {requirements[current_check]}"
+                    )
+                evidence[current_check] = requirements[current_check]
+            log_check(current_check)
+            cards_configuration = cards
+
+            current_check = "card_recharge_modes"
+            if current_check in active_waivers:
+                evidence[current_check] = _waived_evidence(
+                    current_check,
+                    card_recharge_requirements,
+                    active_waivers[current_check],
+                )
+            elif save_match(current_check):
+                evidence[current_check] = save_evidence(current_check)
+            elif card_recharge_requirements is not None:
+                recharge_result = ensure_card_recharge_modes_fn(
+                    card_recharge_requirements,
+                    cards_screenshot=cards,
+                    capture_fn=capture_fn,
+                    detector=detector,
+                    safe_long_press_fn=safe_long_press_fn,
+                    safe_tap_fn=safe_tap_fn,
+                    swipe_fn=swipe_fn,
+                    sleep_fn=sleep_fn,
+                )
+                recharge_payload = recharge_result.as_dict()
+                evidence[current_check] = recharge_payload
+                cards = recharge_result.screenshot
+                if not recharge_result.valid:
+                    raise _SetupFailure(
+                        "Card recharge modes remained invalid after correction"
+                    )
+                normalized_recharge_modes = normalize_card_recharge_modes(
+                    card_recharge_requirements
+                )
+                for label in recharge_payload.get("changed_labels") or ():
+                    required_mode = normalized_recharge_modes.get(str(label))
+                    target = (
+                        required_mode.value.replace("_", " ")
+                        if required_mode is not None
+                        else "the required mode"
+                    )
+                    record_repair(f"{label} recharge mode set to {target}")
+            if card_recharge_requirements is not None:
+                log_check(current_check)
+            current = _return_home(
+                cards,
+                capture_fn,
+                detector,
+                detect_home_control_fn,
+                safe_tap_fn,
+                tap_visible_fn,
+                sleep_fn,
+            )
+
+        if (
+            "perk_first_choice" in requirements
+            or "perk_bans" in requirements
+            or "perk_auto_pick_order" in requirements
+        ):
+            perk_fields = tuple(
+                check_id
+                for check_id in (
+                    "perk_first_choice",
+                    "perk_bans",
+                    "perk_auto_pick_order",
+                )
+                if check_id in requirements
+            )
+            if all(resolved_without_ui(check_id) for check_id in perk_fields):
+                for check_id in perk_fields:
+                    field_evidence = (
+                        _waived_evidence(
+                            check_id,
+                            requirements.get(check_id),
+                            active_waivers[check_id],
+                        )
+                        if check_id in active_waivers
+                        else save_evidence(check_id)
                     )
                     evidence[check_id] = field_evidence
                     _log_home_preflight_evidence(
@@ -469,7 +557,7 @@ def run_gc_no_battle_setup(
                     waived_fields=tuple(
                         check_id
                         for check_id in perk_fields
-                        if check_id in active_waivers
+                        if check_id in active_waivers or save_match(check_id)
                     ),
                     sleep_fn=sleep_fn,
                     operator_workflow=False,
@@ -481,6 +569,8 @@ def run_gc_no_battle_setup(
                             requirements.get(check_id),
                             active_waivers[check_id],
                         )
+                    elif save_match(check_id):
+                        field_evidence = save_evidence(check_id)
                     else:
                         field_evidence = dict(
                             perk_result.evidence[check_id]
@@ -498,6 +588,9 @@ def run_gc_no_battle_setup(
                     if field_evidence.get("changed") is True:
                         record_repair(
                             {
+                                "perk_first_choice": (
+                                    "First Perk Choice restored"
+                                ),
                                 "perk_bans": "Ban Perks list restored",
                                 "perk_auto_pick_order": (
                                     "Auto Pick priority restored"
@@ -511,16 +604,30 @@ def run_gc_no_battle_setup(
                     )
                     raise _SetupFailure(perk_result.reason)
 
+        home_stun_required = _home_poison_swamp_stun_requirement(requirements)
+        workshop_fields = ["workshop_preset"]
+        if "free_upgrade_locks" in requirements:
+            workshop_fields.append("free_upgrade_locks")
+        if home_stun_required is not None:
+            workshop_fields.append("poison_swamp_stun")
+        workshop_needed = not all(
+            resolved_without_ui(check_id) for check_id in workshop_fields
+        )
+
         current_check = "workshop_preset"
-        workshop = _open_static(
-            current,
-            "navigation.goto_workshop_home",
-            "HOME_SCREEN",
-            "WORKSHOP",
-            capture_fn,
-            detector,
-            safe_tap_fn,
-            sleep_fn,
+        workshop = (
+            _open_static(
+                current,
+                "navigation.goto_workshop_home",
+                "HOME_SCREEN",
+                "WORKSHOP",
+                capture_fn,
+                detector,
+                safe_tap_fn,
+                sleep_fn,
+            )
+            if workshop_needed
+            else None
         )
         if current_check in active_waivers:
             evidence[current_check] = _waived_evidence(
@@ -528,6 +635,12 @@ def run_gc_no_battle_setup(
                 requirements.get(current_check),
                 active_waivers[current_check],
             )
+        elif save_match(current_check):
+            evidence[current_check] = save_evidence(current_check)
+            if workshop is None:
+                accepted_sections["workshop"] = active_save_decisions[
+                    current_check
+                ]
         else:
             preset = _preset_spec(current_check, requirements)
             workshop, preset_changed = _ensure_preset(
@@ -563,6 +676,13 @@ def run_gc_no_battle_setup(
                 valid=None,
             )
             evidence[current_check] = waived_locks
+        elif save_match(current_check):
+            lock_payload = save_evidence(current_check)
+            lock_payload.update(
+                boundary=HomeBattleControl.NEW_BATTLE.value,
+                valid=True,
+            )
+            evidence[current_check] = lock_payload
         elif free_upgrade_lock_requirements is not None:
             lock_result = ensure_free_upgrade_locks_fn(
                 free_upgrade_lock_requirements,
@@ -610,13 +730,26 @@ def run_gc_no_battle_setup(
         log_check(current_check)
 
         current_check = "ultimate_weapons"
-        home_stun_required = _home_poison_swamp_stun_requirement(requirements)
         if home_stun_required is not None and current_check in active_waivers:
             evidence[current_check] = _waived_evidence(
                 current_check,
                 requirements.get(current_check),
                 active_waivers[current_check],
             )
+        elif home_stun_required is not None and save_match("poison_swamp_stun"):
+            stun_evidence = save_evidence("poison_swamp_stun")
+            evidence[current_check] = {
+                "boundary": HomeBattleControl.NEW_BATTLE.value,
+                "checked": [],
+                "observations": {
+                    "Poison Swamp": {
+                        "stun": stun_evidence.get("observed"),
+                    },
+                },
+                "valid": True,
+                "source": "player_save_preflight",
+                "components": {"poison_swamp_stun": stun_evidence},
+            }
         elif home_stun_required is not None:
             workshop = select_workshop_menu_fn(
                 workshop,
@@ -666,51 +799,55 @@ def run_gc_no_battle_setup(
                 "reason": "no_supported_home_controls_required",
             }
         log_check(current_check)
-        current = _return_home(
-            workshop,
-            capture_fn,
-            detector,
-            detect_home_control_fn,
-            safe_tap_fn,
-            tap_visible_fn,
-            sleep_fn,
-        )
+        if workshop is not None:
+            current = _return_home(
+                workshop,
+                capture_fn,
+                detector,
+                detect_home_control_fn,
+                safe_tap_fn,
+                tap_visible_fn,
+                sleep_fn,
+            )
 
         current_check = "bots_preset"
-        event = _open_visible(
-            current,
-            "navigation.home_event",
-            "HOME_SCREEN",
-            "EVENT",
-            capture_fn,
-            detector,
-            tap_visible_fn,
-            sleep_fn,
-        )
-        bots = _open_static(
-            event,
-            "navigation.event:bots_tab",
-            "EVENT",
-            "EVENT",
-            capture_fn,
-            detector,
-            safe_tap_fn,
-            sleep_fn,
-        )
-        bots = _ensure_event_bots_top(
-            bots,
-            capture_fn=capture_fn,
-            detector=detector,
-            swipe_fn=swipe_fn,
-            sleep_fn=sleep_fn,
-        )
-        if current_check in active_waivers:
+        bots_configuration = None
+        if resolved_without_ui(current_check):
             evidence[current_check] = _waived_evidence(
                 current_check,
                 requirements.get(current_check),
                 active_waivers[current_check],
-            )
+            ) if current_check in active_waivers else save_evidence(current_check)
+            if save_match(current_check):
+                accepted_sections["bots"] = active_save_decisions[current_check]
         else:
+            event = _open_visible(
+                current,
+                "navigation.home_event",
+                "HOME_SCREEN",
+                "EVENT",
+                capture_fn,
+                detector,
+                tap_visible_fn,
+                sleep_fn,
+            )
+            bots = _open_static(
+                event,
+                "navigation.event:bots_tab",
+                "EVENT",
+                "EVENT",
+                capture_fn,
+                detector,
+                safe_tap_fn,
+                sleep_fn,
+            )
+            bots = _ensure_event_bots_top(
+                bots,
+                capture_fn=capture_fn,
+                detector=detector,
+                swipe_fn=swipe_fn,
+                sleep_fn=sleep_fn,
+            )
             preset = _preset_spec(current_check, requirements)
             bots, preset_changed = _ensure_preset(
                 bots,
@@ -729,47 +866,52 @@ def run_gc_no_battle_setup(
                     f"Bot preset selected {requirements[current_check]}"
                 )
             evidence[current_check] = requirements[current_check]
+            bots_configuration = bots
+            current = _return_home(
+                bots,
+                capture_fn,
+                detector,
+                detect_home_control_fn,
+                safe_tap_fn,
+                tap_visible_fn,
+                sleep_fn,
+            )
         log_check(current_check)
-        bots_configuration = bots
-        current = _return_home(
-            bots,
-            capture_fn,
-            detector,
-            detect_home_control_fn,
-            safe_tap_fn,
-            tap_visible_fn,
-            sleep_fn,
-        )
 
         current_check = "guardian_chips"
-        guild = _open_visible(
-            current,
-            "navigation.home_guild",
-            "HOME_SCREEN",
-            "GUILD",
-            capture_fn,
-            detector,
-            tap_visible_fn,
-            sleep_fn,
-        )
-        guardians = _open_static(
-            guild,
-            "navigation.guild:guardian_tab",
-            "GUILD",
-            "GUILD",
-            capture_fn,
-            detector,
-            safe_tap_fn,
-            sleep_fn,
-            required_secondary="GUILD_GUARDIAN_SCREEN",
-        )
-        if current_check in active_waivers:
+        guardians_configuration = None
+        if resolved_without_ui(current_check):
             evidence[current_check] = _waived_evidence(
                 current_check,
                 requirements.get(current_check),
                 active_waivers[current_check],
-            )
+            ) if current_check in active_waivers else save_evidence(current_check)
+            if save_match(current_check):
+                accepted_sections["guardians"] = active_save_decisions[
+                    current_check
+                ]
         else:
+            guild = _open_visible(
+                current,
+                "navigation.home_guild",
+                "HOME_SCREEN",
+                "GUILD",
+                capture_fn,
+                detector,
+                tap_visible_fn,
+                sleep_fn,
+            )
+            guardians = _open_static(
+                guild,
+                "navigation.guild:guardian_tab",
+                "GUILD",
+                "GUILD",
+                capture_fn,
+                detector,
+                safe_tap_fn,
+                sleep_fn,
+                required_secondary="GUILD_GUARDIAN_SCREEN",
+            )
             guardians, changed_guardians = _ensure_guardian_loadout(
                 guardians,
                 requirements[current_check],
@@ -784,17 +926,17 @@ def run_gc_no_battle_setup(
                     + ", ".join(changed_guardians)
                 )
             evidence[current_check] = list(requirements[current_check])
+            guardians_configuration = guardians
+            current = _return_home(
+                guardians,
+                capture_fn,
+                detector,
+                detect_home_control_fn,
+                safe_tap_fn,
+                tap_visible_fn,
+                sleep_fn,
+            )
         log_check(current_check)
-        guardians_configuration = guardians
-        current = _return_home(
-            guardians,
-            capture_fn,
-            detector,
-            detect_home_control_fn,
-            safe_tap_fn,
-            tap_visible_fn,
-            sleep_fn,
-        )
 
         current_check = "modules"
         if current_check in active_waivers:
@@ -893,6 +1035,14 @@ def run_gc_no_battle_setup(
                 target_priority_requirement,
                 active_waivers[current_check],
             )
+        elif save_match(current_check):
+            target_evidence = save_evidence(current_check)
+            target_evidence.update(
+                mode=target_priority_mode,
+                boundary="RUNNING",
+                valid=True,
+            )
+            evidence[current_check] = target_evidence
         elif target_priority_mode != "preserve":
             # Target Priority is exposed only from the in-battle side menu.
             # Keep its resolved policy/order in the generated runtime plan,
@@ -925,18 +1075,24 @@ def run_gc_no_battle_setup(
         log_check(current_check)
 
         if "auto_pick_perks" in requirements:
-            _log_home_preflight_evidence(
-                "auto_pick_perks",
-                requirements["auto_pick_perks"],
-                {
+            auto_pick_evidence = (
+                save_evidence("auto_pick_perks")
+                if save_match("auto_pick_perks")
+                else {
                     "checked": False,
                     "valid": None,
                     "boundary": "RUNNING",
                     "reason": "battle_only_control",
-                },
+                }
             )
+            _log_home_preflight_evidence(
+                "auto_pick_perks",
+                requirements["auto_pick_perks"],
+                auto_pick_evidence,
+            )
+            evidence["auto_pick_perks"] = auto_pick_evidence
 
-        configuration = validate_configuration_fn(
+        configuration_kwargs = dict(
             cards_screen=cards_configuration,
             workshop_screen=workshop_configuration,
             bots_screen=bots_configuration,
@@ -944,7 +1100,17 @@ def run_gc_no_battle_setup(
             detector=detector,
             section_specs=section_specs,
         )
+        if accepted_sections:
+            configuration_kwargs["accepted_sections"] = accepted_sections
+        configuration = validate_configuration_fn(**configuration_kwargs)
         configuration_payload = configuration.as_dict()
+        configuration_payload["save_backed_sections"] = {
+            section: {
+                "disposition": "save_match",
+                "reason": decision.get("reason"),
+            }
+            for section, decision in sorted(accepted_sections.items())
+        }
         section_checks = (
             ("cards", "cards_deck"),
             ("workshop", "workshop_preset"),
@@ -961,12 +1127,23 @@ def run_gc_no_battle_setup(
         configuration_payload["blocking_valid"] = not configuration_failures
         evidence["configuration"] = configuration_payload
         if configuration_failures:
+            if any(
+                save_match(check_id) for check_id in configuration_failures
+            ):
+                active_save_decisions.clear()
+                snapshot_invalidated = True
+                if snapshot_invalidation_fn is not None:
+                    snapshot_invalidation_fn("save_ui_contradiction")
             current_check = configuration_failures[0]
             raise _SetupFailure(
                 "Home boundary configuration evidence contradicted the "
                 "completed checks: "
                 + ", ".join(configuration_failures)
             )
+        evidence["save_preflight"]["invalidated"] = snapshot_invalidated
+        evidence["save_preflight"]["remaining_checks"] = sorted(
+            active_save_decisions
+        )
     except _SetupControlInterrupted as exc:
         log(
             "[GC_NO_BATTLE] Home setup control interruption ended; "
@@ -1129,6 +1306,18 @@ def _log_home_preflight_evidence(
             if check_evidence.get("valid") is False:
                 disposition = "failed"
                 level = "ERROR"
+        elif check_id == "perk_first_choice":
+            observed_choice = check_evidence.get("observed")
+            observed = (
+                perk_configuration_label(str(observed_choice))
+                if isinstance(observed_choice, str)
+                else "unavailable"
+            )
+            if check_evidence.get("changed"):
+                observed = f"{observed} after correction"
+            if check_evidence.get("valid") is False:
+                disposition = "failed"
+                level = "ERROR"
         elif check_id in {"perk_bans", "perk_auto_pick_order"}:
             expected_labels = check_evidence.get("expected_labels") or []
             observed_labels = check_evidence.get("observed_labels") or []
@@ -1197,6 +1386,8 @@ def _home_preflight_value(check_id: str, value: object) -> str:
         return str(value.get("value") or value.get("mode") or value)
     if check_id == "card_recharge_modes" and isinstance(value, Mapping):
         return ", ".join(f"{key}={item}" for key, item in value.items())
+    if check_id == "perk_first_choice" and isinstance(value, str):
+        return perk_configuration_label(value)
     if check_id in {"perk_bans", "perk_auto_pick_order"} and isinstance(
         value,
         (list, tuple),
@@ -1273,10 +1464,14 @@ def _unsupported_requirement(requirements: Mapping[str, Any]) -> str | None:
     except ValueError as exc:
         return str(exc)
     if (
+        "perk_first_choice" in requirements
+        or
         "perk_bans" in requirements
         or "perk_auto_pick_order" in requirements
     ):
         try:
+            if "perk_first_choice" in requirements:
+                normalize_perk_first_choice_requirement(requirements)
             normalize_perk_configuration_requirements(requirements)
         except ValueError as exc:
             return str(exc)

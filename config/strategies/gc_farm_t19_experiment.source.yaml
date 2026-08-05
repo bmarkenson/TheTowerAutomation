@@ -7,6 +7,9 @@ meta:
 
 builder: gc_farm
 
+runtime_policy:
+  player_save_preflight: save_first
+
 session_preflight_recovery:
   repair_mismatch_attempts: 3
 
@@ -34,6 +37,7 @@ session_preflight:
     core_primary: Multiverse Nexus
     core_assist: Dimension Core
   auto_pick_perks: true
+  perk_first_choice: perk_wave_requirement
   perk_bans:
     - lifesteal_knockback_tradeoff
     - enemies_damage_tradeoff

@@ -665,6 +665,7 @@ def run_read_only_gc_preflight(
     measure_auto_pick_fn: Callable[[Frame], Any] = measure_auto_pick_perks,
     no_battle_setup_evidence: Optional[Mapping[str, Any]] = None,
     free_upgrade_lock_boundary_evidence: Optional[Mapping[str, Any]] = None,
+    player_save_preflight: Any = None,
     detect_home_control_fn: HomeControlDetector = detect_home_battle_control,
     sleep_fn: Callable[[float], None] = time.sleep,
     validate_fn: Callable[
@@ -701,6 +702,10 @@ def run_read_only_gc_preflight(
             if isinstance(no_battle_setup_evidence, Mapping)
             else None
         )
+        configuration_save_backed = bool(
+            isinstance(configuration_boundary_evidence, Mapping)
+            and configuration_boundary_evidence.get("save_backed_sections")
+        )
         module_boundary_evidence = (
             no_battle_setup_evidence.get("modules")
             if isinstance(no_battle_setup_evidence, Mapping)
@@ -708,6 +713,16 @@ def run_read_only_gc_preflight(
         )
         ultimate_boundary_observations = _home_ultimate_weapon_observations(
             no_battle_setup_evidence
+        )
+        ultimate_boundary_payload = (
+            no_battle_setup_evidence.get("ultimate_weapons")
+            if isinstance(no_battle_setup_evidence, Mapping)
+            else None
+        )
+        ultimate_boundary_save_backed = bool(
+            isinstance(ultimate_boundary_payload, Mapping)
+            and ultimate_boundary_payload.get("source")
+            in {"player_save_preflight", "bound_player_save_preflight"}
         )
         use_no_battle_evidence = bool(
             isinstance(configuration_boundary_evidence, Mapping)
@@ -717,12 +732,278 @@ def run_read_only_gc_preflight(
             )
         )
         free_upgrade_lock_requirements = requirements.get("free_upgrade_locks")
+        free_upgrade_lock_save_backed = bool(
+            isinstance(free_upgrade_lock_boundary_evidence, Mapping)
+            and free_upgrade_lock_boundary_evidence.get("source")
+            == "bound_player_save_preflight"
+        )
+        save_snapshot_invalidated = False
         _wait_for(
             state="RUNNING",
             capture_fn=capture_fn,
             detector=detector,
             sleep_fn=sleep_fn,
         )
+
+        auto_pick_perks = requirements.get("auto_pick_perks")
+        if auto_pick_perks not in {True, False, None}:
+            raise _NavigationFailure(
+                "profile supplied an invalid Auto Pick Perks requirement"
+            )
+        gate_waivers = requirements.get("_gate_waivers")
+        auto_pick_skipped = (
+            isinstance(gate_waivers, Mapping)
+            and "auto_pick_perks" in gate_waivers
+        )
+        carried_auto_pick = (
+            player_save_preflight.consume("auto_pick_perks")
+            if callable(getattr(player_save_preflight, "consume", None))
+            else None
+        )
+        auto_pick_boundary_evidence = (
+            {
+                "source": "bound_player_save_preflight",
+                "value": True,
+            }
+            if carried_auto_pick is True and auto_pick_perks is True
+            else None
+        )
+        perks = None
+        if (
+            auto_pick_perks
+            and not auto_pick_skipped
+            and auto_pick_boundary_evidence is None
+        ):
+            _guarded_static_tap(
+                "navigation.open_perks",
+                allowed_states={"RUNNING"},
+                capture_fn=capture_fn,
+                detector=detector,
+                safe_tap_fn=safe_tap_fn,
+            )
+            perks = _wait_for(
+                state="PERKS",
+                capture_fn=capture_fn,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
+            auto_pick_before = measure_auto_pick_fn(perks)
+            perks = _ensure_auto_pick_perks_enabled(
+                perks,
+                capture_fn=capture_fn,
+                detector=detector,
+                safe_tap_fn=safe_tap_fn,
+                sleep_fn=sleep_fn,
+                measure_fn=measure_auto_pick_fn,
+            )
+            if (
+                not auto_pick_before.enabled
+                and callable(getattr(player_save_preflight, "invalidate", None))
+            ):
+                player_save_preflight.invalidate("in_battle_auto_pick_repair")
+            if not auto_pick_before.enabled:
+                save_snapshot_invalidated = True
+                if ultimate_boundary_save_backed:
+                    ultimate_boundary_observations = {}
+            _guarded_visible_tap(
+                "buttons.close:perks",
+                allowed_states={"PERKS"},
+                capture_fn=capture_fn,
+                detector=detector,
+                tap_visible_fn=tap_visible_fn,
+            )
+            _wait_for(
+                state="RUNNING",
+                capture_fn=capture_fn,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
+
+        ultimate_observations: dict[str, dict[str, str]] = {
+            label: dict(toggles)
+            for label, toggles in ultimate_boundary_observations.items()
+        }
+        ui_ultimate_observations: dict[str, dict[str, str]] = {}
+        consume_save = getattr(player_save_preflight, "consume", None)
+        carried_primaries = (
+            consume_save("ultimate_weapon_primaries")
+            if callable(consume_save)
+            else None
+        )
+        if isinstance(carried_primaries, Mapping):
+            for label, toggles in carried_primaries.items():
+                if isinstance(toggles, Mapping):
+                    ultimate_observations.setdefault(str(label), {}).update(
+                        {
+                            str(toggle): str(state)
+                            for toggle, state in toggles.items()
+                        }
+                    )
+        carried_stun = (
+            consume_save("poison_swamp_stun")
+            if callable(consume_save)
+            else None
+        )
+        if carried_stun in {"on", "off"}:
+            ultimate_observations.setdefault("Poison Swamp", {})["stun"] = (
+                str(carried_stun)
+            )
+        carried_missiles = (
+            consume_save("spotlight_missiles")
+            if callable(consume_save)
+            else None
+        )
+        if carried_missiles == "on":
+            ultimate_observations.setdefault("Spotlight", {})["missiles"] = "on"
+        ultimate_ui_required = not _ultimate_observations_complete(
+            ultimate_requirements,
+            ultimate_observations,
+        )
+        if ultimate_ui_required:
+            _select_running_menu(
+                "navigation.goto_uw",
+                "UW_MENU",
+                capture_fn=capture_fn,
+                detector=detector,
+                tap_visible_fn=tap_visible_fn,
+                sleep_fn=sleep_fn,
+            )
+            for _ in range(3):
+                _frame, detection = _capture_detection(capture_fn, detector)
+                if (
+                    detection.get("state") != "RUNNING"
+                    or detection.get("menu") != "UW_MENU"
+                ):
+                    raise _NavigationFailure(
+                        "UW menu guard failed before top scroll"
+                    )
+                swipe_fn("towards_top", "extended")
+                sleep_fn(0.5)
+        poison_swamp_label: Optional[str] = None
+        poison_swamp_stun_required: Optional[str] = None
+        for label, toggles in ultimate_requirements.items():
+            if str(label).strip().lower() != "poison swamp":
+                continue
+            poison_swamp_label = str(label).strip()
+            if isinstance(toggles, Mapping) and "stun" in toggles:
+                poison_swamp_stun_required = str(
+                    toggles.get("stun") or ""
+                ).strip().lower()
+            break
+        poison_swamp_stun_observed = (
+            poison_swamp_stun_required is None
+            or any(
+                str(label).strip().lower() == "poison swamp"
+                and str(toggles.get("stun") or "").strip().lower()
+                == poison_swamp_stun_required
+                for label, toggles in ultimate_observations.items()
+            )
+        )
+        for position in range(6 if ultimate_ui_required else 0):
+            frame = _wait_for(
+                state="RUNNING",
+                menu="UW_MENU",
+                capture_fn=capture_fn,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
+            boxes_by_column = detect_boxes_fn(frame, menu="ultimate weapons")
+            visible = [
+                box
+                for column in boxes_by_column.values()
+                for box in (column or [])
+            ]
+            visible_observations = merge_ultimate_weapon_observations(visible)
+            for label, toggles in visible_observations.items():
+                ui_ultimate_observations.setdefault(label, {}).update(toggles)
+                ultimate_observations.setdefault(label, {}).update(toggles)
+            poison_boxes = [
+                box
+                for box in visible
+                if str(getattr(box, "text", "") or "").strip().lower()
+                == "poison swamp"
+            ]
+            if (
+                poison_swamp_stun_required
+                and not poison_swamp_stun_observed
+                and poison_boxes
+            ):
+                result = ensure_poison_swamp_stun_fn(
+                    screenshot=frame,
+                    required_state=poison_swamp_stun_required,
+                    capture_fn=capture_fn,
+                    detector=detector,
+                    detect_boxes_fn=detect_boxes_fn,
+                    safe_tap_fn=safe_tap_fn,
+                    tap_visible_fn=tap_visible_fn,
+                    sleep_fn=sleep_fn,
+                )
+                frame = result.screenshot
+                ultimate_observations.setdefault(
+                    poison_swamp_label or "Poison Swamp",
+                    {},
+                )["stun"] = result.evidence.state.value
+                poison_swamp_stun_observed = True
+                if (
+                    result.changed
+                    and callable(
+                        getattr(player_save_preflight, "invalidate", None)
+                    )
+                ):
+                    player_save_preflight.invalidate(
+                        "in_battle_poison_stun_repair"
+                    )
+                if result.changed:
+                    save_snapshot_invalidated = True
+                    if ultimate_boundary_save_backed:
+                        ultimate_boundary_observations = {}
+                    # A mutation ends the authority of every pre-action save
+                    # observation.  Preserve only independently acquired Home
+                    # UI proof plus values actually seen on this UW route.
+                    ultimate_observations = {
+                        label: dict(toggles)
+                        for label, toggles in (
+                            ultimate_boundary_observations.items()
+                        )
+                    }
+                    for label, toggles in ui_ultimate_observations.items():
+                        ultimate_observations.setdefault(label, {}).update(
+                            toggles
+                        )
+                    ultimate_observations.setdefault(
+                        poison_swamp_label or "Poison Swamp",
+                        {},
+                    )["stun"] = result.evidence.state.value
+                log(
+                    "[GC_PREFLIGHT] Poison Swamp Stun verified "
+                    f"{poison_swamp_stun_required}"
+                    + (" after correction" if result.changed else ""),
+                    "INFO",
+                )
+            if (
+                _ultimate_observations_complete(
+                    ultimate_requirements,
+                    ultimate_observations,
+                )
+                and poison_swamp_stun_observed
+            ):
+                break
+            if position < 5:
+                swipe_fn("towards_bottom", "medium")
+                sleep_fn(0.5)
+
+        if save_snapshot_invalidated:
+            if configuration_save_backed:
+                configuration_boundary_evidence = None
+            if free_upgrade_lock_save_backed:
+                free_upgrade_lock_boundary_evidence = None
+            use_no_battle_evidence = bool(
+                isinstance(configuration_boundary_evidence, Mapping)
+                and (
+                    module_mode == "preserve"
+                    or isinstance(module_boundary_evidence, Mapping)
+                )
+            )
 
         cards = None
         if not use_no_battle_evidence:
@@ -760,157 +1041,6 @@ def run_read_only_gc_preflight(
                 sleep_fn=sleep_fn,
             )
 
-        auto_pick_perks = requirements.get("auto_pick_perks")
-        if auto_pick_perks not in {True, False, None}:
-            raise _NavigationFailure(
-                "profile supplied an invalid Auto Pick Perks requirement"
-            )
-        gate_waivers = requirements.get("_gate_waivers")
-        auto_pick_skipped = (
-            isinstance(gate_waivers, Mapping)
-            and "auto_pick_perks" in gate_waivers
-        )
-        perks = None
-        if auto_pick_perks and not auto_pick_skipped:
-            _guarded_static_tap(
-                "navigation.open_perks",
-                allowed_states={"RUNNING"},
-                capture_fn=capture_fn,
-                detector=detector,
-                safe_tap_fn=safe_tap_fn,
-            )
-            perks = _wait_for(
-                state="PERKS",
-                capture_fn=capture_fn,
-                detector=detector,
-                sleep_fn=sleep_fn,
-            )
-            perks = _ensure_auto_pick_perks_enabled(
-                perks,
-                capture_fn=capture_fn,
-                detector=detector,
-                safe_tap_fn=safe_tap_fn,
-                sleep_fn=sleep_fn,
-                measure_fn=measure_auto_pick_fn,
-            )
-            _guarded_visible_tap(
-                "buttons.close:perks",
-                allowed_states={"PERKS"},
-                capture_fn=capture_fn,
-                detector=detector,
-                tap_visible_fn=tap_visible_fn,
-            )
-            _wait_for(
-                state="RUNNING",
-                capture_fn=capture_fn,
-                detector=detector,
-                sleep_fn=sleep_fn,
-            )
-
-        _select_running_menu(
-            "navigation.goto_uw",
-            "UW_MENU",
-            capture_fn=capture_fn,
-            detector=detector,
-            tap_visible_fn=tap_visible_fn,
-            sleep_fn=sleep_fn,
-        )
-        for _ in range(3):
-            _frame, detection = _capture_detection(capture_fn, detector)
-            if (
-                detection.get("state") != "RUNNING"
-                or detection.get("menu") != "UW_MENU"
-            ):
-                raise _NavigationFailure("UW menu guard failed before top scroll")
-            swipe_fn("towards_top", "extended")
-            sleep_fn(0.5)
-
-        ultimate_observations: dict[str, dict[str, str]] = {
-            label: dict(toggles)
-            for label, toggles in ultimate_boundary_observations.items()
-        }
-        poison_swamp_label: Optional[str] = None
-        poison_swamp_stun_required: Optional[str] = None
-        for label, toggles in ultimate_requirements.items():
-            if str(label).strip().lower() != "poison swamp":
-                continue
-            poison_swamp_label = str(label).strip()
-            if isinstance(toggles, Mapping) and "stun" in toggles:
-                poison_swamp_stun_required = str(
-                    toggles.get("stun") or ""
-                ).strip().lower()
-            break
-        poison_swamp_stun_observed = (
-            poison_swamp_stun_required is None
-            or any(
-                str(label).strip().lower() == "poison swamp"
-                and str(toggles.get("stun") or "").strip().lower()
-                == poison_swamp_stun_required
-                for label, toggles in ultimate_observations.items()
-            )
-        )
-        for position in range(6):
-            frame = _wait_for(
-                state="RUNNING",
-                menu="UW_MENU",
-                capture_fn=capture_fn,
-                detector=detector,
-                sleep_fn=sleep_fn,
-            )
-            boxes_by_column = detect_boxes_fn(frame, menu="ultimate weapons")
-            visible = [
-                box
-                for column in boxes_by_column.values()
-                for box in (column or [])
-            ]
-            visible_observations = merge_ultimate_weapon_observations(visible)
-            for label, toggles in visible_observations.items():
-                ultimate_observations.setdefault(label, {}).update(toggles)
-            poison_boxes = [
-                box
-                for box in visible
-                if str(getattr(box, "text", "") or "").strip().lower()
-                == "poison swamp"
-            ]
-            if (
-                poison_swamp_stun_required
-                and not poison_swamp_stun_observed
-                and poison_boxes
-            ):
-                result = ensure_poison_swamp_stun_fn(
-                    screenshot=frame,
-                    required_state=poison_swamp_stun_required,
-                    capture_fn=capture_fn,
-                    detector=detector,
-                    detect_boxes_fn=detect_boxes_fn,
-                    safe_tap_fn=safe_tap_fn,
-                    tap_visible_fn=tap_visible_fn,
-                    sleep_fn=sleep_fn,
-                )
-                frame = result.screenshot
-                ultimate_observations.setdefault(
-                    poison_swamp_label or "Poison Swamp",
-                    {},
-                )["stun"] = result.evidence.state.value
-                poison_swamp_stun_observed = True
-                log(
-                    "[GC_PREFLIGHT] Poison Swamp Stun verified "
-                    f"{poison_swamp_stun_required}"
-                    + (" after correction" if result.changed else ""),
-                    "INFO",
-                )
-            if (
-                _ultimate_observations_complete(
-                    ultimate_requirements,
-                    ultimate_observations,
-                )
-                and poison_swamp_stun_observed
-            ):
-                break
-            if position < 5:
-                swipe_fn("towards_bottom", "medium")
-                sleep_fn(0.5)
-
         if use_no_battle_evidence:
             validation_args = dict(
                 cards_screen=None,
@@ -932,6 +1062,10 @@ def run_read_only_gc_preflight(
             waivers = requirements.get("_gate_waivers")
             if isinstance(waivers, Mapping) and waivers:
                 validation_args["waivers"] = dict(waivers)
+            if auto_pick_boundary_evidence is not None:
+                validation_args["auto_pick_boundary_evidence"] = (
+                    auto_pick_boundary_evidence
+                )
             if free_upgrade_lock_requirements is not None:
                 validation_args.update(
                     free_upgrade_lock_requirements=(
@@ -1151,6 +1285,10 @@ def run_read_only_gc_preflight(
         waivers = requirements.get("_gate_waivers")
         if isinstance(waivers, Mapping) and waivers:
             validation_args["waivers"] = dict(waivers)
+        if auto_pick_boundary_evidence is not None:
+            validation_args["auto_pick_boundary_evidence"] = (
+                auto_pick_boundary_evidence
+            )
         if free_upgrade_lock_requirements is not None:
             validation_args.update(
                 free_upgrade_lock_requirements=free_upgrade_lock_requirements,

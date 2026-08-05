@@ -44,8 +44,11 @@ Legacy `gc*` strategy names remain aliases during migration.
 The Farm baseline supplies the defaults for every Farm run: the `Farm` Cards,
 Workshop, and Bots presets; Demon Mode automatic recharge activation and Nuke
 manual-after-recharge activation; Shockwave Size, Bounce Shot Targets, and
-Bounce Shot Range Free Upgrade locks; Guardian chips; Auto Pick Perks; Perk
-Bans and priority; and Ultimate Weapon controls. A custom compact profile
+Bounce Shot Range Free Upgrade locks; Guardian chips; Auto Pick Perks; an
+independent First Perk Choice of `perk_wave_requirement`; Perk Bans and
+priority; and Ultimate Weapon controls. First Perk Choice is not inferred from
+the first Auto Pick row and can change without changing that order. Tournament
+declares no Perk requirement. A custom compact profile
 publishes a complete `setup.settings` snapshot over those defaults so edits do
 not depend on a later baseline change. The shared builder still validates each
 value against implemented runtime authority before it can publish a generated
@@ -126,7 +129,7 @@ promotion requires every published complete check to meet the same standard.
 Scheduled UI audits remain available, and every UI implementation is retained
 as the permanent fallback.
 
-The intended preflight decision is per check:
+The implemented Home-preflight decision is per check:
 
 ```text
 verified NEW_BATTLE -> proven app-pause flush -> stable exact-version pull
@@ -136,19 +139,66 @@ verified NEW_BATTLE -> proven app-pause flush -> stable exact-version pull
                                            `-- repair: verify in UI and invalidate the snapshot
 ```
 
-The decoder and reconciler implement this decision contract; runtime snapshot
-acquisition and incremental navigation suppression remain active backlog work.
-A pre-action snapshot never confirms the result of an input. Any automation
-repair is still verified through fresh UI evidence, and subsequent save use
-requires a new serialization receipt and pull. A save does not authorize a tap
-or prove a transient screen state.
+`PlayerSavePreflightCoordinator` owns that decision at an ordinary exact Home
+boundary. The default `save_first` policy records the current runtime,
+preflight/activity scope, exact ADB target and generation, selected strategy,
+and complete resolved configuration fingerprint; verifies Home `NEW_BATTLE`;
+honors action authority; backgrounds the app to Android Home; uses the existing
+two-identical-read pull; decodes only in memory; restores the app; and requires
+the same ownership plus two stable Home `NEW_BATTLE` frames. `force_ui` skips
+the save lifecycle, while `comparison_audit` retains normalized comparison
+evidence but deliberately suppresses no UI route. These policy modes are
+strategy runtime policy, not observation-collector switches.
+
+One snapshot reconciles every requested eligible check atomically, but each
+decision remains independent. Exact matches may omit redundant Home
+observation for Cards, recharge modes, Workshop, the exact proven three-lock
+Farm set, Bots, independent First Perk Choice, Bans, ranked Auto Pick prefix,
+Guardians, and Poison Swamp Stun. The 34-entry Auto Pick field must contain the
+complete mapped inventory structure, but only its first 18 entries are ranked;
+the 16-entry tail is never compared as priority, and a configured list may be a
+shorter required prefix.
+
+The monolithic Ultimate Weapon check remains unvalidated. Its normalized
+components fail independently: Poison Swamp Stun supports both calibrated
+inverted boolean polarities; primaries support only the exact value-scoped
+state in which all nine weapons are present, unlocked, and on; Spotlight
+Missiles supports only the exact unlocked/on state. A mixed/off primary request,
+Spotlight Missiles off, malformed structure, or unsupported value restores only
+the applicable shared-screen UI work, where any component actually observed
+can still contradict carried evidence. Orb Distance, Modules, and Damage Slider
+remain UI-authoritative.
+
+Session-only matches become typed, single-use carry for exactly the next
+runtime-owned `NEW_BATTLE` launch and its first stable `RUNNING` boundary. The
+current carry covers Auto Pick enabled `true`, a complete exact ten-ID Target
+Priority order, the all-nine-primary-on aggregate, Spotlight-Missiles-on,
+Poison Swamp Stun, and exact Home sections needed by the later consistency
+check. Runtime/preflight/activity identity, target generation, strategy and
+configuration fingerprint, action/control authority, launch dispatch, and
+first-RUNNING transition must all remain unchanged. Restart, attachment,
+unrelated Retry, manual/ambiguous launch, WAIT/Pause/Stop, target/configuration
+change, repair, or a later battle rejects every carried decision.
+
+A pre-action snapshot never confirms the result of an input. The first UI
+repair is verified through fresh UI evidence and invalidates every remaining
+save decision; subsequent checks use UI unless a complete new guarded
+serialization is deliberately performed. Read-only inspection does not erase
+unrelated matches, while UI evidence from any screen that was actually opened
+still detects contradictions. Missing later-session screenshots are accepted
+only for the exact section/component carrying bound `save_match` provenance.
+A save match authorizes no tap, repair, lifecycle transition, battle start,
+attachment, terminal binding, dispatch, or strategy action.
 
 ADB acquisition requires two identical consecutive reads before decoding. The
 container size, gzip integrity, NRBF root, exact version identity, and
-structural signature are validated before mapped values are published. Reports
-retain only the source hash, version metadata, mapped configuration, and a
-redacted profile summary; account identifiers and the raw save are not copied
-into runtime evidence. The component contract and version-update procedure are
+structural signature are validated before mapped values are published.
+Preflight evidence retains only a redacted source fingerprint, exact version
+and mapping metadata, normalized allowlisted decisions, the configuration
+fingerprint, and redacted session/target-generation provenance. Account
+identifiers, raw saves, decoded roots, arbitrary history, private values, and
+raw exception text are not copied into preflight evidence. The component
+contract and version-update procedure are
 in [`../modules/player_save_import.md`](../modules/player_save_import.md).
 
 #### Save-first active-round and terminal evidence
@@ -837,18 +887,24 @@ derives gate authority from warning text in `actions.log`.
 - Complete no-battle setup owns every supported profile check available from
   verified Home `NEW_BATTLE`: Cards and the declared Demon Mode/Nuke recharge
   activation modes, Workshop and its Free Upgrade locks, strategy-declared
-  Perk Bans and Auto Pick priority, Poison Swamp Stun, Bots, Guardians, and
-  Modules. Card recharge traversal checks both unresolved Cards on the initial
+  First Perk Choice, Perk Bans and Auto Pick priority, Poison Swamp Stun, Bots,
+  Guardians, and Modules. The save-first coordinator may omit only exact
+  allowlisted observations it matched; Modules, Damage Slider, and Orb Distance
+  remain UI-only, and navigation required for one fallback does not discard an
+  unrelated accepted component. Card recharge traversal checks both unresolved
+  Cards on the initial
   inventory frame and after every bounded upward or downward swipe, validates
   whichever is visible in any order, and stops without another swipe as soon as
   both have authoritative evidence. Inspection opens each exact inventory card
   through a verified long press, requires the matching detail identity and an
   authoritative checkbox state, changes only a mismatched checkbox, rechecks
   the requested state, and returns to the Cards inventory. Missing cards and
-  ambiguous details fail closed. Perk configuration is changed only when the
-  selected strategy declares both semantic lists and their profile policy does
-  not skip them. Ban repair completes before
-  Auto Pick: extra selections are removed from the fixed Selected Perks block,
+  ambiguous details fail closed. Perk configuration is changed only for
+  requirements independently declared by the selected strategy. First Perk
+  Choice has its own tab and exact semantic comparison; Ban and Auto Pick
+  repairs retain their independent profile-skip policy. Ban repair completes
+  before Auto Pick: extra selections are removed from the fixed Selected Perks
+  block,
   while only missing required bans search the Available list. Each Ban toggle
   and Auto Pick move recaptures the panel immediately before input, uniquely
   reacquires the same semantic row at its settled coordinates, and requires
@@ -858,13 +914,14 @@ derives gate authority from warning text in `actions.log`.
   non-progress blocks New Battle. Persistent control is synchronized before
   every Home setup tap or swipe. Pause holds the workflow action-free, and
   Resume restores verified Home before a fresh setup pass. The setup retains
-  screen-derived configuration evidence for session preflight, which consumes
-  that boundary proof and checks only battle-only settings instead of leaving
-  the newly started run to repeat Home checks.
-  Target Priority records
-  `battle_only_control` at Home and remains unsatisfied until the generated
-  `RUNNING` action observes or enforces it; there is no Home Target Priority
-  tap. Attaching to an existing battle without boundary proof retains the
+  exact UI- or save-derived configuration evidence for session preflight.
+  Save-derived sections are accepted there only after their typed carry binds
+  to the exact launched battle; supplied UI screens still override omission
+  and detect contradictions. Target Priority has no Home control. Without an
+  exact bound save order it records `battle_only_control` and the generated
+  `RUNNING` action observes or enforces it; with bound exact ten-item evidence
+  that same action consumes the single-use order without opening Target
+  Priority. Attaching to an existing battle without boundary proof retains the
   guarded read-only compatibility route. Home-only Free Upgrade locks remain
   deferred there: they record `unavailable_deferred` without a pass, failure,
   Home repair, or Surrender request; Poison Swamp Stun falls back to its guarded

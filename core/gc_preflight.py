@@ -317,6 +317,7 @@ class GcSessionPreflightEvidence:
     auto_pick_perks_required: bool
     auto_pick_perks: AutoPickPerksEvidence
     ultimate_weapons: UltimateWeaponEvidence
+    auto_pick_perks_source: str = "ui"
     waivers: Mapping[str, Any] = field(default_factory=dict)
 
     def is_waived(self, check_id: str) -> bool:
@@ -441,6 +442,7 @@ class GcSessionPreflightEvidence:
             required=self.auto_pick_perks_required,
             checked=self.auto_pick_perks_required,
             valid=self.auto_pick_perks_valid,
+            source=self.auto_pick_perks_source,
         )
         payload["ultimate_weapons"]["valid"] = self.ultimate_weapons.valid
         payload["configuration"]["blocking_valid"] = self.configuration_valid
@@ -539,8 +541,14 @@ def validate_gc_preflight_screens(
     guardians_screen,
     detector: Detector = detect_state_and_overlays,
     section_specs: Mapping[str, GcSectionSpec] = GC_SECTION_SPECS,
+    accepted_sections: Optional[Mapping[str, Mapping[str, Any]]] = None,
 ) -> GcPreflightEvidence:
-    """Validate captured profile preflight sections without sending input."""
+    """Validate captured sections or exact save-backed omissions without input.
+
+    A missing screen is accepted only when that exact section has explicit
+    ``save_match`` provenance.  A supplied screen is always evaluated, even if
+    save provenance also exists, so an observed contradiction cannot be hidden.
+    """
 
     required_names = {"cards", "workshop", "bots", "guardians"}
     missing_names = sorted(required_names - set(section_specs))
@@ -549,31 +557,53 @@ def validate_gc_preflight_screens(
             "preflight section specs are missing: " + ", ".join(missing_names)
         )
 
-    cards_detection, cards_selection = _detect_section_selection(
-        cards_screen,
-        section_specs["cards"],
-        detector,
+    accepted = dict(accepted_sections or {})
+
+    def section_detection(name: str, screen):
+        spec = section_specs[name]
+        if screen is not None:
+            return _detect_section_selection(screen, spec, detector)
+        provenance = accepted.get(name)
+        if not (
+            isinstance(provenance, Mapping)
+            and provenance.get("disposition") == "save_match"
+        ):
+            raise ValueError(
+                f"preflight section {name} has neither a screen nor accepted "
+                "save provenance"
+            )
+        detection = {
+            "state": spec.expected_state,
+            "secondary_states": sorted(spec.required_secondary),
+        }
+        selection = (
+            PresetSlotSelection(
+                region=spec.selection_region,
+                valid_region=True,
+                selected=True,
+                green_pixels=0,
+                cyan_pixels=0,
+            )
+            if spec.selection_region is not None
+            else None
+        )
+        return detection, selection
+
+    cards_detection, cards_selection = section_detection(
+        "cards", cards_screen
     )
-    workshop_detection, workshop_selection = _detect_section_selection(
-        workshop_screen,
-        section_specs["workshop"],
-        detector,
+    workshop_detection, workshop_selection = section_detection(
+        "workshop", workshop_screen
     )
-    bots_detection, bots_selection = _detect_section_selection(
-        bots_screen,
-        section_specs["bots"],
-        detector,
-    )
+    bots_detection, bots_selection = section_detection("bots", bots_screen)
     if (
         cards_selection is None
         or workshop_selection is None
         or bots_selection is None
     ):
         raise ValueError("cards, workshop, and bots specs require selection regions")
-    guardians_detection, _guardians_selection = _detect_section_selection(
-        guardians_screen,
-        section_specs["guardians"],
-        detector,
+    guardians_detection, _guardians_selection = section_detection(
+        "guardians", guardians_screen
     )
 
     return GcPreflightEvidence(
@@ -716,7 +746,17 @@ def _free_upgrade_lock_boundary_evidence(
         and labels == requirements
         and locks_verified
     )
-    if verified:
+    save_verified = bool(
+        candidate.get("status") == "save_match"
+        and candidate.get("source") == "bound_player_save_preflight"
+        and candidate.get("boundary") == "NEW_BATTLE"
+        and candidate.get("checked") is False
+        and candidate.get("valid") is True
+        and tuple(candidate.get("required") or ()) == requirements
+        and len(candidate.get("observed") or ()) == len(requirements)
+        and set(candidate.get("observed") or ()) == set(requirements)
+    )
+    if verified or save_verified:
         candidate["required"] = required
         candidate["blocking_valid"] = True
         return candidate
@@ -752,6 +792,7 @@ def validate_gc_session_preflight_screens(
     detector: Detector = detect_state_and_overlays,
     section_specs: Mapping[str, GcSectionSpec] = GC_SECTION_SPECS,
     auto_pick_perks_required: bool = True,
+    auto_pick_boundary_evidence: Optional[Mapping[str, Any]] = None,
     waivers: Optional[Mapping[str, Any]] = None,
     configuration_boundary_evidence: Optional[Mapping[str, Any]] = None,
     module_boundary_evidence: Optional[Mapping[str, Any]] = None,
@@ -783,7 +824,22 @@ def validate_gc_session_preflight_screens(
         )
     )
     auto_pick = measure_auto_pick_perks(perks_screen)
-    if auto_pick_perks_required and (
+    auto_pick_source = "ui"
+    if (
+        auto_pick_perks_required
+        and isinstance(auto_pick_boundary_evidence, Mapping)
+        and auto_pick_boundary_evidence.get("source")
+        == "bound_player_save_preflight"
+        and auto_pick_boundary_evidence.get("value") is True
+    ):
+        auto_pick = AutoPickPerksEvidence(
+            region=auto_pick.region,
+            valid_region=True,
+            enabled=True,
+            green_pixels=auto_pick.green_pixels,
+        )
+        auto_pick_source = "bound_player_save_preflight"
+    elif auto_pick_perks_required and (
         perks_screen is None or detector(perks_screen).get("state") != "PERKS"
     ):
         auto_pick = AutoPickPerksEvidence(
@@ -827,6 +883,7 @@ def validate_gc_session_preflight_screens(
             ultimate_requirements,
             ultimate_observations,
         ),
+        auto_pick_perks_source=auto_pick_source,
         waivers=active_waivers,
     )
 

@@ -820,6 +820,163 @@ def test_home_perk_does_not_repair_an_incomplete_auto_pick_capture():
     )
 
 
+def test_home_perk_repairs_first_choice_independently_of_auto_pick_order():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    parsed = Mock(
+        side_effect=[
+            {
+                "quality": {"valid": True},
+                "selected": [{"key": "damage"}],
+            },
+            {
+                "quality": {"valid": True},
+                "selected": [{"key": "perk_wave_requirement"}],
+            },
+        ]
+    )
+    evidence = {
+        "boundary": "NEW_BATTLE",
+        "checked": True,
+        "valid": True,
+        "failed_checks": [],
+        "perk_bans": {
+            "valid": True,
+            "expected": list(FARM_PERK_BANS),
+            "observed": list(FARM_PERK_BANS),
+        },
+        "perk_auto_pick_order": {
+            "valid": True,
+            "expected": ["game_speed"],
+            "observed": ["game_speed"],
+        },
+    }
+
+    with (
+        patch("core.home_perk_configuration._require_new_battle_home"),
+        patch(
+            "core.home_perk_configuration._open_configuration",
+            return_value=frame,
+        ),
+        patch(
+            "core.home_perk_configuration._select_and_scroll_top",
+            side_effect=lambda current, **_kwargs: current,
+        ),
+        patch(
+            "core.home_perk_configuration._capture_configuration_pages",
+            return_value=([frame], frame, True),
+        ),
+        patch(
+            "core.home_perk_configuration._scroll_configuration_top",
+            return_value=frame,
+        ),
+        patch(
+            "core.home_perk_configuration._locate_auto_pick_key",
+            return_value=(1, frame, {"key": "perk_wave_requirement"}),
+        ),
+        patch(
+            "core.home_perk_configuration._tap_configuration_row",
+            return_value=frame,
+        ) as set_first,
+        patch(
+            "core.home_perk_configuration.extract_configured_perk_bans",
+            return_value={
+                "quality": {"valid": True},
+                "selected": [
+                    {"key": key}
+                    for key in FARM_PERK_BANS
+                ],
+            },
+        ),
+        patch(
+            "core.home_perk_configuration."
+            "_capture_ranked_order_with_ocr_retries",
+            return_value=([frame], frame, {"quality": {"valid": True}}),
+        ),
+        patch(
+            "core.home_perk_configuration.evaluate_profile_perk_configuration",
+            return_value=evidence,
+        ),
+        patch(
+            "core.home_perk_configuration._close_to_home",
+            return_value=frame,
+        ),
+        patch("core.home_perk_configuration.log_result"),
+    ):
+        result = ensure_home_perk_configuration(
+            {
+                "perk_first_choice": "perk_wave_requirement",
+                "perk_bans": list(FARM_PERK_BANS),
+                "perk_auto_pick_order": ["game_speed"],
+            },
+            home_screenshot=frame,
+            parse_selection_fn=parsed,
+        )
+
+    assert result.valid
+    assert result.changed
+    assert result.evidence["perk_first_choice"]["valid"] is True
+    assert result.evidence["perk_first_choice"]["observed"] == (
+        "perk_wave_requirement"
+    )
+    assert result.evidence["perk_auto_pick_order"]["expected"] == [
+        "game_speed"
+    ]
+    set_first.assert_called_once()
+
+
+def test_home_perk_omits_externally_satisfied_tabs_from_ui_pass():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    selected_bans = {
+        "quality": {"valid": True},
+        "selected": [{"key": key} for key in FARM_PERK_BANS],
+    }
+
+    with (
+        patch("core.home_perk_configuration._require_new_battle_home"),
+        patch(
+            "core.home_perk_configuration._open_configuration",
+            return_value=frame,
+        ),
+        patch(
+            "core.home_perk_configuration._select_and_scroll_top",
+            return_value=frame,
+        ) as select_tab,
+        patch(
+            "core.home_perk_configuration._capture_bans_with_ocr_retries",
+            return_value=(frame, selected_bans),
+        ),
+        patch(
+            "core.home_perk_configuration._close_to_home",
+            return_value=frame,
+        ),
+        patch("core.home_perk_configuration.log_result"),
+    ):
+        result = ensure_home_perk_configuration(
+            {
+                "perk_first_choice": "perk_wave_requirement",
+                "perk_bans": list(FARM_PERK_BANS),
+                "perk_auto_pick_order": ["game_speed"],
+            },
+            home_screenshot=frame,
+            waived_fields=(
+                "perk_first_choice",
+                "perk_auto_pick_order",
+            ),
+        )
+
+    assert result.valid
+    assert [call.kwargs["field"] for call in select_tab.call_args_list] == [
+        "perk_bans"
+    ]
+    assert result.evidence["perk_auto_pick_order"] == {
+        "boundary": "NEW_BATTLE",
+        "checked": False,
+        "valid": True,
+        "reason": "field omitted from this UI pass",
+        "changed": False,
+    }
+
+
 def test_auto_pick_move_requires_fresh_identity_and_visual_change():
     stale = np.full((1920, 1080, 3), 10, dtype=np.uint8)
     before = np.full((1920, 1080, 3), 20, dtype=np.uint8)

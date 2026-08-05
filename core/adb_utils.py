@@ -46,6 +46,7 @@ def adb_shell(
     capture_output: bool = False,
     check: bool = True,
     device_id: Optional[str] = None,
+    report_errors: bool = True,
 ):
     """
     ---
@@ -53,12 +54,13 @@ def adb_shell(
       r: "subprocess.CompletedProcess | None"
       s: ["adb"]
       e:
-        - "Returns None on CalledProcessError or unexpected Exception (error printed)"
+        - "Returns None on CalledProcessError or unexpected Exception"
       params:
         cmd: "str or list[str]; string is shlex-split"
         capture_output: "bool — when True, stdout/stderr captured (text=True)"
         check: "bool — if True, non‑zero exit triggers CalledProcessError (caught)"
         device_id: "str|None — explicit device; else env ADB_DEVICE; else module ADB_DEVICE_ID"
+        report_errors: "bool — print subprocess failures when True"
       notes:
         - "stdout/stderr suppressed when capture_output=False"
         - "Uses 'adb -s <target> shell …'"
@@ -70,10 +72,11 @@ def adb_shell(
         capture_output: When True, returns stdout/stderr in the CompletedProcess.
         check: When True, raises CalledProcessError internally (caught below) on non-zero exit.
         device_id: Overrides target device. Falls back to env ADB_DEVICE, then ADB_DEVICE_ID.
+        report_errors: Print subprocess failures when True.
 
     Returns:
         subprocess.CompletedProcess on success.
-        None on failure (errors printed).
+        None on failure (errors printed when ``report_errors`` is true).
     """
     # Normalize command
     cmd_list = shlex.split(cmd) if isinstance(cmd, str) else cmd
@@ -104,12 +107,14 @@ def adb_shell(
             )
         return result
     except subprocess.CalledProcessError as e:
-        print(f"[ERROR] ADB command failed: {e}")
-        if hasattr(e, 'stderr') and e.stderr:
-            print(f"[STDERR] {e.stderr.strip()}")
+        if report_errors:
+            print(f"[ERROR] ADB command failed: {e}")
+            if hasattr(e, 'stderr') and e.stderr:
+                print(f"[STDERR] {e.stderr.strip()}")
         return None
     except Exception as e:
-        print(f"[ERROR] Unexpected ADB exception: {e}")
+        if report_errors:
+            print(f"[ERROR] Unexpected ADB exception: {e}")
         return None
 
 

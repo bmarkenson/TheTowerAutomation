@@ -54,15 +54,24 @@ Heat panel with no mismatch. Unsupported versions, unvalidated leagues,
 conflicting identities, and stale registry dates publish no conditions and
 require the retained UI path.
 
-This is deliberately a partial validation, not a global promotion. The exact
-mapping now marks Cards, Workshop, and Bots preset selection; First Perk; Ban
-Perks; equipped Guardians; and Demon Mode/Nuke recharge behavior as validated
-checks. Target Priority,
-the complete set of possible Free Upgrade locks, Ultimate Weapon toggle
-polarities, and the unranked Auto Pick tail still need same-version UI
-calibration. Poison Swamp Stun polarity is confirmed, but the combined Ultimate
-Weapon check remains UI-required until every value that check could suppress
-has been calibrated.
+This remains a per-check promotion, not a global mapping promotion. The exact
+mapping now allowlists every configuration claim covered by the accepted
+version-1073 calibration: Cards, Workshop, and Bots preset selection; independent
+First Perk Choice; Ban Perks; the ranked Auto Pick prefix; the exact current
+three-lock Farm set; equipped Guardians; Demon Mode/Nuke recharge behavior;
+Auto Pick enabled for the required value `true`; complete Target Priority ID
+and ordering semantics; Poison Swamp Stun in both calibrated polarities; all
+nine Ultimate Weapon primaries for the all-on requirement; and Spotlight
+Missiles for the on requirement. This adoption reused the prior calibration
+evidence atomically; it did not require or perform another live campaign.
+
+The monolithic Ultimate Weapon check is deliberately not allowlisted. Poison
+Swamp Stun, the all-primary-on aggregate, and Spotlight-Missiles-on are separate
+normalized components with independent fallback. A mixed/off primary request
+or Spotlight Missiles off still opens the existing UI route. Free Upgrade lock
+authority is likewise limited to exactly Shockwave Size, Bounce Shot Targets,
+and Bounce Shot Range: any other requested set, additional set bit, changed
+shape, unknown index, or non-boolean value restores the complete lock UI path.
 
 Candidate status remains fail-closed per check. A matching check can become
 save-authoritative only when it is explicitly validated, its evidence is
@@ -85,6 +94,45 @@ Card recharge modes are now mapped and validated. Damage Slider, Modules, and
 Orb Distance remain explicitly unmapped and always use the UI. More fields can
 be added only with semantic and polarity calibration, not merely because a
 plausible raw field exists.
+
+### Implemented save-first configuration preflight
+
+At a freshly verified Home `NEW_BATTLE` boundary, the ordinary runtime policy
+defaults to `save_first`. One guarded coordinator records the exact owned ADB
+target and generation, runtime/preflight/activity identities, selected strategy,
+and resolved configuration fingerprint; backgrounds the game to Android Home;
+accepts only the existing two-byte-identical-read acquisition; decodes in
+memory; restores the game; and revalidates the same ownership plus two stable
+Home `NEW_BATTLE` observations. It retains only normalized decisions, exact
+version and mapping identity, redacted source/target/session provenance, and
+safe reason codes.
+
+One snapshot reconciles every requested check. A complete allowlisted match can
+omit only that redundant UI observation. A mismatch, unsupported requirement,
+unknown version or ID, changed shape, unequal/pull/decode failure, or forced
+audit restores the existing per-check UI implementation after the exact target
+and Home boundary have been safely restored. A failure to restore foreground,
+target ownership, control authority, or the Home boundary blocks every later
+input instead. `force_ui` performs no save lifecycle; `comparison_audit`
+collects normalized comparison evidence but keeps UI authoritative.
+
+The first actual UI repair invalidates every remaining pre-action save decision.
+The repair is still verified in the UI, and later checks use UI evidence. A
+read-only inspection does not invalidate unrelated decisions, while an actual
+UI contradiction fails closed with its provenance. The V1073-RUNTIME-013
+collector remains a separate optional observation stream and supplies no Home
+preflight authority.
+
+Accepted session-only values are single-use evidence for the exact next
+runtime-owned `NEW_BATTLE` launch and its first stable `RUNNING` boundary. The
+binding covers Auto Pick enabled `true`, exact complete Target Priority order,
+all nine primaries on, Spotlight Missiles on, Poison Swamp Stun, and exact Home
+sections needed by the later consistency check. Restart, attachment, Retry
+without this Home preflight, strategy/configuration/target change, manual or
+ambiguous launch, WAIT/Pause/Stop, repair, or an unrelated later battle rejects
+the complete carry. Save evidence never authorizes a tap, repair, launch,
+lifecycle transition, attachment, terminal binding, dispatch, or strategy
+action.
 
 Snapshot schema 2 contains the repository-local save-first runtime foundation;
 its runtime projection is schema 2. For the exact version-1073 mapping it
@@ -119,12 +167,14 @@ publication but does not erase tail-change evidence. UTC and local DateTime
 ticks are never ordered against each other; the game's established source list
 order owns which entry is newest.
 
-The foundation does not poll the save, retain a same-round cache, bind a
-process, suppress navigation, or build/persist a normal battle record. A
-semantic failure publishes an explicit UI fallback without exposing a partial
-completed entry. A malformed newest entry publishes neither structural nor
-semantic tail evidence. The authoritative ownership and later slice boundaries
-are in
+The active-round/terminal projection foundation does not itself bind a process,
+suppress terminal navigation, or build/persist a normal battle record. The
+configuration coordinator above is a separate exact-Home consumer; the
+V1073-RUNTIME-013 sidecar separately polls and retains only audit state. A
+semantic terminal failure publishes an explicit UI fallback without exposing a
+partial completed entry. A malformed newest entry publishes neither structural
+nor semantic tail evidence. The authoritative ownership and later slice
+boundaries are in
 [`runtime.md`](../architecture/runtime.md#save-first-active-round-and-terminal-evidence).
 
 ### 2026-08-02 Tier 22 natural-boundary audit
@@ -220,14 +270,17 @@ exact game version starts a new matrix at Structural level.
 | `V1073-CFG-002` card recharge modes | `demonModeAutomateToggle`, `nukeAutomateToggle` | **Shortcut-ready.** Both booleans were independently flipped and restored; `true` means auto-reactivate. | Audit runtime acquisition, then retain scheduled UI samples. |
 | `V1073-CFG-003` Workshop preset | `workshopPresetName`, `currentWorkshopPreset` | **Shortcut-ready.** Exact selected-name/index agreement at a verified boundary; causality is not required for this non-polarity claim. | Do not manufacture a switch; force UI again on mapping/version audit. |
 | `V1073-CFG-004` Bots preset | `botPresetName`, `currentBotPreset` | **Shortcut-ready.** Exact selected-name/index agreement at a verified boundary. | Never spend medals for causality; validate future values through naturally selected presets. |
-| `V1073-CFG-005` First Perk | `firstPerkIndex`, versioned Perk IDs | **Shortcut-ready** for the mapped IDs. | Extend only from authoritative visible evidence; any unknown selected ID keeps the whole check in UI. |
+| `V1073-CFG-005` First Perk Choice | `firstPerkIndex`, versioned Perk IDs | **Shortcut-ready** for the mapped IDs. It is an independent profile requirement, not the first Auto Pick row. | Perk-capable Farm profiles currently require `perk_wave_requirement`; Tournament declares no Perk requirement. Extend only from authoritative visible evidence; any unknown selected ID keeps the whole check in UI. |
 | `V1073-CFG-006` Ban Perks | `bannedPerksIndex`, versioned Perk IDs | **Shortcut-ready** for a complete mapped selected set. | Validate each newly encountered ID; any unknown selected ID keeps the whole check in UI. |
 | `V1073-CFG-007` Guardian chips | `guardianChipSlot`, `guardianSlotsUnlocked`, versioned Guardian IDs | **Shortcut-ready** for the mapped Farm/Tournament chips. | Extend through read-only equipped evidence; never equip merely to identify an ID. |
-| `V1073-CFG-008` Auto Pick enabled | `autoPickPerk` | **Structural.** A boolean value is observed, but polarity is not allowlisted. | At a safe no-battle boundary, toggle off/on, flush each state, restore, and prove polarity; UI remains required. |
-| `V1073-CFG-009` ranked Auto Pick order | `autoPickOrder`, versioned Perk IDs | **Structural.** The visible 18-row ranked prefix agreed cross-channel. A live 34-ID value then proved that the remaining 16 entries are an unranked inventory tail; the exact-version decoder now publishes only the mapped 18-entry prefix and explicitly excludes the tail. | UI remains required because this cross-channel observation does not causally prove reorder serialization. Any future unknown ID fails the ranked claim closed. |
-| `V1073-CFG-010` Free Upgrade locks | Three `*LockedFreeUpgrades` arrays | **Structural.** The three Farm locks agree cross-channel; the complete index/polarity claim does not. | Validate every supported index/polarity or narrow the mapping to proven indices and fail closed on every other set bit; UI remains required. |
-| `V1073-CFG-011` Target Priority | `targetPriorityList`, versioned Target Priority IDs | **Structural.** Candidate ordered mapping only. | Compare a fresh in-battle list, then make and restore one reversible adjacent reorder to prove index order and serialization; UI remains required. |
-| `V1073-CFG-012` Ultimate Weapon controls | `ultimateWeaponUnlocked`, `ultimateWeaponOn`, `poisonSwampStunOff`, `spotlightSmartMissilesOff` | **Structural** for the whole check. Weapon order/current values agree; Poison Swamp Stun alone is causally validated. | Prove all nine primary booleans and Spotlight Missiles independently, or split the atomic checks before allowlisting; UI remains required. |
+| `V1073-CFG-008` Auto Pick enabled | `autoPickPerk` | **Shortcut-ready, value-scoped** for exact boolean `true`. | The current required enabled state may skip UI. A false requirement, missing field, non-boolean, or future unsupported semantic remains UI-required. |
+| `V1073-CFG-009` ranked Auto Pick order | `autoPickOrder`, versioned Perk IDs | **Shortcut-ready.** The exact 34-entry structure contains 18 visible ranked entries, 16 unranked inventory-tail slots, all 33 mapped IDs exactly once, and one tail sentinel. Only the mapped ranked block is published. | A configured list may be a shorter required prefix. Unknown IDs, duplicates, changed shape/membership, or an unresolved semantic value restore UI; the unranked tail is never compared as priority. |
+| `V1073-CFG-010` exact Farm Free Upgrade locks | Three `*LockedFreeUpgrades` arrays | **Shortcut-ready, set-scoped** only for Shockwave Size, Bounce Shot Targets, and Bounce Shot Range with exact boolean shapes. | Any different request, extra/missing set bit, unknown index, changed length, or non-boolean restores the complete UI lock path. No claim is made about other possible lock sets. |
+| `V1073-CFG-011` Target Priority | `targetPriorityList`, complete versioned ten-ID mapping | **Shortcut-ready** for an exact complete enforced order: ten unique known IDs with complete membership exactly once. | `enforce` requires full ordered equality; `preserve` creates no assertion. Observe the distinct Farm T18 full order naturally as confirmation of generic sequence serialization; testing all permutations is neither required nor planned. |
+| `V1073-CFG-012` monolithic Ultimate Weapon controls | Combined primary/detail fields | **Structural only.** The aggregate is intentionally not allowlisted because its components have different value scopes. | UI remains available for every unsupported component/value; use the independently failing rows below. |
+| `V1073-CFG-012A` Poison Swamp Stun | `poisonSwampStunOff` plus exact unlocked structure | **Shortcut-ready for both calibrated polarities.** Raw `false` means on; raw `true` means off. | Require an exact boolean and unlocked Poison Swamp. Either current on/off requirement may skip UI; malformed or changed structure restores UI. |
+| `V1073-CFG-012B` all nine Ultimate Weapon primaries on | Exact nine-element `ultimateWeaponUnlocked` and `ultimateWeaponOn` arrays | **Shortcut-ready, value-scoped** only when all nine exact booleans are unlocked and on. | Any subset, mixed/off request, false value, non-boolean, name/length change, or locked weapon restores UI. Validate each individual off/on index before supporting future mixed requirements. |
+| `V1073-CFG-012C` Spotlight Missiles on | `spotlightSmartMissilesOff` plus exact unlocked Spotlight structure | **Shortcut-ready, value-scoped** only for raw exact `false` / required on. | Off, raw true, malformed, missing, locked, or changed structure remains UI-required until one reversible off transition and restoration are reviewed. |
 | `V1073-CFG-013` Legend Tournament conditions | Tournament identity fields plus exact-version generator | **Shortcut-ready.** Seventeen consecutive event sets agreed with historical/live UI evidence. | Retain Heat/Overheat audits; validate every additional league and new exact game version independently. |
 | `V1073-CFG-014` Modules | Equipped/inventory records | **Structural.** Array dimensions are known; semantics are deliberately unpublished. | Map slot order, stable identity, Primary/Assist roles, rarity, level ownership, and substats through naturally occurring read-only comparisons; UI remains required. |
 | `V1073-CFG-015` Damage Slider | No accepted field | **Structural.** The absence of an accepted normalized source is explicit. | In an explicitly authorized test battle, correlate at least two values and restoration, percentage encoding, and save timing; UI remains required. |
@@ -238,8 +291,8 @@ exact game version starts a new matrix at Structural level.
 | `V1073-PROFILE-004` Ultimate Weapon progression | Unlock/level arrays plus candidate cooldown/quantity fields | **Structural.** Dimensions and candidate tuple layout only. | Prove weapon order and every three-level tuple before publishing names or levels. |
 | `V1073-PROFILE-005` Guardian and Bot progression | Unlock/level arrays and candidate Bot fields | **Structural.** Dimensions and selected preset/chip subset only. | Map every stable ID, slot count, level tuple, and preset field through read-only evidence; no cost-bearing calibration. |
 | `V1073-PROFILE-006` Module inventory/equipped loadout | Equipped and module-record structures | **Structural.** Dimensions only. | Decode stable IDs, uniqueness, slot/role, rarity, levels, ancestral stars, and substats across naturally occurring loadouts. |
-| `V1073-RUNTIME-001` stable audit-only preflight acquisition | Proven app-pause flush, two identical ADB reads, exact decoder | **Causal** for the tested profile fields' app-pause serialization boundary; runtime integration is absent. | Add one audit-only `HOME_SCREEN / NEW_BATTLE` acquisition, keep all UI checks, and retain normalized agreement/disagreement. |
-| `V1073-RUNTIME-002` configuration-fingerprint audits and incremental navigation suppression | Normalized profile fingerprint plus per-check evidence | **Structural.** Policy is specified but not exercised. | Force one clean audit per Farm/Tournament fingerprint; then suppress one allowlisted route at a time. Any mismatch, version/shape/freshness failure, repair, or due audit restores UI. |
+| `V1073-RUNTIME-001` guarded save-first Home acquisition | Proven Android-Home flush, two identical exact-target reads, exact decoder, stable restored `NEW_BATTLE` | **Shortcut-ready and implemented.** One runtime/preflight/configuration/target generation owns the lifecycle workflow and retains only normalized redacted provenance. | `save_first` uses this path; acquisition/decode uncertainty safely restored to Home runs UI, while restoration/ownership/control/boundary uncertainty blocks input. The optional audit collector is not an authority source. |
+| `V1073-RUNTIME-002` atomic per-check suppression and exact-next-battle carry | Resolved configuration fingerprint, per-component decisions, runtime-owned launch, first stable `RUNNING` | **Shortcut-ready and implemented** for all currently allowlisted Home/session components together. | `force_ui` preserves complete UI behavior; `comparison_audit` collects normalized comparison evidence while UI remains authoritative. Any repair invalidates remaining snapshot decisions; discontinuity rejects all carry. Future comparisons never self-promote a manifest. |
 | `V1073-RUNTIME-003` active round identity | `(versionNumber, currentTier, roundsStartedThisTier[currentTier], roundSeed)` | **Causal.** A known Home boundary preceded the first stable Tier 22 active projection with a new per-tier counter and round seed; subsequent stable revisions retained that exact identity through wave 710. No finer wall-clock latency is claimed. | The natural boundary semantics are proven. `V1073-RUNTIME-013` scopes audit receipts to the tuple and rejects stale/different-round projections without binding a process; any later attachment consumer must preserve the independent current-process terminal-binding rule. |
 | `V1073-RUNTIME-004` approximately five-minute save freshness | `saveRevision`, capture time, stable source hash, active identity/wave | **Structural.** Multiple ordinary-foreground stable revisions advanced under the same Tier 22 identity through wave 710, corroborating periodic usable writes without retaining exact timestamps. The whole row is not promoted because UI-to-save lag, jitter, unchanged intervals, write-collision behavior, and a runtime staleness threshold were not measured. | The default-300-second observation-only polling cadence is implemented with 30–3600-second bounds. Pause/background behavior and tighter freshness characterization may be measured during ordinary future use; no receipt timing authorizes navigation or claims an exact write time. |
 | `V1073-RUNTIME-005` in-battle Perk inventory | `perkLevel[50]`, `perksPickedCount`, ordered `PerkPick(wave, perk)` list, versioned Perk IDs | **Shortcut-ready** for a complete exact-version snapshot. The final Tier 22 active projection contained 15 internally exact picks; all mapped picks, levels, and order agreed with the terminal UI's 11 collapsed rows. During the first enabled Tier 19 sequence, seven additional IDs were cross-channel calibrated from stable pick waves/levels and the same-round UI timeline; the repaired decoder then accepted all 56 active picks spanning 27 semantic keys. Synthetic unknown-ID, shape, count, level, and non-monotonic-order inconsistencies still publish no snapshot. | The normalized decoder/reconciler claim is complete. `V1073-RUNTIME-013` records session-local prefix deltas and fails non-prefix progress closed. If a structurally valid but unmapped ID appears, the collector now tries the exact same-wave UI/save resolver described below; only a unique allowlisted assignment restores the whole projection. Ambiguity or inconsistency still publishes no inventory and keeps UI evidence. The privacy-safe static calibration is retained in `test/fixtures/player_save_perk_id_calibration_v1073.json`. |
@@ -258,43 +311,56 @@ exact game version starts a new matrix at Structural level.
 | `V1073-RUNTIME-018` transient control and cooldown candidates | `gameSpeedMemory`, buy multipliers, candidate Damage Slider/Orb Distance fields, Card activity, and UW/Bot/Guardian cooldown arrays | **Structural.** Plausible fields exist but are deliberately unpublished and may lag the visible game by a complete save interval. | Rank by current observation cost, then calibrate each claim separately across changed/restored values and stable writes. Current-state enforcement and post-action verification remain visual unless the use case explicitly tolerates checkpoint staleness. |
 | `V1073-TOURNEY-001` Tournament condition profile/history coverage | Exact-version generator, event identity fields, and Heat/Overheat UI | **Shortcut-ready** for Legend condition identity only. | Complete UI inventory, effective descriptions, lower leagues, and unknown-condition preservation in the separate [Tournament condition plan](../backlog/runtime-and-validation.md#tournament-battle-condition-evidence). |
 
-The overall version-1073 save adoption remains incomplete while any runtime
-row above is below its required level. The completed Tier 22 audit promotes
-only the row-level evidence stated above. `V1073-RUNTIME-013` now implements
-observation-only polling and a session-local audit cache, and its first ordinary
-Home-to-terminal deployment pass is complete. The deployed direct-Retry repair
-still awaits one passive ordinary rollover receipt. Neither state attaches a
-runtime tail, constructs a normal save-derived record, nor suppresses
-navigation. Foreground freshness extensions, active upgrades, survival timing
-and repeated-event merging, live tallies, and future unknown `killedBy` values
-remain independently fail-closed work rather than blockers for the core
-collector.
+The complete currently eligible configuration set is adopted atomically by
+`V1073-RUNTIME-001`/`002`; this is not a promotion of unrelated profile or
+active-round rows. `V1073-RUNTIME-013` remains observation-only polling and a
+session-local audit cache, and its first ordinary Home-to-terminal deployment
+pass is complete. The deployed direct-Retry repair still awaits one passive
+ordinary rollover receipt. It does not attach a runtime tail or construct a
+normal save-derived record. Foreground freshness extensions, active upgrades,
+survival timing and repeated-event merging, live tallies, and future unknown
+`killedBy` values remain independently fail-closed work rather than blockers
+for configuration preflight.
 
 Profile groups broaden the diagnostic view but cannot influence automation
 until their own row is Shortcut-ready. Every published group carries mapping
 ID, source fields, capture time, and validation status.
 
-### Runtime rollout sequence
+### Runtime adoption and future calibration
 
-1. Add the per-version field-disposition manifest and validation metadata for
-   profile groups. Unknown or unclassified fields remain unpublished.
-2. Integrate one audit-only snapshot acquisition at verified
-   `HOME_SCREEN / NEW_BATTLE`: perform the proven short app-pause flush, resume
-   to the same boundary, require two identical reads, then reconcile. Continue
-   running every UI check and record only normalized agreement/disagreement.
-3. Run one clean forced audit for each resolved Farm/Tournament configuration
-   fingerprint. Any discrepancy demotes only the affected check and keeps its
-   UI route active.
-4. Enable navigation suppression one allowlisted check at a time. A complete,
-   fresh exact match skips that check; mismatch, missing evidence, unknown
-   version, changed shape, or forced audit runs the existing UI implementation.
-5. The first UI repair invalidates the pre-action snapshot. Verify the repair
-   visually and either finish the remaining checks through UI or perform a new
-   bounded flush/pull; never use the old save to confirm an action.
-6. Force audits on first use of a new exact mapping, after a discrepancy or
-   repair, for the first use of a new configuration fingerprint, and on a
-   configurable periodic cadence. The UI implementations remain maintained and
-   tested even after most ordinary navigation is skipped.
+The guarded acquisition, atomic allowlisted adoption, per-check fallback,
+mutation invalidation, exact launch carry, and `save_first` / `force_ui` /
+`comparison_audit` policy are implemented. Prior version-1073 evidence was
+reused; no duplicate live-preflight campaign was performed. This code-only
+validation is not deployment or live validation. Deployment and observation at
+the first ordinary production boundary remain coordinator work.
+
+Future evidence comes from naturally occurring UI fallbacks or explicit/
+periodic comparison audits. A candidate remains privacy-safe and observational
+until a reviewed mapping/documentation change promotes it; no receipt or
+runtime comparison edits its own authority manifest.
+
+1. **Target Priority:** compare the distinct Farm T18 full order during an
+   ordinary future T18 start. A second nontrivial order confirms generic
+   sequence serialization; do not attempt all ten-factorial permutations.
+2. **Ultimate Weapons:** for future mixed primaries, change and restore one
+   weapon at a time and validate that index's off/on polarity. Validate
+   Spotlight Missiles off through one explicitly authorized reversible
+   transition. Retain normalized before/change/restore comparisons; never
+   enumerate every boolean combination.
+3. **Orb Distance:** prefer ordinary Farm (`30.00m`, Extra `30.00m`, Workshop
+   `39.00m`) → Tournament (`98.38m`, Extra `87.16m`, Workshop `80.37m`) → Farm
+   transitions. Pair authoritative UI evidence with guarded stable saves to
+   establish candidate fields, units/rounding, selected-preset versus derived
+   semantics, serialization timing, Home versus active behavior, and
+   restoration. Only if natural transitions are insufficient may a later
+   coordinator authorize one agent-owned bounded calibration.
+4. **Unknown versions, shapes, IDs, and values:** continue through UI. The
+   existing exact-evidence resolver may attempt only a unique fail-closed
+   mapping; ambiguity or conflict remains UI-required, and the observation-only
+   collector never becomes preflight authority.
+5. Add the versioned raw-field disposition manifest and validation metadata for
+   other profile groups. Unknown or unclassified fields remain unpublished.
 
 ## Authority and fallback
 

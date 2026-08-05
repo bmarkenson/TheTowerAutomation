@@ -91,7 +91,22 @@ def _decoded_save() -> dict:
             23,
             1,
             28,
+            0,
+            2,
             4,
+            5,
+            6,
+            9,
+            13,
+            14,
+            20,
+            21,
+            26,
+            43,
+            46,
+            47,
+            49,
+            -1,
         ],
         "firstPerkIndex": 10,
         "targetPriorityList": [0, 2, 9, 5, 8, 7, 6, 3, 4, 1],
@@ -220,7 +235,14 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
         "bots_preset",
         "perk_first_choice",
         "perk_bans",
+        "perk_auto_pick_order",
+        "free_upgrade_locks",
         "guardian_chips",
+        "auto_pick_perks",
+        "target_priority",
+        "ultimate_weapon_primaries",
+        "poison_swamp_stun",
+        "spotlight_missiles",
         "tournament_conditions",
     )
     assert snapshot.shape_valid
@@ -244,7 +266,7 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
     assert snapshot.checks["perk_auto_pick_order"].value[-1] == (
         "spotlight_damage"
     )
-    assert not snapshot.checks["perk_auto_pick_order"].complete
+    assert snapshot.checks["perk_auto_pick_order"].complete
     assert snapshot.checks["tournament_conditions"].value["summary_codes"] == [
         "DR",
         "SPD",
@@ -766,7 +788,22 @@ def test_live_calibrated_auto_pick_ids_follow_the_ui_rank_order(monkeypatch):
         23,
         28,
         1,
+        0,
+        2,
         4,
+        5,
+        6,
+        9,
+        13,
+        14,
+        20,
+        21,
+        26,
+        43,
+        46,
+        47,
+        49,
+        -1,
     ]
 
     snapshot = _snapshot(monkeypatch, decoded)
@@ -791,10 +828,197 @@ def test_live_calibrated_auto_pick_ids_follow_the_ui_rank_order(monkeypatch):
         "spotlight_damage",
         "damage",
     ]
-    assert snapshot.checks["perk_auto_pick_order"].complete is False
-    assert snapshot.checks["perk_auto_pick_order"].reason == (
-        "excluded 1 unranked Auto Pick tail item(s) from priority evidence"
+    assert snapshot.checks["perk_auto_pick_order"].complete is True
+    assert snapshot.checks["perk_auto_pick_order"].reason == ""
+
+
+@pytest.mark.parametrize(
+    ("mutation", "reason"),
+    [
+        (lambda values: values[:-1], "shape changed"),
+        (
+            lambda values: [*values[:18], values[0], *values[19:]],
+            "duplicate",
+        ),
+        (lambda values: [999, *values[1:]], "membership changed"),
+        (lambda values: [True, *values[1:]], "exact integer"),
+    ],
+)
+def test_auto_pick_structural_uncertainty_fails_closed(
+    monkeypatch,
+    mutation,
+    reason,
+):
+    decoded = _decoded_save()
+    decoded["autoPickOrder"] = mutation(decoded["autoPickOrder"])
+
+    evidence = _snapshot(monkeypatch, decoded).checks["perk_auto_pick_order"]
+
+    assert evidence.status == "unmapped"
+    assert not evidence.complete
+    assert reason.casefold() in evidence.reason.casefold()
+
+
+def test_free_upgrade_locks_accept_only_exact_three_lock_boolean_shape(monkeypatch):
+    snapshot = _snapshot(monkeypatch)
+
+    evidence = snapshot.checks["free_upgrade_locks"]
+    assert evidence.status == "observed"
+    assert set(evidence.value) == {
+        "Shockwave Size",
+        "Bounce Shot Targets",
+        "Bounce Shot Range",
+    }
+    matching = reconcile_requirements(
+        snapshot,
+        {"free_upgrade_locks": evidence.value},
+        freshness_verified=True,
     )
+    different = reconcile_requirements(
+        snapshot,
+        {"free_upgrade_locks": ["Shockwave Size"]},
+        freshness_verified=True,
+    )
+    duplicate = reconcile_requirements(
+        snapshot,
+        {"free_upgrade_locks": [*evidence.value, evidence.value[0]]},
+        freshness_verified=True,
+    )
+    assert matching["checks"]["free_upgrade_locks"]["disposition"] == "save_match"
+    assert different["checks"]["free_upgrade_locks"]["reason"] == (
+        "save_requirement_outside_validated_scope"
+    )
+    assert duplicate["checks"]["free_upgrade_locks"]["reason"] == (
+        "save_requirement_outside_validated_scope"
+    )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("upgradesLockedFreeUpgrades", 1),
+        ("upgradesUtilityLockedFreeUpgrades", True),
+    ],
+)
+def test_free_upgrade_lock_non_boolean_or_extra_set_bit_fails_closed(
+    monkeypatch,
+    field,
+    value,
+):
+    decoded = _decoded_save()
+    index = 0
+    decoded[field][index] = value
+
+    evidence = _snapshot(monkeypatch, decoded).checks["free_upgrade_locks"]
+
+    assert evidence.status == "unmapped"
+    assert not evidence.complete
+
+
+@pytest.mark.parametrize(
+    "priority",
+    [
+        [0, 2, 9, 5, 8, 7, 6, 3, 4],
+        [0, 2, 9, 5, 8, 7, 6, 3, 4, 4],
+        [0, 2, 9, 5, 8, 7, 6, 3, 4, 99],
+        [0, 2, 9, 5, 8, 7, 6, 3, 4, True],
+        [0, 2, 9, 5, 8, 7, 6, 3, 4, 1, 5],
+    ],
+)
+def test_target_priority_requires_exact_complete_ten_id_order(
+    monkeypatch,
+    priority,
+):
+    decoded = _decoded_save()
+    decoded["targetPriorityList"] = priority
+
+    evidence = _snapshot(monkeypatch, decoded).checks["target_priority"]
+
+    assert evidence.status == "unmapped"
+    assert not evidence.complete
+
+
+def test_ultimate_weapon_components_have_independent_value_scope(monkeypatch):
+    snapshot = _snapshot(monkeypatch)
+    requirements = {
+        "ultimate_weapons": {
+            name: {"primary": "on"}
+            for name in VERSION_MAPPING["ultimate_weapon_names"]
+        }
+    }
+    requirements["ultimate_weapons"]["Poison Swamp"]["stun"] = "off"
+    requirements["ultimate_weapons"]["Spotlight"]["missiles"] = "on"
+
+    plan = reconcile_requirements(
+        snapshot,
+        requirements,
+        freshness_verified=True,
+    )
+
+    assert plan["checks"]["ultimate_weapon_primaries"]["disposition"] == (
+        "save_match"
+    )
+    assert plan["checks"]["poison_swamp_stun"]["disposition"] == "save_match"
+    assert plan["checks"]["spotlight_missiles"]["disposition"] == "save_match"
+
+    requirements["ultimate_weapons"]["Chain Lightning"]["primary"] = "off"
+    requirements["ultimate_weapons"]["Spotlight"]["missiles"] = "off"
+    unsupported = reconcile_requirements(
+        snapshot,
+        requirements,
+        freshness_verified=True,
+    )
+    assert unsupported["checks"]["ultimate_weapon_primaries"]["reason"] == (
+        "save_requirement_outside_validated_scope"
+    )
+    assert unsupported["checks"]["spotlight_missiles"]["reason"] == (
+        "save_requirement_outside_validated_scope"
+    )
+    assert unsupported["checks"]["poison_swamp_stun"]["disposition"] == (
+        "save_match"
+    )
+
+
+@pytest.mark.parametrize(("raw", "required"), [(False, "on"), (True, "off")])
+def test_poison_swamp_stun_supports_both_exact_boolean_polarities(
+    monkeypatch,
+    raw,
+    required,
+):
+    decoded = _decoded_save()
+    decoded["poisonSwampStunOff"] = raw
+    snapshot = _snapshot(monkeypatch, decoded)
+
+    assert snapshot.checks["poison_swamp_stun"].value == required
+    plan = reconcile_requirements(
+        snapshot,
+        {
+            "ultimate_weapons": {
+                "Poison Swamp": {"stun": required},
+            }
+        },
+        freshness_verified=True,
+    )
+    assert plan["checks"]["poison_swamp_stun"]["disposition"] == "save_match"
+
+
+def test_malformed_boolean_components_fail_closed_without_truthiness(monkeypatch):
+    decoded = _decoded_save()
+    decoded["autoPickPerk"] = 1
+    decoded["poisonSwampStunOff"] = 0
+    decoded["spotlightSmartMissilesOff"] = 0
+    decoded["ultimateWeaponOn"][0] = 1
+
+    checks = _snapshot(monkeypatch, decoded).checks
+
+    for check_id in (
+        "auto_pick_perks",
+        "poison_swamp_stun",
+        "spotlight_missiles",
+        "ultimate_weapon_primaries",
+    ):
+        assert checks[check_id].status == "unmapped"
+        assert not checks[check_id].complete
 
 
 def test_unknown_game_version_decodes_metadata_but_requires_ui(monkeypatch):
@@ -871,7 +1095,7 @@ def test_candidate_mapping_keeps_ui_for_matching_checks(monkeypatch):
         "save_freshness_unverified"
     )
     assert plan["checks"]["auto_pick_perks"]["reason"] == (
-        "mapping_candidate_audit"
+        "save_freshness_unverified"
     )
     assert plan["checks"]["guardian_chips"]["reason"] == (
         "save_freshness_unverified"
@@ -895,13 +1119,24 @@ def test_candidate_mapping_can_use_only_validated_complete_fresh_checks(monkeypa
 
     assert plan["checks"]["cards_deck"]["disposition"] == "save_match"
     assert plan["checks"]["cards_deck"]["save_check_validated"]
+    assert plan["checks"]["auto_pick_perks"]["disposition"] == "save_match"
+    assert plan["checks"]["perk_auto_pick_order"]["disposition"] == "save_match"
+    assert plan["summary"]["save_matches"] == 3
+
+
+def test_auto_pick_enabled_requires_an_exact_boolean_true_requirement(monkeypatch):
+    snapshot = _snapshot(monkeypatch)
+
+    plan = reconcile_requirements(
+        snapshot,
+        {"auto_pick_perks": "on"},
+        freshness_verified=True,
+    )
+
     assert plan["checks"]["auto_pick_perks"]["reason"] == (
-        "mapping_candidate_audit"
+        "save_requirement_outside_validated_scope"
     )
-    assert plan["checks"]["perk_auto_pick_order"]["reason"] == (
-        "save_evidence_incomplete"
-    )
-    assert plan["summary"]["save_matches"] == 1
+    assert plan["checks"]["auto_pick_perks"]["ui_required"] is True
 
 
 def test_validated_card_recharge_match_skips_ui_but_mismatch_does_not(
@@ -962,10 +1197,11 @@ def test_validated_mapping_can_skip_only_exact_complete_matches(monkeypatch):
     )
 
     assert plan["checks"]["cards_deck"]["disposition"] == "save_match"
-    assert plan["checks"]["perk_auto_pick_order"]["reason"] == (
-        "save_evidence_incomplete"
+    assert plan["checks"]["perk_auto_pick_order"]["disposition"] == "save_match"
+    assert plan["checks"]["ultimate_weapon_primaries"]["reason"] == (
+        "save_requirement_outside_validated_scope"
     )
-    assert plan["checks"]["ultimate_weapons"]["disposition"] == "save_match"
+    assert plan["checks"]["poison_swamp_stun"]["disposition"] == "save_match"
     assert plan["checks"]["modules"]["disposition"] == "ui_required"
     assert plan["checks"]["modules"]["fallback"] == "existing_ui_check"
 

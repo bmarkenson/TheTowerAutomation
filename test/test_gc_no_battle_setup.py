@@ -23,6 +23,7 @@ from core.home_perk_configuration import HomePerkConfigurationResult
 from core.matcher import get_match
 from core.perk_configuration import FARM_AUTO_PICK_ORDER, FARM_PERK_BANS
 from core.poison_swamp_stun import PoisonSwampStunState
+from core.player_save_preflight import CarriedEvidenceState
 from core.target_priority import TARGETS
 from core.workshop_preset import (
     BOTS_AMPLIFY_PRESET_SLOT,
@@ -390,6 +391,8 @@ def _run(
     requirements=REQUIREMENTS,
     *,
     waivers=None,
+    save_decisions=None,
+    snapshot_invalidation_fn=None,
     ensure_perk_configuration_fn=None,
     action_guard_fn=None,
 ):
@@ -400,6 +403,8 @@ def _run(
         requirements,
         screenshot="home",
         waivers=waivers,
+        save_decisions=save_decisions,
+        snapshot_invalidation_fn=snapshot_invalidation_fn,
         capture_fn=router.capture,
         detector=router.detect,
         detect_home_control_fn=router.home_control,
@@ -417,6 +422,203 @@ def _run(
         sleep_fn=lambda _seconds: None,
         **kwargs,
     )
+
+
+def _save_matches(requirements, *check_ids):
+    return {
+        check_id: {
+            "disposition": "save_match",
+            "reason": "exact_version_save_match",
+            "expected": requirements.get(check_id),
+            "observed": requirements.get(check_id),
+            "ui_required": False,
+        }
+        for check_id in check_ids
+    }
+
+
+def test_matching_save_snapshot_skips_all_eligible_home_navigation_together():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+    requirements = {
+        "cards_deck": "Farm",
+        "card_recharge_modes": {
+            "Demon Mode": "auto_reactivate",
+            "Nuke": "ready_after_recharge",
+        },
+        "workshop_preset": "Farm",
+        "free_upgrade_locks": list(FARM_FREE_UPGRADE_LOCKS),
+        "bots_preset": "Farm",
+        "guardian_chips": ["Fetch", "Summon", "Scout"],
+        "auto_pick_perks": True,
+        "perk_first_choice": "perk_wave_requirement",
+        "perk_bans": list(FARM_PERK_BANS),
+        "perk_auto_pick_order": list(FARM_AUTO_PICK_ORDER),
+        "ultimate_weapons": {
+            "Poison Swamp": {"primary": "on", "stun": "off"},
+        },
+        "loadout_policies": {
+            "modules": "preserve",
+            "target_priority": "preserve",
+        },
+    }
+    save_decisions = _save_matches(
+        requirements,
+        "cards_deck",
+        "card_recharge_modes",
+        "workshop_preset",
+        "free_upgrade_locks",
+        "bots_preset",
+        "guardian_chips",
+        "auto_pick_perks",
+        "perk_first_choice",
+        "perk_bans",
+        "perk_auto_pick_order",
+    )
+    save_decisions["poison_swamp_stun"] = {
+        "disposition": "save_match",
+        "reason": "exact_version_save_match",
+        "expected": "off",
+        "observed": "off",
+        "ui_required": False,
+    }
+
+    result = _run(
+        router,
+        requirements,
+        save_decisions=save_decisions,
+    )
+
+    assert result.complete
+    assert router.state == "home"
+    assert router.static_actions == []
+    assert router.visible_actions == []
+    assert router.module_checks == []
+    assert router.card_recharge_checks == []
+    assert router.configuration_screens == [
+        {
+            "cards_screen": None,
+            "workshop_screen": None,
+            "bots_screen": None,
+            "guardians_screen": None,
+        }
+    ]
+    assert result.evidence["configuration"]["save_backed_sections"] == {
+        "bots": {
+            "disposition": "save_match",
+            "reason": "exact_version_save_match",
+        },
+        "cards": {
+            "disposition": "save_match",
+            "reason": "exact_version_save_match",
+        },
+        "guardians": {
+            "disposition": "save_match",
+            "reason": "exact_version_save_match",
+        },
+        "workshop": {
+            "disposition": "save_match",
+            "reason": "exact_version_save_match",
+        },
+    }
+
+
+def test_first_ui_repair_invalidates_later_save_decisions():
+    router = _NoBattleRouter(selected=False, correct_guardians=True)
+    requirements = {
+        "cards_deck": "Farm",
+        "workshop_preset": "Farm",
+        "bots_preset": "Farm",
+        "guardian_chips": ["Fetch", "Summon", "Scout"],
+        "loadout_policies": {
+            "modules": "preserve",
+            "target_priority": "preserve",
+        },
+    }
+    invalidations = []
+    save_decisions = _save_matches(
+        requirements,
+        "workshop_preset",
+        "bots_preset",
+        "guardian_chips",
+    )
+
+    result = _run(
+        router,
+        requirements,
+        save_decisions=save_decisions,
+        snapshot_invalidation_fn=invalidations.append,
+    )
+
+    assert result.complete
+    assert invalidations == ["home_ui_repair"]
+    assert "navigation.goto_workshop_home" in router.static_actions
+    assert "navigation.event:bots_tab" in router.static_actions
+    assert "navigation.guild:guardian_tab" in router.static_actions
+    assert result.evidence["save_preflight"]["invalidated"] is True
+    assert result.evidence["save_preflight"]["remaining_checks"] == []
+
+
+def test_mixed_perk_decisions_visit_only_ui_required_tabs():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+    requirements = {
+        "cards_deck": "Farm",
+        "workshop_preset": "Farm",
+        "bots_preset": "Farm",
+        "guardian_chips": ["Fetch", "Summon", "Scout"],
+        "perk_first_choice": "perk_wave_requirement",
+        "perk_bans": list(FARM_PERK_BANS),
+        "perk_auto_pick_order": ["game_speed"],
+        "loadout_policies": {
+            "modules": "preserve",
+            "target_priority": "preserve",
+        },
+    }
+    save_decisions = _save_matches(
+        requirements,
+        "cards_deck",
+        "workshop_preset",
+        "bots_preset",
+        "guardian_chips",
+        "perk_first_choice",
+        "perk_auto_pick_order",
+    )
+    inspected = []
+
+    def ensure_perks(_requirements, **kwargs):
+        inspected.append(set(kwargs["waived_fields"]))
+        return HomePerkConfigurationResult(
+            valid=True,
+            changed=False,
+            reason="matched",
+            failed_check=None,
+            evidence={
+                "perk_bans": {
+                    "checked": True,
+                    "valid": True,
+                    "observed": list(FARM_PERK_BANS),
+                }
+            },
+            home_screenshot="home",
+        )
+
+    result = _run(
+        router,
+        requirements,
+        save_decisions=save_decisions,
+        ensure_perk_configuration_fn=ensure_perks,
+    )
+
+    assert result.complete
+    assert inspected == [
+        {"perk_first_choice", "perk_auto_pick_order"}
+    ]
+    assert result.evidence["perk_first_choice"]["source"] == (
+        "player_save_preflight"
+    )
+    assert result.evidence["perk_auto_pick_order"]["source"] == (
+        "player_save_preflight"
+    )
+    assert result.evidence["perk_bans"]["checked"] is True
 
 
 def test_no_battle_setup_corrects_supported_farm_presets_and_guardians():
@@ -1261,6 +1463,95 @@ def test_app_runs_no_battle_setup_before_starting_profile_battle():
     manager.mark_no_battle_setup_complete.assert_called_once_with(setup.evidence)
     handle_home.assert_called_once_with(restart_enabled=True)
     manager.on_home.assert_called_once_with()
+
+
+def test_app_binds_save_preflight_to_only_an_exact_new_battle_launch():
+    frame = object()
+    manager = Mock()
+    manager.no_battle_setup_requirements.return_value = REQUIREMENTS
+    manager.strategy.runtime_policy.return_value = {
+        "player_save_preflight": "save_first"
+    }
+    app = App.__new__(App)
+    app._auto_start_enabled = True
+    app._mission_mgr = manager
+    app._fast_game_over = False
+    app._last_wave_value = None
+    app._last_wave_conf = -1.0
+    app._status_reporter = Mock()
+    app._supervisor = Mock()
+    app._handle_daily_gem_if_due = Mock(return_value=False)
+    app._handle_mission_rewards_if_due = Mock(return_value=False)
+    app._runtime_action_guard = Mock(return_value=True)
+    app._player_save_preflight_session_id = ""
+    app._player_save_preflight_result = None
+    preflight = SimpleNamespace(
+        ready=True,
+        decisions={
+            "cards_deck": {
+                "disposition": "save_match",
+                "expected": "Farm",
+                "observed": "Farm",
+            }
+        },
+        as_dict=lambda: {"status": "ready"},
+    )
+    coordinator = Mock()
+    coordinator.acquire.return_value = preflight
+    coordinator.carry = SimpleNamespace(
+        state=CarriedEvidenceState.PENDING_LAUNCH
+    )
+    app._player_save_preflight_coordinator = coordinator
+    setup = GcNoBattleSetupResult(
+        GcNoBattleSetupStatus.COMPLETE,
+        "ok",
+        {"cards_deck": {"source": "player_save_preflight"}},
+    )
+
+    with (
+        patch(
+            "core.app.detect_home_battle_control",
+            return_value=HomeBattleEvidence(
+                HomeBattleControl.NEW_BATTLE,
+                "test",
+                100.0,
+            ),
+        ),
+        patch("core.app.run_gc_no_battle_setup", return_value=setup) as run_setup,
+        patch(
+            "core.app.handle_home_screen",
+            return_value=True,
+        ) as handle_home,
+    ):
+        app._handle_primary_states("HOME_SCREEN", set(), frame)
+
+    coordinator.acquire.assert_called_once_with(
+        REQUIREMENTS,
+        mode="save_first",
+        initial_frame=frame,
+    )
+    run_setup.assert_called_once_with(
+        REQUIREMENTS,
+        screenshot=frame,
+        action_guard_fn=app._runtime_action_guard,
+        save_decisions=preflight.decisions,
+        snapshot_invalidation_fn=coordinator.invalidate,
+    )
+    handle_home.assert_called_once_with(
+        restart_enabled=True,
+        require_new_battle=True,
+    )
+    coordinator.mark_runtime_launch.assert_called_once_with(
+        control=HomeBattleControl.NEW_BATTLE,
+        action_authorized=True,
+        dispatched=True,
+    )
+    manager.mark_no_battle_setup_complete.assert_called_once_with(
+        {
+            **setup.evidence,
+            "player_save_preflight": {"status": "ready"},
+        }
+    )
 
 
 def test_app_runs_tournament_home_preflight_without_starting_battle():

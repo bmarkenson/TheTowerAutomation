@@ -17,6 +17,7 @@ invariants:
     - Summon
     - Scout
   auto_pick_perks: true
+  perk_first_choice: perk_wave_requirement
   perk_bans:
     - lifesteal_knockback_tradeoff
     - enemies_damage_tradeoff

@@ -320,7 +320,10 @@ def test_guarded_route_corrects_declared_in_run_controls_and_returns_to_running(
         return SimpleNamespace(valid=True)
 
     result = run_read_only_gc_preflight(
-        PREFLIGHT_REQUIREMENTS,
+        {
+            **PREFLIGHT_REQUIREMENTS,
+            "free_upgrade_locks": list(FARM_FREE_UPGRADE_LOCKS),
+        },
         capture_fn=ui.capture,
         detector=ui.detect,
         safe_tap_fn=ui.safe_tap,
@@ -429,6 +432,163 @@ def test_farm_route_consumes_home_boundary_evidence_without_revisiting_sections(
     assert "navigation.menu_guild" not in ui.visible_taps
     assert "navigation.goto_workshop_home" not in ui.static_taps
     assert "buttons.battle_control:home" not in ui.static_taps
+
+
+def test_bound_save_components_skip_redundant_auto_pick_and_uw_navigation():
+    ui = _FakeUi()
+    setup_evidence = {
+        "configuration": {"valid": True, "source": "NEW_BATTLE"},
+        "modules": {"checked": True, "valid": True},
+    }
+    carried = {
+        "auto_pick_perks": True,
+        "ultimate_weapon_primaries": {
+            label: {"primary": "on"}
+            for label in ULTIMATE_REQUIREMENTS
+        },
+        "poison_swamp_stun": "off",
+        "spotlight_missiles": "on",
+    }
+    consumed = []
+
+    class BoundSave:
+        def consume(self, check_id):
+            consumed.append(check_id)
+            return carried.get(check_id)
+
+        def invalidate(self, reason):
+            raise AssertionError(f"matching carried evidence invalidated: {reason}")
+
+    validated = {}
+
+    def validate(**kwargs):
+        validated.update(kwargs)
+        return SimpleNamespace(valid=True)
+
+    result = run_read_only_gc_preflight(
+        PREFLIGHT_REQUIREMENTS,
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.safe_tap,
+        tap_visible_fn=ui.visible_tap,
+        go_home_fn=lambda: (_ for _ in ()).throw(
+            AssertionError("Home route must not repeat")
+        ),
+        swipe_fn=ui.swipe,
+        detect_boxes_fn=lambda *_args, **_kwargs: (
+            (_ for _ in ()).throw(
+                AssertionError("UW UI must not be inspected")
+            )
+        ),
+        no_battle_setup_evidence=setup_evidence,
+        player_save_preflight=BoundSave(),
+        detect_home_control_fn=lambda _frame: _home_evidence(),
+        sleep_fn=lambda _seconds: None,
+        validate_fn=validate,
+    )
+
+    assert result.status is GcPreflightNavigationStatus.COMPLETE
+    assert consumed == [
+        "auto_pick_perks",
+        "ultimate_weapon_primaries",
+        "poison_swamp_stun",
+        "spotlight_missiles",
+    ]
+    assert validated["auto_pick_boundary_evidence"] == {
+        "source": "bound_player_save_preflight",
+        "value": True,
+    }
+    assert validated["ultimate_observations"] == {
+        "Golden Tower": {"primary": "on"},
+        "Black Hole": {"primary": "on"},
+        "Poison Swamp": {"primary": "on", "stun": "off"},
+        "Spotlight": {"primary": "on", "missiles": "on"},
+    }
+    assert "navigation.open_perks" not in ui.static_taps
+    assert "navigation.goto_uw" not in ui.visible_taps
+    assert ui.swipes == []
+
+
+def test_uw_repair_discards_pre_action_carried_component_observations():
+    ui = _FakeUi()
+    setup_evidence = {
+        "configuration": {
+            "valid": True,
+            "source": "NEW_BATTLE",
+            "save_backed_sections": {
+                "cards": {"disposition": "save_match"},
+            },
+        },
+        "modules": {"checked": True, "valid": True},
+    }
+    carried = {
+        "auto_pick_perks": True,
+        "ultimate_weapon_primaries": {
+            label: {"primary": "on"}
+            for label in ULTIMATE_REQUIREMENTS
+        },
+        "poison_swamp_stun": None,
+        "spotlight_missiles": "on",
+    }
+    invalidations = []
+
+    class BoundSave:
+        def consume(self, check_id):
+            return carried.get(check_id)
+
+        def invalidate(self, reason):
+            invalidations.append(reason)
+
+    poison_box = UpgradeBox(
+        "left",
+        (0, 0, 1, 1),
+        text="Poison Swamp",
+        toggles={"primary": "on"},
+    )
+    validated = {}
+
+    def validate(**kwargs):
+        validated.update(kwargs)
+        return SimpleNamespace(valid=True)
+
+    result = run_read_only_gc_preflight(
+        {
+            **PREFLIGHT_REQUIREMENTS,
+            "free_upgrade_locks": list(FARM_FREE_UPGRADE_LOCKS),
+        },
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.safe_tap,
+        tap_visible_fn=ui.visible_tap,
+        go_home_fn=ui.go_home,
+        swipe_fn=ui.swipe,
+        detect_boxes_fn=lambda *_args, **_kwargs: {
+            "left": [poison_box],
+            "right": [],
+        },
+        ensure_poison_swamp_stun_fn=lambda **_kwargs: _stun_off_result(
+            ui,
+            changed=True,
+        ),
+        no_battle_setup_evidence=setup_evidence,
+        free_upgrade_lock_boundary_evidence={
+            "status": "save_match",
+            "source": "bound_player_save_preflight",
+        },
+        player_save_preflight=BoundSave(),
+        detect_home_control_fn=lambda _frame: _home_evidence(),
+        sleep_fn=lambda _seconds: None,
+        validate_fn=validate,
+    )
+
+    assert result.status is GcPreflightNavigationStatus.COMPLETE
+    assert invalidations == ["in_battle_poison_stun_repair"]
+    assert validated["ultimate_observations"] == {
+        "Poison Swamp": {"primary": "on", "stun": "off"},
+    }
+    assert "configuration_boundary_evidence" not in validated
+    assert validated["free_upgrade_lock_boundary_evidence"] is None
+    assert "navigation.Cards" in ui.visible_taps
 
 
 def test_home_boundary_accepts_tournament_poison_swamp_stun_on():

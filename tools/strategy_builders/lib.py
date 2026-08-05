@@ -538,6 +538,27 @@ def _build_gc_farm_strategy(source: Dict[str, Any]) -> Dict[str, Any]:
         "per_run_reset": per_run_reset,
         "rules": rules,
     }
+    runtime_policy = source.get("runtime_policy")
+    if runtime_policy is not None:
+        if not isinstance(runtime_policy, dict):
+            raise ValueError("gc_farm runtime_policy must be a mapping")
+        from core.player_save_preflight import (
+            normalize_player_save_preflight_mode,
+        )
+
+        unknown_runtime_policy = sorted(
+            set(runtime_policy) - {"player_save_preflight"}
+        )
+        if unknown_runtime_policy:
+            raise ValueError(
+                "gc_farm runtime_policy has unsupported settings: "
+                + ", ".join(unknown_runtime_policy)
+            )
+        plan["runtime_policy"] = {
+            "player_save_preflight": normalize_player_save_preflight_mode(
+                runtime_policy.get("player_save_preflight")
+            )
+        }
     run_configuration = source.get("run_configuration")
     if isinstance(run_configuration, dict):
         resolved_configuration = copy.deepcopy(run_configuration)
@@ -709,9 +730,11 @@ def _normalize_gc_session_preflight(raw: Any) -> Dict[str, Any]:
 
     from core.perk_configuration import (
         normalize_perk_configuration_requirements,
+        normalize_perk_first_choice_requirement,
     )
 
     try:
+        perk_first_choice = normalize_perk_first_choice_requirement(requirements)
         perk_bans, perk_auto_pick_order = (
             normalize_perk_configuration_requirements(requirements)
         )
@@ -719,6 +742,7 @@ def _normalize_gc_session_preflight(raw: Any) -> Dict[str, Any]:
         raise ValueError(f"gc_farm session_preflight.{exc}") from exc
     requirements["perk_bans"] = perk_bans
     requirements["perk_auto_pick_order"] = perk_auto_pick_order
+    requirements["perk_first_choice"] = perk_first_choice
 
     weapons = requirements.get("ultimate_weapons")
     if not isinstance(weapons, dict) or not weapons:

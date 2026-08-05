@@ -65,7 +65,11 @@ def tap_verified_new_battle() -> bool:
     return _tap_verified_home_battle_control(HomeBattleControl.NEW_BATTLE)
 
 
-def handle_home_screen(restart_enabled=True):
+def handle_home_screen(
+    restart_enabled: bool = True,
+    *,
+    require_new_battle: bool = False,
+) -> bool:
     """
     Handle the HOME_SCREEN state by optionally starting a battle.
 
@@ -75,7 +79,7 @@ def handle_home_screen(restart_enabled=True):
             When False, does nothing beyond logging (awaits manual start).
 
     Returns:
-        None — handler effects only.
+        bool — whether this invocation dispatched a battle control.
 
     Side effects:
         [tap] Taps the Battle button when restart_enabled=True.
@@ -92,18 +96,29 @@ def handle_home_screen(restart_enabled=True):
 
     if restart_enabled:
         log("[HOME] Auto-start enabled — tapping 'Battle' button", "INFO")
-        if not tap_if_visible(
+        if require_new_battle:
+            launched = tap_verified_new_battle()
+        elif tap_if_visible(
             "buttons.battle:home",
             retries=1,
             failure_log_level="DEBUG",
         ):
-            if not tap_if_visible(
-                "buttons.resume_battle:home",
-                retries=1,
-                failure_log_level="DEBUG",
-            ):
-                if not _tap_verified_home_battle_control():
-                    log("[HOME] Battle/Resume controls not verified; leaving handler", "WARN")
+            launched = True
+        elif tap_if_visible(
+            "buttons.resume_battle:home",
+            retries=1,
+            failure_log_level="DEBUG",
+        ):
+            launched = True
+        else:
+            launched = _tap_verified_home_battle_control()
+        if not launched:
+            log(
+                "[HOME] Battle/Resume controls not verified; leaving handler",
+                "WARN",
+            )
         time.sleep(2)
+        return launched
     else:
         log("[HOME] Auto-start disabled — waiting for manual start.", "INFO")
+        return False

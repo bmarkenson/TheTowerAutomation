@@ -15,6 +15,7 @@ Future: extend with swipe/page actions or convert to dataclasses.
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 import time
@@ -96,6 +97,86 @@ def _reset_repair_mismatch_attempts(mv: Dict[str, Any]) -> None:
 
     mv["gc_session_preflight_repair_attempts"] = 0
     mv["gc_session_preflight_repair_failure_key"] = ""
+
+
+def _invalidate_bound_player_save(
+    ctx: Optional[MissionContext],
+    reason: str,
+) -> None:
+    """Invalidate remaining carried decisions after a configuration mutation."""
+
+    coordinator = (
+        ctx.data.get("player_save_preflight_coordinator")
+        if ctx is not None
+        else None
+    )
+    invalidate = getattr(coordinator, "invalidate", None)
+    if callable(invalidate):
+        invalidate(reason)
+
+
+def _bind_save_backed_home_evidence(
+    setup_evidence: Mapping[str, Any],
+    player_save_preflight: Any,
+) -> dict[str, Any]:
+    """Retain save-backed sections only through their exact bound carry."""
+
+    payload = copy.deepcopy(dict(setup_evidence))
+    configuration = payload.get("configuration")
+    save_sections = (
+        configuration.get("save_backed_sections")
+        if isinstance(configuration, Mapping)
+        else None
+    )
+    consume = getattr(player_save_preflight, "consume", None)
+    if isinstance(save_sections, Mapping) and save_sections:
+        section_checks = {
+            "cards": "cards_deck",
+            "workshop": "workshop_preset",
+            "bots": "bots_preset",
+            "guardians": "guardian_chips",
+        }
+        if not callable(consume) or any(
+            consume(section_checks[section]) is None
+            for section in save_sections
+            if section in section_checks
+        ):
+            payload.pop("configuration", None)
+
+    lock_evidence = payload.get("free_upgrade_locks")
+    if (
+        isinstance(lock_evidence, Mapping)
+        and lock_evidence.get("source") == "player_save_preflight"
+    ):
+        carried_locks = (
+            consume("free_upgrade_locks") if callable(consume) else None
+        )
+        expected_locks = lock_evidence.get("required")
+        if (
+            not isinstance(carried_locks, list)
+            or not isinstance(expected_locks, list)
+            or set(carried_locks) != set(expected_locks)
+            or len(carried_locks) != len(expected_locks)
+        ):
+            payload.pop("free_upgrade_locks", None)
+            invalidate = getattr(player_save_preflight, "invalidate", None)
+            if carried_locks is not None and callable(invalidate):
+                invalidate("free_upgrade_lock_boundary_requirement_changed")
+        else:
+            bound_locks = dict(lock_evidence)
+            bound_locks["source"] = "bound_player_save_preflight"
+            bound_locks["observed"] = list(carried_locks)
+            payload["free_upgrade_locks"] = bound_locks
+
+    ultimate = payload.get("ultimate_weapons")
+    if (
+        isinstance(ultimate, Mapping)
+        and ultimate.get("source") == "player_save_preflight"
+    ):
+        # The in-battle route binds this component directly from the typed
+        # carry.  Never let an unbound copy from Home setup bypass continuity.
+        payload.pop("ultimate_weapons", None)
+    return payload
 
 
 def execute_actions(
@@ -282,6 +363,11 @@ def execute_actions(
                     act.get("value"),
                     mode=mode,
                 )
+                if result.changed:
+                    _invalidate_bound_player_save(
+                        ctx,
+                        "in_battle_damage_slider_repair",
+                    )
                 payload = result.as_dict()
                 if mv is not None:
                     mv["damage_slider_observation"] = payload
@@ -323,6 +409,11 @@ def execute_actions(
                 result = configure_orb_distance(
                     **orb_distance_kwargs,
                 )
+                if result.changed:
+                    _invalidate_bound_player_save(
+                        ctx,
+                        "in_battle_orb_distance_repair",
+                    )
                 payload = result.as_dict()
                 if mv is not None:
                     mv["orb_distance_observation"] = payload
@@ -348,10 +439,53 @@ def execute_actions(
                     log_mission(f"[EXEC] Skip target_priority_ensure while state={last_state}", "DEBUG")
                     continue
                 expected_order = act.get("order")
-                if expected_order is None:
-                    ok = ensure_target_priority_order()
+                save_coordinator = (
+                    ctx.data.get("player_save_preflight_coordinator")
+                    if ctx is not None
+                    else None
+                )
+                carried_order = (
+                    save_coordinator.consume("target_priority")
+                    if callable(getattr(save_coordinator, "consume", None))
+                    else None
+                )
+                target_kwargs: Dict[str, Any] = {}
+                if callable(getattr(save_coordinator, "invalidate", None)):
+                    target_kwargs["repair_observer_fn"] = lambda: (
+                        _invalidate_bound_player_save(
+                            ctx,
+                            "in_battle_target_priority_repair",
+                        )
+                    )
+                if (
+                    isinstance(carried_order, list)
+                    and isinstance(expected_order, list)
+                    and carried_order == expected_order
+                ):
+                    ok = True
+                    if mv is not None:
+                        mv["target_priority_evidence"] = {
+                            "source": "bound_player_save_preflight",
+                            "checked": False,
+                            "valid": True,
+                            "order": list(carried_order),
+                        }
+                elif carried_order is not None:
+                    if callable(getattr(save_coordinator, "invalidate", None)):
+                        save_coordinator.invalidate(
+                            "target_priority_action_requirement_changed"
+                        )
+                    ok = ensure_target_priority_order(
+                        expected=expected_order,
+                        **target_kwargs,
+                    )
+                elif expected_order is None:
+                    ok = ensure_target_priority_order(**target_kwargs)
                 else:
-                    ok = ensure_target_priority_order(expected=expected_order)
+                    ok = ensure_target_priority_order(
+                        expected=expected_order,
+                        **target_kwargs,
+                    )
                 if mv is not None:
                     mv["target_priority_checked"] = ok
                 log_mission(f"[EXEC] target_priority_ensure verified={ok}", "INFO" if ok else "WARN")
@@ -418,22 +552,35 @@ def execute_actions(
                     effective_requirements["_gate_waivers"] = waivers
                 preflight_kwargs: Dict[str, Any] = {}
                 if mv is not None:
+                    save_coordinator = ctx.data.get(
+                        "player_save_preflight_coordinator"
+                    )
                     setup_evidence = mv.get("gc_no_battle_setup_evidence")
                     if (
                         mv.get("gc_no_battle_setup_completed")
                         and isinstance(setup_evidence, Mapping)
                     ):
-                        preflight_kwargs["no_battle_setup_evidence"] = dict(
-                            setup_evidence
+                        bound_setup_evidence = _bind_save_backed_home_evidence(
+                            setup_evidence,
+                            save_coordinator,
                         )
+                        preflight_kwargs["no_battle_setup_evidence"] = (
+                            bound_setup_evidence
+                        )
+                    else:
+                        bound_setup_evidence = setup_evidence
                     lock_evidence = (
-                        setup_evidence.get("free_upgrade_locks")
-                        if isinstance(setup_evidence, Mapping)
+                        bound_setup_evidence.get("free_upgrade_locks")
+                        if isinstance(bound_setup_evidence, Mapping)
                         else None
                     )
                     if isinstance(lock_evidence, Mapping):
                         preflight_kwargs["free_upgrade_lock_boundary_evidence"] = (
                             dict(lock_evidence)
+                        )
+                    if callable(getattr(save_coordinator, "consume", None)):
+                        preflight_kwargs["player_save_preflight"] = (
+                            save_coordinator
                         )
                 if validator == "tournament":
                     result = run_read_only_gc_preflight(

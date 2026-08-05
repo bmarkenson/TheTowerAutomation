@@ -1,0 +1,522 @@
+from __future__ import annotations
+
+from dataclasses import replace
+from datetime import datetime, timezone
+import json
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+import pytest
+
+from core.adb_target_session import AdbTargetSnapshot
+from core.battle_lifecycle import HomeBattleControl
+from core.player_save import PlayerSaveSnapshot, SaveCheckEvidence
+from core.player_save import pull_player_save_bytes
+from core.player_save_preflight import (
+    CarriedEvidenceState,
+    PlayerSavePreflightContext,
+    PlayerSavePreflightCoordinator,
+    PlayerSavePreflightStatus,
+)
+
+
+CAPTURED_AT = datetime(2026, 8, 4, tzinfo=timezone.utc).isoformat()
+
+
+def _snapshot() -> PlayerSaveSnapshot:
+    checks = {
+        "cards_deck": SaveCheckEvidence(
+            "cards_deck",
+            "observed",
+            "Farm",
+            ("presetName", "currentPreset"),
+            authority={"kind": "matching_value"},
+        ),
+        "auto_pick_perks": SaveCheckEvidence(
+            "auto_pick_perks",
+            "observed",
+            True,
+            ("autoPickPerk",),
+            authority={"kind": "allowed_values", "values": [True]},
+        ),
+    }
+    return PlayerSaveSnapshot(
+        captured_at=CAPTURED_AT,
+        source_name="playerInfo.dat",
+        source_sha256="a" * 64,
+        source_size=123,
+        container="gzip+nrbf",
+        decompressed_size=456,
+        root_class="SaveLoad+PlayerData",
+        field_count=100,
+        data_version=9,
+        game_version=1073,
+        save_revision=55,
+        mapping_id="data-9-game-1073",
+        mapping_maturity="candidate",
+        validated_checks=("cards_deck", "auto_pick_perks"),
+        shape_valid=True,
+        warnings=(),
+        profile_summary={},
+        checks=checks,
+        runtime_save=None,
+    )
+
+
+def _context(*, generation: int = 1, strategy: str = "farm_t19"):
+    return PlayerSavePreflightContext(
+        runtime_session_id="runtime-private",
+        preflight_session_id="preflight-private",
+        activity_scope_id="activity-private",
+        strategy_name=strategy,
+        configuration_fingerprint="f" * 64,
+        target="private-device-target",
+        target_generation=generation,
+    )
+
+
+def _coordinator(
+    monkeypatch,
+    *,
+    context_fn=lambda: _context(),
+    target_snapshot_fn=lambda: AdbTargetSnapshot(
+        "private-device-target", 1, True
+    ),
+    pull_fn=lambda **_kwargs: b"stable-save",
+    decode_fn=lambda _payload, **_kwargs: _snapshot(),
+    background_fn=lambda _target: True,
+    foreground_fn=lambda _target: True,
+    capture_fn=lambda: object(),
+    action_guard_fn=lambda: True,
+):
+    import core.player_save_preflight as module
+
+    monkeypatch.setattr(module, "log", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        module,
+        "log_action_intent",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(module, "log_input", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(module, "log_result", lambda *_args, **_kwargs: None)
+    return PlayerSavePreflightCoordinator(
+        target_snapshot_fn=target_snapshot_fn,
+        context_fn=context_fn,
+        action_guard_fn=action_guard_fn,
+        capture_fn=capture_fn,
+        detector=lambda _frame: {"state": "HOME_SCREEN"},
+        home_control_fn=lambda _frame: SimpleNamespace(
+            control=HomeBattleControl.NEW_BATTLE
+        ),
+        background_fn=background_fn,
+        foreground_fn=foreground_fn,
+        pull_fn=pull_fn,
+        decode_fn=decode_fn,
+        sleep_fn=lambda _seconds: None,
+    )
+
+
+def test_one_authoritative_snapshot_reconciles_all_checks(monkeypatch):
+    calls = {"pull": 0, "decode": 0, "background": 0, "foreground": 0}
+
+    def pull(**_kwargs):
+        calls["pull"] += 1
+        return b"stable-save"
+
+    def decode(_payload, **_kwargs):
+        calls["decode"] += 1
+        return _snapshot()
+
+    coordinator = _coordinator(
+        monkeypatch,
+        pull_fn=pull,
+        decode_fn=decode,
+        background_fn=lambda _target: (
+            calls.__setitem__("background", calls["background"] + 1) or True
+        ),
+        foreground_fn=lambda _target: (
+            calls.__setitem__("foreground", calls["foreground"] + 1) or True
+        ),
+    )
+
+    result = coordinator.acquire(
+        {"cards_deck": "Farm", "auto_pick_perks": True},
+        initial_frame=object(),
+    )
+
+    assert result.status is PlayerSavePreflightStatus.READY
+    assert result.accepted_checks == ("auto_pick_perks", "cards_deck")
+    assert calls == {
+        "pull": 1,
+        "decode": 1,
+        "background": 1,
+        "foreground": 1,
+    }
+    assert result.carry is coordinator.carry
+    assert not hasattr(result, "snapshot")
+    rendered = json.dumps(result.as_dict())
+    assert "private-device-target" not in rendered
+    assert "runtime-private" not in rendered
+    assert "stable-save" not in rendered
+    assert "a" * 64 not in rendered
+    assert result.provenance["save_version"] == {"data": 9, "game": 1073}
+
+
+def test_pull_failure_restores_home_and_authorizes_normal_ui_fallback(monkeypatch):
+    foreground = []
+
+    def fail_pull(**_kwargs):
+        raise RuntimeError("raw private save text")
+
+    coordinator = _coordinator(
+        monkeypatch,
+        pull_fn=fail_pull,
+        foreground_fn=lambda target: foreground.append(target) or True,
+    )
+
+    result = coordinator.acquire(
+        {"cards_deck": "Farm", "auto_pick_perks": True},
+        initial_frame=object(),
+    )
+
+    assert result.ready
+    assert result.safe_ui_fallback
+    assert set(result.decisions) == {"cards_deck", "auto_pick_perks"}
+    assert all(item["ui_required"] for item in result.decisions.values())
+    assert foreground == ["private-device-target"]
+    assert "raw private save text" not in json.dumps(result.as_dict())
+
+
+def test_default_pull_and_lifecycle_transports_suppress_private_errors(
+    monkeypatch,
+):
+    import core.adb_utils as adb_utils
+    import core.player_save as player_save
+    import core.player_save_preflight as module
+
+    reads = []
+
+    def read_device_file(path, **kwargs):
+        reads.append((path, kwargs))
+        return b"stable-save"
+
+    shell = Mock(return_value=object())
+    monkeypatch.setattr(adb_utils, "read_device_file", read_device_file)
+    monkeypatch.setattr(adb_utils, "adb_shell", shell)
+    monkeypatch.setattr(player_save.time, "sleep", lambda _seconds: None)
+    coordinator = _coordinator(
+        monkeypatch,
+        pull_fn=pull_player_save_bytes,
+    )
+
+    result = coordinator.acquire(
+        {"cards_deck": "Farm"},
+        initial_frame=object(),
+    )
+
+    assert result.ready
+    assert len(reads) == 2
+    assert all(kwargs["report_errors"] is False for _path, kwargs in reads)
+    assert module._background_default("private-device-target")
+    assert module._foreground_default("private-device-target")
+    assert shell.call_count == 2
+    assert all(
+        call.kwargs["report_errors"] is False
+        for call in shell.call_args_list
+    )
+
+
+def test_target_generation_change_blocks_all_followup_input(monkeypatch):
+    targets = iter(
+        [
+            AdbTargetSnapshot("private-device-target", 1, True),
+            AdbTargetSnapshot("private-device-target", 2, True),
+        ]
+    )
+    coordinator = _coordinator(
+        monkeypatch,
+        target_snapshot_fn=lambda: next(targets),
+    )
+
+    result = coordinator.acquire(
+        {"cards_deck": "Farm"},
+        initial_frame=object(),
+    )
+
+    assert result.status is PlayerSavePreflightStatus.BLOCKED
+    assert not result.safe_ui_fallback
+    assert result.reason == "restored_target_or_new_battle_boundary_unverified"
+
+
+def test_failed_foreground_restoration_blocks_ui_and_battle_progression(monkeypatch):
+    coordinator = _coordinator(
+        monkeypatch,
+        foreground_fn=lambda _target: False,
+    )
+
+    result = coordinator.acquire(
+        {"cards_deck": "Farm"},
+        initial_frame=object(),
+    )
+
+    assert not result.ready
+    assert not result.safe_ui_fallback
+    assert result.reason == "foreground_restoration_failed"
+
+
+def test_control_interruption_while_backgrounded_cannot_dispatch_restore(
+    monkeypatch,
+):
+    authority = iter((True, False))
+    foreground = Mock(return_value=True)
+    coordinator = _coordinator(
+        monkeypatch,
+        action_guard_fn=lambda: next(authority),
+        foreground_fn=foreground,
+    )
+
+    result = coordinator.acquire(
+        {"cards_deck": "Farm"},
+        initial_frame=object(),
+    )
+
+    assert not result.ready
+    assert result.reason == "control_authority_interrupted_before_foreground"
+    foreground.assert_not_called()
+
+
+def test_lifecycle_logging_has_one_action_two_inputs_and_one_result(monkeypatch):
+    import core.player_save_preflight as module
+
+    coordinator = _coordinator(monkeypatch)
+    action = Mock()
+    device_input = Mock()
+    result_log = Mock()
+    monkeypatch.setattr(module, "log_action_intent", action)
+    monkeypatch.setattr(module, "log_input", device_input)
+    monkeypatch.setattr(module, "log_result", result_log)
+
+    result = coordinator.acquire(
+        {"cards_deck": "Farm"},
+        initial_frame=object(),
+    )
+
+    assert result.ready
+    action.assert_called_once()
+    assert device_input.call_count == 2
+    result_log.assert_called_once()
+
+
+def test_force_ui_skips_save_lifecycle_and_comparison_audit_keeps_ui_authority(
+    monkeypatch,
+):
+    lifecycle_calls = []
+    coordinator = _coordinator(
+        monkeypatch,
+        background_fn=lambda _target: lifecycle_calls.append("background") or True,
+    )
+
+    forced = coordinator.acquire(
+        {"cards_deck": "Farm"},
+        mode="force_ui",
+        initial_frame=object(),
+    )
+    audited = coordinator.acquire(
+        {"cards_deck": "Farm"},
+        mode="comparison_audit",
+        initial_frame=object(),
+    )
+
+    assert forced.decisions["cards_deck"]["reason"] == "force_ui_policy"
+    assert lifecycle_calls == ["background"]
+    assert audited.decisions["cards_deck"]["reason"] == "scheduled_ui_audit"
+    assert audited.carry is None
+
+
+def test_runtime_policy_metadata_is_not_invented_as_a_ui_check(monkeypatch):
+    coordinator = _coordinator(monkeypatch)
+
+    result = coordinator.acquire(
+        {
+            "cards_deck": "Farm",
+            "loadout_policies": {
+                "modules": "preserve",
+                "target_priority": "preserve",
+            },
+            "profile_skips": ["perk_bans"],
+        },
+        mode="force_ui",
+        initial_frame=object(),
+    )
+
+    assert set(result.decisions) == {"cards_deck"}
+
+
+def test_force_ui_does_not_require_or_probe_private_target_context(monkeypatch):
+    context = Mock(side_effect=AssertionError("force-ui must not acquire context"))
+    coordinator = _coordinator(monkeypatch, context_fn=context)
+
+    result = coordinator.acquire(
+        {"cards_deck": "Farm"},
+        mode="force_ui",
+        initial_frame=object(),
+    )
+
+    assert result.ready
+    assert result.decisions["cards_deck"]["reason"] == "force_ui_policy"
+    context.assert_not_called()
+
+
+def test_missing_private_context_fails_closed_without_exception_text(monkeypatch):
+    coordinator = _coordinator(
+        monkeypatch,
+        context_fn=Mock(side_effect=RuntimeError("private target detail")),
+    )
+
+    result = coordinator.acquire(
+        {"cards_deck": "Farm"},
+        initial_frame=object(),
+    )
+
+    assert not result.ready
+    assert result.reason == "preflight_context_unavailable"
+    assert "private target detail" not in json.dumps(result.as_dict())
+
+
+def test_carry_is_single_use_and_rejects_context_change(monkeypatch):
+    current = [_context()]
+    coordinator = _coordinator(monkeypatch, context_fn=lambda: current[0])
+    result = coordinator.acquire(
+        {"cards_deck": "Farm", "auto_pick_perks": True},
+        initial_frame=object(),
+    )
+    carry = result.carry
+    assert carry is not None
+
+    assert coordinator.mark_runtime_launch(
+        control=HomeBattleControl.NEW_BATTLE,
+        action_authorized=True,
+        dispatched=True,
+    )
+    assert coordinator.bind_running(
+        battle_started=True,
+        stable_running=True,
+        action_authorized=True,
+    )
+    assert coordinator.consume("auto_pick_perks") is True
+    assert coordinator.consume("auto_pick_perks") is None
+
+    current[0] = _context(strategy="farm_t18")
+    assert coordinator.consume("cards_deck") is None
+    assert carry.state is CarriedEvidenceState.INVALIDATED
+    assert carry.invalidation_reason == "carried_evidence_context_changed"
+
+
+@pytest.mark.parametrize(
+    ("scenario", "launch_kwargs", "bind_kwargs"),
+    [
+        (
+            "operator_resume_or_attach",
+            {
+                "control": HomeBattleControl.RESUME_BATTLE,
+                "action_authorized": True,
+                "dispatched": True,
+            },
+            None,
+        ),
+        (
+            "wait_pause_stop_interruption",
+            {
+                "control": HomeBattleControl.NEW_BATTLE,
+                "action_authorized": False,
+                "dispatched": True,
+            },
+            None,
+        ),
+        (
+            "ambiguous_launch",
+            {
+                "control": HomeBattleControl.NEW_BATTLE,
+                "action_authorized": True,
+                "dispatched": False,
+            },
+            None,
+        ),
+        (
+            "retry_without_home_preflight_launch",
+            None,
+            {
+                "battle_started": True,
+                "stable_running": True,
+                "action_authorized": True,
+            },
+        ),
+        (
+            "unstable_first_running_boundary",
+            {
+                "control": HomeBattleControl.NEW_BATTLE,
+                "action_authorized": True,
+                "dispatched": True,
+            },
+            {
+                "battle_started": True,
+                "stable_running": False,
+                "action_authorized": True,
+            },
+        ),
+    ],
+)
+def test_carry_rejects_non_owned_launch_transitions(
+    monkeypatch,
+    scenario,
+    launch_kwargs,
+    bind_kwargs,
+):
+    coordinator = _coordinator(monkeypatch)
+    carry = coordinator.acquire(
+        {"auto_pick_perks": True},
+        initial_frame=object(),
+    ).carry
+    assert carry is not None, scenario
+
+    if launch_kwargs is not None:
+        launch_accepted = coordinator.mark_runtime_launch(**launch_kwargs)
+        if bind_kwargs is None:
+            assert not launch_accepted, scenario
+    if bind_kwargs is not None:
+        assert not coordinator.bind_running(**bind_kwargs), scenario
+
+    assert carry.state is CarriedEvidenceState.INVALIDATED
+
+
+@pytest.mark.parametrize(
+    "changed_context",
+    [
+        replace(_context(), runtime_session_id="restarted-runtime"),
+        replace(_context(), preflight_session_id="later-preflight"),
+        replace(_context(), activity_scope_id="unrelated-battle"),
+        replace(_context(), strategy_name="farm_t18"),
+        replace(_context(), configuration_fingerprint="e" * 64),
+        replace(_context(), target="replacement-target"),
+        replace(_context(), target_generation=2),
+    ],
+)
+def test_carry_rejects_every_context_continuity_change(
+    monkeypatch,
+    changed_context,
+):
+    current = [_context()]
+    coordinator = _coordinator(monkeypatch, context_fn=lambda: current[0])
+    carry = coordinator.acquire(
+        {"auto_pick_perks": True},
+        initial_frame=object(),
+    ).carry
+    assert carry is not None
+    current[0] = changed_context
+
+    assert not coordinator.mark_runtime_launch(
+        control=HomeBattleControl.NEW_BATTLE,
+        action_authorized=True,
+        dispatched=True,
+    )
+    assert carry.state is CarriedEvidenceState.INVALIDATED

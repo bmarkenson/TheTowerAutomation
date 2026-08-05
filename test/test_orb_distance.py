@@ -478,6 +478,7 @@ def test_action_executor_records_successful_orb_distance_enforcement():
         initial_workshop="80.37m",
         final_extra="30.00m",
         final_workshop="39.00m",
+        changed=True,
         extra_steps=4,
         workshop_steps=3,
         reason="matched",

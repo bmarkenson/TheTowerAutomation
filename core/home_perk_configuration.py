@@ -22,6 +22,8 @@ from core.perk_configuration import (
     extract_configured_perk_bans,
     extract_ranked_auto_pick_order,
     normalize_perk_configuration_requirements,
+    normalize_perk_first_choice_requirement,
+    parse_perk_configuration_selection,
     perk_configuration_label,
     perk_entries_match,
     semantic_perk_entry,
@@ -43,6 +45,7 @@ PERK_CONTENT_REGION = (100, 420, 880, 1330)
 HOME_PERKS_CONTROL_REGION = (985, 475, 90, 100)
 MIN_HOME_PERKS_GRAY_PIXELS = 800
 PERK_TABS = {
+    "perk_first_choice": ("First Perk", (222, 210, 210, 90)),
     "perk_bans": ("Ban Perks", (436, 210, 210, 90)),
     "perk_auto_pick_order": ("Auto Pick", (650, 210, 210, 90)),
 }
@@ -80,13 +83,18 @@ def _finish_home_perk_configuration(
 
     changed_fields = [
         check_id
-        for check_id in ("perk_bans", "perk_auto_pick_order")
+        for check_id in (
+            "perk_first_choice",
+            "perk_bans",
+            "perk_auto_pick_order",
+        )
         if isinstance(result.evidence.get(check_id), Mapping)
         and result.evidence[check_id].get("changed") is True
     ]
     changed_labels = {
         "perk_bans": "Ban Perks",
         "perk_auto_pick_order": "Auto Pick order",
+        "perk_first_choice": "First Perk Choice",
     }
     if result.valid and changed_fields:
         summary = (
@@ -153,6 +161,9 @@ def ensure_home_perk_configuration(
     row_near_fn: Callable[..., Optional[dict[str, Any]]] = (
         ocr_perk_configuration_row_near
     ),
+    parse_selection_fn: Callable[..., Mapping[str, Any]] = (
+        parse_perk_configuration_selection
+    ),
     measure_selection_fn: Callable[..., Any] = measure_preset_slot_selection,
     waived_fields: Sequence[str] = (),
     sleep_fn: Callable[[float], None] = time.sleep,
@@ -163,10 +174,16 @@ def ensure_home_perk_configuration(
     required_bans, required_auto_pick = (
         normalize_perk_configuration_requirements(requirements)
     )
+    required_first_choice = (
+        normalize_perk_first_choice_requirement(requirements)
+        if "perk_first_choice" in requirements
+        else None
+    )
     waived = {
         str(field)
         for field in waived_fields
-        if str(field) in {"perk_bans", "perk_auto_pick_order"}
+        if str(field)
+        in {"perk_first_choice", "perk_bans", "perk_auto_pick_order"}
     }
     _require_new_battle_home(
         home_screenshot,
@@ -183,6 +200,7 @@ def ensure_home_perk_configuration(
             detail=(
                 f"[HOME_PERKS] required_bans={len(required_bans)} "
                 f"required_auto_pick={len(required_auto_pick)} "
+                f"required_first_choice={required_first_choice} "
                 f"waived={sorted(waived)}"
             ),
         )
@@ -196,29 +214,138 @@ def ensure_home_perk_configuration(
     )
 
     changed_fields: set[str] = set()
-    bans_top = _select_and_scroll_top(
-        perks,
-        field="perk_bans",
-        capture_fn=capture_fn,
-        detector=detector,
-        safe_tap_fn=safe_tap_fn,
-        visible_fn=visible_fn,
-        swipe_fn=swipe_fn,
-        measure_selection_fn=measure_selection_fn,
-        sleep_fn=sleep_fn,
-    )
-    bans_top, captured_bans = _capture_bans_with_ocr_retries(
-        bans_top,
-        capture_fn=capture_fn,
-        detector=detector,
-        visible_fn=visible_fn,
-        row_fn=row_fn,
-        sleep_fn=sleep_fn,
-    )
+    current = perks
+    first_choice_evidence: dict[str, Any] | None = None
     if (
-        "perk_bans" not in waived
-        and not _ban_capture_matches(required_bans, captured_bans)
+        required_first_choice is not None
+        and "perk_first_choice" not in waived
     ):
+        first_top = _select_and_scroll_top(
+            current,
+            field="perk_first_choice",
+            capture_fn=capture_fn,
+            detector=detector,
+            safe_tap_fn=safe_tap_fn,
+            visible_fn=visible_fn,
+            swipe_fn=swipe_fn,
+            measure_selection_fn=measure_selection_fn,
+            sleep_fn=sleep_fn,
+        )
+        first_frames, current, first_complete = _capture_configuration_pages(
+            first_top,
+            capture_fn=capture_fn,
+            visible_fn=visible_fn,
+            swipe_fn=swipe_fn,
+            sleep_fn=sleep_fn,
+        )
+        captured_first = dict(
+            parse_selection_fn(
+                first_frames,
+                field="perk_first_choice",
+                source_complete=first_complete,
+                source_reason=(
+                    "bottom edge verified"
+                    if first_complete
+                    else "configuration bottom edge was not verified"
+                ),
+            )
+        )
+        first_choice_evidence = _first_choice_comparison(
+            required_first_choice,
+            captured_first,
+        )
+        if first_choice_evidence["valid"] is not True:
+            quality = captured_first.get("quality")
+            selected = captured_first.get("selected")
+            if (
+                not isinstance(quality, Mapping)
+                or quality.get("valid") is not True
+                or not isinstance(selected, list)
+                or len(selected) != 1
+                or selected[0].get("key") is None
+            ):
+                raise HomePerkConfigurationError(
+                    "First Perk Choice was not authoritative enough to repair"
+                )
+            _rank, target_frame, target_row = _locate_auto_pick_key(
+                first_top,
+                required_first_choice,
+                capture_fn=capture_fn,
+                visible_fn=visible_fn,
+                swipe_fn=swipe_fn,
+                row_fn=row_fn,
+                sleep_fn=sleep_fn,
+            )
+            current = _tap_configuration_row(
+                target_frame,
+                target_row,
+                x=BAN_SELECTED_TOGGLE_X,
+                action="set_first_perk_choice",
+                capture_fn=capture_fn,
+                detector=detector,
+                safe_tap_fn=safe_tap_fn,
+                visible_fn=visible_fn,
+                row_fn=row_fn,
+                row_near_fn=row_near_fn,
+                sleep_fn=sleep_fn,
+                require_identity_after=False,
+            )
+            changed_fields.add("perk_first_choice")
+            first_top = _scroll_configuration_top(
+                current,
+                capture_fn=capture_fn,
+                visible_fn=visible_fn,
+                swipe_fn=swipe_fn,
+                sleep_fn=sleep_fn,
+            )
+            first_frames, current, first_complete = _capture_configuration_pages(
+                first_top,
+                capture_fn=capture_fn,
+                visible_fn=visible_fn,
+                swipe_fn=swipe_fn,
+                sleep_fn=sleep_fn,
+            )
+            captured_first = dict(
+                parse_selection_fn(
+                    first_frames,
+                    field="perk_first_choice",
+                    source_complete=first_complete,
+                    source_reason=(
+                        "bottom edge verified"
+                        if first_complete
+                        else "configuration bottom edge was not verified"
+                    ),
+                )
+            )
+            first_choice_evidence = _first_choice_comparison(
+                required_first_choice,
+                captured_first,
+            )
+
+    if "perk_bans" in waived:
+        bans_top = current
+        captured_bans = _synthetic_configuration_capture(required_bans)
+    else:
+        bans_top = _select_and_scroll_top(
+            current,
+            field="perk_bans",
+            capture_fn=capture_fn,
+            detector=detector,
+            safe_tap_fn=safe_tap_fn,
+            visible_fn=visible_fn,
+            swipe_fn=swipe_fn,
+            measure_selection_fn=measure_selection_fn,
+            sleep_fn=sleep_fn,
+        )
+        bans_top, captured_bans = _capture_bans_with_ocr_retries(
+            bans_top,
+            capture_fn=capture_fn,
+            detector=detector,
+            visible_fn=visible_fn,
+            row_fn=row_fn,
+            sleep_fn=sleep_fn,
+        )
+    if not _ban_capture_matches(required_bans, captured_bans):
         ban_quality = captured_bans.get("quality")
         if (
             not isinstance(ban_quality, Mapping)
@@ -254,29 +381,35 @@ def ensure_home_perk_configuration(
         )
         changed_fields.add("perk_bans")
 
-    auto_top = _select_and_scroll_top(
-        bans_top,
-        field="perk_auto_pick_order",
-        capture_fn=capture_fn,
-        detector=detector,
-        safe_tap_fn=safe_tap_fn,
-        visible_fn=visible_fn,
-        swipe_fn=swipe_fn,
-        measure_selection_fn=measure_selection_fn,
-        sleep_fn=sleep_fn,
-    )
-    auto_frames, current, captured_auto = (
-        _capture_ranked_order_with_ocr_retries(
-            auto_top,
-            ranking_count=len(required_auto_pick),
+    if "perk_auto_pick_order" in waived:
+        auto_top = bans_top
+        auto_frames = [bans_top]
+        current = bans_top
+        captured_auto = _synthetic_configuration_capture(required_auto_pick)
+    else:
+        auto_top = _select_and_scroll_top(
+            bans_top,
+            field="perk_auto_pick_order",
             capture_fn=capture_fn,
             detector=detector,
+            safe_tap_fn=safe_tap_fn,
             visible_fn=visible_fn,
             swipe_fn=swipe_fn,
-            row_fn=row_fn,
+            measure_selection_fn=measure_selection_fn,
             sleep_fn=sleep_fn,
         )
-    )
+        auto_frames, current, captured_auto = (
+            _capture_ranked_order_with_ocr_retries(
+                auto_top,
+                ranking_count=len(required_auto_pick),
+                capture_fn=capture_fn,
+                detector=detector,
+                visible_fn=visible_fn,
+                swipe_fn=swipe_fn,
+                row_fn=row_fn,
+                sleep_fn=sleep_fn,
+            )
+        )
     evidence = evaluate_profile_perk_configuration(
         requirements,
         bans_frame=bans_top,
@@ -285,6 +418,14 @@ def ensure_home_perk_configuration(
         captured_auto_pick=captured_auto,
         row_fn=row_fn,
     )
+    _mark_omitted_configuration_fields(evidence, waived)
+    if first_choice_evidence is not None:
+        evidence["perk_first_choice"] = first_choice_evidence
+        if first_choice_evidence["valid"] is not True:
+            evidence.setdefault("failed_checks", []).insert(
+                0, "perk_first_choice"
+            )
+            evidence["valid"] = False
     if (
         evidence["perk_auto_pick_order"]["valid"] is not True
         and "perk_auto_pick_order" not in waived
@@ -339,6 +480,14 @@ def ensure_home_perk_configuration(
             captured_auto_pick=captured_auto,
             row_fn=row_fn,
         )
+        _mark_omitted_configuration_fields(evidence, waived)
+        if first_choice_evidence is not None:
+            evidence["perk_first_choice"] = first_choice_evidence
+            if first_choice_evidence["valid"] is not True:
+                evidence.setdefault("failed_checks", []).insert(
+                    0, "perk_first_choice"
+                )
+                evidence["valid"] = False
 
     home = _close_to_home(
         current,
@@ -355,7 +504,11 @@ def ensure_home_perk_configuration(
     ]
     evidence["blocking_failed_checks"] = failed_checks
     evidence["blocking_valid"] = not failed_checks
-    for check_id in ("perk_bans", "perk_auto_pick_order"):
+    for check_id in (
+        "perk_first_choice",
+        "perk_bans",
+        "perk_auto_pick_order",
+    ):
         if isinstance(evidence.get(check_id), dict):
             evidence[check_id]["changed"] = check_id in changed_fields
     failed_check = str(failed_checks[0]) if failed_checks else None
@@ -1184,6 +1337,107 @@ def _select_and_scroll_top(
         swipe_fn=swipe_fn,
         sleep_fn=sleep_fn,
     )
+
+
+def _capture_configuration_pages(
+    top: Frame,
+    *,
+    capture_fn: Capture,
+    visible_fn: Callable[..., bool],
+    swipe_fn: Callable[[str], bool],
+    sleep_fn: Callable[[float], None],
+) -> tuple[list[Frame], Frame, bool]:
+    """Capture one complete configuration tab through a verified bottom edge."""
+
+    frames = [top]
+    current = top
+    for _page in range(MAX_AUTO_PICK_SCAN_SWIPES):
+        next_frame = _swipe_configuration(
+            current,
+            "gesture_targets.goto_next:perks",
+            capture_fn=capture_fn,
+            visible_fn=visible_fn,
+            swipe_fn=swipe_fn,
+            sleep_fn=sleep_fn,
+        )
+        if _content_difference(current, next_frame) <= 1.0:
+            return frames, current, True
+        frames.append(next_frame)
+        current = next_frame
+    return frames, current, False
+
+
+def _first_choice_comparison(
+    expected: str,
+    captured: Mapping[str, Any],
+) -> dict[str, Any]:
+    selected = captured.get("selected")
+    selected_rows = selected if isinstance(selected, list) else []
+    observed = [
+        str(item.get("key"))
+        for item in selected_rows
+        if isinstance(item, Mapping) and item.get("key") is not None
+    ]
+    quality = captured.get("quality")
+    capture_valid = bool(
+        isinstance(quality, Mapping) and quality.get("valid") is True
+    )
+    valid = bool(capture_valid and observed == [expected])
+    if not capture_valid:
+        reason = "First Perk Choice capture was incomplete or ambiguous"
+    elif observed != [expected]:
+        reason = "First Perk Choice did not match the strategy"
+    else:
+        reason = "First Perk Choice matched the strategy"
+    return {
+        "boundary": HomeBattleControl.NEW_BATTLE.value,
+        "checked": True,
+        "valid": valid,
+        "ordered": True,
+        "expected": expected,
+        "expected_label": perk_configuration_label(expected),
+        "observed": observed[0] if len(observed) == 1 else observed,
+        "reason": reason,
+        "capture": dict(captured),
+    }
+
+
+def _synthetic_configuration_capture(
+    expected: Sequence[str],
+) -> dict[str, Any]:
+    """Stand in only for a field intentionally satisfied outside this UI pass."""
+
+    return {
+        "selected": [{"key": str(value)} for value in expected],
+        "quality": {
+            "valid": True,
+            "source_complete": True,
+            "source_reason": "field omitted from this UI pass",
+        },
+    }
+
+
+def _mark_omitted_configuration_fields(
+    evidence: dict[str, Any],
+    omitted: set[str],
+) -> None:
+    """Keep skipped tabs out of UI evidence instead of claiming observation."""
+
+    for check_id in ("perk_bans", "perk_auto_pick_order"):
+        if check_id not in omitted:
+            continue
+        evidence[check_id] = {
+            "boundary": HomeBattleControl.NEW_BATTLE.value,
+            "checked": False,
+            "valid": True,
+            "reason": "field omitted from this UI pass",
+        }
+    evidence["failed_checks"] = [
+        check_id
+        for check_id in evidence.get("failed_checks") or ()
+        if check_id not in omitted
+    ]
+    evidence["valid"] = not evidence["failed_checks"]
 
 
 def _capture_bans_with_ocr_retries(

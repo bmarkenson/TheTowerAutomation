@@ -427,6 +427,46 @@ must agree with those individual checks before a battle may start. A
 contradiction is a failed setup attempt; it cannot be retained as completed
 evidence and later authorize an in-battle repair.
 
+Ordinary Farm/Tournament plans now default
+`runtime_policy.player_save_preflight` to `save_first`. At a freshly verified
+Home `NEW_BATTLE`, the runtime performs one guarded Android-Home serialization
+workflow before opening configuration screens: it records the exact owned
+target/generation and resolved configuration identity, emits one `ACTION`,
+sends `KEYCODE_HOME`, accepts only two byte-identical save reads, restores the
+launcher activity, and requires the same ownership plus two stable Home
+`NEW_BATTLE` frames. The background and restore operations are individual
+`INPUT` entries with paired `DEBUG` detail, followed by one terminal `RESULT`.
+The optional V1073-RUNTIME-013 collector is unrelated and never supplies this
+authority.
+
+The resulting exact-version snapshot decides all requested allowlisted checks
+together but preserves per-check outcomes. Matches omit only redundant UI
+observation. Mismatch, missing/unsupported value, unknown version/ID, changed
+shape, pull/decode failure, or comparison audit uses the existing guarded UI
+path after the exact Home boundary is safely restored. Failure to restore the
+foreground, target/control ownership, or Home boundary blocks navigation,
+repair, and battle start. Set the same policy field to `force_ui` to skip save
+acquisition and retain the complete prior UI behavior, or to
+`comparison_audit` to collect normalized comparisons while UI remains
+authoritative. No additional CLI or collector switch controls this behavior.
+
+The first actual UI repair invalidates every remaining pre-action save
+decision; the changed setting is still verified through its normal UI path and
+later checks continue through UI. Read-only UI inspection leaves unrelated
+matches intact, but an observed contradiction fails closed. Modules, Damage
+Slider, and Orb Distance always retain UI authority.
+
+Session-only matches may continue only through the exact next battle that this
+same runtime starts with a freshly verified `NEW_BATTLE` control. The runtime
+binds them once at the first stable `RUNNING` boundary, then may consume Auto
+Pick enabled `true`, the complete exact Target Priority order, all nine
+primaries on, Spotlight Missiles on, Poison Swamp Stun, and save-backed Home
+sections without reopening redundant screens. Restart, attachment, unrelated
+Retry, strategy/configuration/target change, operator/manual or ambiguous
+launch, WAIT/Pause/Stop, repair, or a later battle rejects the entire carry.
+A save match never authorizes an input, mutation, lifecycle transition,
+attachment, terminal binding, dispatch, or strategy action.
+
 When an active Farm session preflight authoritatively appears to require a
 supported Home-only repair, the runtime retries the same read-only validation
 after its 30-second cooldown. Farm profiles require three consecutive
@@ -453,8 +493,11 @@ script or remote shell. `force-continue` remains only as a compatibility alias
 for `gate bypass_once`; it cannot create an exception before a real failure and
 it no longer skips the complete preflight.
 
-Farm strategies declare their Home Perks configuration as semantic profile
-data. The current Farm baseline bans **Lifesteal / Knockback Trade-Off**,
+Farm strategies declare their Home Perks configuration as independent semantic
+profile data. First Perk Choice is currently **Perk Wave Requirement** for every
+Perk-capable Farm strategy; it is not inferred from Auto Pick Order and can be
+changed without changing that list. Tournament declares no Perk requirement.
+The current Farm baseline bans **Lifesteal / Knockback Trade-Off**,
 **Enemies Damage / Tower Damage Trade-Off**, **Defense Absolute**,
 **Interest**, **Land Mine Damage**, and **Cash Bonus**. Its Auto Pick priority
 is:
@@ -502,22 +545,25 @@ described a 300-wave recharge for both Cards; only the activation checkbox is
 strategy-configurable. The in-battle greyed-out Intro Sprint icon is not used
 as Home preflight authority.
 
-At verified Home `NEW_BATTLE`, setup opens the independently verified Perks
-configuration control after returning from Cards. It reads the complete
-selected Ban block and the strategy-sized Auto Pick prefix. A mismatch is
-repaired before moving to the next tab. Extra bans are removed directly from
-the fixed Selected Perks block; only missing required bans require an
-Available-list checkbox search. Auto Pick uses the matched up arrow. Every
-input first recaptures the panel and uniquely reacquires the same semantic row
-at its current settled coordinates. After each Auto Pick up-arrow tap, setup
-scrolls from the top, rebuilds the semantic rank, and requires exactly
-one-rank upward progress before another tap. Completion requires an exact final
-list followed by closing Perks and revalidating Home `NEW_BATTLE`. The complete
+At verified Home `NEW_BATTLE`, a UI-required setup opens the independently
+verified Perks configuration control after returning from Cards. It reads and
+repairs the independent First Perk tab, complete selected Ban block, and
+strategy-sized Auto Pick prefix. Extra bans are removed directly from the fixed
+Selected Perks block; only missing required bans require an Available-list
+checkbox search. Auto Pick uses the matched up arrow. Every input first
+recaptures the panel and uniquely reacquires the same semantic row at its
+current settled coordinates. After each Auto Pick up-arrow tap, setup scrolls
+from the top, rebuilds the semantic rank, and requires exactly one-rank upward
+progress before another tap. The save's first 18 entries are the ranked block;
+its known 16-entry inventory tail has no priority meaning, and a shorter
+configured list remains a required ranked prefix. Completion requires exact
+final comparisons followed by closing Perks and revalidating Home
+`NEW_BATTLE`. The complete
 Home setup synchronizes persistent control before every tap and swipe. Pause
 waits without cleanup input; after Resume it restores verified Home and
-restarts setup with fresh evidence. A strategy that does not declare both
-lists cannot trigger these changes. Uncertain OCR, an unavailable row,
-unchanged input, or an exhausted move/scroll bound fails closed.
+restarts setup with fresh evidence. An undeclared Perk component receives no
+input. Uncertain OCR, an unavailable row, unchanged input, or an exhausted
+move/scroll bound fails closed.
 
 Module replacement treats each equipped slot's level as persistent slot-owned
 state. Replacing an occupied Primary or Assist must present and accept the

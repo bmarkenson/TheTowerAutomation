@@ -21,6 +21,7 @@ def test_ocr_noise_is_canonicalised():
 def test_enforcer_moves_rows_up_and_verifies():
     reads = iter((list(reversed(TARGETS)), list(TARGETS)))
     taps = []
+    repairs = []
     with (
         patch("core.target_priority.read_target_priority_order", side_effect=reads),
         patch("core.target_priority.log"),
@@ -31,9 +32,11 @@ def test_enforcer_moves_rows_up_and_verifies():
             tap_fn=lambda point, **_kwargs: taps.append(point) or True,
             ensure_menu_fn=lambda: True,
             sleep_fn=lambda _seconds: None,
+            repair_observer_fn=lambda: repairs.append("started"),
         )
     assert taps[0] == (910, 380)
     assert taps[-1] == (950, 100)
+    assert repairs == ["started"]
     result_log.assert_called_once()
     assert result_log.call_args.args[0] == (
         "Target Priority setup complete — order verified"
@@ -42,6 +45,7 @@ def test_enforcer_moves_rows_up_and_verifies():
 
 def test_running_boundary_can_supply_an_already_open_priority_panel():
     taps = []
+    repairs = []
     with (
         patch(
             "core.target_priority.read_target_priority_order",
@@ -56,10 +60,12 @@ def test_running_boundary_can_supply_an_already_open_priority_panel():
             ),
             sleep_fn=lambda _seconds: None,
             panel_open=True,
+            repair_observer_fn=lambda: repairs.append("started"),
         )
 
     assert resolve_dot_path("navigation.home_target_priority") is None
     assert taps == [(950, 100)]
+    assert repairs == []
 
 
 def test_priority_comparison_is_case_insensitive_and_ordered():

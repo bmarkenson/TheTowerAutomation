@@ -9,7 +9,7 @@ check back through the existing UI implementation.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import gzip
 import hashlib
@@ -60,6 +60,7 @@ class SaveCheckEvidence:
     source_fields: tuple[str, ...]
     complete: bool = True
     reason: str = ""
+    authority: Mapping[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -68,6 +69,7 @@ class SaveCheckEvidence:
             "source_fields": list(self.source_fields),
             "complete": self.complete,
             "reason": self.reason,
+            "authority": dict(self.authority),
         }
 
 
@@ -349,7 +351,7 @@ def reconcile_requirements(
     current preflight path.
     """
 
-    expected = _requirement_values(requirements)
+    expected = _expanded_requirement_values(requirements)
     stale = _snapshot_is_stale(
         snapshot,
         max_snapshot_age_s=max_snapshot_age_s,
@@ -363,6 +365,14 @@ def reconcile_requirements(
             _check_matches(str(check_id), expected_value, observed)
             if evidence is not None and evidence.status == "observed"
             else None
+        )
+        requirement_supported = bool(
+            evidence is not None
+            and _requirement_is_supported(
+                str(check_id),
+                expected_value,
+                evidence,
+            )
         )
         check_validated = bool(
             snapshot.mapping_maturity == "validated"
@@ -381,6 +391,9 @@ def reconcile_requirements(
         elif evidence is None or evidence.status != "observed":
             disposition = "ui_required"
             reason = evidence.reason if evidence is not None else "check_unmapped"
+        elif not requirement_supported:
+            disposition = "ui_required"
+            reason = "save_requirement_outside_validated_scope"
         elif matches is not True:
             disposition = "ui_required"
             reason = "save_mismatch"
@@ -410,6 +423,7 @@ def reconcile_requirements(
                 evidence.complete if evidence is not None else False
             ),
             "save_check_validated": check_validated,
+            "save_requirement_supported": requirement_supported,
             "ui_required": disposition == "ui_required",
             "fallback": "existing_ui_check",
         }
@@ -579,13 +593,19 @@ def _build_checks(
                 if status == "observed"
                 else "active preset could not be resolved"
             ),
+            authority={"kind": "matching_value"},
         )
 
+    auto_pick_value = decoded.get("autoPickPerk")
+    auto_pick_valid = isinstance(auto_pick_value, bool)
     checks["auto_pick_perks"] = SaveCheckEvidence(
         check_id="auto_pick_perks",
-        status="observed",
-        value=bool(decoded.get("autoPickPerk")),
+        status="observed" if auto_pick_valid else "unmapped",
+        value=auto_pick_value if auto_pick_valid else None,
         source_fields=("autoPickPerk",),
+        complete=auto_pick_valid,
+        reason="" if auto_pick_valid else "autoPickPerk is not an exact boolean",
+        authority={"kind": "exact_values", "values": [True]},
     )
 
     checks["card_recharge_modes"] = _card_recharge_mode_evidence(
@@ -594,7 +614,7 @@ def _build_checks(
     )
 
     perk_ids = mapping.get("perk_ids") or {}
-    first_id = _optional_int(decoded.get("firstPerkIndex"))
+    first_id = _exact_int(decoded.get("firstPerkIndex"))
     first_name = perk_ids.get(str(first_id)) if first_id is not None else None
     checks["perk_first_choice"] = SaveCheckEvidence(
         check_id="perk_first_choice",
@@ -602,20 +622,23 @@ def _build_checks(
         value=first_name,
         source_fields=("firstPerkIndex",),
         reason="" if first_name else f"unmapped perk id {first_id}",
+        authority={"kind": "matching_value"},
     )
 
-    bans, ban_unknown = _map_id_sequence(
+    bans, bans_complete, bans_reason = _validated_selected_id_slots(
         decoded.get("bannedPerksIndex"),
         perk_ids,
-        stop_at_negative=True,
+        mapping.get("perk_bans"),
+        label="perk ban",
     )
     checks["perk_bans"] = SaveCheckEvidence(
         check_id="perk_bans",
-        status="observed" if bans and not ban_unknown else "unmapped",
+        status="observed" if bans_complete else "unmapped",
         value=bans,
         source_fields=("bannedPerksIndex",),
-        complete=not ban_unknown,
-        reason=_unknown_id_reason("perk", ban_unknown),
+        complete=bans_complete,
+        reason=bans_reason,
+        authority={"kind": "matching_value"},
     )
 
     raw_auto_order = decoded.get("autoPickOrder")
@@ -625,39 +648,11 @@ def _build_checks(
         if isinstance(auto_order_spec, Mapping)
         else None
     )
-    auto_order: list[str] = []
-    order_unknown: list[int] = []
-    order_complete = False
-    order_reason = "ranked Auto Pick count is unavailable"
-    if (
-        ranked_count is not None
-        and ranked_count > 0
-        and _is_sequence(raw_auto_order)
-    ):
-        ranked_raw = list(raw_auto_order[:ranked_count])
-        auto_order, order_unknown = _map_id_sequence(
-            ranked_raw,
-            perk_ids,
-            stop_on_unknown=True,
-        )
-        if order_unknown:
-            order_reason = _unknown_id_reason("ranked perk", order_unknown)
-        elif len(ranked_raw) != ranked_count:
-            order_reason = (
-                "ranked Auto Pick order is shorter than the exact-version "
-                f"count of {ranked_count}"
-            )
-        else:
-            unranked_count = max(0, len(raw_auto_order) - ranked_count)
-            order_complete = unranked_count == 0
-            order_reason = (
-                ""
-                if order_complete
-                else (
-                    f"excluded {unranked_count} unranked Auto Pick tail "
-                    "item(s) from priority evidence"
-                )
-            )
+    auto_order, order_complete, order_reason = _validated_auto_pick_order(
+        raw_auto_order,
+        perk_ids,
+        auto_order_spec,
+    )
     checks["perk_auto_pick_order"] = SaveCheckEvidence(
         check_id="perk_auto_pick_order",
         status="observed" if auto_order else "unmapped",
@@ -665,49 +660,73 @@ def _build_checks(
         source_fields=("autoPickOrder",),
         complete=order_complete,
         reason=order_reason,
+        authority={"kind": "prefix", "maximum_length": ranked_count or 0},
     )
 
-    locks, unknown_locks = _mapped_free_upgrade_locks(decoded, mapping)
+    locks, lock_complete, lock_reason = _mapped_free_upgrade_locks(
+        decoded,
+        mapping,
+    )
+    validated_lock_set = list(
+        mapping.get("validated_free_upgrade_lock_set") or ()
+    )
     checks["free_upgrade_locks"] = SaveCheckEvidence(
         check_id="free_upgrade_locks",
-        status="observed" if not unknown_locks else "unmapped",
+        status="observed" if lock_complete else "unmapped",
         value=locks,
         source_fields=tuple((mapping.get("free_upgrade_lock_fields") or {}).keys()),
-        complete=not unknown_locks,
-        reason=(
-            "locked save indices lack semantic names: " + ", ".join(unknown_locks)
-            if unknown_locks
-            else ""
-        ),
+        complete=lock_complete,
+        reason=lock_reason,
+        authority={"kind": "exact_set", "values": validated_lock_set},
     )
 
-    priority, priority_unknown = _map_id_sequence(
+    target_ids = mapping.get("target_priority_ids") or {}
+    priority, priority_complete, priority_reason = _validated_complete_order(
         decoded.get("targetPriorityList"),
-        mapping.get("target_priority_ids") or {},
+        target_ids,
+        label="target priority",
     )
     checks["target_priority"] = SaveCheckEvidence(
         check_id="target_priority",
-        status="observed" if priority and not priority_unknown else "unmapped",
+        status="observed" if priority_complete else "unmapped",
         value=priority,
         source_fields=("targetPriorityList",),
-        complete=not priority_unknown,
-        reason=_unknown_id_reason("target priority", priority_unknown),
+        complete=priority_complete,
+        reason=priority_reason,
+        authority={
+            "kind": "complete_order",
+            "values": [str(value) for value in target_ids.values()],
+        },
     )
 
-    guardians, guardian_unknown = _map_id_sequence(
+    guardian_spec = mapping.get("guardian_chips")
+    guardian_slot_count = (
+        _optional_int(guardian_spec.get("slot_count"))
+        if isinstance(guardian_spec, Mapping)
+        else None
+    )
+    guardians, guardians_complete, guardians_reason = _validated_known_id_list(
         decoded.get("guardianChipSlot"),
         mapping.get("guardian_chip_ids") or {},
+        label="guardian chip",
+        expected_count=guardian_slot_count,
     )
+    guardian_slots_unlocked = decoded.get("guardianSlotsUnlocked")
+    if _exact_int(guardian_slots_unlocked) is None:
+        guardians_complete = False
+        guardians_reason = "guardianSlotsUnlocked is not an exact integer"
     checks["guardian_chips"] = SaveCheckEvidence(
         check_id="guardian_chips",
-        status="observed" if guardians and not guardian_unknown else "unmapped",
+        status="observed" if guardians_complete else "unmapped",
         value=guardians,
         source_fields=("guardianChipSlot", "guardianSlotsUnlocked"),
-        complete=not guardian_unknown,
-        reason=_unknown_id_reason("guardian chip", guardian_unknown),
+        complete=guardians_complete,
+        reason=guardians_reason,
+        authority={"kind": "matching_value"},
     )
 
     checks["ultimate_weapons"] = _ultimate_weapon_evidence(decoded, mapping)
+    checks.update(_ultimate_weapon_component_evidence(decoded, mapping))
 
     tournament_conditions = derive_tournament_conditions_from_save(
         decoded,
@@ -733,6 +752,7 @@ def _build_checks(
         source_fields=tournament_source_fields,
         complete=tournament_complete,
         reason=str(tournament_conditions.get("reason") or ""),
+        authority={"kind": "matching_value"},
     )
     for check_id, reason in (mapping.get("unmapped_checks") or {}).items():
         checks[str(check_id)] = SaveCheckEvidence(
@@ -784,6 +804,7 @@ def _card_recharge_mode_evidence(
             if not specs
             else ""
         ),
+        authority={"kind": "matching_value"},
     )
 
 
@@ -791,8 +812,11 @@ def _selected_preset(
     decoded: Mapping[str, Any],
     spec: Mapping[str, Any],
 ) -> dict[str, Any]:
-    names = list(decoded.get(str(spec.get("names_field") or "")) or [])
-    index = _optional_int(decoded.get(str(spec.get("active_field") or "")))
+    raw_names = decoded.get(str(spec.get("names_field") or ""))
+    names = list(raw_names) if _is_sequence(raw_names) else []
+    if not all(isinstance(name, str) and name.strip() for name in names):
+        names = []
+    index = _exact_int(decoded.get(str(spec.get("active_field") or "")))
     active_name = (
         str(names[index]).strip()
         if index is not None and 0 <= index < len(names) and str(names[index]).strip()
@@ -803,6 +827,76 @@ def _selected_preset(
         "active_index": index,
         "active_name": active_name,
     }
+
+
+def _validated_selected_id_slots(
+    raw: Any,
+    names: Mapping[str, Any],
+    raw_spec: Any,
+    *,
+    label: str,
+) -> tuple[list[str], bool, str]:
+    spec = raw_spec if isinstance(raw_spec, Mapping) else {}
+    slot_count = _optional_int(spec.get("slot_count"))
+    empty_id = _optional_int(spec.get("empty_id"))
+    if slot_count is None or empty_id is None:
+        return [], False, f"{label} structural contract is incomplete"
+    if not _is_sequence(raw) or len(raw) != slot_count:
+        actual = len(raw) if _is_sequence(raw) else "non-array"
+        return (
+            [],
+            False,
+            f"{label} shape changed: expected {slot_count}, got {actual}",
+        )
+    numeric = [_exact_int(value) for value in raw]
+    if any(value is None for value in numeric):
+        return [], False, f"{label} slots require exact integer IDs"
+    values = [int(value) for value in numeric if value is not None]
+    selected: list[int] = []
+    empty_seen = False
+    for value in values:
+        if value == empty_id:
+            empty_seen = True
+            continue
+        if empty_seen:
+            return [], False, f"{label} selected ID appeared after an empty slot"
+        selected.append(value)
+    if len(selected) != len(set(selected)):
+        return [], False, f"{label} contains duplicate selected IDs"
+    unknown = [value for value in selected if str(value) not in names]
+    if unknown:
+        return [], False, _unknown_id_reason(label, unknown)
+    return [str(names[str(value)]) for value in selected], True, ""
+
+
+def _validated_known_id_list(
+    raw: Any,
+    names: Mapping[str, Any],
+    *,
+    label: str,
+    expected_count: Optional[int],
+) -> tuple[list[str], bool, str]:
+    if (
+        expected_count is None
+        or not _is_sequence(raw)
+        or len(raw) != expected_count
+    ):
+        actual = len(raw) if _is_sequence(raw) else "non-array"
+        return (
+            [],
+            False,
+            f"{label} shape changed: expected {expected_count}, got {actual}",
+        )
+    numeric = [_exact_int(value) for value in raw]
+    if any(value is None for value in numeric):
+        return [], False, f"{label} slots require exact integer IDs"
+    values = [int(value) for value in numeric if value is not None]
+    if len(values) != len(set(values)):
+        return [], False, f"{label} contains duplicate IDs"
+    unknown = [value for value in values if str(value) not in names]
+    if unknown:
+        return [], False, _unknown_id_reason(label, unknown)
+    return [str(names[str(value)]) for value in values], True, ""
 
 
 def _map_id_sequence(
@@ -833,23 +927,146 @@ def _map_id_sequence(
     return mapped, unknown
 
 
+def _validated_auto_pick_order(
+    raw: Any,
+    names: Mapping[str, Any],
+    raw_spec: Any,
+) -> tuple[list[str], bool, str]:
+    spec = raw_spec if isinstance(raw_spec, Mapping) else {}
+    ranked_count = _optional_int(spec.get("ranked_count"))
+    unranked_count = _optional_int(spec.get("unranked_count"))
+    total_count = _optional_int(spec.get("total_count"))
+    empty_tail_id = _optional_int(spec.get("empty_tail_id"))
+    if None in (ranked_count, unranked_count, total_count, empty_tail_id):
+        return [], False, "Auto Pick structural contract is incomplete"
+    if (
+        ranked_count <= 0
+        or unranked_count < 0
+        or ranked_count + unranked_count != total_count
+    ):
+        return [], False, "Auto Pick structural contract is invalid"
+    if not _is_sequence(raw) or len(raw) != total_count:
+        actual = len(raw) if _is_sequence(raw) else "non-array"
+        return (
+            [],
+            False,
+            f"Auto Pick order shape changed: expected {total_count}, got {actual}",
+        )
+
+    numeric: list[int] = []
+    for index, value in enumerate(raw):
+        parsed = _exact_int(value)
+        if parsed is None:
+            return (
+                [],
+                False,
+                f"Auto Pick order entry {index} is not an exact integer",
+            )
+        numeric.append(parsed)
+
+    ranked_raw = numeric[:ranked_count]
+    tail_raw = numeric[ranked_count:]
+    if empty_tail_id in ranked_raw:
+        return [], False, "Auto Pick empty sentinel appeared in ranked entries"
+    if tail_raw.count(empty_tail_id) != 1:
+        return [], False, "Auto Pick tail must contain exactly one empty sentinel"
+    mapped_ids = [value for value in numeric if value != empty_tail_id]
+    expected_ids = {_optional_int(value) for value in names.keys()}
+    if None in expected_ids:
+        return [], False, "Auto Pick perk mapping contains a non-integer ID"
+    expected_numeric_ids = {int(value) for value in expected_ids}
+    if len(mapped_ids) != len(set(mapped_ids)):
+        return [], False, "Auto Pick order contains duplicate perk IDs"
+    if set(mapped_ids) != expected_numeric_ids:
+        missing = sorted(expected_numeric_ids - set(mapped_ids))
+        unknown = sorted(set(mapped_ids) - expected_numeric_ids)
+        return (
+            [],
+            False,
+            "Auto Pick inventory membership changed"
+            f" (missing={missing}, unknown={unknown})",
+        )
+    ranked = [str(names[str(value)]) for value in ranked_raw]
+    return ranked, True, ""
+
+
+def _validated_complete_order(
+    raw: Any,
+    names: Mapping[str, Any],
+    *,
+    label: str,
+) -> tuple[list[str], bool, str]:
+    if not _is_sequence(raw):
+        return [], False, f"{label} is not an array"
+    expected_count = len(names)
+    if len(raw) != expected_count:
+        return (
+            [],
+            False,
+            f"{label} length changed: expected {expected_count}, got {len(raw)}",
+        )
+    numeric: list[int] = []
+    for index, value in enumerate(raw):
+        parsed = _exact_int(value)
+        if parsed is None:
+            return [], False, f"{label} entry {index} is not an exact integer"
+        numeric.append(parsed)
+    if len(set(numeric)) != expected_count:
+        return [], False, f"{label} contains duplicate IDs"
+    expected_ids = {_optional_int(value) for value in names.keys()}
+    if None in expected_ids or set(numeric) != expected_ids:
+        return [], False, f"{label} does not contain the complete known ID set"
+    return [str(names[str(value)]) for value in numeric], True, ""
+
+
 def _mapped_free_upgrade_locks(
     decoded: Mapping[str, Any],
     mapping: Mapping[str, Any],
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], bool, str]:
     locked: list[str] = []
-    unknown: list[str] = []
+    invalid: list[str] = []
+    expected_shapes = mapping.get("required_array_lengths") or {}
     for field, labels in (mapping.get("free_upgrade_lock_fields") or {}).items():
-        flags = list(decoded.get(field) or [])
+        raw_flags = decoded.get(field)
+        expected_length = _optional_int(expected_shapes.get(field))
+        if (
+            not _is_sequence(raw_flags)
+            or expected_length is None
+            or len(raw_flags) != expected_length
+            or len(labels) != expected_length
+        ):
+            invalid.append(f"{field}:shape")
+            continue
+        flags = list(raw_flags)
         for index, enabled in enumerate(flags):
-            if not bool(enabled):
+            if not isinstance(enabled, bool):
+                invalid.append(f"{field}[{index}]:type")
+                continue
+            if not enabled:
                 continue
             label = labels[index] if index < len(labels) else None
             if label:
                 locked.append(str(label))
             else:
-                unknown.append(f"{field}[{index}]")
-    return locked, unknown
+                invalid.append(f"{field}[{index}]:unknown")
+    validated = {
+        str(value)
+        for value in mapping.get("validated_free_upgrade_lock_set") or ()
+    }
+    unexpected = sorted(set(locked) - validated)
+    missing = sorted(validated - set(locked))
+    if unexpected:
+        invalid.append("unexpected=" + ",".join(unexpected))
+    if missing:
+        invalid.append("missing=" + ",".join(missing))
+    return (
+        locked,
+        not invalid,
+        "Free Upgrade lock structure/value is outside validated scope: "
+        + "; ".join(invalid)
+        if invalid
+        else "",
+    )
 
 
 def _ultimate_weapon_evidence(
@@ -897,12 +1114,204 @@ def _ultimate_weapon_evidence(
     )
 
 
+def _ultimate_weapon_component_evidence(
+    decoded: Mapping[str, Any],
+    mapping: Mapping[str, Any],
+) -> dict[str, SaveCheckEvidence]:
+    names = [str(value) for value in mapping.get("ultimate_weapon_names") or ()]
+    unlocked_raw = decoded.get("ultimateWeaponUnlocked")
+    active_raw = decoded.get("ultimateWeaponOn")
+    arrays_valid = bool(
+        names
+        and _is_sequence(unlocked_raw)
+        and _is_sequence(active_raw)
+        and len(unlocked_raw) == len(names)
+        and len(active_raw) == len(names)
+        and all(isinstance(value, bool) for value in unlocked_raw)
+        and all(isinstance(value, bool) for value in active_raw)
+    )
+    unlocked = list(unlocked_raw) if arrays_valid else []
+    active = list(active_raw) if arrays_valid else []
+    all_unlocked = arrays_valid and all(unlocked)
+    primary_complete = bool(all_unlocked)
+    primaries = (
+        {
+            name: {"primary": "on" if active[index] else "off"}
+            for index, name in enumerate(names)
+        }
+        if primary_complete
+        else None
+    )
+    checks = {
+        "ultimate_weapon_primaries": SaveCheckEvidence(
+            check_id="ultimate_weapon_primaries",
+            status="observed" if primary_complete else "unmapped",
+            value=primaries,
+            source_fields=("ultimateWeaponUnlocked", "ultimateWeaponOn"),
+            complete=primary_complete,
+            reason=(
+                ""
+                if primary_complete
+                else (
+                    "ultimate weapon arrays require nine exact booleans with "
+                    "all weapons unlocked"
+                )
+            ),
+            authority={"kind": "all_named_primary_on", "names": names},
+        )
+    }
+
+    poison_index = names.index("Poison Swamp") if "Poison Swamp" in names else -1
+    poison_raw = decoded.get("poisonSwampStunOff")
+    poison_valid = bool(
+        arrays_valid
+        and poison_index >= 0
+        and unlocked[poison_index]
+        and isinstance(poison_raw, bool)
+    )
+    checks["poison_swamp_stun"] = SaveCheckEvidence(
+        check_id="poison_swamp_stun",
+        status="observed" if poison_valid else "unmapped",
+        value=("off" if poison_raw else "on") if poison_valid else None,
+        source_fields=("ultimateWeaponUnlocked", "poisonSwampStunOff"),
+        complete=poison_valid,
+        reason=(
+            ""
+            if poison_valid
+            else "Poison Swamp Stun requires an unlocked weapon and exact boolean"
+        ),
+        authority={"kind": "allowed_values", "values": ["on", "off"]},
+    )
+
+    spotlight_index = names.index("Spotlight") if "Spotlight" in names else -1
+    missiles_raw = decoded.get("spotlightSmartMissilesOff")
+    missiles_valid = bool(
+        arrays_valid
+        and spotlight_index >= 0
+        and unlocked[spotlight_index]
+        and isinstance(missiles_raw, bool)
+    )
+    checks["spotlight_missiles"] = SaveCheckEvidence(
+        check_id="spotlight_missiles",
+        status="observed" if missiles_valid else "unmapped",
+        value=("off" if missiles_raw else "on") if missiles_valid else None,
+        source_fields=(
+            "ultimateWeaponUnlocked",
+            "spotlightSmartMissilesOff",
+        ),
+        complete=missiles_valid,
+        reason=(
+            ""
+            if missiles_valid
+            else "Spotlight Missiles requires an unlocked weapon and exact boolean"
+        ),
+        authority={"kind": "allowed_values", "values": ["on"]},
+    )
+    return checks
+
+
 def _requirement_values(requirements: Mapping[str, Any]) -> Mapping[str, Any]:
     for key in ("invariants", "settings"):
         nested = requirements.get(key)
         if isinstance(nested, Mapping):
             return nested
     return requirements
+
+
+def _expanded_requirement_values(
+    requirements: Mapping[str, Any],
+) -> dict[str, Any]:
+    values = dict(_requirement_values(requirements))
+    for metadata_key in (
+        "loadout_policies",
+        "profile_skips",
+        "_gate_waivers",
+    ):
+        values.pop(metadata_key, None)
+    ultimate = values.pop("ultimate_weapons", None)
+    if not isinstance(ultimate, Mapping):
+        return values
+
+    primaries: dict[str, dict[str, Any]] = {}
+    for raw_name, raw_requirement in ultimate.items():
+        if not isinstance(raw_requirement, Mapping):
+            continue
+        name = str(raw_name)
+        if "primary" in raw_requirement:
+            primaries[name] = {"primary": raw_requirement["primary"]}
+    if primaries:
+        values["ultimate_weapon_primaries"] = primaries
+    poison = ultimate.get("Poison Swamp")
+    if isinstance(poison, Mapping) and "stun" in poison:
+        values["poison_swamp_stun"] = poison["stun"]
+    spotlight = ultimate.get("Spotlight")
+    if isinstance(spotlight, Mapping) and "missiles" in spotlight:
+        values["spotlight_missiles"] = spotlight["missiles"]
+    return values
+
+
+def _requirement_is_supported(
+    check_id: str,
+    expected: Any,
+    evidence: SaveCheckEvidence,
+) -> bool:
+    authority = evidence.authority
+    kind = str(authority.get("kind") or "")
+    if kind == "matching_value":
+        return True
+    if kind == "allowed_values":
+        normalized = _normal_scalar(expected)
+        return normalized in {
+            _normal_scalar(value) for value in authority.get("values") or ()
+        }
+    if kind == "exact_values":
+        return any(
+            type(expected) is type(value) and expected == value
+            for value in authority.get("values") or ()
+        )
+    if kind == "exact_set":
+        if not _is_sequence(expected):
+            return False
+        normalized = [_normal_scalar(value) for value in expected]
+        allowed = [
+            _normal_scalar(value)
+            for value in authority.get("values") or ()
+        ]
+        return bool(
+            len(normalized) == len(allowed)
+            and len(set(normalized)) == len(normalized)
+            and set(normalized) == set(allowed)
+        )
+    if kind == "prefix":
+        maximum = _optional_int(authority.get("maximum_length"))
+        return bool(
+            _is_sequence(expected)
+            and maximum is not None
+            and 0 < len(expected) <= maximum
+        )
+    if kind == "complete_order":
+        if not _is_sequence(expected):
+            return False
+        normalized = [_normal_scalar(value) for value in expected]
+        allowed = {
+            _normal_scalar(value) for value in authority.get("values") or ()
+        }
+        return len(normalized) == len(allowed) and set(normalized) == allowed
+    if kind == "all_named_primary_on":
+        if not isinstance(expected, Mapping):
+            return False
+        expected_names = {str(value) for value in authority.get("names") or ()}
+        if set(str(value) for value in expected) != expected_names:
+            return False
+        for requirement in expected.values():
+            if (
+                not isinstance(requirement, Mapping)
+                or set(requirement) != {"primary"}
+                or _normal_scalar(requirement.get("primary")) != "on"
+            ):
+                return False
+        return True
+    return False
 
 
 def _check_matches(check_id: str, expected: Any, observed: Any) -> bool:
@@ -970,6 +1379,10 @@ def _optional_int(value: Any) -> Optional[int]:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _exact_int(value: Any) -> Optional[int]:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def _is_sequence(value: Any) -> bool:

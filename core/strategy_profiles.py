@@ -25,6 +25,7 @@ from core.gate_decisions import (
 from core.perk_configuration import (
     PERK_CONFIGURATION_LABELS,
     normalize_perk_configuration_requirements,
+    normalize_perk_first_choice_requirement,
 )
 from core.module_presets import (
     DEFAULT_CUSTOM_MODULE_PRESET_DIRECTORY,
@@ -3958,6 +3959,7 @@ def _normalize_farm_setup(raw: object) -> dict[str, Any]:
         json.loads(json.dumps(dict(raw_settings), ensure_ascii=False))
     )
     try:
+        first_choice = normalize_perk_first_choice_requirement(requirements)
         bans, auto_pick_order = normalize_perk_configuration_requirements(
             requirements
         )
@@ -3970,6 +3972,7 @@ def _normalize_farm_setup(raw: object) -> dict[str, Any]:
         "skipped_checks": skipped,
         "settings": {
             **requirements,
+            "perk_first_choice": first_choice,
             "perk_bans": bans,
             "perk_auto_pick_order": auto_pick_order,
         },

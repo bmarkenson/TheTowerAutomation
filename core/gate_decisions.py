@@ -19,6 +19,7 @@ STARTUP_GATE_CHECK_LABELS = {
     "modules": "Modules",
     "target_priority": "Target Priority",
     "auto_pick_perks": "Auto Pick Perks",
+    "perk_first_choice": "First Perk Choice",
     "perk_bans": "Perk Bans",
     "perk_auto_pick_order": "Auto Pick priority",
     "ultimate_weapons": "Ultimate Weapons",

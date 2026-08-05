@@ -5,10 +5,12 @@ from __future__ import annotations
 import copy
 from typing import Any, Mapping
 
+from core.player_save_preflight import normalize_player_save_preflight_mode
 from core.tournament_preflight import load_tournament_contract
 
 
 TOURNAMENT_RUNTIME_POLICY = {
+    "player_save_preflight": "save_first",
     "handlers": ["ad_gem", "game_over", "game_speed"],
     "auto_return": False,
     "game_over_mode": "wait",
@@ -60,6 +62,25 @@ def build_tournament_strategy(source: Mapping[str, Any]) -> dict[str, Any]:
     orb_distance_values = copy.deepcopy(orb_distance["resolved"])
     orb_distance_presets = copy.deepcopy(orb_distance["range_presets"])
     runtime_policy = copy.deepcopy(TOURNAMENT_RUNTIME_POLICY)
+    requested_runtime_policy = source.get("runtime_policy") or {}
+    if not isinstance(requested_runtime_policy, Mapping):
+        raise ValueError("tournament runtime_policy must be a mapping")
+    unknown_runtime_policy = sorted(
+        set(requested_runtime_policy) - {"player_save_preflight"}
+    )
+    if unknown_runtime_policy:
+        raise ValueError(
+            "tournament runtime_policy has unsupported settings: "
+            + ", ".join(str(value) for value in unknown_runtime_policy)
+        )
+    runtime_policy["player_save_preflight"] = (
+        normalize_player_save_preflight_mode(
+            requested_runtime_policy.get(
+                "player_save_preflight",
+                runtime_policy["player_save_preflight"],
+            )
+        )
+    )
     variables = {
         "exclusive_validation_battle": False,
         "ehls_completed": False,

@@ -9,7 +9,11 @@ from typing import Any, Mapping
 import yaml
 
 from core.gate_decisions import normalize_profile_skip_checks
-from core.perk_configuration import normalize_perk_configuration_requirements
+from core.perk_configuration import (
+    normalize_perk_configuration_requirements,
+    normalize_perk_first_choice_requirement,
+)
+from core.player_save_preflight import normalize_player_save_preflight_mode
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -22,6 +26,7 @@ ORB_DISTANCE_PRESETS_PATH = (
     ROOT / "config" / "loadouts" / "orb_distances.yaml"
 )
 POLICY_MODES = frozenset({"enforce", "observe", "preserve"})
+PLAYER_SAVE_PREFLIGHT_POLICY = "save_first"
 LOADOUT_KEYS = frozenset(
     {"modules", "damage_slider", "orb_distance", "target_priority"}
 )
@@ -61,6 +66,23 @@ def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
     invariants = copy.deepcopy(profile.get("invariants"))
     if not isinstance(invariants, dict):
         raise ValueError("Farm run profile invariants must be a mapping")
+    raw_runtime_policy = source.get("runtime_policy") or {}
+    if not isinstance(raw_runtime_policy, Mapping):
+        raise ValueError("farm profile runtime_policy must be a mapping")
+    unknown_runtime_policy = sorted(
+        set(raw_runtime_policy) - {"player_save_preflight"}
+    )
+    if unknown_runtime_policy:
+        raise ValueError(
+            "farm profile runtime_policy has unsupported settings: "
+            + ", ".join(str(value) for value in unknown_runtime_policy)
+        )
+    player_save_preflight_policy = normalize_player_save_preflight_mode(
+        raw_runtime_policy.get(
+            "player_save_preflight",
+            PLAYER_SAVE_PREFLIGHT_POLICY,
+        )
+    )
 
     loadout = source.get("loadout")
     if not isinstance(loadout, Mapping):
@@ -136,6 +158,7 @@ def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
                 "bots_preset",
                 "guardian_chips",
                 "auto_pick_perks",
+                "perk_first_choice",
                 "perk_bans",
                 "perk_auto_pick_order",
                 "ultimate_weapons",
@@ -158,6 +181,9 @@ def resolve_farm_source(source: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "meta": meta,
         "builder": "gc_farm",
+        "runtime_policy": {
+            "player_save_preflight": player_save_preflight_policy,
+        },
         "initialization": {
             "damage_slider": copy.deepcopy(damage_policy),
             "orb_distance": copy.deepcopy(orb_distance_policy),
@@ -202,6 +228,7 @@ def _resolve_setup(
     requirements = copy.deepcopy(dict(baseline))
     requirements.update(copy.deepcopy(dict(raw_settings)))
     try:
+        first_choice = normalize_perk_first_choice_requirement(requirements)
         bans, auto_pick_order = normalize_perk_configuration_requirements(
             requirements
         )
@@ -214,6 +241,7 @@ def _resolve_setup(
         "skipped_checks": skipped,
         "settings": {
             **requirements,
+            "perk_first_choice": first_choice,
             "perk_bans": bans,
             "perk_auto_pick_order": auto_pick_order,
         },

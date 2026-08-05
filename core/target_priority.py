@@ -240,6 +240,7 @@ def ensure_target_priority_order(
     ensure_menu_fn: Callable[[], bool] = ensure_menu_open,
     sleep_fn: Callable[[float], None] = time.sleep,
     panel_open: bool = False,
+    repair_observer_fn: Optional[Callable[[], None]] = None,
 ) -> bool:
     """Open or consume the panel, enforce with Up arrows, and verify it."""
     expected_list = validate_target_priority_order(expected)
@@ -275,6 +276,7 @@ def ensure_target_priority_order(
     verified: list[str] = []
     success = False
     reason = "not_started"
+    repair_observed = False
     try:
         actual = read_target_priority_order(capture_fn)
         log(f"[TARGET_PRIORITY] Current order: {actual}", "DEBUG")
@@ -307,6 +309,9 @@ def ensure_target_priority_order(
                     verification=verification,
                 ):
                     raise RuntimeError(f"Failed moving {target!r} upward")
+                if not repair_observed and repair_observer_fn is not None:
+                    repair_observer_fn()
+                    repair_observed = True
                 working[current_index - 1], working[current_index] = (
                     working[current_index], working[current_index - 1]
                 )

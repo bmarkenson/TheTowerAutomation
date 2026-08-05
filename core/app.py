@@ -55,6 +55,11 @@ from core.battle_stats import (
 )
 from core.battle_activation_tracker import BattleActivationTracker
 from core.player_save_audit import PlayerSaveAuditCollector
+from core.player_save_preflight import (
+    CarriedEvidenceState,
+    PlayerSavePreflightContext,
+    PlayerSavePreflightCoordinator,
+)
 from core.perk_timeline import PerkTimelineObserver
 from core.no_strategy_inventory import (
     NoStrategyInventoryStatus,
@@ -196,6 +201,19 @@ class App:
         self._exclusive_validation_ownership_hold = False
         self._observe_strategy_request()
         ensure_activity_scope(reason="automation_started")
+        self._player_save_runtime_session_id = new_operation_id()
+        self._player_save_preflight_session_id = ""
+        self._player_save_preflight_result = None
+        self._player_save_preflight_coordinator = (
+            PlayerSavePreflightCoordinator(
+                target_snapshot_fn=adb_target_session.snapshot,
+                context_fn=self._current_player_save_preflight_context,
+                action_guard_fn=self._runtime_action_guard,
+                capture_fn=self._capture_frame,
+            )
+            if adb_target_session is not None
+            else None
+        )
         self._activity_continuity = ActivityContinuityCoordinator()
         log(
             f"[RUN_INIT] Startup gate policy={config.startup_gate_policy}",
@@ -786,6 +804,71 @@ class App:
         except Exception:
             return {}
         return dict(policy) if isinstance(policy, Mapping) else {}
+
+    def _current_player_save_preflight_context(
+        self,
+    ) -> PlayerSavePreflightContext:
+        """Return the exact private identity used by acquisition and carry."""
+
+        session = self._adb_target_session
+        if session is None:
+            raise RuntimeError(
+                "player-save preflight requires an ADB target session"
+            )
+        target = session.snapshot()
+        if not target.owned:
+            raise RuntimeError("player-save preflight target is not owned")
+        strategy = self._mission_mgr.strategy
+        if strategy is None:
+            raise RuntimeError(
+                "player-save preflight requires a selected strategy"
+            )
+        scope = get_activity_scope()
+        scope_id = str(scope.get("run_id") or "") if scope else ""
+        if not scope_id:
+            raise RuntimeError(
+                "player-save preflight activity scope is unavailable"
+            )
+        preflight_id = str(self._player_save_preflight_session_id or "")
+        if not preflight_id:
+            raise RuntimeError("player-save preflight session is not armed")
+        return PlayerSavePreflightContext(
+            runtime_session_id=self._player_save_runtime_session_id,
+            preflight_session_id=preflight_id,
+            activity_scope_id=scope_id,
+            strategy_name=str(strategy.name or ""),
+            configuration_fingerprint=str(
+                strategy.session_preflight_fingerprint() or ""
+            ),
+            target=target.target,
+            target_generation=target.generation,
+        )
+
+    def _acquire_player_save_home_preflight(
+        self,
+        requirements: Mapping[str, Any],
+        *,
+        screenshot,
+    ):
+        coordinator = getattr(
+            self,
+            "_player_save_preflight_coordinator",
+            None,
+        )
+        if coordinator is None:
+            return None
+        self._player_save_preflight_session_id = new_operation_id()
+        mode = self._runtime_policy().get(
+            "player_save_preflight",
+            "save_first",
+        )
+        result = coordinator.acquire(
+            requirements,
+            mode=mode,
+            initial_frame=screenshot,
+        )
+        self._player_save_preflight_result = result
+        return result
 
     def _current_strategy_name(self) -> str:
         strategy = self._mission_mgr.strategy
@@ -2308,6 +2391,32 @@ class App:
                     self._steady_run_entry_pending = False
                     if game_speed_guard is not None:
                         game_speed_guard.reset_battle()
+                    save_coordinator = getattr(
+                        self,
+                        "_player_save_preflight_coordinator",
+                        None,
+                    )
+                    if save_coordinator is not None:
+                        carry_action_authorized = bool(
+                            AUTOMATION.mode is not ExecMode.WAIT
+                            and self._runtime_action_guard(
+                                action_class=(
+                                    RuntimeActionClass.LIFECYCLE_ACTION
+                                )
+                            )
+                        )
+                        bound = save_coordinator.bind_running(
+                            battle_started=True,
+                            stable_running=(
+                                str(detection.get("state") or "").upper()
+                                == "RUNNING"
+                            ),
+                            action_authorized=carry_action_authorized,
+                        )
+                        if bound:
+                            self._mission_mgr.ctx.data[
+                                "player_save_preflight_coordinator"
+                            ] = save_coordinator
                 continuity_pending = False
                 activity_continuity = getattr(
                     self,
@@ -2945,6 +3054,7 @@ class App:
         *,
         screenshot,
         waivers: Optional[Mapping[str, Any]] = None,
+        save_preflight=None,
     ):
         """Retry a recoverable Home setup from fresh evidence before blocking."""
 
@@ -2956,6 +3066,24 @@ class App:
             }
             if waivers:
                 setup_kwargs["waivers"] = dict(waivers)
+            coordinator = getattr(
+                self,
+                "_player_save_preflight_coordinator",
+                None,
+            )
+            carry = coordinator.carry if coordinator is not None else None
+            save_still_valid = bool(
+                carry is None
+                or carry.state is not CarriedEvidenceState.INVALIDATED
+            )
+            if save_preflight is not None and save_still_valid:
+                setup_kwargs["save_decisions"] = dict(
+                    save_preflight.decisions
+                )
+                if coordinator is not None:
+                    setup_kwargs["snapshot_invalidation_fn"] = (
+                        coordinator.invalidate
+                    )
             setup = run_gc_no_battle_setup(requirements, **setup_kwargs)
             if (
                 setup.complete
@@ -3939,10 +4067,17 @@ class App:
                     requirements,
                     getattr(self, "_startup_gate_waivers", {}),
                 )
+                save_preflight = self._acquire_player_save_home_preflight(
+                    requirements,
+                    screenshot=img,
+                )
+                if save_preflight is not None and not save_preflight.ready:
+                    return
                 setup = self._run_home_setup_attempts(
                     requirements,
                     screenshot=img,
                     waivers=waivers,
+                    save_preflight=save_preflight,
                 )
                 if setup.interrupted:
                     return
@@ -3999,6 +4134,7 @@ class App:
                         requirements,
                         screenshot=fresh,
                         waivers=waivers,
+                        save_preflight=save_preflight,
                     )
                     if setup.interrupted:
                         return
@@ -4016,13 +4152,20 @@ class App:
                             "ERROR",
                         )
                         return
+                setup_evidence = dict(setup.evidence)
+                if save_preflight is not None:
+                    setup_evidence["player_save_preflight"] = (
+                        save_preflight.as_dict()
+                    )
                 if waivers:
                     self._mission_mgr.mark_no_battle_setup_complete(
-                        setup.evidence,
+                        setup_evidence,
                         waivers=waivers,
                     )
                 else:
-                    self._mission_mgr.mark_no_battle_setup_complete(setup.evidence)
+                    self._mission_mgr.mark_no_battle_setup_complete(
+                        setup_evidence
+                    )
                 self._startup_gate_waivers = {}
             if self._maybe_start_exclusive_validation(
                 home_control=home_control,
@@ -4050,8 +4193,69 @@ class App:
                         "[HOME] WAIT mode — holding Home without starting a battle",
                         "INFO",
                     )
-                handle_home_screen(restart_enabled=restart_enabled)
+                save_coordinator = getattr(
+                    self,
+                    "_player_save_preflight_coordinator",
+                    None,
+                )
+                carry = (
+                    save_coordinator.carry
+                    if save_coordinator is not None
+                    else None
+                )
+                carry_pending = bool(
+                    carry is not None
+                    and carry.state is CarriedEvidenceState.PENDING_LAUNCH
+                )
+                if (
+                    carry is not None
+                    and carry.state
+                    in {
+                        CarriedEvidenceState.LAUNCH_DISPATCHED,
+                        CarriedEvidenceState.BOUND_RUNNING,
+                    }
+                ):
+                    save_coordinator.invalidate(
+                        "unrelated_later_home_launch_boundary"
+                    )
+                launch_authorized = True
+                if carry_pending and restart_enabled:
+                    launch_authorized = self._runtime_action_guard(
+                        action_class=RuntimeActionClass.LIFECYCLE_ACTION,
+                    )
+                    if not launch_authorized:
+                        restart_enabled = False
+                launched = (
+                    handle_home_screen(
+                        restart_enabled=restart_enabled,
+                        require_new_battle=True,
+                    )
+                    if carry_pending
+                    else handle_home_screen(restart_enabled=restart_enabled)
+                )
+                if carry_pending:
+                    if restart_enabled:
+                        save_coordinator.mark_runtime_launch(
+                            control=home_control,
+                            action_authorized=launch_authorized,
+                            dispatched=bool(launched),
+                        )
+                    else:
+                        save_coordinator.invalidate(
+                            "wait_pause_stop_or_manual_launch_boundary"
+                        )
                 self._mission_mgr.on_home()
+            else:
+                save_coordinator = getattr(
+                    self,
+                    "_player_save_preflight_coordinator",
+                    None,
+                )
+                if (
+                    save_coordinator is not None
+                    and save_coordinator.carry is not None
+                ):
+                    save_coordinator.invalidate("home_handler_disabled")
 
         if (
             "AD_GEMS_AVAILABLE" in overlays

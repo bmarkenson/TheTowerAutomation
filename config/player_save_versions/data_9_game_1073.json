@@ -9,7 +9,14 @@
     "bots_preset",
     "perk_first_choice",
     "perk_bans",
+    "perk_auto_pick_order",
+    "free_upgrade_locks",
     "guardian_chips",
+    "auto_pick_perks",
+    "target_priority",
+    "ultimate_weapon_primaries",
+    "poison_swamp_stun",
+    "spotlight_missiles",
     "tournament_conditions"
   ],
   "identity": {
@@ -112,7 +119,14 @@
   },
   "auto_pick_order": {
     "ranked_count": 18,
+    "unranked_count": 16,
+    "total_count": 34,
+    "empty_tail_id": -1,
     "tail_semantics": "unranked_perk_inventory_not_priority"
+  },
+  "perk_bans": {
+    "slot_count": 8,
+    "empty_id": -1
   },
   "perk_ids": {
     "0": "max_health",
@@ -168,6 +182,9 @@
     "6": "Fetch",
     "7": "Summon",
     "8": "Scout"
+  },
+  "guardian_chips": {
+    "slot_count": 3
   },
   "ultimate_weapon_names": [
     "Chain Lightning",
@@ -248,6 +265,11 @@
       null
     ]
   },
+  "validated_free_upgrade_lock_set": [
+    "Shockwave Size",
+    "Bounce Shot Targets",
+    "Bounce Shot Range"
+  ],
   "tournament_conditions": {
     "mapping_id": "data-9-game-1073-tournament-conditions-v1",
     "seed_field": "tourneyConditionsSeed",

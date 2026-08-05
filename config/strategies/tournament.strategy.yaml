@@ -3,6 +3,7 @@ meta:
   family: tournament
   version: 1
 runtime_policy:
+  player_save_preflight: save_first
   handlers:
   - ad_gem
   - game_over
@@ -318,6 +319,7 @@ run_configuration:
         extra: 87.16m
         workshop: 80.37m
   runtime_policy:
+    player_save_preflight: save_first
     handlers:
     - ad_gem
     - game_over
