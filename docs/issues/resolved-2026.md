@@ -59,7 +59,7 @@ and actionable work lives in
   known orphans, and all 1,439 tests. Changed documentation links/anchors and
   base-range whitespace are checked before completion; all 42 local links,
   including 27 anchors, resolved.
-- **Fixed by:** Pending completion metadata.
+- **Fixed by:** `2dcde8bdd3717af93239a464901b77bf4578f366`.
 
 ### Save-first rollout repeated matching UI checks and opened History early
 

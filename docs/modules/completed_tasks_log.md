@@ -39,12 +39,11 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 
 ### 2026-08-05 observation-only Tournament Module save mapping
 
-- The implementation commit is recorded by the completion metadata follow-up.
-  Version 1073 now decodes multiple cross-channel-validated values in each
-  exact equipped slot instead of treating the original Farm value as the only
-  possible value. The complete `tournament_standard` reference is save-mapped,
-  including generator Primary Project Funding `43` and core Assist Harmony
-  Conductor `39`.
+- `2dcde8bdd3717af93239a464901b77bf4578f366` makes version 1073 decode
+  multiple cross-channel-validated values in each exact equipped slot instead
+  of treating the original Farm value as the only possible value. The complete
+  `tournament_standard` reference is save-mapped, including generator Primary
+  Project Funding `43` and core Assist Harmony Conductor `39`.
 - The operator-authorized current Tournament pairing also mapped armor Primary
   Anti-Cube Portal `20`, armor Assist Space Displacer `19`, and core Primary
   Dimension Core `38`. The operator withdrew an initial Magnetic Hook
