@@ -37,6 +37,45 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-04 save-first Home configuration preflight
+
+- `9a006a00dadbb2d4104267ce85a1cd7b6c337e28` implemented the default
+  `save_first` Home preflight without using the observation-only player-save
+  collector. One exact-target coordinator owns the guarded Android-Home
+  serialization boundary, the existing two-identical-read pull, in-memory
+  decode, restored stable `NEW_BATTLE` proof, normalized privacy-safe
+  dispositions, and safe distinction between UI fallback and blocked action
+  authority. `force_ui` and `comparison_audit` retain the complete UI route.
+- Version-1073 authority now covers Cards and recharge modes, Workshop, Bots,
+  Guardians, independent First Perk Choice, Bans, the 18-entry ranked Auto
+  Pick prefix over its structurally validated 16-entry inventory tail, and
+  exactly the three current Farm Free Upgrade locks. Perk-capable Farm plans
+  require `perk_wave_requirement`; Tournament declares no Perk requirement.
+- Typed single-use carry may bind only to the exact runtime-owned next
+  `NEW_BATTLE` and its first stable `RUNNING` boundary. It covers Auto Pick
+  enabled `true`, a complete exact ten-ID Target Priority order, all nine
+  primaries on, Spotlight Missiles on, Poison Swamp Stun in either calibrated
+  polarity, and accepted Home sections. Every continuity break or first UI
+  repair invalidates remaining evidence; actual UI observations still detect
+  contradictions.
+- The monolithic Ultimate Weapon check remains unvalidated; its supported
+  value-scoped components fail independently. Mixed/off primaries and
+  Spotlight Missiles off remain UI-required, while Orb Distance, Modules, and
+  Damage Slider remain wholly UI-authoritative. Every existing UI audit,
+  repair, verification, and fallback path is retained.
+- Canonical Farm, GC Farm, and Tournament strategies regenerated
+  byte-consistently. The focused affected suite passed all 232 tests. The
+  complete non-live checkpoint passed compilation, state-definition
+  validation, clickmap integrity with zero errors and 44 existing orphans, and
+  all 1,385 pytest tests. All 39 local links across the five changed
+  documents, including 26 anchors, resolved; cached and base-range whitespace
+  checks passed.
+- Prior accepted calibration was reused; no duplicate campaign or live
+  validation was performed. No process, systemd service, ADB server or target,
+  emulator, shared live frame, current battle, or installed runtime was
+  inspected or changed. No merge, push, rebase, deployment, branch mutation,
+  or worktree-topology action occurred.
+
 ### 2026-08-04 atomic shared latest production frame
 
 - `dd44c0171c6dd1e5b0e5d090b7c08e5376e7ed3d` extended the existing screenshot
