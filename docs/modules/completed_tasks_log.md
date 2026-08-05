@@ -194,6 +194,32 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   inspected or changed. No merge, push, rebase, deployment, branch mutation,
   or worktree-topology action occurred.
 
+### 2026-08-04 cooperative interactive-development lease
+
+- `b87cdd96e21a544b65a0adcd8d0ca37dc0677cb3` implemented delivery step 3 of
+  production/development coordination on the existing control directive,
+  supervisor, structured action-gate status, and control-surface API. One
+  bounded request can be acknowledged only by the freshly matched production
+  runtime, PID, session, and ADB target after it installs the production-owned
+  `external_development` hold at a safe coordination boundary.
+- The hold leaves capture, detection, interpretation, and status active while
+  denying every production input class, including auxiliary/background input,
+  with no in-process owner bypass. Pause and Stop, heartbeat expiry, runtime or
+  target replacement, battle boundaries, and natural Game Over terminate the
+  lease. Release remains suppressive until a fresh post-release observation
+  permits safe hold removal; ambiguous cleanup fails closed and stays visible.
+- The version-1 API now exposes requested state separately from the structured
+  runtime acknowledgement, returns HTTP 409 for a competing live request, and
+  advertises `interactive_development_lease_v1` at server revision 26. Concise
+  transition events use the existing action log without per-heartbeat noise.
+- The final focused authority, supervisor, application-control, API, and
+  strategy-authoring run passed 132 tests. The complete non-live checkpoint
+  passed compilation, state-definition validation, clickmap integrity with
+  zero errors, and all 1,346 pytest tests; `git diff --check` also passed. No
+  production file, environment, runtime process, systemd unit, ADB target, or
+  emulator was inspected or changed. The lease-aware development ADB input
+  helper remains the next delivery step and was not implemented here.
+
 ### 2026-08-04 atomic shared latest production frame
 
 - `dd44c0171c6dd1e5b0e5d090b7c08e5376e7ed3d` extended the existing screenshot
