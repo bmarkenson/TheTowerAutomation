@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import threading
 from unittest.mock import patch
 
 import pytest
@@ -16,10 +17,13 @@ from core.action_authority import (
     RuntimeActionClass,
 )
 from core.app import App
+from core.adb_connection import AdbConnectionCoordinator
 from core.automation_supervisor import AutomationSupervisor
 from core.battle_lifecycle import HomeBattleControl
 from core.control_directives import ControlDirectiveStore
 from core.run_state import AUTOMATION
+from core.watchdog import _watchdog_process_check_once
+import handlers.ad_gem_handler as ad_gems
 
 
 def _timestamp(value: float) -> str:
@@ -232,6 +236,178 @@ def test_hold_precedes_ack_and_waits_for_background_input_quiescence(
         "observed_at": _timestamp(1_003.0),
     }
     assert active["holds"][0]["hold"] == "external_development"
+
+
+def test_hold_install_waits_for_an_inflight_watchdog_mutation(
+    tmp_path,
+    monkeypatch,
+):
+    app, _supervisor, _store, _lease = _runtime_app(tmp_path, monkeypatch)
+    app._update_action_authority()
+    guard = app._get_watchdog_mutation_guard()
+    connection = AdbConnectionCoordinator(is_connected=lambda _target: True)
+    mutation_started = threading.Event()
+    mutation_release = threading.Event()
+    mutation_finished = threading.Event()
+    boundary_started = threading.Event()
+    boundary_finished = threading.Event()
+
+    def restart_game():
+        mutation_started.set()
+        assert mutation_release.wait(2)
+        mutation_finished.set()
+
+    def install_hold():
+        boundary_started.set()
+        app._sync_interactive_development_control_boundary(now=1_001.0)
+        boundary_finished.set()
+
+    watchdog_thread = threading.Thread(
+        target=_watchdog_process_check_once,
+        args=(connection, guard),
+        daemon=True,
+    )
+    boundary_thread = threading.Thread(target=install_hold, daemon=True)
+    with (
+        patch("core.watchdog.time.sleep"),
+        patch("core.watchdog._pid_running", return_value=False),
+        patch("core.watchdog.is_game_foregrounded", return_value=True),
+        patch("core.watchdog.restart_game", side_effect=restart_game),
+    ):
+        watchdog_thread.start()
+        try:
+            assert mutation_started.wait(1)
+
+            boundary_thread.start()
+            assert boundary_started.wait(1)
+            assert not boundary_finished.wait(0.05)
+            assert not app._external_development_hold_active
+        finally:
+            mutation_release.set()
+            watchdog_thread.join(timeout=2)
+            if boundary_thread.ident is not None:
+                boundary_thread.join(timeout=2)
+
+    assert not watchdog_thread.is_alive()
+    assert not boundary_thread.is_alive()
+    assert mutation_finished.is_set()
+    assert boundary_finished.is_set()
+    assert app._external_development_hold_active
+    assert app._interactive_development_ack["state"] == "pending"
+
+    with (
+        patch("core.app.stop_blind_gem_tapper", return_value=False),
+        patch("core.app.is_blind_gem_tapper_active", return_value=False),
+    ):
+        app._sync_interactive_development_observation(
+            {"state": "RUNNING"},
+            now=1_002.0,
+        )
+    assert mutation_finished.is_set()
+    assert app._interactive_development_ack["state"] == "active"
+
+
+@pytest.mark.parametrize(
+    ("pid_running", "foregrounded"),
+    (
+        (False, True),
+        (True, False),
+    ),
+)
+def test_external_hold_blocks_watchdog_mutation_but_not_observation(
+    tmp_path,
+    monkeypatch,
+    pid_running,
+    foregrounded,
+):
+    app, _supervisor, _store, _lease = _runtime_app(tmp_path, monkeypatch)
+    app._sync_interactive_development_control_boundary(now=1_001.0)
+    assert app._external_development_hold_active
+    connection = AdbConnectionCoordinator(is_connected=lambda _target: True)
+
+    with (
+        patch("core.watchdog.time.sleep"),
+        patch(
+            "core.watchdog._pid_running",
+            return_value=pid_running,
+        ) as process_observation,
+        patch(
+            "core.watchdog.is_game_foregrounded",
+            return_value=foregrounded,
+        ) as foreground_observation,
+        patch("core.watchdog.restart_game") as restart,
+        patch("core.watchdog.bring_to_foreground") as foreground,
+    ):
+        _watchdog_process_check_once(
+            connection,
+            app._get_watchdog_mutation_guard(),
+        )
+
+    process_observation.assert_called_once_with("com.TechTreeGames.TheTower")
+    foreground_observation.assert_called_once_with()
+    restart.assert_not_called()
+    foreground.assert_not_called()
+
+
+def test_inflight_blind_gem_tap_prevents_active_acknowledgement(
+    tmp_path,
+    monkeypatch,
+):
+    app, _supervisor, _store, _lease = _runtime_app(tmp_path, monkeypatch)
+    tap_started = threading.Event()
+    tap_release = threading.Event()
+    tap_finished = threading.Event()
+
+    def blocking_tap(*_args, **_kwargs):
+        tap_started.set()
+        assert tap_release.wait(2)
+        tap_finished.set()
+        return True
+
+    try:
+        with (
+            patch.object(ad_gems, "get_click", return_value=(250, 1200)),
+            patch.object(ad_gems, "tap_now", side_effect=blocking_tap) as tap_now,
+            patch.object(ad_gems, "log_action_intent"),
+            patch.object(ad_gems, "log_result"),
+        ):
+            ad_gems.start_blind_gem_tapper(
+                duration=30,
+                interval=30,
+                blocking=False,
+                action_guard_fn=lambda: True,
+            )
+            assert tap_started.wait(1)
+
+            app._sync_interactive_development_control_boundary(now=1_001.0)
+            app._sync_interactive_development_observation(
+                {"state": "RUNNING"},
+                now=1_002.0,
+            )
+            assert app._interactive_development_ack["state"] == "pending"
+            assert ad_gems.is_blind_gem_tapper_active()
+            assert not tap_finished.is_set()
+
+            tap_release.set()
+            assert tap_finished.wait(1)
+            for _attempt in range(100):
+                if not ad_gems.is_blind_gem_tapper_active():
+                    break
+                threading.Event().wait(0.01)
+            assert not ad_gems.is_blind_gem_tapper_active()
+
+            app._sync_interactive_development_observation(
+                {"state": "RUNNING"},
+                now=1_003.0,
+            )
+            assert app._interactive_development_ack["state"] == "active"
+            assert tap_finished.is_set()
+            assert tap_now.call_count == 1
+            threading.Event().wait(0.05)
+            assert tap_now.call_count == 1
+    finally:
+        tap_release.set()
+        ad_gems.stop_blind_gem_tapper()
 
 
 def test_external_hold_blocks_every_runtime_input_owner_but_keeps_observation(

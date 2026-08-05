@@ -87,7 +87,10 @@ def test_low_level_runtime_tap_authority_is_narrowly_allowlisted():
             if node.module == "core.adb_utils" and "input_tap" in imported:
                 if relative not in allowed_importers:
                     violations.append(f"{relative}:{node.lineno}:input_tap")
-            if node.module == "core.tap_dispatcher" and "tap" in imported:
+            if node.module == "core.tap_dispatcher" and imported & {
+                "tap",
+                "tap_now",
+            }:
                 if relative not in allowed_importers:
                     violations.append(f"{relative}:{node.lineno}:tap_dispatcher")
     assert violations == []

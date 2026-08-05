@@ -149,7 +149,7 @@ def test_blind_floating_gem_taps_retain_input_logging():
             patch.object(ad_gems, "get_click", return_value=(250, 1200)),
             patch.object(ad_gems.time, "time", side_effect=lambda: next(times)),
             patch.object(ad_gems.time, "sleep"),
-            patch.object(ad_gems, "tap") as tap,
+            patch.object(ad_gems, "tap_now", return_value=True) as tap,
             patch.object(ad_gems, "log_action_intent") as action_log,
             patch.object(ad_gems, "log_result") as result_log,
         ):
@@ -197,7 +197,7 @@ def test_blind_floating_gem_rechecks_authority_before_every_tap():
         patch.object(ad_gems, "get_click", return_value=(250, 1200)),
         patch.object(ad_gems.time, "time", side_effect=clock.time),
         patch.object(ad_gems.time, "sleep", side_effect=clock.sleep),
-        patch.object(ad_gems, "tap") as tap,
+        patch.object(ad_gems, "tap_now", return_value=True) as tap,
         patch.object(ad_gems, "log_action_intent"),
         patch.object(ad_gems, "log_result") as result_log,
     ):
@@ -254,12 +254,17 @@ def test_global_pause_stops_floating_gem_scan_before_its_next_tap():
 
     def tap_once_then_pause(*_args, **_kwargs):
         set_pause(True)
+        return True
 
     with (
         patch.object(ad_gems, "get_click", return_value=(250, 1200)),
         patch.object(ad_gems.time, "time", side_effect=clock.time),
         patch.object(ad_gems.time, "sleep", side_effect=clock.sleep),
-        patch.object(ad_gems, "tap", side_effect=tap_once_then_pause) as tap,
+        patch.object(
+            ad_gems,
+            "tap_now",
+            side_effect=tap_once_then_pause,
+        ) as tap,
         patch.object(ad_gems, "log_action_intent"),
         patch.object(ad_gems, "log_result") as result_log,
     ):
@@ -301,8 +306,10 @@ def test_floating_gem_guard_latency_does_not_accumulate_in_tap_cadence():
         patch.object(ad_gems.time, "sleep", side_effect=clock.sleep),
         patch.object(
             ad_gems,
-            "tap",
-            side_effect=lambda *_args, **_kwargs: tap_times.append(clock.now),
+            "tap_now",
+            side_effect=lambda *_args, **_kwargs: (
+                tap_times.append(clock.now) or True
+            ),
         ),
         patch.object(ad_gems, "log_action_intent"),
         patch.object(ad_gems, "log_result"),

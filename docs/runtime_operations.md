@@ -352,6 +352,14 @@ that value proves all of the following at once:
 - auxiliary, strategy, lifecycle, initialization, validation, recovery, and
   blind/background input are all suppressed without an owner bypass.
 
+The watchdog may still observe connectivity, process presence, and foreground
+state. Its restart, force-stop, launch, and foreground mutations make a final
+typed lifecycle check under the same cooperative guard used to install the
+hold. If recovery was already authorized, hold installation waits for it to
+finish. The floating-gem scan likewise keeps its producer active through each
+synchronous tap; production does not acknowledge the lease while such input is
+in flight, and there is no trailing queued tap to execute afterward.
+
 Keep a live request current with the matching ID; heartbeat operations are
 deliberately absent from the action log:
 

@@ -22,7 +22,7 @@ from utils.logger import (
     set_mission_log_path,
     start_retry_activity_scope,
 )
-from core.watchdog import watchdog_process_check
+from core.watchdog import CooperativeMutationGuard, watchdog_process_check
 from core.adb_connection import AdbConnectionCoordinator
 from core.adb_target_session import AdbTargetSession
 from core.artifact_retention import RuntimeArtifactRetention
@@ -343,6 +343,11 @@ class App:
         self._authority_holds: tuple[AuthorityHoldState, ...] = ()
         self._external_development_hold_active = False
         self._interactive_development_ack: Optional[Dict[str, Any]] = None
+        self._watchdog_mutation_guard = CooperativeMutationGuard(
+            lambda: self._runtime_action_guard(
+                action_class=RuntimeActionClass.LIFECYCLE_ACTION
+            )
+        )
         self._pending_auxiliary_cleanup: Optional[
             tuple[str, AuxiliaryRouteLease]
         ] = None
@@ -558,6 +563,19 @@ class App:
             authority = RuntimeActionAuthority()
             self._action_authority = authority
         return authority
+
+    def _get_watchdog_mutation_guard(self) -> CooperativeMutationGuard:
+        """Return the guard shared by watchdog recovery and lease holds."""
+
+        guard = getattr(self, "_watchdog_mutation_guard", None)
+        if guard is None:
+            guard = CooperativeMutationGuard(
+                lambda: self._runtime_action_guard(
+                    action_class=RuntimeActionClass.LIFECYCLE_ACTION
+                )
+            )
+            self._watchdog_mutation_guard = guard
+        return guard
 
     @staticmethod
     def _current_run_scope_id() -> Optional[str]:
@@ -834,23 +852,27 @@ class App:
         *,
         now: Optional[float] = None,
     ) -> None:
-        previous = getattr(self, "_interactive_development_ack", None)
-        newly_observed = not (
-            isinstance(previous, Mapping)
-            and previous.get("lease_id") == lease.get("lease_id")
-        )
-        self._external_development_hold_active = True
-        self._set_interactive_development_ack(
-            lease,
-            state="pending",
-            now=now,
-            reason=(
-                "the suppressive production hold is installed; a fresh "
-                "observation and background-input quiescence are still required"
-            ),
-        )
+        # A watchdog recovery that passed its final authority check owns this
+        # boundary until the mutation finishes.  Waiting here ensures the hold
+        # and its pending acknowledgement never claim premature quiescence.
+        with self._get_watchdog_mutation_guard().quiescence_boundary():
+            previous = getattr(self, "_interactive_development_ack", None)
+            newly_observed = not (
+                isinstance(previous, Mapping)
+                and previous.get("lease_id") == lease.get("lease_id")
+            )
+            self._external_development_hold_active = True
+            self._set_interactive_development_ack(
+                lease,
+                state="pending",
+                now=now,
+                reason=(
+                    "the suppressive production hold is installed; a fresh "
+                    "observation and background-input quiescence are still required"
+                ),
+            )
+            self._update_action_authority()
         stop_blind_gem_tapper()
-        self._update_action_authority()
         if newly_observed:
             log(
                 "[INTERACTIVE_DEVELOPMENT] Lease request observed at a safe "
@@ -861,9 +883,10 @@ class App:
             )
 
     def _remove_external_development_hold(self) -> None:
-        self._external_development_hold_active = False
-        stop_blind_gem_tapper()
-        self._update_action_authority()
+        with self._get_watchdog_mutation_guard().quiescence_boundary():
+            self._external_development_hold_active = False
+            stop_blind_gem_tapper()
+            self._update_action_authority()
 
     def _terminate_interactive_development_lease(
         self,
@@ -2970,7 +2993,11 @@ class App:
 
         threading.Thread(
             target=watchdog_process_check,
-            args=(30, self._adb_connection_coordinator),
+            args=(
+                30,
+                self._adb_connection_coordinator,
+                self._get_watchdog_mutation_guard(),
+            ),
             daemon=True,
         ).start()
 

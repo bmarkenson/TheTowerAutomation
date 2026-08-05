@@ -1,6 +1,17 @@
 from unittest.mock import patch
 
-from core.tap_dispatcher import _execute_tap
+from core.tap_dispatcher import TAP_QUEUE, _execute_tap, tap_now
+
+
+def test_tap_now_dispatches_inline_without_enqueuing():
+    with (
+        patch.object(TAP_QUEUE, "put") as enqueue,
+        patch("core.tap_dispatcher.input_tap", return_value=object()) as dispatch,
+    ):
+        assert tap_now(10, 20, "test_target", log_it=False)
+
+    enqueue.assert_not_called()
+    dispatch.assert_called_once_with(10, 20)
 
 
 def test_queued_tap_logs_dispatch_only_after_adb_success(tmp_path, monkeypatch):

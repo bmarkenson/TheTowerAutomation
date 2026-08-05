@@ -13,6 +13,7 @@ defaults:
   queue_semantics: FIFO ordering preserved per process
   worker: A daemon thread is started on import and processes TAP_QUEUE
   tap_path: Uses core.adb_utils.input_tap to map canonical points to device pixels
+  synchronous_path: tap_now executes in the caller's existing worker thread
   logging: Per-tap logging goes through utils.logger.log_input when log_it=True
 """
 
@@ -73,6 +74,12 @@ def _execute_tap(x, y, label, *, log_it: bool) -> bool:
         detail += f" error={error!r}"
     log(detail, "DEBUG")
     return False
+
+
+def tap_now(x, y, label=None, *, log_it: bool = True) -> bool:
+    """Dispatch one tap synchronously through the existing logging boundary."""
+
+    return _execute_tap(x, y, label, log_it=log_it)
 
 
 def tap(x, y, label=None, *, log_it: bool = True):

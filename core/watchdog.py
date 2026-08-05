@@ -23,8 +23,11 @@ defaults:
     - _last_foreground_pkg caches last seen foreground for change logging only
 """
 
+from contextlib import contextmanager
 import re
+import threading
 import time
+from typing import Callable, Iterator, Optional
 
 from core.run_state import AUTOMATION, RunState
 from core.adb_connection import (
@@ -52,6 +55,41 @@ spec:
   kind: module-global cache
   r: str|None (last detected foreground package), used to suppress noisy logs.
 """
+
+
+class CooperativeMutationGuard:
+    """Serialize watchdog mutations against a production quiescence boundary.
+
+    Passive watchdog observations do not use this lock.  A mutating recovery
+    holds it from its final authority check until the mutation finishes, while
+    hold installation acquires the same lock before publishing quiescence.
+    """
+
+    def __init__(self, action_allowed: Callable[[], bool]):
+        self._action_allowed = action_allowed
+        self._lock = threading.RLock()
+
+    @contextmanager
+    def authorize_mutation(self) -> Iterator[bool]:
+        """Yield one final fail-closed authority decision under the guard."""
+
+        with self._lock:
+            try:
+                allowed = bool(self._action_allowed())
+            except Exception as exc:
+                log(
+                    f"[WATCHDOG] Mutating recovery authority check failed: {exc}",
+                    "ERROR",
+                )
+                allowed = False
+            yield allowed
+
+    @contextmanager
+    def quiescence_boundary(self) -> Iterator[None]:
+        """Wait for an authorized mutation to finish and exclude new ones."""
+
+        with self._lock:
+            yield
 
 
 def _parse_pkg_from_text(text: str):
@@ -227,10 +265,40 @@ def _pid_running(package: str) -> bool:
     return False
 
 
+def _dispatch_mutating_recovery(
+    action: Callable[[], None],
+    *,
+    warning: str,
+    mutation_guard: Optional[CooperativeMutationGuard],
+) -> bool:
+    """Run one watchdog mutation only under a final cooperative check."""
+
+    if mutation_guard is None:
+        if AUTOMATION.state in {RunState.PAUSED, RunState.STOPPED}:
+            return False
+        log(warning, "WARN")
+        action()
+        return True
+
+    with mutation_guard.authorize_mutation() as allowed:
+        # Keep operator control authoritative even if a caller supplies a
+        # permissive or stale callback.  This is the final check immediately
+        # before the mutating dispatch.
+        if (
+            not allowed
+            or AUTOMATION.state in {RunState.PAUSED, RunState.STOPPED}
+        ):
+            return False
+        log(warning, "WARN")
+        action()
+        return True
+
+
 def _watchdog_process_check_once(
     connection_coordinator: AdbConnectionCoordinator = (
         DEFAULT_ADB_CONNECTION_COORDINATOR
     ),
+    mutation_guard: Optional[CooperativeMutationGuard] = None,
 ) -> None:
     """Run one fail-closed watchdog inspection for the current target."""
 
@@ -252,11 +320,19 @@ def _watchdog_process_check_once(
         foregrounded = is_game_foregrounded()
 
         if not pid_running:
-            log("[WATCHDOG] Game process not running. Restarting.", "WARN")
-            restart_game()
+            _dispatch_mutating_recovery(
+                restart_game,
+                warning="[WATCHDOG] Game process not running. Restarting.",
+                mutation_guard=mutation_guard,
+            )
         elif not foregrounded:
-            log("[WATCHDOG] Game is backgrounded. Bringing to foreground.", "WARN")
-            bring_to_foreground()
+            _dispatch_mutating_recovery(
+                bring_to_foreground,
+                warning=(
+                    "[WATCHDOG] Game is backgrounded. Bringing to foreground."
+                ),
+                mutation_guard=mutation_guard,
+            )
 
 
 def watchdog_process_check(
@@ -264,11 +340,12 @@ def watchdog_process_check(
     connection_coordinator: AdbConnectionCoordinator = (
         DEFAULT_ADB_CONNECTION_COORDINATOR
     ),
+    mutation_guard: Optional[CooperativeMutationGuard] = None,
 ):
     """
     spec:
       name: watchdog_process_check
-      signature: watchdog_process_check(interval:int=30) -> None
+      signature: watchdog_process_check(interval:int=30, mutation_guard=None) -> None
       r: null (infinite supervisory loop)
       s: [adb][state][log][loop][sleep]
       e:
@@ -280,7 +357,10 @@ def watchdog_process_check(
     """
     while True:
         try:
-            _watchdog_process_check_once(connection_coordinator)
+            _watchdog_process_check_once(
+                connection_coordinator,
+                mutation_guard,
+            )
 
         except Exception as e:
             log(f"[WATCHDOG ERROR] {e}", "ERROR")

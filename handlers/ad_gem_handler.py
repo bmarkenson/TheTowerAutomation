@@ -3,7 +3,7 @@
 import threading
 import time
 from typing import Callable, Optional
-from core.tap_dispatcher import tap
+from core.tap_dispatcher import tap_now
 from core.clickmap_access import get_click
 from core.input import safe_tap
 from core.label_tapper import is_visible
@@ -120,11 +120,13 @@ def _blind_floating_gem_tapper(
                 )
                 break
             try:
-                tap(x, y, label=label, log_it=True)
+                if not tap_now(x, y, label=label, log_it=True):
+                    failure_reason = "tap dispatch failed"
+                    break
                 taps += 1
             except Exception as e:
                 failure_reason = repr(e)
-                log(f"Blind gem tapper tap() failed: {e!r}", "ERROR")
+                log(f"Blind gem tapper tap_now() failed: {e!r}", "ERROR")
                 break
             # Keep the sweep on its wall-clock cadence.  The mandatory
             # pre-input authority check must not add its own latency to every
@@ -198,6 +200,8 @@ def start_blind_gem_tapper(
     Notes:
         - Non-reentrant: will not start if another instance is active.
         - The active state is tracked via `_blind_tapper_active`.
+        - Each tap dispatch is synchronous inside this already-backgrounded
+          worker, so active state covers the complete input operation.
     """
     if duration <= 0:
         log("Blind floating gem duration must be > 0; request ignored", "WARN")

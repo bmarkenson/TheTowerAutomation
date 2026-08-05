@@ -823,7 +823,12 @@ initialization, preflight, continuity, and exclusive-validation ownership, it
 has no matching in-process bypass: even `owner=external_development` is denied.
 It therefore stops normal strategy, handler, auxiliary, initialization,
 validation, recovery, lifecycle, and blind/background input without changing
-`AUTOMATION.state` or representing itself as Pause.
+`AUTOMATION.state` or representing itself as Pause. Watchdog connection,
+process, and foreground observations continue, but its restart and foreground
+paths recheck lifecycle authority under the mutation guard shared with hold
+installation. An already-authorized recovery retains that guard through its
+last mutation; production cannot install the hold or acknowledge quiescence
+until it finishes.
 
 An active Strategy Gate is distinct from Pause and never mutates the control
 file or `AUTOMATION.state`. It is scoped to the current activity/run identity
@@ -900,11 +905,13 @@ development-lease authority from warning text in `actions.log`.
   tapper rechecks the central floating-gem auxiliary decision immediately
   before every tap and stops cooperatively on Pause, Stop, gate replacement,
   exclusive ownership, shutdown, battle-scope change, or loss of the detected
-  `RUNNING` precondition. That hot guard performs no capture, OCR, detector, or
-  status-publication work, and its wall-clock schedule prevents guard latency
-  from accumulating across the one-second sweep cadence. Operator-invoked
-  gesture tuning may use its separately named unchecked tooling path with a
-  recorded reason.
+  `RUNNING` precondition. Each tap is synchronous within that already
+  backgrounded worker, so the worker remains active until accepted input has
+  completed and cannot leave a queued tap behind. That hot guard performs no
+  capture, OCR, detector, or status-publication work, and its wall-clock
+  schedule prevents guard latency from accumulating across the one-second
+  sweep cadence. Operator-invoked gesture tuning may use its separately named
+  unchecked tooling path with a recorded reason.
 - Every ordinary live action requires fresh source-state evidence immediately
   before the input. A bounded urgent block requires fresh evidence before
   issuing its reusable authority. Transition frames and unrelated stale
@@ -1016,11 +1023,14 @@ development-lease authority from warning text in `actions.log`.
   owner label and ordinary lease ID to the fresh production runtime/session,
   PID, exact ADB target, and starting screen/battle evidence. The request is
   not authority. The matching runtime installs `external_development` at a
-  safe main-loop boundary, stops background input, obtains a fresh known
-  observation, and only then publishes the separate acknowledgement. A
-  30-second heartbeat deadline, Pause/Stop, runtime/PID/target replacement, or
-  authoritative battle boundary makes status inactive and terminates the
-  lease. Resume never revives the terminal request.
+  safe main-loop boundary shared with watchdog mutation dispatch, stops
+  background input, obtains a fresh known observation, and only then publishes
+  the separate acknowledgement. The watchdog may continue passive observation,
+  but restart and foreground recovery make their final typed lifecycle check
+  under that shared guard. A 30-second heartbeat deadline, Pause/Stop,
+  runtime/PID/target replacement, or an authoritative battle boundary makes
+  status inactive and terminates the lease. Resume never revives the terminal
+  request.
 - A normal development release remains held through the first post-release
   capture and detection. A known same-battle screen permits the runtime to
   publish the terminal result and remove the hold. An ambiguous screen or

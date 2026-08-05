@@ -315,7 +315,19 @@ An interactive lease becomes active only after the production runtime:
 The main loop installs the hold only between runtime input workflows. It then
 cooperatively stops the floating-gem tapper and withholds acknowledgement until
 that worker is inactive and a known fresh screen has been detected. The
-runtime acknowledgement is carried by the same atomic
+floating-gem worker dispatches synchronously rather than handing input to a
+second queue, so its active flag remains set through the complete tap operation
+and no accepted tap can outlive the producer into an active lease.
+
+The watchdog continues passive connection, process, and foreground observation
+while the hold is pending or active. Restart, force-stop, launch, and foreground
+recovery cross a small lock-backed mutation guard that makes the typed lifecycle
+decision immediately before dispatch and retains the guard until the recovery
+finishes. Hold installation acquires that same guard before setting
+`external_development`, so it waits for any already-authorized recovery and
+prevents later recovery before production reports quiescence.
+
+The runtime acknowledgement is carried by the same atomic
 `logs/strategy_action_gate.json` channel as the typed authority matrix. Status
 reports a lease active only when that snapshot is fresh, its runtime/PID/target
 matches both the request and active lock, the `external_development` hold is
