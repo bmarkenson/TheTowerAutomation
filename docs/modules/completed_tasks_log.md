@@ -196,7 +196,7 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 
 ### 2026-08-04 cooperative interactive-development lease
 
-- `b87cdd96e21a544b65a0adcd8d0ca37dc0677cb3` implemented delivery step 3 of
+- `fba8c50151069c3ffae86ac8b1050094b8985330` implemented delivery step 3 of
   production/development coordination on the existing control directive,
   supervisor, structured action-gate status, and control-surface API. One
   bounded request can be acknowledged only by the freshly matched production
@@ -220,7 +220,7 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   emulator was inspected or changed. The lease-aware development ADB input
   helper remains the next delivery step and was not implemented here.
 - The 2026-08-05 master-review correction
-  `baaa91c8186b1de3d343d7a63366e811e926b57e` closes two production-quiescence
+  `d70d5a340e350bc12471c8654f0b1301213bea96` closes two production-quiescence
   races. Watchdog restart and foreground recovery now retain a shared mutation
   guard from their final typed lifecycle check through completion, while hold
   installation waits on the same boundary. The blind floating-gem worker now
