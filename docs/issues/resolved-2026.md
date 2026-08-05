@@ -8,6 +8,60 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Save-first rollout repeated matching UI checks and opened History early
+
+- **Observed:** 2026-08-04 in the coordinator-accepted rollout evidence after
+  the initial save-first implementation reached production.
+- **Symptom:** The authoritative Home acquisition accepted eleven configuration
+  checks but unnecessarily sent Free Upgrade locks, Modules, Auto Pick order,
+  and Target Priority to UI. Before that acquisition, Activity Continuity also
+  opened Battle History even though the eventual snapshot exposed the same
+  newest Tier 19, wave 1899 structural tail.
+- **Evidence:** The retained same-run UI routes required no repair: all 17
+  configured Auto Pick ranks, the three requested Farm locks, all eight Farm
+  Module assignments, and the complete Farm Target Priority order matched. The
+  34-entry Auto Pick array was unique, had no sentinel, and lacked only ID `11`
+  from the old table; retained UI evidence uniquely named it Unlock a random
+  ultimate weapon outside the ranked prefix. Lock evidence additionally
+  contained Health. The accepted raw Target Priority permutation was
+  `[2, 7, 9, 5, 8, 6, 3, 0, 4, 1]`.
+- **Safety response:** The corrective worker reused the coordinator's accepted
+  evidence. It performed no duplicate calibration campaign and no live
+  validation, and did not inspect or change production processes, systemd,
+  ADB, an emulator, a shared live frame, or a battle.
+- **Cause:** The version-1073 Auto Pick contract still expected one nonexistent
+  tail sentinel and omitted Perk ID `11`; Target Priority used the wrong
+  complete ID map; Free Upgrade reconciliation incorrectly treated a strategy
+  required subset as an exact saved set; Module structures had no narrowly
+  promoted name/slot mapping; and Activity Continuity was scheduled before the
+  Home save preflight could supply its structural tail. Summary rendering also
+  read save-backed Card Recharge and Perk Ban evidence from UI-only fields.
+- **Resolution:** Auto Pick now requires all 34 unique mapped IDs with an
+  18/16 ranked/inventory split and no sentinel; ID `11` is static. Target
+  Priority uses the accepted complete map. Locks require only every requested
+  bit and report extras without input. The exact current eight-slot Farm Module
+  loadout is value-scoped while Tournament gaps remain UI-backed. The same Home
+  snapshot seeds source-tagged continuity, and direct Retry passively polls a
+  fresh stable tail with append/30-entry-rollover validation and guarded UI
+  fallback. Per-check diagnostics are normalized and privacy-safe.
+- **Regression:** `test/test_player_save.py` covers Auto Pick, Target Priority,
+  lock-subset, Module, malformed-shape, and redaction contracts;
+  `test/test_player_save_preflight.py` covers one-snapshot History publication,
+  force/audit policy, diagnostics, and collector independence;
+  `test/test_player_save_history.py` covers exact-target stable acquisition and
+  source/capacity rules; `test/test_activity_continuity.py` covers initial
+  omission, Retry polling/rollover/fallback, binding loss, source migration,
+  and legacy metadata. Home/carry suppression remains covered by
+  `test/test_gc_no_battle_setup.py` and
+  `test/test_action_executor_save_preflight.py`.
+- **Validation:** The complete isolated checkpoint passed all 1,432 tests plus
+  compilation, state definitions, and clickmap integrity with zero errors and
+  44 known orphans. Generated strategies were byte-identical; changed canonical
+  docs passed local-link/anchor and base-range whitespace checks. Validation was
+  code-only. Deployment and first ordinary-boundary observation remain
+  coordinator work.
+- **Fixed by:** `fe0c43fee8b2c013e13b89e85508e7555b377054`.
+
 ### Clean-checkout Mission test depended on an ignored screenshot
 
 - **Observed:** 2026-08-04 while running the first development-isolation

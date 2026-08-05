@@ -37,6 +37,61 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-04 save-first fallback correction and History continuity
+
+- `fe0c43fee8b2c013e13b89e85508e7555b377054` corrects the first deployed
+  save-first boundary's unnecessary Auto Pick, Free Upgrade lock, Modules,
+  Target Priority, and Battle History UI routes. The causes were a missing Perk
+  ID plus false sentinel contract, an incorrect Target Priority permutation,
+  exact-set lock reconciliation, unpublished Module slot values, and Activity
+  Continuity running before the shared Home snapshot could publish its tail.
+- Version 1073 now requires exactly 34 unique mapped Auto Pick IDs: an
+  18-entry ranked prefix plus 16-entry unranked inventory tail, with no
+  sentinel. ID `11` is `unlock_random_ultimate_weapon`; unknown IDs,
+  duplicates, changed length, and changed membership remain fail-closed. The
+  complete Target Priority map is `0=Closest (Default)`, `1=Basic`, `2=Fast`,
+  `3=Tank`, `4=Ranged`, `5=Boss`, `6=In Spotlight`, `7=Protector`, `8=Elites`,
+  and `9=Fleets`.
+- Free Upgrade lists remain required subsets. Shockwave Size, Bounce Shot
+  Targets, and Bounce Shot Range must be set; additional normalized locks such
+  as Health are privacy-safe unmanaged evidence, do not trigger fallback, and
+  are never unlocked. Missing requested locks and malformed arrays retain the
+  complete UI check/repair path.
+- Module authority is exact and value-scoped to Farm's Primary Amplifying
+  Strike, Orbital Augment, Black Hole Digestor, and Multiverse Nexus plus
+  Assist Being Annihilator, Anti-Cube Portal, Singularity Harness, and
+  Dimension Core in their four typed slots. Unknown/partial structures and
+  Tournament's Project Funding and Harmony Conductor retain the full UI path;
+  rarity, levels, stars, effects, substats, inventory records, GUIDs, and
+  private values remain unpublished.
+- The authoritative Home snapshot now seeds a source-tagged structural History
+  baseline without a second acquisition. Runtime-owned direct Retry uses fresh
+  stable two-identical-read exact-target saves, passively polls an unchanged
+  tail, accepts one append or capacity-30 rollover, and restores guarded UI only
+  when acquisition/shape/transition failure remains safely bound. Unknown
+  `killedBy` preserves structural continuity, UI/save fingerprints are never
+  equated, and legacy schema-1 scopes migrate only through their known UI
+  source. Attachment, terminal record construction, lifecycle authority, and
+  collector receipts remain unchanged.
+- Operator diagnostics now include mapping, completeness, support,
+  disposition, reason, and normalized evidence; accepted Card Recharge Modes
+  and Perk Bans no longer render as unavailable. The complete isolated
+  checkpoint passed compilation, state validation, clickmap integrity with
+  zero errors and 44 known orphans, and all 1,432 tests; the final focused set
+  passed all 231 tests. Generated strategies were byte-identical, and all 42
+  local links across the six changed documents, including 27 anchors, resolved.
+- Accepted coordinator evidence was reused; no duplicate campaign or live
+  validation was performed. This worker did not inspect or change a production
+  process, systemd service, ADB server/target, emulator, shared live frame, or
+  battle. Deployment and ordinary-boundary observation remain coordinator
+  work.
+- The next, separate Perk phase remains active backlog work: add a
+  collector-independent normal-runtime stable-save cache, preserve exact saved
+  pick waves, obtain a terminal stable prefix, and retain UI for unknown,
+  unbound, audit, or unresolved-final evidence. It must not background an
+  active battle by default; forced serialization requires explicit policy and
+  preserved lifecycle/control authority.
+
 ### 2026-08-04 save-first Home configuration preflight
 
 - `9a006a00dadbb2d4104267ce85a1cd7b6c337e28` implemented the default
