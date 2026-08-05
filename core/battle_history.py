@@ -70,7 +70,10 @@ class BattleHistoryIdentity:
 
     def scope_metadata(self) -> dict[str, object]:
         return {
-            "schema_version": 1,
+            "schema_version": 2,
+            "source": "battle_history_ui",
+            "mapping_id": "battle-history-ui-report-v1",
+            "identity_schema_version": 1,
             "fingerprint": self.fingerprint,
             "battle_date": self.battle_date,
             "tier": self.tier,

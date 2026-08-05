@@ -12,6 +12,7 @@
     "perk_auto_pick_order",
     "free_upgrade_locks",
     "guardian_chips",
+    "modules",
     "auto_pick_perks",
     "target_priority",
     "ultimate_weapon_primaries",
@@ -78,12 +79,8 @@
     "ultimateWeaponUnlocked": 9,
     "ultimateWeaponOn": 9,
     "ultimateWeaponLevel": 27,
-    "moduleEquipped": 4,
     "guardianChipUnlocked": 10,
-    "guardianChipLevel": 30,
-    "upgradesLockedFreeUpgrades": 20,
-    "upgradesDefenseLockedFreeUpgrades": 20,
-    "upgradesUtilityLockedFreeUpgrades": 20
+    "guardianChipLevel": 30
   },
   "presets": {
     "cards_deck": {
@@ -121,7 +118,6 @@
     "ranked_count": 18,
     "unranked_count": 16,
     "total_count": 34,
-    "empty_tail_id": -1,
     "tail_semantics": "unranked_perk_inventory_not_priority"
   },
   "perk_bans": {
@@ -140,6 +136,7 @@
     "8": "free_upgrade_chance",
     "9": "defense_percent",
     "10": "perk_wave_requirement",
+    "11": "unlock_random_ultimate_weapon",
     "12": "game_speed",
     "13": "cash_bonus",
     "14": "defense_absolute",
@@ -164,16 +161,87 @@
     "49": "lifesteal_knockback_tradeoff"
   },
   "target_priority_ids": {
-    "0": "Fast",
+    "0": "Closest (Default)",
     "1": "Basic",
-    "2": "Protector",
-    "3": "Closest (Default)",
+    "2": "Fast",
+    "3": "Tank",
     "4": "Ranged",
     "5": "Boss",
-    "6": "Tank",
-    "7": "In Spotlight",
+    "6": "In Spotlight",
+    "7": "Protector",
     "8": "Elites",
     "9": "Fleets"
+  },
+  "module_loadout": {
+    "assist_slot_class": "AssistModuleSlot",
+    "primary": [
+      {
+        "array_index": 0,
+        "slot_key": "cannon_primary",
+        "family": "cannon",
+        "role": "primary",
+        "info_index": 45,
+        "name": "Amplifying Strike"
+      },
+      {
+        "array_index": 1,
+        "slot_key": "armor_primary",
+        "family": "armor",
+        "role": "primary",
+        "info_index": 46,
+        "name": "Orbital Augment"
+      },
+      {
+        "array_index": 2,
+        "slot_key": "generator_primary",
+        "family": "generator",
+        "role": "primary",
+        "info_index": 27,
+        "name": "Black Hole Digestor"
+      },
+      {
+        "array_index": 3,
+        "slot_key": "core_primary",
+        "family": "core",
+        "role": "primary",
+        "info_index": 37,
+        "name": "Multiverse Nexus"
+      }
+    ],
+    "assist": [
+      {
+        "type": 0,
+        "slot_key": "cannon_assist",
+        "family": "cannon",
+        "role": "assist",
+        "info_index": 9,
+        "name": "Being Annihilator"
+      },
+      {
+        "type": 1,
+        "slot_key": "armor_assist",
+        "family": "armor",
+        "role": "assist",
+        "info_index": 20,
+        "name": "Anti-Cube Portal"
+      },
+      {
+        "type": 2,
+        "slot_key": "generator_assist",
+        "family": "generator",
+        "role": "assist",
+        "info_index": 30,
+        "name": "Singularity Harness"
+      },
+      {
+        "type": 3,
+        "slot_key": "core_assist",
+        "family": "core",
+        "role": "assist",
+        "info_index": 38,
+        "name": "Dimension Core"
+      }
+    ]
   },
   "guardian_chip_ids": {
     "0": "Bounty",
@@ -660,7 +728,6 @@
   },
   "unmapped_checks": {
     "damage_slider": "No authoritative current Damage Slider field has been mapped.",
-    "modules": "Primary, assist, rarity, and substat mappings are not yet complete for this version.",
     "orb_distance": "The raw orb-distance fields need unit and selected-preset calibration."
   }
 }

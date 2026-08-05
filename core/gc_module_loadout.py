@@ -134,6 +134,45 @@ def gc_module_loadout_evidence_from_dict(
     return GcModuleLoadoutEvidence(tuple(slots))
 
 
+def gc_module_loadout_evidence_from_assignments(
+    requirements: Mapping[str, Any],
+    observed: Mapping[str, Any],
+    *,
+    catalog: Optional[ModuleIconCatalog] = None,
+) -> GcModuleLoadoutEvidence:
+    """Build final-check evidence from privacy-safe mapped save assignments."""
+
+    selected_catalog = catalog or load_module_icon_catalog()
+    expected = normalize_gc_module_requirements(
+        requirements,
+        catalog=selected_catalog,
+    )
+    actual = {
+        str(key): str(value)
+        for key, value in observed.items()
+        if isinstance(key, str) and isinstance(value, str)
+    }
+    slots = []
+    for slot in selected_catalog.slots:
+        observed_name = actual.get(slot.key)
+        matched = observed_name is not None
+        slots.append(
+            GcModuleSlotEvidence(
+                slot_key=slot.key,
+                family=slot.family,
+                role=slot.role,
+                expected=expected[slot.key],
+                actual=observed_name,
+                match_status="matched" if matched else "unknown",
+                valid=matched and observed_name == expected[slot.key],
+                confidence=1.0 if matched else 0.0,
+                margin=1.0 if matched else 0.0,
+                green_fraction=0.0,
+            )
+        )
+    return GcModuleLoadoutEvidence(tuple(slots))
+
+
 def normalize_gc_module_requirements(
     raw: Any,
     *,
@@ -1080,6 +1119,7 @@ def _equip_inventory_module(
 
 
 __all__ = [
+    "gc_module_loadout_evidence_from_assignments",
     "gc_module_loadout_evidence_from_dict",
     "GcModuleLoadoutEvidence",
     "GcModuleSlotEvidence",

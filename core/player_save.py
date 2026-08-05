@@ -61,6 +61,7 @@ class SaveCheckEvidence:
     complete: bool = True
     reason: str = ""
     authority: Mapping[str, Any] = field(default_factory=dict)
+    diagnostics: Mapping[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -70,6 +71,7 @@ class SaveCheckEvidence:
             "complete": self.complete,
             "reason": self.reason,
             "authority": dict(self.authority),
+            "diagnostics": dict(self.diagnostics),
         }
 
 
@@ -414,8 +416,12 @@ def reconcile_requirements(
             reason = "exact_version_save_match"
 
         decisions[str(check_id)] = {
+            "mapping_id": snapshot.mapping_id,
             "disposition": disposition,
             "reason": reason,
+            "save_evidence_status": (
+                evidence.status if evidence is not None else "unmapped"
+            ),
             "matches": matches,
             "expected": expected_value,
             "observed": observed,
@@ -424,6 +430,12 @@ def reconcile_requirements(
             ),
             "save_check_validated": check_validated,
             "save_requirement_supported": requirement_supported,
+            "diagnostics": _check_diagnostics(
+                str(check_id),
+                expected_value,
+                observed,
+                evidence,
+            ),
             "ui_required": disposition == "ui_required",
             "fallback": "existing_ui_check",
         }
@@ -663,9 +675,11 @@ def _build_checks(
         authority={"kind": "prefix", "maximum_length": ranked_count or 0},
     )
 
-    locks, lock_complete, lock_reason = _mapped_free_upgrade_locks(
-        decoded,
-        mapping,
+    locks, unmanaged_locks, unmapped_lock_count, lock_complete, lock_reason = (
+        _mapped_free_upgrade_locks(
+            decoded,
+            mapping,
+        )
     )
     validated_lock_set = list(
         mapping.get("validated_free_upgrade_lock_set") or ()
@@ -677,8 +691,14 @@ def _build_checks(
         source_fields=tuple((mapping.get("free_upgrade_lock_fields") or {}).keys()),
         complete=lock_complete,
         reason=lock_reason,
-        authority={"kind": "exact_set", "values": validated_lock_set},
+        authority={"kind": "required_subset", "values": validated_lock_set},
+        diagnostics={
+            "unmanaged_locks": unmanaged_locks,
+            "unmapped_locked_slot_count": unmapped_lock_count,
+        },
     )
+
+    checks["modules"] = _module_loadout_evidence(decoded, mapping)
 
     target_ids = mapping.get("target_priority_ids") or {}
     priority, priority_complete, priority_reason = _validated_complete_order(
@@ -936,8 +956,7 @@ def _validated_auto_pick_order(
     ranked_count = _optional_int(spec.get("ranked_count"))
     unranked_count = _optional_int(spec.get("unranked_count"))
     total_count = _optional_int(spec.get("total_count"))
-    empty_tail_id = _optional_int(spec.get("empty_tail_id"))
-    if None in (ranked_count, unranked_count, total_count, empty_tail_id):
+    if None in (ranked_count, unranked_count, total_count):
         return [], False, "Auto Pick structural contract is incomplete"
     if (
         ranked_count <= 0
@@ -965,21 +984,15 @@ def _validated_auto_pick_order(
         numeric.append(parsed)
 
     ranked_raw = numeric[:ranked_count]
-    tail_raw = numeric[ranked_count:]
-    if empty_tail_id in ranked_raw:
-        return [], False, "Auto Pick empty sentinel appeared in ranked entries"
-    if tail_raw.count(empty_tail_id) != 1:
-        return [], False, "Auto Pick tail must contain exactly one empty sentinel"
-    mapped_ids = [value for value in numeric if value != empty_tail_id]
     expected_ids = {_optional_int(value) for value in names.keys()}
     if None in expected_ids:
         return [], False, "Auto Pick perk mapping contains a non-integer ID"
     expected_numeric_ids = {int(value) for value in expected_ids}
-    if len(mapped_ids) != len(set(mapped_ids)):
+    if len(numeric) != len(set(numeric)):
         return [], False, "Auto Pick order contains duplicate perk IDs"
-    if set(mapped_ids) != expected_numeric_ids:
-        missing = sorted(expected_numeric_ids - set(mapped_ids))
-        unknown = sorted(set(mapped_ids) - expected_numeric_ids)
+    if set(numeric) != expected_numeric_ids:
+        missing = sorted(expected_numeric_ids - set(numeric))
+        unknown = sorted(set(numeric) - expected_numeric_ids)
         return (
             [],
             False,
@@ -1022,13 +1035,13 @@ def _validated_complete_order(
 def _mapped_free_upgrade_locks(
     decoded: Mapping[str, Any],
     mapping: Mapping[str, Any],
-) -> tuple[list[str], bool, str]:
+) -> tuple[list[str], list[str], int, bool, str]:
     locked: list[str] = []
     invalid: list[str] = []
-    expected_shapes = mapping.get("required_array_lengths") or {}
+    unmapped_locked_slot_count = 0
     for field, labels in (mapping.get("free_upgrade_lock_fields") or {}).items():
         raw_flags = decoded.get(field)
-        expected_length = _optional_int(expected_shapes.get(field))
+        expected_length = len(labels) if _is_sequence(labels) else None
         if (
             not _is_sequence(raw_flags)
             or expected_length is None
@@ -1048,24 +1061,237 @@ def _mapped_free_upgrade_locks(
             if label:
                 locked.append(str(label))
             else:
-                invalid.append(f"{field}[{index}]:unknown")
+                unmapped_locked_slot_count += 1
     validated = {
         str(value)
         for value in mapping.get("validated_free_upgrade_lock_set") or ()
     }
-    unexpected = sorted(set(locked) - validated)
-    missing = sorted(validated - set(locked))
-    if unexpected:
-        invalid.append("unexpected=" + ",".join(unexpected))
-    if missing:
-        invalid.append("missing=" + ",".join(missing))
+    unmanaged = sorted(set(locked) - validated)
     return (
         locked,
+        unmanaged,
+        unmapped_locked_slot_count,
         not invalid,
-        "Free Upgrade lock structure/value is outside validated scope: "
+        "Free Upgrade lock arrays changed structure: "
         + "; ".join(invalid)
         if invalid
         else "",
+    )
+
+
+def _module_loadout_evidence(
+    decoded: Mapping[str, Any],
+    mapping: Mapping[str, Any],
+) -> SaveCheckEvidence:
+    spec = mapping.get("module_loadout")
+    source_fields = ("moduleEquipped", "assistModuleSlots")
+    if not isinstance(spec, Mapping):
+        return SaveCheckEvidence(
+            check_id="modules",
+            status="unmapped",
+            value=None,
+            source_fields=source_fields,
+            complete=False,
+            reason="module loadout mapping is unavailable",
+        )
+    primary_specs = spec.get("primary")
+    assist_specs = spec.get("assist")
+    if (
+        not _is_sequence(primary_specs)
+        or not _is_sequence(assist_specs)
+        or len(primary_specs) != 4
+        or len(assist_specs) != 4
+    ):
+        return SaveCheckEvidence(
+            check_id="modules",
+            status="unmapped",
+            value=None,
+            source_fields=source_fields,
+            complete=False,
+            reason="module loadout structural contract is incomplete",
+        )
+
+    primary_raw = decoded.get("moduleEquipped")
+    assist_raw = decoded.get("assistModuleSlots")
+    if not _is_sequence(primary_raw) or len(primary_raw) != 4:
+        return _unmapped_module_evidence(
+            source_fields,
+            "Primary module structure changed",
+        )
+    if not _is_sequence(assist_raw) or len(assist_raw) != 4:
+        return _unmapped_module_evidence(
+            source_fields,
+            "Assist module structure changed",
+        )
+
+    assignments: dict[str, str] = {}
+    slot_diagnostics: list[dict[str, str]] = []
+    for raw_spec in primary_specs:
+        if not isinstance(raw_spec, Mapping):
+            return _unmapped_module_evidence(
+                source_fields,
+                "Primary module mapping changed",
+            )
+        index = _exact_int(raw_spec.get("array_index"))
+        if index is None or not 0 <= index < len(primary_raw):
+            return _unmapped_module_evidence(
+                source_fields,
+                "Primary module slot mapping changed",
+            )
+        item = primary_raw[index]
+        if not _is_module_item(item):
+            return _unmapped_module_evidence(
+                source_fields,
+                "Primary module entry is missing or changed type",
+            )
+        failure = _record_mapped_module_assignment(
+            assignments,
+            slot_diagnostics,
+            raw_spec,
+            item,
+        )
+        if failure:
+            return _unmapped_module_evidence(source_fields, failure)
+
+    assist_by_type: dict[int, Mapping[str, Any]] = {}
+    assist_slot_class = str(spec.get("assist_slot_class") or "").strip()
+    if not assist_slot_class:
+        return _unmapped_module_evidence(
+            source_fields,
+            "Assist module slot class mapping changed",
+        )
+    for raw_slot in assist_raw:
+        if not _is_typed_object(raw_slot, assist_slot_class):
+            return _unmapped_module_evidence(
+                source_fields,
+                "Assist module slot changed type",
+            )
+        slot_type = _exact_int(raw_slot.get("type"))
+        unlocked = raw_slot.get("unlocked")
+        if slot_type is None or slot_type in assist_by_type:
+            return _unmapped_module_evidence(
+                source_fields,
+                "Assist module slot types are incomplete or duplicated",
+            )
+        if type(unlocked) is not bool or not unlocked:
+            return _unmapped_module_evidence(
+                source_fields,
+                "Assist module slot is locked or has changed unlock state",
+            )
+        module_items = [
+            value for value in raw_slot.values() if _is_module_item(value)
+        ]
+        if len(module_items) != 1:
+            return _unmapped_module_evidence(
+                source_fields,
+                "Assist module slot does not contain exactly one ModuleItem",
+            )
+        assist_by_type[slot_type] = module_items[0]
+
+    for raw_spec in assist_specs:
+        if not isinstance(raw_spec, Mapping):
+            return _unmapped_module_evidence(
+                source_fields,
+                "Assist module mapping changed",
+            )
+        slot_type = _exact_int(raw_spec.get("type"))
+        item = assist_by_type.get(slot_type) if slot_type is not None else None
+        if item is None:
+            return _unmapped_module_evidence(
+                source_fields,
+                "Assist module slot membership changed",
+            )
+        failure = _record_mapped_module_assignment(
+            assignments,
+            slot_diagnostics,
+            raw_spec,
+            item,
+        )
+        if failure:
+            return _unmapped_module_evidence(source_fields, failure)
+
+    if len(assignments) != 8:
+        return _unmapped_module_evidence(
+            source_fields,
+            "module loadout is partial",
+        )
+    return SaveCheckEvidence(
+        check_id="modules",
+        status="observed",
+        value=assignments,
+        source_fields=source_fields,
+        complete=True,
+        authority={
+            "kind": "exact_module_loadout",
+            "assignments": assignments,
+        },
+        diagnostics={"slots": slot_diagnostics},
+    )
+
+
+def _record_mapped_module_assignment(
+    assignments: dict[str, str],
+    diagnostics: list[dict[str, str]],
+    spec: Mapping[str, Any],
+    item: Mapping[str, Any],
+) -> str:
+    slot_key = str(spec.get("slot_key") or "").strip()
+    family = str(spec.get("family") or "").strip()
+    role = str(spec.get("role") or "").strip()
+    name = str(spec.get("name") or "").strip()
+    expected_info_index = _exact_int(spec.get("info_index"))
+    observed_info_index = _exact_int(item.get("infoIndex"))
+    if (
+        not slot_key
+        or slot_key in assignments
+        or not family
+        or role not in {"primary", "assist"}
+        or not name
+        or expected_info_index is None
+    ):
+        return "module slot mapping changed"
+    if observed_info_index is None:
+        return f"{role.title()} module infoIndex is unavailable"
+    if observed_info_index != expected_info_index:
+        return f"unsupported {role} module infoIndex"
+    assignments[slot_key] = name
+    diagnostics.append(
+        {
+            "slot_key": slot_key,
+            "family": family,
+            "role": role,
+            "name": name,
+        }
+    )
+    return ""
+
+
+def _is_module_item(value: Any) -> bool:
+    return _is_typed_object(value, "ModuleItem")
+
+
+def _is_typed_object(value: Any, expected_class: str) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    class_name = str(value.get("__class__") or "").strip()
+    return bool(
+        class_name
+        and class_name.rsplit("+", 1)[-1] == str(expected_class).strip()
+    )
+
+
+def _unmapped_module_evidence(
+    source_fields: tuple[str, str],
+    reason: str,
+) -> SaveCheckEvidence:
+    return SaveCheckEvidence(
+        check_id="modules",
+        status="unmapped",
+        value=None,
+        source_fields=source_fields,
+        complete=False,
+        reason=reason,
+        authority={"kind": "exact_module_loadout", "assignments": {}},
     )
 
 
@@ -1269,18 +1495,18 @@ def _requirement_is_supported(
             type(expected) is type(value) and expected == value
             for value in authority.get("values") or ()
         )
-    if kind == "exact_set":
+    if kind == "required_subset":
         if not _is_sequence(expected):
             return False
         normalized = [_normal_scalar(value) for value in expected]
-        allowed = [
+        allowed = {
             _normal_scalar(value)
             for value in authority.get("values") or ()
-        ]
+        }
         return bool(
-            len(normalized) == len(allowed)
+            normalized
             and len(set(normalized)) == len(normalized)
-            and set(normalized) == set(allowed)
+            and set(normalized) <= allowed
         )
     if kind == "prefix":
         maximum = _optional_int(authority.get("maximum_length"))
@@ -1297,6 +1523,19 @@ def _requirement_is_supported(
             _normal_scalar(value) for value in authority.get("values") or ()
         }
         return len(normalized) == len(allowed) and set(normalized) == allowed
+    if kind == "exact_module_loadout":
+        if not isinstance(expected, Mapping):
+            return False
+        assignments = authority.get("assignments")
+        if not isinstance(assignments, Mapping):
+            return False
+        return {
+            str(key): _normal_scalar(value)
+            for key, value in expected.items()
+        } == {
+            str(key): _normal_scalar(value)
+            for key, value in assignments.items()
+        }
     if kind == "all_named_primary_on":
         if not isinstance(expected, Mapping):
             return False
@@ -1315,7 +1554,11 @@ def _requirement_is_supported(
 
 
 def _check_matches(check_id: str, expected: Any, observed: Any) -> bool:
-    if check_id in {"free_upgrade_locks", "guardian_chips", "perk_bans"}:
+    if check_id == "free_upgrade_locks":
+        expected_set = {_normal_scalar(value) for value in expected or []}
+        observed_set = {_normal_scalar(value) for value in observed or []}
+        return expected_set <= observed_set
+    if check_id in {"guardian_chips", "perk_bans"}:
         return {_normal_scalar(value) for value in expected or []} == {
             _normal_scalar(value) for value in observed or []
         }
@@ -1323,6 +1566,16 @@ def _check_matches(check_id: str, expected: Any, observed: Any) -> bool:
         expected_list = [_normal_scalar(value) for value in expected or []]
         observed_list = [_normal_scalar(value) for value in observed or []]
         return observed_list[: len(expected_list)] == expected_list
+    if check_id == "modules" and isinstance(expected, Mapping):
+        if not isinstance(observed, Mapping):
+            return False
+        return {
+            str(key): _normal_scalar(value)
+            for key, value in expected.items()
+        } == {
+            str(key): _normal_scalar(value)
+            for key, value in observed.items()
+        }
     if isinstance(expected, Mapping):
         return _mapping_is_subset(expected, observed)
     if isinstance(expected, Sequence) and not isinstance(expected, (str, bytes)):
@@ -1330,6 +1583,24 @@ def _check_matches(check_id: str, expected: Any, observed: Any) -> bool:
             _normal_scalar(value) for value in observed or []
         ]
     return _normal_scalar(expected) == _normal_scalar(observed)
+
+
+def _check_diagnostics(
+    check_id: str,
+    expected: Any,
+    observed: Any,
+    evidence: Optional[SaveCheckEvidence],
+) -> dict[str, Any]:
+    diagnostics = dict(evidence.diagnostics) if evidence is not None else {}
+    if check_id == "free_upgrade_locks" and _is_sequence(expected):
+        expected_set = {_normal_scalar(value) for value in expected}
+        observed_labels = [str(value) for value in observed or ()]
+        diagnostics["unmanaged_locks"] = sorted(
+            label
+            for label in observed_labels
+            if _normal_scalar(label) not in expected_set
+        )
+    return diagnostics
 
 
 def _mapping_is_subset(expected: Mapping[str, Any], observed: Any) -> bool:

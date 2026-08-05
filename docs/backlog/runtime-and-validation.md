@@ -31,11 +31,24 @@ checked-item detail remains in the
     / `comparison_audit` runtime policy without depending on the observation
     collector. First Perk Choice is an independent Farm requirement;
     Tournament invents no Perk requirement. The adopted scope is the ranked
-    Auto Pick prefix, the exact current three-lock Farm set, complete exact
-    Target Priority order, both Poison Stun polarities, all-nine-primaries-on,
-    and Spotlight-Missiles-on. Modules, Damage Slider, Orb Distance, mixed/off
-    primaries, and Spotlight Missiles off remain UI-authoritative. This was
-    code-only validation, not a repeated live-preflight campaign.
+    Auto Pick prefix, the current three-lock Farm required subset, complete
+    exact Target Priority order, both Poison Stun polarities,
+    all-nine-primaries-on, Spotlight-Missiles-on, and the exact current
+    eight-slot Farm Module assignment. Tournament's unmapped Modules, Damage
+    Slider, Orb Distance, mixed/off primaries, and Spotlight Missiles off remain
+    UI-authoritative. This was code-only validation, not a repeated
+    live-preflight campaign.
+  - [x] Correct the deployed save-first fallbacks from the accepted first
+    rollout. Version 1073 now requires all 34 unique Auto Pick IDs with no
+    sentinel and maps `11=unlock_random_ultimate_weapon`; Target Priority uses
+    the complete accepted ten-ID permutation; Free Upgrade locks compare the
+    requested subset while reporting unmanaged extras such as `Health`; the
+    exact Farm Primary/Assist Module names are value-scoped; and the same Home
+    snapshot seeds source-tagged Activity Continuity before History UI. Direct
+    Retry passively accepts an advancing append or capacity-30 rollover from a
+    fresh stable exact-target save. This reused coordinator-supplied evidence,
+    performed no duplicate campaign, and was code-only; deployment and
+    ordinary-boundary observation remain coordinator work.
   - [x] Consolidate every profile and runtime save claim into the authoritative
     `data-9-game-1073` audit matrix. Implement the repository-local
     normalized runtime foundation: guarded round identity, exact consistent
@@ -119,6 +132,16 @@ checked-item detail remains in the
     facts, lifecycle changes, and UI suppression remain outside
     `V1073-RUNTIME-013` and must preserve the current-process terminal-binding
     rule.
+  - [ ] Replace the in-battle Perk UI timeline with a normal-runtime save
+    checkpoint cache independent of collector opt-in. Consume naturally
+    serialized stable revisions under the exact round identity; preserve the
+    exact saved `PerkPick` wave even when the checkpoint arrives later; and
+    obtain a terminal stable save to close the final prefix. Retain UI for an
+    unknown ID, acquisition/continuity failure, explicit audit, or unresolved
+    final state. Do not background an active battle merely to accelerate a
+    save. Any optional forced active-battle serialization requires an explicit
+    runtime policy and must preserve control and lifecycle authority. This is a
+    separate implementation phase, not part of the save-first fallback fix.
   - [ ] Add save-derived normal completed records and conditional terminal
     Perks navigation only after history-tail attachment and final-Perk proofs
     are complete. Preserve passive compact Game Stats OCR, forced full UI audit,
@@ -126,17 +149,26 @@ checked-item detail remains in the
   - [ ] Add the versioned raw-field disposition manifest and explicit
     validation status/provenance for every normalized profile group. Keep
     private, ignored, and unknown fields unpublished.
-  - [ ] After deployment, observe the first ordinary save-first Home boundary
-    and exact-next-battle bind. Confirm operator-facing ACTION / INPUT / RESULT
-    logging, the expected omitted versus fallback UI routes, and unchanged
-    production authority. This is ordinary rollout observation, not a request
-    for a special battle or duplicate field-validation campaign.
+  - [ ] Deploy the corrective commits through the coordinator-owned promotion
+    path, then observe the first ordinary save-first Home boundary,
+    exact-next-battle bind, and natural direct Retry. Confirm privacy-safe
+    per-check dispositions, the omitted versus fallback UI routes, advancing
+    source-tagged History continuity, and unchanged production authority. This
+    is ordinary rollout observation, not a request for a special battle or
+    duplicate field-validation campaign.
   - [ ] Use natural UI fallbacks and explicit/periodic `comparison_audit` runs
     for future privacy-safe candidates. Candidates never self-promote; mapping
     promotion remains a reviewed code/documentation change.
     - [ ] During an ordinary Farm T18 start, compare its distinct complete
-      Target Priority order with the mapped save sequence. A second nontrivial
-      full order confirms generic serialization; do not test all permutations.
+      Target Priority order with the mapped save sequence as generic
+      serialization-order confirmation only. The accepted complete Farm
+      permutation is already sufficient for the current mapping; do not test
+      all permutations.
+    - [ ] Naturally cross-validate Tournament's Project Funding and Harmony
+      Conductor `infoIndex`/typed-slot associations before extending Module
+      authority. Keep the complete Tournament Modules UI route until both
+      requested names and all eight assignments are exact; do not infer rarity,
+      levels, stars, effects, substats, GUIDs, or inventory semantics.
     - [ ] Before supporting mixed Ultimate Weapon primaries, validate one
       weapon index's off/on polarity at a time with normalized
       before/change/restore evidence. Validate Spotlight Missiles off through
@@ -149,8 +181,8 @@ checked-item detail remains in the
       versus active behavior, and restoration. Only if natural transitions are
       insufficient may a later coordinator authorize one owned bounded
       calibration.
-    - [ ] Continue routing unknown versions, shapes, IDs, values, Modules, and
-      Damage Slider through UI. A unique exact-evidence mapping attempt may use
+    - [ ] Continue routing unknown versions, shapes, IDs, values, unsupported
+      Module requests, and Damage Slider through UI. A unique exact-evidence mapping attempt may use
       the existing fail-closed resolver; ambiguity/conflict remains UI-only,
       and the observation collector never supplies preflight authority.
 - [ ] Capture the numeric level of every equipped Module from authoritative

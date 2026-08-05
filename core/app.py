@@ -60,6 +60,7 @@ from core.player_save_preflight import (
     PlayerSavePreflightContext,
     PlayerSavePreflightCoordinator,
 )
+from core.player_save_history import PlayerSaveHistoryReader
 from core.perk_timeline import PerkTimelineObserver
 from core.no_strategy_inventory import (
     NoStrategyInventoryStatus,
@@ -204,6 +205,8 @@ class App:
         self._player_save_runtime_session_id = new_operation_id()
         self._player_save_preflight_session_id = ""
         self._player_save_preflight_result = None
+        self._player_save_preflight_activity_scope_id = None
+        self._player_save_history_baseline_outcome = None
         self._player_save_preflight_coordinator = (
             PlayerSavePreflightCoordinator(
                 target_snapshot_fn=adb_target_session.snapshot,
@@ -214,7 +217,21 @@ class App:
             if adb_target_session is not None
             else None
         )
-        self._activity_continuity = ActivityContinuityCoordinator()
+        save_history_reader = (
+            PlayerSaveHistoryReader(
+                target_snapshot_fn=adb_target_session.snapshot,
+                capture_fn=self._capture_frame,
+            )
+            if adb_target_session is not None
+            else None
+        )
+        self._activity_continuity = ActivityContinuityCoordinator(
+            save_history_reader=(
+                save_history_reader.read
+                if save_history_reader is not None
+                else None
+            )
+        )
         log(
             f"[RUN_INIT] Startup gate policy={config.startup_gate_policy}",
             "INFO",
@@ -868,6 +885,25 @@ class App:
             initial_frame=screenshot,
         )
         self._player_save_preflight_result = result
+        scope = get_activity_scope()
+        self._player_save_preflight_activity_scope_id = (
+            getattr(result, "history_scope_id", None)
+            or (str(scope.get("run_id") or "") if scope else None)
+        )
+        activity_continuity = getattr(self, "_activity_continuity", None)
+        self._player_save_history_baseline_outcome = (
+            activity_continuity.accept_home_save_baseline(
+                getattr(result, "history_tail", {}),
+                expected_scope_id=getattr(result, "history_scope_id", None),
+                player_save_mode=str(mode),
+            )
+            if (
+                activity_continuity is not None
+                and result.ready
+                and str(mode) != "force_ui"
+            )
+            else None
+        )
         return result
 
     def _current_strategy_name(self) -> str:
@@ -2424,6 +2460,77 @@ class App:
                     None,
                 )
                 if activity_continuity is not None:
+                    player_save_mode = str(
+                        self._runtime_policy().get(
+                            "player_save_preflight",
+                            "save_first",
+                        )
+                    )
+                    current_scope = get_activity_scope()
+                    current_scope_id = (
+                        str(current_scope.get("run_id") or "")
+                        if current_scope
+                        else ""
+                    )
+                    save_history_baseline_blocked = bool(
+                        getattr(
+                            getattr(
+                                self,
+                                "_player_save_history_baseline_outcome",
+                                None,
+                            ),
+                            "blocked",
+                            False,
+                        )
+                        and getattr(
+                            self,
+                            "_player_save_preflight_activity_scope_id",
+                            None,
+                        )
+                        == current_scope_id
+                    )
+                    home_save_preflight_pending = bool(
+                        str(detection.get("state") or "").upper()
+                        in {"HOME", "HOME_SCREEN"}
+                        and HomeBattleControl.parse(
+                            detection.get(
+                                "home_battle_control",
+                                "UNKNOWN",
+                            )
+                        )
+                        is HomeBattleControl.NEW_BATTLE
+                        and player_save_mode
+                        in {"save_first", "comparison_audit"}
+                        and getattr(
+                            self,
+                            "_player_save_preflight_coordinator",
+                            None,
+                        )
+                        is not None
+                        and bool(
+                            self._mission_mgr.no_battle_setup_requirements()
+                        )
+                        and (
+                            getattr(
+                                self,
+                                "_player_save_preflight_activity_scope_id",
+                                None,
+                            )
+                            != current_scope_id
+                            or not bool(
+                                getattr(
+                                    getattr(
+                                        self,
+                                        "_player_save_preflight_result",
+                                        None,
+                                    ),
+                                    "ready",
+                                    False,
+                                )
+                            )
+                        )
+                        or save_history_baseline_blocked
+                    )
                     initialization_blocks_history = (
                         self._mission_mgr.run_initialization_pending()
                     )
@@ -2438,6 +2545,7 @@ class App:
                     continuity_needed = activity_continuity.needs_check(
                         detection,
                         post_retry_poll_allowed=post_retry_poll_allowed,
+                        defer_home_baseline=home_save_preflight_pending,
                     )
                     continuity_holds = (
                         (
@@ -2469,6 +2577,8 @@ class App:
                             owner=AuthorityHold.ACTIVITY_CONTINUITY
                         ),
                         post_retry_poll_allowed=post_retry_poll_allowed,
+                        defer_home_baseline=home_save_preflight_pending,
+                        player_save_mode=player_save_mode,
                     )
                     continuity_pending = continuity.pending
                     self._apply_activity_continuity_outcome(continuity)
@@ -4052,6 +4162,29 @@ class App:
                     or exclusive_request_pending
                 )
             ):
+                scope = get_activity_scope()
+                scope_id = str(scope.get("run_id") or "") if scope else ""
+                prior_history_baseline = getattr(
+                    self,
+                    "_player_save_history_baseline_outcome",
+                    None,
+                )
+                if (
+                    bool(getattr(prior_history_baseline, "blocked", False))
+                    and getattr(
+                        self,
+                        "_player_save_preflight_activity_scope_id",
+                        None,
+                    )
+                    == scope_id
+                ):
+                    log(
+                        "[BATTLE_CONTINUITY] Save-first Home baseline remains "
+                        "blocked for this activity scope; no repeated save, "
+                        "History UI, or battle input is authorized",
+                        "INFO",
+                    )
+                    return
                 self._claim_proactive_gate_waivers(
                     for_home_setup=True,
                     requirements=requirements,
@@ -4072,6 +4205,19 @@ class App:
                     screenshot=img,
                 )
                 if save_preflight is not None and not save_preflight.ready:
+                    return
+                history_baseline = getattr(
+                    self,
+                    "_player_save_history_baseline_outcome",
+                    None,
+                )
+                if bool(getattr(history_baseline, "blocked", False)):
+                    log(
+                        "[BATTLE_CONTINUITY] Save-first Home baseline lost its "
+                        "activity/source binding; no History UI or battle input "
+                        "is authorized",
+                        "INFO",
+                    )
                     return
                 setup = self._run_home_setup_attempts(
                     requirements,
@@ -4167,6 +4313,14 @@ class App:
                         setup_evidence
                     )
                 self._startup_gate_waivers = {}
+                if bool(getattr(history_baseline, "ui_required", False)):
+                    log(
+                        "[BATTLE_CONTINUITY] Home configuration setup is "
+                        "complete; yielding the next action boundary to the "
+                        "guarded Battle History UI fallback",
+                        "INFO",
+                    )
+                    return
             if self._maybe_start_exclusive_validation(
                 home_control=home_control,
             ):

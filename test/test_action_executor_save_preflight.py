@@ -19,6 +19,16 @@ ORDER = [
     "Ranged",
     "Basic",
 ]
+MODULES = {
+    "cannon_primary": "Amplifying Strike",
+    "armor_primary": "Orbital Augment",
+    "generator_primary": "Black Hole Digestor",
+    "core_primary": "Multiverse Nexus",
+    "cannon_assist": "Being Annihilator",
+    "armor_assist": "Anti-Cube Portal",
+    "generator_assist": "Singularity Harness",
+    "core_assist": "Dimension Core",
+}
 
 
 def test_target_priority_consumes_bound_exact_order_without_opening_ui():
@@ -129,13 +139,13 @@ def test_target_priority_ui_repair_invalidates_other_carried_checks():
     assert invalidations == ["in_battle_target_priority_repair"]
 
 
-def test_bound_save_locks_satisfy_only_the_exact_later_boundary_check():
+def test_bound_save_locks_preserve_required_subset_with_unmanaged_extra():
     expected = list(FARM_FREE_UPGRADE_LOCKS)
 
     class BoundSave:
         def consume(self, check_id):
             assert check_id == "free_upgrade_locks"
-            return list(expected)
+            return [*expected, "Health"]
 
     setup = {
         "free_upgrade_locks": {
@@ -158,6 +168,42 @@ def test_bound_save_locks_satisfy_only_the_exact_later_boundary_check():
     assert normalized["source"] == "bound_player_save_preflight"
     assert normalized["blocking_valid"] is True
     assert normalized["valid"] is True
+    assert normalized["observed"] == [*expected, "Health"]
+    assert normalized["diagnostics"]["unmanaged_locks"] == ["Health"]
+
+
+def test_exact_save_backed_modules_bind_into_final_session_evidence():
+    class BoundSave:
+        def consume(self, check_id):
+            assert check_id == "modules"
+            return dict(MODULES)
+
+    setup = {
+        "modules": {
+            "status": "save_match",
+            "source": "player_save_preflight",
+            "checked": False,
+            "valid": True,
+            "slots": [
+                {
+                    "slot_key": key,
+                    "expected": value,
+                    "actual": value,
+                    "valid": True,
+                }
+                for key, value in MODULES.items()
+            ],
+        }
+    }
+
+    bound = _bind_save_backed_home_evidence(setup, BoundSave())
+
+    assert bound["modules"]["source"] == "bound_player_save_preflight"
+    assert bound["modules"]["valid"] is True
+    assert {
+        slot["slot_key"]: slot["actual"]
+        for slot in bound["modules"]["slots"]
+    } == MODULES
 
 
 def test_changed_later_lock_requirement_invalidates_carried_snapshot():

@@ -155,8 +155,8 @@ def _bind_save_backed_home_evidence(
         if (
             not isinstance(carried_locks, list)
             or not isinstance(expected_locks, list)
-            or set(carried_locks) != set(expected_locks)
-            or len(carried_locks) != len(expected_locks)
+            or len(set(expected_locks)) != len(expected_locks)
+            or not set(expected_locks).issubset(set(carried_locks))
         ):
             payload.pop("free_upgrade_locks", None)
             invalidate = getattr(player_save_preflight, "invalidate", None)
@@ -166,7 +166,42 @@ def _bind_save_backed_home_evidence(
             bound_locks = dict(lock_evidence)
             bound_locks["source"] = "bound_player_save_preflight"
             bound_locks["observed"] = list(carried_locks)
+            bound_locks["diagnostics"] = {
+                **dict(bound_locks.get("diagnostics") or {}),
+                "unmanaged_locks": sorted(
+                    set(carried_locks) - set(expected_locks)
+                ),
+            }
             payload["free_upgrade_locks"] = bound_locks
+
+    modules = payload.get("modules")
+    if (
+        isinstance(modules, Mapping)
+        and modules.get("source") == "player_save_preflight"
+    ):
+        carried_modules = consume("modules") if callable(consume) else None
+        expected_modules = {
+            str(slot.get("slot_key") or ""): str(slot.get("expected") or "")
+            for slot in modules.get("slots") or ()
+            if isinstance(slot, Mapping)
+        }
+        if (
+            not isinstance(carried_modules, Mapping)
+            or not expected_modules
+            or {
+                str(key): str(value)
+                for key, value in carried_modules.items()
+            }
+            != expected_modules
+        ):
+            payload.pop("modules", None)
+            invalidate = getattr(player_save_preflight, "invalidate", None)
+            if carried_modules is not None and callable(invalidate):
+                invalidate("module_boundary_requirement_changed")
+        else:
+            bound_modules = dict(modules)
+            bound_modules["source"] = "bound_player_save_preflight"
+            payload["modules"] = bound_modules
 
     ultimate = payload.get("ultimate_weapons")
     if (

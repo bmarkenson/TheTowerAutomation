@@ -570,6 +570,7 @@ def test_auto_pick_rows_have_value_independent_semantic_keys():
             "ay Enemies have -55.0% Ca health, but tower health"
         ): "enemy_health_tradeoff",
         "Swamp radius x1.5": "swamp_radius",
+        "Unlock a random ultimate weapon": "unlock_random_ultimate_weapon",
     }
 
     assert {

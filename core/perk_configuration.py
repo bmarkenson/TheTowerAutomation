@@ -72,6 +72,7 @@ PERK_CONFIGURATION_LABELS = {
     "land_mine_damage": "Land Mine Damage",
     "cash_bonus": "Cash Bonus",
     "perk_wave_requirement": "Perk Wave Requirement",
+    "unlock_random_ultimate_weapon": "Unlock a random ultimate weapon",
     "game_speed": "Game Speed",
     "coin_tradeoff": "Coin Trade-Off",
     "golden_tower_bonus": "Golden Tower Bonus",
@@ -121,6 +122,7 @@ PERK_CONFIGURATION_OCR_EXEMPLARS = {
     "land_mine_damage": "Land Mine Damage x4.38",
     "cash_bonus": "x1.44 Cash Bonus",
     "perk_wave_requirement": "Perk wave requirement -25.00%",
+    "unlock_random_ultimate_weapon": "Unlock a random ultimate weapon",
     "game_speed": "Increase max game speed by +1.25",
     "coin_tradeoff": "x1.98 coins, but tower max health -70.0%",
     "golden_tower_bonus": "Golden tower bonus x1.5",
@@ -223,6 +225,8 @@ def classify_perk_configuration_text(text: str) -> str | None:
         return "enemies_damage_tradeoff"
     if "perk wave requirement" in normalized:
         return "perk_wave_requirement"
+    if "unlock a random ultimate weapon" in normalized:
+        return "unlock_random_ultimate_weapon"
     if "increase max game speed" in normalized:
         return "game_speed"
     if (

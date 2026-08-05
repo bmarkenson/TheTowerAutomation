@@ -63,6 +63,36 @@ def _snapshot() -> PlayerSaveSnapshot:
     )
 
 
+def _snapshot_with_history(
+    *,
+    semantic_status: str = "observed",
+) -> PlayerSaveSnapshot:
+    identity = SimpleNamespace(
+        mapping_id="data-9-game-1073",
+        fingerprint="b" * 64,
+        tier=19,
+        wave=1899,
+    )
+    tail = SimpleNamespace(
+        structural_status="observed",
+        structural_reason="",
+        identity=identity,
+        entry_count=30,
+        capacity=30,
+        completed_entry_status=semantic_status,
+        completed_entry_reason=(
+            "unmapped_killed_by_id:999"
+            if semantic_status == "unavailable"
+            else ""
+        ),
+    )
+    runtime = SimpleNamespace(
+        mapping_id="data-9-game-1073",
+        battle_history_tail=tail,
+    )
+    return replace(_snapshot(), runtime_save=runtime)
+
+
 def _context(*, generation: int = 1, strategy: str = "farm_t19"):
     return PlayerSavePreflightContext(
         runtime_session_id="runtime-private",
@@ -160,6 +190,74 @@ def test_one_authoritative_snapshot_reconciles_all_checks(monkeypatch):
     assert "stable-save" not in rendered
     assert "a" * 64 not in rendered
     assert result.provenance["save_version"] == {"data": 9, "game": 1073}
+
+
+def test_same_home_snapshot_publishes_structural_history_baseline(monkeypatch):
+    pulls = []
+    coordinator = _coordinator(
+        monkeypatch,
+        pull_fn=lambda **kwargs: pulls.append(kwargs) or b"stable-save",
+        decode_fn=lambda _payload, **_kwargs: _snapshot_with_history(
+            semantic_status="unavailable"
+        ),
+    )
+
+    result = coordinator.acquire(
+        {"cards_deck": "Farm"},
+        initial_frame=object(),
+    )
+
+    assert len(pulls) == 1
+    assert result.history_scope_id == "activity-private"
+    assert result.history_tail["disposition"] == "save_match"
+    metadata = result.history_tail["metadata"]
+    assert metadata["source"] == "player_save"
+    assert metadata["fingerprint"] == "b" * 64
+    assert metadata["entry_count"] == metadata["capacity"] == 30
+    assert metadata["semantic_status"] == "unavailable"
+    assert "activity-private" not in json.dumps(result.as_dict())
+
+
+@pytest.mark.parametrize("collector_opt_in", ("0", "1"))
+def test_collector_opt_in_is_irrelevant_to_preflight_and_history_authority(
+    monkeypatch,
+    collector_opt_in,
+):
+    monkeypatch.setenv("THETOWER_PLAYER_SAVE_AUDIT", collector_opt_in)
+    pulls = []
+    coordinator = _coordinator(
+        monkeypatch,
+        pull_fn=lambda **kwargs: pulls.append(kwargs) or b"stable-save",
+        decode_fn=lambda _payload, **_kwargs: _snapshot_with_history(),
+    )
+
+    result = coordinator.acquire(
+        {"cards_deck": "Farm"},
+        initial_frame=object(),
+    )
+
+    assert len(pulls) == 1
+    assert result.decisions["cards_deck"]["disposition"] == "save_match"
+    assert result.history_tail["disposition"] == "save_match"
+
+
+def test_comparison_audit_retains_history_ui_even_with_complete_save_tail(
+    monkeypatch,
+):
+    coordinator = _coordinator(
+        monkeypatch,
+        decode_fn=lambda _payload, **_kwargs: _snapshot_with_history(),
+    )
+
+    result = coordinator.acquire(
+        {"cards_deck": "Farm"},
+        mode="comparison_audit",
+        initial_frame=object(),
+    )
+
+    assert result.history_tail["complete"] is True
+    assert result.history_tail["disposition"] == "ui_required"
+    assert result.history_tail["reason"] == "comparison_audit_requires_ui"
 
 
 def test_pull_failure_restores_home_and_authorizes_normal_ui_fallback(monkeypatch):
@@ -307,6 +405,34 @@ def test_lifecycle_logging_has_one_action_two_inputs_and_one_result(monkeypatch)
     result_log.assert_called_once()
 
 
+def test_per_check_diagnostics_log_mapping_support_and_reason(monkeypatch):
+    import core.player_save_preflight as module
+
+    coordinator = _coordinator(monkeypatch)
+    emit = Mock()
+    monkeypatch.setattr(module, "log", emit)
+
+    result = coordinator.acquire(
+        {"cards_deck": "Farm"},
+        initial_frame=object(),
+    )
+
+    assert result.ready
+    messages = [call.args[0] for call in emit.call_args_list]
+    assert any(
+        "check=cards_deck mapping=data-9-game-1073 "
+        "complete=True supported=True disposition=save_match "
+        "reason=exact_version_save_match" in message
+        for message in messages
+    )
+    assert any(
+        "check=battle_history_tail mapping=data-9-game-1073 complete=False "
+        "supported=False disposition=ui_required "
+        "reason=runtime_history_projection_unavailable" in message
+        for message in messages
+    )
+
+
 def test_force_ui_skips_save_lifecycle_and_comparison_audit_keeps_ui_authority(
     monkeypatch,
 ):
@@ -316,20 +442,35 @@ def test_force_ui_skips_save_lifecycle_and_comparison_audit_keeps_ui_authority(
         background_fn=lambda _target: lifecycle_calls.append("background") or True,
     )
 
+    requirements = {
+        "cards_deck": "Farm",
+        "perk_auto_pick_order": ["perk_wave_requirement"],
+        "free_upgrade_locks": ["Shockwave Size"],
+        "modules": {"cannon_primary": "Amplifying Strike"},
+        "target_priority": ["Fast"],
+    }
     forced = coordinator.acquire(
-        {"cards_deck": "Farm"},
+        requirements,
         mode="force_ui",
         initial_frame=object(),
     )
     audited = coordinator.acquire(
-        {"cards_deck": "Farm"},
+        requirements,
         mode="comparison_audit",
         initial_frame=object(),
     )
 
-    assert forced.decisions["cards_deck"]["reason"] == "force_ui_policy"
+    assert set(forced.decisions) == set(requirements)
+    assert all(
+        decision["reason"] == "force_ui_policy"
+        and decision["ui_required"]
+        for decision in forced.decisions.values()
+    )
     assert lifecycle_calls == ["background"]
-    assert audited.decisions["cards_deck"]["reason"] == "scheduled_ui_audit"
+    assert all(
+        decision["disposition"] == "ui_required"
+        for decision in audited.decisions.values()
+    )
     assert audited.carry is None
 
 

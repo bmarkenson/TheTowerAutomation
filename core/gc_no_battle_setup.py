@@ -27,6 +27,7 @@ from core.home_perk_configuration import (
 from core.gc_module_loadout import (
     evaluate_gc_module_loadout,
     ensure_gc_module_loadout,
+    gc_module_loadout_evidence_from_assignments,
     normalize_gc_module_requirements,
 )
 from core.gc_preflight import GC_SECTION_SPECS, validate_gc_preflight_screens
@@ -347,10 +348,19 @@ def run_gc_no_battle_setup(
         return {
             "status": "save_match",
             "source": "player_save_preflight",
+            "mapping_id": decision.get("mapping_id"),
+            "disposition": decision.get("disposition"),
             "checked": False,
             "required": decision.get("expected"),
             "observed": decision.get("observed"),
             "reason": decision.get("reason"),
+            "save_evidence_complete": decision.get(
+                "save_evidence_complete"
+            ),
+            "save_requirement_supported": decision.get(
+                "save_requirement_supported"
+            ),
+            "diagnostics": dict(decision.get("diagnostics") or {}),
         }
 
     def record_repair(description: str) -> None:
@@ -945,6 +955,39 @@ def run_gc_no_battle_setup(
                 requirements.get(current_check),
                 active_waivers[current_check],
             )
+        elif save_match(current_check):
+            module_decision = active_save_decisions[current_check]
+            observed_assignments = module_decision.get("observed")
+            if not isinstance(observed_assignments, Mapping):
+                raise _SetupFailure(
+                    "save-backed module assignments were unavailable"
+                )
+            module_evidence = gc_module_loadout_evidence_from_assignments(
+                requirements["modules"],
+                observed_assignments,
+            )
+            if not module_evidence.valid:
+                raise _SetupFailure(
+                    "save-backed module loadout did not match the requirement"
+                )
+            module_payload = module_evidence.as_dict()
+            module_payload.update(
+                mode=module_mode,
+                checked=False,
+                source="player_save_preflight",
+                status="save_match",
+                mapping_id=module_decision.get("mapping_id"),
+                disposition=module_decision.get("disposition"),
+                reason=module_decision.get("reason"),
+                save_evidence_complete=module_decision.get(
+                    "save_evidence_complete"
+                ),
+                save_requirement_supported=module_decision.get(
+                    "save_requirement_supported"
+                ),
+                diagnostics=dict(module_decision.get("diagnostics") or {}),
+            )
+            evidence[current_check] = module_payload
         elif module_mode == "enforce":
             modules = _open_static(
                 current,
@@ -1245,13 +1288,32 @@ def _log_home_preflight_evidence(
             disposition = "deferred"
         elif check_id == "free_upgrade_locks":
             required = check_evidence.get("required") or []
-            locks = check_evidence.get("locks") or []
+            if check_evidence.get("source") == "player_save_preflight":
+                unmanaged = (
+                    check_evidence.get("diagnostics", {}).get(
+                        "unmanaged_locks",
+                        [],
+                    )
+                    if isinstance(check_evidence.get("diagnostics"), Mapping)
+                    else []
+                )
+                observed = f"{len(required)}/{len(required)} required locks verified"
+                if unmanaged:
+                    observed += "; unmanaged locks: " + ", ".join(
+                        str(value) for value in unmanaged
+                    )
+                disposition = "passed"
+                level = "INFO"
+                locks = []
+            else:
+                locks = check_evidence.get("locks") or []
             valid_count = sum(
                 bool(lock.get("valid"))
                 for lock in locks
                 if isinstance(lock, Mapping)
             )
-            observed = f"{valid_count}/{len(required)} required locks verified"
+            if check_evidence.get("source") != "player_save_preflight":
+                observed = f"{valid_count}/{len(required)} required locks verified"
             if check_evidence.get("valid") is False:
                 disposition = "failed"
                 level = "ERROR"
@@ -1295,12 +1357,18 @@ def _log_home_preflight_evidence(
                 observed = "module loadout observed"
                 disposition = "observed" if mode == "observe" else "passed"
         elif check_id == "card_recharge_modes":
-            modes = check_evidence.get("modes") or []
-            observed = ", ".join(
-                f"{mode.get('label')}={mode.get('observed')}"
-                for mode in modes
-                if isinstance(mode, Mapping)
-            ) or "unavailable"
+            if (
+                check_evidence.get("source") == "player_save_preflight"
+                and isinstance(check_evidence.get("observed"), Mapping)
+            ):
+                observed = check_evidence["observed"]
+            else:
+                modes = check_evidence.get("modes") or []
+                observed = ", ".join(
+                    f"{mode.get('label')}={mode.get('observed')}"
+                    for mode in modes
+                    if isinstance(mode, Mapping)
+                ) or "unavailable"
             if check_evidence.get("changed"):
                 observed = f"{observed} after correction"
             if check_evidence.get("valid") is False:
@@ -1321,6 +1389,14 @@ def _log_home_preflight_evidence(
         elif check_id in {"perk_bans", "perk_auto_pick_order"}:
             expected_labels = check_evidence.get("expected_labels") or []
             observed_labels = check_evidence.get("observed_labels") or []
+            if (
+                check_evidence.get("source") == "player_save_preflight"
+                and isinstance(check_evidence.get("observed"), (list, tuple))
+            ):
+                observed_labels = [
+                    perk_configuration_label(str(item))
+                    for item in check_evidence["observed"]
+                ]
             if expected_labels:
                 expected_value = " > ".join(
                     str(item) for item in expected_labels
@@ -1347,10 +1423,26 @@ def _log_home_preflight_evidence(
         check_id,
         str(check_id).replace("_", " ").title(),
     )
+    save_detail = ""
+    if (
+        isinstance(check_evidence, Mapping)
+        and check_evidence.get("source") == "player_save_preflight"
+    ):
+        save_detail = (
+            "; source=player_save_preflight"
+            f"; mapping={check_evidence.get('mapping_id') or 'none'}"
+            "; complete="
+            f"{bool(check_evidence.get('save_evidence_complete'))}"
+            "; supported="
+            f"{bool(check_evidence.get('save_requirement_supported'))}"
+            f"; disposition={check_evidence.get('disposition') or 'save_match'}"
+            f"; reason={check_evidence.get('reason') or 'unspecified'}"
+        )
     log(
         f"[HOME_PREFLIGHT] {label} {disposition}; "
         f"expected={_home_preflight_value(check_id, expected_value)}; "
-        f"observed={_home_preflight_value(check_id, observed)}",
+        f"observed={_home_preflight_value(check_id, observed)}"
+        f"{save_detail}",
         level,
     )
 

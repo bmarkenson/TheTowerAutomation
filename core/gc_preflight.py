@@ -753,8 +753,8 @@ def _free_upgrade_lock_boundary_evidence(
         and candidate.get("checked") is False
         and candidate.get("valid") is True
         and tuple(candidate.get("required") or ()) == requirements
-        and len(candidate.get("observed") or ()) == len(requirements)
-        and set(candidate.get("observed") or ()) == set(requirements)
+        and len(set(requirements)) == len(requirements)
+        and set(requirements).issubset(set(candidate.get("observed") or ()))
     )
     if verified or save_verified:
         candidate["required"] = required

@@ -106,10 +106,10 @@ def _decoded_save() -> dict:
             46,
             47,
             49,
-            -1,
+            11,
         ],
         "firstPerkIndex": 10,
-        "targetPriorityList": [0, 2, 9, 5, 8, 7, 6, 3, 4, 1],
+        "targetPriorityList": [2, 7, 9, 5, 8, 6, 3, 0, 4, 1],
         "ultimateWeaponUnlocked": [True] * 9,
         "ultimateWeaponOn": [True] * 9,
         "ultimateWeaponLevel": [0] * 27,
@@ -143,7 +143,18 @@ def _decoded_save() -> dict:
         "cardUnlocked": [True] * 31 + [False] * 9,
         "slotPresetCardInt": [0] * 140,
         "slotPresetCardAssignedBool": [True] * 28 + [False] * 112,
-        "moduleEquipped": [None] * 4,
+        "moduleEquipped": [
+            _module_item(45),
+            _module_item(46),
+            _module_item(27),
+            _module_item(37),
+        ],
+        "assistModuleSlots": [
+            _assist_module_slot(0, 9),
+            _assist_module_slot(1, 20),
+            _assist_module_slot(2, 30),
+            _assist_module_slot(3, 38),
+        ],
         "upgradesLockedFreeUpgrades": [False] * 20,
         "upgradesDefenseLockedFreeUpgrades": [False] * 20,
         "upgradesUtilityLockedFreeUpgrades": [False] * 20,
@@ -158,6 +169,26 @@ def _decoded_save() -> dict:
     payload["perkLevel"][10] = 2
     payload["perkLevel"][41] = 1
     return payload
+
+
+def _module_item(info_index: int) -> dict:
+    return {
+        "__class__": "ModuleItem",
+        "infoIndex": info_index,
+        "guid": f"must-not-leak-module-guid-{info_index}",
+        "level": 201,
+        "effects": ["must-not-leak-module-effect"],
+        "inventoryRecord": {"private": "must-not-leak-module-inventory"},
+    }
+
+
+def _assist_module_slot(slot_type: int, info_index: int) -> dict:
+    return {
+        "__class__": "AssistModuleSlot",
+        "type": slot_type,
+        "unlocked": True,
+        "module": _module_item(info_index),
+    }
 
 
 def _synthetic_battle_history_entry(
@@ -238,6 +269,7 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
         "perk_auto_pick_order",
         "free_upgrade_locks",
         "guardian_chips",
+        "modules",
         "auto_pick_perks",
         "target_priority",
         "ultimate_weapon_primaries",
@@ -278,7 +310,17 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
         "SD",
         "SRM",
     ]
-    assert snapshot.checks["modules"].status == "unmapped"
+    assert snapshot.checks["modules"].status == "observed"
+    assert snapshot.checks["modules"].value == {
+        "cannon_primary": "Amplifying Strike",
+        "armor_primary": "Orbital Augment",
+        "generator_primary": "Black Hole Digestor",
+        "core_primary": "Multiverse Nexus",
+        "cannon_assist": "Being Annihilator",
+        "armor_assist": "Anti-Cube Portal",
+        "generator_assist": "Singularity Harness",
+        "core_assist": "Dimension Core",
+    }
 
     runtime = snapshot.runtime_save
     assert runtime is not None
@@ -304,6 +346,10 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
     rendered = json.dumps(snapshot.as_dict())
     assert "must-not-leak-player-id" not in rendered
     assert "must-not-leak-user-name" not in rendered
+    assert "must-not-leak-module-guid" not in rendered
+    assert "must-not-leak-module-effect" not in rendered
+    assert "must-not-leak-module-inventory" not in rendered
+    assert '"level": 201' not in rendered
     assert "/private/path" not in rendered
 
 
@@ -803,7 +849,7 @@ def test_live_calibrated_auto_pick_ids_follow_the_ui_rank_order(monkeypatch):
         46,
         47,
         49,
-        -1,
+        11,
     ]
 
     snapshot = _snapshot(monkeypatch, decoded)
@@ -830,6 +876,34 @@ def test_live_calibrated_auto_pick_ids_follow_the_ui_rank_order(monkeypatch):
     ]
     assert snapshot.checks["perk_auto_pick_order"].complete is True
     assert snapshot.checks["perk_auto_pick_order"].reason == ""
+    assert len(decoded["autoPickOrder"]) == 34
+    assert len(set(decoded["autoPickOrder"])) == 34
+    assert set(decoded["autoPickOrder"]) == {
+        int(perk_id) for perk_id in VERSION_MAPPING["perk_ids"]
+    }
+    assert VERSION_MAPPING["perk_ids"]["11"] == (
+        "unlock_random_ultimate_weapon"
+    )
+
+
+def test_statically_mapped_random_ultimate_weapon_needs_no_dynamic_override(
+    monkeypatch,
+):
+    decoded = _decoded_save()
+    decoded["perksPicked"].append(
+        {"wave": 440, "perk": 11, "__class__": "PerkPick"}
+    )
+    decoded["perksPickedCount"] += 1
+    decoded["perkLevel"][11] = 1
+
+    runtime = _snapshot(monkeypatch, decoded).runtime_save
+
+    assert runtime is not None
+    assert runtime.perks_status == "observed"
+    assert runtime.perks is not None
+    assert runtime.perks.picks[-1].perk_key == (
+        "unlock_random_ultimate_weapon"
+    )
 
 
 @pytest.mark.parametrize(
@@ -859,8 +933,12 @@ def test_auto_pick_structural_uncertainty_fails_closed(
     assert reason.casefold() in evidence.reason.casefold()
 
 
-def test_free_upgrade_locks_accept_only_exact_three_lock_boolean_shape(monkeypatch):
-    snapshot = _snapshot(monkeypatch)
+def test_free_upgrade_locks_accept_required_subset_with_unmanaged_health(
+    monkeypatch,
+):
+    decoded = _decoded_save()
+    decoded["upgradesDefenseLockedFreeUpgrades"][0] = True
+    snapshot = _snapshot(monkeypatch, decoded)
 
     evidence = snapshot.checks["free_upgrade_locks"]
     assert evidence.status == "observed"
@@ -868,13 +946,20 @@ def test_free_upgrade_locks_accept_only_exact_three_lock_boolean_shape(monkeypat
         "Shockwave Size",
         "Bounce Shot Targets",
         "Bounce Shot Range",
+        "Health",
     }
     matching = reconcile_requirements(
         snapshot,
-        {"free_upgrade_locks": evidence.value},
+        {
+            "free_upgrade_locks": [
+                "Shockwave Size",
+                "Bounce Shot Targets",
+                "Bounce Shot Range",
+            ]
+        },
         freshness_verified=True,
     )
-    different = reconcile_requirements(
+    narrower = reconcile_requirements(
         snapshot,
         {"free_upgrade_locks": ["Shockwave Size"]},
         freshness_verified=True,
@@ -885,9 +970,16 @@ def test_free_upgrade_locks_accept_only_exact_three_lock_boolean_shape(monkeypat
         freshness_verified=True,
     )
     assert matching["checks"]["free_upgrade_locks"]["disposition"] == "save_match"
-    assert different["checks"]["free_upgrade_locks"]["reason"] == (
-        "save_requirement_outside_validated_scope"
+    assert matching["checks"]["free_upgrade_locks"]["diagnostics"] == {
+        "unmanaged_locks": ["Health"],
+        "unmapped_locked_slot_count": 0,
+    }
+    assert narrower["checks"]["free_upgrade_locks"]["disposition"] == (
+        "save_match"
     )
+    assert narrower["checks"]["free_upgrade_locks"]["diagnostics"][
+        "unmanaged_locks"
+    ] == ["Bounce Shot Range", "Bounce Shot Targets", "Health"]
     assert duplicate["checks"]["free_upgrade_locks"]["reason"] == (
         "save_requirement_outside_validated_scope"
     )
@@ -897,10 +989,10 @@ def test_free_upgrade_locks_accept_only_exact_three_lock_boolean_shape(monkeypat
     "field,value",
     [
         ("upgradesLockedFreeUpgrades", 1),
-        ("upgradesUtilityLockedFreeUpgrades", True),
+        ("upgradesUtilityLockedFreeUpgrades", None),
     ],
 )
-def test_free_upgrade_lock_non_boolean_or_extra_set_bit_fails_closed(
+def test_free_upgrade_lock_non_boolean_value_fails_closed(
     monkeypatch,
     field,
     value,
@@ -913,6 +1005,85 @@ def test_free_upgrade_lock_non_boolean_or_extra_set_bit_fails_closed(
 
     assert evidence.status == "unmapped"
     assert not evidence.complete
+
+
+def test_free_upgrade_lock_shape_failure_is_component_local(monkeypatch):
+    decoded = _decoded_save()
+    decoded["upgradesDefenseLockedFreeUpgrades"].pop()
+
+    snapshot = _snapshot(monkeypatch, decoded)
+    evidence = snapshot.checks["free_upgrade_locks"]
+
+    assert snapshot.shape_valid
+    assert snapshot.checks["cards_deck"].status == "observed"
+    assert evidence.status == "unmapped"
+    assert not evidence.complete
+    assert "shape" in evidence.reason.casefold()
+
+
+def test_missing_required_free_upgrade_lock_retains_ui_fallback(monkeypatch):
+    decoded = _decoded_save()
+    decoded["upgradesLockedFreeUpgrades"][11] = False
+    snapshot = _snapshot(monkeypatch, decoded)
+
+    plan = reconcile_requirements(
+        snapshot,
+        {
+            "free_upgrade_locks": [
+                "Shockwave Size",
+                "Bounce Shot Targets",
+                "Bounce Shot Range",
+            ]
+        },
+        freshness_verified=True,
+    )
+
+    decision = plan["checks"]["free_upgrade_locks"]
+    assert snapshot.checks["free_upgrade_locks"].status == "observed"
+    assert decision["disposition"] == "ui_required"
+    assert decision["reason"] == "save_mismatch"
+    assert decision["fallback"] == "existing_ui_check"
+
+
+def test_calibrated_target_priority_permutation_matches_farm(monkeypatch):
+    snapshot = _snapshot(monkeypatch)
+    expected = [
+        "Fast",
+        "Protector",
+        "Fleets",
+        "Boss",
+        "Elites",
+        "In Spotlight",
+        "Tank",
+        "Closest (Default)",
+        "Ranged",
+        "Basic",
+    ]
+
+    evidence = snapshot.checks["target_priority"]
+    plan = reconcile_requirements(
+        snapshot,
+        {"target_priority": expected},
+        freshness_verified=True,
+    )
+
+    assert evidence.value == expected
+    assert plan["checks"]["target_priority"]["disposition"] == "save_match"
+
+
+def test_target_priority_order_mismatch_retains_ui_fallback(monkeypatch):
+    snapshot = _snapshot(monkeypatch)
+    expected = list(snapshot.checks["target_priority"].value)
+    expected[0], expected[1] = expected[1], expected[0]
+
+    decision = reconcile_requirements(
+        snapshot,
+        {"target_priority": expected},
+        freshness_verified=True,
+    )["checks"]["target_priority"]
+
+    assert decision["disposition"] == "ui_required"
+    assert decision["reason"] == "save_mismatch"
 
 
 @pytest.mark.parametrize(
@@ -936,6 +1107,129 @@ def test_target_priority_requires_exact_complete_ten_id_order(
 
     assert evidence.status == "unmapped"
     assert not evidence.complete
+
+
+FARM_MODULES = {
+    "cannon_primary": "Amplifying Strike",
+    "armor_primary": "Orbital Augment",
+    "generator_primary": "Black Hole Digestor",
+    "core_primary": "Multiverse Nexus",
+    "cannon_assist": "Being Annihilator",
+    "armor_assist": "Anti-Cube Portal",
+    "generator_assist": "Singularity Harness",
+    "core_assist": "Dimension Core",
+}
+
+
+def test_exact_farm_module_loadout_matches_from_one_redacted_snapshot(
+    monkeypatch,
+):
+    snapshot = _snapshot(monkeypatch)
+
+    decision = reconcile_requirements(
+        snapshot,
+        {"modules": FARM_MODULES},
+        freshness_verified=True,
+    )["checks"]["modules"]
+
+    assert snapshot.checks["modules"].value == FARM_MODULES
+    assert decision["disposition"] == "save_match"
+    assert decision["save_requirement_supported"] is True
+    rendered = json.dumps(decision)
+    for private_marker in (
+        "must-not-leak-module-guid",
+        "must-not-leak-module-effect",
+        "must-not-leak-module-inventory",
+        '"level": 201',
+    ):
+        assert private_marker not in rendered
+
+
+def test_unmapped_tournament_module_names_retain_complete_ui_path(monkeypatch):
+    snapshot = _snapshot(monkeypatch)
+    tournament = {
+        **FARM_MODULES,
+        "generator_primary": "Project Funding",
+        "core_primary": "Harmony Conductor",
+    }
+
+    decision = reconcile_requirements(
+        snapshot,
+        {"modules": tournament},
+        freshness_verified=True,
+    )["checks"]["modules"]
+
+    assert decision["disposition"] == "ui_required"
+    assert decision["reason"] == "save_requirement_outside_validated_scope"
+    assert decision["fallback"] == "existing_ui_check"
+
+
+@pytest.mark.parametrize(
+    ("mutation", "reason"),
+    [
+        (
+            lambda decoded: decoded["moduleEquipped"].__setitem__(0, None),
+            "Primary module entry",
+        ),
+        (
+            lambda decoded: decoded["moduleEquipped"][0].__setitem__(
+                "infoIndex", 999
+            ),
+            "unsupported primary module infoIndex",
+        ),
+        (
+            lambda decoded: decoded["assistModuleSlots"][0].__setitem__(
+                "unlocked", False
+            ),
+            "Assist module slot is locked",
+        ),
+        (
+            lambda decoded: decoded["assistModuleSlots"][0].__setitem__(
+                "__class__", "ChangedAssistSlot"
+            ),
+            "Assist module slot changed type",
+        ),
+        (
+            lambda decoded: decoded["assistModuleSlots"][0].__setitem__(
+                "module", None
+            ),
+            "exactly one ModuleItem",
+        ),
+        (
+            lambda decoded: decoded.__setitem__(
+                "moduleEquipped", decoded["moduleEquipped"][:-1]
+            ),
+            "Primary module structure changed",
+        ),
+        (
+            lambda decoded: decoded.__setitem__(
+                "assistModuleSlots", decoded["assistModuleSlots"][:-1]
+            ),
+            "Assist module structure changed",
+        ),
+    ],
+)
+def test_malformed_or_unknown_module_structure_fails_closed(
+    monkeypatch,
+    mutation,
+    reason,
+):
+    decoded = _decoded_save()
+    mutation(decoded)
+
+    snapshot = _snapshot(monkeypatch, decoded)
+    evidence = snapshot.checks["modules"]
+    decision = reconcile_requirements(
+        snapshot,
+        {"modules": FARM_MODULES},
+        freshness_verified=True,
+    )["checks"]["modules"]
+
+    assert snapshot.shape_valid
+    assert snapshot.checks["cards_deck"].status == "observed"
+    assert evidence.status == "unmapped"
+    assert reason.casefold() in evidence.reason.casefold()
+    assert decision["disposition"] == "ui_required"
 
 
 def test_ultimate_weapon_components_have_independent_value_scope(monkeypatch):

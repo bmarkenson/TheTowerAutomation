@@ -711,6 +711,11 @@ def run_read_only_gc_preflight(
             if isinstance(no_battle_setup_evidence, Mapping)
             else None
         )
+        module_boundary_save_backed = bool(
+            isinstance(module_boundary_evidence, Mapping)
+            and module_boundary_evidence.get("source")
+            == "bound_player_save_preflight"
+        )
         ultimate_boundary_observations = _home_ultimate_weapon_observations(
             no_battle_setup_evidence
         )
@@ -997,6 +1002,8 @@ def run_read_only_gc_preflight(
                 configuration_boundary_evidence = None
             if free_upgrade_lock_save_backed:
                 free_upgrade_lock_boundary_evidence = None
+            if module_boundary_save_backed:
+                module_boundary_evidence = None
             use_no_battle_evidence = bool(
                 isinstance(configuration_boundary_evidence, Mapping)
                 and (

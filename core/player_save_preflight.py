@@ -26,6 +26,7 @@ from core.player_save import (
     pull_player_save_bytes,
     reconcile_requirements,
 )
+from core.player_save_history import history_metadata_from_snapshot
 from core.state_detector import detect_state_and_overlays
 from utils.logger import (
     log,
@@ -52,6 +53,7 @@ HOME_SAVE_CHECKS = frozenset(
         "perk_auto_pick_order",
         "free_upgrade_locks",
         "guardian_chips",
+        "modules",
         "poison_swamp_stun",
     }
 )
@@ -212,6 +214,12 @@ class PlayerSavePreflightResult:
     decisions: Mapping[str, Mapping[str, Any]]
     provenance: Mapping[str, Any]
     safe_ui_fallback: bool
+    history_tail: Mapping[str, Any] = field(default_factory=dict)
+    history_scope_id: Optional[str] = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
     carry: Optional[CarriedPlayerSaveEvidence] = field(
         default=None,
         repr=False,
@@ -245,6 +253,7 @@ class PlayerSavePreflightResult:
                 for key, value in sorted(self.decisions.items())
             },
             "accepted_checks": list(self.accepted_checks),
+            "history_tail": dict(self.history_tail),
             "carry": self.carry.as_dict() if self.carry is not None else None,
         }
 
@@ -322,6 +331,7 @@ class PlayerSavePreflightCoordinator:
                 decisions,
                 provenance,
                 True,
+                _history_ui_decision("force_ui_policy"),
             )
 
         operation_id = new_operation_id()
@@ -511,6 +521,7 @@ class PlayerSavePreflightCoordinator:
                 decisions,
                 provenance,
                 operation_id,
+                history_tail=_history_ui_decision(acquisition_reason),
             )
 
         provenance["source_fingerprint"] = _redacted(
@@ -531,6 +542,15 @@ class PlayerSavePreflightCoordinator:
             str(key): dict(value)
             for key, value in (plan.get("checks") or {}).items()
         }
+        history_observation = history_metadata_from_snapshot(
+            snapshot,
+            acquisition="authoritative_home_preflight_snapshot",
+        )
+        history_tail = _history_save_decision(
+            history_observation,
+            mode=selected_mode,
+            mapping_id=snapshot.mapping_id,
+        )
         carry = None
         if selected_mode == "save_first":
             values = {
@@ -554,6 +574,8 @@ class PlayerSavePreflightCoordinator:
             decisions,
             provenance,
             operation_id,
+            history_tail=history_tail,
+            history_scope_id=context.activity_scope_id,
             carry=carry,
         )
 
@@ -691,6 +713,7 @@ class PlayerSavePreflightCoordinator:
             _all_ui_decisions(requested, reason),
             dict(provenance),
             False,
+            _history_ui_decision(reason, safe_ui_fallback=False),
         )
         log_result(
             "Save-first Home preflight blocked — no UI or battle input is "
@@ -708,6 +731,8 @@ class PlayerSavePreflightCoordinator:
         provenance: Mapping[str, Any],
         operation_id: str,
         *,
+        history_tail: Optional[Mapping[str, Any]] = None,
+        history_scope_id: Optional[str] = None,
         carry: Optional[CarriedPlayerSaveEvidence] = None,
     ) -> PlayerSavePreflightResult:
         accepted = sorted(
@@ -727,7 +752,33 @@ class PlayerSavePreflightCoordinator:
             decisions,
             dict(provenance),
             True,
+            dict(history_tail or _history_ui_decision(reason)),
+            history_scope_id=history_scope_id,
             carry=carry,
+        )
+        for check_id, decision in sorted(decisions.items()):
+            log(
+                "[PLAYER_SAVE_PREFLIGHT] "
+                f"check={check_id} mapping={decision.get('mapping_id') or 'none'} "
+                "complete="
+                f"{bool(decision.get('save_evidence_complete'))} "
+                "supported="
+                f"{bool(decision.get('save_requirement_supported'))} "
+                f"disposition={decision.get('disposition') or 'ui_required'} "
+                f"reason={decision.get('reason') or 'unspecified'}",
+                "INFO",
+            )
+        log(
+            "[PLAYER_SAVE_PREFLIGHT] check=battle_history_tail "
+            f"mapping={(result.history_tail.get('mapping_id') or 'none')} "
+            "complete="
+            f"{bool(result.history_tail.get('complete'))} "
+            "supported="
+            f"{bool(result.history_tail.get('supported'))} "
+            "disposition="
+            f"{result.history_tail.get('disposition') or 'ui_required'} "
+            f"reason={result.history_tail.get('reason') or 'unspecified'}",
+            "INFO",
         )
         log_result(
             "Save-first Home preflight complete — configuration evidence "
@@ -775,17 +826,73 @@ def _all_ui_decisions(
 ) -> dict[str, dict[str, Any]]:
     return {
         check_id: {
+            "mapping_id": None,
             "disposition": "ui_required",
             "reason": reason,
+            "save_evidence_status": "unmapped",
             "matches": None,
             "observed": None,
             "save_evidence_complete": False,
             "save_check_validated": False,
             "save_requirement_supported": False,
+            "diagnostics": {},
             "ui_required": True,
             "fallback": "existing_ui_check",
         }
         for check_id in sorted(check_ids)
+    }
+
+
+def _history_save_decision(
+    observation: Any,
+    *,
+    mode: str,
+    mapping_id: Optional[str],
+) -> dict[str, Any]:
+    complete = bool(observation.complete and observation.metadata is not None)
+    if not complete:
+        return _history_ui_decision(
+            observation.reason or "history_tail_unavailable",
+            mapping_id=mapping_id,
+            complete=False,
+            supported=False,
+            safe_ui_fallback=bool(observation.safe_ui_fallback),
+        )
+    if mode == "comparison_audit":
+        disposition = "ui_required"
+        reason = "comparison_audit_requires_ui"
+    else:
+        disposition = "save_match"
+        reason = "structural_history_tail_observed"
+    return {
+        "mapping_id": mapping_id,
+        "complete": True,
+        "supported": True,
+        "disposition": disposition,
+        "reason": reason,
+        "metadata": dict(observation.metadata),
+        "safe_ui_fallback": True,
+        "fallback": "existing_battle_history_ui",
+    }
+
+
+def _history_ui_decision(
+    reason: str,
+    *,
+    mapping_id: Optional[str] = None,
+    complete: bool = False,
+    supported: bool = False,
+    safe_ui_fallback: bool = True,
+) -> dict[str, Any]:
+    return {
+        "mapping_id": mapping_id,
+        "complete": complete,
+        "supported": supported,
+        "disposition": "ui_required",
+        "reason": str(reason or "history_tail_unavailable"),
+        "metadata": None,
+        "safe_ui_fallback": safe_ui_fallback,
+        "fallback": "existing_battle_history_ui",
     }
 
 

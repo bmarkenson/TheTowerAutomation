@@ -522,6 +522,97 @@ def test_matching_save_snapshot_skips_all_eligible_home_navigation_together():
     }
 
 
+def test_exact_farm_module_save_match_skips_modules_navigation():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+    save_decisions = _save_matches(
+        REQUIREMENTS,
+        "cards_deck",
+        "workshop_preset",
+        "bots_preset",
+        "guardian_chips",
+        "modules",
+        "target_priority",
+    )
+    save_decisions["modules"].update(
+        mapping_id="data-9-game-1073",
+        save_evidence_complete=True,
+        save_requirement_supported=True,
+        diagnostics={"slots": 8},
+    )
+
+    result = _run(
+        router,
+        REQUIREMENTS,
+        save_decisions=save_decisions,
+    )
+
+    assert result.complete
+    assert router.module_checks == []
+    assert "navigation.goto_modules_home" not in router.static_actions
+    modules = result.evidence["modules"]
+    assert modules["source"] == "player_save_preflight"
+    assert modules["status"] == "save_match"
+    assert modules["checked"] is False
+    assert modules["valid"] is True
+    assert len(modules["slots"]) == 8
+    assert all(slot["valid"] for slot in modules["slots"])
+
+
+def test_save_backed_required_locks_ignore_unmanaged_health_without_input():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+    requirements = {
+        "cards_deck": "Farm",
+        "workshop_preset": "Farm",
+        "bots_preset": "Farm",
+        "guardian_chips": ["Fetch", "Summon", "Scout"],
+        "free_upgrade_locks": list(FARM_FREE_UPGRADE_LOCKS),
+        "loadout_policies": {
+            "modules": "preserve",
+            "target_priority": "preserve",
+        },
+    }
+    decision = _save_matches(
+        requirements,
+        "cards_deck",
+        "workshop_preset",
+        "bots_preset",
+        "guardian_chips",
+    )
+    decision.update({
+        "free_upgrade_locks": {
+            "disposition": "save_match",
+            "reason": "exact_version_save_match",
+            "expected": list(FARM_FREE_UPGRADE_LOCKS),
+            "observed": [*FARM_FREE_UPGRADE_LOCKS, "Health"],
+            "diagnostics": {"unmanaged_locks": ["Health"]},
+            "ui_required": False,
+        }
+    })
+    lock_inputs = []
+
+    result = run_gc_no_battle_setup(
+        requirements,
+        screenshot="home",
+        save_decisions=decision,
+        capture_fn=router.capture,
+        detector=router.detect,
+        detect_home_control_fn=router.home_control,
+        ensure_free_upgrade_locks_fn=lambda *_args, **_kwargs: (
+            lock_inputs.append(True)
+        ),
+        validate_configuration_fn=router.validate_configuration,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.complete
+    assert lock_inputs == []
+    locks = result.evidence["free_upgrade_locks"]
+    assert locks["valid"] is True
+    assert locks["required"] == list(FARM_FREE_UPGRADE_LOCKS)
+    assert locks["observed"] == [*FARM_FREE_UPGRADE_LOCKS, "Health"]
+    assert locks["diagnostics"]["unmanaged_locks"] == ["Health"]
+
+
 def test_first_ui_repair_invalidates_later_save_decisions():
     router = _NoBattleRouter(selected=False, correct_guardians=True)
     requirements = {
@@ -930,6 +1021,70 @@ def test_home_preflight_logs_concise_check_results_for_operator_activity():
     assert result_log.call_args.args[0] == (
         "Home-only run configuration complete — verified without changes"
     )
+
+
+def test_save_accepted_mapping_and_list_logs_render_normalized_values():
+    router = _NoBattleRouter(selected=True, correct_guardians=True)
+    requirements = {
+        "cards_deck": "Farm",
+        "card_recharge_modes": {
+            "Demon Mode": "auto_reactivate",
+            "Nuke": "ready_after_recharge",
+        },
+        "workshop_preset": "Farm",
+        "bots_preset": "Farm",
+        "guardian_chips": ["Fetch", "Summon", "Scout"],
+        "perk_bans": list(FARM_PERK_BANS),
+        "perk_auto_pick_order": list(FARM_AUTO_PICK_ORDER),
+        "loadout_policies": {
+            "modules": "preserve",
+            "target_priority": "preserve",
+        },
+    }
+    save_decisions = _save_matches(
+        requirements,
+        "cards_deck",
+        "card_recharge_modes",
+        "workshop_preset",
+        "bots_preset",
+        "guardian_chips",
+        "perk_bans",
+        "perk_auto_pick_order",
+    )
+    for decision in save_decisions.values():
+        decision.update(
+            mapping_id="data-9-game-1073",
+            save_evidence_complete=True,
+            save_requirement_supported=True,
+        )
+
+    with patch("core.gc_no_battle_setup.log") as emit:
+        result = _run(
+            router,
+            requirements,
+            save_decisions=save_decisions,
+        )
+
+    assert result.complete
+    messages = [call.args[0] for call in emit.call_args_list]
+    card_log = next(
+        message
+        for message in messages
+        if "[HOME_PREFLIGHT] Card recharge modes" in message
+    )
+    bans_log = next(
+        message
+        for message in messages
+        if "[HOME_PREFLIGHT] Perk Bans" in message
+    )
+    assert "observed=Demon Mode=auto_reactivate, Nuke=ready_after_recharge" in (
+        card_log
+    )
+    assert "observed=unavailable" not in card_log
+    assert "Lifesteal / Knockback Trade-Off" in bans_log
+    assert "observed=unavailable" not in bans_log
+    assert "mapping=data-9-game-1073" in card_log
+    assert "complete=True; supported=True; disposition=save_match" in card_log
 
 
 def test_home_preflight_result_names_repairs_that_were_applied():
@@ -1552,6 +1707,93 @@ def test_app_binds_save_preflight_to_only_an_exact_new_battle_launch():
             "player_save_preflight": {"status": "ready"},
         }
     )
+
+
+def test_app_feeds_history_from_the_same_home_preflight_result():
+    manager = Mock()
+    manager.strategy.runtime_policy.return_value = {
+        "player_save_preflight": "save_first"
+    }
+    result = SimpleNamespace(
+        ready=True,
+        history_tail={"disposition": "save_match"},
+        history_scope_id="scope-1",
+    )
+    coordinator = Mock()
+    coordinator.acquire.return_value = result
+    continuity = Mock()
+    continuity.accept_home_save_baseline.return_value = SimpleNamespace(
+        accepted=True
+    )
+    app = App.__new__(App)
+    app._mission_mgr = manager
+    app._player_save_preflight_coordinator = coordinator
+    app._player_save_preflight_session_id = ""
+    app._activity_continuity = continuity
+
+    with patch(
+        "core.app.get_activity_scope",
+        return_value={"run_id": "scope-1"},
+    ):
+        observed = app._acquire_player_save_home_preflight(
+            REQUIREMENTS,
+            screenshot="home",
+        )
+
+    assert observed is result
+    coordinator.acquire.assert_called_once_with(
+        REQUIREMENTS,
+        mode="save_first",
+        initial_frame="home",
+    )
+    continuity.accept_home_save_baseline.assert_called_once_with(
+        result.history_tail,
+        expected_scope_id="scope-1",
+        player_save_mode="save_first",
+    )
+    assert app._player_save_preflight_activity_scope_id == "scope-1"
+
+
+def test_app_does_not_repeat_save_or_navigate_when_history_scope_is_blocked():
+    frame = object()
+    manager = Mock()
+    manager.no_battle_setup_requirements.return_value = REQUIREMENTS
+    manager.strategy.runtime_policy.return_value = {
+        "player_save_preflight": "save_first"
+    }
+    app = App.__new__(App)
+    app._auto_start_enabled = True
+    app._mission_mgr = manager
+    app._fast_game_over = False
+    app._last_wave_value = None
+    app._last_wave_conf = -1.0
+    app._status_reporter = Mock()
+    app._supervisor = Mock()
+    app._handle_daily_gem_if_due = Mock(return_value=False)
+    app._handle_mission_rewards_if_due = Mock(return_value=False)
+    app._player_save_preflight_activity_scope_id = "scope-1"
+    app._player_save_history_baseline_outcome = SimpleNamespace(blocked=True)
+    coordinator = Mock()
+    app._player_save_preflight_coordinator = coordinator
+
+    with (
+        patch("core.app.get_activity_scope", return_value={"run_id": "scope-1"}),
+        patch(
+            "core.app.detect_home_battle_control",
+            return_value=HomeBattleEvidence(
+                HomeBattleControl.NEW_BATTLE,
+                "test",
+                100.0,
+            ),
+        ),
+        patch("core.app.run_gc_no_battle_setup") as run_setup,
+        patch("core.app.handle_home_screen") as handle_home,
+    ):
+        app._handle_primary_states("HOME_SCREEN", set(), frame)
+
+    coordinator.acquire.assert_not_called()
+    run_setup.assert_not_called()
+    handle_home.assert_not_called()
 
 
 def test_app_runs_tournament_home_preflight_without_starting_battle():

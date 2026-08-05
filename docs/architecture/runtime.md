@@ -152,12 +152,21 @@ strategy runtime policy, not observation-collector switches.
 
 One snapshot reconciles every requested eligible check atomically, but each
 decision remains independent. Exact matches may omit redundant Home
-observation for Cards, recharge modes, Workshop, the exact proven three-lock
-Farm set, Bots, independent First Perk Choice, Bans, ranked Auto Pick prefix,
-Guardians, and Poison Swamp Stun. The 34-entry Auto Pick field must contain the
-complete mapped inventory structure, but only its first 18 entries are ranked;
-the 16-entry tail is never compared as priority, and a configured list may be a
-shorter required prefix.
+observation for Cards, recharge modes, Workshop, the required three-lock Farm
+subset, Bots, independent First Perk Choice, Bans, ranked Auto Pick prefix,
+Guardians, the exact current Farm Module loadout, and Poison Swamp Stun. The
+34-entry Auto Pick field must contain every mapped Perk ID exactly once,
+including `11=unlock_random_ultimate_weapon`; no sentinel is present. Only its
+first 18 entries are ranked. The 16-entry inventory tail is never compared as
+priority, and a configured list may be a shorter required prefix. Unknown IDs,
+duplicates, changed length, or changed membership restore UI.
+
+Free Upgrade locks retain their strategy-declared required-subset contract:
+every requested lock must be set, but additional normalized locks are
+unmanaged evidence, do not invalidate the match, and never authorize an
+unlock. The accepted extra `Health` bit is therefore reported but left alone.
+Malformed arrays, non-booleans, unknown requested indices, or a missing
+required lock retain the complete existing UI validation/repair path.
 
 The monolithic Ultimate Weapon check remains unvalidated. Its normalized
 components fail independently: Poison Swamp Stun supports both calibrated
@@ -166,16 +175,26 @@ state in which all nine weapons are present, unlocked, and on; Spotlight
 Missiles supports only the exact unlocked/on state. A mixed/off primary request,
 Spotlight Missiles off, malformed structure, or unsupported value restores only
 the applicable shared-screen UI work, where any component actually observed
-can still contradict carried evidence. Orb Distance, Modules, and Damage Slider
-remain UI-authoritative.
+can still contradict carried evidence. Modules are value-scoped only to the
+accepted four Primary and four typed Assist assignments in the current Farm
+loadout. Exact slot, family, role, name, unlocked Assist state, and mapped
+`infoIndex` must all agree. Tournament's Project Funding and Harmony Conductor,
+any other unknown module value, and malformed or partial structures retain the
+complete Modules UI path. Rarity, levels, stars, effects, substats, inventory
+semantics, GUIDs, and private record values are not published. Orb Distance
+and Damage Slider remain UI-authoritative.
 
 Session-only matches become typed, single-use carry for exactly the next
 runtime-owned `NEW_BATTLE` launch and its first stable `RUNNING` boundary. The
 current carry covers Auto Pick enabled `true`, a complete exact ten-ID Target
-Priority order, the all-nine-primary-on aggregate, Spotlight-Missiles-on,
-Poison Swamp Stun, and exact Home sections needed by the later consistency
-check. Runtime/preflight/activity identity, target generation, strategy and
-configuration fingerprint, action/control authority, launch dispatch, and
+Priority order, the exact eight-slot Farm Module assignment, the
+all-nine-primary-on aggregate, Spotlight-Missiles-on, Poison Swamp Stun, and
+exact Home sections needed by the later consistency check. The version-1073
+Target Priority map is `0=Closest (Default)`, `1=Basic`, `2=Fast`, `3=Tank`,
+`4=Ranged`, `5=Boss`, `6=In Spotlight`, `7=Protector`, `8=Elites`, and
+`9=Fleets`; complete membership, uniqueness, and ordered policy comparison
+remain mandatory. Runtime/preflight/activity identity, target generation,
+strategy and configuration fingerprint, action/control authority, launch dispatch, and
 first-RUNNING transition must all remain unchanged. Restart, attachment,
 unrelated Retry, manual/ambiguous launch, WAIT/Pause/Stop, target/configuration
 change, repair, or a later battle rejects every carried decision.
@@ -210,7 +229,9 @@ arbitrary `BattleHistoryEntry`. A root-level version or structural failure
 publishes no runtime model. Perks and the history tail fail independently so an
 unknown Perk ID cannot leak a partial inventory, while an unknown `killedBy`
 ID blocks only the semantic completed entry and preserves structural
-tail-change evidence.
+tail-change evidence. The same authoritative Home snapshot now also supplies
+the initial activity-continuity baseline before the UI route is eligible; it
+is not acquired a second time.
 
 For an active save, the guarded identity is exactly
 `(versionNumber, currentTier, roundsStartedThisTier[currentTier], roundSeed)`.
@@ -219,16 +240,19 @@ time, source fingerprint, and bounded container metadata. The identity has a
 canonical fingerprint. The authorized Tier 22 natural boundary proved that a
 known Home state preceded a new seed and per-tier counter, then that the exact
 identity stayed stable while revisions and waves advanced through the last
-active snapshot. The decoder's projection is nevertheless observation only:
-no implemented consumer binds a process with it or suppresses Battle History
-UI continuity inspection.
+active snapshot. The decoder's active-round projection remains observation
+only. The separate activity-continuity consumer uses only the source-tagged
+structural newest-tail identity: it may omit the initial Home Battle History
+read and close a runtime-owned direct-Retry baseline, but it does not authorize
+attachment, terminal record construction, lifecycle input, or Strategy facts.
 
 The in-battle Perk projection requires exact agreement among the 50-entry
 `perkLevel` array, `perksPickedCount`, and every ordered `PerkPick(wave, perk)`
 entry. It publishes canonical Perk IDs, selection waves, level-after values,
 and a stable snapshot fingerprint. Perk ID `0` is `max_health` (Max Health).
 The 50 positions are storage capacity, not evidence that every index names a
-possible Perk; the exact-version table currently maps 33 observed semantic IDs.
+possible Perk; the exact-version table currently maps all 34 defined semantic
+IDs, including ID `11` as `unlock_random_ultimate_weapon`.
 Changed entry shape/class, non-monotonic waves, or any count/list/level
 inconsistency publishes no Perk snapshot. A structurally consistent unknown ID
 retains a private numeric calibration projection for the audit sidecar, but it
@@ -288,14 +312,17 @@ recorded in
 Runtime adoption proceeds in bounded vertical slices with these ownership
 rules:
 
-1. A future observer may poll stable revisions at approximately five-minute
-   cadence without navigation or input.
+1. A future normal-runtime Perk checkpoint cache may consume naturally
+   serialized stable revisions without navigation or input and independently
+   of collector opt-in. It must bind each complete checkpoint to the exact
+   active identity.
 2. The completed new-round audit permits an implemented consumer to bind only
    an exact active identity to a round without Battle History navigation; no
    such consumer is implemented yet.
 3. Perk strategy facts may advance only from a newer complete snapshot carrying
    that same identity; a stale, different-round, or incomplete snapshot cannot
-   drive strategy.
+   drive strategy. The saved `PerkPick` wave remains the exact event wave even
+   when the stable revision is observed later.
 4. Upgrade and survival components advance independently. A malformed or
    unvalidated ability timer cannot erase valid Perks or upgrade evidence, and
    none of these components grants UI action authority.
@@ -324,13 +351,21 @@ rules:
 10. One passive compact Game Stats capture remains for optional base/ad coin
     split augmentation. Its absence never invalidates otherwise authoritative
     save-derived battle stats.
-11. Game Over opens the Perks panel only when a complete final same-round Perk
-    snapshot has not already been proven.
+11. The future cache obtains a terminal stable save to close the final Perk
+    prefix. Game Over opens the Perks panel only when that complete final
+    same-round prefix has not been proven, or when an ID, acquisition,
+    continuity, audit, or final-state condition requires UI.
 12. The complete existing Game Stats/Perks/More Stats path remains the forced
     audit and fallback for every missing, unknown, stale, changed, inconsistent,
     or unbound save claim.
 13. Wait, Retry, Home, every setting mutation, post-action verification, and
     terminal transition confirmation remain owned by verified UI controls.
+
+That future Perk-timeline phase is documented only; it is not implemented by
+the save-first configuration/history change. The runtime does not background
+an active battle merely to accelerate serialization. Any optional forced
+active-battle serialization requires a separate explicit runtime policy and
+must preserve control and lifecycle authority.
 
 Save-tail causality does not relax the independent current-process
 `runtime.run_binding` boundary. A process that starts only on a terminal remains
@@ -889,11 +924,12 @@ derives gate authority from warning text in `actions.log`.
   activation modes, Workshop and its Free Upgrade locks, strategy-declared
   First Perk Choice, Perk Bans and Auto Pick priority, Poison Swamp Stun, Bots,
   Guardians, and Modules. The save-first coordinator may omit only exact
-  allowlisted observations it matched; Modules, Damage Slider, and Orb Distance
-  remain UI-only, and navigation required for one fallback does not discard an
-  unrelated accepted component. Card recharge traversal checks both unresolved
-  Cards on the initial
-  inventory frame and after every bounded upward or downward swipe, validates
+  allowlisted observations it matched; only the exact current Farm Module
+  assignment is save-backed, while unsupported Module names, Damage Slider,
+  and Orb Distance remain UI-only. Navigation required for one fallback does
+  not discard an unrelated accepted component. Card recharge traversal checks
+  both unresolved Cards on the initial inventory frame and after every bounded
+  upward or downward swipe, validates
   whichever is visible in any order, and stops without another swipe as soon as
   both have authoritative evidence. Inspection opens each exact inventory card
   through a verified long press, requires the matching detail identity and an
@@ -915,8 +951,9 @@ derives gate authority from warning text in `actions.log`.
   every Home setup tap or swipe. Pause holds the workflow action-free, and
   Resume restores verified Home before a fresh setup pass. The setup retains
   exact UI- or save-derived configuration evidence for session preflight.
-  Save-derived sections are accepted there only after their typed carry binds
-  to the exact launched battle; supplied UI screens still override omission
+  Save-derived sections, including the exact current eight-slot Farm Module
+  assignment, are accepted there only after their typed carry binds to the
+  exact launched battle; supplied UI screens still override omission
   and detect contradictions. Target Priority has no Home control. Without an
   exact bound save order it records `battle_only_control` and the generated
   `RUNNING` action observes or enforces it; with bound exact ten-item evidence
@@ -992,14 +1029,27 @@ derives gate authority from warning text in `actions.log`.
   the normal run-start hooks. Home `RESUME_BATTLE` and transient Unknown states
   preserve the attachment.
 - Current-run activity continuity is verified independently of process and
-  strategy attachment. Each Home `NEW_BATTLE` scope records a fingerprint of
-  the newest copied in-game Battle History report before launch. A replacement
-  process compares that persisted baseline at `RUNNING`, Home
+  strategy attachment. In `save_first`, the authoritative Home snapshot feeds
+  its source-tagged structural newest history-tail identity into the new scope
+  before the guarded UI route may run; acquisition/shape failure safely falls
+  back after Home setup, while target/control/scope/restoration loss authorizes
+  no input. `force_ui` and `comparison_audit` retain the UI route. A replacement
+  process still compares a UI-derived persisted baseline at `RUNNING`, Home
   `RESUME_BATTLE`, or a Battle History screen left open by an interrupted
   inspection. Equality preserves the scope; a changed report creates a new
   scope whose log boundary includes the continuity action. A readable identity
   is persisted with a run-ID compare-and-set so a stale inspection cannot
   overwrite a newer lifecycle boundary.
+- A successful runtime-owned direct Retry passively polls fresh stable
+  two-identical-read exact-target saves until the structural tail advances.
+  Unchanged tails schedule another poll without UI input; one append or a
+  capacity-30 rollover closes the new scope. Acquisition, shape, or invalid
+  transition evidence restores the guarded UI route only while its source,
+  target, scope, and action authority remain proven. Source-specific UI and
+  save fingerprints are never compared. Fallback records a new source-tagged
+  baseline conservatively, and legacy schema-1 activity metadata is recognized
+  only as the historical UI source. Unknown `killedBy` preserves structural
+  continuity while semantic completed-record publication remains unavailable.
 - Completion of a session configuration gate writes a receipt into that same
   run scope. The receipt identifies the strategy and fingerprints its exact
   session assertions, requirements, fallbacks, and generated gate rules. Only

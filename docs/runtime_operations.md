@@ -228,12 +228,18 @@ activity view. Verified Home `NEW_BATTLE` evidence deliberately replaces the
 scope when the next preflight begins, keeping that setup and the battle it
 launches together.
 
-The ledger also stores an identity for the latest completed in-game Battle
-History entry. Before the first launch from Home `NEW_BATTLE`, automation opens
-Battle History, copies the newest report, and records its fingerprint as the
-new run's baseline. On a later process attachment at `RUNNING`, Home
-`RESUME_BATTLE`, or an interrupted Battle History inspection, it repeats that
-guarded read:
+The ledger also stores source-tagged normalized identity metadata for the
+latest completed in-game Battle History entry. Under `save_first`, the same
+authoritative snapshot acquired for Home configuration supplies the structural
+newest-tail baseline before Battle History UI may run; no second Home save is
+acquired. Unknown `killedBy` values preserve this structural continuity while
+semantic completed-record publication remains unavailable. Acquisition or
+shape uncertainty uses the guarded UI route only after source restoration;
+target generation, scope, control, boundary, Pause/Stop, or restoration loss
+authorizes no UI input. `force_ui` and `comparison_audit` retain the existing
+UI baseline. On a later process attachment at `RUNNING`, Home `RESUME_BATTLE`,
+or an interrupted Battle History inspection, automation still uses that
+guarded UI read:
 
 - an unchanged fingerprint preserves the existing Current run scope;
 - a changed fingerprint proves that a battle completed while automation was
@@ -245,19 +251,29 @@ guarded read:
 
 A successful automatic Game Over **Retry** starts the next Current-run scope
 immediately after the verified Retry tap. That scope retains the preceding
-History fingerprint only as pending comparison evidence. After run
+History metadata only as pending same-source comparison evidence. After run
 initialization and session preflight release their exclusive startup authority,
-automation polls the newest History entry. If the game still exposes the prior
-entry, the same scope remains active and another bounded poll is scheduled
-without blocking ordinary battle actions. Only an advanced entry completes the
-new scope's baseline; it never creates a second attachment scope for the battle
-that automation itself started.
+`save_first` uses a fresh stable two-identical-read acquisition bound to the
+same exact target, source state, scope, and action guard. An unchanged
+structural tail schedules another passive poll without UI input. One append or
+a capacity-30 rollover completes the new scope's baseline. Acquisition, shape,
+or invalid-transition evidence restores the existing guarded UI route only
+while navigation remains safe; binding loss keeps it action-free. UI and save
+fingerprints are never equated, and a necessary cross-source fallback records a
+new tagged baseline conservatively. Legacy schema-1 scopes are treated only as
+historical UI evidence. The Retry baseline never creates a second attachment
+scope for the battle that automation itself started, and the optional
+player-save collector and its receipts are irrelevant to this authority.
 
-Only the fingerprint, Battle Date, Tier, Wave, and capture time are retained in
-the scope ledger; the copied report remains clipboard input. The complete
-inspection has one operator-facing `ACTION` and one `RESULT`. Its menu, row,
-Copy, close, and return taps are `INPUT`/`DEBUG` detail. Pause can interrupt the
-route without authorizing cleanup input, and Resume continues it.
+The scope ledger retains only source/mapping identity, the privacy-safe
+fingerprint, Tier/Wave, and the source-specific normalized metadata required by
+that contract. UI identity may include Battle Date; save identity includes the
+bounded entry count/capacity, semantic availability, acquisition kind, and
+capture time. It retains neither the copied report nor a decoded save object.
+Each bounded continuity attempt has one operator-facing `ACTION` and one
+terminal `RESULT`. UI menu, row, Copy, close, and return taps are
+`INPUT`/`DEBUG` detail; an unchanged save tail has no input. Pause can interrupt
+the route without authorizing cleanup input, and Resume continues it.
 
 `Clear view` is a client-side cursor only: it does not edit `actions.log`, and
 a new scope or log rotation resets it.
@@ -450,18 +466,42 @@ acquisition and retain the complete prior UI behavior, or to
 `comparison_audit` to collect normalized comparisons while UI remains
 authoritative. No additional CLI or collector switch controls this behavior.
 
+The version-1073 Auto Pick contract is exactly 34 unique mapped IDs with an
+18-entry ranked prefix, 16-entry unranked inventory tail, and no sentinel; ID
+`11` is Unlock a random ultimate weapon. The complete Target Priority ID order
+is Closest (`0`), Basic (`1`), Fast (`2`), Tank (`3`), Ranged (`4`), Boss (`5`),
+In Spotlight (`6`), Protector (`7`), Elites (`8`), and Fleets (`9`). Any shape,
+membership, uniqueness, or requested-order failure uses UI.
+
+The save-backed Farm Modules are Primary Amplifying Strike, Orbital Augment,
+Black Hole Digestor, and Multiverse Nexus plus Assist Being Annihilator,
+Anti-Cube Portal, Singularity Harness, and Dimension Core in their exact typed
+slots. Project Funding and Harmony Conductor remain unmapped Tournament gaps;
+Tournament therefore continues through the complete Modules UI path.
+
+Each check emits a privacy-safe diagnostic with mapping ID, evidence
+completeness, requested-value support, disposition, reason, and a normalized
+summary. Card Recharge Modes and Perk Bans render their accepted mapped/list
+evidence instead of the misleading `observed=unavailable`. Raw save values,
+GUIDs, module records/effects/levels, target identity, and private fields are
+not logged.
+
 The first actual UI repair invalidates every remaining pre-action save
 decision; the changed setting is still verified through its normal UI path and
 later checks continue through UI. Read-only UI inspection leaves unrelated
-matches intact, but an observed contradiction fails closed. Modules, Damage
-Slider, and Orb Distance always retain UI authority.
+matches intact, but an observed contradiction fails closed. Free Upgrade locks
+are a required subset: all requested bits must be set, while extra normalized
+locks such as `Health` are reported as unmanaged and never changed. Only the
+exact current eight-slot Farm Module assignment is save-backed; unsupported or
+partial Modules, Damage Slider, and Orb Distance retain UI authority.
 
 Session-only matches may continue only through the exact next battle that this
 same runtime starts with a freshly verified `NEW_BATTLE` control. The runtime
 binds them once at the first stable `RUNNING` boundary, then may consume Auto
 Pick enabled `true`, the complete exact Target Priority order, all nine
-primaries on, Spotlight Missiles on, Poison Swamp Stun, and save-backed Home
-sections without reopening redundant screens. Restart, attachment, unrelated
+primaries on, Spotlight Missiles on, Poison Swamp Stun, the exact current Farm
+Module assignment, and save-backed Home sections without reopening redundant
+screens. Restart, attachment, unrelated
 Retry, strategy/configuration/target change, operator/manual or ambiguous
 launch, WAIT/Pause/Stop, repair, or a later battle rejects the entire carry.
 A save match never authorizes an input, mutation, lifecycle transition,
