@@ -212,13 +212,25 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   runtime acknowledgement, returns HTTP 409 for a competing live request, and
   advertises `interactive_development_lease_v1` at server revision 26. Concise
   transition events use the existing action log without per-heartbeat noise.
-- The final focused authority, supervisor, application-control, API, and
+- The initial focused authority, supervisor, application-control, API, and
   strategy-authoring run passed 132 tests. The complete non-live checkpoint
   passed compilation, state-definition validation, clickmap integrity with
   zero errors, and all 1,346 pytest tests; `git diff --check` also passed. No
   production file, environment, runtime process, systemd unit, ADB target, or
   emulator was inspected or changed. The lease-aware development ADB input
   helper remains the next delivery step and was not implemented here.
+- The 2026-08-05 master-review correction
+  `baaa91c8186b1de3d343d7a63366e811e926b57e` closes two production-quiescence
+  races. Watchdog restart and foreground recovery now retain a shared mutation
+  guard from their final typed lifecycle check through completion, while hold
+  installation waits on the same boundary. The blind floating-gem worker now
+  dispatches synchronously, so its active state covers the complete tap and no
+  queued tap can survive into an acknowledged lease.
+- The post-correction watchdog, tap-dispatcher, ad-gem, interactive-lease,
+  authority, application-control, and tap-safety run passed 122 tests. The
+  complete non-live checkpoint again passed compilation, state-definition
+  validation, clickmap integrity with zero errors, and all 1,357 pytest tests.
+  No live or production inspection was performed.
 
 ### 2026-08-04 atomic shared latest production frame
 
