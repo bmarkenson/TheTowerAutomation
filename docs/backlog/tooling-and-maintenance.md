@@ -58,13 +58,13 @@ malicious same-account process.
     reads remain available after the live startup inspection without an
     interactive lease. Production still owns connection management and
     long-lived capture.
-- [ ] Add one cooperative interactive lease and production hold.
-  - Extend the existing control surface/directive path rather than adding an
+- [x] Add one cooperative interactive lease and production hold.
+  - Extended the existing control surface/directive path rather than adding an
     authenticated runtime-peer protocol or third daemon.
-  - Allow at most one active lease with an operator-readable owner, ordinary
+  - Allows at most one active lease with an operator-readable owner, ordinary
     lease ID, exact target, fresh runtime evidence, acknowledgement,
     heartbeat, expiry, and release time. Returning `busy` is sufficient.
-  - Install a distinct suppressive `external_development` hold before
+  - Installs a distinct suppressive `external_development` hold before
     acknowledgement. Operator Pause/Stop, runtime replacement, target change,
     heartbeat loss, and battle boundaries end input authority.
 - [ ] Add a small lease-aware exact-target ADB input helper.

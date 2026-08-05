@@ -12,6 +12,8 @@ from unittest.mock import patch
 import pytest
 
 from core.action_authority import (
+    AuthorityHold,
+    AuthorityHoldState,
     RuntimeActionAuthority,
     RuntimeActionAuthorityPublisher,
 )
@@ -483,6 +485,290 @@ def test_strategy_gate_status_never_scrapes_warning_text(tmp_path):
     assert gate["available"] is False
     assert gate["active"] is False
     assert gate["stale"] is True
+
+
+def test_interactive_development_status_separates_request_and_fresh_ack(
+    tmp_path,
+):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    lock_handle = _fresh_runtime_lock(tmp_path, state="RUNNING")
+    authority = RuntimeActionAuthority()
+    authority.update_context(
+        global_pause=False,
+        active_battle=True,
+        battle_scope="run-lease",
+        primary_state="RUNNING",
+    )
+    owner = {
+        "runtime_id": "runtime-lease",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+    }
+    publisher = RuntimeActionAuthorityPublisher(
+        tmp_path / "logs" / "strategy_action_gate.json",
+        owner=owner,
+        stale_after_seconds=30,
+    )
+    publisher.publish(
+        authority.snapshot(now=now.timestamp()),
+        now=now.timestamp(),
+    )
+    service = _service(tmp_path)
+    try:
+        requested = service.apply_interactive_development_lease(
+            {
+                "operation": "request",
+                "owner_label": "interactive lease status test",
+            },
+            now=now.timestamp(),
+        )
+        lease = requested["interactive_development_lease"]["request"]
+        assert lease["runtime"] == owner
+        assert lease["starting_evidence"] == {
+            "screen_state": "RUNNING",
+            "battle_active": True,
+            "battle_scope": "run-lease",
+            "observed_at": now.isoformat(timespec="microseconds"),
+        }
+        assert requested["interactive_development_lease"][
+            "runtime_acknowledgement"
+        ] is None
+        assert requested["interactive_development_lease"]["active"] is False
+
+        with pytest.raises(ControlSurfaceRequestError) as busy:
+            service.apply_interactive_development_lease(
+                {"operation": "request", "owner_label": "conflict"},
+                now=now.timestamp() + 1,
+            )
+        assert busy.value.status == 409
+        assert busy.value.code == "busy"
+
+        before_heartbeat = (tmp_path / "logs" / "actions.log").read_text(
+            encoding="utf-8"
+        )
+        heartbeat = service.apply_interactive_development_lease(
+            {"operation": "heartbeat", "lease_id": lease["lease_id"]},
+            now=now.timestamp() + 2,
+        )
+        after_heartbeat = (tmp_path / "logs" / "actions.log").read_text(
+            encoding="utf-8"
+        )
+        assert heartbeat["operation"]["operation"] == "heartbeat"
+        assert after_heartbeat == before_heartbeat
+
+        live_request = heartbeat["interactive_development_lease"]["request"]
+        authority.update_context(
+            global_pause=False,
+            active_battle=True,
+            battle_scope="run-lease",
+            primary_state="RUNNING",
+            holds=(
+                AuthorityHoldState(
+                    AuthorityHold.EXTERNAL_DEVELOPMENT,
+                    "interactive development owns the cooperative input window",
+                ),
+            ),
+        )
+        acknowledged_at = (
+            now + timedelta(seconds=3)
+        ).isoformat(timespec="seconds")
+        acknowledgement = {
+            "schema_version": 1,
+            "lease_id": lease["lease_id"],
+            "owner_label": lease["owner_label"],
+            "state": "active",
+            "requested_at": live_request["requested_at"],
+            "heartbeat_at": live_request["heartbeat_at"],
+            "expires_at": live_request["expires_at"],
+            "runtime": owner,
+            "hold_installed_at": acknowledged_at,
+            "acknowledged_at": acknowledged_at,
+            "activated_at": acknowledged_at,
+            "updated_at": acknowledged_at,
+            "starting_evidence": {
+                "screen_state": "RUNNING",
+                "battle_active": True,
+                "battle_scope": "run-lease",
+                "observed_at": acknowledged_at,
+            },
+        }
+        publisher.publish(
+            authority.snapshot(now=now.timestamp() + 3),
+            now=now.timestamp() + 3,
+            interactive_development_lease=acknowledgement,
+        )
+        active = service.status(now=now.timestamp() + 3)[
+            "interactive_development_lease"
+        ]
+        assert active["request"]["request_state"] == "requested"
+        assert active["runtime_acknowledgement"]["state"] == "active"
+        assert active["acknowledgement_fresh"] is True
+        assert active["owner_matches_request"] is True
+        assert active["external_hold_installed"] is True
+        assert active["active"] is True
+
+        stale = service.status(now=now.timestamp() + 40)[
+            "interactive_development_lease"
+        ]
+        assert stale["acknowledgement_fresh"] is False
+        assert stale["active"] is False
+
+        released = service.apply_interactive_development_lease(
+            {"operation": "release", "lease_id": lease["lease_id"]},
+            now=now.timestamp() + 4,
+        )["interactive_development_lease"]
+        assert released["request"]["request_state"] == "release_requested"
+        assert released["runtime_acknowledgement"]["state"] == "active"
+        assert released["active"] is False
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+def test_interactive_development_heartbeat_rejects_stale_or_wrong_lease(
+    tmp_path,
+):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    lock_handle = _fresh_runtime_lock(tmp_path, state="RUNNING")
+    authority = RuntimeActionAuthority()
+    authority.update_context(
+        global_pause=False,
+        active_battle=False,
+        battle_scope="run-home",
+        primary_state="HOME_SCREEN",
+    )
+    owner = {
+        "runtime_id": "runtime-heartbeat",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+    }
+    publisher = RuntimeActionAuthorityPublisher(
+        tmp_path / "logs" / "strategy_action_gate.json",
+        owner=owner,
+        stale_after_seconds=30,
+    )
+    publisher.publish(authority.snapshot(), now=now.timestamp())
+    service = _service(tmp_path)
+    try:
+        response = service.apply_interactive_development_lease(
+            {"operation": "request", "owner_label": "heartbeat test"},
+            now=now.timestamp(),
+        )
+        lease_id = response["operation"]["lease_id"]
+        with pytest.raises(ControlSurfaceRequestError) as wrong_heartbeat:
+            service.apply_interactive_development_lease(
+                {"operation": "heartbeat", "lease_id": "0" * 32},
+                now=now.timestamp() + 1,
+            )
+        assert wrong_heartbeat.value.status == 409
+        with pytest.raises(ControlSurfaceRequestError) as wrong_release:
+            service.apply_interactive_development_lease(
+                {"operation": "release", "lease_id": "0" * 32},
+                now=now.timestamp() + 1,
+            )
+        assert wrong_release.value.status == 409
+
+        with pytest.raises(ControlSurfaceRequestError) as stale:
+            service.apply_interactive_development_lease(
+                {"operation": "heartbeat", "lease_id": lease_id},
+                now=now.timestamp() + 31,
+            )
+        assert stale.value.status == 409
+        assert "no longer fresh" in str(stale.value)
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+
+
+def test_http_interactive_development_endpoint_returns_busy_and_id_errors(
+    tmp_path,
+):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    lock_handle = _fresh_runtime_lock(tmp_path, state="RUNNING")
+    authority = RuntimeActionAuthority()
+    authority.update_context(
+        global_pause=False,
+        active_battle=False,
+        battle_scope="run-http",
+        primary_state="HOME_SCREEN",
+    )
+    publisher = RuntimeActionAuthorityPublisher(
+        tmp_path / "logs" / "strategy_action_gate.json",
+        owner={
+            "runtime_id": "runtime-http",
+            "pid": os.getpid(),
+            "adb_target": "localhost:5555",
+        },
+    )
+    publisher.publish(authority.snapshot(), now=now.timestamp())
+    server = ControlSurfaceHTTPServer(
+        ("127.0.0.1", 0),
+        service=_service(tmp_path),
+        static_dir=STATIC_DIR,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    connection = http.client.HTTPConnection(
+        "127.0.0.1",
+        server.server_port,
+        timeout=3,
+    )
+
+    def post(payload):
+        body = json.dumps(payload)
+        connection.request(
+            "POST",
+            "/api/v1/interactive-development-lease",
+            body=body,
+            headers={"Content-Type": "application/json"},
+        )
+        response = connection.getresponse()
+        return response.status, json.loads(response.read())
+
+    try:
+        status, requested = post(
+            {"operation": "request", "owner_label": "HTTP lease test"}
+        )
+        assert status == 200
+        lease_id = requested["operation"]["lease_id"]
+        assert requested["interactive_development_lease"]["active"] is False
+
+        status, busy = post(
+            {"operation": "request", "owner_label": "HTTP conflict"}
+        )
+        assert status == 409
+        assert busy["code"] == "busy"
+
+        status, wrong_heartbeat = post(
+            {"operation": "heartbeat", "lease_id": "0" * 32}
+        )
+        assert status == 409
+        assert "does not match" in wrong_heartbeat["error"]
+        status, wrong_release = post(
+            {"operation": "release", "lease_id": "0" * 32}
+        )
+        assert status == 409
+        assert "does not match" in wrong_release["error"]
+
+        status, heartbeat = post(
+            {"operation": "heartbeat", "lease_id": lease_id}
+        )
+        assert status == 200
+        assert heartbeat["operation"]["operation"] == "heartbeat"
+        status, release = post(
+            {"operation": "release", "lease_id": lease_id}
+        )
+        assert status == 200
+        assert release["interactive_development_lease"]["request"][
+            "request_state"
+        ] == "release_requested"
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
 
 
 def test_status_reads_concise_heartbeat_with_paired_diagnostic_detail(tmp_path):

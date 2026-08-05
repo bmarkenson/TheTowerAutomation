@@ -118,6 +118,7 @@ from handlers.tournament_launch_handler import dispatch_tournament_launch
 from handlers.ad_gem_handler import (
     handle_ad_gem,
     handle_home_ad_gem,
+    is_blind_gem_tapper_active,
     start_blind_gem_tapper,
     stop_blind_gem_tapper,
 )
@@ -340,6 +341,8 @@ class App:
         self._authority_battle_active = False
         self._authority_primary_state = "UNKNOWN"
         self._authority_holds: tuple[AuthorityHoldState, ...] = ()
+        self._external_development_hold_active = False
+        self._interactive_development_ack: Optional[Dict[str, Any]] = None
         self._pending_auxiliary_cleanup: Optional[
             tuple[str, AuxiliaryRouteLease]
         ] = None
@@ -619,8 +622,21 @@ class App:
                 getattr(self, "_authority_battle_active", False)
             )
         if holds is not None:
-            self._authority_holds = tuple(holds)
+            self._authority_holds = tuple(
+                item
+                for item in holds
+                if item.hold is not AuthorityHold.EXTERNAL_DEVELOPMENT
+            )
         current_holds = tuple(getattr(self, "_authority_holds", ()))
+        if bool(
+            getattr(self, "_external_development_hold_active", False)
+        ):
+            current_holds += (
+                AuthorityHoldState(
+                    AuthorityHold.EXTERNAL_DEVELOPMENT,
+                    "interactive development owns the cooperative input window",
+                ),
+            )
         supervisor = getattr(self, "_supervisor", None)
         paused = bool(
             supervisor is not None
@@ -656,10 +672,10 @@ class App:
         self,
         *,
         runtime_active: bool = True,
-    ) -> None:
+    ) -> bool:
         publisher = getattr(self, "_action_authority_publisher", None)
         if publisher is None:
-            return
+            return False
         supervisor = getattr(self, "_supervisor", None)
         owner = (
             supervisor.current_exclusive_validation_owner()
@@ -669,11 +685,587 @@ class App:
             )
             else None
         )
-        publisher.publish(
+        return publisher.publish(
             self._get_action_authority().snapshot(),
             runtime_active=runtime_active,
             owner=owner,
+            interactive_development_lease=getattr(
+                self,
+                "_interactive_development_ack",
+                None,
+            ),
         )
+
+    @staticmethod
+    def _interactive_development_timestamp(
+        now: Optional[float] = None,
+    ) -> str:
+        value = time.time() if now is None else float(now)
+        return datetime.fromtimestamp(value, tz=timezone.utc).astimezone().isoformat(
+            timespec="seconds"
+        )
+
+    @staticmethod
+    def _interactive_development_timestamp_value(value: object) -> float:
+        parsed = datetime.fromisoformat(str(value or ""))
+        if parsed.tzinfo is None:
+            raise ValueError("interactive development timestamp has no timezone")
+        return parsed.timestamp()
+
+    def _interactive_development_control_state(self) -> str:
+        supervisor = getattr(self, "_supervisor", None)
+        state = getattr(supervisor, "control_state", None)
+        if isinstance(state, str):
+            return state.strip().upper()
+        runtime_state = getattr(AUTOMATION, "state", None)
+        return str(getattr(runtime_state, "value", runtime_state)).strip().upper()
+
+    def _interactive_development_runtime_owner(self) -> Dict[str, object]:
+        supervisor = getattr(self, "_supervisor", None)
+        owner_fn = getattr(supervisor, "current_exclusive_validation_owner", None)
+        if not callable(owner_fn):
+            return {"runtime_id": "", "pid": 0, "adb_target": "unknown"}
+        return dict(owner_fn())
+
+    def _interactive_development_binding_error(
+        self,
+        lease: Mapping[str, object],
+    ) -> Optional[str]:
+        expected = lease.get("runtime")
+        if not isinstance(expected, Mapping):
+            return "the request has no valid production runtime binding"
+        actual = self._interactive_development_runtime_owner()
+        if str(expected.get("runtime_id") or "") != str(
+            actual.get("runtime_id") or ""
+        ):
+            return "the production runtime/session changed"
+        if expected.get("pid") != actual.get("pid"):
+            return "the production runtime PID changed"
+        if str(expected.get("adb_target") or "") != str(
+            actual.get("adb_target") or ""
+        ):
+            return "the production ADB target changed"
+        return None
+
+    def _interactive_development_expired(
+        self,
+        lease: Mapping[str, object],
+        *,
+        now: Optional[float] = None,
+    ) -> bool:
+        current = time.time() if now is None else float(now)
+        try:
+            return current >= self._interactive_development_timestamp_value(
+                lease.get("expires_at")
+            )
+        except (TypeError, ValueError):
+            return True
+
+    def _set_interactive_development_ack(
+        self,
+        lease: Mapping[str, object],
+        *,
+        state: str,
+        now: Optional[float] = None,
+        reason: Optional[str] = None,
+        starting_evidence: Optional[Mapping[str, object]] = None,
+        terminal_evidence: Optional[Mapping[str, object]] = None,
+    ) -> Dict[str, Any]:
+        lease_id = str(lease.get("lease_id") or "")
+        existing = getattr(self, "_interactive_development_ack", None)
+        if not isinstance(existing, Mapping) or existing.get("lease_id") != lease_id:
+            existing = {}
+        timestamp = self._interactive_development_timestamp(now)
+        acknowledgement: Dict[str, Any] = {
+            "schema_version": 1,
+            "lease_id": lease_id,
+            "owner_label": str(lease.get("owner_label") or ""),
+            "state": state,
+            "requested_at": lease.get("requested_at"),
+            "heartbeat_at": lease.get("heartbeat_at"),
+            "expires_at": lease.get("expires_at"),
+            "runtime": self._interactive_development_runtime_owner(),
+            "updated_at": timestamp,
+        }
+        for name in (
+            "hold_installed_at",
+            "acknowledged_at",
+            "activated_at",
+            "starting_evidence",
+        ):
+            if existing.get(name) is not None:
+                acknowledgement[name] = existing[name]
+        if state in {
+            "pending",
+            "release_pending",
+            "release_blocked",
+            "expiry_pending",
+            "termination_blocked",
+        }:
+            acknowledgement.setdefault("hold_installed_at", timestamp)
+        if starting_evidence is not None:
+            acknowledgement["starting_evidence"] = dict(starting_evidence)
+        if state == "active":
+            acknowledgement.setdefault("hold_installed_at", timestamp)
+            acknowledgement.setdefault("acknowledged_at", timestamp)
+            acknowledgement.setdefault("activated_at", timestamp)
+        if lease.get("release_requested_at") is not None:
+            acknowledgement["release_requested_at"] = lease.get(
+                "release_requested_at"
+            )
+        if reason:
+            acknowledgement["reason"] = " ".join(str(reason).split())[:256]
+        if state == "terminal":
+            for name in (
+                "terminal_at",
+                "terminal_disposition",
+                "terminal_reason",
+            ):
+                if lease.get(name) is not None:
+                    acknowledgement[name] = lease[name]
+            if terminal_evidence is not None:
+                acknowledgement["terminal_evidence"] = dict(terminal_evidence)
+        self._interactive_development_ack = acknowledgement
+        return acknowledgement
+
+    def _install_external_development_hold(
+        self,
+        lease: Mapping[str, object],
+        *,
+        now: Optional[float] = None,
+    ) -> None:
+        previous = getattr(self, "_interactive_development_ack", None)
+        newly_observed = not (
+            isinstance(previous, Mapping)
+            and previous.get("lease_id") == lease.get("lease_id")
+        )
+        self._external_development_hold_active = True
+        self._set_interactive_development_ack(
+            lease,
+            state="pending",
+            now=now,
+            reason=(
+                "the suppressive production hold is installed; a fresh "
+                "observation and background-input quiescence are still required"
+            ),
+        )
+        stop_blind_gem_tapper()
+        self._update_action_authority()
+        if newly_observed:
+            log(
+                "[INTERACTIVE_DEVELOPMENT] Lease request observed at a safe "
+                f"runtime boundary: lease={lease.get('lease_id')} "
+                f"owner={lease.get('owner_label')}",
+                "INFO",
+                console=True,
+            )
+
+    def _remove_external_development_hold(self) -> None:
+        self._external_development_hold_active = False
+        stop_blind_gem_tapper()
+        self._update_action_authority()
+
+    def _terminate_interactive_development_lease(
+        self,
+        lease: Mapping[str, object],
+        *,
+        disposition: str,
+        reason: str,
+        now: Optional[float] = None,
+        terminal_evidence: Optional[Mapping[str, object]] = None,
+        abnormal: bool = False,
+        force_local_terminal: bool = False,
+    ) -> bool:
+        lease_id = str(lease.get("lease_id") or "")
+        existing = getattr(self, "_interactive_development_ack", None)
+        if (
+            isinstance(existing, Mapping)
+            and existing.get("lease_id") == lease_id
+            and existing.get("state") == "terminal"
+        ):
+            return True
+        supervisor = getattr(self, "_supervisor", None)
+        finish = getattr(
+            supervisor,
+            "finish_interactive_development_lease",
+            None,
+        )
+        persisted = (
+            finish(
+                lease_id,
+                disposition=disposition,
+                reason=reason,
+                now=now,
+            )
+            if callable(finish)
+            else None
+        )
+        if not isinstance(persisted, Mapping) and force_local_terminal:
+            persisted = {
+                **dict(lease),
+                "request_state": "terminal",
+                "terminal_at": self._interactive_development_timestamp(now),
+                "terminal_disposition": disposition,
+                "terminal_reason": reason,
+            }
+            log(
+                "[INTERACTIVE_DEVELOPMENT] Operator control terminated the "
+                "lease locally after its terminal record could not be persisted",
+                "WARN",
+                console=True,
+            )
+        elif not isinstance(persisted, Mapping):
+            if getattr(self, "_external_development_hold_active", False):
+                self._set_interactive_development_ack(
+                    lease,
+                    state="termination_blocked",
+                    now=now,
+                    reason=(
+                        "the terminal lease state could not be persisted; "
+                        "production input remains suppressed"
+                    ),
+                )
+            return False
+        self._set_interactive_development_ack(
+            persisted,
+            state="terminal",
+            now=now,
+            terminal_evidence=terminal_evidence,
+        )
+        self._remove_external_development_hold()
+        if abnormal:
+            log(
+                "[INTERACTIVE_DEVELOPMENT] Lease ended abnormally: "
+                f"lease={lease_id}; {reason}",
+                "WARN",
+                console=True,
+            )
+        log_result(
+            "Interactive development lease ended — "
+            f"{disposition.replace('_', ' ')}",
+            detail=(
+                f"[INTERACTIVE_DEVELOPMENT] lease_id={lease_id} "
+                f"disposition={disposition} reason={reason}"
+            ),
+            console=True,
+        )
+        return True
+
+    def _sync_interactive_development_control_boundary(
+        self,
+        *,
+        now: Optional[float] = None,
+    ) -> None:
+        """Install or revoke the hold only between runtime input workflows."""
+
+        supervisor = getattr(self, "_supervisor", None)
+        lease = getattr(supervisor, "interactive_development_lease", None)
+        if not isinstance(lease, Mapping):
+            if getattr(self, "_external_development_hold_active", False):
+                acknowledgement = getattr(
+                    self,
+                    "_interactive_development_ack",
+                    {},
+                )
+                if isinstance(acknowledgement, Mapping):
+                    control_state = self._interactive_development_control_state()
+                    if control_state in {"PAUSED", "STOPPED"}:
+                        self._terminate_interactive_development_lease(
+                            acknowledgement,
+                            disposition="revoked",
+                            reason=f"operator control changed to {control_state}",
+                            now=now,
+                            force_local_terminal=True,
+                        )
+                        self._publish_action_authority()
+                        return
+                    self._set_interactive_development_ack(
+                        acknowledgement,
+                        state="termination_blocked",
+                        now=now,
+                        reason=(
+                            "the lease directive is missing or malformed; "
+                            "production input remains suppressed"
+                        ),
+                    )
+                    self._publish_action_authority()
+            return
+        lease_id = str(lease.get("lease_id") or "")
+        acknowledgement = getattr(self, "_interactive_development_ack", None)
+        if (
+            isinstance(acknowledgement, Mapping)
+            and acknowledgement.get("lease_id") == lease_id
+            and acknowledgement.get("state") == "terminal"
+        ):
+            return
+        control_state = self._interactive_development_control_state()
+        if control_state in {"PAUSED", "STOPPED"}:
+            self._terminate_interactive_development_lease(
+                lease,
+                disposition="revoked",
+                reason=f"operator control changed to {control_state}",
+                now=now,
+                force_local_terminal=True,
+            )
+            self._publish_action_authority()
+            return
+        binding_error = self._interactive_development_binding_error(lease)
+        if binding_error:
+            self._terminate_interactive_development_lease(
+                lease,
+                disposition="abnormal",
+                reason=binding_error,
+                now=now,
+                abnormal=True,
+            )
+            self._publish_action_authority()
+            return
+        request_state = str(lease.get("request_state") or "")
+        if request_state == "terminal":
+            self._set_interactive_development_ack(
+                lease,
+                state="terminal",
+                now=now,
+            )
+            self._remove_external_development_hold()
+            self._publish_action_authority()
+            return
+        if not getattr(self, "_external_development_hold_active", False):
+            self._install_external_development_hold(lease, now=now)
+        if self._interactive_development_expired(lease, now=now):
+            self._set_interactive_development_ack(
+                lease,
+                state="expiry_pending",
+                now=now,
+                reason=(
+                    "the heartbeat expired; a fresh observation is required "
+                    "before production input resumes"
+                ),
+            )
+        elif request_state == "release_requested":
+            previous_state = (
+                acknowledgement.get("state")
+                if isinstance(acknowledgement, Mapping)
+                else None
+            )
+            self._set_interactive_development_ack(
+                lease,
+                state="release_pending",
+                now=now,
+                reason=(
+                    "release was requested; production remains held until a "
+                    "fresh post-release observation"
+                ),
+            )
+            if previous_state != "release_pending":
+                log(
+                    "[INTERACTIVE_DEVELOPMENT] Release request observed; "
+                    f"lease={lease_id} remains suppressive pending a fresh screen",
+                    "INFO",
+                    console=True,
+                )
+        else:
+            current = getattr(self, "_interactive_development_ack", None)
+            if isinstance(current, Mapping) and current.get("state") == "active":
+                self._set_interactive_development_ack(
+                    lease,
+                    state="active",
+                    now=now,
+                )
+        stop_blind_gem_tapper()
+        self._update_action_authority()
+        self._publish_action_authority()
+
+    @staticmethod
+    def _interactive_development_evidence(
+        detection: Mapping[str, object],
+        *,
+        battle_active: bool,
+        battle_scope: Optional[str],
+        observed_at: str,
+    ) -> Dict[str, object]:
+        return {
+            "screen_state": str(detection.get("state") or "UNKNOWN").upper(),
+            "battle_active": bool(battle_active),
+            "battle_scope": battle_scope,
+            "observed_at": observed_at,
+        }
+
+    @staticmethod
+    def _interactive_development_boundary_reason(
+        starting: Mapping[str, object],
+        current: Mapping[str, object],
+    ) -> Optional[str]:
+        current_state = str(current.get("screen_state") or "UNKNOWN").upper()
+        if current_state in {"GAME_OVER", "TOURNAMENT_RESULTS"}:
+            return f"authoritative terminal boundary {current_state} was observed"
+        if bool(starting.get("battle_active")) != bool(
+            current.get("battle_active")
+        ):
+            return "the authoritative running-battle boundary changed"
+        starting_scope = str(starting.get("battle_scope") or "")
+        current_scope = str(current.get("battle_scope") or "")
+        if starting_scope and current_scope and starting_scope != current_scope:
+            return "the authoritative battle/session identity changed"
+        return None
+
+    def _sync_interactive_development_observation(
+        self,
+        detection: Mapping[str, object],
+        *,
+        now: Optional[float] = None,
+    ) -> None:
+        """Acknowledge, release, or terminate from one fresh detected frame."""
+
+        self._sync_interactive_development_control_boundary(now=now)
+        if not getattr(self, "_external_development_hold_active", False):
+            return
+        supervisor = getattr(self, "_supervisor", None)
+        lease = getattr(supervisor, "interactive_development_lease", None)
+        if not isinstance(lease, Mapping):
+            return
+        self._update_action_authority(detection=detection)
+        observed_at = self._interactive_development_timestamp(now)
+        battle_active = bool(getattr(self, "_authority_battle_active", False))
+        battle_scope = self._current_run_scope_id()
+        evidence = self._interactive_development_evidence(
+            detection,
+            battle_active=battle_active,
+            battle_scope=battle_scope,
+            observed_at=observed_at,
+        )
+        acknowledgement = getattr(self, "_interactive_development_ack", None)
+        starting = (
+            acknowledgement.get("starting_evidence")
+            if isinstance(acknowledgement, Mapping)
+            else None
+        )
+        if not isinstance(starting, Mapping):
+            candidate = lease.get("starting_evidence")
+            starting = candidate if isinstance(candidate, Mapping) else {}
+        boundary_reason = self._interactive_development_boundary_reason(
+            starting,
+            evidence,
+        )
+        if boundary_reason:
+            disposition = (
+                "natural_game_over"
+                if evidence["screen_state"] == "GAME_OVER"
+                else "battle_boundary"
+            )
+            self._terminate_interactive_development_lease(
+                lease,
+                disposition=disposition,
+                reason=boundary_reason,
+                now=now,
+                terminal_evidence=evidence,
+                abnormal=disposition != "natural_game_over",
+            )
+            self._publish_action_authority()
+            return
+        screen_state = str(evidence["screen_state"])
+        if self._interactive_development_expired(lease, now=now):
+            if screen_state == "UNKNOWN":
+                self._set_interactive_development_ack(
+                    lease,
+                    state="termination_blocked",
+                    now=now,
+                    reason=(
+                        "the heartbeat expired on an ambiguous screen; "
+                        "production input remains suppressed"
+                    ),
+                )
+            else:
+                self._terminate_interactive_development_lease(
+                    lease,
+                    disposition="expired",
+                    reason="the cooperative heartbeat deadline expired",
+                    now=now,
+                    terminal_evidence=evidence,
+                )
+            self._publish_action_authority()
+            return
+        if lease.get("request_state") == "release_requested":
+            if screen_state == "UNKNOWN":
+                previous_state = (
+                    acknowledgement.get("state")
+                    if isinstance(acknowledgement, Mapping)
+                    else None
+                )
+                self._set_interactive_development_ack(
+                    lease,
+                    state="release_blocked",
+                    now=now,
+                    reason=(
+                        "the post-release screen is ambiguous; production "
+                        "input remains suppressed"
+                    ),
+                )
+                if previous_state != "release_blocked":
+                    log(
+                        "[INTERACTIVE_DEVELOPMENT] Release remains held because "
+                        "the fresh screen is ambiguous",
+                        "WARN",
+                        console=True,
+                    )
+            else:
+                self._terminate_interactive_development_lease(
+                    lease,
+                    disposition="released",
+                    reason="a fresh post-release observation was obtained",
+                    now=now,
+                    terminal_evidence=evidence,
+                )
+            self._publish_action_authority()
+            return
+        if screen_state == "UNKNOWN":
+            self._set_interactive_development_ack(
+                lease,
+                state="pending",
+                now=now,
+                reason="a known starting screen is required before acknowledgement",
+            )
+            self._publish_action_authority()
+            return
+        stop_blind_gem_tapper()
+        if is_blind_gem_tapper_active():
+            self._set_interactive_development_ack(
+                lease,
+                state="pending",
+                now=now,
+                reason=(
+                    "the background floating-gem input is stopping before "
+                    "acknowledgement"
+                ),
+            )
+            self._publish_action_authority()
+            return
+        previous_state = (
+            acknowledgement.get("state")
+            if isinstance(acknowledgement, Mapping)
+            else None
+        )
+        self._set_interactive_development_ack(
+            lease,
+            state="active",
+            now=now,
+            starting_evidence=evidence,
+        )
+        if previous_state != "active":
+            log(
+                "[INTERACTIVE_DEVELOPMENT] Production acknowledged lease "
+                f"{lease.get('lease_id')} after the suppressive hold was installed",
+                "INFO",
+                console=True,
+            )
+            log(
+                "[INTERACTIVE_DEVELOPMENT] Lease activated: "
+                f"owner={lease.get('owner_label')} screen={screen_state} "
+                f"battle_scope={battle_scope or 'unavailable'}",
+                "INFO",
+                console=True,
+            )
+        self._publish_action_authority()
 
     def _action_decision(
         self,
@@ -1054,6 +1646,9 @@ class App:
     ) -> bool:
         """Claim and start exactly one verified ordinary validation battle."""
 
+        if getattr(self, "_external_development_hold_active", False):
+            return False
+
         definition = self._exclusive_validation_definition()
         if definition is None:
             return False
@@ -1247,6 +1842,9 @@ class App:
         detection: Mapping[str, object],
     ) -> bool:
         """Conclude validation and Surrender only its still-owned battle."""
+
+        if getattr(self, "_external_development_hold_active", False):
+            return False
 
         receipt = self._reconcile_exclusive_validation()
         if receipt is None or str(receipt.get("status") or "") != "running":
@@ -1470,6 +2068,9 @@ class App:
         battle_started: bool,
     ) -> bool:
         """Handle one confirmed Tournament launch without rerunning validation."""
+
+        if getattr(self, "_external_development_hold_active", False):
+            return False
 
         receipt = self._reconcile_exclusive_validation_launch()
         if receipt is None:
@@ -2358,6 +2959,7 @@ class App:
         if self._supervisor.apply_control():
             self._status_reporter.request_immediate_report()
         self._observe_strategy_request()
+        self._sync_interactive_development_control_boundary()
         if self._supervisor.is_paused:
             if stop_blind_gem_tapper():
                 self._blind_tapper_suspended = True
@@ -2381,6 +2983,7 @@ class App:
                 if self._supervisor.apply_control():
                     self._status_reporter.request_immediate_report()
                 self._observe_strategy_request()
+                self._sync_interactive_development_control_boundary()
                 is_paused = self._supervisor.is_paused
                 if is_paused and stop_blind_gem_tapper():
                     self._blind_tapper_suspended = True
@@ -2412,6 +3015,7 @@ class App:
                 # later setup or Home handler can dispatch an action. It never
                 # returns a control decision and remains active during Pause.
                 self._observe_player_save_audit_screen(detection)
+                self._sync_interactive_development_observation(detection)
 
                 self._mission_mgr.observe_detection(detection)
                 self._observe_no_strategy_frame(img, detection)
@@ -3094,6 +3698,21 @@ class App:
         except KeyboardInterrupt:
             log("KeyboardInterrupt — shutting down.", "INFO")
         finally:
+            lease = getattr(
+                getattr(self, "_supervisor", None),
+                "interactive_development_lease",
+                None,
+            )
+            if (
+                isinstance(lease, Mapping)
+                and lease.get("request_state") != "terminal"
+            ):
+                self._terminate_interactive_development_lease(
+                    lease,
+                    disposition="abnormal",
+                    reason="the production runtime shut down",
+                    abnormal=True,
+                )
             self._update_action_authority(shutting_down=True)
             stop_blind_gem_tapper()
             self._publish_action_authority(runtime_active=False)

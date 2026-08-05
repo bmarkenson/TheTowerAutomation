@@ -27,6 +27,7 @@ from core.battle_classification import (
 from core.control_directives import (
     ControlDirectiveError,
     ControlDirectiveStore,
+    INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS,
     MAXIMUM_GAME_SPEED_TARGET,
 )
 from core.gate_decisions import startup_gate_context_for_strategy
@@ -54,7 +55,7 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 25
+CONTROL_SURFACE_REVISION = 26
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -67,6 +68,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "game_speed_target",
     "host_performance_gpu_v1",
     "host_performance_telemetry_v1",
+    "interactive_development_lease_v1",
     "managed_custom_module_presets_v1",
     "observed_game_speed",
     "persistent_adb_connection_v1",
@@ -586,6 +588,8 @@ class ControlSurfaceService:
                     "current_request_id": None,
                     "receipts": {},
                 },
+                "interactive_development_lease": None,
+                "interactive_development_lease_error": None,
                 "exists": self.control_path.exists(),
             }
         control["path"] = self._display_path(self.control_path)
@@ -610,6 +614,13 @@ class ControlSurfaceService:
         strategy_action_gate = self._strategy_action_gate_status(
             now=current_time,
             runtime=runtime,
+        )
+        interactive_development_lease = (
+            self._interactive_development_lease_status(
+                control=control,
+                runtime_authority=strategy_action_gate,
+                now=current_time,
+            )
         )
         process_service = (
             self.process_manager.status() if self.process_manager is not None else None
@@ -647,10 +658,218 @@ class ControlSurfaceService:
                 else None
             ),
             "strategy_action_gate": strategy_action_gate,
+            "interactive_development_lease": interactive_development_lease,
             "runtime": runtime,
             "process_service": process_service,
             "adb_connection": adb_connection,
         }
+
+    def apply_interactive_development_lease(
+        self,
+        request: Mapping[str, Any],
+        *,
+        now: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """Apply one request, heartbeat, or release lease operation."""
+
+        if not isinstance(request, Mapping):
+            raise ControlSurfaceRequestError("Request body must be a JSON object")
+        current_time = datetime.now().timestamp() if now is None else float(now)
+        operation = str(request.get("operation") or "").strip().lower()
+        with self._process_action_lock:
+            try:
+                if operation == "request":
+                    owner_label = " ".join(
+                        str(request.get("owner_label") or "").split()
+                    )
+                    if not owner_label:
+                        raise ControlSurfaceRequestError(
+                            "request requires owner_label"
+                        )
+                    current = self.status(now=current_time)
+                    current_lease = current["interactive_development_lease"]
+                    requested = current_lease.get("request")
+                    acknowledgement = current_lease.get(
+                        "runtime_acknowledgement"
+                    )
+                    if (
+                        isinstance(requested, Mapping)
+                        and requested.get("request_state") != "terminal"
+                    ) or (
+                        isinstance(acknowledgement, Mapping)
+                        and acknowledgement.get("state")
+                        in {
+                            "pending",
+                            "active",
+                            "release_pending",
+                            "release_blocked",
+                            "expiry_pending",
+                            "termination_blocked",
+                        }
+                    ):
+                        raise ControlSurfaceRequestError(
+                            "An interactive development lease request is busy",
+                            status=409,
+                            code="busy",
+                        )
+                    authority = current.get("strategy_action_gate") or {}
+                    owner = authority.get("owner")
+                    if (
+                        authority.get("available") is not True
+                        or authority.get("stale") is True
+                        or authority.get("owner_matches_active_runtime") is not True
+                        or not isinstance(owner, Mapping)
+                    ):
+                        raise ControlSurfaceRequestError(
+                            "Interactive development requires fresh structured "
+                            "runtime ownership evidence",
+                            status=409,
+                        )
+                    if current["control"].get("state") != "RUNNING":
+                        raise ControlSurfaceRequestError(
+                            "Interactive development requires operator control RUNNING",
+                            status=409,
+                        )
+                    screen_state = str(
+                        authority.get("primary_state") or "UNKNOWN"
+                    ).upper()
+                    if screen_state in {
+                        "UNKNOWN",
+                        "GAME_OVER",
+                        "TOURNAMENT_RESULTS",
+                    }:
+                        raise ControlSurfaceRequestError(
+                            "Interactive development requires a fresh non-terminal "
+                            "starting screen",
+                            status=409,
+                        )
+                    lease = self.control_store.request_interactive_development_lease(
+                        owner_label=owner_label,
+                        runtime=owner,
+                        starting_evidence={
+                            "screen_state": screen_state,
+                            "battle_active": authority.get("active_battle") is True,
+                            "battle_scope": authority.get(
+                                "runtime_battle_scope"
+                            ),
+                            "observed_at": authority.get("observed_at"),
+                        },
+                        now=current_time,
+                        ttl_seconds=INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS,
+                    )
+                    warning = self._append_audit(
+                        "Interactive development lease requested: "
+                        f"owner={lease['owner_label']} lease={lease['lease_id']} "
+                        f"runtime={lease['runtime']['runtime_id']} "
+                        f"pid={lease['runtime']['pid']} "
+                        f"target={lease['runtime']['adb_target']}"
+                    )
+                elif operation == "heartbeat":
+                    lease_id = str(request.get("lease_id") or "").strip().lower()
+                    if not lease_id:
+                        raise ControlSurfaceRequestError(
+                            "heartbeat requires lease_id"
+                        )
+                    self._require_fresh_interactive_development_runtime(
+                        lease_id,
+                        now=current_time,
+                    )
+                    lease = (
+                        self.control_store.heartbeat_interactive_development_lease(
+                            lease_id,
+                            now=current_time,
+                            ttl_seconds=(
+                                INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS
+                            ),
+                        )
+                    )
+                    warning = None
+                elif operation == "release":
+                    lease_id = str(request.get("lease_id") or "").strip().lower()
+                    if not lease_id:
+                        raise ControlSurfaceRequestError("release requires lease_id")
+                    lease = self.control_store.release_interactive_development_lease(
+                        lease_id,
+                        now=current_time,
+                    )
+                    warning = self._append_audit(
+                        "Interactive development lease release requested: "
+                        f"lease={lease['lease_id']} owner={lease['owner_label']}",
+                        level="INFO",
+                    )
+                else:
+                    raise ControlSurfaceRequestError(
+                        "operation must be request, heartbeat, or release"
+                    )
+            except ControlDirectiveError as exc:
+                raise ControlSurfaceRequestError(str(exc), status=409) from exc
+            except ValueError as exc:
+                if isinstance(exc, ControlSurfaceRequestError):
+                    raise
+                message = str(exc)
+                status = 409 if any(
+                    marker in message.lower()
+                    for marker in (
+                        "busy",
+                        "does not match",
+                        "expired",
+                        "no longer",
+                        "no valid",
+                    )
+                ) else 400
+                raise ControlSurfaceRequestError(message, status=status) from exc
+
+            response = self.status(now=current_time)
+            response["operation"] = {
+                "accepted": True,
+                "operation": operation,
+                "lease_id": lease["lease_id"],
+            }
+            if warning:
+                response["operation"]["warning"] = warning
+            return response
+
+    def _require_fresh_interactive_development_runtime(
+        self,
+        lease_id: str,
+        *,
+        now: float,
+    ) -> None:
+        """Reject a heartbeat unless the request still names the live owner."""
+
+        current = self.status(now=now)
+        lease_status = current.get("interactive_development_lease") or {}
+        lease = lease_status.get("request")
+        if not isinstance(lease, Mapping):
+            raise ControlSurfaceRequestError(
+                "No valid interactive development lease request exists",
+                status=409,
+            )
+        if lease.get("lease_id") != lease_id:
+            raise ControlSurfaceRequestError(
+                "Interactive development lease ID does not match",
+                status=409,
+            )
+        authority = current.get("strategy_action_gate") or {}
+        owner = authority.get("owner")
+        if (
+            current.get("control", {}).get("state") != "RUNNING"
+            or authority.get("available") is not True
+            or authority.get("stale") is True
+            or authority.get("owner_matches_active_runtime") is not True
+            or not isinstance(owner, Mapping)
+            or dict(lease.get("runtime") or {})
+            != {
+                "runtime_id": str(owner.get("runtime_id") or ""),
+                "pid": owner.get("pid"),
+                "adb_target": str(owner.get("adb_target") or ""),
+            }
+        ):
+            raise ControlSurfaceRequestError(
+                "Interactive development runtime ownership is no longer fresh "
+                "or matching",
+                status=409,
+            )
 
     def publish_host_performance(
         self,
@@ -2091,6 +2310,8 @@ class ControlSurfaceService:
                 "updated_at": None,
                 "global_pause": False,
                 "runtime_stopped": False,
+                "active_battle": False,
+                "runtime_battle_scope": None,
                 "primary_state": "UNKNOWN",
                 "holds": [],
                 "observation_authority": {
@@ -2123,6 +2344,7 @@ class ControlSurfaceService:
                     "owner": None,
                 },
                 "auxiliary_route": None,
+                "interactive_development_lease": None,
                 "path": self._display_path(self.strategy_action_gate_path),
             }
             if error:
@@ -2219,6 +2441,11 @@ class ControlSurfaceService:
         failed_checks = payload.get("failed_check_ids")
         allowed_collectors = payload.get("allowed_auxiliary_collectors")
         holds = payload.get("holds")
+        interactive_development_lease = (
+            self._runtime_interactive_development_acknowledgement(
+                payload.get("interactive_development_lease")
+            )
+        )
         return {
             "schema_version": 1,
             "available": True,
@@ -2251,6 +2478,8 @@ class ControlSurfaceService:
             "updated_at": payload.get("updated_at"),
             "global_pause": payload.get("global_pause") is True,
             "runtime_stopped": payload.get("runtime_stopped") is True,
+            "active_battle": payload.get("active_battle") is True,
+            "runtime_battle_scope": payload.get("runtime_battle_scope"),
             "primary_state": str(payload.get("primary_state") or "UNKNOWN"),
             "holds": holds if isinstance(holds, list) else [],
             "observation_authority": authority_field(
@@ -2283,7 +2512,217 @@ class ControlSurfaceService:
                 if isinstance(payload.get("auxiliary_route"), Mapping)
                 else None
             ),
+            "interactive_development_lease": interactive_development_lease,
             "path": self._display_path(self.strategy_action_gate_path),
+        }
+
+    @staticmethod
+    def _runtime_interactive_development_acknowledgement(
+        value: object,
+    ) -> Optional[dict[str, Any]]:
+        if not isinstance(value, Mapping) or value.get("schema_version") != 1:
+            return None
+        lease_id = str(value.get("lease_id") or "").strip().lower()
+        state = str(value.get("state") or "").strip().lower()
+        owner_label = " ".join(str(value.get("owner_label") or "").split())
+        runtime = value.get("runtime")
+        if (
+            len(lease_id) != 32
+            or any(character not in "0123456789abcdef" for character in lease_id)
+            or state
+            not in {
+                "pending",
+                "active",
+                "release_pending",
+                "release_blocked",
+                "expiry_pending",
+                "termination_blocked",
+                "terminal",
+            }
+            or not owner_label
+            or not isinstance(runtime, Mapping)
+        ):
+            return None
+        try:
+            runtime_pid = int(runtime.get("pid"))
+        except (TypeError, ValueError):
+            return None
+        runtime_owner = {
+            "runtime_id": str(runtime.get("runtime_id") or ""),
+            "pid": runtime_pid,
+            "adb_target": str(runtime.get("adb_target") or ""),
+        }
+        if (
+            not runtime_owner["runtime_id"]
+            or runtime_owner["pid"] <= 0
+            or not runtime_owner["adb_target"]
+            or runtime_owner["adb_target"] == "unknown"
+        ):
+            return None
+        response: dict[str, Any] = {
+            "schema_version": 1,
+            "lease_id": lease_id,
+            "owner_label": owner_label[:96],
+            "state": state,
+            "runtime": runtime_owner,
+        }
+        for name in (
+            "requested_at",
+            "heartbeat_at",
+            "expires_at",
+            "hold_installed_at",
+            "acknowledged_at",
+            "activated_at",
+            "release_requested_at",
+            "updated_at",
+            "terminal_at",
+            "terminal_disposition",
+            "terminal_reason",
+            "reason",
+        ):
+            if value.get(name) is not None:
+                response[name] = str(value[name])[:256]
+        for name in ("starting_evidence", "terminal_evidence"):
+            evidence = value.get(name)
+            if isinstance(evidence, Mapping):
+                response[name] = {
+                    "screen_state": str(
+                        evidence.get("screen_state") or "UNKNOWN"
+                    ).upper()[:64],
+                    "battle_active": evidence.get("battle_active") is True,
+                    "battle_scope": (
+                        str(evidence.get("battle_scope"))[:128]
+                        if evidence.get("battle_scope") is not None
+                        else None
+                    ),
+                    "observed_at": str(evidence.get("observed_at") or "")[:64],
+                }
+        if state == "active" and not response.get("acknowledged_at"):
+            return None
+        if state == "terminal" and not response.get("terminal_at"):
+            return None
+        return response
+
+    def _interactive_development_lease_status(
+        self,
+        *,
+        control: Mapping[str, Any],
+        runtime_authority: Mapping[str, Any],
+        now: float,
+    ) -> dict[str, Any]:
+        """Keep the cooperative request distinct from runtime acknowledgement."""
+
+        request = control.get("interactive_development_lease")
+        request = dict(request) if isinstance(request, Mapping) else None
+        acknowledgement = runtime_authority.get(
+            "interactive_development_lease"
+        )
+        acknowledgement = (
+            dict(acknowledgement)
+            if isinstance(acknowledgement, Mapping)
+            else None
+        )
+        request_expired = False
+        if request is not None:
+            try:
+                request_expired = now >= datetime.fromisoformat(
+                    str(request.get("expires_at") or "")
+                ).timestamp()
+            except ValueError:
+                request_expired = True
+        fresh_acknowledgement = bool(
+            acknowledgement is not None
+            and runtime_authority.get("available") is True
+            and runtime_authority.get("stale") is False
+            and runtime_authority.get("owner_matches_active_runtime") is True
+        )
+        owner = runtime_authority.get("owner")
+        owner_matches_request = bool(
+            request is not None
+            and isinstance(owner, Mapping)
+            and request.get("runtime")
+            == {
+                "runtime_id": str(owner.get("runtime_id") or ""),
+                "pid": owner.get("pid"),
+                "adb_target": str(owner.get("adb_target") or ""),
+            }
+        )
+        acknowledgement_matches_request = bool(
+            request is not None
+            and acknowledgement is not None
+            and acknowledgement.get("lease_id") == request.get("lease_id")
+            and acknowledgement.get("runtime") == request.get("runtime")
+        )
+        holds = runtime_authority.get("holds")
+        external_hold_installed = any(
+            isinstance(item, Mapping)
+            and item.get("hold") == "external_development"
+            for item in (holds if isinstance(holds, list) else [])
+        )
+        suppressive_authority = bool(
+            runtime_authority.get("observation_authority", {}).get("allowed")
+            is True
+            and runtime_authority.get(
+                "auxiliary_collection_authority", {}
+            ).get("allowed")
+            is False
+            and runtime_authority.get("strategy_action_authority", {}).get(
+                "allowed"
+            )
+            is False
+            and runtime_authority.get("lifecycle_action_authority", {}).get(
+                "allowed"
+            )
+            is False
+            and not runtime_authority.get("allowed_auxiliary_collectors")
+        )
+        active = bool(
+            request is not None
+            and request.get("request_state") == "requested"
+            and not request_expired
+            and control.get("state") == "RUNNING"
+            and fresh_acknowledgement
+            and owner_matches_request
+            and acknowledgement_matches_request
+            and acknowledgement.get("state") == "active"
+            and external_hold_installed
+            and suppressive_authority
+        )
+        if control.get("interactive_development_lease_error"):
+            reason = str(control["interactive_development_lease_error"])
+        elif request is None:
+            reason = "no interactive development lease is requested"
+        elif request.get("request_state") == "terminal":
+            reason = str(
+                request.get("terminal_reason") or "the lease is terminal"
+            )
+        elif control.get("state") != "RUNNING":
+            reason = "operator Pause or Stop takes precedence"
+        elif request_expired:
+            reason = "the heartbeat deadline has expired"
+        elif not fresh_acknowledgement:
+            reason = "fresh runtime acknowledgement is unavailable"
+        elif not owner_matches_request or not acknowledgement_matches_request:
+            reason = "runtime acknowledgement ownership does not match the request"
+        elif acknowledgement.get("state") != "active":
+            reason = str(
+                acknowledgement.get("reason")
+                or f"runtime acknowledgement is {acknowledgement.get('state')}"
+            )
+        elif not external_hold_installed or not suppressive_authority:
+            reason = "runtime acknowledgement does not prove the suppressive hold"
+        else:
+            reason = "the matching production runtime acknowledged the lease"
+        return {
+            "schema_version": 1,
+            "request": request,
+            "runtime_acknowledgement": acknowledgement,
+            "request_expired": request_expired,
+            "acknowledgement_fresh": fresh_acknowledgement,
+            "owner_matches_request": owner_matches_request,
+            "external_hold_installed": external_hold_installed,
+            "active": active,
+            "reason": reason,
         }
 
     def _runtime_evidence(self) -> dict[str, Any]:
@@ -2323,9 +2762,18 @@ class ControlSurfaceService:
             "instances": instances,
         }
 
-    def _append_audit(self, message: str) -> Optional[str]:
+    def _append_audit(
+        self,
+        message: str,
+        *,
+        level: str = "ACTION",
+    ) -> Optional[str]:
+        normalized_level = str(level or "ACTION").strip().upper()
+        if normalized_level not in {"ACTION", "INFO", "RESULT", "WARN"}:
+            normalized_level = "ACTION"
         entry = (
-            f"[ACTION {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+            f"[{normalized_level} "
+            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
             f"[CONTROL_SURFACE] {message}\n"
         )
         try:

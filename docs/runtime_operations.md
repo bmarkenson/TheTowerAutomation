@@ -324,6 +324,68 @@ consumed it. Paused automation continues capture, state detection, lifecycle
 observation, and status reporting, while strategy and handler actions remain
 blocked.
 
+### Interactive development hold is not Pause
+
+The loopback control surface supports one cooperative development-lease
+lifecycle at `POST /api/v1/interactive-development-lease`. Complete the normal
+live startup inspection before using it. Request only a bounded operator/task
+label:
+
+```bash
+curl --fail --silent --show-error \
+  -H 'Content-Type: application/json' \
+  --data '{"operation":"request","owner_label":"bounded task label"}' \
+  http://127.0.0.1:8787/api/v1/interactive-development-lease
+```
+
+The response's `operation.lease_id` is an ordinary coordination handle, not a
+secret. A request is not input authority. Inspect
+`interactive_development_lease` in `/api/v1/status` and require `active: true`;
+that value proves all of the following at once:
+
+- operator control is still `RUNNING`;
+- the 30-second heartbeat deadline has not expired;
+- the request and fresh runtime acknowledgement name the same runtime/session,
+  PID, and exact ADB target as the active lock;
+- production installed `external_development` before acknowledgement;
+- capture, detection, interpretation, and status remain active; and
+- auxiliary, strategy, lifecycle, initialization, validation, recovery, and
+  blind/background input are all suppressed without an owner bypass.
+
+Keep a live request current with the matching ID; heartbeat operations are
+deliberately absent from the action log:
+
+```bash
+curl --fail --silent --show-error \
+  -H 'Content-Type: application/json' \
+  --data '{"operation":"heartbeat","lease_id":"LEASE_ID"}' \
+  http://127.0.0.1:8787/api/v1/interactive-development-lease
+```
+
+Delivery step 3 does not include the lease-aware ADB input helper. Until that
+helper is implemented, an active lease demonstrates production quiescence but
+does not make ad-hoc raw ADB input a supported project workflow.
+
+Request normal release with the matching ID after development input has
+stopped:
+
+```bash
+curl --fail --silent --show-error \
+  -H 'Content-Type: application/json' \
+  --data '{"operation":"release","lease_id":"LEASE_ID"}' \
+  http://127.0.0.1:8787/api/v1/interactive-development-lease
+```
+
+Release is not complete merely because that write succeeded. Production keeps
+the hold through a fresh post-release capture and detection, then publishes a
+terminal disposition before resuming its own input. `UNKNOWN`, failed terminal
+persistence, or other ambiguity keeps the suppressive hold visible. Pause or
+Stop revokes immediately and Resume never revives the old request. Heartbeat
+expiry, runtime/PID/session or target replacement, a running-battle boundary,
+and natural Game Over terminate the lease; Game Over returns authority to the
+normal production terminal handler. Request a new lease after any terminal
+boundary. The native Windows GUI does not expose this workflow yet.
+
 ### Strategy Action Gate is not Pause
 
 An enforced validation mismatch discovered inside an authoritative running

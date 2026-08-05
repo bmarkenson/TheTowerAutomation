@@ -22,6 +22,7 @@ Linux loopback HTTP server
       ├── manage ► persisted localhost ADB registration
       ├── read  ──► logs/actions.log
       ├── read  ──► logs/activity_scope.json
+      ├── read  ──► logs/strategy_action_gate.json
       ├── read  ──► logs/automation-*.lock
       ├── read  ──► logs/battles/Battle*.json
       └── read  ──► logs/tournaments/Tournament*.json
@@ -42,6 +43,11 @@ agnostic.
 - The GUI distinguishes a saved directive from runtime acknowledgement. It
   never presents a control-file write alone as proof that the runtime applied
   it.
+- Interactive development uses that same separation. A lease request is only
+  control intent; `/api/v1/status` reports it apart from the fresh
+  runtime-owned acknowledgement and marks it active only when the exact
+  runtime/session, PID, target, heartbeat, suppressive hold, and denied input
+  matrix all agree.
 - Runtime health requires both current lock/PID evidence and a fresh status
   heartbeat. A lock file by itself may be stale.
 - Completed-battle JSON is the authoritative statistics source. List responses
@@ -59,6 +65,8 @@ agnostic.
   persistent numeric game-speed target selection,
   resolution of a runtime-published startup-gate decision,
   optional strategy-scoped one-run check configuration,
+  one cooperative interactive-development lease request, heartbeat, and
+  release,
   bundled or validated custom-strategy selection, constrained custom Farm
   profile publication, stopped or
   acknowledged-paused ADB-port
@@ -270,6 +278,7 @@ memory only. The API deliberately sends no CORS permission.
 | --- | --- | --- |
 | `GET` | `/api/v1/status` | Server revision/capabilities, control intent, acknowledgement, current-run identity, latest observation, structured Strategy Action Gate, and runtime evidence |
 | `POST` | `/api/v1/control` | Allowlisted control mutation |
+| `POST` | `/api/v1/interactive-development-lease` | Request, heartbeat, or release the one cooperative development lease; never dispatch device input |
 | `POST` | `/api/v1/process` | Start/stop or guarded-reload the fixed systemd automation unit, select its startup-gate policy, save/queue/adopt a bundled or published custom strategy, or configure/safely hand off its ADB port |
 | `POST` | `/api/v1/host-performance` | Bounded, idempotent batches of native Windows host/BlueStacks performance aggregates |
 | `GET` | `/api/v1/strategy-profiles` | Bundled/custom profile summaries plus the allowlisted Farm policy and preset catalogs |
@@ -300,6 +309,36 @@ reported as unavailable/stale and cannot be promoted into action authority.
 Warning text in the action log is never parsed as gate state. Adding this
 field is backward compatible: earlier clients ignore it and retain every older
 endpoint and capability.
+
+### Interactive development lease status
+
+Server revision 26 advertises `interactive_development_lease_v1`. The additive
+`POST /api/v1/interactive-development-lease` operation model is:
+
+```json
+{"operation": "request", "owner_label": "bounded task label"}
+{"operation": "heartbeat", "lease_id": "ordinary coordination ID"}
+{"operation": "release", "lease_id": "ordinary coordination ID"}
+```
+
+There is no client-supplied runtime, PID, target, timeout, source fingerprint,
+secret, action, or command. The server derives the binding from a fresh
+runtime-owned authority snapshot that matches the active OS lock. A live
+conflict returns HTTP 409 with code `busy`; expired, terminal, or wrong-ID
+heartbeats and releases are rejected, and a heartbeat additionally requires
+fresh matching runtime ownership. Heartbeats extend the fixed 30-second expiry
+without adding an action-log entry.
+
+`GET /api/v1/status` exposes `interactive_development_lease.request` from the
+control directive and `runtime_acknowledgement` from the atomic runtime-owned
+authority snapshot. Its derived `active` flag additionally requires RUNNING
+operator control, an unexpired request, fresh matching runtime/lock ownership,
+an `active` acknowledgement for the same lease, the
+`external_development` hold, continued observation authority, and denial of
+auxiliary, strategy, lifecycle, and all allowlisted collector input. Pending,
+release-blocked, expired, stale, or mismatched evidence is visible but never
+active. The endpoint provides coordination state only; the lease-aware ADB
+input helper remains a separate later delivery.
 
 ## Strategy profile publication
 
@@ -763,16 +802,14 @@ Process request examples:
 
 ## Deliberately deferred capabilities
 
-The production control-surface service is the planned coordinator for one
-cooperative interactive development lease. It should extend the existing local
-JSON/HTTP and runtime-directive model rather than add an authenticated Unix
-peer protocol or another daemon. Production must acknowledge a distinct
-suppressive development hold before the lease permits exact-target worker
-input; heartbeat expiry, Pause/Stop, runtime or target replacement, and a battle
-boundary end that authority. Bounded read-only ADB operations need no lease
-after the normal live startup inspection. The complete coordination contract is
-defined in [development_isolation.md](development_isolation.md). No current
-endpoint or worktree-local lock grants interactive authority.
+The production control-surface service now coordinates one cooperative
+interactive development lease through the existing JSON/HTTP directive and
+runtime-owned status paths. The lease-aware exact-target ADB input helper is
+still deferred to the next delivery step. Until then, neither an acknowledged
+lease nor a worktree-local lock makes ad-hoc worker input a supported path.
+Bounded read-only ADB operations still need no lease after the normal live
+startup inspection. The complete coordination contract is defined in
+[development_isolation.md](development_isolation.md).
 
 These are the next useful additions, in approximate priority order:
 

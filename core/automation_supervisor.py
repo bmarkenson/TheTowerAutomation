@@ -20,6 +20,7 @@ Public usage (simplified):
 
 from __future__ import annotations
 
+from copy import deepcopy
 import math
 import os
 import time
@@ -35,6 +36,7 @@ from core.control_directives import (
     ControlDirectiveError,
     ControlDirectiveStore,
     MAXIMUM_GAME_SPEED_TARGET,
+    normalize_interactive_development_lease,
     normalize_game_speed_target,
 )
 from core.strategy_profiles import is_configurable_strategy
@@ -81,6 +83,11 @@ class AutomationSupervisor:
         )
         self._startup_gate_waivers = self._parse_startup_gate_waivers(
             initial_directives
+        )
+        self._interactive_development_lease = (
+            normalize_interactive_development_lease(
+                initial_directives.get("interactive_development_lease")
+            )
         )
         self._runtime_id = uuid4().hex
         self.auto_return_secs = max(0, int(auto_return_secs))
@@ -163,6 +170,24 @@ class AutomationSupervisor:
             for check_id, waiver in self._startup_gate_waivers.items()
         }
 
+    @property
+    def interactive_development_lease(self) -> Optional[Dict[str, object]]:
+        """Return the latest validated cooperative development directive."""
+
+        return (
+            deepcopy(self._interactive_development_lease)
+            if self._interactive_development_lease is not None
+            else None
+        )
+
+    @property
+    def control_state(self) -> str:
+        """Return the currently applied operator run-state value."""
+
+        state = getattr(AUTOMATION, "state", None)
+        value = getattr(state, "value", state)
+        return str(value or "UNKNOWN").strip().upper()
+
     def apply_control(self) -> bool:
         """Apply directives and report whether tracked control intent changed."""
 
@@ -204,6 +229,11 @@ class AutomationSupervisor:
             )
             self._startup_gate_waivers = self._parse_startup_gate_waivers(
                 directives
+            )
+            self._interactive_development_lease = (
+                normalize_interactive_development_lease(
+                    directives.get("interactive_development_lease")
+                )
             )
             self._apply_state(
                 directives.get("state"),
@@ -419,6 +449,33 @@ class AutomationSupervisor:
             "pid": os.getpid(),
             "adb_target": os.getenv("ADB_DEVICE") or "unknown",
         }
+
+    def finish_interactive_development_lease(
+        self,
+        lease_id: str,
+        *,
+        disposition: str,
+        reason: str,
+        now: Optional[float] = None,
+    ) -> Optional[Dict[str, object]]:
+        """Persist a terminal lease result owned by the runtime boundary."""
+
+        try:
+            lease = self._control_store.finish_interactive_development_lease(
+                lease_id,
+                disposition=disposition,
+                reason=reason,
+                now=now,
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(
+                "[INTERACTIVE_DEVELOPMENT] Failed recording terminal lease "
+                f"state: {exc}",
+                "WARN",
+            )
+            return None
+        self._interactive_development_lease = deepcopy(lease)
+        return deepcopy(lease)
 
     def exclusive_validation_receipt(
         self,

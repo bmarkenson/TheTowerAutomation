@@ -152,7 +152,14 @@ def test_complete_normal_pause_and_strategy_gate_authority_matrix():
     assert not snapshot.lifecycle_action_authority.allowed
 
 
-@pytest.mark.parametrize("hold", tuple(AuthorityHold))
+@pytest.mark.parametrize(
+    "hold",
+    tuple(
+        hold
+        for hold in AuthorityHold
+        if hold is not AuthorityHold.EXTERNAL_DEVELOPMENT
+    ),
+)
 def test_exclusive_holds_precede_gate_and_block_all_auxiliary_collection(hold):
     authority = RuntimeActionAuthority()
     hold_state = AuthorityHoldState(hold, f"{hold.value} owns the screen")
@@ -197,6 +204,31 @@ def test_exclusive_holds_precede_gate_and_block_all_auxiliary_collection(hold):
         RuntimeActionClass.LIFECYCLE_ACTION,
         owner=hold.value,
     ).reason
+
+
+def test_external_development_hold_is_suppressive_without_owner_bypass():
+    authority = RuntimeActionAuthority()
+    hold = AuthorityHoldState(
+        AuthorityHold.EXTERNAL_DEVELOPMENT,
+        "interactive development owns the cooperative input window",
+    )
+    _set_running_context(authority, holds=(hold,))
+
+    assert authority.decision(RuntimeActionClass.OBSERVATION).allowed
+    for collector in STRATEGY_GATE_AUXILIARY_ALLOWLIST:
+        assert not authority.decision(
+            RuntimeActionClass.AUXILIARY_COLLECTION,
+            collector=collector,
+            owner=AuthorityHold.EXTERNAL_DEVELOPMENT.value,
+        ).allowed
+    for action_class in (
+        RuntimeActionClass.STRATEGY_ACTION,
+        RuntimeActionClass.LIFECYCLE_ACTION,
+    ):
+        for owner in (None, *tuple(item.value for item in AuthorityHold)):
+            decision = authority.decision(action_class, owner=owner)
+            assert not decision.allowed
+            assert "external_development" in decision.reason
 
 
 def test_gate_survives_transient_screens_but_requires_fresh_running_for_taps():

@@ -816,6 +816,14 @@ routed through an input guard.
 | Global Pause or Stop | Continues | Blocked | Blocked | Blocked |
 | Running-battle Strategy Gate | Continues | Only the explicit safe allowlist | Blocked | Blocked |
 | Continuity, initialization, validation, or exclusive screen hold | Continues | Blocked | Matching bounded owner only | Matching bounded owner only |
+| `external_development` hold | Continues | Blocked | Blocked for every owner | Blocked for every owner |
+
+`external_development` is the one intentionally suppressive hold. Unlike
+initialization, preflight, continuity, and exclusive-validation ownership, it
+has no matching in-process bypass: even `owner=external_development` is denied.
+It therefore stops normal strategy, handler, auxiliary, initialization,
+validation, recovery, lifecycle, and blind/background input without changing
+`AUTOMATION.state` or representing itself as Pause.
 
 An active Strategy Gate is distinct from Pause and never mutates the control
 file or `AUTOMATION.state`. It is scoped to the current activity/run identity
@@ -853,12 +861,14 @@ boundary handler can take ownership.
 `RuntimeActionAuthorityPublisher` atomically refreshes
 `logs/strategy_action_gate.json`. Schema version 1 includes runtime/ADB/PID
 ownership, observation time, runtime-active flag, staleness threshold, active
-gate and run scope, strategy, source/phase, failed checks, reason, activation
-and update times, Pause/Stop/hold context, all four authority decisions,
-currently allowed collectors, and any auxiliary-route lease. The control
-surface accepts the channel only while its timestamp is fresh, `runtime_active`
-is true, and its PID/target owner matches the active runtime lock. It never
-derives gate authority from warning text in `actions.log`.
+gate and run scope, current battle-active/scope evidence, strategy,
+source/phase, failed checks, reason, activation and update times,
+Pause/Stop/hold context, all four authority decisions, currently allowed
+collectors, any auxiliary-route lease, and the separate interactive-development
+runtime acknowledgement when applicable. The control surface accepts the
+channel only while its timestamp is fresh, `runtime_active` is true, and its
+PID/target owner matches the active runtime lock. It never derives gate or
+development-lease authority from warning text in `actions.log`.
 
 - Direct ADB capture accepts supported native `1080x1920` and `720x1280`
   framebuffers, records the source geometry, and normalizes them to the
@@ -1002,6 +1012,21 @@ derives gate authority from warning text in `actions.log`.
   alone is not proof that its PID is still alive.
 - Pause blocks every strategy and handler action while allowing observation and
   status reporting.
+- One schema-1 `interactive_development_lease` directive may bind a bounded
+  owner label and ordinary lease ID to the fresh production runtime/session,
+  PID, exact ADB target, and starting screen/battle evidence. The request is
+  not authority. The matching runtime installs `external_development` at a
+  safe main-loop boundary, stops background input, obtains a fresh known
+  observation, and only then publishes the separate acknowledgement. A
+  30-second heartbeat deadline, Pause/Stop, runtime/PID/target replacement, or
+  authoritative battle boundary makes status inactive and terminates the
+  lease. Resume never revives the terminal request.
+- A normal development release remains held through the first post-release
+  capture and detection. A known same-battle screen permits the runtime to
+  publish the terminal result and remove the hold. An ambiguous screen or
+  failed terminal write retains the hold; natural Game Over instead terminates
+  the lease and restores normal production terminal authority on that fresh
+  observation.
 - Control synchronization precedes capture, so an ADB outage cannot prevent a
   Pause acknowledgement or a paused target-handoff request. Connection recovery
   may continue while paused but may not foreground or restart the game.
@@ -1126,12 +1151,17 @@ may read or copy production artifacts and, after the live startup inspection,
 run bounded exact-target ADB reads or captures without an interactive lease.
 Connection management and continuous capture remain production-owned.
 
-Interactive development will use the existing control-surface/directive path,
-one exclusive expiring lease, and a distinct suppressive runtime hold that
-production acknowledges before worker input. It is a coordination boundary,
-not a same-user security boundary: no source attestation, secret token,
-authenticated peer protocol, semantic action catalog, or cryptographic audit
-is planned. A worktree-local lock or screenshot never grants input authority.
+Interactive development now uses the existing control-surface/directive path,
+one cooperative expiring request, and the distinct suppressive
+`external_development` hold that production acknowledges through its existing
+runtime-owned authority snapshot. It is a coordination boundary, not a
+same-user security boundary: no source attestation, secret token, authenticated
+peer protocol, semantic action catalog, or cryptographic audit is planned. A
+worktree-local lock or screenshot never grants input authority.
+
+The lease-aware exact-target ADB input helper remains the next delivery step.
+Until it exists, the implemented request and acknowledgement lifecycle does not
+make ad-hoc worker input a supported project path.
 
 An app-owned frame source and short-lived UI-state action lease are the intended
 direction for multi-frame decisions and latency-sensitive scheduled actions.

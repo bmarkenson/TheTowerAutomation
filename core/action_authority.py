@@ -68,6 +68,7 @@ class AuthorityHold(str, Enum):
     SESSION_PREFLIGHT = "session_preflight"
     EXCLUSIVE_VALIDATION = "exclusive_validation"
     EXCLUSIVE_OWNERSHIP = "exclusive_ownership"
+    EXTERNAL_DEVELOPMENT = "external_development"
 
 
 class StrategyGateExitEvent(str, Enum):
@@ -172,6 +173,8 @@ class RuntimeActionAuthoritySnapshot:
     updated_at: str
     global_pause: bool
     runtime_stopped: bool
+    active_battle: bool
+    runtime_battle_scope: Optional[str]
     primary_state: str
     holds: tuple[AuthorityHoldState, ...]
     observation_authority: ActionAuthorityDecision
@@ -209,6 +212,8 @@ class RuntimeActionAuthoritySnapshot:
             "updated_at": self.updated_at,
             "global_pause": self.global_pause,
             "runtime_stopped": self.runtime_stopped,
+            "active_battle": self.active_battle,
+            "runtime_battle_scope": self.runtime_battle_scope,
             "primary_state": self.primary_state,
             "holds": [
                 {"hold": item.hold.value, "reason": item.reason}
@@ -435,6 +440,10 @@ class RuntimeActionAuthority:
         return bool(
             normalized_owner
             and holds
+            and all(
+                item.hold is not AuthorityHold.EXTERNAL_DEVELOPMENT
+                for item in holds
+            )
             and all(item.hold.value == normalized_owner for item in holds)
         )
 
@@ -855,6 +864,8 @@ class RuntimeActionAuthority:
                 updated_at=_timestamp(now),
                 global_pause=self._context.global_pause,
                 runtime_stopped=self._context.runtime_stopped,
+                active_battle=self._context.active_battle,
+                runtime_battle_scope=self._context.battle_scope,
                 primary_state=self._context.primary_state,
                 holds=self._context.holds,
                 observation_authority=observation,
@@ -892,6 +903,9 @@ class RuntimeActionAuthorityPublisher:
         runtime_active: bool = True,
         now: Optional[float] = None,
         owner: Optional[Mapping[str, object]] = None,
+        interactive_development_lease: Optional[
+            Mapping[str, object]
+        ] = None,
     ) -> bool:
         published_owner = dict(self.owner)
         if owner is not None:
@@ -909,6 +923,11 @@ class RuntimeActionAuthorityPublisher:
             "observed_at": _timestamp(now),
             "stale_after_seconds": self.stale_after_seconds,
             "runtime_active": bool(runtime_active),
+            "interactive_development_lease": (
+                dict(interactive_development_lease)
+                if isinstance(interactive_development_lease, Mapping)
+                else None
+            ),
             **snapshot.as_dict(),
         }
         temporary: Optional[str] = None

@@ -267,28 +267,33 @@ Read-only observation is concurrent. Device input is exclusive.
 
 The existing production control-surface service is the natural coordinator
 because it already observes runtime/process evidence and writes control
-directives. It should be extended through its existing local JSON/HTTP model;
-there is no need for a third daemon, a second authenticated Unix protocol, or a
-custom persistent peer channel.
+directives. The implemented lease extends that local JSON/HTTP model and the
+runtime-owned structured authority snapshot; it adds no third daemon, second
+authenticated Unix protocol, custom persistent peer channel, or worktree lock.
 
 ### Minimal lease
 
-There is at most one active interactive development lease. The minimal record
-contains:
+There is at most one live interactive development request. The control file
+retains its requested state separately from the runtime acknowledgement. The
+minimal record contains:
 
 - a lease ID used as a coordination handle, not a secret;
 - an owner/task label for operator comprehension;
-- request, acknowledgement, heartbeat, expiry, and release times;
+- request, acknowledgement, heartbeat, expiry, release, and terminal times as
+  applicable;
 - the exact ADB target;
 - the production runtime PID/session or equivalent fresh process evidence;
 - the production acknowledgement that its development hold is installed; and
-- a concise starting screen/battle description when known.
+- a concise starting screen/battle description when known; and
+- a terminal disposition and reason.
 
-The coordinator may return `busy` rather than implement a fairness queue. The
-master already serializes authority-sensitive work. A short heartbeat and
-expiry recover abandoned leases. Exact timings should be chosen from observed
-loop cadence and may remain simple configuration rather than a protocol
-negotiation.
+`POST /api/v1/interactive-development-lease` accepts the three small operations
+`request`, `heartbeat`, and `release`. A request supplies only a bounded
+`owner_label`; heartbeat and release supply the ordinary `lease_id`. The
+control surface binds a request to the fresh runtime-owned session ID, PID, ADB
+target, screen, and battle evidence it has already verified against the held
+runtime lock. A conflicting live request returns `busy`/HTTP 409. The fixed
+30-second heartbeat expiry is server policy rather than client negotiation.
 
 There is no source registration, complete worktree fingerprint, secret bearer
 token, client authentication handshake, service epoch, capability negotiation,
@@ -306,6 +311,16 @@ An interactive lease becomes active only after the production runtime:
    normal in-process strategy, handler, auxiliary, recovery, initialization,
    lifecycle, and blind-tapper input; and
 4. publishes an acknowledgement and a fresh observation.
+
+The main loop installs the hold only between runtime input workflows. It then
+cooperatively stops the floating-gem tapper and withholds acknowledgement until
+that worker is inactive and a known fresh screen has been detected. The
+runtime acknowledgement is carried by the same atomic
+`logs/strategy_action_gate.json` channel as the typed authority matrix. Status
+reports a lease active only when that snapshot is fresh, its runtime/PID/target
+matches both the request and active lock, the `external_development` hold is
+present, observation remains allowed, and every input authority class is
+denied.
 
 The development hold is not operator Pause and must not overwrite
 `logs/automation_ctl.json`. Capture and detection may continue while it is
@@ -336,6 +351,11 @@ calling the helper.
 An input whose result is uncertain is never repeated automatically. The worker
 captures a fresh screen and decides from current evidence or asks the operator.
 
+That helper is delivery step 4 and is not implemented by the current lease/hold
+delivery. An acknowledged lease is therefore structured coordination state for
+the later helper; it does not by itself make ad-hoc raw ADB input a supported
+project workflow.
+
 ### Release and boundaries
 
 On normal completion, the worker stops input, captures a fresh screen, and
@@ -344,6 +364,13 @@ development hold and resuming its own actions. If the screen is unexpected or
 ambiguous, the safe response is to retain the no-input hold or apply an
 operator-owned Pause and report the condition; no elaborate automatic cleanup
 state machine is required initially.
+
+The implemented runtime keeps a release request suppressive until a subsequent
+known observation. `UNKNOWN` or failed terminal persistence remains visible and
+keeps the hold. Pause/Stop revokes immediately because operator control is the
+stronger authority. Expiry waits for a fresh known frame before production
+input resumes, while the expired deadline already prevents the request from
+remaining active.
 
 Heartbeat loss, runtime replacement, ADB target change, and an authoritative
 battle boundary end the lease. At natural Game Over, production regains normal
@@ -395,9 +422,10 @@ Implementation proceeds in small reviewable steps:
    path atomically publishes the latest complete canonical PNG and its small
    advisory capture/target/geometry sidecar. Direct bounded read-only capture
    is documented separately from interactive input authority.
-3. **Add the suppressive hold and minimal lease.** Reuse the existing control
-   surface/directive path and prove that production input is quiescent before
-   acknowledgement.
+3. **Completed: add the suppressive hold and minimal lease.** The existing
+   control-surface/directive and runtime-owned authority paths now provide one
+   request/acknowledgement/heartbeat/release lifecycle and prove production
+   input quiescence before acknowledgement.
 4. **Add the lease-aware ADB input helper.** Support one bounded command at a
    time, exact-target checking, readable logging, expiry, and release.
 5. **Perform bounded live validation.** The master schedules one cooperative

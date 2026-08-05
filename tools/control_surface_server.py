@@ -85,6 +85,7 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
             "/api/v1/strategy-authoring",
             "/api/v1/strategy-profiles",
             "/api/v1/host-performance",
+            "/api/v1/interactive-development-lease",
         }:
             self._json_error(HTTPStatus.NOT_FOUND, "Endpoint not found")
             return
@@ -123,6 +124,12 @@ class ControlSurfaceHandler(BaseHTTPRequestHandler):
                 response = self.server.service.apply_strategy_profile(payload)
             elif parsed.path == "/api/v1/strategy-authoring":
                 response = self.server.service.apply_strategy_authoring(payload)
+            elif parsed.path == "/api/v1/interactive-development-lease":
+                response = (
+                    self.server.service.apply_interactive_development_lease(
+                        payload
+                    )
+                )
             else:
                 response = self.server.service.publish_host_performance(payload)
         except UnicodeDecodeError:

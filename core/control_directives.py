@@ -51,6 +51,11 @@ EXCLUSIVE_VALIDATION_LAUNCH_STATUSES = frozenset(
         "failed",
     }
 )
+INTERACTIVE_DEVELOPMENT_LEASE_SCHEMA_VERSION = 1
+INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS = 30
+INTERACTIVE_DEVELOPMENT_REQUEST_STATES = frozenset(
+    {"requested", "release_requested", "terminal"}
+)
 _MAX_EXCLUSIVE_VALIDATION_RECEIPTS = 12
 
 
@@ -128,9 +133,191 @@ class ControlDirectiveStore:
             "exclusive_validation": _valid_exclusive_validation_ledger(
                 data.get("exclusive_validation")
             ),
+            "interactive_development_lease": (
+                _valid_interactive_development_lease(
+                    data.get("interactive_development_lease")
+                )
+            ),
+            "interactive_development_lease_error": (
+                "interactive development lease directive is malformed"
+                if data.get("interactive_development_lease") is not None
+                and _valid_interactive_development_lease(
+                    data.get("interactive_development_lease")
+                )
+                is None
+                else None
+            ),
             "path": str(self.path),
             "exists": self.path.exists(),
         }
+
+    def request_interactive_development_lease(
+        self,
+        *,
+        owner_label: str,
+        runtime: Mapping[str, object],
+        starting_evidence: Mapping[str, object],
+        now: Optional[float] = None,
+        ttl_seconds: int = INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS,
+    ) -> dict[str, Any]:
+        """Persist one cooperative request bound to fresh runtime evidence."""
+
+        normalized_owner = " ".join(str(owner_label or "").split())
+        if not normalized_owner:
+            raise ValueError("Interactive development owner label is required")
+        if len(normalized_owner) > 96:
+            raise ValueError(
+                "Interactive development owner label must be at most 96 characters"
+            )
+        normalized_runtime = _valid_interactive_development_runtime(runtime)
+        if normalized_runtime is None:
+            raise ValueError(
+                "Interactive development request requires exact runtime, PID, "
+                "and ADB-target evidence"
+            )
+        normalized_evidence = _valid_interactive_development_evidence(
+            starting_evidence
+        )
+        if normalized_evidence is None:
+            raise ValueError(
+                "Interactive development request requires starting screen evidence"
+            )
+        if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int):
+            raise ValueError("Interactive development lease TTL must be an integer")
+        if not 5 <= ttl_seconds <= 300:
+            raise ValueError(
+                "Interactive development lease TTL must be between 5 and 300 seconds"
+            )
+        requested_at = _timestamp_at(now)
+        expires_at = _timestamp_at(
+            _timestamp_value(requested_at) + ttl_seconds
+        )
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            raw_current = data.get("interactive_development_lease")
+            current = _valid_interactive_development_lease(raw_current)
+            if raw_current is not None and current is None:
+                raise ValueError(
+                    "Existing interactive development lease directive is malformed; "
+                    "it was preserved"
+                )
+            if current is not None and current["request_state"] != "terminal":
+                raise ValueError("An interactive development lease request is busy")
+            lease = {
+                "schema_version": INTERACTIVE_DEVELOPMENT_LEASE_SCHEMA_VERSION,
+                "lease_id": uuid4().hex,
+                "owner_label": normalized_owner,
+                "request_state": "requested",
+                "requested_at": requested_at,
+                "heartbeat_at": requested_at,
+                "expires_at": expires_at,
+                "runtime": normalized_runtime,
+                "starting_evidence": normalized_evidence,
+            }
+            data["interactive_development_lease"] = lease
+            return data
+
+        saved = self.update(mutate)
+        return dict(saved["interactive_development_lease"])
+
+    def heartbeat_interactive_development_lease(
+        self,
+        lease_id: str,
+        *,
+        now: Optional[float] = None,
+        ttl_seconds: int = INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS,
+    ) -> dict[str, Any]:
+        """Refresh only the matching live request without producing log noise."""
+
+        current_time = datetime.now().timestamp() if now is None else float(now)
+        if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int):
+            raise ValueError("Interactive development lease TTL must be an integer")
+        if not 5 <= ttl_seconds <= 300:
+            raise ValueError(
+                "Interactive development lease TTL must be between 5 and 300 seconds"
+            )
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            lease = _require_interactive_development_lease(
+                data,
+                lease_id=lease_id,
+            )
+            if lease["request_state"] != "requested":
+                raise ValueError(
+                    "Interactive development lease no longer accepts heartbeats"
+                )
+            if current_time >= _timestamp_value(lease["expires_at"]):
+                raise ValueError("Interactive development lease has expired")
+            lease["heartbeat_at"] = _timestamp_at(current_time)
+            lease["expires_at"] = _timestamp_at(current_time + ttl_seconds)
+            data["interactive_development_lease"] = lease
+            return data
+
+        saved = self.update(mutate)
+        return dict(saved["interactive_development_lease"])
+
+    def release_interactive_development_lease(
+        self,
+        lease_id: str,
+        *,
+        now: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """Request a matching normal release; the runtime removes the hold."""
+
+        current_time = datetime.now().timestamp() if now is None else float(now)
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            lease = _require_interactive_development_lease(
+                data,
+                lease_id=lease_id,
+            )
+            if lease["request_state"] != "requested":
+                raise ValueError(
+                    "Interactive development lease is not active for release"
+                )
+            if current_time >= _timestamp_value(lease["expires_at"]):
+                raise ValueError("Interactive development lease has expired")
+            lease["request_state"] = "release_requested"
+            lease["release_requested_at"] = _timestamp_at(current_time)
+            data["interactive_development_lease"] = lease
+            return data
+
+        saved = self.update(mutate)
+        return dict(saved["interactive_development_lease"])
+
+    def finish_interactive_development_lease(
+        self,
+        lease_id: str,
+        *,
+        disposition: str,
+        reason: str,
+        now: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """Persist one runtime- or coordinator-proven terminal disposition."""
+
+        normalized_disposition = _bounded_text(disposition, 48).lower()
+        normalized_reason = " ".join(str(reason or "").split())[:256]
+        if not normalized_disposition or not normalized_reason:
+            raise ValueError(
+                "Interactive development terminal disposition and reason are required"
+            )
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            lease = _require_interactive_development_lease(
+                data,
+                lease_id=lease_id,
+            )
+            if lease["request_state"] == "terminal":
+                return data
+            lease["request_state"] = "terminal"
+            lease["terminal_at"] = _timestamp_at(now)
+            lease["terminal_disposition"] = normalized_disposition
+            lease["terminal_reason"] = normalized_reason
+            data["interactive_development_lease"] = lease
+            return data
+
+        saved = self.update(mutate)
+        return dict(saved["interactive_development_lease"])
 
     def set_state(
         self,
@@ -1465,6 +1652,170 @@ def _valid_game_speed_target(value: object) -> float:
         return MAXIMUM_GAME_SPEED_TARGET
 
 
+def _timestamp_at(value: Optional[float] = None) -> str:
+    timestamp = datetime.now().timestamp() if value is None else float(value)
+    if not math.isfinite(timestamp):
+        raise ValueError("Timestamp must be finite")
+    return datetime.fromtimestamp(timestamp).astimezone().isoformat(
+        timespec="seconds"
+    )
+
+
+def _timestamp_value(value: object) -> float:
+    try:
+        parsed = datetime.fromisoformat(str(value or ""))
+    except ValueError as exc:
+        raise ValueError("Timestamp must be ISO-8601") from exc
+    if parsed.tzinfo is None:
+        raise ValueError("Timestamp must include a timezone")
+    return parsed.timestamp()
+
+
+def _valid_interactive_development_runtime(
+    value: object,
+) -> Optional[dict[str, Any]]:
+    if not isinstance(value, Mapping):
+        return None
+    runtime_id = _bounded_text(value.get("runtime_id"), 128)
+    adb_target = _bounded_text(value.get("adb_target"), 128)
+    pid = value.get("pid")
+    if (
+        not runtime_id
+        or not adb_target
+        or adb_target == "unknown"
+        or isinstance(pid, bool)
+        or not isinstance(pid, int)
+        or pid <= 0
+    ):
+        return None
+    return {
+        "runtime_id": runtime_id,
+        "pid": pid,
+        "adb_target": adb_target,
+    }
+
+
+def _valid_interactive_development_evidence(
+    value: object,
+) -> Optional[dict[str, Any]]:
+    if not isinstance(value, Mapping):
+        return None
+    screen_state = _bounded_text(value.get("screen_state"), 64).upper()
+    observed_at = _bounded_text(value.get("observed_at"), 64)
+    battle_active = value.get("battle_active")
+    battle_scope = _bounded_text(value.get("battle_scope"), 128) or None
+    if not screen_state or not isinstance(battle_active, bool):
+        return None
+    try:
+        _timestamp_value(observed_at)
+    except ValueError:
+        return None
+    return {
+        "screen_state": screen_state,
+        "battle_active": battle_active,
+        "battle_scope": battle_scope,
+        "observed_at": observed_at,
+    }
+
+
+def _valid_interactive_development_lease(
+    value: object,
+) -> Optional[dict[str, Any]]:
+    if not isinstance(value, Mapping):
+        return None
+    if value.get("schema_version") != INTERACTIVE_DEVELOPMENT_LEASE_SCHEMA_VERSION:
+        return None
+    lease_id = str(value.get("lease_id") or "").strip().lower()
+    owner_label = " ".join(str(value.get("owner_label") or "").split())
+    request_state = str(value.get("request_state") or "").strip().lower()
+    runtime = _valid_interactive_development_runtime(value.get("runtime"))
+    starting_evidence = _valid_interactive_development_evidence(
+        value.get("starting_evidence")
+    )
+    if (
+        len(lease_id) != 32
+        or any(character not in "0123456789abcdef" for character in lease_id)
+        or not owner_label
+        or len(owner_label) > 96
+        or request_state not in INTERACTIVE_DEVELOPMENT_REQUEST_STATES
+        or runtime is None
+        or starting_evidence is None
+    ):
+        return None
+    timestamps: dict[str, str] = {}
+    for name in ("requested_at", "heartbeat_at", "expires_at"):
+        candidate = _bounded_text(value.get(name), 64)
+        try:
+            _timestamp_value(candidate)
+        except ValueError:
+            return None
+        timestamps[name] = candidate
+    if _timestamp_value(timestamps["expires_at"]) < _timestamp_value(
+        timestamps["heartbeat_at"]
+    ):
+        return None
+    result: dict[str, Any] = {
+        "schema_version": INTERACTIVE_DEVELOPMENT_LEASE_SCHEMA_VERSION,
+        "lease_id": lease_id,
+        "owner_label": owner_label,
+        "request_state": request_state,
+        **timestamps,
+        "runtime": runtime,
+        "starting_evidence": starting_evidence,
+    }
+    release_requested_at = value.get("release_requested_at")
+    if release_requested_at is not None:
+        normalized = _bounded_text(release_requested_at, 64)
+        try:
+            _timestamp_value(normalized)
+        except ValueError:
+            return None
+        result["release_requested_at"] = normalized
+    if request_state == "release_requested" and "release_requested_at" not in result:
+        return None
+    if request_state == "terminal":
+        terminal_at = _bounded_text(value.get("terminal_at"), 64)
+        disposition = _bounded_text(value.get("terminal_disposition"), 48).lower()
+        reason = " ".join(str(value.get("terminal_reason") or "").split())[:256]
+        try:
+            _timestamp_value(terminal_at)
+        except ValueError:
+            return None
+        if not disposition or not reason:
+            return None
+        result.update(
+            {
+                "terminal_at": terminal_at,
+                "terminal_disposition": disposition,
+                "terminal_reason": reason,
+            }
+        )
+    return result
+
+
+def normalize_interactive_development_lease(
+    value: object,
+) -> Optional[dict[str, Any]]:
+    """Return the bounded schema-1 lease directive or ``None``."""
+
+    return _valid_interactive_development_lease(value)
+
+
+def _require_interactive_development_lease(
+    data: Mapping[str, Any],
+    *,
+    lease_id: str,
+) -> dict[str, Any]:
+    lease = _valid_interactive_development_lease(
+        data.get("interactive_development_lease")
+    )
+    if lease is None:
+        raise ValueError("No valid interactive development lease request exists")
+    if lease["lease_id"] != str(lease_id or "").strip().lower():
+        raise ValueError("Interactive development lease ID does not match")
+    return lease
+
+
 def _valid_strategy_apply_mode(value: object) -> str:
     normalized = str(value or "next_boundary").strip().lower()
     return normalized if normalized in STRATEGY_APPLY_MODES else "next_boundary"
@@ -1798,9 +2149,13 @@ __all__ = [
     "EXCLUSIVE_VALIDATION_OUTCOMES",
     "EXCLUSIVE_VALIDATION_STATUSES",
     "GATE_DECISION_STATUSES",
+    "INTERACTIVE_DEVELOPMENT_LEASE_SCHEMA_VERSION",
+    "INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS",
+    "INTERACTIVE_DEVELOPMENT_REQUEST_STATES",
     "MAXIMUM_GAME_SPEED_TARGET",
     "VALID_GAME_SPEED_TARGETS",
     "VALID_MODES",
     "VALID_STATES",
+    "normalize_interactive_development_lease",
     "normalize_game_speed_target",
 ]
