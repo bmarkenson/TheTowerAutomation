@@ -558,6 +558,48 @@ def test_exact_farm_module_save_match_skips_modules_navigation():
     assert all(slot["valid"] for slot in modules["slots"])
 
 
+def test_tournament_save_observation_reports_variation_without_modules_ui():
+    router = _TournamentRouter(selected=True, correct_guardians=True)
+    observed = {
+        **TOURNAMENT_REQUIREMENTS["modules"],
+        "armor_primary": "Anti-Cube Portal",
+        "armor_assist": "Space Displacer",
+    }
+    save_decisions = {
+        "modules": {
+            "disposition": "save_observation",
+            "reason": "exact_version_save_observation",
+            "expected": TOURNAMENT_REQUIREMENTS["modules"],
+            "observed": observed,
+            "mapping_id": "data-9-game-1073",
+            "save_evidence_complete": True,
+            "save_requirement_supported": True,
+            "ui_required": False,
+        }
+    }
+
+    result = _run(
+        router,
+        TOURNAMENT_REQUIREMENTS,
+        save_decisions=save_decisions,
+    )
+
+    assert result.complete
+    assert router.module_checks == []
+    assert router.module_observations == []
+    assert "navigation.goto_modules_home" not in router.static_actions
+    modules = result.evidence["modules"]
+    assert modules["status"] == "save_observation"
+    assert modules["mode"] == "observe"
+    assert modules["checked"] is False
+    assert modules["valid"] is False
+    assert modules["fully_observed"] is True
+    assert {
+        slot["slot_key"]: slot["actual"]
+        for slot in modules["slots"]
+    } == observed
+
+
 def test_save_backed_required_locks_ignore_unmanaged_health_without_input():
     router = _NoBattleRouter(selected=True, correct_guardians=True)
     requirements = {

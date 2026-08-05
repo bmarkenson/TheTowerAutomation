@@ -473,11 +473,21 @@ is Closest (`0`), Basic (`1`), Fast (`2`), Tank (`3`), Ranged (`4`), Boss (`5`),
 In Spotlight (`6`), Protector (`7`), Elites (`8`), and Fleets (`9`). Any shape,
 membership, uniqueness, or requested-order failure uses UI.
 
-The save-backed Farm Modules are Primary Amplifying Strike, Orbital Augment,
-Black Hole Digestor, and Multiverse Nexus plus Assist Being Annihilator,
-Anti-Cube Portal, Singularity Harness, and Dimension Core in their exact typed
-slots. Project Funding and Harmony Conductor remain unmapped Tournament gaps;
-Tournament therefore continues through the complete Modules UI path.
+Module decoding is exact-slot and value-scoped. Farm's enforced values remain
+Primary Amplifying Strike (`45`), Orbital Augment (`46`), Black Hole Digestor
+(`27`), and Multiverse Nexus (`37`) plus Assist Being Annihilator (`9`),
+Anti-Cube Portal (`20`), Singularity Harness (`30`), and Dimension Core (`38`).
+The observed Tournament reference adds generator Primary Project Funding
+(`43`), core Primary Dimension Core (`38`), and core Assist Harmony Conductor
+(`39`). A naturally observed Tournament variation also maps armor Primary
+Anti-Cube Portal (`20`) and armor Assist Space Displacer (`19`). These are
+slot-scoped equipped values, not generic Module inventory IDs.
+
+Tournament remains `observe`: any complete mapped loadout is reported against
+`tournament_standard` and carried as `save_observation` without enforcing or
+changing it. Unknown IDs, an unsupported requested name such as Magnetic Hook,
+locked/missing Assist entries, malformed/partial structures, `force_ui`, and
+`comparison_audit` retain the complete Modules UI path.
 
 Each check emits a privacy-safe diagnostic with mapping ID, evidence
 completeness, requested-value support, disposition, reason, and a normalized
@@ -491,21 +501,23 @@ decision; the changed setting is still verified through its normal UI path and
 later checks continue through UI. Read-only UI inspection leaves unrelated
 matches intact, but an observed contradiction fails closed. Free Upgrade locks
 are a required subset: all requested bits must be set, while extra normalized
-locks such as `Health` are reported as unmanaged and never changed. Only the
-exact current eight-slot Farm Module assignment is save-backed; unsupported or
-partial Modules, Damage Slider, and Orb Distance retain UI authority.
+locks such as `Health` are reported as unmanaged and never changed. Exact
+enforced Farm Modules and complete mapped observation-only Tournament Modules
+may be save-backed; unsupported or partial Modules, Damage Slider, and Orb
+Distance retain UI authority.
 
-Session-only matches may continue only through the exact next battle that this
-same runtime starts with a freshly verified `NEW_BATTLE` control. The runtime
-binds them once at the first stable `RUNNING` boundary, then may consume Auto
+Session-only accepted decisions may continue only through the exact next battle
+that this same runtime starts with a freshly verified `NEW_BATTLE` control. The
+runtime binds them once at the first stable `RUNNING` boundary, then may consume Auto
 Pick enabled `true`, the complete exact Target Priority order, all nine
-primaries on, Spotlight Missiles on, Poison Swamp Stun, the exact current Farm
-Module assignment, and save-backed Home sections without reopening redundant
-screens. Restart, attachment, unrelated
+primaries on, Spotlight Missiles on, Poison Swamp Stun, an exact enforced Farm
+Module assignment or fully decoded observation-only Tournament assignment,
+and save-backed Home sections without reopening redundant screens. Restart,
+attachment, unrelated
 Retry, strategy/configuration/target change, operator/manual or ambiguous
 launch, WAIT/Pause/Stop, repair, or a later battle rejects the entire carry.
-A save match never authorizes an input, mutation, lifecycle transition,
-attachment, terminal binding, dispatch, or strategy action.
+An accepted save decision never authorizes an input, mutation, lifecycle
+transition, attachment, terminal binding, dispatch, or strategy action.
 
 When an active Farm session preflight authoritatively appears to require a
 supported Home-only repair, the runtime retries the same read-only validation
@@ -866,7 +878,10 @@ readiness, or state-restoration protocol.
 Tournament Modules use `tournament_standard` as an observed reference rather
 than an enforced invariant. A confidently identified variation is named in the
 successful preflight result and retained without changing Modules or emitting
-a mismatch warning. Missing or ambiguous identity evidence remains incomplete.
+a mismatch warning. A complete slot-scoped save decode supplies the same
+observation without opening Modules; it remains observation evidence, not
+enforcement authority. Missing or ambiguous identity evidence remains
+incomplete.
 An authoritative mismatch in an enforced Tournament setting is logged and
 retained, completes the one-shot observer pass, and continues without
 publishing a gate decision. No Tournament preflight result can trigger a

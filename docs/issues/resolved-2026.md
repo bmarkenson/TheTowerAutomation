@@ -8,6 +8,59 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Tournament Module values were not available to the save decoder
+
+- **Observed:** 2026-08-05 during an operator-authorized read-only inspection
+  of the already-running Tournament.
+- **Symptom:** The first save-first correction could decode only the exact Farm
+  Module assignments. Tournament's Project Funding and Harmony Conductor
+  therefore forced the complete Modules UI observation route even though the
+  profile's Modules policy was `observe`, not `enforce`.
+- **Evidence:** Stable two-identical-read projections exposed Primary slot
+  `infoIndex` values `[45, 20, 43, 38]` and unlocked typed Assist values
+  `[9, 19, 30, 39]`. The same-run Modules overview identified Amplifying
+  Strike, Anti-Cube Portal, Project Funding, Dimension Core, Being Annihilator,
+  Space Displacer, Singularity Harness, and Harmony Conductor in those slots.
+  The equipped core Assist detail independently confirmed Harmony Conductor;
+  the operator withdrew the initial Magnetic Hook identification. A second
+  stable pair after returning to the battle retained all eight assignments.
+- **Safety response:** The bounded route checked stopped control and released
+  ownership before input, connected only the configured exact ADB target,
+  opened read-only Modules evidence, and returned to the same Tournament. It
+  did not equip, unequip, transfer, repair, background the game, force a save,
+  start/end/retry a battle, deploy code, or alter a process or systemd service.
+  No raw save, decoded root, screenshot, GUID, effect, level, substat,
+  inventory record, or private value was retained. This targeted pairing did
+  not repeat the earlier broad calibration campaign.
+- **Cause:** The exact-version manifest represented one Farm value per slot,
+  and reconciliation had only match-versus-UI dispositions. It could neither
+  represent multiple cross-channel-validated values in one typed slot nor
+  carry a complete observation-policy variation without treating it as an
+  enforced mismatch.
+- **Resolution:** Module decoding now uses per-slot value tables. Combined Farm
+  and Tournament evidence covers the complete `tournament_standard` reference
+  plus the observed armor variation. A complete supported `observe` result is
+  published and carried as `save_observation`; it can omit redundant Modules
+  navigation but never authorizes a repair. Enforced mismatches, Magnetic Hook
+  or another unsupported request, unknown IDs, locked/missing Assist entries,
+  malformed or partial structures, `force_ui`, and `comparison_audit` retain
+  the full existing UI path. The mapping is not a generic Module inventory,
+  rarity, level, star, effect, substat, GUID, or private-record claim.
+- **Regression:** `test/test_player_save.py` covers exact Tournament decoding,
+  observation-only variation, enforced mismatch, unsupported names, audit,
+  malformed values, and redaction. `test/test_gc_no_battle_setup.py`,
+  `test/test_player_save_preflight.py`, and
+  `test/test_action_executor_save_preflight.py` cover UI suppression and exact
+  next-battle carry without enforcement.
+- **Validation:** Focused save/preflight/Home/carry coverage passed all 169
+  tests, the broader Tournament/strategy set passed all 240 tests, generated
+  strategies were byte-identical, and the complete isolated checkpoint passed
+  compilation, state definitions, clickmap integrity with zero errors and 44
+  known orphans, and all 1,439 tests. Changed documentation links/anchors and
+  base-range whitespace are checked before completion; all 42 local links,
+  including 27 anchors, resolved.
+- **Fixed by:** Pending completion metadata.
+
 ### Save-first rollout repeated matching UI checks and opened History early
 
 - **Observed:** 2026-08-04 in the coordinator-accepted rollout evidence after
@@ -61,6 +114,9 @@ and actionable work lives in
   code-only. Deployment and first ordinary-boundary observation remain
   coordinator work.
 - **Fixed by:** `fe0c43fee8b2c013e13b89e85508e7555b377054`.
+- **Follow-up:** The 2026-08-05 operator-authorized Tournament pairing above
+  subsequently closed the Project Funding/Harmony Conductor gap without
+  changing Tournament's observation-only policy.
 
 ### Clean-checkout Mission test depended on an ignored screenshot
 

@@ -22,6 +22,7 @@ from core.battle_lifecycle import HomeBattleControl
 from core.home_battle import detect_home_battle_control
 from core.player_save import (
     PlayerSaveSnapshot,
+    SAVE_ACCEPTED_DISPOSITIONS,
     decode_player_save_bytes,
     pull_player_save_bytes,
     reconcile_requirements,
@@ -236,7 +237,7 @@ class PlayerSavePreflightResult:
             sorted(
                 check_id
                 for check_id, decision in self.decisions.items()
-                if decision.get("disposition") == "save_match"
+                if decision.get("disposition") in SAVE_ACCEPTED_DISPOSITIONS
             )
         )
 
@@ -557,7 +558,7 @@ class PlayerSavePreflightCoordinator:
                 check_id: decision.get("observed")
                 for check_id, decision in decisions.items()
                 if check_id in CARRIED_SAVE_CHECKS
-                and decision.get("disposition") == "save_match"
+                and decision.get("disposition") in SAVE_ACCEPTED_DISPOSITIONS
             }
             if values:
                 carry = CarriedPlayerSaveEvidence(
@@ -738,7 +739,7 @@ class PlayerSavePreflightCoordinator:
         accepted = sorted(
             check_id
             for check_id, decision in decisions.items()
-            if decision.get("disposition") == "save_match"
+            if decision.get("disposition") in SAVE_ACCEPTED_DISPOSITIONS
         )
         fallback = sorted(
             check_id

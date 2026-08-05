@@ -29,6 +29,17 @@ MODULES = {
     "generator_assist": "Singularity Harness",
     "core_assist": "Dimension Core",
 }
+TOURNAMENT_REFERENCE = {
+    **MODULES,
+    "generator_primary": "Project Funding",
+    "core_primary": "Dimension Core",
+    "core_assist": "Harmony Conductor",
+}
+TOURNAMENT_VARIATION = {
+    **TOURNAMENT_REFERENCE,
+    "armor_primary": "Anti-Cube Portal",
+    "armor_assist": "Space Displacer",
+}
 
 
 def test_target_priority_consumes_bound_exact_order_without_opening_ui():
@@ -204,6 +215,79 @@ def test_exact_save_backed_modules_bind_into_final_session_evidence():
         slot["slot_key"]: slot["actual"]
         for slot in bound["modules"]["slots"]
     } == MODULES
+
+
+def test_observed_module_variation_binds_without_enforcement():
+    class BoundSave:
+        def consume(self, check_id):
+            assert check_id == "modules"
+            return dict(TOURNAMENT_VARIATION)
+
+    setup = {
+        "modules": {
+            "status": "save_observation",
+            "source": "player_save_preflight",
+            "checked": False,
+            "mode": "observe",
+            "valid": False,
+            "fully_observed": True,
+            "slots": [
+                {
+                    "slot_key": key,
+                    "expected": value,
+                    "actual": TOURNAMENT_VARIATION[key],
+                    "valid": TOURNAMENT_VARIATION[key] == value,
+                }
+                for key, value in TOURNAMENT_REFERENCE.items()
+            ],
+        }
+    }
+
+    bound = _bind_save_backed_home_evidence(setup, BoundSave())
+
+    assert bound["modules"]["source"] == "bound_player_save_preflight"
+    assert bound["modules"]["mode"] == "observe"
+    assert bound["modules"]["valid"] is False
+    assert bound["modules"]["fully_observed"] is True
+    assert {
+        slot["slot_key"]: slot["actual"]
+        for slot in bound["modules"]["slots"]
+    } == TOURNAMENT_VARIATION
+
+
+def test_changed_observed_module_carry_invalidates_before_session_use():
+    invalidations = []
+
+    class BoundSave:
+        def consume(self, _check_id):
+            return {
+                **TOURNAMENT_VARIATION,
+                "armor_assist": "Anti-Cube Portal",
+            }
+
+        def invalidate(self, reason):
+            invalidations.append(reason)
+
+    setup = {
+        "modules": {
+            "status": "save_observation",
+            "source": "player_save_preflight",
+            "mode": "observe",
+            "slots": [
+                {
+                    "slot_key": key,
+                    "expected": value,
+                    "actual": TOURNAMENT_VARIATION[key],
+                }
+                for key, value in TOURNAMENT_REFERENCE.items()
+            ],
+        }
+    }
+
+    bound = _bind_save_backed_home_evidence(setup, BoundSave())
+
+    assert "modules" not in bound
+    assert invalidations == ["module_boundary_requirement_changed"]
 
 
 def test_changed_later_lock_requirement_invalidates_carried_snapshot():

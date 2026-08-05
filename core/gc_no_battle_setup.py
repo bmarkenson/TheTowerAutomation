@@ -43,6 +43,7 @@ from core.perk_configuration import (
     normalize_perk_first_choice_requirement,
     perk_configuration_label,
 )
+from core.player_save import SAVE_ACCEPTED_DISPOSITIONS
 from core.poison_swamp_stun import (
     PoisonSwampStunResult,
     ensure_poison_swamp_stun,
@@ -255,11 +256,11 @@ def run_gc_no_battle_setup(
             GcNoBattleSetupStatus.UNSUPPORTED,
             unsupported,
         )
-    logged_save_matches = sorted(
+    logged_save_acceptances = sorted(
         str(check_id)
         for check_id, decision in (save_decisions or {}).items()
         if isinstance(decision, Mapping)
-        and decision.get("disposition") == "save_match"
+        and decision.get("disposition") in SAVE_ACCEPTED_DISPOSITIONS
     )
     log_action_intent(
         "Verifying Home-only run configuration",
@@ -270,7 +271,7 @@ def run_gc_no_battle_setup(
         detail=(
             f"[GC_NO_BATTLE] requirements={sorted(requirements)} "
             f"waivers={sorted((waivers or {}).keys())} "
-            f"save_matches={logged_save_matches}"
+            f"save_acceptances={logged_save_acceptances}"
         ),
     )
 
@@ -332,21 +333,21 @@ def run_gc_no_battle_setup(
         str(check_id): dict(decision)
         for check_id, decision in (save_decisions or {}).items()
         if isinstance(decision, Mapping)
-        and decision.get("disposition") == "save_match"
+        and decision.get("disposition") in SAVE_ACCEPTED_DISPOSITIONS
     }
     repairs: list[str] = []
     snapshot_invalidated = False
 
-    def save_match(check_id: str) -> bool:
+    def save_accepted(check_id: str) -> bool:
         return check_id in active_save_decisions
 
     def resolved_without_ui(check_id: str) -> bool:
-        return check_id in active_waivers or save_match(check_id)
+        return check_id in active_waivers or save_accepted(check_id)
 
     def save_evidence(check_id: str) -> dict[str, Any]:
         decision = active_save_decisions[check_id]
         return {
-            "status": "save_match",
+            "status": str(decision.get("disposition") or "save_match"),
             "source": "player_save_preflight",
             "mapping_id": decision.get("mapping_id"),
             "disposition": decision.get("disposition"),
@@ -427,7 +428,7 @@ def run_gc_no_battle_setup(
                     else save_evidence(check_id)
                 )
                 log_check(check_id)
-            if save_match("cards_deck"):
+            if save_accepted("cards_deck"):
                 accepted_sections["cards"] = active_save_decisions["cards_deck"]
         else:
             current_check = "cards_deck"
@@ -447,7 +448,7 @@ def run_gc_no_battle_setup(
                     requirements.get(current_check),
                     active_waivers[current_check],
                 )
-            elif save_match(current_check):
+            elif save_accepted(current_check):
                 evidence[current_check] = save_evidence(current_check)
             else:
                 preset = _preset_spec(current_check, requirements)
@@ -478,7 +479,7 @@ def run_gc_no_battle_setup(
                     card_recharge_requirements,
                     active_waivers[current_check],
                 )
-            elif save_match(current_check):
+            elif save_accepted(current_check):
                 evidence[current_check] = save_evidence(current_check)
             elif card_recharge_requirements is not None:
                 recharge_result = ensure_card_recharge_modes_fn(
@@ -567,7 +568,7 @@ def run_gc_no_battle_setup(
                     waived_fields=tuple(
                         check_id
                         for check_id in perk_fields
-                        if check_id in active_waivers or save_match(check_id)
+                        if check_id in active_waivers or save_accepted(check_id)
                     ),
                     sleep_fn=sleep_fn,
                     operator_workflow=False,
@@ -579,7 +580,7 @@ def run_gc_no_battle_setup(
                             requirements.get(check_id),
                             active_waivers[check_id],
                         )
-                    elif save_match(check_id):
+                    elif save_accepted(check_id):
                         field_evidence = save_evidence(check_id)
                     else:
                         field_evidence = dict(
@@ -645,7 +646,7 @@ def run_gc_no_battle_setup(
                 requirements.get(current_check),
                 active_waivers[current_check],
             )
-        elif save_match(current_check):
+        elif save_accepted(current_check):
             evidence[current_check] = save_evidence(current_check)
             if workshop is None:
                 accepted_sections["workshop"] = active_save_decisions[
@@ -686,7 +687,7 @@ def run_gc_no_battle_setup(
                 valid=None,
             )
             evidence[current_check] = waived_locks
-        elif save_match(current_check):
+        elif save_accepted(current_check):
             lock_payload = save_evidence(current_check)
             lock_payload.update(
                 boundary=HomeBattleControl.NEW_BATTLE.value,
@@ -746,7 +747,7 @@ def run_gc_no_battle_setup(
                 requirements.get(current_check),
                 active_waivers[current_check],
             )
-        elif home_stun_required is not None and save_match("poison_swamp_stun"):
+        elif home_stun_required is not None and save_accepted("poison_swamp_stun"):
             stun_evidence = save_evidence("poison_swamp_stun")
             evidence[current_check] = {
                 "boundary": HomeBattleControl.NEW_BATTLE.value,
@@ -828,7 +829,7 @@ def run_gc_no_battle_setup(
                 requirements.get(current_check),
                 active_waivers[current_check],
             ) if current_check in active_waivers else save_evidence(current_check)
-            if save_match(current_check):
+            if save_accepted(current_check):
                 accepted_sections["bots"] = active_save_decisions[current_check]
         else:
             event = _open_visible(
@@ -896,7 +897,7 @@ def run_gc_no_battle_setup(
                 requirements.get(current_check),
                 active_waivers[current_check],
             ) if current_check in active_waivers else save_evidence(current_check)
-            if save_match(current_check):
+            if save_accepted(current_check):
                 accepted_sections["guardians"] = active_save_decisions[
                     current_check
                 ]
@@ -955,7 +956,7 @@ def run_gc_no_battle_setup(
                 requirements.get(current_check),
                 active_waivers[current_check],
             )
-        elif save_match(current_check):
+        elif save_accepted(current_check):
             module_decision = active_save_decisions[current_check]
             observed_assignments = module_decision.get("observed")
             if not isinstance(observed_assignments, Mapping):
@@ -966,16 +967,20 @@ def run_gc_no_battle_setup(
                 requirements["modules"],
                 observed_assignments,
             )
-            if not module_evidence.valid:
+            if module_mode == "enforce" and not module_evidence.valid:
                 raise _SetupFailure(
                     "save-backed module loadout did not match the requirement"
+                )
+            if module_mode == "observe" and not module_evidence.fully_observed:
+                raise _SetupFailure(
+                    "save-backed module loadout was not completely observed"
                 )
             module_payload = module_evidence.as_dict()
             module_payload.update(
                 mode=module_mode,
                 checked=False,
                 source="player_save_preflight",
-                status="save_match",
+                status=module_decision.get("disposition"),
                 mapping_id=module_decision.get("mapping_id"),
                 disposition=module_decision.get("disposition"),
                 reason=module_decision.get("reason"),
@@ -1078,7 +1083,7 @@ def run_gc_no_battle_setup(
                 target_priority_requirement,
                 active_waivers[current_check],
             )
-        elif save_match(current_check):
+        elif save_accepted(current_check):
             target_evidence = save_evidence(current_check)
             target_evidence.update(
                 mode=target_priority_mode,
@@ -1120,7 +1125,7 @@ def run_gc_no_battle_setup(
         if "auto_pick_perks" in requirements:
             auto_pick_evidence = (
                 save_evidence("auto_pick_perks")
-                if save_match("auto_pick_perks")
+                if save_accepted("auto_pick_perks")
                 else {
                     "checked": False,
                     "valid": None,
@@ -1171,7 +1176,7 @@ def run_gc_no_battle_setup(
         evidence["configuration"] = configuration_payload
         if configuration_failures:
             if any(
-                save_match(check_id) for check_id in configuration_failures
+                save_accepted(check_id) for check_id in configuration_failures
             ):
                 active_save_decisions.clear()
                 snapshot_invalidated = True

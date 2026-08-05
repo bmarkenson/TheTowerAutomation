@@ -36,6 +36,7 @@ PLAYER_SAVE_DEVICE_PATH = (
 MAX_PLAYER_SAVE_BYTES = 512 * 1024
 MAX_DECOMPRESSED_SAVE_BYTES = 4 * 1024 * 1024
 SNAPSHOT_SCHEMA_VERSION = 2
+SAVE_ACCEPTED_DISPOSITIONS = frozenset({"save_match", "save_observation"})
 
 
 class PlayerSaveError(RuntimeError):
@@ -361,6 +362,7 @@ def reconcile_requirements(
     )
     decisions: dict[str, dict[str, Any]] = {}
     for check_id, expected_value in expected.items():
+        check_policy = _requirement_policy(requirements, str(check_id))
         evidence = snapshot.checks.get(str(check_id))
         observed = evidence.value if evidence is not None else None
         matches = (
@@ -380,6 +382,9 @@ def reconcile_requirements(
             snapshot.mapping_maturity == "validated"
             or str(check_id) in snapshot.validated_checks
         )
+        observation_only = bool(
+            str(check_id) == "modules" and check_policy == "observe"
+        )
 
         if not snapshot.mapping_supported:
             disposition = "ui_required"
@@ -396,7 +401,7 @@ def reconcile_requirements(
         elif not requirement_supported:
             disposition = "ui_required"
             reason = "save_requirement_outside_validated_scope"
-        elif matches is not True:
+        elif matches is not True and not observation_only:
             disposition = "ui_required"
             reason = "save_mismatch"
         elif not evidence.complete:
@@ -411,6 +416,9 @@ def reconcile_requirements(
         elif not freshness_verified:
             disposition = "ui_required"
             reason = "save_freshness_unverified"
+        elif observation_only:
+            disposition = "save_observation"
+            reason = "exact_version_save_observation"
         else:
             disposition = "save_match"
             reason = "exact_version_save_match"
@@ -423,6 +431,7 @@ def reconcile_requirements(
                 evidence.status if evidence is not None else "unmapped"
             ),
             "matches": matches,
+            "policy": check_policy,
             "expected": expected_value,
             "observed": observed,
             "save_evidence_complete": (
@@ -459,7 +468,15 @@ def reconcile_requirements(
             "matching_observations": sum(
                 decision["matches"] is True for decision in decisions.values()
             ),
-            "save_matches": len(decisions) - len(ui_required),
+            "save_acceptances": len(decisions) - len(ui_required),
+            "save_matches": sum(
+                decision["disposition"] == "save_match"
+                for decision in decisions.values()
+            ),
+            "save_observations": sum(
+                decision["disposition"] == "save_observation"
+                for decision in decisions.values()
+            ),
             "ui_required": len(ui_required),
             "ui_required_checks": ui_required,
         },
@@ -1125,6 +1142,7 @@ def _module_loadout_evidence(
         )
 
     assignments: dict[str, str] = {}
+    supported_names: dict[str, list[str]] = {}
     slot_diagnostics: list[dict[str, str]] = []
     for raw_spec in primary_specs:
         if not isinstance(raw_spec, Mapping):
@@ -1146,6 +1164,7 @@ def _module_loadout_evidence(
             )
         failure = _record_mapped_module_assignment(
             assignments,
+            supported_names,
             slot_diagnostics,
             raw_spec,
             item,
@@ -1203,6 +1222,7 @@ def _module_loadout_evidence(
             )
         failure = _record_mapped_module_assignment(
             assignments,
+            supported_names,
             slot_diagnostics,
             raw_spec,
             item,
@@ -1222,8 +1242,9 @@ def _module_loadout_evidence(
         source_fields=source_fields,
         complete=True,
         authority={
-            "kind": "exact_module_loadout",
+            "kind": "slot_scoped_module_values",
             "assignments": assignments,
+            "supported_names": supported_names,
         },
         diagnostics={"slots": slot_diagnostics},
     )
@@ -1231,6 +1252,7 @@ def _module_loadout_evidence(
 
 def _record_mapped_module_assignment(
     assignments: dict[str, str],
+    supported_names: dict[str, list[str]],
     diagnostics: list[dict[str, str]],
     spec: Mapping[str, Any],
     item: Mapping[str, Any],
@@ -1238,23 +1260,28 @@ def _record_mapped_module_assignment(
     slot_key = str(spec.get("slot_key") or "").strip()
     family = str(spec.get("family") or "").strip()
     role = str(spec.get("role") or "").strip()
-    name = str(spec.get("name") or "").strip()
-    expected_info_index = _exact_int(spec.get("info_index"))
+    options = _module_value_options(spec)
     observed_info_index = _exact_int(item.get("infoIndex"))
     if (
         not slot_key
         or slot_key in assignments
+        or slot_key in supported_names
         or not family
         or role not in {"primary", "assist"}
-        or not name
-        or expected_info_index is None
+        or options is None
     ):
         return "module slot mapping changed"
     if observed_info_index is None:
         return f"{role.title()} module infoIndex is unavailable"
-    if observed_info_index != expected_info_index:
+    selected = next(
+        (option for option in options if option[0] == observed_info_index),
+        None,
+    )
+    if selected is None:
         return f"unsupported {role} module infoIndex"
+    _info_index, name = selected
     assignments[slot_key] = name
+    supported_names[slot_key] = [option_name for _index, option_name in options]
     diagnostics.append(
         {
             "slot_key": slot_key,
@@ -1264,6 +1291,34 @@ def _record_mapped_module_assignment(
         }
     )
     return ""
+
+
+def _module_value_options(
+    spec: Mapping[str, Any],
+) -> Optional[tuple[tuple[int, str], ...]]:
+    raw_options = spec.get("values")
+    if not _is_sequence(raw_options) or not raw_options:
+        return None
+    options: list[tuple[int, str]] = []
+    seen_indices: set[int] = set()
+    seen_names: set[str] = set()
+    for raw_option in raw_options:
+        if not isinstance(raw_option, Mapping):
+            return None
+        info_index = _exact_int(raw_option.get("info_index"))
+        name = str(raw_option.get("name") or "").strip()
+        normalized_name = _normal_scalar(name)
+        if (
+            info_index is None
+            or not name
+            or info_index in seen_indices
+            or normalized_name in seen_names
+        ):
+            return None
+        seen_indices.add(info_index)
+        seen_names.add(normalized_name)
+        options.append((info_index, name))
+    return tuple(options)
 
 
 def _is_module_item(value: Any) -> bool:
@@ -1291,7 +1346,11 @@ def _unmapped_module_evidence(
         source_fields=source_fields,
         complete=False,
         reason=reason,
-        authority={"kind": "exact_module_loadout", "assignments": {}},
+        authority={
+            "kind": "slot_scoped_module_values",
+            "assignments": {},
+            "supported_names": {},
+        },
     )
 
 
@@ -1476,6 +1535,28 @@ def _expanded_requirement_values(
     return values
 
 
+def _requirement_policy(
+    requirements: Mapping[str, Any],
+    check_id: str,
+) -> str:
+    values = _requirement_values(requirements)
+    policies = values.get("loadout_policies")
+    if not isinstance(policies, Mapping):
+        return "enforce"
+    policy_key = {
+        "modules": "modules",
+        "target_priority": "target_priority",
+    }.get(str(check_id))
+    if policy_key is None:
+        return "enforce"
+    normalized = str(policies.get(policy_key) or "enforce").strip().lower()
+    return (
+        normalized
+        if normalized in {"enforce", "observe", "preserve"}
+        else "enforce"
+    )
+
+
 def _requirement_is_supported(
     check_id: str,
     expected: Any,
@@ -1523,19 +1604,26 @@ def _requirement_is_supported(
             _normal_scalar(value) for value in authority.get("values") or ()
         }
         return len(normalized) == len(allowed) and set(normalized) == allowed
-    if kind == "exact_module_loadout":
+    if kind == "slot_scoped_module_values":
         if not isinstance(expected, Mapping):
             return False
-        assignments = authority.get("assignments")
-        if not isinstance(assignments, Mapping):
+        supported_names = authority.get("supported_names")
+        if not isinstance(supported_names, Mapping):
             return False
-        return {
+        expected_names = {
             str(key): _normal_scalar(value)
             for key, value in expected.items()
-        } == {
-            str(key): _normal_scalar(value)
-            for key, value in assignments.items()
         }
+        if set(expected_names) != {str(key) for key in supported_names}:
+            return False
+        return all(
+            expected_name
+            in {
+                _normal_scalar(value)
+                for value in supported_names.get(slot_key) or ()
+            }
+            for slot_key, expected_name in expected_names.items()
+        )
     if kind == "all_named_primary_on":
         if not isinstance(expected, Mapping):
             return False
@@ -1670,6 +1758,7 @@ __all__ = [
     "PlayerSaveError",
     "PlayerSavePullError",
     "PlayerSaveSnapshot",
+    "SAVE_ACCEPTED_DISPOSITIONS",
     "SaveCheckEvidence",
     "decode_player_save_bytes",
     "pull_player_save_bytes",

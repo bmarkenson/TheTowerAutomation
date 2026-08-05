@@ -154,7 +154,8 @@ One snapshot reconciles every requested eligible check atomically, but each
 decision remains independent. Exact matches may omit redundant Home
 observation for Cards, recharge modes, Workshop, the required three-lock Farm
 subset, Bots, independent First Perk Choice, Bans, ranked Auto Pick prefix,
-Guardians, the exact current Farm Module loadout, and Poison Swamp Stun. The
+Guardians, an exact enforced Farm Module loadout, a complete mapped
+observation-only Tournament loadout, and Poison Swamp Stun. The
 34-entry Auto Pick field must contain every mapped Perk ID exactly once,
 including `11=unlock_random_ultimate_weapon`; no sentinel is present. Only its
 first 18 entries are ranked. The 16-entry inventory tail is never compared as
@@ -175,21 +176,33 @@ state in which all nine weapons are present, unlocked, and on; Spotlight
 Missiles supports only the exact unlocked/on state. A mixed/off primary request,
 Spotlight Missiles off, malformed structure, or unsupported value restores only
 the applicable shared-screen UI work, where any component actually observed
-can still contradict carried evidence. Modules are value-scoped only to the
-accepted four Primary and four typed Assist assignments in the current Farm
-loadout. Exact slot, family, role, name, unlocked Assist state, and mapped
-`infoIndex` must all agree. Tournament's Project Funding and Harmony Conductor,
-any other unknown module value, and malformed or partial structures retain the
-complete Modules UI path. Rarity, levels, stars, effects, substats, inventory
-semantics, GUIDs, and private record values are not published. Orb Distance
-and Damage Slider remain UI-authoritative.
+can still contradict carried evidence. Module decoding is value-scoped by
+exact slot rather than a generic inventory map. Farm's four Primary and four
+typed Assist assignments remain enforced. The Tournament reference is also
+fully mapped: Primary Amplifying Strike (`45`), Orbital Augment (`46`), Project
+Funding (`43`), and Dimension Core (`38`); Assist Being Annihilator (`9`),
+Anti-Cube Portal (`20`), Singularity Harness (`30`), and Harmony Conductor
+(`39`). A same-run stable-save/UI pairing additionally established armor
+Primary Anti-Cube Portal (`20`) and armor Assist Space Displacer (`19`).
 
-Session-only matches become typed, single-use carry for exactly the next
-runtime-owned `NEW_BATTLE` launch and its first stable `RUNNING` boundary. The
+Exact slot, family, role, mapped name, unlocked Assist state, and complete
+structure must agree before save evidence can replace Modules observation.
+Tournament's `observe` policy records a fully decoded difference from
+`tournament_standard` as `save_observation`; it neither fails the gate nor
+authorizes a repair. An `enforce` policy still requires exact equality.
+Magnetic Hook, any other unsupported requested name or unknown slot value, and
+malformed or partial structures retain the complete Modules UI path. These
+facts do not map rarity, levels, stars, effects, substats, inventory semantics,
+GUIDs, or private record values. Orb Distance and Damage Slider remain
+UI-authoritative.
+
+Session-only accepted decisions become typed, single-use carry for exactly the
+next runtime-owned `NEW_BATTLE` launch and its first stable `RUNNING` boundary. The
 current carry covers Auto Pick enabled `true`, a complete exact ten-ID Target
-Priority order, the exact eight-slot Farm Module assignment, the
-all-nine-primary-on aggregate, Spotlight-Missiles-on, Poison Swamp Stun, and
-exact Home sections needed by the later consistency check. The version-1073
+Priority order, an exact enforced Farm Module assignment or a complete
+observation-only mapped Tournament assignment, the all-nine-primary-on
+aggregate, Spotlight-Missiles-on, Poison Swamp Stun, and exact Home sections
+needed by the later consistency check. The version-1073
 Target Priority map is `0=Closest (Default)`, `1=Basic`, `2=Fast`, `3=Tank`,
 `4=Ranged`, `5=Boss`, `6=In Spotlight`, `7=Protector`, `8=Elites`, and
 `9=Fleets`; complete membership, uniqueness, and ordered policy comparison
@@ -205,9 +218,10 @@ save decision; subsequent checks use UI unless a complete new guarded
 serialization is deliberately performed. Read-only inspection does not erase
 unrelated matches, while UI evidence from any screen that was actually opened
 still detects contradictions. Missing later-session screenshots are accepted
-only for the exact section/component carrying bound `save_match` provenance.
-A save match authorizes no tap, repair, lifecycle transition, battle start,
-attachment, terminal binding, dispatch, or strategy action.
+only for the exact section/component carrying bound accepted provenance:
+`save_match`, or `save_observation` solely for observation-policy Modules.
+Neither disposition authorizes a tap, repair, lifecycle transition, battle
+start, attachment, terminal binding, dispatch, or strategy action.
 
 ADB acquisition requires two identical consecutive reads before decoding. The
 container size, gzip integrity, NRBF root, exact version identity, and
@@ -923,10 +937,11 @@ derives gate authority from warning text in `actions.log`.
   verified Home `NEW_BATTLE`: Cards and the declared Demon Mode/Nuke recharge
   activation modes, Workshop and its Free Upgrade locks, strategy-declared
   First Perk Choice, Perk Bans and Auto Pick priority, Poison Swamp Stun, Bots,
-  Guardians, and Modules. The save-first coordinator may omit only exact
-  allowlisted observations it matched; only the exact current Farm Module
-  assignment is save-backed, while unsupported Module names, Damage Slider,
-  and Orb Distance remain UI-only. Navigation required for one fallback does
+  Guardians, and Modules. The save-first coordinator may omit exact
+  allowlisted matches and complete observation-policy Module evidence. Exact
+  Farm assignments remain enforced; mapped Tournament assignments are reported
+  only. Unsupported Module names, Damage Slider, and Orb Distance remain
+  UI-only. Navigation required for one fallback does
   not discard an unrelated accepted component. Card recharge traversal checks
   both unresolved Cards on the initial inventory frame and after every bounded
   upward or downward swipe, validates

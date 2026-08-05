@@ -149,9 +149,10 @@ checked-item detail remains in the
   - [ ] Add the versioned raw-field disposition manifest and explicit
     validation status/provenance for every normalized profile group. Keep
     private, ignored, and unknown fields unpublished.
-  - [ ] Deploy the corrective commits through the coordinator-owned promotion
-    path, then observe the first ordinary save-first Home boundary,
-    exact-next-battle bind, and natural direct Retry. Confirm privacy-safe
+  - [ ] Deploy the corrective and Tournament slot-decoder commits through the
+    coordinator-owned promotion path, then observe the first ordinary
+    save-first Home boundary, exact-next-battle bind, and natural direct Retry.
+    Confirm privacy-safe
     per-check dispositions, the omitted versus fallback UI routes, advancing
     source-tagged History continuity, and unchanged production authority. This
     is ordinary rollout observation, not a request for a special battle or
@@ -164,10 +165,18 @@ checked-item detail remains in the
       serialization-order confirmation only. The accepted complete Farm
       permutation is already sufficient for the current mapping; do not test
       all permutations.
-    - [ ] Naturally cross-validate Tournament's Project Funding and Harmony
-      Conductor `infoIndex`/typed-slot associations before extending Module
-      authority. Keep the complete Tournament Modules UI route until both
-      requested names and all eight assignments are exact; do not infer rarity,
+    - [x] Cross-validate Tournament's Project Funding and Harmony Conductor
+      `infoIndex`/typed-slot associations. The operator-authorized 2026-08-05
+      stable-save/UI pairing mapped generator Primary Project Funding `43` and
+      core Assist Harmony Conductor `39`; the same complete variation also
+      mapped armor Primary Anti-Cube Portal `20`, armor Assist Space Displacer
+      `19`, and core Primary Dimension Core `38`. Tournament remains
+      observation-only: a complete decoded variation is reported and never
+      enforced or repaired.
+    - [ ] Extend exact-slot Module values only through future natural paired
+      evidence. Magnetic Hook remains unmapped after the operator withdrew its
+      identification; an unknown ID, unsupported requested name, or partial
+      structure must retain the complete Modules UI route. Do not infer rarity,
       levels, stars, effects, substats, GUIDs, or inventory semantics.
     - [ ] Before supporting mixed Ultimate Weapon primaries, validate one
       weapon index's off/on polarity at a time with normalized

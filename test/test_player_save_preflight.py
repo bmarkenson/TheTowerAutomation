@@ -192,6 +192,79 @@ def test_one_authoritative_snapshot_reconciles_all_checks(monkeypatch):
     assert result.provenance["save_version"] == {"data": 9, "game": 1073}
 
 
+def test_observation_only_modules_are_accepted_and_carried(monkeypatch):
+    expected = {
+        "cannon_primary": "Amplifying Strike",
+        "armor_primary": "Orbital Augment",
+        "generator_primary": "Project Funding",
+        "core_primary": "Dimension Core",
+        "cannon_assist": "Being Annihilator",
+        "armor_assist": "Anti-Cube Portal",
+        "generator_assist": "Singularity Harness",
+        "core_assist": "Harmony Conductor",
+    }
+    observed = {
+        **expected,
+        "armor_primary": "Anti-Cube Portal",
+        "armor_assist": "Space Displacer",
+    }
+    supported_names = {
+        key: [expected[key], observed[key]]
+        if expected[key] != observed[key]
+        else [expected[key]]
+        for key in expected
+    }
+    base_snapshot = _snapshot()
+    snapshot = replace(
+        base_snapshot,
+        validated_checks=(*base_snapshot.validated_checks, "modules"),
+        checks={
+            **base_snapshot.checks,
+            "modules": SaveCheckEvidence(
+                "modules",
+                "observed",
+                observed,
+                ("moduleEquipped", "assistModuleSlots"),
+                complete=True,
+                authority={
+                    "kind": "slot_scoped_module_values",
+                    "assignments": observed,
+                    "supported_names": supported_names,
+                },
+            ),
+        },
+    )
+    coordinator = _coordinator(
+        monkeypatch,
+        decode_fn=lambda _payload, **_kwargs: snapshot,
+    )
+
+    result = coordinator.acquire(
+        {
+            "modules": expected,
+            "loadout_policies": {"modules": "observe"},
+        },
+        initial_frame=object(),
+    )
+
+    assert result.ready
+    assert result.accepted_checks == ("modules",)
+    assert result.decisions["modules"]["disposition"] == "save_observation"
+    assert result.decisions["modules"]["matches"] is False
+    assert result.carry is not None
+    assert coordinator.mark_runtime_launch(
+        control=HomeBattleControl.NEW_BATTLE,
+        action_authorized=True,
+        dispatched=True,
+    )
+    assert coordinator.bind_running(
+        battle_started=True,
+        stable_running=True,
+        action_authorized=True,
+    )
+    assert coordinator.consume("modules") == observed
+
+
 def test_same_home_snapshot_publishes_structural_history_baseline(monkeypatch):
     pulls = []
     coordinator = _coordinator(

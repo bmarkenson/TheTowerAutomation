@@ -1120,6 +1120,36 @@ FARM_MODULES = {
     "core_assist": "Dimension Core",
 }
 
+TOURNAMENT_MODULES = {
+    "cannon_primary": "Amplifying Strike",
+    "armor_primary": "Orbital Augment",
+    "generator_primary": "Project Funding",
+    "core_primary": "Dimension Core",
+    "cannon_assist": "Being Annihilator",
+    "armor_assist": "Anti-Cube Portal",
+    "generator_assist": "Singularity Harness",
+    "core_assist": "Harmony Conductor",
+}
+
+CURRENT_TOURNAMENT_MODULES = {
+    **TOURNAMENT_MODULES,
+    "armor_primary": "Anti-Cube Portal",
+    "armor_assist": "Space Displacer",
+}
+
+
+def _set_module_loadout(
+    decoded: dict,
+    *,
+    primary: tuple[int, int, int, int],
+    assist: tuple[int, int, int, int],
+) -> None:
+    decoded["moduleEquipped"] = [_module_item(value) for value in primary]
+    decoded["assistModuleSlots"] = [
+        _assist_module_slot(slot_type, value)
+        for slot_type, value in enumerate(assist)
+    ]
+
 
 def test_exact_farm_module_loadout_matches_from_one_redacted_snapshot(
     monkeypatch,
@@ -1145,17 +1175,115 @@ def test_exact_farm_module_loadout_matches_from_one_redacted_snapshot(
         assert private_marker not in rendered
 
 
-def test_unmapped_tournament_module_names_retain_complete_ui_path(monkeypatch):
-    snapshot = _snapshot(monkeypatch)
-    tournament = {
-        **FARM_MODULES,
-        "generator_primary": "Project Funding",
-        "core_primary": "Harmony Conductor",
-    }
+def test_exact_tournament_reference_is_a_save_backed_observation(monkeypatch):
+    decoded = _decoded_save()
+    _set_module_loadout(
+        decoded,
+        primary=(45, 46, 43, 38),
+        assist=(9, 20, 30, 39),
+    )
+    snapshot = _snapshot(monkeypatch, decoded)
 
     decision = reconcile_requirements(
         snapshot,
-        {"modules": tournament},
+        {
+            "modules": TOURNAMENT_MODULES,
+            "loadout_policies": {"modules": "observe"},
+        },
+        freshness_verified=True,
+    )
+
+    modules = decision["checks"]["modules"]
+    assert snapshot.checks["modules"].value == TOURNAMENT_MODULES
+    assert modules["disposition"] == "save_observation"
+    assert modules["reason"] == "exact_version_save_observation"
+    assert modules["matches"] is True
+    assert modules["policy"] == "observe"
+    assert modules["save_requirement_supported"] is True
+    assert modules["ui_required"] is False
+    assert decision["summary"]["save_observations"] == 1
+
+
+def test_tournament_variation_is_reported_without_enforcement(monkeypatch):
+    decoded = _decoded_save()
+    _set_module_loadout(
+        decoded,
+        primary=(45, 20, 43, 38),
+        assist=(9, 19, 30, 39),
+    )
+    snapshot = _snapshot(monkeypatch, decoded)
+
+    observed = reconcile_requirements(
+        snapshot,
+        {
+            "modules": TOURNAMENT_MODULES,
+            "loadout_policies": {"modules": "observe"},
+        },
+        freshness_verified=True,
+    )["checks"]["modules"]
+    enforced = reconcile_requirements(
+        snapshot,
+        {"modules": TOURNAMENT_MODULES},
+        freshness_verified=True,
+    )["checks"]["modules"]
+
+    assert snapshot.checks["modules"].value == CURRENT_TOURNAMENT_MODULES
+    assert observed["disposition"] == "save_observation"
+    assert observed["matches"] is False
+    assert observed["observed"] == CURRENT_TOURNAMENT_MODULES
+    assert observed["ui_required"] is False
+    assert enforced["disposition"] == "ui_required"
+    assert enforced["reason"] == "save_mismatch"
+    rendered = json.dumps(snapshot.checks["modules"].as_dict())
+    for private_marker in (
+        "must-not-leak-module-guid",
+        "must-not-leak-module-effect",
+        "must-not-leak-module-inventory",
+        '"level": 201',
+        '"infoIndex"',
+    ):
+        assert private_marker not in rendered
+
+
+def test_tournament_module_observation_audit_still_requires_ui(monkeypatch):
+    decoded = _decoded_save()
+    _set_module_loadout(
+        decoded,
+        primary=(45, 46, 43, 38),
+        assist=(9, 20, 30, 39),
+    )
+    snapshot = _snapshot(monkeypatch, decoded)
+
+    decision = reconcile_requirements(
+        snapshot,
+        {
+            "modules": TOURNAMENT_MODULES,
+            "loadout_policies": {"modules": "observe"},
+        },
+        freshness_verified=True,
+        force_ui_audit=True,
+    )["checks"]["modules"]
+
+    assert decision["disposition"] == "ui_required"
+    assert decision["reason"] == "scheduled_ui_audit"
+
+
+def test_unmapped_tournament_module_name_retains_complete_ui_path(monkeypatch):
+    decoded = _decoded_save()
+    _set_module_loadout(
+        decoded,
+        primary=(45, 46, 43, 38),
+        assist=(9, 20, 30, 39),
+    )
+    snapshot = _snapshot(monkeypatch, decoded)
+    requested = {**TOURNAMENT_MODULES, "core_assist": "Magnetic Hook"}
+
+    decision = reconcile_requirements(
+        snapshot,
+        {
+            "modules": requested,
+            "loadout_policies": {"modules": "observe"},
+        },
         freshness_verified=True,
     )["checks"]["modules"]
 

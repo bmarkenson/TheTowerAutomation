@@ -37,6 +37,44 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-05 observation-only Tournament Module save mapping
+
+- The implementation commit is recorded by the completion metadata follow-up.
+  Version 1073 now decodes multiple cross-channel-validated values in each
+  exact equipped slot instead of treating the original Farm value as the only
+  possible value. The complete `tournament_standard` reference is save-mapped,
+  including generator Primary Project Funding `43` and core Assist Harmony
+  Conductor `39`.
+- The operator-authorized current Tournament pairing also mapped armor Primary
+  Anti-Cube Portal `20`, armor Assist Space Displacer `19`, and core Primary
+  Dimension Core `38`. The operator withdrew an initial Magnetic Hook
+  identification after the equipped detail confirmed Harmony Conductor, so
+  Magnetic Hook remains an explicit future natural-calibration gap.
+- Tournament remains `observe`. A complete supported save projection publishes
+  `save_observation`, reports any difference from `tournament_standard`, and
+  may omit duplicate Modules navigation; it never enforces the reference or
+  authorizes equip, unequip, transfer, repair, lifecycle, or battle input.
+  Enforced mismatch, unknown/unsupported values, partial/malformed structures,
+  `force_ui`, and `comparison_audit` retain the full UI route.
+- The mapping is narrowly slot/value-scoped. It claims no generic Module ID,
+  inventory, rarity, level, star, effect, substat, GUID, or private-record
+  semantics. Exact-next-battle carry binds only when the complete observed
+  assignment agrees with the original accepted evidence.
+- Focused save/preflight/Home/carry validation passed all 169 tests. The
+  broader Tournament/strategy set passed all 240 tests, all generated strategy
+  plans were byte-identical, and the complete isolated checkpoint passed
+  compilation, state validation, clickmap integrity with zero errors and 44
+  known orphans, and all 1,439 tests. All 42 local links across the six changed
+  documents, including 27 anchors, resolved.
+- This follow-up reused the prior accepted Farm evidence and did not repeat its
+  broad campaign. It performed only the newly authorized bounded live pairing:
+  stable exact-target save reads, read-only Modules overview/detail inspection,
+  and verified return to the same Tournament. It connected the configured ADB
+  target and inspected the live emulator, but did not inspect a shared live
+  frame or change a loadout, battle lifecycle, automation process, systemd
+  service, installed file, or production code. Deployment and ordinary
+  save-first-boundary observation remain coordinator work.
+
 ### 2026-08-04 save-first fallback correction and History continuity
 
 - `fe0c43fee8b2c013e13b89e85508e7555b377054` corrects the first deployed

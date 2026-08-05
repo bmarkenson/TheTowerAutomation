@@ -36,6 +36,27 @@ could supply its newest-tail identity. Coordinator-retained same-run UI
 comparisons proved the corrected contracts below. This corrective work reuses
 that accepted evidence and does not repeat a calibration campaign.
 
+On 2026-08-05 the operator authorized a narrowly bounded read-only follow-up
+against the already-running Tournament solely to extend Module decoding. Two
+stable exact-target save reads before UI inspection and another stable pair
+after restoration exposed the same slot values. The paired Modules overview
+identified all eight names, and the equipped core Assist detail explicitly
+identified Harmony Conductor; the operator withdrew the initial Magnetic Hook
+identification. No Module was equipped, unequipped, transferred, or changed,
+the game was not backgrounded to force a save, and the existing Tournament was
+returned to its running screen. No raw save, decoded object, screenshot, GUID,
+effect, level, substat, inventory record, or private value was retained.
+
+The resulting exact slot mappings are cannon Primary Amplifying Strike (`45`),
+armor Primary Anti-Cube Portal (`20`), generator Primary Project Funding
+(`43`), and core Primary Dimension Core (`38`); cannon Assist Being Annihilator
+(`9`), armor Assist Space Displacer (`19`), generator Assist Singularity
+Harness (`30`), and core Assist Harmony Conductor (`39`). Combined with the
+prior Farm evidence, every value in `tournament_standard` is now decodable.
+These are slot-scoped equipped-value facts, not a generic Module ID or inventory
+map. The currently observed armor variation is evidence only; it does not
+replace the Tournament reference.
+
 Bounded mutation testing then established direct causality and the save-write
 boundary. Changing the visible Cards preset from slot 2 to slot 1 and back
 produced raw `currentPreset` values `1 -> 0 -> 1`; the raw field is zero-based
@@ -68,8 +89,9 @@ This remains a per-check promotion, not a global mapping promotion. The exact
 mapping now allowlists every configuration claim covered by the accepted
 version-1073 calibration: Cards, Workshop, and Bots preset selection; independent
 First Perk Choice; Ban Perks; the ranked Auto Pick prefix; the exact current
-three-lock Farm required subset; equipped Guardians; the exact current
-eight-slot Farm Module assignment; Demon Mode/Nuke recharge behavior;
+three-lock Farm required subset; equipped Guardians; exact enforced Farm
+Modules and complete mapped observation-only Tournament Modules; Demon
+Mode/Nuke recharge behavior;
 Auto Pick enabled for the required value `true`; complete Target Priority ID
 and ordering semantics; Poison Swamp Stun in both calibrated polarities; all
 nine Ultimate Weapon primaries for the all-on requirement; and Spotlight
@@ -98,17 +120,20 @@ The currently mapped profile checks are:
 - active Cards, Workshop, and Bots presets;
 - Free Upgrade locks;
 - Guardian chips and Target Priority order;
-- the exact current Farm Primary and Assist Module names by typed slot;
+- the enforced Farm and observation-only Tournament Primary/Assist Module
+  values by exact typed slot;
 - Auto Pick Perks, bans, first choice, and the mapped Auto Pick priority
   prefix (the visible ranked block is distinct from the save's unranked tail);
 - Ultimate Weapon primary toggles, Poison Swamp Stun, and Spotlight Missiles;
 - current Legend Tournament identity and version-derived Battle Conditions.
 
 Card recharge modes are now mapped and validated. Damage Slider and Orb
-Distance remain explicitly unmapped and always use the UI. Tournament Module
-names Project Funding and Harmony Conductor, any unknown `infoIndex`, and any
-nonexact or partial loadout also retain the full Modules UI route. More fields
-can be added only with semantic and polarity calibration, not merely because a
+Distance remain explicitly unmapped and always use the UI. A complete mapped
+Tournament loadout may supply observation without opening Modules; a difference
+from `tournament_standard` is reported, never enforced or repaired. Magnetic
+Hook, any unsupported requested name or unknown slot `infoIndex`, and any
+nonexact structure or partial loadout retain the full Modules UI route. More
+fields can be added only with cross-channel calibration, not merely because a
 plausible raw field exists.
 
 ### Implemented save-first configuration preflight
@@ -124,8 +149,12 @@ version and mapping identity, redacted source/target/session provenance, and
 safe reason codes.
 
 One snapshot reconciles every requested check. A complete allowlisted match can
-omit only that redundant UI observation. A mismatch, unsupported requirement,
-unknown version or ID, changed shape, unequal/pull/decode failure, or forced
+omit only that redundant UI observation. Modules under an `observe` policy may
+also omit duplicate UI when all eight actual assignments and all requested
+reference names are supported; a difference is carried as `save_observation`,
+not a match or repair authorization. A mismatch in an enforced check, an
+unsupported requirement, unknown version or ID, changed shape,
+unequal/pull/decode failure, or forced
 audit restores the existing per-check UI implementation after the exact target
 and Home boundary have been safely restored. A failure to restore foreground,
 target ownership, control authority, or the Home boundary blocks every later
@@ -152,9 +181,10 @@ preflight authority.
 Accepted session-only values are single-use evidence for the exact next
 runtime-owned `NEW_BATTLE` launch and its first stable `RUNNING` boundary. The
 binding covers Auto Pick enabled `true`, exact complete Target Priority order,
-the exact current eight-slot Farm Module assignment, all nine primaries on,
-Spotlight Missiles on, Poison Swamp Stun, and exact Home sections needed by the
-later consistency check. Restart, attachment, Retry
+an exact enforced Farm Module assignment or complete observation-only mapped
+Tournament assignment, all nine primaries on, Spotlight Missiles on, Poison
+Swamp Stun, and exact Home sections needed by the later consistency check.
+Restart, attachment, Retry
 without this Home preflight, strategy/configuration/target change, manual or
 ambiguous launch, WAIT/Pause/Stop, repair, or an unrelated later battle rejects
 the complete carry. Save evidence never authorizes a tap, repair, launch,
@@ -320,7 +350,7 @@ exact game version starts a new matrix at Structural level.
 | `V1073-CFG-012B` all nine Ultimate Weapon primaries on | Exact nine-element `ultimateWeaponUnlocked` and `ultimateWeaponOn` arrays | **Shortcut-ready, value-scoped** only when all nine exact booleans are unlocked and on. | Any subset, mixed/off request, false value, non-boolean, name/length change, or locked weapon restores UI. Validate each individual off/on index before supporting future mixed requirements. |
 | `V1073-CFG-012C` Spotlight Missiles on | `spotlightSmartMissilesOff` plus exact unlocked Spotlight structure | **Shortcut-ready, value-scoped** only for raw exact `false` / required on. | Off, raw true, malformed, missing, locked, or changed structure remains UI-required until one reversible off transition and restoration are reviewed. |
 | `V1073-CFG-013` Legend Tournament conditions | Tournament identity fields plus exact-version generator | **Shortcut-ready.** Seventeen consecutive event sets agreed with historical/live UI evidence. | Retain Heat/Overheat audits; validate every additional league and new exact game version independently. |
-| `V1073-CFG-014` Modules | Four `moduleEquipped` `ModuleItem` entries plus four typed `assistModuleSlots` | **Shortcut-ready, value-scoped** only for the exact current Farm loadout: cannon Primary Amplifying Strike (`45`), armor Primary Orbital Augment (`46`), generator Primary Black Hole Digestor (`27`), core Primary Multiverse Nexus (`37`); cannon Assist Being Annihilator (`9`), armor Assist Anti-Cube Portal (`20`), generator Assist Singularity Harness (`30`), and core Assist Dimension Core (`38`). | Require exact slot/family/role/name, mapped `infoIndex`, four unlocked exact-boolean Assist slots, and complete structure. Unknown IDs, nil/missing/locked/partial entries, Project Funding, Harmony Conductor, and every unsupported request retain the full UI path. Rarity, level, stars, effects, substats, inventory semantics, GUIDs, and private values remain unpublished. |
+| `V1073-CFG-014` Modules | Four `moduleEquipped` `ModuleItem` entries plus four typed `assistModuleSlots` | **Shortcut-ready, exact-slot/value-scoped.** Farm maps cannon Primary Amplifying Strike (`45`), armor Primary Orbital Augment (`46`), generator Primary Black Hole Digestor (`27`), core Primary Multiverse Nexus (`37`); cannon Assist Being Annihilator (`9`), armor Assist Anti-Cube Portal (`20`), generator Assist Singularity Harness (`30`), and core Assist Dimension Core (`38`). Tournament evidence adds generator Primary Project Funding (`43`), core Primary Dimension Core (`38`), core Assist Harmony Conductor (`39`), plus observed alternatives armor Primary Anti-Cube Portal (`20`) and armor Assist Space Displacer (`19`). | Require exact slot/family/role/mapped name, four unlocked exact-boolean Assist slots, and complete structure. `enforce` requires equality; `observe` reports any complete mapped assignment without repair. Unknown IDs, nil/missing/locked/partial entries, Magnetic Hook or another unsupported request retain the full UI path. No generic Module-ID, rarity, level, stars, effects, substats, inventory, GUID, or private-value semantics are claimed. |
 | `V1073-CFG-015` Damage Slider | No accepted field | **Structural.** The absence of an accepted normalized source is explicit. | In an explicitly authorized test battle, correlate at least two values and restoration, percentage encoding, and save timing; UI remains required. |
 | `V1073-CFG-016` Orb Distance | Candidate distance/preset fields not accepted | **Structural.** Candidate fields are deliberately unpublished. | In an explicitly authorized battle, cycle known Extra/Workshop presets, prove units and selected-preset semantics, and restore the original pair; UI remains required. |
 | `V1073-PROFILE-001` card ownership, levels, and five 28-slot decks | `cardUnlocked`, `cardLevel`, `slotPresetCardInt`, `slotPresetCardAssignedBool`, `slotsUnlocked` | **Structural.** Dimensions and base/effective width distinction are known. | Build the complete card-ID map, compare ownership/levels, and inventory every preset membership before publication. |

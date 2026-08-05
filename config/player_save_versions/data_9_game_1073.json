@@ -180,32 +180,60 @@
         "slot_key": "cannon_primary",
         "family": "cannon",
         "role": "primary",
-        "info_index": 45,
-        "name": "Amplifying Strike"
+        "values": [
+          {
+            "info_index": 45,
+            "name": "Amplifying Strike"
+          }
+        ]
       },
       {
         "array_index": 1,
         "slot_key": "armor_primary",
         "family": "armor",
         "role": "primary",
-        "info_index": 46,
-        "name": "Orbital Augment"
+        "values": [
+          {
+            "info_index": 46,
+            "name": "Orbital Augment"
+          },
+          {
+            "info_index": 20,
+            "name": "Anti-Cube Portal"
+          }
+        ]
       },
       {
         "array_index": 2,
         "slot_key": "generator_primary",
         "family": "generator",
         "role": "primary",
-        "info_index": 27,
-        "name": "Black Hole Digestor"
+        "values": [
+          {
+            "info_index": 27,
+            "name": "Black Hole Digestor"
+          },
+          {
+            "info_index": 43,
+            "name": "Project Funding"
+          }
+        ]
       },
       {
         "array_index": 3,
         "slot_key": "core_primary",
         "family": "core",
         "role": "primary",
-        "info_index": 37,
-        "name": "Multiverse Nexus"
+        "values": [
+          {
+            "info_index": 37,
+            "name": "Multiverse Nexus"
+          },
+          {
+            "info_index": 38,
+            "name": "Dimension Core"
+          }
+        ]
       }
     ],
     "assist": [
@@ -214,32 +242,56 @@
         "slot_key": "cannon_assist",
         "family": "cannon",
         "role": "assist",
-        "info_index": 9,
-        "name": "Being Annihilator"
+        "values": [
+          {
+            "info_index": 9,
+            "name": "Being Annihilator"
+          }
+        ]
       },
       {
         "type": 1,
         "slot_key": "armor_assist",
         "family": "armor",
         "role": "assist",
-        "info_index": 20,
-        "name": "Anti-Cube Portal"
+        "values": [
+          {
+            "info_index": 20,
+            "name": "Anti-Cube Portal"
+          },
+          {
+            "info_index": 19,
+            "name": "Space Displacer"
+          }
+        ]
       },
       {
         "type": 2,
         "slot_key": "generator_assist",
         "family": "generator",
         "role": "assist",
-        "info_index": 30,
-        "name": "Singularity Harness"
+        "values": [
+          {
+            "info_index": 30,
+            "name": "Singularity Harness"
+          }
+        ]
       },
       {
         "type": 3,
         "slot_key": "core_assist",
         "family": "core",
         "role": "assist",
-        "info_index": 38,
-        "name": "Dimension Core"
+        "values": [
+          {
+            "info_index": 38,
+            "name": "Dimension Core"
+          },
+          {
+            "info_index": 39,
+            "name": "Harmony Conductor"
+          }
+        ]
       }
     ]
   },

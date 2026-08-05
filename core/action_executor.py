@@ -185,15 +185,42 @@ def _bind_save_backed_home_evidence(
             for slot in modules.get("slots") or ()
             if isinstance(slot, Mapping)
         }
-        if (
-            not isinstance(carried_modules, Mapping)
-            or not expected_modules
-            or {
-                str(key): str(value)
+        observed_modules = {
+            str(slot.get("slot_key") or ""): str(slot.get("actual") or "")
+            for slot in modules.get("slots") or ()
+            if isinstance(slot, Mapping)
+            and isinstance(slot.get("actual"), str)
+            and bool(str(slot.get("actual")).strip())
+        }
+        normalized_carried_modules = None
+        if isinstance(carried_modules, Mapping) and all(
+            isinstance(key, str)
+            and bool(key.strip())
+            and isinstance(value, str)
+            and bool(value.strip())
+            for key, value in carried_modules.items()
+        ):
+            normalized_carried_modules = {
+                key.strip(): value.strip()
                 for key, value in carried_modules.items()
             }
-            != expected_modules
-        ):
+        module_mode = str(modules.get("mode") or "enforce")
+        carried_modules_match = (
+            normalized_carried_modules is not None
+            and bool(expected_modules)
+            and set(normalized_carried_modules) == set(expected_modules)
+            and (
+                (
+                    module_mode == "observe"
+                    and normalized_carried_modules == observed_modules
+                )
+                or (
+                    module_mode != "observe"
+                    and normalized_carried_modules == expected_modules
+                )
+            )
+        )
+        if not carried_modules_match:
             payload.pop("modules", None)
             invalidate = getattr(player_save_preflight, "invalidate", None)
             if carried_modules is not None and callable(invalidate):
