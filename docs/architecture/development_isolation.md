@@ -347,26 +347,29 @@ not automatically reactivate a lease on Resume.
 ### Development input
 
 Once production has acknowledged the lease, the worker may send bounded
-exact-target ADB input through a small lease-aware helper. The helper rechecks
-the current active lease, production acknowledgement, target, and expiry; logs
-the intended input; invokes one command; and records the result. Its purpose is
-to prevent cooperative threads from accidentally acting outside their window.
-It is not intended to resist deliberate bypass by the same Unix user.
+exact-target ADB input through `tools/development_adb_input.py`. The helper
+accepts one canonical-coordinate tap or swipe, validates the complete composite
+lease status, uses one bounded exact-target screenshot to establish supported
+native geometry, and rechecks the same lease/runtime/target binding immediately
+before one finite-timeout input command. It writes one `ACTION`, the attempted
+input plus coordinate/outcome detail, and one terminal `RESULT` to production's
+action log by default. Its purpose is to prevent cooperative threads from
+accidentally acting outside their window; it is not intended to resist
+deliberate bypass by the same Unix user.
 
-The first implementation may support ordinary taps, swipes, and the existing
-project screenshot/read helpers. It does not need a production-published
-semantic action catalog, dependency digests, per-action capability tokens,
-idempotent replay protocol, or a runtime mailbox. Higher-level development
-code may still use existing project detectors and clickmap coordinates before
-calling the helper.
+The helper does not request, heartbeat, revive, or release a lease. It does not
+wrap read-only screenshot helpers, which remain independently available under
+the read-only ADB rules. Higher-level development code may still use existing
+project detectors and clickmap coordinates before calling this one-command
+boundary. The exact invocation and exit-status contract are in
+[runtime operations](../runtime_operations.md#lease-aware-exact-target-input).
+There is no production-published semantic action catalog, dependency digest,
+per-action capability token, idempotent replay protocol, or runtime mailbox.
 
 An input whose result is uncertain is never repeated automatically. The worker
 captures a fresh screen and decides from current evidence or asks the operator.
-
-That helper is delivery step 4 and is not implemented by the current lease/hold
-delivery. An acknowledged lease is therefore structured coordination state for
-the later helper; it does not by itself make ad-hoc raw ADB input a supported
-project workflow.
+An acknowledged lease remains structured coordination state rather than raw
+ADB authority: supported development input goes through the helper.
 
 ### Release and boundaries
 
@@ -438,8 +441,9 @@ Implementation proceeds in small reviewable steps:
    control-surface/directive and runtime-owned authority paths now provide one
    request/acknowledgement/heartbeat/release lifecycle and prove production
    input quiescence before acknowledgement.
-4. **Add the lease-aware ADB input helper.** Support one bounded command at a
-   time, exact-target checking, readable logging, expiry, and release.
+4. **Completed: add the lease-aware ADB input helper.** One canonical tap or
+   swipe now requires the active acknowledged lease, exact-target geometry and
+   final revalidation, paired action-log records, and no automatic replay.
 5. **Perform bounded live validation.** The master schedules one cooperative
    lease, verifies Pause precedence and expiry, and confirms clean return to
    production. Add Home or owned-battle behavior only in response to a concrete

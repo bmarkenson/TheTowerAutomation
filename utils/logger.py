@@ -400,18 +400,23 @@ def set_mission_log_path(path: Optional[str]) -> None:
     _MISSION_LOG_PATH = path if path else None
 
 
-def _write_entries(entries: Sequence[str], *, extra_path: Optional[str] = None) -> None:
+def _write_entries(
+    entries: Sequence[str],
+    *,
+    extra_path: Optional[str] = None,
+    primary_path: Optional[str] = None,
+) -> None:
     """Append one atomic group of entries to the primary and optional logs."""
 
     if not entries:
         return
     text = "".join(f"{entry}\n" for entry in entries)
     encoded_size = len(text.encode("utf-8"))
-    primary_path = get_action_log_path()
+    selected_primary_path = primary_path or get_action_log_path()
     with _WRITE_LOCK:
-        os.makedirs(os.path.dirname(primary_path) or ".", exist_ok=True)
-        _rotate_log_if_needed(primary_path, incoming_bytes=encoded_size)
-        with open(primary_path, "a", encoding="utf-8") as f:
+        os.makedirs(os.path.dirname(selected_primary_path) or ".", exist_ok=True)
+        _rotate_log_if_needed(selected_primary_path, incoming_bytes=encoded_size)
+        with open(selected_primary_path, "a", encoding="utf-8") as f:
             f.write(text)
         if extra_path:
             os.makedirs(os.path.dirname(extra_path) or ".", exist_ok=True)
@@ -509,10 +514,19 @@ def _nonnegative_environment_integer(name: str, default: int) -> int:
     return parsed if parsed >= 0 else int(default)
 
 
-def _write_entry(entry: str, *, extra_path: Optional[str] = None) -> None:
+def _write_entry(
+    entry: str,
+    *,
+    extra_path: Optional[str] = None,
+    primary_path: Optional[str] = None,
+) -> None:
     """Append a single log entry to the primary log and optional extra path."""
 
-    _write_entries([entry], extra_path=extra_path)
+    _write_entries(
+        [entry],
+        extra_path=extra_path,
+        primary_path=primary_path,
+    )
 
 
 def _paired_log(
@@ -521,6 +535,7 @@ def _paired_log(
     detail: str,
     *,
     extra_path: Optional[str] = None,
+    primary_path: Optional[str] = None,
     console: Optional[bool] = None,
 ) -> None:
     """Write an operator summary and its diagnostic detail as one log group."""
@@ -538,7 +553,11 @@ def _paired_log(
     )
     if emit_console:
         print(entries[0])
-    _write_entries(entries, extra_path=extra_path)
+    _write_entries(
+        entries,
+        extra_path=extra_path,
+        primary_path=primary_path,
+    )
 
 
 def log(
@@ -546,6 +565,7 @@ def log(
     level: str = "INFO",
     *,
     extra_path: Optional[str] = None,
+    primary_path: Optional[str] = None,
     console: Optional[bool] = None,
 ) -> None:
     """
@@ -555,6 +575,9 @@ def log(
         msg (str): The log message text.
         level (str, optional): Log level label (e.g., "INFO", "ERROR"). Defaults to "INFO".
         extra_path (str, optional): Secondary log path to append to in addition to the default log.
+        primary_path (str, optional): Explicit primary action-log path. This
+            bypasses the environment/default selection without adding a
+            secondary write.
         console (bool, optional): Force console emission; default determines based on configured levels.
 
     Side effects:
@@ -573,7 +596,11 @@ def log(
     if emit_console:
         print(entry)
 
-    _write_entry(entry, extra_path=extra_path)
+    _write_entry(
+        entry,
+        extra_path=extra_path,
+        primary_path=primary_path,
+    )
 
 
 def log_mission(msg: str, level: str = "INFO") -> None:
@@ -588,19 +615,27 @@ def _log_summary(
     detail: Optional[str],
     operation_id: Optional[str],
     extra_path: Optional[str],
+    primary_path: Optional[str],
     console: Optional[bool],
 ) -> None:
     """Write one semantic summary with optional paired diagnostic evidence."""
 
     detail = _operation_detail(detail, operation_id)
     if detail is None:
-        log(summary, level, extra_path=extra_path, console=console)
+        log(
+            summary,
+            level,
+            extra_path=extra_path,
+            primary_path=primary_path,
+            console=console,
+        )
         return
     _paired_log(
         summary,
         level,
         detail,
         extra_path=extra_path,
+        primary_path=primary_path,
         console=console,
     )
 
@@ -611,6 +646,7 @@ def log_action(
     detail: Optional[str] = None,
     operation_id: Optional[str] = None,
     extra_path: Optional[str] = None,
+    primary_path: Optional[str] = None,
     console: Optional[bool] = None,
 ) -> None:
     """Log one operator-facing workflow action with optional diagnostic detail."""
@@ -621,6 +657,7 @@ def log_action(
         detail=detail,
         operation_id=operation_id,
         extra_path=extra_path,
+        primary_path=primary_path,
         console=console,
     )
 
@@ -631,6 +668,7 @@ def log_result(
     detail: Optional[str] = None,
     operation_id: Optional[str] = None,
     extra_path: Optional[str] = None,
+    primary_path: Optional[str] = None,
     console: Optional[bool] = None,
 ) -> None:
     """Log one terminal workflow outcome with optional diagnostic detail."""
@@ -641,6 +679,7 @@ def log_result(
         detail=detail,
         operation_id=operation_id,
         extra_path=extra_path,
+        primary_path=primary_path,
         console=console,
     )
 
@@ -650,6 +689,7 @@ def log_input(
     *,
     detail: Optional[str] = None,
     extra_path: Optional[str] = None,
+    primary_path: Optional[str] = None,
     console: Optional[bool] = None,
 ) -> None:
     """Log one device input with optional paired dispatch evidence."""
@@ -660,6 +700,7 @@ def log_input(
         detail=detail,
         operation_id=None,
         extra_path=extra_path,
+        primary_path=primary_path,
         console=console,
     )
 
@@ -671,6 +712,7 @@ def log_action_intent(
     detail: Optional[str] = None,
     operation_id: Optional[str] = None,
     extra_path: Optional[str] = None,
+    primary_path: Optional[str] = None,
     console: Optional[bool] = None,
 ) -> None:
     """Log one human-readable header before a guarded action sequence."""
@@ -686,6 +728,7 @@ def log_action_intent(
         detail=detail,
         operation_id=operation_id,
         extra_path=extra_path,
+        primary_path=primary_path,
         console=console,
     )
 

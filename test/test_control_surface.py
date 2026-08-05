@@ -22,6 +22,7 @@ from core.control_directives import (
     ControlDirectiveStore,
     VALID_GAME_SPEED_TARGETS,
 )
+from core.development_adb_input import validate_active_lease_status
 from core.control_surface import (
     CONTROL_SURFACE_CAPABILITIES,
     CONTROL_SURFACE_REVISION,
@@ -597,15 +598,20 @@ def test_interactive_development_status_separates_request_and_fresh_ack(
             now=now.timestamp() + 3,
             interactive_development_lease=acknowledgement,
         )
-        active = service.status(now=now.timestamp() + 3)[
-            "interactive_development_lease"
-        ]
+        active_status = service.status(now=now.timestamp() + 3)
+        active = active_status["interactive_development_lease"]
         assert active["request"]["request_state"] == "requested"
         assert active["runtime_acknowledgement"]["state"] == "active"
         assert active["acknowledgement_fresh"] is True
         assert active["owner_matches_request"] is True
         assert active["external_hold_installed"] is True
         assert active["active"] is True
+        helper_authority = validate_active_lease_status(
+            active_status,
+            lease_id=lease["lease_id"],
+        )
+        assert helper_authority.adb_target == "localhost:5555"
+        assert helper_authority.runtime_pid == os.getpid()
 
         stale = service.status(now=now.timestamp() + 40)[
             "interactive_development_lease"

@@ -370,8 +370,40 @@ curl --fail --silent --show-error \
   http://127.0.0.1:8787/api/v1/interactive-development-lease
 ```
 
-Delivery step 3 does not include the lease-aware ADB input helper. Until that
-helper is implemented, an active lease demonstrates production quiescence but
+#### Lease-aware exact-target input
+
+While the matching heartbeat remains current and status reports the lease
+active, send one canonical-coordinate action through the development helper:
+
+```bash
+.venv/bin/python tools/development_adb_input.py \
+  --lease-id LEASE_ID tap 540 960
+.venv/bin/python tools/development_adb_input.py \
+  --lease-id LEASE_ID swipe 540 1500 540 500 300
+```
+
+Tap and swipe coordinates use the canonical `1080x1920` space with half-open
+bounds (`0 <= x < 1080`, `0 <= y < 1920`). Swipe duration is an integer from 1
+through 5000 milliseconds. Each invocation queries the production-owned
+loopback status immediately, requires the advertised active lease and matching
+fresh suppressive runtime authority, acquires native geometry through one
+bounded screenshot against that exact target, and revalidates the same
+lease/runtime/target binding before attempting exactly one finite-timeout ADB
+input command. Supported native framebuffers are `1080x1920` and `720x1280`.
+
+The default audit destination is the fixed production
+`/home/brianm/dev/python/TheTower/logs/actions.log`, even when the tool runs in a
+feature worktree. `--action-log ABSOLUTE_PATH` is only a narrow test-fixture
+override. If the required `ACTION` intent cannot be written, no ADB input is
+sent. Exit `0` means the single command completed; `2` is invalid CLI usage;
+`3` is lease/status rejection; `4` is geometry or ADB failure; and `5` is a
+required audit-write failure. A timeout, lost connection, nonzero result,
+exception, or audit uncertainty is never retried automatically.
+
+The helper does not request, heartbeat, revive, or release the lease and does
+not resume automation. Continue heartbeats separately for the complete input
+window. Read-only exact-target capture remains available under the ordinary ADB
+rules without routing it through this mutating helper. An acknowledged lease
 does not make ad-hoc raw ADB input a supported project workflow.
 
 Request normal release with the matching ID after development input has

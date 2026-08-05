@@ -337,8 +337,9 @@ an `active` acknowledgement for the same lease, the
 `external_development` hold, continued observation authority, and denial of
 auxiliary, strategy, lifecycle, and all allowlisted collector input. Pending,
 release-blocked, expired, stale, or mismatched evidence is visible but never
-active. The endpoint provides coordination state only; the lease-aware ADB
-input helper remains a separate later delivery.
+active. The endpoint provides coordination state only. The separately delivered
+development-side lease-aware ADB helper consumes this composite status and does
+not add an input operation to the control-surface API.
 
 ## Strategy profile publication
 
@@ -804,11 +805,12 @@ Process request examples:
 
 The production control-surface service now coordinates one cooperative
 interactive development lease through the existing JSON/HTTP directive and
-runtime-owned status paths. The lease-aware exact-target ADB input helper is
-still deferred to the next delivery step. Until then, neither an acknowledged
-lease nor a worktree-local lock makes ad-hoc worker input a supported path.
-Bounded read-only ADB operations still need no lease after the normal live
-startup inspection. The complete coordination contract is defined in
+runtime-owned status paths. The development-side exact-target input helper is a
+separate consumer of that status; it does not add arbitrary tap or ADB routes
+to this service. Neither an acknowledged lease nor a worktree-local lock makes
+ad-hoc worker input a supported path. Bounded read-only ADB operations still
+need no lease after the normal live startup inspection. The complete
+coordination contract is defined in
 [development_isolation.md](development_isolation.md).
 
 These are the next useful additions, in approximate priority order:

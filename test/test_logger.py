@@ -345,6 +345,29 @@ def test_log_input_pairs_human_summary_with_dispatch_detail(
     assert input_timestamp == detail_timestamp
 
 
+def test_explicit_primary_path_does_not_also_write_environment_log(
+    tmp_path,
+    monkeypatch,
+):
+    environment_log = tmp_path / "environment" / "actions.log"
+    selected_log = tmp_path / "selected" / "actions.log"
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(environment_log))
+
+    logger.log_action_intent(
+        "Development ADB tap",
+        reason="verify one bounded input",
+        detail="lease_id=0123456789abcdef0123456789abcdef",
+        operation_id="development-input-test",
+        primary_path=str(selected_log),
+        console=False,
+    )
+
+    lines = selected_log.read_text(encoding="utf-8").splitlines()
+    assert [line.split(" ", 1)[0] for line in lines] == ["[ACTION", "[DEBUG"]
+    assert "[OPERATION] id=development-input-test" in lines[1]
+    assert not environment_log.exists()
+
+
 def test_action_log_rotation_bounds_oversized_history_and_keeps_action_pair(
     tmp_path,
     monkeypatch,

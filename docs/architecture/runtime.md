@@ -1169,9 +1169,14 @@ same-user security boundary: no source attestation, secret token, authenticated
 peer protocol, semantic action catalog, or cryptographic audit is planned. A
 worktree-local lock or screenshot never grants input authority.
 
-The lease-aware exact-target ADB input helper remains the next delivery step.
-Until it exists, the implemented request and acknowledgement lifecycle does not
-make ad-hoc worker input a supported project path.
+The development-side `tools/development_adb_input.py` helper now consumes that
+composite status for one canonical tap or swipe. It establishes exact-target
+native geometry through a bounded read, rechecks the unchanged lease, runtime,
+and target binding immediately before one finite-timeout input attempt, writes
+the existing `ACTION`/`INPUT`/`RESULT` audit sequence, and never retries
+uncertainty.
+It adds no in-process runtime authority route; ad-hoc worker input remains
+unsupported.
 
 An app-owned frame source and short-lived UI-state action lease are the intended
 direction for multi-frame decisions and latency-sensitive scheduled actions.
