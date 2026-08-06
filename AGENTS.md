@@ -36,8 +36,8 @@ permissions in this repository are coordination tools, not security boundaries.
   when its ignored `.venv` is absent or mismatched; it must never execute,
   copy, symlink, or mutate production's environment.
 - `main` is production, `develop` is integration, and workers commit only to
-  feature branches. Only the master updates `develop` or promotes to `main`,
-  following the
+  feature branches. Only the operator or an explicitly assigned integration
+  owner updates `develop` or promotes to `main`, following the
   [production promotion procedure](docs/runtime_operations.md#production-promotion-and-rollback).
 - Once the checkout's supported `.venv` is selected, run all project Python
   through `.venv/bin/python`, including tests.
@@ -89,11 +89,11 @@ permissions in this repository are coordination tools, not security boundaries.
   editing, staging, or committing. If a target changed since inspection, reread
   and reconcile it; unrelated changes are not a blocker, but overlapping or
   unclear ownership requires coordination with the user.
-- Before adding a helper or utility, search the existing code and callers for
-  identical or closely related behavior. Reuse or extend an existing function
-  when doing so preserves clear ownership and semantics; create a new helper
-  only when adapting existing code would distort its contract or architectural
-  boundary.
+- Before adding a function, class, module, command, configuration/schema path,
+  or workflow, search the directly relevant source, configuration, callers,
+  and tests for existing or closely related ownership. Reuse or extend the
+  existing owner when its contract and architectural boundary fit; create a new
+  owner only when they do not.
 - Write operator-facing logs for comprehension, not just internal mechanics:
   state what automation is doing and why. Before a guarded or multi-step input
   workflow, emit one `ACTION` through `log_action_intent(...)` before its first
@@ -109,6 +109,22 @@ permissions in this repository are coordination tools, not security boundaries.
   configuration plus explicit generated plans over strategy-name conditionals
   or duplicated expanded YAML.
 
+## Outcome coordination
+
+- Use one disposable outcome coordinator for each coherent feature, fix, or
+  milestone; do not establish a permanent repository-wide coordinator.
+  Delegate only when at least two substantial independent subtasks can proceed
+  usefully in parallel, to no more than three direct subagents. Descendant
+  delegation requires explicit operator authorization.
+- Within a shared checkout, the outcome coordinator is the sole implementation
+  writer. Subagents may explore, validate, analyze, or review. Parallel
+  implementation writers require separate feature branches/worktrees, explicit
+  ownership boundaries, and the repository's concurrency rules.
+- Repository artifacts—not chat history—hold durable state.
+  `PENDING_DEVELOPMENT.md` and its domain backlogs remain the work queue. Follow
+  [`docs/new_thread.md`](docs/new_thread.md#outcome-coordination) for the
+  conditional procedure, checkpointing, evidence summaries, and closure.
+
 ## Documentation discipline
 
 - Before changing documentation structure or moving information between active
@@ -122,12 +138,7 @@ permissions in this repository are coordination tools, not security boundaries.
   Do not erase the original symptom; recurrence history is useful.
 - Keep actionable work in `PENDING_DEVELOPMENT.md`. The issue ledger is evidence
   and history, not a second backlog.
-- A worker directly delegated by an active master coordination thread reports
-  its owned commits, validation, and remaining uncertainty back to that master.
-  It does not choose the next task, draft a prompt for another worker, or tell
-  the operator to move between threads unless the master explicitly requests a
-  formal handoff.
-- When work really is being transferred to an independent thread, the handoff
-  must follow `docs/handoff_template.md`, direct that thread to follow the
+- When responsibility actually moves to an independent top-level chat, the
+  handoff must follow `docs/handoff_template.md`, direct that chat to follow the
   automatically loaded `AGENTS.md` and read `docs/new_thread.md`, and report
   only freshly inspected volatile state.

@@ -6,6 +6,43 @@ do not reopen that file merely to begin a task. Reread it only when it may have
 changed after the session started or when the task edits it. Handoffs should
 reference this document instead of reproducing stable operational guidance.
 
+## Outcome coordination
+
+Use one outcome-scoped coordinator chat for each coherent feature, fix, or
+milestone. The outcome coordinator is disposable: complete the repository's
+normal lifecycle for that one result, report that the chat is ready to archive,
+and do not turn it into a standing repository-wide coordinator.
+
+Keep trivial or tightly coupled work in the coordinator. Delegate only when at
+least two substantial independent subtasks can proceed usefully in parallel.
+Spawn one bounded batch of no more than three direct subagents, wait for the
+requested batch, and synthesize its results. Do not authorize recursive
+delegation or descendants unless the operator explicitly permits it. Avoid
+unnecessary repeated steering and unbounded serial fan-out.
+
+Within a shared checkout, the outcome coordinator is the sole implementation
+writer. Subagents may explore, run appropriate validation, analyze, or review.
+Parallel implementation writers require separate feature branches and
+worktrees, explicit non-overlapping ownership, and compliance with the
+repository's concurrency rules. Use separate top-level chats and isolated
+worktrees only for genuinely independent writing outcomes.
+
+Ask subagents for concise evidence-oriented summaries: findings, exact
+file/symbol references, validation performed, risks, blockers, and
+recommendations. Include raw logs or routine progress only when necessary to
+support a conclusion.
+
+`PENDING_DEVELOPMENT.md` and its domain backlogs remain the authoritative work
+queue. Commits, canonical documentation, validation evidence, and compliant
+handoffs carry durable state; chats do not. Before compaction or coordinator
+replacement could jeopardize continuity, record the necessary checkpoint once
+in the owning canonical repository artifact. If another top-level chat must
+continue the task, use `docs/handoff_template.md`. Do not create a thread
+registry, duplicate state across documents, or put volatile runtime facts into
+durable guidance. When the outcome is complete, finish validation, commit, and
+documentation work, close completed subagents, and report that the coordinator
+chat is ready to archive.
+
 ## Shared-workspace changes
 
 The automatically loaded `AGENTS.md` owns the non-negotiable concurrency and

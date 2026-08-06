@@ -36,7 +36,8 @@ The architectural rationale and branch contract are in
 The production systemd units remain fixed to the `main` checkout, so feature
 and integration work cannot change what an ordinary production restart loads.
 
-Promotion is master-owned. Before changing `main`:
+Promotion is operator- or explicitly assigned integration-owner work. Before
+changing `main`:
 
 1. Complete the repository-change checklist in the feature, integration, and
    production worktrees. Preserve unrelated work; any staged or unstaged

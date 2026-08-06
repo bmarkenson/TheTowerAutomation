@@ -68,9 +68,10 @@ The repository uses linked Git worktrees, not separate repositories:
 ```
 
 `main` is production, `develop` is integration, and feature branches are
-temporary. Workers commit only their owned feature changes. The master reviews
-and integrates them into `develop`, runs the combined gate there, and promotes
-an exact validated `develop` commit to `main` only by fast-forward.
+temporary. Workers commit only their owned feature changes. The explicitly
+assigned integration owner for a coherent outcome reviews and integrates them
+into `develop`, runs the combined gate there, and promotes an exact validated
+`develop` commit to `main` only by fast-forward.
 
 Production is never switched to `develop` or a feature branch. Existing
 operator or parallel changes are preserved. A non-clean production checkout
@@ -426,7 +427,7 @@ The earlier work is modified forward rather than erased or history-rewritten:
 
 | Area | Keep | Simplify, remove, or defer |
 | --- | --- | --- |
-| Git topology | `main`, `develop`, feature worktrees, master integration and fast-forward promotion | No independent repository per worker; no source attestation |
+| Git topology | `main`, `develop`, feature worktrees, assigned integration ownership, and fast-forward promotion | No independent repository per worker; no source attestation |
 | Python isolation | Separate production environment, tracked pins, content-selected development environments, one builder lock, checkpoint | Compact completion-marker bootstrap; immutable manifests, relocation, no-follow hardening, whole-tree fsync/permissions, and host-tool blocking removed |
 | Screenshots | Complete-frame validation and atomic latest replacement | No confidential-data treatment, immutable bundle hierarchy, hash identity chain, or broker receipt |
 | Read-only ADB | Bounded exact-target reads after live inspection; production owns connection management | No lease or source registration for reads/capture |
@@ -462,14 +463,15 @@ Implementation proceeds in small reviewable steps:
    helper rejection, and clean release with repository-local unit and
    fake-runtime/fake-ADB tests.
 6. **Perform bounded live validation.** After accepting the combined boundary,
-   the master may schedule one separately inspected cooperative lease, verify
-   Pause precedence and expiry, and confirm clean return to production. Add
-   Home or owned-battle behavior only in response to a concrete development
-   need.
+   the operator may explicitly authorize the outcome coordinator to schedule
+   one separately inspected cooperative lease, verify Pause precedence and
+   expiry, and confirm clean return to production. Add Home or owned-battle
+   behavior only in response to a concrete development need.
 
 Do not implement a later step merely to make the current step look complete.
 Repository-local tests use fakes and retained or copied production frames;
-live validation remains a separately inspected master action.
+live validation remains a separately inspected, operator-authorized outcome
+coordinator action.
 
 ## Regression expectations
 
@@ -502,8 +504,8 @@ The useful regression seams are correspondingly small:
   unacknowledged leases and logs every attempted input;
 - uncertain input is not automatically repeated;
 - release requires a fresh observation before production removes its hold; and
-- the master integrates worker commits into `develop` and promotes only an
-  exact clean validated fast-forward candidate.
+- the assigned integration owner integrates worker commits into `develop` and
+  promotes only an exact clean validated fast-forward candidate.
 
 These tests protect the project from realistic accidents without turning a
 hobby automation repository into a same-user security system.

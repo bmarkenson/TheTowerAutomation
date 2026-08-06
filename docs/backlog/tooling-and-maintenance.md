@@ -12,6 +12,13 @@ work. Historical checked detail remains in the
     runner that persists across sessions.
   - Until then, require `.venv/bin/python` and
     `.venv/bin/python -m pytest` explicitly and fail clearly if absent.
+- [ ] Add the project Codex spawned-agent concurrency guard when the supported
+  local configuration parser accepts the current schema key.
+  - Exact intended setting: `[agents]` with
+    `max_concurrent_threads_per_session = 3`.
+  - This is a concurrency guard, not a total-usage budget. Until it is
+    compatible, the three-direct-subagent invariant in `AGENTS.md` remains
+    authoritative.
 - [ ] Continue the full template audit begun on 2026-07-13.
   - Resolve or classify the recursive validator's dated orphan list.
   - Add fixture-based match verification so a present template is also proven
@@ -40,8 +47,9 @@ malicious same-account process.
 - [x] Establish the Git and documentation baseline.
   - Keep production on `main` at its existing path, use the sibling `develop`
     integration worktree, and give each worker a temporary feature worktree.
-  - Workers commit only feature changes; the master owns integration,
-    authority-sensitive work, validation, and exact fast-forward promotion.
+  - Workers commit only feature changes; the explicitly assigned integration
+    owner handles integration, authority-sensitive work, validation, and exact
+    fast-forward promotion.
   - Treat `develop` as the only standing staging layer. Normal releases
     fast-forward one exact validated candidate to `main`, smoke-test it in
     production, and use a recorded pre-deployment commit plus a normal revert
@@ -78,9 +86,10 @@ malicious same-account process.
     production acknowledgement, Pause/Stop precedence, expiry, runtime/target
     and battle boundaries, stale helper rejection, and clean release with unit
     and fake-runtime/fake-ADB tests.
-  - The master may then schedule one separately inspected bounded live lease.
-    Add Home queues, suspended continuation, or automated owned-validation
-    battles only when a concrete test requires them.
+  - The operator may then authorize the outcome coordinator to schedule one
+    separately inspected bounded live lease. Add Home queues, suspended
+    continuation, or automated owned-validation battles only when a concrete
+    test requires them.
 
 Source attestation, peer authentication, capability negotiation, secret-token
 security, hash-chained audit, fairness queues, automatic cross-battle renewal,
