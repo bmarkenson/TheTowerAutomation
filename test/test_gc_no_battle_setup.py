@@ -24,6 +24,7 @@ from core.matcher import get_match
 from core.perk_configuration import FARM_AUTO_PICK_ORDER, FARM_PERK_BANS
 from core.poison_swamp_stun import PoisonSwampStunState
 from core.player_save_preflight import CarriedEvidenceState
+from core.run_state import AUTOMATION, ExecMode
 from core.target_priority import TARGETS
 from core.workshop_preset import (
     BOTS_AMPLIFY_PRESET_SLOT,
@@ -2125,6 +2126,43 @@ def test_tournament_home_policy_reports_changed_readiness_without_heartbeat():
     assert emit.call_count == 2
     assert emit.call_args.args[0].startswith("[TOURNAMENT_READY]")
     assert "waiting for operator confirmation" in emit.call_args.args[0]
+
+
+def test_normal_home_policy_reports_disposition_changes_without_heartbeat():
+    app = App.__new__(App)
+    app._mission_mgr = SimpleNamespace(ctx=SimpleNamespace(data={}))
+    app._current_strategy_name = Mock(return_value="farm_t19")
+    app._exclusive_validation_receipt = Mock(return_value=None)
+    app._exclusive_validation_definition = Mock(return_value=None)
+    app._last_home_policy_signature = None
+    original_mode = AUTOMATION.mode
+
+    try:
+        with patch("core.app.log") as emit:
+            AUTOMATION.mode = ExecMode.HOME
+            for _ in range(2):
+                app._report_home_policy(
+                    home_control=HomeBattleControl.NEW_BATTLE,
+                    home_handler_enabled=True,
+                    home_preflight_enabled=True,
+                    requirements_pending=False,
+                )
+
+            assert emit.call_count == 1
+            assert "Stay Home active" in emit.call_args.args[0]
+
+            AUTOMATION.mode = ExecMode.WAIT
+            app._report_home_policy(
+                home_control=HomeBattleControl.NEW_BATTLE,
+                home_handler_enabled=True,
+                home_preflight_enabled=True,
+                requirements_pending=False,
+            )
+
+        assert emit.call_count == 2
+        assert "Wait active" in emit.call_args.args[0]
+    finally:
+        AUTOMATION.mode = original_mode
 
 
 def test_app_blocks_battle_start_when_no_battle_setup_fails():

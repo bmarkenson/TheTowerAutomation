@@ -2394,12 +2394,14 @@ class App:
             launch = validation_receipt.get("launch")
             if isinstance(launch, Mapping):
                 validation_launch_status = str(launch.get("status") or "")
+        terminal_mode = AUTOMATION.mode if home_handler_enabled else None
         signature: Tuple[object, ...] = (
             self._current_strategy_name(),
             home_control,
             home_handler_enabled,
             home_preflight_enabled,
             requirements_pending,
+            terminal_mode,
             session_valid,
             validation_status,
             validation_outcome,
@@ -2418,7 +2420,20 @@ class App:
             and home_control is HomeBattleControl.NEW_BATTLE
         )
         if not exclusive_validation_home:
-            log("Detected HOME_SCREEN. Evaluating Home policy.", "INFO")
+            if terminal_mode is ExecMode.HOME:
+                log(
+                    "[HOME] Stay Home active — holding Home without starting "
+                    "or resuming a battle",
+                    "INFO",
+                )
+            elif terminal_mode is ExecMode.WAIT:
+                log(
+                    "[HOME] Wait active — holding Home until the disposition "
+                    "changes",
+                    "INFO",
+                )
+            else:
+                log("Detected HOME_SCREEN. Evaluating Home policy.", "INFO")
             return
         if validation_status == "result" and validation_outcome == "ready":
             if validation_launch_status == "awaiting_operator":
@@ -5108,19 +5123,6 @@ class App:
                     self._auto_start_enabled
                     and terminal_mode is ExecMode.NEXT_BATTLE
                 )
-                if self._auto_start_enabled and not restart_enabled:
-                    if terminal_mode is ExecMode.WAIT:
-                        log(
-                            "[HOME] WAIT mode — holding Home without starting "
-                            "a battle",
-                            "INFO",
-                        )
-                    elif terminal_mode is ExecMode.HOME:
-                        log(
-                            "[HOME] HOME mode — staying Home without starting "
-                            "or resuming a battle",
-                            "INFO",
-                        )
                 save_coordinator = getattr(
                     self,
                     "_player_save_preflight_coordinator",

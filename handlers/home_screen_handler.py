@@ -76,14 +76,15 @@ def handle_home_screen(
     Args:
         restart_enabled (bool, optional):
             When True (default), taps the 'Battle' button to auto-start gameplay.
-            When False, does nothing beyond logging (awaits manual start).
+            When False, performs no input and leaves hold-state reporting to the
+            owning app policy.
 
     Returns:
         bool — whether this invocation dispatched a battle control.
 
     Side effects:
         [tap] Taps the Battle button when restart_enabled=True.
-        [log] Emits INFO logs.
+        [log] Emits launch-attempt INFO logs when restart_enabled=True.
         (Also sleeps ≈2s after tapping to allow UI to transition.)
 
     Defaults:
@@ -92,8 +93,6 @@ def handle_home_screen(
     Errors:
         None material; tap failures (if any) are not explicitly handled here.
     """
-    log("[HOME] Handling HOME_SCREEN state", "INFO")
-
     if restart_enabled:
         log("[HOME] Auto-start enabled — tapping 'Battle' button", "INFO")
         if require_new_battle:
@@ -119,6 +118,4 @@ def handle_home_screen(
             )
         time.sleep(2)
         return launched
-    else:
-        log("[HOME] Auto-start disabled — waiting for manual start.", "INFO")
-        return False
+    return False

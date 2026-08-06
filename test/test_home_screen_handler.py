@@ -89,6 +89,13 @@ def test_home_battle_alternative_probes_keep_misses_diagnostic():
     )
 
 
+def test_disabled_auto_start_is_silent_in_low_level_handler():
+    with patch("handlers.home_screen_handler.log") as emit:
+        assert handle_home_screen(restart_enabled=False) is False
+
+    emit.assert_not_called()
+
+
 def test_validation_new_battle_tap_refuses_resume_control():
     with (
         patch(
