@@ -59,20 +59,6 @@ work. Historical checked detail remains in the
   - Add tooling only for a demonstrated discovery gap; keep the universal
     reuse-first safeguard canonical in `AGENTS.md`.
 
-## Production and development coordination delivery
-
-The implemented contract and deterministic validation are recorded in the
-[coordination architecture](../architecture/development_isolation.md) and
-[completion log](../modules/completed_tasks_log.md#2026-08-06-combined-productiondevelopment-coordination-boundary).
-
-- [ ] Perform one bounded live coordination validation only when the operator
-  separately authorizes it.
-  - Inspect the current process, control, lease, ADB target, screen, and action
-    log first; acquire and release one lease without starting or surrendering a
-    battle or replaying uncertain input.
-  - Add Home queues, suspended continuation, or an owned validation battle only
-    if a later concrete test requires and separately authorizes that scope.
-
 ## Codebase maintenance
 
 - [ ] Resolve the compatibility and removal decisions from the

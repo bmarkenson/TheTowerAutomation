@@ -8,6 +8,92 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Process replacement discarded detailed session-preflight report evidence
+
+**Stable ID:** `ISSUE-2026-025` · **Lifecycle:** `resolved`
+
+- **Observed:** 2026-08-06 while comparing Farm Bot loadout runs that crossed
+  automation-process replacement.
+- **Symptom:** The active battle correctly reused a matching session-preflight
+  completion receipt after continuity proved that it was the same battle, but
+  its completed record retained only
+  `free_upgrade_locks.status=unavailable_deferred`. Cards, Workshop, Bots,
+  Guardians, Modules, Auto Pick, Ultimate Weapons, waivers, failures,
+  deferrals, and the combined validity result disappeared even though the
+  original process had captured them.
+- **Evidence:** The retained `Battle20260805T195730-0700` record showed the
+  one-field attachment placeholder after two process starts, while the earlier
+  completion diagnostic contained the full normalized snapshot. Source review
+  confirmed that activity-scope receipt schema 1 persisted only status,
+  strategy, fingerprint, and time; replacement startup created the placeholder,
+  then receipt reuse suppressed checks without restoring report data. The new
+  deterministic regressions preserve this exact loss and multi-replacement
+  sequence without depending on rolling production artifacts.
+- **Safety response:** Diagnosis used read-only retained records, logs, and
+  source. Implementation and validation used isolated development state and
+  fakes; no control directive, runtime process, ADB target, emulator screen,
+  battle, or loadout was changed.
+- **Cause:** Durable state proved only that the gate had completed. The detailed
+  `gc_session_preflight_evidence` mapping remained process-local, and terminal
+  reporting had no report-only restoration path separate from mission and
+  action-authority variables.
+- **Resolution:** Nested activity-scope receipt schema 2 now atomically retains
+  the canonical evidence projection in a strict, size-bounded envelope bound to
+  the activity run, strategy, and configuration fingerprint. Exact same-battle
+  continuity restores that projection only into terminal-report context and
+  replaces the startup placeholder in the report. It never restores completion,
+  failure, waiver, repair, or input-authority state. Malformed or unknown current
+  receipts fail closed into the declared attachment checks; matching legacy
+  schema-1 receipts keep their prior suppression behavior but explicitly report
+  that detailed evidence is unavailable. The restored snapshot clears only at a
+  genuine later battle or strategy boundary.
+- **Regression:** `test/test_logger.py` covers atomic schema-2 persistence,
+  detached normalization, stale-scope rejection, non-finite/non-JSON/oversize/
+  cyclic rejection, and unchanged scope after failure.
+  `test/test_run_initialization.py::DeferredStartupGateTests` covers legacy
+  upgrade, exact restoration, two independent replacements, report-only
+  isolation, malformed identity/schema/evidence rejection, legacy unavailable
+  reporting, and next-battle cleanup. The Farm terminal regression proves that
+  restored detail wins over the attachment placeholder, while the existing
+  unbound-terminal regression still omits it.
+- **Validation:** The focused affected suites passed all 179 tests. Compilation,
+  whitespace validation, and all 1,656 repository tests passed. No live
+  validation was required for this persistence/reporting-only correction.
+- **Fixed by:** `4739cf3`.
+
+### Configured completed records serialized an empty observed configuration
+
+**Stable ID:** `ISSUE-2026-026` · **Lifecycle:** `resolved`
+
+- **Observed:** 2026-08-06 during the same Farm loadout-report review.
+- **Symptom:** Configured Farm records included
+  `observed_run_configuration: {}`. The field is reserved for actual No
+  Strategy inventory observations, so the empty object implied an observation
+  channel that had never run and obscured the distinction between declared
+  intent and verified configuration evidence.
+- **Evidence:** The configured Game Over branch explicitly selected `{}` while
+  the terminal context and battle assembler serialized every mapping, including
+  an empty one. Existing No Strategy tests already proved that real snapshots
+  were populated and later enriched at Home.
+- **Safety response:** The correction changed only record construction and used
+  existing fake terminal paths. It sent no input and changed no live state.
+- **Cause:** Configured and No Strategy paths shared one Mapping-typed argument,
+  and the configured branch used an empty mapping as a null sentinel even
+  though serialization treated mappings as evidence.
+- **Resolution:** Configured Game Over now passes `None`, record assembly also
+  rejects empty observation mappings defensively, and non-empty No Strategy
+  snapshots retain their independent field and classification behavior. The
+  configured profile remains under `run_configuration`; its verified values
+  remain under `runtime.session_preflight_evidence`.
+- **Regression:** The Farm and Tournament terminal tests require omission for
+  configured runs; `test/test_battle_stats.py` protects the serializer boundary
+  with `test_empty_observed_configuration_is_omitted_from_completed_record`;
+  and the existing No Strategy App and battle-record regressions still require
+  the populated snapshot.
+- **Validation:** The focused affected suites passed all 179 tests, followed by
+  all 1,656 repository tests.
+- **Fixed by:** `4739cf3`.
+
 ### Save-first Cards repair discarded unrelated accepted decisions
 
 - **Observed:** 2026-08-05 during an ordinary Home transition from Tournament

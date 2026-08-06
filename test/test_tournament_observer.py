@@ -706,6 +706,7 @@ def test_tournament_game_over_waits_and_records_profile_evidence():
     assert kwargs["battle_context"]["session_preflight_evidence"] == {
         "valid": True
     }
+    assert "observed_run_configuration" not in kwargs["battle_context"]
     manager.on_game_over.assert_called_once_with()
     app._status_reporter.reset_coin_rate_samples.assert_called_once_with()
 

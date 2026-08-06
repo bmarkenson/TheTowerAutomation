@@ -39,6 +39,63 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-06 restart-stable session-preflight reporting
+
+- `4739cf3` upgrades the activity scope's nested session-preflight receipt to
+  schema 2. It retains the existing normalized evidence projection in a
+  run/strategy/configuration-bound schema-1 envelope after strict finite-JSON
+  normalization and a 64 KiB cap. Atomic compare-and-set scope persistence is
+  unchanged.
+- A continuity-confirmed replacement process restores that projection only to
+  terminal reporting. It does not seed completion, mismatch, waiver, repair,
+  or action-authority variables. Malformed current receipts run the declared
+  attachment checks; legacy schema-1 receipts keep compatibility while
+  reporting their detailed evidence as unavailable. The snapshot is replaced,
+  not merged with the attachment's Home-lock placeholder, remains available for
+  a terminal-capture retry, and clears at the next battle or strategy boundary.
+- Configured Game Over paths now omit `observed_run_configuration`, and record
+  assembly defensively drops any empty observation. Real No Strategy snapshots
+  remain separate from configured intent and continue to serialize normally.
+- Focused logger, lifecycle, terminal, No Strategy, Tournament, and battle
+  record coverage passed 179 tests. Compilation and whitespace checks passed,
+  followed by all 1,656 repository tests. Retained completed-record inspection
+  confirmed that a real full Farm projection is 5.8 KB with valid deferred
+  Free Upgrade-lock evidence. Validation used no ADB input, process replacement,
+  control mutation, or live battle action.
+
+### 2026-08-06 bounded live production/development coordination validation
+
+- With separate operator authorization, the completed
+  [production/development coordination contract](../architecture/development_isolation.md)
+  was exercised against the production-owned runtime and its exact ADB target.
+  Preflight confirmed the control directive, host-backed runtime owner and
+  lock, ADB connection, current screen, recent action log, and absence of a
+  competing lease. The validation neither started nor Surrendered a battle and
+  performed no terminal or lifecycle action.
+- One no-input lease reached active acknowledgement and then expired normally.
+  Production retained its suppressive hold until a fresh known running-battle
+  observation, recorded terminal disposition `expired`, removed the hold, and
+  restored normal authority in the same battle.
+- A second lease was heartbeated and used by the lease-aware helper for exactly
+  one non-retried tap on the already-selected Attack tab. A subsequent owned
+  Pause made the lease unusable immediately, production recorded terminal
+  disposition `revoked`, observations continued while every action class was
+  blocked, and RUNNING was restored only after the unchanged Pause request ID
+  and same battle identity were verified.
+- A final no-input lease exercised explicit release. The release request made
+  the lease inactive while production remained suppressive; a fresh
+  post-release running-battle observation then recorded terminal disposition
+  `released`, removed the hold, and restored normal authority. An earlier
+  request made while the structured action-authority snapshot was stale was
+  rejected with HTTP 409 without creating a lease, and was retried only after
+  fresh matching ownership evidence appeared.
+- The production action log contains the request, acknowledgement, input,
+  Pause revocation, release-pending, and terminal-result records. No live defect
+  or uncertain input occurred, so no runtime implementation changed. The
+  repository-local coordination harness and its full checkpoint remain
+  recorded in the
+  [combined boundary completion](#2026-08-06-combined-productiondevelopment-coordination-boundary).
+
 ### 2026-08-06 combined production/development coordination boundary
 
 - `b2d2811975b80957159fe9da28cf7ba0d70f429c` (integrated as `073bf05`) adds

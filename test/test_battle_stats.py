@@ -758,6 +758,28 @@ def test_no_strategy_record_keeps_observed_configuration_distinct_from_intent():
     assert "post run home; 2026-07-22T20:00:00-07:00" in markdown
 
 
+def test_empty_observed_configuration_is_omitted_from_completed_record():
+    record = build_battle_record(
+        _frame(9),
+        [_frame(1), _frame(2), _frame(3), _frame(4), _frame(5)],
+        source_complete=True,
+        source_reason="edge_reached",
+        battle_id="Battle20260806T120000-0700",
+        captured_at=datetime(2026, 8, 6, 12, 0, tzinfo=timezone.utc),
+        strategy_name="farm_t19",
+        run_configuration={"profile": "farm", "tier": 19},
+        runtime_context={
+            "terminal_state": "GAME_OVER",
+            "observed_run_configuration": {},
+        },
+        data_fn=_data_fn,
+        game_stats_text_fn=_game_text,
+    )
+
+    assert "observed_run_configuration" not in record
+    assert "observed_run_configuration" not in record["runtime"]
+
+
 def test_post_run_observations_refresh_previously_unknown_classification():
     record = {
         "battle_id": "Battle20260722T200000-0700",

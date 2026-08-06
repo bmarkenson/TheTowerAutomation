@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Primary application orchestration loop for the automation runtime."""
 
+import copy
 import threading
 import time
 from datetime import datetime, timezone
@@ -121,7 +122,10 @@ from core.app_setup import AppConfig
 from core.status_report import StateChangeTracker, StatusReporter
 from core.recovery import handle_unknown_state, update_unknown_state
 from core.run_controls import return_home_from_game_over, surrender_run
-from automation.missions.manager import MissionManager
+from automation.missions.manager import (
+    MissionManager,
+    RESTORED_SESSION_PREFLIGHT_REPORT_KEY,
+)
 from automation.missions import get_mission
 from automation.missions.yaml_mission import YamlMission
 from automation.strategies import get_strategy
@@ -554,6 +558,16 @@ class App:
 
         self._last_unbound_terminal_signature = None
         strategy = self._mission_mgr.strategy
+        manager_data = self._mission_mgr.ctx.data
+        if RESTORED_SESSION_PREFLIGHT_REPORT_KEY in manager_data:
+            session_preflight_report = manager_data.get(
+                RESTORED_SESSION_PREFLIGHT_REPORT_KEY
+            )
+        else:
+            session_preflight_report = manager_data.get(
+                "mission_vars",
+                {},
+            ).get("gc_session_preflight_evidence")
         context.update(
             {
                 "strategy": strategy.name if strategy else None,
@@ -568,14 +582,12 @@ class App:
                     self._activation_tracker().snapshot()
                 ),
                 "perk_selection_timeline": self._perk_timeline().snapshot(),
-                "session_preflight_evidence": dict(
-                    self._mission_mgr.ctx.data.get("mission_vars", {}).get(
-                        "gc_session_preflight_evidence",
-                        {},
-                    )
-                ),
             }
         )
+        if isinstance(session_preflight_report, Mapping) and session_preflight_report:
+            context["session_preflight_evidence"] = copy.deepcopy(
+                dict(session_preflight_report)
+            )
         if isinstance(observed_run_configuration, Mapping):
             context["observed_run_configuration"] = dict(
                 observed_run_configuration
@@ -5032,7 +5044,7 @@ class App:
             observed_run_configuration = (
                 self._no_strategy_observer.snapshot()
                 if no_strategy_run
-                else {}
+                else None
             )
             if self._runtime_policy().get("game_over_mode") == "wait":
                 if not self._supervisor.persist_mode("WAIT"):

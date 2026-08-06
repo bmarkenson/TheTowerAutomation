@@ -742,7 +742,16 @@ def _assemble_battle_record(
         "coin_breakdown": coin_breakdown,
     }
     runtime = dict(runtime_context or {})
-    observed_run_configuration = runtime.pop("observed_run_configuration", None)
+    raw_observed_run_configuration = runtime.pop(
+        "observed_run_configuration",
+        None,
+    )
+    observed_run_configuration = (
+        raw_observed_run_configuration
+        if isinstance(raw_observed_run_configuration, Mapping)
+        and raw_observed_run_configuration
+        else None
+    )
     profile_progression = runtime.pop("profile_progression", None)
     observed_tier = observed_tier_for_record(
         {
@@ -759,11 +768,7 @@ def _assemble_battle_record(
         terminal_state=runtime.get("terminal_state"),
         record_id=battle_id,
         observed_tier=observed_tier,
-        observed_run_configuration=(
-            observed_run_configuration
-            if isinstance(observed_run_configuration, Mapping)
-            else None
-        ),
+        observed_run_configuration=observed_run_configuration,
     )
     record = {
         "schema_version": SCHEMA_VERSION,
@@ -777,7 +782,7 @@ def _assemble_battle_record(
         "game_stats": game_stats,
         "more_stats": more_stats,
     }
-    if isinstance(observed_run_configuration, Mapping):
+    if observed_run_configuration is not None:
         record["observed_run_configuration"] = copy.deepcopy(
             dict(observed_run_configuration)
         )
