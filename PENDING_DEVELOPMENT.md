@@ -6,8 +6,9 @@ is changing. Search this index first, then read the linked domain file.
 
 ## Current priorities
 
-1. Complete the active
-   [documentation context-reduction audit](docs/backlog/tooling-and-maintenance.md#documentation-context-reduction).
+1. Audit
+   [source capability and ownership discovery](docs/backlog/tooling-and-maintenance.md#source-and-documentation-discovery)
+   now that the legacy API summaries are retired.
 2. Resolve the active runtime and capture validation gates in
    [`docs/backlog/runtime-and-validation.md`](docs/backlog/runtime-and-validation.md#current-validation-gates).
 3. Continue UI-state coverage and recovery work in

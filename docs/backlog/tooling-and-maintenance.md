@@ -38,19 +38,8 @@ work. Historical checked detail remains in the
 - [ ] Extract duplicated handler helpers only after the unused-code audit
   establishes their actual call sites.
 
-## Documentation context reduction
+## Source and documentation discovery
 
-- [ ] Complete the documentation context-reduction audit.
-  - Remove completed work and duplicate completion narrative from active
-    backlogs after preserving any missing outcome, commit, and validation
-    evidence in the on-demand completion log.
-  - Slim startup, live-preflight, runtime, and documentation routing so each
-    task loads only its canonical owner and applicable safeguards.
-  - Audit and retire or relocate legacy API summaries, web-chat prompts, spec
-    packers, completed plans, and retired roadmaps after preserving any unique
-    active requirement or historical evidence.
-  - Finish with link/anchor, ownership, context-budget, and proportionate
-    repository validation, then move this checkpoint to the completion log.
 - [ ] Audit source capability and ownership discovery after retiring the legacy
   API summaries.
   - Verify representative feature work finds existing functions, classes,

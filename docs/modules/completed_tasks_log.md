@@ -39,6 +39,42 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-06 documentation context-reduction audit
+
+- `4669547`, `860e747`, and `8132996` preserved narrow host-performance
+  evidence and replaced the 6,138-word active issue ledger with a 1,500-word
+  22-entry safety index plus conditionally loaded dossiers and separate
+  resolved/unconfirmed history. All 2,194 cited aggregate rows and eight
+  windows remained reproducible byte-for-byte.
+- `2474858` removed completed work from active backlogs after preserving missing
+  outcomes. At the audit base, the active root/domain backlogs plus issue ledger
+  contained 15,234 words; the final routed set contains 6,627, a 56.5%
+  reduction, with zero completed checkboxes in active files.
+- `30ed51a` established the disposable outcome-coordinator policy.
+  `a682ddc` reduced automatic startup from 2,422 to 1,231 words, replaced the
+  12,478-word runtime monolith with a 420-word selector and 249–474-word
+  operation chapters, and separated live preflight, action authority, and log
+  semantics into conditional owners.
+- `6e705e6` removed 60 stale duplicated API summaries, the obsolete spec
+  bundle, all legacy web-chat prompts, both spec packers, six superseded plans,
+  and two retired roadmaps. Player-save evidence, UI schema, YAML strategy, and
+  template workflow guidance moved to explicit architecture, reference, and
+  tooling owners. API summaries are now ephemeral, revision-labeled output
+  only when explicitly requested; capability discovery uses current source,
+  configuration, callers, and tests.
+- Across the audit range, tracked Markdown fell from 109 files/170,909 words to
+  48 files/153,775 words despite adding durable issue evidence and narrow
+  operation chapters. `docs/modules/` now contains only this on-demand history.
+  The separate source-capability discovery audit remains active, as does the
+  exact Codex concurrency-setting follow-up until the installed parser accepts
+  it.
+- The final merged checkpoint passed compilation, state-definition validation,
+  clickmap integrity with zero errors and the 44 established orphan candidates,
+  and all 1,656 tests. All 278 local Markdown targets and 119 linked anchors
+  across 48 files resolved, range whitespace checks passed, and current Codex
+  configuration loaded under strict parsing. The documentation audit used no
+  runtime process control, ADB command, device input, or volatile-state claim.
+
 ### 2026-08-06 restart-stable session-preflight reporting
 
 - `4739cf3` upgrades the activity scope's nested session-preflight receipt to

@@ -5,8 +5,8 @@ development worktrees, shared screenshots, and coordinated use of the one
 emulator. It replaces the archived
 [high-assurance design](history/development_isolation_high_assurance_2026-08-03.md),
 which assumed a threat model this project does not have.
-Delivery is tracked in the
-[tooling and maintenance backlog](../backlog/tooling-and-maintenance.md#production-and-development-coordination-delivery).
+Delivery and live validation are recorded in the
+[completion history](../modules/completed_tasks_log.md#2026-08-06-bounded-live-productiondevelopment-coordination-validation).
 
 ## Trust model and design standard
 
