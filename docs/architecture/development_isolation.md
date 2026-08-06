@@ -457,11 +457,15 @@ Implementation proceeds in small reviewable steps:
 4. **Completed: add the lease-aware ADB input helper.** One canonical tap or
    swipe now requires the active acknowledged lease, exact-target geometry and
    final revalidation, paired action-log records, and no automatic replay.
-5. **Validate the combined coordination boundary.** Exercise bootstrap
-   recovery, atomic frame replacement, lease exclusion and acknowledgement,
-   Pause/Stop precedence, expiry, runtime/target/battle boundaries, stale
-   helper rejection, and clean release with repository-local unit and
-   fake-runtime/fake-ADB tests.
+5. **Completed: validate the combined coordination boundary.** The
+   repository-local combined harness now exercises interrupted-bootstrap
+   recovery and atomic environment selection, concurrent complete-frame
+   publication, and the real control store, supervisor, runtime authority,
+   control-surface status, and helper path against fake ADB. It covers
+   exclusion, quiescent hold installation before acknowledgement, Pause/Stop,
+   heartbeat expiry,
+   runtime/target/battle boundaries, stale and near-expiry rejection, one
+   bounded input, and fresh-observation release cleanup.
 6. **Perform bounded live validation.** After accepting the combined boundary,
    the operator may explicitly authorize the outcome coordinator to schedule
    one separately inspected cooperative lease, verify Pause precedence and

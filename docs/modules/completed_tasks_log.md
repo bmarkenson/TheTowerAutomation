@@ -37,6 +37,34 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-06 combined production/development coordination boundary
+
+- `b2d2811975b80957159fe9da28cf7ba0d70f429c` (integrated as `073bf05`) adds
+  one deterministic repository-local harness for the completed
+  development-coordination stack. Interrupted bootstrap recovery proves the
+  prior `.venv` selection remains untouched until a verified completion marker
+  and atomic replacement; a blocked frame writer proves a concurrent reader
+  sees the complete prior PNG before replacement and the complete new PNG plus
+  schema-1 sidecar afterward.
+- The fake-runtime path crosses the actual control store, automation
+  supervisor, runtime action-authority publisher, host-lock-derived control
+  status, composite lease decision, lease-aware input helper, action log, and
+  fake ADB subprocess boundary. It proves one-lease exclusion, suppressive
+  hold before acknowledgement, background-input quiescence, exactly one
+  exact-target input, Pause/Stop precedence without revival, heartbeat expiry,
+  runtime/target/battle termination, stale and near-expiry rejection, and
+  release remaining held through ambiguity until a fresh known observation.
+- The new harness passed all 11 scenarios; the focused bootstrap, frame,
+  lease, helper, control-surface, authority, watchdog, dispatcher, tap-safety,
+  and ad-gem set passed all 239 tests. The exact implementation commit's full
+  non-live checkpoint passed compilation, state-definition validation,
+  clickmap integrity with zero errors and 44 established orphans, and all
+  1,634 pytest tests. No repository-local production defect surfaced, so no
+  production code changed. No live runtime, process, systemd unit, control
+  socket, ADB server or device, emulator, production artifact, screen, log, or
+  battle was inspected or changed; bounded live lease validation remains a
+  separately operator-authorized outcome-coordinator step.
+
 ### 2026-08-06 save-first terminal battle reports
 
 - `069b1d9` makes the causally bound exact-version player-save report primary

@@ -81,11 +81,16 @@ malicious same-account process.
   - Never automatically replay uncertain input. Do not add secret tokens,
     complete source fingerprints, a semantic action catalog, a custom runtime
     mailbox, or an ordered replay protocol.
-- [ ] Validate the combined coordination boundary.
-  - Cover bootstrap recovery, atomic frame replacement, one-lease exclusion,
-    production acknowledgement, Pause/Stop precedence, expiry, runtime/target
-    and battle boundaries, stale helper rejection, and clean release with unit
-    and fake-runtime/fake-ADB tests.
+- [x] Validate the combined coordination boundary.
+  - The deterministic combined harness covers bootstrap recovery and atomic
+    worktree selection, concurrent old/new complete-frame reads, one-lease
+    exclusion, production hold-before-acknowledgement and background-input
+    quiescence, Pause/Stop precedence, heartbeat expiry, runtime/target/battle
+    boundaries, stale and near-expiry helper rejection, one exact-target fake
+    ADB input, and fresh-observation release cleanup.
+  - The harness crosses the real control store, supervisor, runtime authority
+    publisher, control-surface composite status, and development input helper;
+    it did not expose a repository-local production defect.
   - The operator may then authorize the outcome coordinator to schedule one
     separately inspected bounded live lease. Add Home queues, suspended
     continuation, or automated owned-validation battles only when a concrete
