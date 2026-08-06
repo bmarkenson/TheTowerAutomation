@@ -338,6 +338,7 @@ class App:
         self._session_preflight_terminal_blocked_logged = False
         self._session_preflight_repair_denial_logged = False
         self._steady_run_entry_pending = False
+        self._last_logged_home_battle_control: Optional[HomeBattleControl] = None
         self._last_home_policy_signature: Optional[Tuple[object, ...]] = None
         rollover_state = Path(config.control_file).parent / "daily_gem_state.json"
         self._daily_gem_scheduler = DailyGemScheduler(rollover_state)
@@ -3184,6 +3185,34 @@ class App:
                 "INFO",
             )
 
+    def _annotate_home_battle_control(
+        self,
+        img: Frame,
+        detection: Dict[str, Any],
+    ) -> None:
+        """Classify Home's battle control and log only semantic transitions."""
+
+        if detection.get("state") != "HOME_SCREEN":
+            self._last_logged_home_battle_control = None
+            return
+
+        evidence = detect_home_battle_control(img)
+        detection["home_battle_control"] = evidence.control.value
+        if evidence.control is getattr(
+            self,
+            "_last_logged_home_battle_control",
+            None,
+        ):
+            return
+
+        self._last_logged_home_battle_control = evidence.control
+        log(
+            "[BATTLE] Home control="
+            f"{evidence.control.value} source={evidence.source} "
+            f"confidence={evidence.confidence:.2f}",
+            "DEBUG",
+        )
+
     def run(self) -> None:
         log("Starting main heartbeat loop.", level="INFO", console=True)
         self._prune_generated_artifacts(force=True)
@@ -3243,15 +3272,7 @@ class App:
                         self._supervisor.game_speed_target,
                         wave=self._last_wave_value,
                     )
-                if detection.get("state") == "HOME_SCREEN":
-                    home_evidence = detect_home_battle_control(img)
-                    detection["home_battle_control"] = home_evidence.control.value
-                    log(
-                        "[BATTLE] Home control="
-                        f"{home_evidence.control.value} source={home_evidence.source} "
-                        f"confidence={home_evidence.confidence:.2f}",
-                        "DEBUG",
-                    )
+                self._annotate_home_battle_control(img, detection)
 
                 # This passive sidecar sees exact Home NEW_BATTLE before any
                 # later setup or Home handler can dispatch an action. It never

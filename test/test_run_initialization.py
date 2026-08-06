@@ -18,11 +18,13 @@ from core.app import App
 from core.action_executor import execute_actions
 from core.app_setup import config_from_args, parse_args
 from core.automation_supervisor import AutomationSupervisor
+from core.battle_lifecycle import HomeBattleControl
 from core.free_upgrade_locks import FARM_FREE_UPGRADE_LOCKS
 from core.gc_preflight_navigation import (
     GcLivePreflightResult,
     GcPreflightNavigationStatus,
 )
+from core.home_battle import HomeBattleEvidence
 from core.perk_configuration import FARM_AUTO_PICK_ORDER, FARM_PERK_BANS
 from core.run_state import AUTOMATION, RunState
 from core.status_report import StatusReporter
@@ -209,6 +211,62 @@ class DefaultStrategyTests(unittest.TestCase):
 
 
 class StartupLoggingTests(unittest.TestCase):
+    def test_home_control_logging_ignores_repeated_semantic_evidence(self):
+        app = App.__new__(App)
+        detection = {"state": "HOME_SCREEN"}
+        observations = (
+            HomeBattleEvidence(HomeBattleControl.NEW_BATTLE, "ocr", 96.0),
+            HomeBattleEvidence(HomeBattleControl.NEW_BATTLE, "template", 99.0),
+            HomeBattleEvidence(HomeBattleControl.RESUME_BATTLE, "ocr", 95.0),
+        )
+
+        with (
+            patch(
+                "core.app.detect_home_battle_control",
+                side_effect=observations,
+            ),
+            patch("core.app.log") as runtime_log,
+        ):
+            for _ in observations:
+                app._annotate_home_battle_control(object(), detection)
+
+        self.assertEqual(detection["home_battle_control"], "RESUME_BATTLE")
+        self.assertEqual(runtime_log.call_count, 2)
+        self.assertIn(
+            "Home control=NEW_BATTLE",
+            runtime_log.call_args_list[0].args[0],
+        )
+        self.assertIn(
+            "Home control=RESUME_BATTLE",
+            runtime_log.call_args_list[1].args[0],
+        )
+
+    def test_home_control_logging_reports_home_reentry(self):
+        app = App.__new__(App)
+        home = {"state": "HOME_SCREEN"}
+        evidence = HomeBattleEvidence(
+            HomeBattleControl.NEW_BATTLE,
+            "ocr",
+            96.0,
+        )
+
+        with (
+            patch(
+                "core.app.detect_home_battle_control",
+                return_value=evidence,
+            ) as detect,
+            patch("core.app.log") as runtime_log,
+        ):
+            app._annotate_home_battle_control(object(), home)
+            app._annotate_home_battle_control(
+                object(),
+                {"state": "RUNNING"},
+            )
+            app._annotate_home_battle_control(object(), home)
+
+        self.assertEqual(detect.call_count, 2)
+        self.assertEqual(runtime_log.call_count, 2)
+
     def test_steady_run_entry_log_names_the_completed_transition(self):
         app = App.__new__(App)
 
