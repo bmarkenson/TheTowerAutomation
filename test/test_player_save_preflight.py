@@ -72,6 +72,14 @@ def _snapshot_with_history(
         fingerprint="b" * 64,
         tier=19,
         wave=1899,
+        battle_date={
+            "kind_id": 2,
+            "kind": "local",
+            "ticks": "639197340971234560",
+            "clock_time": "2026-07-15T01:41:37.123456",
+            "clock_basis": "local_wall_clock_without_offset",
+            "submicrosecond_100ns": 0,
+        },
     )
     tail = SimpleNamespace(
         structural_status="observed",

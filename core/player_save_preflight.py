@@ -14,10 +14,7 @@ import hashlib
 import time
 from typing import Any, Callable, Mapping, Optional
 
-from core.adb_target_session import (
-    ADB_TARGET_OPERATION_LOCK,
-    AdbTargetSnapshot,
-)
+from core.adb_target_session import AdbTargetSnapshot
 from core.battle_lifecycle import HomeBattleControl
 from core.home_battle import detect_home_battle_control
 from core.player_save import (
@@ -29,6 +26,13 @@ from core.player_save import (
     reconcile_requirements,
 )
 from core.player_save_history import history_metadata_from_snapshot
+from core.player_save_serialization import (
+    GuardedPlayerSaveSerializer,
+    GuardedSerializationStatus,
+    background_to_android_home,
+    quiet_player_save_read,
+    restore_tower_launcher,
+)
 from core.state_detector import detect_state_and_overlays
 from utils.logger import (
     log,
@@ -318,8 +322,8 @@ class PlayerSavePreflightCoordinator:
         self._capture_fn = capture_fn or _capture_default
         self._detector = detector
         self._home_control_fn = home_control_fn
-        self._background_fn = background_fn or _background_default
-        self._foreground_fn = foreground_fn or _foreground_default
+        self._background_fn = background_fn or background_to_android_home
+        self._foreground_fn = foreground_fn or restore_tower_launcher
         self._pull_fn = pull_fn
         self._decode_fn = decode_fn
         self._sleep_fn = sleep_fn
@@ -426,143 +430,51 @@ class PlayerSavePreflightCoordinator:
             operation_id=operation_id,
         )
 
-        with ADB_TARGET_OPERATION_LOCK:
-            try:
-                target_before = self._target_snapshot_fn()
-            except Exception:
-                return self._blocked_result(
-                    requested,
-                    selected_mode,
-                    provenance,
-                    "exact_target_ownership_unverified",
-                    operation_id,
-                )
-            if not _target_matches_context(target_before, context):
-                return self._blocked_result(
-                    requested,
-                    selected_mode,
-                    provenance,
-                    "exact_target_ownership_unverified",
-                    operation_id,
-                )
-            if not self._same_context(context) or not self._verify_home(
-                initial_frame,
-                stable=False,
-            ):
-                return self._blocked_result(
-                    requested,
-                    selected_mode,
-                    provenance,
-                    "initial_new_battle_boundary_unverified",
-                    operation_id,
-                )
-            if not self._action_allowed():
-                return self._blocked_result(
-                    requested,
-                    selected_mode,
-                    provenance,
-                    "control_authority_interrupted_before_background",
-                    operation_id,
-                )
-
-            log_input(
-                "Backgrounding The Tower to Android Home",
-                detail=(
-                    "[PLAYER_SAVE_PREFLIGHT] input=KEYCODE_HOME "
-                    f"target_generation={context.redacted()['target_generation']}"
-                ),
-            )
-            try:
-                backgrounded = bool(self._background_fn(context.target))
-            except Exception:
-                backgrounded = False
-            log(
-                "[PLAYER_SAVE_PREFLIGHT] Android Home dispatch "
-                f"result={'accepted' if backgrounded else 'failed'}",
-                "DEBUG",
-            )
-            if not backgrounded:
-                return self._blocked_result(
-                    requested,
-                    selected_mode,
-                    provenance,
-                    "background_serialization_boundary_failed",
-                    operation_id,
-                )
+        serializer = GuardedPlayerSaveSerializer(
+            target_snapshot_fn=self._target_snapshot_fn,
+            context_guard_fn=lambda: self._same_context(context),
+            action_guard_fn=self._action_allowed,
+            source_guard_fn=lambda frame, stable: self._verify_home(
+                frame,
+                stable=stable,
+            ),
+            background_fn=self._background_fn,
+            foreground_fn=self._foreground_fn,
+            pull_fn=self._pull_fn,
+            decode_fn=self._decode_fn,
+            sleep_fn=self._sleep_fn,
+            input_log_fn=log_input,
+            debug_log_fn=log,
+            log_prefix="PLAYER_SAVE_PREFLIGHT",
+        )
+        serialized = serializer.acquire(
+            expected_target=context.target,
+            expected_generation=context.target_generation,
+            target_generation_detail=context.redacted()["target_generation"],
+            source_label="the verified New Battle boundary",
+            initial_frame=initial_frame,
+        )
+        if serialized.background_dispatched:
             provenance["serialization"] = "background_dispatched"
-            self._sleep_fn(0.25)
-
-            snapshot: Optional[PlayerSaveSnapshot] = None
-            acquisition_reason = "save_acquired"
-            try:
-                pull_kwargs: dict[str, Any] = {"device_id": context.target}
-                if self._pull_fn is pull_player_save_bytes:
-                    pull_kwargs["read_fn"] = _quiet_player_save_read
-                payload = self._pull_fn(**pull_kwargs)
-                snapshot = self._decode_fn(payload, source_name="playerInfo.dat")
-                del payload
-            except Exception:
-                acquisition_reason = "save_acquisition_failed"
-
-            if not self._action_allowed():
-                return self._blocked_result(
-                    requested,
-                    selected_mode,
-                    provenance,
-                    "control_authority_interrupted_before_foreground",
-                    operation_id,
-                )
-            log_input(
-                "Restoring The Tower from Android Home",
-                detail=(
-                    "[PLAYER_SAVE_PREFLIGHT] input=launcher_restore "
-                    f"target_generation={context.redacted()['target_generation']}"
+        if serialized.status is GuardedSerializationStatus.BLOCKED:
+            reason = {
+                "initial_source_boundary_unverified": (
+                    "initial_new_battle_boundary_unverified"
                 ),
+                "restored_source_boundary_unverified": (
+                    "restored_target_or_new_battle_boundary_unverified"
+                ),
+            }.get(serialized.reason, serialized.reason)
+            return self._blocked_result(
+                requested,
+                selected_mode,
+                provenance,
+                reason,
+                operation_id,
             )
-            try:
-                foregrounded = bool(self._foreground_fn(context.target))
-            except Exception:
-                foregrounded = False
-            log(
-                "[PLAYER_SAVE_PREFLIGHT] launcher restore "
-                f"result={'accepted' if foregrounded else 'failed'}",
-                "DEBUG",
-            )
-            if not foregrounded:
-                return self._blocked_result(
-                    requested,
-                    selected_mode,
-                    provenance,
-                    "foreground_restoration_failed",
-                    operation_id,
-                )
-            self._sleep_fn(0.5)
 
-            try:
-                target_after = self._target_snapshot_fn()
-            except Exception:
-                return self._blocked_result(
-                    requested,
-                    selected_mode,
-                    provenance,
-                    "restored_target_or_new_battle_boundary_unverified",
-                    operation_id,
-                )
-            boundary_restored = bool(
-                _same_target_snapshot(target_before, target_after)
-                and _target_matches_context(target_after, context)
-                and self._same_context(context)
-                and self._action_allowed()
-                and self._verify_home(None, stable=True)
-            )
-            if not boundary_restored:
-                return self._blocked_result(
-                    requested,
-                    selected_mode,
-                    provenance,
-                    "restored_target_or_new_battle_boundary_unverified",
-                    operation_id,
-                )
+        snapshot = serialized.snapshot
+        acquisition_reason = serialized.reason
 
         provenance["serialization"] = "verified_android_home_boundary"
         provenance["freshness"] = "verified"
@@ -1051,29 +963,6 @@ def _history_ui_decision(
     }
 
 
-def _target_matches_context(
-    target: AdbTargetSnapshot,
-    context: PlayerSavePreflightContext,
-) -> bool:
-    return bool(
-        target.owned
-        and target.target == context.target
-        and target.generation == context.target_generation
-    )
-
-
-def _same_target_snapshot(
-    before: AdbTargetSnapshot,
-    after: AdbTargetSnapshot,
-) -> bool:
-    return bool(
-        before.owned
-        and after.owned
-        and before.target == after.target
-        and before.generation == after.generation
-    )
-
-
 def _redacted(value: Any) -> str:
     return hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:16]
 
@@ -1085,30 +974,11 @@ def _capture_default():
 
 
 def _background_default(target: str) -> bool:
-    from core.adb_utils import adb_shell
-
-    return adb_shell(
-        ["input", "keyevent", "KEYCODE_HOME"],
-        device_id=target,
-        report_errors=False,
-    ) is not None
+    return background_to_android_home(target)
 
 
 def _foreground_default(target: str) -> bool:
-    from core.adb_utils import adb_shell
-
-    return adb_shell(
-        [
-            "monkey",
-            "-p",
-            "com.TechTreeGames.TheTower",
-            "-c",
-            "android.intent.category.LAUNCHER",
-            "1",
-        ],
-        device_id=target,
-        report_errors=False,
-    ) is not None
+    return restore_tower_launcher(target)
 
 
 def _quiet_player_save_read(
@@ -1116,15 +986,7 @@ def _quiet_player_save_read(
     *,
     device_id: Optional[str] = None,
 ) -> Optional[bytes]:
-    """Read the private save without printing target-bearing exceptions."""
-
-    from core.adb_utils import read_device_file
-
-    return read_device_file(
-        path,
-        device_id=device_id,
-        report_errors=False,
-    )
+    return quiet_player_save_read(path, device_id=device_id)
 
 
 __all__ = [

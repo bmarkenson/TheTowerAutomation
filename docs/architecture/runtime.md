@@ -273,10 +273,13 @@ canonical fingerprint. The authorized Tier 22 natural boundary proved that a
 known Home state preceded a new seed and per-tier counter, then that the exact
 identity stayed stable while revisions and waves advanced through the last
 active snapshot. The decoder's active-round projection remains observation
-only. The separate activity-continuity consumer uses only the source-tagged
-structural newest-tail identity: it may omit the initial Home Battle History
-read and close a runtime-owned direct-Retry baseline, but it does not authorize
-attachment, terminal record construction, lifecycle input, or Strategy facts.
+only. The separate activity-continuity consumer uses the source-tagged
+structural newest-tail identity to omit the initial Home Battle History read,
+close a runtime-owned direct-Retry baseline, and compare a replacement process
+already attached at `RUNNING`. That attachment comparison additionally
+requires the exact active identity from a guarded forced serialization; it
+never turns that identity into lifecycle input, terminal record construction,
+or Strategy facts.
 
 The in-battle Perk projection requires exact agreement among the 50-entry
 `perkLevel` array, `perksPickedCount`, and every ordered `PerkPick(wave, perk)`
@@ -394,10 +397,12 @@ rules:
     terminal transition confirmation remain owned by verified UI controls.
 
 That future Perk-timeline phase is documented only; it is not implemented by
-the save-first configuration/history change. The runtime does not background
-an active battle merely to accelerate serialization. Any optional forced
-active-battle serialization requires a separate explicit runtime policy and
-must preserve control and lifecycle authority.
+the save-first configuration/history change. It does not background an active
+battle merely to accelerate a Perk checkpoint. The separate `save_first`
+Current-run attachment boundary may briefly use Android Home only for a
+replacement process already at `RUNNING`; it preserves process, activity
+scope, target generation, active-round identity, control, source restoration,
+and lifecycle authority and grants no broader save consumer that permission.
 
 Save-tail causality does not relax the independent current-process
 `runtime.run_binding` boundary. A process that starts only on a terminal remains
@@ -1119,13 +1124,25 @@ development-lease authority from warning text in `actions.log`.
   its source-tagged structural newest history-tail identity into the new scope
   before the guarded UI route may run; acquisition/shape failure safely falls
   back after Home setup, while target/control/scope/restoration loss authorizes
-  no input. `force_ui` and `comparison_audit` retain the UI route. A replacement
-  process still compares a UI-derived persisted baseline at `RUNNING`, Home
-  `RESUME_BATTLE`, or a Battle History screen left open by an interrupted
-  inspection. Equality preserves the scope; a changed report creates a new
-  scope whose log boundary includes the continuity action. A readable identity
-  is persisted with a run-ID compare-and-set so a stale inspection cannot
-  overwrite a newer lifecycle boundary.
+  no input. At a replacement-process `RUNNING` attachment with either a
+  compatible save baseline or a UI baseline retaining parseable Tier, Wave,
+  and Battle Date, the continuity owner records the exact runtime/scope/target
+  and lifecycle state, requires stable `RUNNING` before and after the shared
+  Android-Home serializer, and accepts only two byte-identical reads with an
+  exact active-round identity. A save baseline uses its source-specific
+  fingerprint and valid append/rollover contract. A UI baseline bridges only
+  through independently normalized Tier/Wave/Battle Date: the save date must
+  be unambiguous .NET `Local` wall-clock evidence matching the UI's minute
+  precision. Agreement migrates the metadata while preserving scope; mismatch,
+  UTC/Unspecified/LocalAmbiguous kind, timezone, parse, or retained-field
+  ambiguity restores UI. Source fingerprints are never compared. Unsupported,
+  acquisition, or invalid-transition evidence reaches the guarded UI only
+  after safe restoration; any ownership, process, identity, control, source,
+  or restoration ambiguity blocks it. `force_ui`, `comparison_audit`, Home
+  `RESUME_BATTLE`, interrupted Battle History, and insufficient baselines
+  retain the UI route. A readable identity is persisted with a run-ID
+  compare-and-set so stale evidence cannot overwrite a newer lifecycle
+  boundary.
 - A successful runtime-owned direct Retry passively polls fresh stable
   two-identical-read exact-target saves until the structural tail advances.
   Unchanged tails schedule another poll without UI input; one append or a

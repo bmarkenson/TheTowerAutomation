@@ -1,15 +1,19 @@
 """Source-bound Battle History continuity from stable player-save reads.
 
-This module is deliberately observation-only.  It never backgrounds the game,
-navigates the UI, consumes collector receipts, or authorizes lifecycle input.
-The caller may use ``UI_FALLBACK`` only after the exact target, activity scope,
-control authority, and source screen were all shown to remain unchanged.
+Ordinary reads remain observation-only.  Replacement-process attachment may
+explicitly request the guarded Android-Home serialization shared with Home
+preflight.  Neither path navigates game UI or authorizes lifecycle input, and
+``UI_FALLBACK`` is available only after the exact source was safely restored.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
+import hashlib
+import re
+import time
 from typing import Any, Callable, Mapping, Optional
 
 from core.adb_target_session import ADB_TARGET_OPERATION_LOCK, AdbTargetSnapshot
@@ -20,13 +24,44 @@ from core.player_save import (
     decode_player_save_bytes,
     pull_player_save_bytes,
 )
+from core.player_save_serialization import (
+    GuardedPlayerSaveSerializer,
+    GuardedSerializationStatus,
+)
 from core.state_detector import detect_state_and_overlays
-from utils.logger import get_activity_scope
+from utils.logger import get_activity_scope, log, log_input
 
 
 PLAYER_SAVE_HISTORY_SOURCE = "player_save"
+BATTLE_HISTORY_UI_SOURCE = "battle_history_ui"
+BATTLE_HISTORY_UI_MAPPING_ID = "battle-history-ui-report-v1"
 PLAYER_SAVE_HISTORY_IDENTITY_SCHEMA_VERSION = 1
 ACTIVITY_HISTORY_METADATA_SCHEMA_VERSION = 2
+_UI_BATTLE_DATE_PATTERN = re.compile(
+    r"^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) "
+    r"(0[1-9]|[1-9]|[12][0-9]|3[01]), ([0-9]{4}) "
+    r"([01][0-9]|2[0-3]):([0-5][0-9])$"
+)
+_MONTH_NUMBER = {
+    month: index
+    for index, month in enumerate(
+        (
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec",
+        ),
+        start=1,
+    )
+}
 
 
 class PlayerSaveHistoryReadStatus(str, Enum):
@@ -41,6 +76,11 @@ class PlayerSaveHistoryReadResult:
     reason: str
     metadata: Optional[Mapping[str, Any]] = None
     safe_ui_fallback: bool = False
+    active_round_identity_fingerprint: Optional[str] = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     @property
     def complete(self) -> bool:
@@ -48,6 +88,47 @@ class PlayerSaveHistoryReadResult:
             self.status is PlayerSaveHistoryReadStatus.COMPLETE
             and self.metadata is not None
         )
+
+
+@dataclass(frozen=True)
+class PlayerSaveAttachmentContext:
+    """Exact process-local authority for one running-battle attachment read."""
+
+    runtime_session_id: str
+    activity_scope_id: str
+    target: str
+    target_generation: int
+    active_battle_observed: bool
+
+    def valid_for(self, expected_scope_id: str) -> bool:
+        return bool(
+            self.runtime_session_id
+            and self.activity_scope_id == str(expected_scope_id or "")
+            and self.target
+            and self.target_generation > 0
+            and self.active_battle_observed
+        )
+
+    def target_generation_detail(self) -> str:
+        return hashlib.sha256(
+            f"{self.target}\0{self.target_generation}".encode("utf-8")
+        ).hexdigest()[:16]
+
+
+class CrossSourceHistoryStatus(str, Enum):
+    MATCH = "match"
+    MISMATCH = "mismatch"
+    AMBIGUOUS = "ambiguous"
+
+
+@dataclass(frozen=True)
+class CrossSourceHistoryResult:
+    status: CrossSourceHistoryStatus
+    reason: str
+
+    @property
+    def matched(self) -> bool:
+        return self.status is CrossSourceHistoryStatus.MATCH
 
 
 def history_metadata_from_snapshot(
@@ -66,12 +147,14 @@ def history_metadata_from_snapshot(
         return _ui_fallback(
             tail.structural_reason or "history_tail_identity_unavailable"
         )
+    battle_date = getattr(identity, "battle_date", None)
     if (
         tail.capacity <= 0
         or tail.entry_count <= 0
         or tail.entry_count > tail.capacity
         or not identity.fingerprint
         or identity.mapping_id != runtime.mapping_id
+        or not isinstance(battle_date, Mapping)
     ):
         return _ui_fallback("history_tail_structure_invalid")
 
@@ -88,6 +171,7 @@ def history_metadata_from_snapshot(
             "fingerprint": identity.fingerprint,
             "tier": identity.tier,
             "wave": identity.wave,
+            "battle_date": dict(battle_date),
             "entry_count": tail.entry_count,
             "capacity": tail.capacity,
             "semantic_status": tail.completed_entry_status,
@@ -95,6 +179,69 @@ def history_metadata_from_snapshot(
             "captured_at": snapshot.captured_at,
             "acquisition": str(acquisition),
         },
+    )
+
+
+def ui_history_bridge_eligible(metadata: Mapping[str, Any]) -> bool:
+    """Return whether retained UI fields can enter cross-source corroboration."""
+
+    return bool(
+        metadata.get("schema_version")
+        == ACTIVITY_HISTORY_METADATA_SCHEMA_VERSION
+        and metadata.get("source") == BATTLE_HISTORY_UI_SOURCE
+        and metadata.get("mapping_id") == BATTLE_HISTORY_UI_MAPPING_ID
+        and metadata.get("identity_schema_version")
+        == PLAYER_SAVE_HISTORY_IDENTITY_SCHEMA_VERSION
+        and _nonnegative_int(metadata.get("tier")) is not None
+        and _nonnegative_int(metadata.get("wave")) is not None
+        and _parse_ui_battle_date(metadata.get("battle_date")) is not None
+    )
+
+
+def corroborate_ui_and_save_history(
+    ui_metadata: Mapping[str, Any],
+    save_metadata: Mapping[str, Any],
+) -> CrossSourceHistoryResult:
+    """Bridge source contracts through Tier/Wave/date, never fingerprints."""
+
+    if not ui_history_bridge_eligible(ui_metadata):
+        return _cross_source_ambiguous("ui_history_identity_insufficient")
+    if not (
+        save_metadata.get("schema_version")
+        == ACTIVITY_HISTORY_METADATA_SCHEMA_VERSION
+        and save_metadata.get("source") == PLAYER_SAVE_HISTORY_SOURCE
+        and str(save_metadata.get("mapping_id") or "")
+        and save_metadata.get("identity_schema_version")
+        == PLAYER_SAVE_HISTORY_IDENTITY_SCHEMA_VERSION
+    ):
+        return _cross_source_ambiguous("save_history_identity_insufficient")
+
+    ui_tier = _nonnegative_int(ui_metadata.get("tier"))
+    ui_wave = _nonnegative_int(ui_metadata.get("wave"))
+    save_tier = _nonnegative_int(save_metadata.get("tier"))
+    save_wave = _nonnegative_int(save_metadata.get("wave"))
+    if save_tier is None or save_wave is None:
+        return _cross_source_ambiguous("save_history_tier_wave_ambiguous")
+    if ui_tier != save_tier or ui_wave != save_wave:
+        return CrossSourceHistoryResult(
+            CrossSourceHistoryStatus.MISMATCH,
+            "cross_source_tier_wave_mismatch",
+        )
+
+    ui_date = _parse_ui_battle_date(ui_metadata.get("battle_date"))
+    save_date = _parse_unambiguous_local_save_date(
+        save_metadata.get("battle_date")
+    )
+    if ui_date is None or save_date is None:
+        return _cross_source_ambiguous("cross_source_battle_date_ambiguous")
+    if ui_date != save_date.replace(second=0, microsecond=0):
+        return CrossSourceHistoryResult(
+            CrossSourceHistoryStatus.MISMATCH,
+            "cross_source_battle_date_mismatch",
+        )
+    return CrossSourceHistoryResult(
+        CrossSourceHistoryStatus.MATCH,
+        "cross_source_tier_wave_battle_date_match",
     )
 
 
@@ -111,16 +258,30 @@ class PlayerSaveHistoryReader:
         ),
         home_control_fn: Callable[[Any], Any] = detect_home_battle_control,
         scope_fn: Callable[[], Optional[Mapping[str, Any]]] = get_activity_scope,
+        attachment_context_fn: Optional[
+            Callable[[], PlayerSaveAttachmentContext]
+        ] = None,
+        background_fn: Optional[Callable[[str], bool]] = None,
+        foreground_fn: Optional[Callable[[str], bool]] = None,
         pull_fn: Callable[..., bytes] = pull_player_save_bytes,
         decode_fn: Callable[..., PlayerSaveSnapshot] = decode_player_save_bytes,
+        sleep_fn: Callable[[float], None] = time.sleep,
+        input_log_fn: Callable[..., None] = log_input,
+        debug_log_fn: Callable[..., None] = log,
     ) -> None:
         self._target_snapshot_fn = target_snapshot_fn
         self._capture_fn = capture_fn
         self._detector = detector
         self._home_control_fn = home_control_fn
         self._scope_fn = scope_fn
+        self._attachment_context_fn = attachment_context_fn
+        self._background_fn = background_fn
+        self._foreground_fn = foreground_fn
         self._pull_fn = pull_fn
         self._decode_fn = decode_fn
+        self._sleep_fn = sleep_fn
+        self._input_log_fn = input_log_fn
+        self._debug_log_fn = debug_log_fn
 
     def read(
         self,
@@ -129,10 +290,18 @@ class PlayerSaveHistoryReader:
         expected_home_control: HomeBattleControl,
         expected_scope_id: str,
         action_guard_fn: Callable[[], bool],
+        serialize_active_attachment: bool = False,
     ) -> PlayerSaveHistoryReadResult:
         normalized_source = str(source_state or "").upper()
         if normalized_source not in {"RUNNING", "HOME_SCREEN"}:
             return _blocked("save_history_source_unsupported")
+        if serialize_active_attachment:
+            if normalized_source != "RUNNING":
+                return _blocked("active_attachment_source_unsupported")
+            return self._read_serialized_active_attachment(
+                expected_scope_id=expected_scope_id,
+                action_guard_fn=action_guard_fn,
+            )
 
         with ADB_TARGET_OPERATION_LOCK:
             try:
@@ -186,27 +355,139 @@ class PlayerSaveHistoryReader:
                 return _blocked("history_source_binding_lost")
             return observed
 
+    def _read_serialized_active_attachment(
+        self,
+        *,
+        expected_scope_id: str,
+        action_guard_fn: Callable[[], bool],
+    ) -> PlayerSaveHistoryReadResult:
+        context_fn = self._attachment_context_fn
+        if context_fn is None:
+            return _blocked("active_attachment_context_unavailable")
+        try:
+            context = context_fn()
+        except Exception:
+            return _blocked("active_attachment_context_unavailable")
+        if not context.valid_for(expected_scope_id):
+            return _blocked("active_attachment_context_unverified")
+
+        serializer = GuardedPlayerSaveSerializer(
+            target_snapshot_fn=self._target_snapshot_fn,
+            context_guard_fn=lambda: self._same_attachment_context(
+                context,
+                expected_scope_id,
+            ),
+            action_guard_fn=action_guard_fn,
+            source_guard_fn=lambda frame, stable: self._source_matches(
+                "RUNNING",
+                HomeBattleControl.UNKNOWN,
+                initial_frame=frame,
+                stable=stable,
+            ),
+            background_fn=self._background_fn,
+            foreground_fn=self._foreground_fn,
+            pull_fn=self._pull_fn,
+            decode_fn=self._decode_fn,
+            sleep_fn=self._sleep_fn,
+            input_log_fn=self._input_log_fn,
+            debug_log_fn=self._debug_log_fn,
+            log_prefix="BATTLE_CONTINUITY",
+        )
+        serialized = serializer.acquire(
+            expected_target=context.target,
+            expected_generation=context.target_generation,
+            target_generation_detail=context.target_generation_detail(),
+            source_label="the attached running battle",
+            stable_initial_source=True,
+        )
+        if serialized.status is GuardedSerializationStatus.BLOCKED:
+            return _blocked(
+                f"active_attachment_{serialized.reason}"
+            )
+        snapshot = serialized.snapshot
+        if snapshot is None:
+            return _ui_fallback(serialized.reason)
+
+        runtime = snapshot.runtime_save
+        if runtime is None:
+            return _ui_fallback("active_round_projection_unavailable")
+        active_identity = runtime.active_round_identity
+        if not runtime.round_active or active_identity is None:
+            return _blocked("active_round_identity_conflicted_after_restore")
+        if (
+            not active_identity.fingerprint
+            or active_identity.game_version != snapshot.game_version
+            or active_identity.current_tier < 0
+            or active_identity.rounds_started_this_tier < 0
+            or active_identity.round_seed <= 0
+        ):
+            return _blocked("active_round_identity_invalid_after_restore")
+
+        observed = history_metadata_from_snapshot(
+            snapshot,
+            acquisition="forced_active_attachment_android_home_serialization",
+        )
+        if not observed.complete:
+            return observed
+        return PlayerSaveHistoryReadResult(
+            observed.status,
+            observed.reason,
+            metadata=observed.metadata,
+            safe_ui_fallback=observed.safe_ui_fallback,
+            active_round_identity_fingerprint=active_identity.fingerprint,
+        )
+
+    def _same_attachment_context(
+        self,
+        expected: PlayerSaveAttachmentContext,
+        expected_scope_id: str,
+    ) -> bool:
+        context_fn = self._attachment_context_fn
+        if context_fn is None:
+            return False
+        try:
+            current = context_fn()
+        except Exception:
+            return False
+        return bool(
+            current == expected
+            and current.valid_for(expected_scope_id)
+            and _scope_matches(self._scope_fn, expected_scope_id)
+        )
+
     def _source_matches(
         self,
         source_state: str,
         expected_home_control: HomeBattleControl,
+        *,
+        initial_frame: Any = None,
+        stable: bool = False,
     ) -> bool:
-        try:
-            frame = self._capture_fn()
-            if frame is None:
+        attempts = 2 if stable else 1
+        frame = initial_frame
+        for attempt in range(attempts):
+            try:
+                if frame is None or attempt > 0:
+                    frame = self._capture_fn()
+                if frame is None:
+                    return False
+                detection = self._detector(frame)
+                state = str(detection.get("state") or "").upper()
+                if source_state == "RUNNING":
+                    matched = state == "RUNNING"
+                else:
+                    matched = bool(
+                        state in {"HOME", "HOME_SCREEN"}
+                        and self._home_control_fn(frame).control
+                        is expected_home_control
+                    )
+                if not matched:
+                    return False
+            except Exception:
                 return False
-            detection = self._detector(frame)
-            state = str(detection.get("state") or "").upper()
-            if source_state == "RUNNING":
-                return state == "RUNNING"
-            if state not in {"HOME", "HOME_SCREEN"}:
-                return False
-            return (
-                self._home_control_fn(frame).control
-                is expected_home_control
-            )
-        except Exception:
-            return False
+            if stable and attempt == 0:
+                self._sleep_fn(0.2)
+        return True
 
 
 def history_sources_compatible(
@@ -316,6 +597,69 @@ def _safe_reason(value: Any) -> str:
     )
 
 
+def _nonnegative_int(value: Any) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    normalized = str(value or "").strip()
+    if not normalized or not normalized.isascii() or not normalized.isdigit():
+        return None
+    parsed = int(normalized)
+    return parsed if parsed >= 0 else None
+
+
+def _parse_ui_battle_date(value: Any) -> Optional[datetime]:
+    match = _UI_BATTLE_DATE_PATTERN.fullmatch(str(value or "").strip())
+    if match is None:
+        return None
+    month, day, year, hour, minute = match.groups()
+    try:
+        return datetime(
+            int(year),
+            _MONTH_NUMBER[month],
+            int(day),
+            int(hour),
+            int(minute),
+        )
+    except (KeyError, ValueError):
+        return None
+
+
+def _parse_unambiguous_local_save_date(value: Any) -> Optional[datetime]:
+    if not isinstance(value, Mapping):
+        return None
+    if (
+        value.get("kind_id") != 2
+        or value.get("kind") != "local"
+        or value.get("clock_basis") != "local_wall_clock_without_offset"
+    ):
+        return None
+    ticks = str(value.get("ticks") or "")
+    if not ticks.isascii() or not ticks.isdigit():
+        return None
+    try:
+        submicrosecond = int(value.get("submicrosecond_100ns"))
+    except (TypeError, ValueError):
+        return None
+    if not 0 <= submicrosecond <= 9:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value.get("clock_time") or ""))
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        return None
+    return parsed
+
+
+def _cross_source_ambiguous(reason: str) -> CrossSourceHistoryResult:
+    return CrossSourceHistoryResult(
+        CrossSourceHistoryStatus.AMBIGUOUS,
+        reason,
+    )
+
+
 def _ui_fallback(reason: str) -> PlayerSaveHistoryReadResult:
     return PlayerSaveHistoryReadResult(
         PlayerSaveHistoryReadStatus.UI_FALLBACK,
@@ -334,11 +678,18 @@ def _blocked(reason: str) -> PlayerSaveHistoryReadResult:
 
 __all__ = [
     "ACTIVITY_HISTORY_METADATA_SCHEMA_VERSION",
+    "BATTLE_HISTORY_UI_MAPPING_ID",
+    "BATTLE_HISTORY_UI_SOURCE",
+    "CrossSourceHistoryResult",
+    "CrossSourceHistoryStatus",
     "PLAYER_SAVE_HISTORY_SOURCE",
+    "PlayerSaveAttachmentContext",
     "PlayerSaveHistoryReadResult",
     "PlayerSaveHistoryReadStatus",
     "PlayerSaveHistoryReader",
+    "corroborate_ui_and_save_history",
     "history_metadata_from_snapshot",
     "history_sources_compatible",
+    "ui_history_bridge_eligible",
     "valid_history_tail_advance",
 ]

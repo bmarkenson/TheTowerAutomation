@@ -241,9 +241,43 @@ semantic completed-record publication remains unavailable. Acquisition or
 shape uncertainty uses the guarded UI route only after source restoration;
 target generation, scope, control, boundary, Pause/Stop, or restoration loss
 authorizes no UI input. `force_ui` and `comparison_audit` retain the existing
-UI baseline. On a later process attachment at `RUNNING`, Home `RESUME_BATTLE`,
-or an interrupted Battle History inspection, automation still uses that
-guarded UI read:
+UI baseline.
+
+On a later process attachment already at `RUNNING`, `save_first` prefers a
+fresh save when the persisted baseline is either a compatible player-save
+identity or a UI identity retaining parseable Tier, Wave, and Battle Date.
+Activity Continuity owns exclusive action authority,
+stops blind/background input, records the exact runtime session, activity
+scope, lifecycle-owned active-battle state, and ADB target/generation, then
+uses the same guarded Android-Home serializer as Home preflight. It requires
+two stable `RUNNING` frames before `KEYCODE_HOME`, two byte-identical save
+reads, an exact active-round identity, launcher restoration, and two stable
+`RUNNING` frames afterward while every recorded binding remains unchanged.
+The Settings **Force Cloud Save** control is not mapped or used. For a
+same-source save baseline:
+
+- an unchanged fingerprint preserves the existing Current run scope;
+- one valid append or capacity-preserving rollover proves that a battle
+  completed while automation was absent and starts a new scope at the
+  continuity `ACTION`;
+- acquisition, unsupported projection, or invalid-transition evidence uses
+  guarded Battle History UI only after the running source is safely restored;
+- process, active identity, target generation, scope, control, Pause/Stop, or
+  restoration ambiguity keeps all later UI and normal inputs blocked.
+
+For a retained UI baseline, Activity Continuity never compares source
+fingerprints. It independently normalizes UI Tier/Wave/Battle Date and the
+fresh save tail's Tier/Wave/date. Only .NET `Local` save dates with an explicit
+local-wall-clock-without-offset basis can bridge the UI's minute-precision
+date. Exact agreement migrates the baseline to save metadata while preserving
+the scope. A Tier/Wave/date mismatch, UTC, Unspecified, LocalAmbiguous,
+malformed date, timezone-bearing local value, or insufficient retained field
+uses guarded UI after safe restoration. A legacy UI baseline may enter only
+when those same retained fields pass the identical contract.
+
+Home `RESUME_BATTLE`, an interrupted Battle History inspection, an
+insufficient baseline, `force_ui`, and `comparison_audit` retain the guarded
+UI read:
 
 - an unchanged fingerprint preserves the existing Current run scope;
 - a changed fingerprint proves that a battle completed while automation was
@@ -264,19 +298,23 @@ a capacity-30 rollover completes the new scope's baseline. Acquisition, shape,
 or invalid-transition evidence restores the existing guarded UI route only
 while navigation remains safe; binding loss keeps it action-free. UI and save
 fingerprints are never equated, and a necessary cross-source fallback records a
-new tagged baseline conservatively. Legacy schema-1 scopes are treated only as
-historical UI evidence. The Retry baseline never creates a second attachment
-scope for the battle that automation itself started, and the optional
+new tagged baseline conservatively. For this direct-Retry path, legacy
+schema-1 scopes remain historical UI evidence rather than save-polling
+baselines. The Retry baseline never creates a second attachment scope for the
+battle that automation itself started, and the optional
 player-save collector and its receipts are irrelevant to this authority.
 
 The scope ledger retains only source/mapping identity, the privacy-safe
 fingerprint, Tier/Wave, and the source-specific normalized metadata required by
-that contract. UI identity may include Battle Date; save identity includes the
-bounded entry count/capacity, semantic availability, acquisition kind, and
-capture time. It retains neither the copied report nor a decoded save object.
+that contract. UI identity includes its display Battle Date; save identity
+includes its normalized source date plus bounded entry count/capacity,
+semantic availability, acquisition kind, and capture time. It retains neither
+the copied report nor a decoded save object.
 Each bounded continuity attempt has one operator-facing `ACTION` and one
-terminal `RESULT`. UI menu, row, Copy, close, and return taps are
-`INPUT`/`DEBUG` detail; an unchanged save tail has no input. Pause can interrupt
+terminal `RESULT`. Android Home/background restore and UI menu, row, Copy,
+close, and return actions are `INPUT` with paired `DEBUG` detail. A direct-Retry
+unchanged-tail poll has no input; a replacement attachment has only the guarded
+background/restore pair unless UI fallback is required. Pause can interrupt
 the route without authorizing cleanup input, and Resume continues it.
 
 `Clear view` is a client-side cursor only: it does not edit `actions.log`, and

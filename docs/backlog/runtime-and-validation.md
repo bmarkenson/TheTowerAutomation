@@ -81,10 +81,11 @@ checked-item detail remains in the
     establish the core new-round, foreground-revision, final-Perk/clearing,
     Game Over tail-candidate, complete 144-row projection, mapped Boss, and
     optional coin-split observations. No additional purpose-built battle is
-    requested. Pause/background freshness, future unknown `killedBy` values,
-    Retry/Home timing, runtime attachment, and survival repeated-event/timer
-    semantics remain explicit independent extensions, not blockers for
-    `V1073-RUNTIME-013`; incomplete runtime claims still use UI fallback.
+    requested. Broader pause/background freshness, future unknown `killedBy`
+    values, Retry/Home timing, other runtime attachment consumers, and survival
+    repeated-event/timer semantics remain explicit independent extensions, not
+    blockers for `V1073-RUNTIME-013`; incomplete runtime claims still use UI
+    fallback.
   - [x] Implement `V1073-RUNTIME-013`, the explicitly enabled read-only
     natural-boundary audit collector defined in the runtime architecture. Its
     allowlisted append-only receipts may record stable revision, active
@@ -147,10 +148,25 @@ checked-item detail remains in the
     leave `workshop_preset` explicitly deferred while the in-battle checks
     continue. This must not broaden attachment authority or reintroduce Exit
     Battle → Go Home → Resume Battle.
-  - [ ] Add any normal-runtime consumer of the observation-only polling and
-    same-round audit cache only after its own matrix evidence is complete.
-    Attachment, record construction, Perks-navigation decisions, Strategy
-    facts, lifecycle changes, and UI suppression remain outside
+  - [x] Add the narrow normal-runtime save consumer for replacement-process
+    Current-run continuity already at `RUNNING`. Under `save_first`, a
+    compatible save baseline uses same-source fingerprint/transition rules; a
+    UI baseline may enter only with parseable Tier/Wave/Battle Date and migrate
+    through exact shared-field corroboration with an unambiguous .NET `Local`
+    save date at UI minute precision. Fingerprints are never compared across
+    sources. Activity Continuity owns the guarded Android-Home serialization,
+    two-identical-read acquisition, exact active-round identity, and stable
+    source restoration. Unsupported, decode, invalid-transition, shared-field
+    mismatch, date-kind/timezone/parse ambiguity, and insufficient UI evidence
+    use UI only after restoration; process, target/generation, activity scope,
+    active identity, control, and restoration ambiguity block all later
+    input. This neither uses Force Cloud Save nor grants authority to passive
+    polling, Home `RESUME_BATTLE`, terminal records, Strategy, trackers, or
+    lifecycle input.
+  - [ ] Add any other normal-runtime consumer of the observation-only polling
+    and same-round audit cache only after its own matrix evidence is complete.
+    Record construction, Perks-navigation decisions, Strategy facts,
+    lifecycle changes, and UI suppression remain outside
     `V1073-RUNTIME-013` and must preserve the current-process terminal-binding
     rule.
   - [ ] Replace the in-battle Perk UI timeline with a normal-runtime save
@@ -160,9 +176,10 @@ checked-item detail remains in the
     obtain a terminal stable save to close the final prefix. Retain UI for an
     unknown ID, acquisition/continuity failure, explicit audit, or unresolved
     final state. Do not background an active battle merely to accelerate a
-    save. Any optional forced active-battle serialization requires an explicit
-    runtime policy and must preserve control and lifecycle authority. This is a
-    separate implementation phase, not part of the save-first fallback fix.
+    Perk checkpoint. The separate `save_first` replacement-process continuity
+    boundary is the only current forced active-battle serialization policy and
+    grants this cache no authority. This is a separate implementation phase,
+    not part of the continuity fix.
   - [ ] Add save-derived normal completed records and conditional terminal
     Perks navigation only after history-tail attachment and final-Perk proofs
     are complete. Preserve passive compact Game Stats OCR, forced full UI audit,

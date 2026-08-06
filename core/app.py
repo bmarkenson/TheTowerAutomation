@@ -60,7 +60,10 @@ from core.player_save_preflight import (
     PlayerSavePreflightContext,
     PlayerSavePreflightCoordinator,
 )
-from core.player_save_history import PlayerSaveHistoryReader
+from core.player_save_history import (
+    PlayerSaveAttachmentContext,
+    PlayerSaveHistoryReader,
+)
 from core.perk_timeline import PerkTimelineObserver
 from core.no_strategy_inventory import (
     NoStrategyInventoryStatus,
@@ -226,6 +229,9 @@ class App:
             PlayerSaveHistoryReader(
                 target_snapshot_fn=adb_target_session.snapshot,
                 capture_fn=self._capture_frame,
+                attachment_context_fn=(
+                    self._current_player_save_attachment_context
+                ),
             )
             if adb_target_session is not None
             else None
@@ -1478,6 +1484,45 @@ class App:
             ),
             target=target.target,
             target_generation=target.generation,
+        )
+
+    def _current_player_save_attachment_context(
+        self,
+    ) -> PlayerSaveAttachmentContext:
+        """Return exact process/scope authority for a RUNNING attachment."""
+
+        session = self._adb_target_session
+        if session is None:
+            raise RuntimeError(
+                "player-save attachment requires an ADB target session"
+            )
+        target = session.snapshot()
+        if not target.owned:
+            raise RuntimeError("player-save attachment target is not owned")
+        scope = get_activity_scope()
+        scope_id = str(scope.get("run_id") or "") if scope else ""
+        if not scope_id:
+            raise RuntimeError(
+                "player-save attachment activity scope is unavailable"
+            )
+        active_battle = self._mission_mgr.active_battle_observed()
+        if active_battle is not True:
+            raise RuntimeError(
+                "player-save attachment battle identity is not active"
+            )
+        runtime_session_id = str(
+            self._player_save_runtime_session_id or ""
+        )
+        if not runtime_session_id:
+            raise RuntimeError(
+                "player-save attachment runtime session is unavailable"
+            )
+        return PlayerSaveAttachmentContext(
+            runtime_session_id=runtime_session_id,
+            activity_scope_id=scope_id,
+            target=target.target,
+            target_generation=target.generation,
+            active_battle_observed=True,
         )
 
     def _acquire_player_save_home_preflight(

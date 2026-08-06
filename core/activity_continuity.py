@@ -13,9 +13,13 @@ from core.battle_history import (
 )
 from core.battle_lifecycle import HomeBattleControl
 from core.player_save_history import (
+    BATTLE_HISTORY_UI_MAPPING_ID,
+    BATTLE_HISTORY_UI_SOURCE,
     PlayerSaveHistoryReadResult,
     PlayerSaveHistoryReadStatus,
+    corroborate_ui_and_save_history,
     history_sources_compatible,
+    ui_history_bridge_eligible,
     valid_history_tail_advance,
 )
 from utils.logger import (
@@ -31,8 +35,8 @@ from utils.logger import (
 
 POST_RETRY_HISTORY_POLL_INTERVAL_SECONDS = 15.0
 SOURCE_RETRY_INTERVAL_SECONDS = 5.0
-UI_HISTORY_SOURCE = "battle_history_ui"
-UI_HISTORY_MAPPING_ID = "battle-history-ui-report-v1"
+UI_HISTORY_SOURCE = BATTLE_HISTORY_UI_SOURCE
+UI_HISTORY_MAPPING_ID = BATTLE_HISTORY_UI_MAPPING_ID
 PLAYER_SAVE_HISTORY_SOURCE = "player_save"
 
 
@@ -298,6 +302,10 @@ class ActivityContinuityCoordinator:
                 expected_home_control=self._pending_home_control,
                 expected_scope_id=run_id,
                 action_guard_fn=action_guard_fn,
+                serialize_active_attachment=(
+                    self._pending_mode == "compare"
+                    and self._pending_source == "RUNNING"
+                ),
             )
             if save_result.status is PlayerSaveHistoryReadStatus.BLOCKED:
                 log_result(
@@ -348,7 +356,48 @@ class ActivityContinuityCoordinator:
                         elif not force_ui_fallback:
                             return self._handle_metadata(scope, metadata)
                     else:
-                        return self._handle_metadata(scope, metadata)
+                        baseline = _scope_battle_history(scope)
+                        compatible = history_sources_compatible(
+                            baseline,
+                            metadata,
+                        )
+                        if baseline is None:
+                            force_ui_fallback = True
+                            fallback_reason = "history_baseline_unavailable"
+                        elif compatible and (
+                            baseline["fingerprint"]
+                            == metadata["fingerprint"]
+                        ):
+                            return self._handle_metadata(scope, metadata)
+                        elif compatible and not valid_history_tail_advance(
+                            baseline,
+                            metadata,
+                        ):
+                            log(
+                                "[BATTLE_CONTINUITY] Attached save History "
+                                "tail changed without a valid append/rollover "
+                                "transition; restoring the guarded UI fallback",
+                                "INFO",
+                            )
+                            force_ui_fallback = True
+                            fallback_reason = (
+                                "history_tail_transition_invalid"
+                            )
+                        elif compatible:
+                            return self._handle_metadata(scope, metadata)
+                        else:
+                            corroboration = corroborate_ui_and_save_history(
+                                baseline,
+                                metadata,
+                            )
+                            if corroboration.matched:
+                                return self._handle_cross_source_migration(
+                                    scope,
+                                    metadata,
+                                    reason=corroboration.reason,
+                                )
+                            force_ui_fallback = True
+                            fallback_reason = corroboration.reason
                 else:
                     force_ui_fallback = True
                     fallback_reason = "save_history_metadata_invalid"
@@ -406,25 +455,84 @@ class ActivityContinuityCoordinator:
                 return self._handle_unchanged_post_retry(metadata)
         return self._handle_metadata(scope, metadata)
 
+    def _handle_cross_source_migration(
+        self,
+        scope: Mapping[str, object],
+        metadata: Mapping[str, Any],
+        *,
+        reason: str,
+    ) -> ActivityContinuityOutcome:
+        """Persist a UI-to-save bridge without comparing source fingerprints."""
+
+        run_id = str(scope["run_id"])
+        updated = record_activity_scope_battle_history(
+            run_id=run_id,
+            latest_completed_battle=metadata,
+        )
+        if updated is None:
+            log_result(
+                "Attached battle continuity migration failed — the normalized "
+                "save identity could not be persisted",
+                detail=(
+                    "[BATTLE_CONTINUITY] "
+                    "disposition=cross_source_identity_write_failed "
+                    f"reason={reason} scope_id={run_id}"
+                ),
+            )
+            self._action_logged = False
+            self._boundary = None
+            self._retry_at = self._clock() + SOURCE_RETRY_INTERVAL_SECONDS
+            return ActivityContinuityOutcome(pending=True, recapture=True)
+
+        log_result(
+            "Attached battle continuity confirmed — UI identity corroborated "
+            "the fresh save tail",
+            detail=(
+                "[BATTLE_CONTINUITY] disposition=cross_source_scope_preserved "
+                f"corroboration={reason} latest={_metadata_detail(metadata)} "
+                f"scope_id={run_id} fingerprint_compared=False"
+            ),
+        )
+        self._checked_scope_id = run_id
+        self._reset_pending()
+        return ActivityContinuityOutcome(
+            recapture=True,
+            confirmed_same_battle_scope_id=run_id,
+        )
+
     def _should_read_save(
         self,
         scope: Mapping[str, object],
         player_save_mode: str,
     ) -> bool:
-        # A save observation may close a Retry scope whose lifecycle binding is
-        # already runtime-owned.  It must never establish or reuse attachment
-        # authority; ordinary attached-battle comparison remains UI-backed.
         if (
             str(player_save_mode) != "save_first"
             or self._save_history_reader is None
             or self._pending_source == "BATTLE_HISTORY"
-            or self._pending_mode != "post_retry_baseline"
         ):
             return False
-        reference = _pending_previous_battle(scope)
+        if self._pending_mode == "post_retry_baseline":
+            reference = _pending_previous_battle(scope)
+            return bool(
+                reference is not None
+                and reference.get("source") == PLAYER_SAVE_HISTORY_SOURCE
+            )
+        elif (
+            self._pending_mode == "compare"
+            and self._pending_source == "RUNNING"
+        ):
+            # A save baseline is directly comparable. A retained UI baseline
+            # enters only when Tier/Wave/Battle Date can support the explicit
+            # cross-source bridge; fingerprints remain incomparable.
+            reference = _scope_battle_history(scope)
+        else:
+            return False
         return bool(
             reference is not None
-            and reference.get("source") == PLAYER_SAVE_HISTORY_SOURCE
+            and (
+                reference.get("source") == PLAYER_SAVE_HISTORY_SOURCE
+                or ui_history_bridge_eligible(reference)
+            )
         )
 
     def _log_action(self, run_id: str, *, use_save: bool) -> None:

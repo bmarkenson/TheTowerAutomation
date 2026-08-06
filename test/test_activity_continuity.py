@@ -53,8 +53,10 @@ def _save_metadata(
     fingerprint="a" * 64,
     entry_count=29,
     capacity=30,
+    tier=19,
     wave=1899,
     semantic_status="observed",
+    battle_date=None,
 ):
     return {
         "schema_version": 2,
@@ -62,8 +64,17 @@ def _save_metadata(
         "mapping_id": "data-9-game-1073",
         "identity_schema_version": 1,
         "fingerprint": fingerprint,
-        "tier": 19,
+        "tier": tier,
         "wave": wave,
+        "battle_date": battle_date
+        or {
+            "kind_id": 2,
+            "kind": "local",
+            "ticks": "639197340971234560",
+            "clock_time": "2026-07-15T01:41:37.123456",
+            "clock_basis": "local_wall_clock_without_offset",
+            "submicrosecond_100ns": 0,
+        },
         "entry_count": entry_count,
         "capacity": capacity,
         "semantic_status": semantic_status,
@@ -550,6 +561,324 @@ def test_direct_retry_accepts_save_tail_append_or_capacity_rollover(
     assert save_reads[0]["expected_scope_id"] == retry_scope["run_id"]
 
 
+def test_unchanged_save_tail_preserves_running_attachment_without_history_ui(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "TOWER_ACTION_LOG_PATH",
+        str(tmp_path / "logs" / "actions.log"),
+    )
+    baseline = _save_metadata()
+    scope = _scope_with_save_baseline(baseline)
+    save_reads = []
+    ui_reads = []
+
+    def save_reader(**kwargs):
+        save_reads.append(kwargs)
+        return _save_complete(baseline)
+
+    coordinator = ActivityContinuityCoordinator(
+        save_history_reader=save_reader,
+        history_reader=lambda **kwargs: ui_reads.append(kwargs),
+    )
+
+    outcome = coordinator.handle(
+        {"state": "RUNNING"},
+        actions_allowed=True,
+        action_guard_fn=lambda: True,
+        player_save_mode="save_first",
+    )
+
+    current = logger.get_activity_scope()
+    assert outcome.recapture
+    assert outcome.confirmed_same_battle_scope_id == scope["run_id"]
+    assert current is not None
+    assert current["run_id"] == scope["run_id"]
+    assert current["latest_completed_battle"] == baseline
+    assert ui_reads == []
+    assert len(save_reads) == 1
+    assert save_reads[0]["serialize_active_attachment"] is True
+
+
+def test_corroborated_ui_baseline_migrates_to_save_without_fingerprint_compare(
+    tmp_path,
+    monkeypatch,
+):
+    log_path = tmp_path / "logs" / "actions.log"
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(log_path))
+    ui_identity = _identity(wave="9112")
+    original = _scope_with_baseline(ui_identity)
+    save_metadata = _save_metadata(
+        fingerprint="save-fingerprint-is-source-specific",
+        tier=18,
+        wave=9112,
+    )
+    save_reads = []
+
+    def save_reader(**kwargs):
+        save_reads.append(kwargs)
+        return _save_complete(save_metadata)
+
+    coordinator = ActivityContinuityCoordinator(
+        save_history_reader=save_reader,
+        history_reader=lambda **_kwargs: pytest.fail(
+            "corroborated UI baseline should migrate without History UI"
+        ),
+    )
+
+    outcome = coordinator.handle(
+        {"state": "RUNNING"},
+        actions_allowed=True,
+        action_guard_fn=lambda: True,
+        player_save_mode="save_first",
+    )
+
+    current = logger.get_activity_scope()
+    assert outcome.recapture
+    assert outcome.confirmed_same_battle_scope_id == original["run_id"]
+    assert current is not None
+    assert current["run_id"] == original["run_id"]
+    assert current["latest_completed_battle"] == save_metadata
+    assert len(save_reads) == 1
+    assert save_reads[0]["serialize_active_attachment"] is True
+    contents = log_path.read_text(encoding="utf-8")
+    assert "cross_source_scope_preserved" in contents
+    assert "fingerprint_compared=False" in contents
+
+
+@pytest.mark.parametrize(
+    "evidence_kind",
+    ("tier_wave_mismatch", "date_mismatch", "ambiguous_date"),
+)
+def test_cross_source_mismatch_or_date_ambiguity_uses_restored_ui(
+    tmp_path,
+    monkeypatch,
+    evidence_kind,
+):
+    log_path = tmp_path / evidence_kind / "logs" / "actions.log"
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(log_path))
+    ui_identity = _identity(wave="9112")
+    original = _scope_with_baseline(ui_identity)
+    battle_date = {
+        "kind_id": 2,
+        "kind": "local",
+        "ticks": "639197341571234560",
+        "clock_time": "2026-07-15T01:42:37.123456",
+        "clock_basis": "local_wall_clock_without_offset",
+        "submicrosecond_100ns": 0,
+    }
+    wave = 9112
+    if evidence_kind == "tier_wave_mismatch":
+        wave = 9333
+        battle_date["clock_time"] = "2026-07-15T01:41:37.123456"
+    elif evidence_kind == "ambiguous_date":
+        battle_date.update(
+            {
+                "kind_id": 1,
+                "kind": "utc",
+                "clock_time": "2026-07-15T01:41:37.123456+00:00",
+                "clock_basis": "utc",
+            }
+        )
+    save_metadata = _save_metadata(
+        fingerprint="save-fingerprint-is-never-compared",
+        tier=18,
+        wave=wave,
+        battle_date=battle_date,
+    )
+    save_reads = []
+    ui_reads = []
+    coordinator = ActivityContinuityCoordinator(
+        save_history_reader=lambda **kwargs: (
+            save_reads.append(kwargs) or _save_complete(save_metadata)
+        ),
+        history_reader=lambda **kwargs: (
+            ui_reads.append(kwargs) or _complete(ui_identity)
+        ),
+    )
+
+    outcome = coordinator.handle(
+        {"state": "RUNNING"},
+        actions_allowed=True,
+        action_guard_fn=lambda: True,
+        player_save_mode="save_first",
+    )
+
+    current = logger.get_activity_scope()
+    assert outcome.recapture
+    assert outcome.confirmed_same_battle_scope_id == original["run_id"]
+    assert current is not None
+    assert current["run_id"] == original["run_id"]
+    assert current["latest_completed_battle"]["source"] == (
+        "battle_history_ui"
+    )
+    assert len(save_reads) == len(ui_reads) == 1
+    contents = log_path.read_text(encoding="utf-8")
+    expected_reason = {
+        "tier_wave_mismatch": "cross_source_tier_wave_mismatch",
+        "date_mismatch": "cross_source_battle_date_mismatch",
+        "ambiguous_date": "cross_source_battle_date_ambiguous",
+    }[evidence_kind]
+    assert expected_reason in contents
+
+
+def test_insufficient_ui_baseline_stays_on_ui_without_forced_save(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "TOWER_ACTION_LOG_PATH",
+        str(tmp_path / "logs" / "actions.log"),
+    )
+    identity = _identity(wave="9112")
+    scope = logger.start_activity_scope(reason="new_battle_preflight")
+    assert scope is not None
+    metadata = identity.scope_metadata()
+    metadata["battle_date"] = "date kind unavailable"
+    logger.record_activity_scope_battle_history(
+        run_id=str(scope["run_id"]),
+        latest_completed_battle=metadata,
+    )
+    ui_reads = []
+    coordinator = ActivityContinuityCoordinator(
+        save_history_reader=lambda **_kwargs: pytest.fail(
+            "insufficient UI identity must not force serialization"
+        ),
+        history_reader=lambda **kwargs: (
+            ui_reads.append(kwargs) or _complete(identity)
+        ),
+    )
+
+    outcome = coordinator.handle(
+        {"state": "RUNNING"},
+        actions_allowed=True,
+        action_guard_fn=lambda: True,
+        player_save_mode="save_first",
+    )
+
+    assert outcome.recapture
+    assert len(ui_reads) == 1
+
+
+@pytest.mark.parametrize(
+    ("previous_count", "latest_count"),
+    ((29, 30), (30, 30)),
+)
+def test_valid_changed_save_tail_starts_later_running_attachment_scope(
+    tmp_path,
+    monkeypatch,
+    previous_count,
+    latest_count,
+):
+    monkeypatch.setenv(
+        "TOWER_ACTION_LOG_PATH",
+        str(tmp_path / "logs" / "actions.log"),
+    )
+    baseline = _save_metadata(entry_count=previous_count)
+    original = _scope_with_save_baseline(baseline)
+    latest = _save_metadata(
+        fingerprint="b" * 64,
+        entry_count=latest_count,
+        wave=2100,
+    )
+    coordinator = ActivityContinuityCoordinator(
+        save_history_reader=lambda **_kwargs: _save_complete(latest),
+        history_reader=lambda **_kwargs: pytest.fail(
+            "valid same-source tail advance must suppress History UI"
+        ),
+    )
+
+    outcome = coordinator.handle(
+        {"state": "RUNNING"},
+        actions_allowed=True,
+        action_guard_fn=lambda: True,
+        player_save_mode="save_first",
+    )
+
+    current = logger.get_activity_scope()
+    assert outcome.recapture
+    assert current is not None
+    assert current["run_id"] != original["run_id"]
+    assert outcome.confirmed_later_battle_scope_id == current["run_id"]
+    assert current["latest_completed_battle"] == latest
+    assert current["reason"] == "battle_history_changed_on_attachment"
+
+
+def test_invalid_attachment_save_transition_uses_ui_after_safe_restoration(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "TOWER_ACTION_LOG_PATH",
+        str(tmp_path / "logs" / "actions.log"),
+    )
+    _scope_with_save_baseline(_save_metadata(entry_count=28))
+    invalid = _save_metadata(
+        fingerprint="b" * 64,
+        entry_count=30,
+        wave=2100,
+    )
+    ui_reads = []
+    coordinator = ActivityContinuityCoordinator(
+        save_history_reader=lambda **_kwargs: _save_complete(invalid),
+        history_reader=lambda **kwargs: (
+            ui_reads.append(kwargs) or _complete(_identity(wave="2100"))
+        ),
+    )
+
+    outcome = coordinator.handle(
+        {"state": "RUNNING"},
+        actions_allowed=True,
+        action_guard_fn=lambda: True,
+        player_save_mode="save_first",
+    )
+
+    assert outcome.recapture
+    assert len(ui_reads) == 1
+    assert "history_tail_transition_invalid" in (
+        tmp_path / "logs" / "actions.log"
+    ).read_text(encoding="utf-8")
+
+
+def test_blocked_active_attachment_save_never_opens_history_ui(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "TOWER_ACTION_LOG_PATH",
+        str(tmp_path / "logs" / "actions.log"),
+    )
+    _scope_with_save_baseline(_save_metadata())
+    save_reads = []
+    ui_reads = []
+
+    def save_reader(**kwargs):
+        save_reads.append(kwargs)
+        return PlayerSaveHistoryReadResult(
+            PlayerSaveHistoryReadStatus.BLOCKED,
+            "active_attachment_restored_source_boundary_unverified",
+        )
+
+    coordinator = ActivityContinuityCoordinator(
+        save_history_reader=save_reader,
+        history_reader=lambda **kwargs: ui_reads.append(kwargs),
+    )
+
+    outcome = coordinator.handle(
+        {"state": "RUNNING"},
+        actions_allowed=True,
+        action_guard_fn=lambda: True,
+        player_save_mode="save_first",
+    )
+
+    assert outcome.pending
+    assert outcome.recapture
+    assert len(save_reads) == 1
+    assert save_reads[0]["serialize_active_attachment"] is True
+    assert ui_reads == []
+
+
 def test_unchanged_retry_save_tail_polls_passively_without_history_ui(
     tmp_path,
     monkeypatch,
@@ -824,7 +1153,7 @@ def test_force_ui_and_comparison_audit_suppress_no_history_ui(
     assert len(ui_reads) == 1
 
 
-def test_legacy_v1_ui_scope_is_migrated_only_through_ui_source_contract(
+def test_legacy_v1_ui_scope_with_complete_fields_uses_same_strong_bridge(
     tmp_path,
     monkeypatch,
 ):
@@ -848,11 +1177,12 @@ def test_legacy_v1_ui_scope_is_migrated_only_through_ui_source_contract(
     )
     save_reads = []
     ui_reads = []
+    save_metadata = _save_metadata(tier=18, wave=9112)
     coordinator = ActivityContinuityCoordinator(
-        save_history_reader=lambda **kwargs: save_reads.append(kwargs),
-        history_reader=lambda **kwargs: (
-            ui_reads.append(kwargs) or _complete(identity)
+        save_history_reader=lambda **kwargs: (
+            save_reads.append(kwargs) or _save_complete(save_metadata)
         ),
+        history_reader=lambda **kwargs: ui_reads.append(kwargs),
     )
 
     outcome = coordinator.handle(
@@ -864,12 +1194,12 @@ def test_legacy_v1_ui_scope_is_migrated_only_through_ui_source_contract(
 
     current = logger.get_activity_scope()
     assert outcome.confirmed_same_battle_scope_id == scope["run_id"]
-    assert save_reads == []
-    assert len(ui_reads) == 1
+    assert len(save_reads) == 1
+    assert ui_reads == []
     assert current is not None
     assert current["latest_completed_battle"]["schema_version"] == 2
     assert current["latest_completed_battle"]["source"] == (
-        "battle_history_ui"
+        "player_save"
     )
 
 
