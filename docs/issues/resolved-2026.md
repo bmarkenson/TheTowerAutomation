@@ -3860,6 +3860,44 @@ and actionable work lives in
   was performed.
 - **Fixed by:** `e13e498`.
 
+### Coins/min OCR dropped the magnitude suffix from quadrillion readings
+
+**Stable ID:** `ISSUE-2026-016` · **Lifecycle:** `resolved`
+
+- **Observed:** 2026-07-20 at 09:23:29 during an active Farm battle, with an
+  earlier matching event at 08:47:41.
+- **Symptom:** The runtime logged an implausible drop from `36.7q` to `37.19`
+  (roughly one quadrillion-fold) even though the adjacent accepted readings
+  progressed normally from `36.7q` at 09:22:28 to `40.7q` at 09:24:33. The
+  earlier event similarly read `28.19` between quadrillion-scale samples.
+- **Evidence:** `logs/actions.log` preserves the three consecutive status
+  samples and the rejected OCR confidence of 75.0. The parsed bare value is
+  consistent with OCR omitting the trailing `q`, making the intended reading
+  `37.19q`. Static inspection also found that live parsing stopped at `Q` even
+  though battle reports already supported the game's later case-sensitive
+  suffixes, and `/min` cleanup could consume an uppercase `M` suffix.
+- **Safety response:** The existing plausibility guard retained the prior
+  trusted `36.7q` rate, and no gameplay action depended on the rejected value.
+- **Cause:** The live parser carried an incomplete local scale instead of the
+  complete case-sensitive Tower-number scale, and suffix cleanup could consume
+  uppercase `M`. A visually omitted suffix also lacked a bounded reconstruction
+  path even when surrounding trusted samples established the scale.
+- **Resolution:** The live parser reuses the complete case-sensitive
+  Tower-number scale, preserves `M` before `/min`, and recovers a missing suffix
+  only when the reconstructed rate fits the same scale-independent plausibility
+  window.
+- **Regression:** `test/test_coin_detector.py` covers the complete suffix scale,
+  uppercase `M` cleanup, bounded missing-suffix recovery, and implausible-value
+  rejection.
+- **Former confirmation requirement:** The original entry remained open until
+  the repair could be observed in automation. On 2026-07-21 the operator later
+  reported that visual OCR still failed to recognize `q` or `Q`, but no crop was
+  retained. That distinct visual-recognition recurrence and its evidence
+  requirement remain open as
+  [`ISSUE-2026-024`](open-2026.md#coinsmin-visual-ocr-failed-to-recognize-q-or-q);
+  it does not reopen the parser/cleanup defect archived here.
+- **Fixed by:** `dd1b0f7`.
+
 ## Operational lessons
 
 ### A detached child may not survive the agent execution wrapper

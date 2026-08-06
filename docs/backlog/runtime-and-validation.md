@@ -241,7 +241,7 @@ checked-item detail remains in the
   not OCR or validate the numeric values.
 - [ ] Diagnose the transient Home Poison Swamp Stun verification timeout
   recorded in
-  [`../observed_issues.md`](../observed_issues.md#home-poison-swamp-stun-verification-transiently-timed-out-after-its-source-tap).
+  [open issue dossier](../issues/open-2026.md#home-poison-swamp-stun-verification-transiently-timed-out-after-its-source-tap).
   Retain the failing frame and individual detail/off/on match confidences on
   recurrence, then distinguish a missed detail-open tap from unsettled
   Workshop scroll geometry or a detail-template miss before changing retry or
@@ -274,16 +274,16 @@ checked-item detail remains in the
     boundary. This remaining check requires the next strategy to declare gates;
     No Strategy itself has none.
 - [ ] Diagnose the unexpectedly early Tier 18 Farm ending recorded in
-  [`../observed_issues.md`](../observed_issues.md#tier-18-farm-ended-at-wave-2644-without-completed-session-preflight).
+  [open issue dossier](../issues/open-2026.md#tier-18-farm-ended-at-wave-2644-without-completed-session-preflight).
   Reproduce a clean, fully validated Farm start at 720p before attributing the
   result to resolution, loadout, preflight, or perk ordering.
 - [ ] Diagnose the unclean runtime-owner exits recorded in
-  [`../observed_issues.md`](../observed_issues.md#automation-owner-exited-without-a-clean-shutdown-record).
+  [open issue dossier](../issues/open-2026.md#automation-owner-exited-without-a-clean-shutdown-record).
   The owners disappeared without a clean-shutdown record and left stale locks.
   Keep control `PAUSED` while distinguishing execution-session termination,
   an unlogged crash, and manual-player activity before restarting automation.
 - [ ] Diagnose the intermittent incomplete ADB screenshot frames recorded in
-  [`../observed_issues.md`](../observed_issues.md#direct-adb-screenshots-intermittently-returned-incomplete-black-frames).
+  [open issue dossier](../issues/open-2026.md#direct-adb-screenshots-intermittently-returned-incomplete-black-frames).
   - [x] Close the action-authority gap. A partial frame retaining narrow Game
     Over strips still matched both state evidence and the visible Home control,
     so capture now retries once and shared state/action boundaries reject
@@ -512,10 +512,10 @@ stages:
   later observes `RUNNING` before verified Home cleanup. Fail closed, release
   action authority, and perform no Retry, Surrender, or other recovery input,
   as recorded in
-  [`../observed_issues.md`](../observed_issues.md#owned-validation-cleanup-survived-a-later-running-battle-transition).
+  [open issue dossier](../issues/open-2026.md#owned-validation-cleanup-survived-a-later-running-battle-transition).
 - [ ] Make `STOPPED` interrupt an in-progress Home setup without another device
   input, as recorded in
-  [`../observed_issues.md`](../observed_issues.md#stopped-control-could-not-interrupt-an-in-progress-home-setup-guard).
+  [open issue dossier](../issues/open-2026.md#stopped-control-could-not-interrupt-an-in-progress-home-setup-guard).
   Preserve the current Pause behavior, but let Stop unwind the guarded route
   and release the runtime lock without requiring `KeyboardInterrupt`.
 - [ ] Finish the operator-control lifecycle.

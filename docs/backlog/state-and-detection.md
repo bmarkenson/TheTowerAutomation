@@ -45,8 +45,8 @@ Completed and superseded detail remains in the
   - Automatically retain the rejected frame, crop, candidate support, and
     confidence so the underlying visual failure can be reproduced.
   - Cover the 1070 -> false 80 -> 1270 sequence and genuine new-battle reset in
-    regression tests. The originating anomaly is recorded in
-    [`../observed_issues.md`](../observed_issues.md).
+    regression tests. The originating anomaly is preserved in its
+    [open issue dossier](../issues/open-2026.md#wave-ocr-dropped-the-leading-digits-from-wave-1180).
 - [ ] Finish matcher API and policy consolidation after fixture coverage is
   broad enough to make the compatibility decision safely.
   - Migrate remaining `utils.template_matcher` shim callers to `core.matcher`.

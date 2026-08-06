@@ -1512,7 +1512,7 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   inside an in-progress Home setup. The
   [Demon Mode miss](../issues/resolved-2026.md#home-card-recharge-scan-repeatedly-missed-demon-mode-while-finding-nuke)
   is resolved; the Stop interruption defect remains in
-  [`../observed_issues.md`](../observed_issues.md#stopped-control-could-not-interrupt-an-in-progress-home-setup-guard).
+  [open issue dossier](../issues/open-2026.md#stopped-control-could-not-interrupt-an-in-progress-home-setup-guard).
 
 ### 2026-07-27–28 Second Wind activation waves and transition evidence
 

@@ -159,7 +159,7 @@ that the lower value improved whole-run coins per hour.
   but it excludes a deliberately low cap as the explanation for those two
   runs' collapsed entity throughput. The complete evidence and current
   host/emulator scheduling hypothesis are retained in the
-  [open issue](observed_issues.md#t19-farm-retained-near-normal-game-clock-speed-while-entity-throughput-collapsed).
+  [open issue dossier](issues/open-2026.md#t19-farm-retained-near-normal-game-clock-speed-while-entity-throughput-collapsed).
 - The T18 Farm profile currently enforces `1E-22%`; the T19 Farm profile now
   enforces the `1E-19%` comparison value. Those policies are repository facts,
   not evidence that either number is permanently optimal.

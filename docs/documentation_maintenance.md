@@ -17,8 +17,11 @@ and transition rules below.
 | Current runtime architecture and layer boundaries | `docs/architecture/runtime.md` |
 | Current priorities and domain routing | `PENDING_DEVELOPMENT.md` |
 | Detailed active work | The relevant `docs/backlog/*.md` domain file |
-| Open runtime or tooling anomalies | `docs/observed_issues.md` |
-| Resolved anomaly history | The applicable archive under `docs/issues/` |
+| Compact active issue classification and routing | `docs/observed_issues.md` |
+| Full open issue evidence dossiers | `docs/issues/open-YYYY.md` |
+| Resolved issue history | The applicable `docs/issues/resolved-YYYY.md` archive |
+| Unconfirmed, non-actionable issue history | The applicable `docs/issues/unconfirmed-YYYY.md` file |
+| Narrow durable issue evidence | `docs/issues/evidence/` |
 | Completed implementation outcomes | `docs/modules/completed_tasks_log.md` |
 | Dated investigations, superseded plans, and preserved evidence | A clearly labeled history file |
 
@@ -41,17 +44,37 @@ when its condition applies.
 
 ### Issues
 
-- Record a new anomaly in `docs/observed_issues.md` with date, symptom,
-  evidence, safety response, and current status. Put repair work in the
-  appropriate backlog rather than using the issue ledger as a second backlog.
-- When durable documentation relies on generated evidence under a runtime
-  retention root, promote it to a canonical regression fixture or add a narrow
-  repository-relative entry to `config/protected_artifacts.txt` in the same
-  change. A documentation link alone does not exempt a file from cleanup.
+- Assign every issue a stable ID. Put its compact lifecycle status, one-sentence
+  symptom or hazard, required safety behavior, dossier-load condition, next
+  evidence requirement, full-dossier link, and backlog link in
+  `docs/observed_issues.md`. Keep the index as routing rather than a second
+  evidence ledger or backlog.
+- Put the complete dated observation, evidence, safety response, analysis,
+  implementation status, recurrences, commits, regression coverage, and
+  unresolved requirements in the applicable `docs/issues/open-YYYY.md`
+  dossier. Link actionable work to exactly one owning domain backlog.
+- Move an unreproduced, non-actionable historical report to the applicable
+  `docs/issues/unconfirmed-YYYY.md` file without calling it resolved. Preserve
+  the complete report, negative and later-success evidence, tests, and the
+  exact evidence required on recurrence; remove it from active routing until a
+  matching recurrence makes it actionable.
 - When fixed, retain the original symptom, add cause, resolution, fixing
-  commit, and regression location, then move the entire entry to the archive
-  for the resolution year. Add that archive to `docs/issues/README.md` when
-  creating a new yearly file.
+  commit, and regression location, then move the complete dossier to the
+  resolution year's archive and remove its active-index entry. When one report
+  splits into resolved and open causes, give each lifecycle its own stable ID
+  and cross-link both records.
+- When durable issue documentation depends on generated evidence under rolling
+  runtime retention, export only the cited rows/fields and their definitions,
+  exact query windows, units, and read-only extraction method into
+  `docs/issues/evidence/`. Do not copy the complete production artifact. A
+  canonical regression fixture is preferable when behavior tests need the
+  evidence; otherwise the narrow tracked extract is the durable source.
+- For generated evidence that must remain under a runtime cleanup root rather
+  than the tracked evidence directory, add the narrow repository-relative path
+  to `config/protected_artifacts.txt` in the same change. A documentation link
+  alone does not exempt a runtime artifact from cleanup.
+- Add every new yearly dossier/history file and durable evidence category to
+  `docs/issues/README.md`.
 
 ### Architecture and operations
 
@@ -86,8 +109,9 @@ For every documentation change:
 4. Confirm that all active tasks and open issues remain represented before
    archiving or deleting material.
 5. Confirm that generated evidence used by changed durable documentation is
-   either outside the runtime cleanup boundary or represented narrowly in
-   `config/protected_artifacts.txt`.
+   tracked narrowly under `docs/issues/evidence/`, promoted to a canonical
+   fixture, or—only when it must stay under a runtime cleanup root—represented
+   narrowly in `config/protected_artifacts.txt`.
 6. Run `git diff --check` and any repository tests needed when documentation is
    generated, executable, schema-defining, or coupled to behavior.
 7. Do not copy volatile runtime facts into durable documentation. Runtime state
