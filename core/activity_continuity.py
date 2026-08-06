@@ -229,11 +229,11 @@ class ActivityContinuityCoordinator:
         ):
             return ActivityContinuityOutcome()
 
+        state = str(detection.get("state") or "UNKNOWN").upper()
+        control = HomeBattleControl.parse(
+            detection.get("home_battle_control", "UNKNOWN")
+        )
         if self._pending_source is None:
-            state = str(detection.get("state") or "UNKNOWN").upper()
-            control = HomeBattleControl.parse(
-                detection.get("home_battle_control", "UNKNOWN")
-            )
             if (
                 defer_home_baseline
                 and state in {"HOME", "HOME_SCREEN"}
@@ -280,6 +280,16 @@ class ActivityContinuityCoordinator:
                     self._pending_mode = "baseline"
             else:
                 return ActivityContinuityOutcome()
+        elif self._pending_source == "HOME_SCREEN" and state == "RUNNING":
+            self._pending_source = "RUNNING"
+            self._pending_home_control = HomeBattleControl.UNKNOWN
+            self._retry_at = 0.0
+            log(
+                "[BATTLE_CONTINUITY] Pending Home continuity source advanced "
+                "to RUNNING; continuing the same activity scope from the "
+                "observed battle start",
+                "INFO",
+            )
 
         if not actions_allowed:
             return ActivityContinuityOutcome(pending=True)

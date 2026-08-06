@@ -9,6 +9,7 @@ from core.battle_history import (
     BattleHistoryReadStatus,
     parse_battle_history_report,
 )
+from core.battle_lifecycle import HomeBattleControl
 from core.player_save_history import (
     PlayerSaveHistoryReadResult,
     PlayerSaveHistoryReadStatus,
@@ -240,6 +241,72 @@ def test_home_new_battle_records_baseline_without_replacing_scope(
         current["latest_completed_battle"]["fingerprint"]
         == identity.fingerprint
     )
+
+
+def test_paused_home_baseline_follows_manual_start_before_sending_input(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "TOWER_ACTION_LOG_PATH",
+        str(tmp_path / "logs" / "actions.log"),
+    )
+    scope = logger.start_activity_scope(reason="new_battle_preflight")
+    assert scope is not None
+    identity = _identity(wave="9112")
+    reads = []
+
+    def reader(**kwargs):
+        reads.append(kwargs)
+        return _complete(identity)
+
+    coordinator = ActivityContinuityCoordinator(history_reader=reader)
+
+    paused_home = coordinator.handle(
+        {
+            "state": "HOME_SCREEN",
+            "home_battle_control": "NEW_BATTLE",
+        },
+        actions_allowed=False,
+        action_guard_fn=lambda: False,
+    )
+    paused_running = coordinator.handle(
+        {"state": "RUNNING"},
+        actions_allowed=False,
+        action_guard_fn=lambda: False,
+    )
+
+    assert paused_home.pending
+    assert paused_running.pending
+    assert reads == []
+
+    resumed = coordinator.handle(
+        {"state": "RUNNING"},
+        actions_allowed=True,
+        action_guard_fn=lambda: True,
+    )
+
+    current = logger.get_activity_scope()
+    assert resumed.recapture
+    assert not resumed.pending
+    assert current is not None
+    assert current["run_id"] == scope["run_id"]
+    assert (
+        current["latest_completed_battle"]["fingerprint"]
+        == identity.fingerprint
+    )
+    assert len(reads) == 1
+    assert reads[0]["source_state"] == "RUNNING"
+    assert (
+        reads[0]["expected_home_control"]
+        is HomeBattleControl.UNKNOWN
+    )
+    contents = (
+        tmp_path / "logs" / "actions.log"
+    ).read_text(encoding="utf-8")
+    assert contents.count(
+        "Pending Home continuity source advanced to RUNNING"
+    ) == 1
 
 
 def test_post_retry_history_poll_waits_for_startup_gates(
