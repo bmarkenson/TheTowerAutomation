@@ -204,8 +204,8 @@ def weighted_average(rows: list[dict[str, Any]], field: str) -> float | None:
 
 def summarize(window: EvidenceWindow, rows: list[dict[str, Any]]) -> dict[str, Any]:
     raw_rows = [raw_row(payload, (window.label,)) for payload in rows]
-    ds_values = [
-        (row["ds_gpu_percent_avg"], row["ds_sample_count"])
+    ds_rows = [
+        row
         for row in raw_rows
         if row.get("ds_gpu_percent_avg") is not None
         and row.get("ds_sample_count") is not None
@@ -243,12 +243,17 @@ def summarize(window: EvidenceWindow, rows: list[dict[str, Any]]) -> dict[str, A
         "bluestacks_gpu_percent_avg": weighted_average(
             raw_rows, "bluestacks_gpu_percent_avg"
         ),
-        "ds_observed_row_count": len(ds_values),
-        "ds_observed_sample_count": sum(count for _, count in ds_values),
+        "ds_observed_row_count": len(ds_rows),
+        "ds_observed_sample_count": sum(
+            row["ds_sample_count"] for row in ds_rows
+        ),
         "ds_gpu_percent_avg": (
-            sum(value * count for value, count in ds_values)
-            / sum(count for _, count in ds_values)
-            if ds_values
+            sum(
+                row["ds_gpu_percent_avg"] * row["sample_count"]
+                for row in ds_rows
+            )
+            / sum(row["sample_count"] for row in raw_rows)
+            if ds_rows
             else None
         ),
     }

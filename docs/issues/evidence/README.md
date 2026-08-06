@@ -7,8 +7,9 @@ not mirror runtime databases or make claims about current runtime state.
 ## 2026-07-30/31 host-performance windows
 
 [`host-performance-2026-07-30-31-aggregates.csv`](host-performance-2026-07-30-31-aggregates.csv)
-preserves the 2,194 unique ten-second aggregate rows cited by
-`ISSUE-2026-002` and `ISSUE-2026-003`.
+preserves the 2,194 unique aggregate rows cited by `ISSUE-2026-002` and
+`ISSUE-2026-003`. Of those, 2,192 contain ten samples and two boundary flushes
+contain six samples.
 [`host-performance-2026-07-30-31-windows.csv`](host-performance-2026-07-30-31-windows.csv)
 contains one sample-weighted summary row for each query window. The raw export
 uses `evidence_windows` to record every window containing an aggregate; the
@@ -70,8 +71,11 @@ two dossiers:
   dedicated/shared bytes. Absence remains blank rather than being rewritten as
   zero.
 
-Window-level `*_avg` values are weighted by each source aggregate's
-`sample_count`; `ds_gpu_percent_avg` is weighted by `ds_sample_count`. The raw
-export retains source minima and maxima. I/O, thread, handle, unrelated
-competitor, ingest-context, and all out-of-window rows were deliberately not
-copied.
+Window-level `*_avg` values recombine source aggregate averages weighted by
+each aggregate's total `sample_count`. They are deterministic comparison
+summaries, not exact raw-sample means when a source metric omitted null samples,
+because per-metric valid counts were not retained. `ds_gpu_percent_avg` follows
+the source's full-window convention: competitor-absent samples contribute zero,
+and aggregate averages are weighted by total `sample_count`. The raw export
+retains source minima and maxima. I/O, thread, handle, unrelated competitor,
+ingest-context, and all out-of-window rows were deliberately not copied.
