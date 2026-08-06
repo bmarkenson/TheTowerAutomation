@@ -47,6 +47,11 @@ work. Historical checked detail remains in the
   - Verify representative feature work finds existing functions, classes,
     modules, commands, configuration/schema paths, workflows, callers, and
     tests through current-source search rather than generated summaries.
+  - Classify the six remaining generation-era `AUTO-SPEC`/`spec_legend`
+    docstring blocks in `core/floating_button_detector.py`, `label_tapper.py`,
+    `run_state.py`, `state_detector.py`, `tap_dispatcher.py`, and `watchdog.py`;
+    retain source documentation only when it improves current ownership
+    discovery.
   - Add tooling only for a demonstrated discovery gap; keep the universal
     reuse-first safeguard canonical in `AGENTS.md`.
 
