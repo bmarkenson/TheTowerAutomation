@@ -6,14 +6,15 @@ completion evidence remains in the
 
 ## Mission rewards
 
-- [ ] Deploy and live-verify open-menu Mission reward scheduling at a safe
-  process boundary. Commit `2b4315d` uses section badges when the
-  in-battle menu is verified open and retains the attention-dot trigger when it
-  is verified closed.
+- [ ] Deploy and live-verify commit `2b4315d` at a safe process boundary,
+  confirming that Mission reward scheduling uses section badges while the
+  in-battle menu is verified open and the attention dot while it is closed.
+  Track confirmation in
+  [`ISSUE-2026-015`](../issues/open-2026.md#open-in-battle-side-menu-suppressed-mission-reward-scheduling).
 - [ ] Deploy commit `e14999c` at a safe process boundary and confirm that a
-  scheduler-owned Event Mission pass uses overlapping downward viewports. A
-  paused one-off live pass with the repair claimed all four available Event
-  rewards and returned to the active battle.
+  scheduler-owned Event Mission pass uses overlapping downward viewports. The
+  repaired traversal and paused one-off validation are preserved in the
+  [resolved issue](../issues/resolved-2026.md#event-mission-claim-search-skipped-past-the-claimable-row).
 
 ## Dispatch architecture
 
