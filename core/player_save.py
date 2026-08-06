@@ -24,6 +24,10 @@ from core.runtime_save import (
     RuntimeSaveNormalizationError,
     normalize_runtime_save,
 )
+from core.profile_progression import (
+    ProfileProgressionError,
+    normalize_profile_progression,
+)
 from core.tournament_conditions import derive_tournament_conditions_from_save
 
 
@@ -35,7 +39,7 @@ PLAYER_SAVE_DEVICE_PATH = (
 )
 MAX_PLAYER_SAVE_BYTES = 512 * 1024
 MAX_DECOMPRESSED_SAVE_BYTES = 4 * 1024 * 1024
-SNAPSHOT_SCHEMA_VERSION = 2
+SNAPSHOT_SCHEMA_VERSION = 3
 SAVE_ACCEPTED_DISPOSITIONS = frozenset({"save_match", "save_observation"})
 SAVE_MISMATCH_DISPOSITION = "save_mismatch"
 SAVE_UI_REQUIRED_DISPOSITION = "ui_required"
@@ -101,6 +105,7 @@ class PlayerSaveSnapshot:
     profile_summary: Mapping[str, Any]
     checks: Mapping[str, SaveCheckEvidence]
     runtime_save: Optional[NormalizedRuntimeSave]
+    profile_progression: Mapping[str, Any] = field(default_factory=dict)
 
     @property
     def mapping_supported(self) -> bool:
@@ -133,6 +138,7 @@ class PlayerSaveSnapshot:
             },
             "warnings": list(self.warnings),
             "profile_summary": dict(self.profile_summary),
+            "profile_progression": dict(self.profile_progression),
             "checks": {
                 check_id: evidence.as_dict()
                 for check_id, evidence in sorted(self.checks.items())
@@ -238,22 +244,36 @@ def decode_player_save_bytes(
     shape_valid = not shape_warnings
     checks: dict[str, SaveCheckEvidence] = {}
     profile_summary: dict[str, Any] = {}
+    profile_progression: dict[str, Any] = {}
     runtime_save: Optional[NormalizedRuntimeSave] = None
     if shape_valid:
         checks = _build_checks(decoded, mapping, captured_at=stamp)
         profile_summary = _build_profile_summary(decoded, mapping)
+        capture = {
+            "captured_at": stamp.isoformat(),
+            "source_name": Path(source_name).name,
+            "source_sha256": digest,
+            "source_size": len(payload),
+            "container": container,
+            "decompressed_size": len(raw),
+        }
+        try:
+            profile_progression = normalize_profile_progression(
+                decoded,
+                mapping,
+                capture=capture,
+            )
+        except ProfileProgressionError as exc:
+            warnings.append(
+                "The exact-version profile progression projection failed "
+                f"closed: {exc}. Completed-run progression will be marked "
+                "unavailable."
+            )
         try:
             runtime_save = normalize_runtime_save(
                 decoded,
                 mapping,
-                capture={
-                    "captured_at": stamp.isoformat(),
-                    "source_name": Path(source_name).name,
-                    "source_sha256": digest,
-                    "source_size": len(payload),
-                    "container": container,
-                    "decompressed_size": len(raw),
-                },
+                capture=capture,
             )
         except RuntimeSaveNormalizationError as exc:
             warnings.append(
@@ -296,6 +316,7 @@ def decode_player_save_bytes(
         profile_summary=profile_summary,
         checks=checks,
         runtime_save=runtime_save,
+        profile_progression=profile_progression,
     )
 
 

@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal
+import json
 from pathlib import Path
 
 import numpy as np
@@ -171,7 +172,12 @@ def _game_text(_frame, *, psm):
     )
 
 
-def _record(*, source_complete=True, source_reason="edge_reached"):
+def _record(
+    *,
+    source_complete=True,
+    source_reason="edge_reached",
+    profile_progression=None,
+):
     return build_battle_record(
         _frame(9),
         [_frame(1), _frame(2), _frame(3), _frame(4), _frame(5)],
@@ -273,16 +279,68 @@ def _record(*, source_complete=True, source_reason="edge_reached"):
                     },
                 ],
             },
+            **(
+                {"profile_progression": profile_progression}
+                if profile_progression is not None
+                else {}
+            ),
         },
         data_fn=_data_fn,
         game_stats_text_fn=_game_text,
     )
 
 
+def _progression(revision: int, *, menu_unlocked: bool) -> dict:
+    values = {
+        "tower_unlocked": [True, False],
+        "background_unlocked": [True, False],
+        "menu_unlocked": [True, menu_unlocked],
+    }
+    return {
+        "schema_version": 1,
+        "status": "complete",
+        "complete": True,
+        "identity": {
+            "data_version": 9,
+            "game_version": 1073,
+            "save_revision": revision,
+            "mapping_id": "data-9-game-1073",
+            "audit_matrix_id": "data-9-game-1073-profile-progression-v1",
+        },
+        "source": {
+            "captured_at": f"2026-07-15T12:0{revision}:00+00:00",
+            "sha256": f"sha-{revision}",
+        },
+        "fingerprint": f"fingerprint-{revision}",
+        "components": {
+            "themes": {
+                "status": "structural",
+                "complete": True,
+                "source_fields": [
+                    "towerUnlocked",
+                    "backgroundUnlocked",
+                    "menuUnlocked",
+                ],
+                "values": values,
+                "summary": {
+                    "tower_unlocked": {"length": 2, "true_count": 1},
+                    "background_unlocked": {"length": 2, "true_count": 1},
+                    "menu_unlocked": {
+                        "length": 2,
+                        "true_count": 2 if menu_unlocked else 1,
+                    },
+                },
+                "fingerprint": f"themes-{revision}",
+            }
+        },
+        "warnings": [],
+    }
+
+
 def test_battle_record_retains_resolved_run_configuration():
     record = _record()
 
-    assert record["schema_version"] == 4
+    assert record["schema_version"] == 5
     assert record["battle_type"] == "farm"
     assert record["battle_type_analysis"]["confidence"] == "high"
     assert record["runtime"]["observed_tier"] == 19
@@ -780,6 +838,53 @@ def test_record_persists_json_markdown_and_supports_previous_wave_lookup(tmp_pat
         get_previous_run_wave(records_dir=str(tmp_path))
         == 2000
     )
+
+
+def test_profile_progression_is_top_level_and_persistence_adds_prior_run_delta(
+    tmp_path,
+):
+    first = _record(profile_progression=_progression(1, menu_unlocked=False))
+    persist_battle_record(first, records_dir=tmp_path)
+
+    assert first["profile_progression"]["identity"]["save_revision"] == 1
+    assert "profile_progression" not in first["runtime"]
+    assert first["profile_progression_delta"]["status"] == "baseline"
+
+    partial = _record(
+        profile_progression=_progression(2, menu_unlocked=False)
+    )
+    partial["battle_id"] = "Battle20260715T123000-0700"
+    partial["captured_at"] = "2026-07-15T12:30:00-07:00"
+    partial["profile_progression"]["status"] = "partial"
+    partial["profile_progression"]["complete"] = False
+    persist_battle_record(partial, records_dir=tmp_path)
+    assert partial["profile_progression_delta"]["status"] == "unavailable"
+
+    second = _record(profile_progression=_progression(2, menu_unlocked=True))
+    second["battle_id"] = "Battle20260715T130000-0700"
+    second["captured_at"] = "2026-07-15T13:00:00-07:00"
+    json_path, markdown_path = persist_battle_record(
+        second,
+        records_dir=tmp_path,
+    )
+
+    stored = json.loads(json_path.read_text(encoding="utf-8"))
+    delta = stored["profile_progression_delta"]
+    assert delta["status"] == "changed"
+    assert delta["baseline_record"]["record_id"] == (
+        "Battle20260715T120000-0700"
+    )
+    assert delta["changes"] == [
+        {
+            "path": "themes.menu_unlocked[1]",
+            "before": False,
+            "after": True,
+        }
+    ]
+    markdown = markdown_path.read_text(encoding="utf-8")
+    assert "## Profile Progression" in markdown
+    assert "Menu 2/2" in markdown
+    assert "`themes.menu_unlocked[1]`: false → true" in markdown
 
 
 def _clipboard_game_text(_frame, *, psm):

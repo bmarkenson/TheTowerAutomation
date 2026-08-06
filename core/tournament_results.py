@@ -28,13 +28,14 @@ from core.tournament_conditions import (
     tournament_conditions_complete,
     unavailable_tournament_conditions,
 )
+from core.profile_progression import render_profile_progression_markdown
 from utils.ocr_utils import ocr_text_and_conf
 
 
 Frame = np.ndarray
 SUMMARY_CROP = (100, 300, 880, 1380)
 DEFAULT_RECORDS_DIR = Path("logs/tournaments")
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _REQUIRED_SUMMARY_FIELDS = {
     "league",
     "wave",
@@ -170,6 +171,7 @@ def build_tournament_result(
         and not identity["mismatch"]
     )
     runtime = dict(runtime_context or {})
+    profile_progression = runtime.pop("profile_progression", None)
     run_binding_warning = unbound_run_evidence_warning(runtime)
     if run_binding_warning is not None:
         warnings.append(run_binding_warning)
@@ -186,7 +188,7 @@ def build_tournament_result(
         observed_tier=observed_tier,
     )
     conditions = _conditions_for_summary(battle_conditions, summary)
-    return {
+    record = {
         "schema_version": SCHEMA_VERSION,
         "tournament_id": tournament_id or make_tournament_id(when),
         "captured_at": when.isoformat(timespec="seconds"),
@@ -205,6 +207,11 @@ def build_tournament_result(
             "identity": identity,
         },
     }
+    if isinstance(profile_progression, Mapping):
+        record["profile_progression"] = copy.deepcopy(
+            dict(profile_progression)
+        )
+    return record
 
 
 def attach_tournament_conditions(
@@ -555,6 +562,12 @@ def render_tournament_markdown(record: Mapping[str, Any]) -> str:
         lines.append(f"- Status: {conditions.get('status', 'unavailable')}")
         lines.append(f"- Reason: {conditions.get('reason', 'not_captured')}")
         lines.append("- UI fallback required: yes")
+
+    lines.extend(
+        render_profile_progression_markdown(
+            record.get("profile_progression")
+        )
+    )
 
     sections = record.get("detailed_stats", {}).get("sections", [])
     for section in sections:

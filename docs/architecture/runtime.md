@@ -411,13 +411,43 @@ events, or other process-local evidence. A future save-derived attachment may
 identify the completed round only through its own guarded evidence; it cannot
 manufacture active-process continuity.
 
-The normalization foundation itself does not poll, cache, bind a process,
-build a persisted battle record, or alter `App`/Game Over dispatch. The
-implemented audit sidecar below polls and keeps only process-local audit state;
-it still does not bind a battle, construct or attach a record, or alter
-dispatch. Any normal-runtime consumer remains a later slice gated by the
+The runtime/history normalization foundation itself does not poll, cache, bind
+a process, build a persisted battle record, or alter `App`/Game Over dispatch.
+The profile-progression attachment below is a separate structural consumer; it
+does not promote active-round or Battle History semantics. The implemented
+audit sidecar polls and keeps only process-local audit state; it still does not
+bind a battle, construct or attach a record, or alter dispatch. Any future
+normal-runtime runtime/history consumer remains a later slice gated by the
 versioned audit matrix in
-[`player_save_import.md`](../modules/player_save_import.md#versioned-audit-matrix-data-9-game-1073--revision-2).
+[`player_save_import.md`](../modules/player_save_import.md#versioned-audit-matrix-data-9-game-1073--revision-3).
+
+##### Implemented terminal profile-progression attachment
+
+At a normal or Tournament terminal, `App` performs one fail-open stable read
+from the exact target generation already owned by its `AdbTargetSession`. It
+does not background the game or send input. A target handoff, unsupported
+mapping, malformed component, or acquisition failure cannot delay or replace
+the existing Game Stats/Perks/More Stats path; the record receives explicit
+unavailable/partial evidence instead.
+
+The exact-version profile manifest retains allowlisted primitive ownership,
+level, selected-preset, equipped-Module, Bot, Theme, relic, Research, Workshop,
+Enhancement, Ultimate Weapon, Guardian, and Harmony vectors. Every component
+has its own source fields, structural completeness, and fingerprint. Unknown
+indices remain indices: this consumer does not assign effects, calculate
+effective multipliers, enforce a setting, or grant UI authority. Account IDs,
+balances, Module GUIDs/inventory records, purchase histories, and the raw save
+are excluded.
+
+The projection is placed at top-level `profile_progression`, outside
+`runtime`, because global profile state is not process-local battle evidence.
+It may therefore survive a terminal-only start without weakening
+`runtime.run_binding`: Strategy, configured intent, Perk/activation timelines,
+and other process-local evidence remain omitted. Normal battle persistence
+compares the snapshot to the newest earlier normal battle containing compatible
+evidence and stores an exact-path `profile_progression_delta`; the first such
+record declares a missing baseline. Tournament records retain the snapshot but
+do not alter normal-battle baseline selection.
 
 ##### Implemented natural-boundary audit collector
 

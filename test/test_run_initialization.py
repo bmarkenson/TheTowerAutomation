@@ -2147,6 +2147,10 @@ class GcFarmProfileTests(unittest.TestCase):
                 "observed_active_scope_run_id": None,
             },
         )
+        self.assertEqual(
+            context["profile_progression"]["reason"],
+            "adb_target_session_unavailable",
+        )
         self.assertNotIn("perk_selection_timeline", context)
         self.assertNotIn("survival_ability_activations", context)
         self.assertNotIn("session_preflight_evidence", context)

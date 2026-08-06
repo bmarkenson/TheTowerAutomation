@@ -19,6 +19,12 @@ from core.battle_classification import (
     observed_tier_for_record,
     unbound_run_evidence_warning,
 )
+from core.profile_progression import (
+    baseline_profile_progression_delta,
+    diff_profile_progression,
+    render_profile_progression_markdown,
+    unavailable_profile_progression_delta,
+)
 from utils.ocr_utils import ocr_text_and_conf
 
 try:
@@ -30,7 +36,7 @@ except Exception:  # pragma: no cover - exercised through the unavailable path
 Frame = np.ndarray
 OcrDataFn = Callable[[Frame], Mapping[str, Sequence[Any]]]
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 DEFAULT_RECORDS_DIR = Path("logs/battles")
 MORE_STATS_CROP = (140, 330, 800, 1370)
 GAME_STATS_CROP = (40, 400, 995, 1110)
@@ -587,6 +593,7 @@ def _assemble_battle_record(
     }
     runtime = dict(runtime_context or {})
     observed_run_configuration = runtime.pop("observed_run_configuration", None)
+    profile_progression = runtime.pop("profile_progression", None)
     observed_tier = observed_tier_for_record(
         {
             "runtime": runtime,
@@ -623,6 +630,10 @@ def _assemble_battle_record(
     if isinstance(observed_run_configuration, Mapping):
         record["observed_run_configuration"] = copy.deepcopy(
             dict(observed_run_configuration)
+        )
+    if isinstance(profile_progression, Mapping):
+        record["profile_progression"] = copy.deepcopy(
+            dict(profile_progression)
         )
     record["derived"] = derive_battle_stats(record)
     identity = compare_battle_identity(game_stats, more_stats)
@@ -940,12 +951,127 @@ def persist_battle_record(
 
     directory = Path(records_dir)
     directory.mkdir(parents=True, exist_ok=True)
-    battle_id = str(record["battle_id"])
+    payload = _record_with_profile_progression_delta(record, directory)
+    battle_id = str(payload["battle_id"])
     json_path = directory / f"{battle_id}.json"
     markdown_path = directory / f"{battle_id}.md"
-    _atomic_write(json_path, json.dumps(record, indent=2, ensure_ascii=False) + "\n")
-    _atomic_write(markdown_path, render_battle_markdown(record))
+    _atomic_write(json_path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+    _atomic_write(markdown_path, render_battle_markdown(payload))
+    if isinstance(record, dict) and "profile_progression_delta" in payload:
+        record["profile_progression_delta"] = copy.deepcopy(
+            payload["profile_progression_delta"]
+        )
     return json_path, markdown_path
+
+
+def _record_with_profile_progression_delta(
+    record: Mapping[str, Any],
+    directory: Path,
+) -> dict[str, Any]:
+    """Return a record copy augmented against the newest prior snapshot."""
+
+    payload = copy.deepcopy(dict(record))
+    snapshot = payload.get("profile_progression")
+    if not isinstance(snapshot, Mapping):
+        return payload
+    if isinstance(payload.get("profile_progression_delta"), Mapping):
+        return payload
+    if (
+        snapshot.get("status") == "unavailable"
+        or snapshot.get("complete") is not True
+    ):
+        payload["profile_progression_delta"] = (
+            unavailable_profile_progression_delta(
+                snapshot,
+                reason=(
+                    "current_profile_progression_snapshot_unavailable"
+                    if snapshot.get("status") == "unavailable"
+                    else "current_profile_progression_snapshot_incomplete"
+                ),
+            )
+        )
+        return payload
+
+    previous = _previous_profile_progression_record(payload, directory)
+    if previous is None:
+        payload["profile_progression_delta"] = (
+            baseline_profile_progression_delta(snapshot)
+        )
+        return payload
+    previous_snapshot = previous.get("profile_progression")
+    if not isinstance(previous_snapshot, Mapping):
+        payload["profile_progression_delta"] = (
+            baseline_profile_progression_delta(snapshot)
+        )
+        return payload
+    delta = diff_profile_progression(previous_snapshot, snapshot)
+    delta["baseline_record"] = {
+        "record_id": previous.get("battle_id"),
+        "captured_at": previous.get("captured_at"),
+    }
+    payload["profile_progression_delta"] = delta
+    return payload
+
+
+def _previous_profile_progression_record(
+    current: Mapping[str, Any],
+    directory: Path,
+) -> Optional[dict[str, Any]]:
+    """Return the most recent earlier battle with a progression snapshot."""
+
+    current_id = str(current.get("battle_id") or "")
+    current_snapshot = current.get("profile_progression")
+    current_schema = (
+        current_snapshot.get("schema_version")
+        if isinstance(current_snapshot, Mapping)
+        else None
+    )
+    current_identity = (
+        current_snapshot.get("identity")
+        if isinstance(current_snapshot, Mapping)
+        else None
+    )
+    current_mapping = (
+        current_identity.get("mapping_id")
+        if isinstance(current_identity, Mapping)
+        else None
+    )
+    try:
+        current_at = datetime.fromisoformat(str(current.get("captured_at") or ""))
+    except ValueError:
+        current_at = None
+    candidates: list[tuple[float, str, dict[str, Any]]] = []
+    for path in directory.glob("Battle*.json"):
+        if path.stem == current_id:
+            continue
+        try:
+            candidate = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(candidate, dict):
+                continue
+            candidate_snapshot = candidate.get("profile_progression")
+            if not isinstance(candidate_snapshot, Mapping):
+                continue
+            candidate_identity = candidate_snapshot.get("identity")
+            if (
+                candidate_snapshot.get("status") != "complete"
+                or candidate_snapshot.get("complete") is not True
+                or candidate_snapshot.get("schema_version") != current_schema
+                or not isinstance(candidate_identity, Mapping)
+                or candidate_identity.get("mapping_id") != current_mapping
+            ):
+                continue
+            candidate_at = datetime.fromisoformat(
+                str(candidate.get("captured_at") or "")
+            )
+            if current_at is not None and candidate_at >= current_at:
+                continue
+            rank = candidate_at.timestamp()
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+        candidates.append((rank, path.name, candidate))
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: (item[0], item[1]))[2]
 
 
 def render_battle_markdown(record: Mapping[str, Any]) -> str:
@@ -1108,6 +1234,12 @@ def render_battle_markdown(record: Mapping[str, Any]) -> str:
                 )
         if not_observed:
             lines.append("- Not observed: " + ", ".join(not_observed))
+    lines.extend(
+        render_profile_progression_markdown(
+            record.get("profile_progression"),
+            record.get("profile_progression_delta"),
+        )
+    )
     lines.extend(["", "## Derived", ""])
     derived = record.get("derived", {})
     if derived:

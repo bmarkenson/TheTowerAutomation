@@ -401,6 +401,337 @@
       5
     ]
   },
+  "profile_progression": {
+    "schema_version": 1,
+    "audit_matrix_id": "data-9-game-1073-profile-progression-v1",
+    "components": {
+      "account_bonuses": {
+        "disable_ads_unlocked": {
+          "source": "disableAdsUnlockedBool",
+          "kind": "boolean"
+        },
+        "epic_pack_unlocked": {
+          "source": "epicPackUnlockedBool",
+          "kind": "boolean"
+        },
+        "event_boosts_bought_total": {
+          "source": "eventBoostsBoughtTotal",
+          "kind": "integer"
+        },
+        "starter_pack_unlocked": {
+          "source": "starterPackUnlockedBool",
+          "kind": "boolean"
+        }
+      },
+      "bots": {
+        "amplify_cooldown_lab_level_selected": {
+          "source": "amplifyBotLevelCooldownSelected",
+          "kind": "integer"
+        },
+        "amplify_presets": {
+          "source": "amplifyBotPresets",
+          "kind": "bot_presets",
+          "length": 4
+        },
+        "bot_bot_cooldown_lab_level_selected": {
+          "source": "botBotLevelCooldownSelected",
+          "kind": "integer"
+        },
+        "bot_bot_presets": {
+          "source": "botBotPresets",
+          "kind": "bot_presets",
+          "length": 4
+        },
+        "current_preset": {
+          "source": "currentBotPreset",
+          "kind": "integer"
+        },
+        "flame_cooldown_lab_level_selected": {
+          "source": "flameBotLevelCooldownSelected",
+          "kind": "integer"
+        },
+        "flame_presets": {
+          "source": "flameBotPresets",
+          "kind": "bot_presets",
+          "length": 4
+        },
+        "golden_cooldown_lab_level_selected": {
+          "source": "goldenBotLevelCooldownSelected",
+          "kind": "integer"
+        },
+        "golden_presets": {
+          "source": "goldenBotPresets",
+          "kind": "bot_presets",
+          "length": 4
+        },
+        "preset_names": {
+          "source": "botPresetName",
+          "kind": "string_vector",
+          "length": 3
+        },
+        "thunder_cooldown_lab_level_selected": {
+          "source": "thunderBotLevelCooldownSelected",
+          "kind": "integer"
+        },
+        "thunder_presets": {
+          "source": "thunderBotPresets",
+          "kind": "bot_presets",
+          "length": 4
+        }
+      },
+      "cards": {
+        "assigned_slots": {
+          "source": "slotPresetCardAssignedBool",
+          "kind": "boolean_vector",
+          "length": 140
+        },
+        "current_preset": {
+          "source": "currentPreset",
+          "kind": "integer"
+        },
+        "levels": {
+          "source": "cardLevel",
+          "kind": "integer_vector",
+          "length": 40
+        },
+        "mastery_unlocked": {
+          "source": "cardMasteryUnlocked",
+          "kind": "boolean_vector",
+          "length": 40
+        },
+        "preset_slots": {
+          "source": "slotPresetCardInt",
+          "kind": "integer_vector",
+          "length": 140
+        },
+        "slots_unlocked": {
+          "source": "slotsUnlocked",
+          "kind": "integer"
+        },
+        "unlocked": {
+          "source": "cardUnlocked",
+          "kind": "boolean_vector",
+          "length": 40
+        }
+      },
+      "enhancements": {
+        "attack_levels": {
+          "source": "enhancementLevel",
+          "kind": "integer_vector",
+          "length": 20
+        },
+        "attack_tiers_unlocked": {
+          "source": "enhancementTierUnlocked",
+          "kind": "boolean_vector",
+          "length": 20
+        },
+        "defense_levels": {
+          "source": "enhancementDefenseLevel",
+          "kind": "integer_vector",
+          "length": 20
+        },
+        "defense_tiers_unlocked": {
+          "source": "enhancementDefenseTierUnlocked",
+          "kind": "boolean_vector",
+          "length": 20
+        },
+        "utility_levels": {
+          "source": "enhancementUtilityLevel",
+          "kind": "integer_vector",
+          "length": 20
+        },
+        "utility_tiers_unlocked": {
+          "source": "enhancementUtilityTierUnlocked",
+          "kind": "boolean_vector",
+          "length": 20
+        }
+      },
+      "guardian": {
+        "chip_levels": {
+          "source": "guardianChipLevel",
+          "kind": "integer_vector",
+          "length": 30
+        },
+        "chip_slots": {
+          "source": "guardianChipSlot",
+          "kind": "integer_vector",
+          "length": 3
+        },
+        "chips_unlocked": {
+          "source": "guardianChipUnlocked",
+          "kind": "boolean_vector",
+          "length": 10
+        },
+        "slots_unlocked": {
+          "source": "guardianSlotsUnlocked",
+          "kind": "integer"
+        },
+        "unlocked": {
+          "source": "guardianUnlocked",
+          "kind": "boolean"
+        }
+      },
+      "harmony": {
+        "harmony_nodes_unlocked": {
+          "source": "harmonyNodesUnlocked",
+          "kind": "boolean_vector",
+          "length": 48
+        },
+        "power_node_levels": {
+          "source": "powerNodesLevel",
+          "kind": "integer_vector",
+          "length": 46
+        },
+        "power_node_max_levels": {
+          "source": "powerNodesMaxLevel",
+          "kind": "integer_vector",
+          "length": 46
+        },
+        "power_nodes_unlocked": {
+          "source": "powerNodesUnlocked",
+          "kind": "boolean_vector",
+          "length": 46
+        },
+        "synchronicity_level": {
+          "source": "synchronicityLevel",
+          "kind": "integer"
+        },
+        "synchronicity_unlocked": {
+          "source": "synchronicityUnlocked",
+          "kind": "boolean"
+        }
+      },
+      "modules": {
+        "assist_slots": {
+          "source": "assistModuleSlots",
+          "kind": "assist_module_slots",
+          "length": 4
+        },
+        "primary_slots": {
+          "source": "moduleEquipped",
+          "kind": "module_items",
+          "length": 4
+        }
+      },
+      "relics": {
+        "profile_slots": {
+          "source": "profileRelics",
+          "kind": "integer_vector",
+          "length": 5
+        },
+        "unlocked": {
+          "source": "relicsUnlocked",
+          "kind": "integer_vector",
+          "length": 305
+        }
+      },
+      "research": {
+        "lab_levels": {
+          "source": "labLevel",
+          "kind": "integer_vector",
+          "length": 5
+        },
+        "levels": {
+          "source": "researchLevel",
+          "kind": "integer_vector",
+          "length": 250
+        },
+        "labs_unlocked": {
+          "source": "labsUnlocked",
+          "kind": "integer"
+        }
+      },
+      "themes": {
+        "background_dice": {
+          "source": "diceBackgrounds",
+          "kind": "boolean_vector",
+          "length": 100
+        },
+        "background_unlocked": {
+          "source": "backgroundUnlocked",
+          "kind": "boolean_vector",
+          "length": 100
+        },
+        "menu_unlocked": {
+          "source": "menuUnlocked",
+          "kind": "boolean_vector",
+          "length": 100
+        },
+        "total_skins_bought": {
+          "source": "totalSkinsBought",
+          "kind": "integer"
+        },
+        "tower_dice": {
+          "source": "diceTowers",
+          "kind": "boolean_vector",
+          "length": 100
+        },
+        "tower_unlocked": {
+          "source": "towerUnlocked",
+          "kind": "boolean_vector",
+          "length": 100
+        }
+      },
+      "ultimate_weapons": {
+        "levels": {
+          "source": "ultimateWeaponLevel",
+          "kind": "integer_vector",
+          "length": 27
+        },
+        "plus_levels": {
+          "source": "ultimateWeaponPlusLevel",
+          "kind": "integer_vector",
+          "length": 9
+        },
+        "plus_on": {
+          "source": "ultimateWeaponPlusOn",
+          "kind": "boolean_vector",
+          "length": 9
+        },
+        "plus_unlocked": {
+          "source": "ultimateWeaponPlusUnlocked",
+          "kind": "boolean_vector",
+          "length": 9
+        },
+        "primary_on": {
+          "source": "ultimateWeaponOn",
+          "kind": "boolean_vector",
+          "length": 9
+        },
+        "unlocked": {
+          "source": "ultimateWeaponUnlocked",
+          "kind": "boolean_vector",
+          "length": 9
+        }
+      },
+      "workshop": {
+        "attack_levels": {
+          "source": "upgradeWorkshopLevel",
+          "kind": "integer_vector",
+          "length": 20
+        },
+        "current_preset": {
+          "source": "currentWorkshopPreset",
+          "kind": "integer"
+        },
+        "defense_levels": {
+          "source": "upgradeWorkshopDefenseLevel",
+          "kind": "integer_vector",
+          "length": 20
+        },
+        "preset_names": {
+          "source": "workshopPresetName",
+          "kind": "string_vector",
+          "length": 5
+        },
+        "utility_levels": {
+          "source": "upgradeWorkshopUtilityLevel",
+          "kind": "integer_vector",
+          "length": 20
+        }
+      }
+    }
+  },
   "runtime_save": {
     "schema_version": 1,
     "audit_matrix_id": "data-9-game-1073-runtime-audit-v2",

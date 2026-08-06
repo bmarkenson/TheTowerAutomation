@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import gzip
@@ -18,6 +19,7 @@ from core.player_save import (
     pull_player_save_bytes,
     reconcile_requirements,
 )
+from core.profile_progression import diff_profile_progression
 from core.runtime_save import runtime_with_perk_id_overrides
 
 
@@ -119,6 +121,7 @@ def _decoded_save() -> dict:
         "guardianSlotsUnlocked": 2,
         "guardianChipUnlocked": [False] * 10,
         "guardianChipLevel": [0] * 30,
+        "guardianUnlocked": True,
         "tourneyConditionsSeed": 287,
         "tournamentNumber": 287,
         "tournamentCheckedNumber": 287,
@@ -139,10 +142,47 @@ def _decoded_save() -> dict:
         "enhancementLevel": [0] * 20,
         "enhancementDefenseLevel": [0] * 20,
         "enhancementUtilityLevel": [0] * 20,
+        "enhancementTierUnlocked": [False] * 20,
+        "enhancementDefenseTierUnlocked": [False] * 20,
+        "enhancementUtilityTierUnlocked": [False] * 20,
         "cardLevel": [0] * 40,
         "cardUnlocked": [True] * 31 + [False] * 9,
+        "cardMasteryUnlocked": [True] * 8 + [False] * 32,
         "slotPresetCardInt": [0] * 140,
         "slotPresetCardAssignedBool": [True] * 28 + [False] * 112,
+        "labLevel": [1] * 5,
+        "labsUnlocked": 5,
+        "profileRelics": [19, 18, 20, 21, 6],
+        "relicsUnlocked": [2] * 276 + [0] * 29,
+        "towerUnlocked": [True] * 74 + [False] * 26,
+        "backgroundUnlocked": [True] * 54 + [False] * 46,
+        "menuUnlocked": [True] * 11 + [False] * 89,
+        "diceTowers": [True] * 50 + [False] * 50,
+        "diceBackgrounds": [True] * 50 + [False] * 50,
+        "totalSkinsBought": 144,
+        "disableAdsUnlockedBool": True,
+        "starterPackUnlockedBool": True,
+        "epicPackUnlockedBool": True,
+        "eventBoostsBoughtTotal": 3,
+        "ultimateWeaponPlusLevel": [0] * 9,
+        "ultimateWeaponPlusOn": [True] * 9,
+        "ultimateWeaponPlusUnlocked": [False] * 9,
+        "flameBotLevelCooldownSelected": 25,
+        "thunderBotLevelCooldownSelected": 14,
+        "goldenBotLevelCooldownSelected": 25,
+        "amplifyBotLevelCooldownSelected": 20,
+        "botBotLevelCooldownSelected": 25,
+        "flameBotPresets": [_bot_preset() for _ in range(4)],
+        "thunderBotPresets": [_bot_preset() for _ in range(4)],
+        "goldenBotPresets": [_bot_preset() for _ in range(4)],
+        "amplifyBotPresets": [_bot_preset() for _ in range(4)],
+        "botBotPresets": [_bot_preset() for _ in range(4)],
+        "harmonyNodesUnlocked": [True] * 41 + [False] * 7,
+        "powerNodesLevel": [0] * 46,
+        "powerNodesMaxLevel": [0] * 46,
+        "powerNodesUnlocked": [True] * 10 + [False] * 36,
+        "synchronicityLevel": 0,
+        "synchronicityUnlocked": False,
         "moduleEquipped": [
             _module_item(45),
             _module_item(46),
@@ -168,7 +208,36 @@ def _decoded_save() -> dict:
     payload["perkLevel"][0] = 1
     payload["perkLevel"][10] = 2
     payload["perkLevel"][41] = 1
+    payload["goldenBotPresets"][0] = _bot_preset(
+        levels=[30, 20, 15, 30],
+        plus_level=2,
+    )
+    payload["amplifyBotPresets"][0] = _bot_preset(
+        levels=[3, 3, 0, 0],
+        plus_level=1,
+    )
+    payload["botBotPresets"][0] = _bot_preset(
+        levels=[11, 15, 15, 11],
+        plus_level=9,
+    )
     return payload
+
+
+def _bot_preset(
+    *,
+    levels: list[int] | None = None,
+    plus_level: int = 0,
+) -> dict:
+    values = list(levels or [0, 0, 0, 0])
+    return {
+        "__class__": "UserBotData",
+        "unlocked": True,
+        "active": True,
+        "levels": values,
+        "selectedLevels": list(values),
+        "plusUnlocked": True,
+        "plusLevel": plus_level,
+    }
 
 
 def _module_item(info_index: int) -> dict:
@@ -176,8 +245,11 @@ def _module_item(info_index: int) -> dict:
         "__class__": "ModuleItem",
         "infoIndex": info_index,
         "guid": f"must-not-leak-module-guid-{info_index}",
+        "currentRarity": 15,
         "level": 201,
-        "effects": ["must-not-leak-module-effect"],
+        "effects": [18, 71, 12, 6, 67, 35, 54, 0],
+        "effectLocked": [True] * 7 + [False],
+        "privateEffectDetail": "must-not-leak-module-effect",
         "inventoryRecord": {"private": "must-not-leak-module-inventory"},
     }
 
@@ -188,6 +260,9 @@ def _assist_module_slot(slot_type: int, info_index: int) -> dict:
         "type": slot_type,
         "unlocked": True,
         "module": _module_item(info_index),
+        "uniqueEffectEfficiencyLevel": 2,
+        "mainEffectEfficiencyLevel": 23,
+        "substatEfficiencyLevel": 24,
     }
 
 
@@ -256,7 +331,7 @@ def _snapshot(monkeypatch, decoded: dict | None = None):
 def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
     snapshot = _snapshot(monkeypatch)
 
-    assert snapshot.as_dict()["schema_version"] == 2
+    assert snapshot.as_dict()["schema_version"] == 3
     assert snapshot.mapping_id == "data-9-game-1073"
     assert snapshot.mapping_maturity == "candidate"
     assert snapshot.validated_checks == (
@@ -321,6 +396,22 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
         "generator_assist": "Singularity Harness",
         "core_assist": "Dimension Core",
     }
+    progression = snapshot.profile_progression
+    assert progression["status"] == "complete"
+    assert progression["identity"]["save_revision"] == 1234
+    assert progression["components"]["themes"]["summary"] == {
+        "background_dice": {"length": 100, "true_count": 50},
+        "background_unlocked": {"length": 100, "true_count": 54},
+        "menu_unlocked": {"length": 100, "true_count": 11},
+        "tower_dice": {"length": 100, "true_count": 50},
+        "tower_unlocked": {"length": 100, "true_count": 74},
+    }
+    assert progression["components"]["bots"]["values"]["bot_bot_presets"][0][
+        "plus_level"
+    ] == 9
+    assert progression["components"]["modules"]["values"]["primary_slots"][0][
+        "level"
+    ] == 201
 
     runtime = snapshot.runtime_save
     assert runtime is not None
@@ -349,8 +440,53 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
     assert "must-not-leak-module-guid" not in rendered
     assert "must-not-leak-module-effect" not in rendered
     assert "must-not-leak-module-inventory" not in rendered
-    assert '"level": 201' not in rendered
     assert "/private/path" not in rendered
+
+
+def test_profile_progression_diff_reports_exact_source_indices(monkeypatch):
+    before_decoded = _decoded_save()
+    after_decoded = copy.deepcopy(before_decoded)
+    after_decoded["saveRevision"] += 1
+    after_decoded["menuUnlocked"][11] = True
+    after_decoded["researchLevel"][231] = 9
+    after_decoded["upgradeWorkshopUtilityLevel"][2] = 150
+    after_decoded["botBotPresets"][0]["plusLevel"] = 10
+
+    before = _snapshot(monkeypatch, before_decoded).profile_progression
+    after = _snapshot(monkeypatch, after_decoded).profile_progression
+    delta = diff_profile_progression(before, after)
+
+    assert delta["status"] == "changed"
+    assert delta["changed_components"] == [
+        "bots",
+        "research",
+        "themes",
+        "workshop",
+    ]
+    assert {change["path"] for change in delta["changes"]} == {
+        "bots.bot_bot_presets[0].plus_level",
+        "research.levels[231]",
+        "themes.menu_unlocked[11]",
+        "workshop.utility_levels[2]",
+    }
+
+
+def test_profile_progression_shape_change_isolated_to_its_component(monkeypatch):
+    decoded = _decoded_save()
+    decoded["menuUnlocked"] = [True]
+
+    snapshot = _snapshot(monkeypatch, decoded)
+    progression = snapshot.profile_progression
+
+    assert snapshot.shape_valid
+    assert snapshot.runtime_save is not None
+    assert progression["status"] == "partial"
+    assert progression["components"]["themes"]["status"] == "partial"
+    assert progression["components"]["workshop"]["status"] == "structural"
+    assert progression["components"]["themes"]["reasons"] == [
+        "menuUnlocked:length_changed:expected=100:actual=1"
+    ]
+    assert "menu_unlocked" not in progression["components"]["themes"]["values"]
 
 
 def test_runtime_capture_and_history_projection_are_privacy_safe(monkeypatch):

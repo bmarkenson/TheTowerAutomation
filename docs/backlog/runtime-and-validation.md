@@ -11,7 +11,7 @@ checked-item detail remains in the
 - [ ] Cross-validate the `data-9-game-1073` player-save mapping against fresh
   UI inventory from the same version, and add a new exact candidate mapping if
   the current game reports a different identity. Execute the complete
-  [versioned audit matrix and rollout sequence](../modules/player_save_import.md#versioned-audit-matrix-data-9-game-1073--revision-2).
+  [versioned audit matrix and rollout sequence](../modules/player_save_import.md#versioned-audit-matrix-data-9-game-1073--revision-3).
   Promote only fully cross-validated fields; retain scheduled audits and every
   existing UI checker as the fallback for unknown versions, shape changes,
   stale data, mismatches, and unmapped settings.
