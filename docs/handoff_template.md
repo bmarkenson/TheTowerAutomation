@@ -1,5 +1,11 @@
 # Preparing a Thread Handoff
 
+Use a handoff only when responsibility is actually moving to an independent
+thread. A worker spawned and managed by an active master coordination thread
+instead returns a concise report to that master: owned commits, changed scope,
+validation, and remaining uncertainty. The worker does not select the next
+task or draft another worker prompt unless the master asks for one.
+
 Read this file only when preparing or reviewing a handoff. A new development
 thread does not need it: Codex automatically loads `AGENTS.md`, and the handoff
 directs the new thread to `docs/new_thread.md`.

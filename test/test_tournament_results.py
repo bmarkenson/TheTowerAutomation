@@ -74,6 +74,17 @@ def test_tournament_result_persists_summary_and_exact_detailed_report(tmp_path):
         run_configuration={"profile": "tournament", "tier": "17+"},
         runtime_context={
             "terminal_state": "TOURNAMENT_RESULTS",
+            "profile_progression": {
+                "schema_version": 1,
+                "status": "unavailable",
+                "complete": False,
+                "reason": "test_snapshot_unavailable",
+                "identity": {},
+                "source": {},
+                "fingerprint": "",
+                "components": {},
+                "warnings": [],
+            },
             "coin_rate_samples": [
                 {
                     "captured_at": "2026-07-18T05:00:00-07:00",
@@ -122,6 +133,11 @@ def test_tournament_result_persists_summary_and_exact_detailed_report(tmp_path):
 
     assert record["quality"]["valid"]
     assert record["battle_type"] == "tournament"
+    assert record["schema_version"] == 3
+    assert record["profile_progression"]["reason"] == (
+        "test_snapshot_unavailable"
+    )
+    assert "profile_progression" not in record["runtime"]
     assert record["runtime"]["observed_tier"] == 19
     assert record["battle_type_analysis"]["observed_tier"] == 19
     assert record["battle_conditions"]["tournament_number"] == 283
@@ -325,7 +341,7 @@ def test_explicit_utc_date_backfill_is_dry_run_then_atomic_update(tmp_path):
 
     assert applied["summary"]["updated"] == 1
     stored = json.loads((tmp_path / f"{tournament_id}.json").read_text())
-    assert stored["schema_version"] == 2
+    assert stored["schema_version"] == 3
     assert stored["battle_conditions"]["tournament_number"] == 287
     assert stored["battle_conditions"]["source"]["event_date"] == "2026-08-01"
     markdown = (tmp_path / f"{tournament_id}.md").read_text(encoding="utf-8")

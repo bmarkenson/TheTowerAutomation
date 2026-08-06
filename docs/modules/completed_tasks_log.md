@@ -37,6 +37,72 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-06 lease-aware development input boundary correction
+
+- `4d7af4b54ba00e387681e559cffe699bc3ca70bb` corrects the accepted
+  development-side input helper so its final production-status check reserves
+  the selected ADB subprocess timeout plus one second for server timestamp
+  precision and one second for status-response/dispatch latency. Taps retain a
+  5-second timeout; swipes use at least 5 seconds and otherwise their duration
+  plus 2 seconds, capped by the valid 5000 ms gesture at a bounded 7-second
+  timeout. The corresponding minimum lease windows are 7 and 9 seconds, with
+  equality accepted.
+- An insufficient final window rejects before mutating ADB input and directs
+  the operator to heartbeat separately, wait for the renewed matching runtime
+  acknowledgement, and invoke the non-replaying helper again. A changed lease,
+  runtime, target, or acknowledged expiry between geometry acquisition and the
+  final check still fails closed.
+- The helper now consumes the production-owned composite lease `active` value
+  as the canonical suppressive-authority decision. It retains only its own
+  command bindings and structural checks: supported API/capability, RUNNING
+  control, request/acknowledgement lease IDs and lifecycle states, matching
+  runtime identity and exact target, and one valid matching acknowledged
+  expiry. Duplicate acknowledgement-dictionary equality, authority-matrix and
+  gate-age reconstruction, and direct `runtime.instances` policy were removed
+  without changing the control surface's active calculation.
+- The focused development-input, control-surface, geometry, screenshot,
+  logger, and ADB-connection run passed all 150 tests. The complete non-live
+  checkpoint passed compilation, state-definition validation, clickmap
+  integrity with zero errors and 44 established orphans, and all 1,621 pytest
+  tests. Changed local links/anchors and feature-range whitespace also passed.
+  No live runtime, process, systemd unit, control socket, ADB server or target,
+  emulator, production log, screen, or battle was inspected. Combined
+  fake-runtime/fake-ADB coordination validation remains open, and a live lease
+  remains separately authorized master work.
+
+### 2026-08-05 completed-run profile progression snapshots
+
+- `0075349cba5537fe4d6dff1b582185e2cd210174` adds a versioned,
+  exact-save projection of 12 account components to every captured normal or
+  Tournament terminal. It covers pack/ad bonuses; Bots; Cards; Enhancements;
+  Guardian; Harmony/Power nodes; equipped Primary and Assist Modules; relics;
+  Research; Tower, Background, and Menu Themes; Ultimate Weapons; and
+  Workshop levels.
+- Terminal capture uses two byte-identical reads from the exact target
+  generation already owned by the runtime, sends no input, and fails open so
+  Game Stats capture remains authoritative. The raw save, account identifiers,
+  balances, purchase histories, Module GUIDs, and arbitrary inventory records
+  are not retained.
+- Normal battle schema 5 stores a top-level snapshot and an exact-path delta
+  against the newest earlier complete, mapping-compatible normal battle. The
+  first run establishes a baseline, and a partial capture is skipped when
+  selecting the next baseline. Tournament schema 3 retains its terminal
+  snapshot without affecting normal-battle comparisons.
+- The projection preserves source fields and indices instead of inventing
+  names, formulas, costs, or effective multipliers. Markdown reports Theme and
+  relic counts plus exact changes; JSON retains the complete structural
+  evidence and component fingerprints for later CPH/cell/survival analysis.
+- The focused player-save, terminal-capture, battle, Tournament, and run-
+  initialization suite passed all 216 tests. The complete isolated checkpoint
+  passed compilation, state validation, clickmap integrity with zero errors
+  and 44 known orphans, and all 1,612 tests. Changed whitespace and local
+  documentation anchors also passed validation.
+- One bounded read-only exact-target save normalized all 12 current components
+  without retaining the raw save. No device input, battle lifecycle change,
+  production code change, merge, deployment, or installation was performed;
+  the first post-deployment normal run will intentionally establish the
+  comparison baseline.
+
 ### 2026-08-05 save-first targeted repair reconciliation
 
 - `b9c229a77d2fbc5efe16a7cdcb6681d469751a0b` separates global snapshot

@@ -54,6 +54,11 @@ from core.battle_stats import (
     persist_battle_record,
 )
 from core.battle_activation_tracker import BattleActivationTracker
+from core.player_save import (
+    PlayerSaveError,
+    decode_player_save_bytes,
+    pull_player_save_bytes,
+)
 from core.player_save_audit import PlayerSaveAuditCollector
 from core.player_save_preflight import (
     CarriedEvidenceState,
@@ -64,6 +69,8 @@ from core.player_save_history import (
     PlayerSaveAttachmentContext,
     PlayerSaveHistoryReader,
 )
+from core.player_save_serialization import quiet_player_save_read
+from core.profile_progression import unavailable_profile_progression
 from core.perk_timeline import PerkTimelineObserver
 from core.no_strategy_inventory import (
     NoStrategyInventoryStatus,
@@ -331,6 +338,7 @@ class App:
         self._session_preflight_terminal_blocked_logged = False
         self._session_preflight_repair_denial_logged = False
         self._steady_run_entry_pending = False
+        self._last_logged_home_battle_control: Optional[HomeBattleControl] = None
         self._last_home_policy_signature: Optional[Tuple[object, ...]] = None
         rollover_state = Path(config.control_file).parent / "daily_gem_state.json"
         self._daily_gem_scheduler = DailyGemScheduler(rollover_state)
@@ -510,6 +518,7 @@ class App:
             "terminal_state": terminal,
             "run_configuration": {},
             "run_binding": binding,
+            "profile_progression": self._capture_terminal_profile_progression(),
         }
         if binding["status"] != "bound":
             signature = (
@@ -560,6 +569,98 @@ class App:
                 observed_run_configuration
             )
         return context
+
+    def _capture_terminal_profile_progression(self) -> dict[str, Any]:
+        """Capture one exact-target progression snapshot without blocking stats."""
+
+        captured_at = datetime.now(timezone.utc)
+        session = getattr(self, "_adb_target_session", None)
+        if session is None:
+            return unavailable_profile_progression(
+                "adb_target_session_unavailable",
+                captured_at=captured_at.isoformat(),
+            )
+        try:
+            target_before = session.snapshot()
+        except Exception:
+            return unavailable_profile_progression(
+                "adb_target_snapshot_unavailable",
+                captured_at=captured_at.isoformat(),
+            )
+        if not target_before.owned:
+            return unavailable_profile_progression(
+                "adb_target_not_owned",
+                captured_at=captured_at.isoformat(),
+            )
+
+        try:
+            payload = pull_player_save_bytes(
+                device_id=target_before.target,
+                attempts=3,
+                settle_seconds=0.1,
+                read_fn=quiet_player_save_read,
+            )
+            snapshot = decode_player_save_bytes(
+                payload,
+                source_name="playerInfo.dat",
+                captured_at=captured_at,
+            )
+            del payload
+        except PlayerSaveError as exc:
+            log(
+                "[PROFILE_PROGRESSION] Stable terminal save capture was "
+                f"unavailable without blocking battle stats: {exc}",
+                "WARN",
+            )
+            return unavailable_profile_progression(
+                "stable_terminal_save_unavailable",
+                captured_at=captured_at.isoformat(),
+            )
+        except Exception as exc:
+            log(
+                "[PROFILE_PROGRESSION] Terminal progression projection failed "
+                f"without blocking battle stats: {exc}",
+                "WARN",
+            )
+            return unavailable_profile_progression(
+                "terminal_progression_projection_failed",
+                captured_at=captured_at.isoformat(),
+            )
+
+        try:
+            target_after = session.snapshot()
+        except Exception:
+            target_after = None
+        if (
+            target_after is None
+            or not target_after.owned
+            or target_after.target != target_before.target
+            or target_after.generation != target_before.generation
+        ):
+            return unavailable_profile_progression(
+                "adb_target_changed_during_terminal_capture",
+                captured_at=captured_at.isoformat(),
+                mapping_id=snapshot.mapping_id,
+            )
+
+        progression = snapshot.profile_progression
+        if not isinstance(progression, Mapping) or not progression:
+            return unavailable_profile_progression(
+                "exact_version_progression_projection_unavailable",
+                captured_at=captured_at.isoformat(),
+                mapping_id=snapshot.mapping_id,
+            )
+        result = dict(progression)
+        source = dict(result.get("source") or {})
+        source["acquisition"] = "stable_terminal_player_save"
+        result["source"] = source
+        log(
+            "[PROFILE_PROGRESSION] Captured terminal account snapshot "
+            f"revision={snapshot.save_revision} "
+            f"status={result.get('status') or 'unknown'}",
+            "DEBUG",
+        )
+        return result
 
     def _get_action_authority(self) -> RuntimeActionAuthority:
         """Return the central authority, including for partial test instances."""
@@ -3084,6 +3185,34 @@ class App:
                 "INFO",
             )
 
+    def _annotate_home_battle_control(
+        self,
+        img: Frame,
+        detection: Dict[str, Any],
+    ) -> None:
+        """Classify Home's battle control and log only semantic transitions."""
+
+        if detection.get("state") != "HOME_SCREEN":
+            self._last_logged_home_battle_control = None
+            return
+
+        evidence = detect_home_battle_control(img)
+        detection["home_battle_control"] = evidence.control.value
+        if evidence.control is getattr(
+            self,
+            "_last_logged_home_battle_control",
+            None,
+        ):
+            return
+
+        self._last_logged_home_battle_control = evidence.control
+        log(
+            "[BATTLE] Home control="
+            f"{evidence.control.value} source={evidence.source} "
+            f"confidence={evidence.confidence:.2f}",
+            "DEBUG",
+        )
+
     def run(self) -> None:
         log("Starting main heartbeat loop.", level="INFO", console=True)
         self._prune_generated_artifacts(force=True)
@@ -3143,15 +3272,7 @@ class App:
                         self._supervisor.game_speed_target,
                         wave=self._last_wave_value,
                     )
-                if detection.get("state") == "HOME_SCREEN":
-                    home_evidence = detect_home_battle_control(img)
-                    detection["home_battle_control"] = home_evidence.control.value
-                    log(
-                        "[BATTLE] Home control="
-                        f"{home_evidence.control.value} source={home_evidence.source} "
-                        f"confidence={home_evidence.confidence:.2f}",
-                        "DEBUG",
-                    )
+                self._annotate_home_battle_control(img, detection)
 
                 # This passive sidecar sees exact Home NEW_BATTLE before any
                 # later setup or Home handler can dispatch an action. It never

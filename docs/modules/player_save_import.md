@@ -136,6 +136,44 @@ nonexact structure or partial loadout retain the full Modules UI route. More
 fields can be added only with cross-channel calibration, not merely because a
 plausible raw field exists.
 
+### Implemented completed-run profile progression snapshots
+
+Completed battle records now carry a separate `profile_progression` projection
+for run-to-run analysis. At `GAME_OVER` or `TOURNAMENT_RESULTS`, the runtime
+uses the exact target and ownership generation already held by
+`AdbTargetSession`, accepts only two byte-identical reads, decodes entirely in
+memory, and discards the result if target ownership changes. It does not
+background the game, navigate, or send input. Capture or mapping failure is
+nonblocking and produces an explicit `unavailable` snapshot while the existing
+UI stats path continues.
+
+The exact-version manifest records 12 structural components: account pack/ad
+unlocks; Bots and their cooldown-lab selections; cards/decks; Enhancements;
+Guardian progression; Harmony/Power nodes; equipped Primary and Assist Module
+levels, rarity, indexed effects, and Assist efficiencies; relics; Research;
+Tower, Background, and Menu Theme ownership; Ultimate Weapons; and the active
+Workshop levels. Only allowlisted primitive fields are retained. Module GUIDs,
+inventory records, account identifiers, balances, arbitrary raw fields, and
+the raw save remain excluded.
+
+These values preserve exact source field and array-index identity. A numeric
+Research, Workshop, Bot, Module-effect, relic, or Theme index is not assigned a
+name, formula, cap, or gameplay effect unless its separate audit row supports
+that semantic claim. The snapshot is observational and cannot suppress UI,
+authorize a setting change, classify a battle, or repair a loadout. It is safe
+to include on a terminal-only process because it describes global profile
+state and makes no process-local Strategy or run-binding claim.
+
+Normal battle records use schema 5 and Tournament records use schema 3. The
+JSON stores the complete normalized snapshot and component fingerprints; the
+Markdown view summarizes Theme/relic ownership and structural completeness.
+When a normal battle is persisted, its `profile_progression_delta` compares
+against the newest earlier battle that also has a snapshot. Deltas preserve
+exact paths such as `themes.menu_unlocked[11]` or
+`bots.bot_bot_presets[0].plus_level`, include before/after values, and identify
+the baseline battle. The first captured run records an explicit missing
+baseline rather than treating every owned item as newly acquired.
+
 ### Implemented save-first configuration preflight
 
 At a freshly verified Home `NEW_BATTLE` boundary, the ordinary runtime policy
@@ -354,7 +392,7 @@ control fields; flush through a proven lifecycle boundary; visually verify the
 restoration; and finish at the original safe boundary. A new exact game
 version starts again at structural status even when its fields look unchanged.
 
-### Versioned audit matrix: `data-9-game-1073` / revision 2
+### Versioned audit matrix: `data-9-game-1073` / revision 3
 
 This is the single authoritative matrix for every normalized claim published
 or proposed for exact game version 1073. The evidence level names the highest
@@ -388,12 +426,13 @@ exact game version starts a new matrix at Structural level.
 | `V1073-CFG-014` Modules | Four `moduleEquipped` `ModuleItem` entries plus four typed `assistModuleSlots` | **Shortcut-ready, exact-slot/value-scoped.** Farm maps cannon Primary Amplifying Strike (`45`), armor Primary Orbital Augment (`46`), generator Primary Black Hole Digestor (`27`), core Primary Multiverse Nexus (`37`); cannon Assist Being Annihilator (`9`), armor Assist Anti-Cube Portal (`20`), generator Assist Singularity Harness (`30`), and core Assist Dimension Core (`38`). Tournament evidence adds generator Primary Project Funding (`43`), core Primary Dimension Core (`38`), core Assist Harmony Conductor (`39`), plus observed alternatives armor Primary Anti-Cube Portal (`20`) and armor Assist Space Displacer (`19`). | Require exact slot/family/role/mapped name, four unlocked exact-boolean Assist slots, and complete structure. `enforce` requires equality; `observe` reports any complete mapped assignment without repair. Unknown IDs, nil/missing/locked/partial entries, Magnetic Hook or another unsupported request retain the full UI path. No generic Module-ID, rarity, level, stars, effects, substats, inventory, GUID, or private-value semantics are claimed. |
 | `V1073-CFG-015` Damage Slider | No accepted field | **Structural.** The absence of an accepted normalized source is explicit. | In an explicitly authorized test battle, correlate at least two values and restoration, percentage encoding, and save timing; UI remains required. |
 | `V1073-CFG-016` Orb Distance | Candidate distance/preset fields not accepted | **Structural.** Candidate fields are deliberately unpublished. | In an explicitly authorized battle, cycle known Extra/Workshop presets, prove units and selected-preset semantics, and restore the original pair; UI remains required. |
-| `V1073-PROFILE-001` card ownership, levels, and five 28-slot decks | `cardUnlocked`, `cardLevel`, `slotPresetCardInt`, `slotPresetCardAssignedBool`, `slotsUnlocked` | **Structural.** Dimensions and base/effective width distinction are known. | Build the complete card-ID map, compare ownership/levels, and inventory every preset membership before publication. |
-| `V1073-PROFILE-002` Workshop and Enhancements | Attack/Defense/Utility workshop and enhancement arrays | **Structural.** Dimensions only. | Map every index; verify zero, nonzero, maxed, and unlocked states; account for special upgrades with different level semantics. |
-| `V1073-PROFILE-003` Research and Labs | `researchLevel` plus candidate queue/timing fields | **Structural.** Dimensions only. | Map research IDs/levels; give active lab, duration, and completion timestamps independent volatile-freshness rules. |
-| `V1073-PROFILE-004` Ultimate Weapon progression | Unlock/level arrays plus candidate cooldown/quantity fields | **Structural.** Dimensions and candidate tuple layout only. | Prove weapon order and every three-level tuple before publishing names or levels. |
-| `V1073-PROFILE-005` Guardian and Bot progression | Unlock/level arrays and candidate Bot fields | **Structural.** Dimensions and selected preset/chip subset only. | Map every stable ID, slot count, level tuple, and preset field through read-only evidence; no cost-bearing calibration. |
-| `V1073-PROFILE-006` Module inventory and progression | Inventory and module-record structures outside the eight value-scoped equipped assignments | **Structural.** The Farm assignment row above does not promote inventory or progression semantics. | Decode stable IDs, uniqueness, rarity, levels, ancestral stars, and substats across naturally occurring loadouts without retaining private records. |
+| `V1073-PROFILE-001` card ownership, levels, mastery unlocks, and five 28-slot decks | `cardUnlocked`, `cardLevel`, `cardMasteryUnlocked`, `slotPresetCardInt`, `slotPresetCardAssignedBool`, `slotsUnlocked` | **Structural and implemented for completed-run comparison.** Exact vectors, source fields, and changed indices are retained; base/effective width remains distinct. | Build the complete card-ID and mastery-effect map before assigning names or effects to indices. The snapshot never suppresses Cards UI. |
+| `V1073-PROFILE-002` Workshop and Enhancements | Active Attack/Defense/Utility Workshop and Enhancement level/unlock arrays | **Structural and implemented for completed-run comparison.** Exact source-index levels and changed indices are retained. | Map every index; verify zero, nonzero, maxed, unlocked, and special-level semantics before naming an index or claiming an effective multiplier. |
+| `V1073-PROFILE-003` Research and Labs | `researchLevel`, `labLevel`, `labsUnlocked` | **Structural and implemented for completed-run comparison.** Exact level vectors and changed indices are retained. | Map Research IDs/levels; keep active queue, duration, completion time, and effective-value formulas independent until validated. |
+| `V1073-PROFILE-004` Ultimate Weapon progression | Unlock/level/Plus arrays and current primary/Plus toggles | **Structural and implemented for completed-run comparison.** Exact tuples and changed indices are retained without naming level positions. | Prove weapon order and every three-level tuple before publishing semantic stat names or effective values; configuration UI authority remains in the separate CFG rows. |
+| `V1073-PROFILE-005` Guardian, Bot, and Harmony progression | Guardian chip arrays; typed Bot preset structures and cooldown-lab selections; Harmony/Power-node arrays | **Structural and implemented for completed-run comparison.** Naturally observed Farm Bot values agree with their source structures, while the record preserves indices rather than derived durations/ranges/bonuses. | Map every stable ID, Bot tuple position, node, cost, cap, and selected-lab effect through read-only/cross-channel evidence; no cost-bearing calibration. |
+| `V1073-PROFILE-006` equipped Module progression | Eight equipped Primary/Assist items with `infoIndex`, rarity, level, indexed effects/locks, and Assist efficiency levels | **Structural and implemented for completed-run comparison.** GUIDs, costs, reroll counters, inventory records, and the 150-item inventory remain excluded. | Decode effect IDs, rarity/stars, levels, and efficiency formulas across naturally occurring loadouts before claiming effective values. The slot-name CFG row remains independently value-scoped. |
+| `V1073-PROFILE-007` passive account, Theme, and relic progression | Pack/ad unlock booleans; `towerUnlocked[100]`, `backgroundUnlocked[100]`, `menuUnlocked[100]`, matching Dice vectors, `totalSkinsBought`; `relicsUnlocked[305]`, `profileRelics[5]` | **Structural and implemented for completed-run comparison.** Exact ownership vectors, counts, and changed indices are retained. The three Theme ownership counts are not forced to equal `totalSkinsBought`. | Map individual Theme/relic IDs and effective coin/health/damage bonuses before attributing a run delta to a specific formula. Account balances and purchase histories remain excluded. |
 | `V1073-RUNTIME-001` guarded save-first Home acquisition | Proven Android-Home flush, two identical exact-target reads, exact decoder, stable restored `NEW_BATTLE` | **Shortcut-ready and implemented.** One runtime/preflight/configuration/target generation owns the lifecycle workflow and retains only normalized redacted provenance. | `save_first` uses this path; acquisition/decode uncertainty safely restored to Home runs UI, while restoration/ownership/control/boundary uncertainty blocks input. The optional audit collector is not an authority source. |
 | `V1073-RUNTIME-002` atomic per-check suppression and exact-next-battle carry | Resolved configuration fingerprint, per-component decisions, runtime-owned launch, first stable `RUNNING` | **Shortcut-ready and implemented** for all currently allowlisted Home/session components together. | `force_ui` preserves complete UI behavior; `comparison_audit` collects normalized comparison evidence while UI remains authoritative. A trusted exact mismatch queues only its own guarded UI path and a verified repair preserves unrelated accepted decisions/carry. Trust, continuity, requirement, and save/UI-contradiction failures reject all carry. Future comparisons never self-promote a manifest. |
 | `V1073-RUNTIME-003` active round identity | `(versionNumber, currentTier, roundsStartedThisTier[currentTier], roundSeed)` | **Causal.** A known Home boundary preceded the first stable Tier 22 active projection with a new per-tier counter and round seed; subsequent stable revisions retained that exact identity through wave 710. No finer wall-clock latency is claimed. | The guarded replacement-process Current-run comparison requires this identity after forced serialization and stable `RUNNING` restoration; it does not manufacture terminal binding or process-local evidence. `V1073-RUNTIME-013` still uses the tuple only for observation receipts. |
@@ -412,6 +451,7 @@ exact game version starts a new matrix at Structural level.
 | `V1073-RUNTIME-016` save-checkpoint and visual-tail event merge | Same-round stable revisions, normalized survival checkpoints, passive visual activation events, and terminal Battle History counts | **Structural.** Source precedence and fail-closed merge policy are specified; no cache or merger exists. | Merge monotonically by guarded round identity. Count deltas define event intervals; matching visual transitions may refine them. Retain confirmed visual events after the last stable active save through Game Over and reconcile against terminal counts. Never double count, discard an unexplained count, or synthesize an exact wave. Conflict or missing binding forces the full UI audit. |
 | `V1073-RUNTIME-017` active-round battle tallies | Version-allowlisted `*ThisRound`/`*ThisWave` counters and current round totals | **Structural.** The root contains broad live damage, enemy, currency, skip, free-upgrade, survival, and subsystem tallies; only their completed-history counterparts are semantically normalized today. | Prioritize fields that replace current OCR/navigation or strengthen terminal reconciliation. Validate monotonicity, units, reset/clear timing, exceptional decreases, and correspondence to completed-history rows. Publish separate components and provenance; stale tallies remain observational and cannot authorize an input. |
 | `V1073-RUNTIME-018` transient control and cooldown candidates | `gameSpeedMemory`, buy multipliers, candidate Damage Slider/Orb Distance fields, Card activity, and UW/Bot/Guardian cooldown arrays | **Structural.** Plausible fields exist but are deliberately unpublished and may lag the visible game by a complete save interval. | Rank by current observation cost, then calibrate each claim separately across changed/restored values and stable writes. Current-state enforcement and post-action verification remain visual unless the use case explicitly tolerates checkpoint staleness. |
+| `V1073-RUNTIME-019` completed-run profile progression attachment and delta | Same-target-generation terminal stable save; versioned `profile_progression`; newest earlier normal battle snapshot | **Structural and implemented.** Exact-version synthetic coverage validates malformed-field isolation, private-field exclusion, source-index diffs, first-run baselines, prior-record selection, Markdown rendering, and target-generation discard. One bounded read-only live save normalized all 12 current components without retaining the raw save. | Every Game Over/Tournament capture remains UI-authoritative for battle stats. Progression failure is nonblocking; a terminal-only process may attach global profile state but cannot inherit Strategy or process-local trackers. Deploy normally, then let the first captured production run establish the delta baseline. |
 | `V1073-TOURNEY-001` Tournament condition profile/history coverage | Exact-version generator, event identity fields, and Heat/Overheat UI | **Shortcut-ready** for Legend condition identity only. | Complete UI inventory, effective descriptions, lower leagues, and unknown-condition preservation in the separate [Tournament condition plan](../backlog/runtime-and-validation.md#tournament-battle-condition-evidence). |
 
 The complete currently eligible configuration set is adopted atomically by
@@ -427,6 +467,13 @@ extensions, active upgrades,
 survival timing and repeated-event merging, live tallies, and future unknown
 `killedBy` values remain independently fail-closed work rather than blockers
 for configuration preflight.
+
+`V1073-RUNTIME-019` is a separate structural record consumer. It does not use
+the audit collector's session cache, does not attach Battle History semantics,
+and does not weaken terminal run binding. Its snapshot/delta can explain which
+save-backed account fields changed between recorded runs; causal attribution
+to CPH, cells, or survival still requires the relevant semantic mapping and
+run evidence.
 
 Profile groups broaden the diagnostic view but cannot influence automation
 until their own row is Shortcut-ready. Every published group carries mapping
@@ -519,10 +566,13 @@ validates its structural signature.
 
 The normalized report deliberately omits `playerID`, `userName`, and every
 unmapped raw field. Its runtime projection contains only version-allowlisted
-round, Perk, and completed-battle evidence; non-report history fields have
-explicit dispositions and remain unpublished. It includes SHA-256 source and
+round, Perk, and completed-battle evidence; its profile-progression projection
+contains only the exact-version structural allowlist described above.
+Non-report history fields, balances, purchase histories, Module GUIDs, and
+arbitrary inventory records remain unpublished. It includes SHA-256 source and
 canonical component fingerprints so observations can be correlated without
-retaining the save. The operator-owned
+retaining the save. Completed battle records retain the normalized allowlist
+and exact deltas, not the raw NRBF root. The operator-owned
 `playerInfo.dat` must remain untracked and must never be copied into tests,
 logs, commits, or retained runtime evidence.
 
