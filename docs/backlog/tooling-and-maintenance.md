@@ -19,7 +19,9 @@ work. Historical checked detail remains in the
   - This is a concurrency guard, not a total-usage budget. Until it is
     compatible, the three-direct-subagent invariant in `AGENTS.md` remains
     authoritative.
-- [ ] Continue the full template audit begun on 2026-07-13 through the
+- [ ] Continue the
+  [full template audit begun on 2026-07-13](../template_audit_2026-07-13.md)
+  through the
   [current template workflow](../tooling/template_workflow.md).
   - Resolve or classify the recursive validator's dated orphan list.
   - Add fixture-based match verification so a present template is also proven

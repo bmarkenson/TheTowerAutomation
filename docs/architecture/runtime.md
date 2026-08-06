@@ -424,7 +424,7 @@ after same-run tail proof, Battle History record construction. The implemented
 audit sidecar remains observation-only and is not an authority source. Any
 additional normal-runtime runtime/history consumer remains a later slice gated
 by the versioned audit matrix in
-[`player_save.md`](player_save.md#versioned-audit-matrix-data-9-game-1073--revision-3).
+[`player_save.md`](player_save.md#versioned-audit-matrix-data-9-game-1073--revision-4).
 
 ##### Implemented terminal save attachment
 
