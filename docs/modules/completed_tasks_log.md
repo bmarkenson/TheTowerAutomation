@@ -160,6 +160,26 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   the first post-deployment normal run will intentionally establish the
   comparison baseline.
 
+### 2026-08-05 save-first replacement-process activity continuity
+
+- `f218619` makes an already-running replacement process prefer one guarded,
+  fresh exact-target save over Battle History navigation when the retained
+  activity scope has a compatible save baseline or independently comparable
+  UI Tier, Wave, and Battle Date evidence. It preserves the scope for an
+  unchanged tail and starts a conservative later-battle scope only for one
+  valid append or capacity rollover.
+- The shared Android-Home serialization path requires the same runtime,
+  activity scope, lifecycle-owned active battle, target, and generation across
+  stable pre-background and post-restore `RUNNING` observations. Ambiguous
+  source, time, identity, transition, control, or restoration evidence fails
+  closed to the guarded UI route. Correction `fddb855` additionally requires a
+  positive independently normalized History bridge before a UI baseline may
+  migrate to save evidence.
+- Regression coverage is in `test/test_activity_continuity.py`,
+  `test/test_player_save_history.py`, and
+  `test/test_player_save_preflight.py`. The canonical contract is in
+  `docs/modules/player_save_import.md` and `docs/architecture/runtime.md`.
+
 ### 2026-08-05 save-first targeted repair reconciliation
 
 - `b9c229a77d2fbc5efe16a7cdcb6681d469751a0b` separates global snapshot
@@ -454,6 +474,19 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   passed. No production file or environment, runtime process, systemd unit,
   ADB target, emulator, merge, push, rebase, deployment, or worktree topology
   was inspected or changed.
+
+### 2026-08-04 production/development coordination baseline
+
+- `cdfca7a` established the trusted-single-user coordination model, canonical
+  `main`/`develop`/feature-worktree topology, shared-workspace ownership rules,
+  and compact active architecture while relocating the superseded
+  high-assurance design to history.
+- `9ddd952` established exact validated-candidate promotion, production smoke
+  validation, recorded pre-deployment identity, and normal revert or
+  fix-forward recovery without creating a second staging runtime. The current
+  operational contract is canonical in `AGENTS.md`, `docs/new_thread.md`,
+  `docs/runtime_operations.md`, and
+  `docs/architecture/development_isolation.md`.
 
 ### 2026-08-04 compact trusted-user development bootstrap
 
@@ -1365,6 +1398,19 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   paired-cycle order, reusable tap authority, and independent burst limits.
   All 922 repository tests passed.
 
+### 2026-07-30 native control-surface layout redesign
+
+- Commit `4c69f44` replaced the four-card scrolling rail with full-height
+  Controls, Process, Setup, and Details tabs; persisted the selected tab,
+  control-pane width, latest-battle height, and usable main/Battle History
+  window placement; and added independently collapsible Previous Game Screen,
+  Host Health, and latest-battle panels plus Reset Layout.
+- The optional connection Token moved to Setup with explanatory tooltips and
+  remains an unsaved in-memory bearer credential. Minimum-size constraints,
+  off-screen recovery, and persisted layout state are covered in the native
+  implementation; visual validation at minimum, default, and maximized Windows
+  sizes remains active work.
+
 ### 2026-07-30 native Windows host-performance telemetry
 
 - Commit `33b4687` adds one-second native Windows host and BlueStacks sampling
@@ -1548,6 +1594,25 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   verified `close_state=RUNNING`; normal automation continued through wave
   470.
 
+### 2026-07-28 action-log taxonomy migration
+
+- Commits `5f7ef32`, `0620101`, `c975fa8`, `d35b8db`, `6b515d2`, and
+  `110cd61` established one operator-facing `ACTION` and terminal `RESULT` per
+  meaningful workflow while classifying individual taps, swipes, and presses
+  as `INPUT` with paired diagnostic evidence. They migrated reward, terminal,
+  in-battle setting, startup configuration, Golden Combo, Tournament,
+  auto-return, and nested Ultimate Weapon workflows.
+- `bd7dd23` separated current status and prior meaningful transition from the
+  default Operational activity stream. `d98d67a` and `28b4a8a` moved ordinary
+  scrolling, transient game-speed OCR misses, ADB retry detail, and Coins/min
+  suffix repair out of warnings while retaining persistent rate-limited
+  degradation and recovery records.
+- `0b18f20` added mixed-stream audience regression coverage proving that
+  Operational presents What/Why followed by Result, Diagnostics retains input
+  and decision evidence, and All Levels preserves complete ordering. Final
+  validation passed 817 sandbox-compatible tests plus the host-loopback
+  transport test, and the native Windows publish completed successfully.
+
 ### 2026-07-28 restart-stable activity scope
 
 - Commit `d8a1cda` makes automation startup reuse a valid Current run ledger
@@ -1694,6 +1759,19 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   authenticated loopback HTTP test, for 775 total. The self-contained
   `win-x64` WPF publish also completed successfully. Implemented in commit
   `efec703`.
+
+### 2026-07-26 codebase maintenance audit
+
+- Commit `75d181c` recorded the repository-local audit and reviewable removal
+  proposal in `docs/codebase_maintenance_audit_2026-07-26.md`. It traced
+  imports, entry points, dynamic and YAML references, clickmap use, and tests,
+  finding concentrated orchestration complexity rather than broad duplicate
+  implementation.
+- The audit classified the named Cards paths, separated 24 active
+  Module-catalog templates from 20 asset-removal candidates, and identified
+  compatibility decisions that must precede deletion. Those decisions remain
+  active; the completed investigation itself no longer belongs in the work
+  queue.
 
 ### 2026-07-26 protected development evidence
 
@@ -2586,6 +2664,13 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - The full Python suite passed 431 tests, and the Linux publisher produced a
   self-contained `win-x64` executable with Microsoft's WindowsDesktop SDK.
 
+- Follow-up `86b5cec` added local UTF-8 CSV export, boundary-aware Strategy
+  queue/replace/cancel and active-run adoption, exact Strategy filtering, and
+  locally persisted main/Battle History window placement. It also kept
+  current, pending, and acknowledged Strategy state distinct across the Linux
+  API and native client. Unconfirmed mutex, filter-input, and compatibility
+  repairs remain routed through their issue dossiers and live-validation tasks.
+
 ### 2026-07-21 startup gates and operator evidence
 
 - Commit `e14999c` shortened Event Mission traversal to overlapping viewports;
@@ -2732,9 +2817,11 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Repository-wide validation passed 543 sandbox tests plus the separately
   permitted localhost HTTP test, for 544 total. The current ignored frame read
   1,071 badge-purple pixels against a 500-pixel threshold; eight retained
-  `RUNNING` fixtures were negative. No device input or live terminal-boundary
-  validation was used, so the complete natural Game Over path remains in the
-  runtime backlog.
+  `RUNNING` fixtures were negative.
+- Commit `d79153c` records the completed natural Game Over validation for
+  `Battle20260722T185119-0700`: Attack Dissonance identity and the complete
+  observed-run inventory were retained, Home finalization captured the ordered
+  Perks configuration, and the held boundary released through normal handling.
 
 ### 2026-07-22 automatic No Strategy configuration traversal
 
