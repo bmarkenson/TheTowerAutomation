@@ -6,12 +6,12 @@ is changing. Search this index first, then read the linked domain file.
 
 ## Current priorities
 
-1. Resolve the active runtime and capture validation gates in
+1. Complete the active
+   [documentation context-reduction audit](docs/backlog/tooling-and-maintenance.md#documentation-context-reduction).
+2. Resolve the active runtime and capture validation gates in
    [`docs/backlog/runtime-and-validation.md`](docs/backlog/runtime-and-validation.md#current-validation-gates).
-2. Continue UI-state coverage and recovery work in
+3. Continue UI-state coverage and recovery work in
    [`docs/backlog/state-and-detection.md`](docs/backlog/state-and-detection.md#state-coverage-and-recovery).
-3. Continue runtime and operator-control work in
-   [`docs/backlog/runtime-and-validation.md`](docs/backlog/runtime-and-validation.md#runtime-control).
 
 ## Active domain backlogs
 
@@ -21,8 +21,8 @@ is changing. Search this index first, then read the linked domain file.
 - [`docs/backlog/state-and-detection.md`](docs/backlog/state-and-detection.md)
   — state coverage, detection policy, frame capture, action authority, and
   related validation.
-- [`docs/backlog/handlers.md`](docs/backlog/handlers.md) — handler dispatch
-  architecture.
+- [`docs/backlog/handlers.md`](docs/backlog/handlers.md) — Mission deployment
+  validation and handler dispatch architecture.
 - [`docs/backlog/tooling-and-maintenance.md`](docs/backlog/tooling-and-maintenance.md)
   — developer tooling, schema validation, repository maintenance, and process
   improvements.
@@ -39,5 +39,3 @@ is changing. Search this index first, then read the linked domain file.
   to the resolved issue archive after recording the fix and regression.
 - The complete pre-split backlog is preserved in
   [`docs/backlog/history/PENDING_DEVELOPMENT_2026-07-16.md`](docs/backlog/history/PENDING_DEVELOPMENT_2026-07-16.md).
-- The retired `docs/modules/ROADMAP.md` and
-  `docs/modules/roadmap_priorities.md` remain historical snapshots.

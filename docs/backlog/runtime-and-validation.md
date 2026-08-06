@@ -15,105 +15,14 @@ checked-item detail remains in the
   Promote only fully cross-validated fields; retain scheduled audits and every
   existing UI checker as the fallback for unknown versions, shape changes,
   stale data, mismatches, and unmapped settings.
-  - [x] On game `28.3.1` / version code `1073`, cross-validate Cards,
-    Workshop, Bots, First Perk, Ban Perks, the complete 18-row ranked Auto Pick
-    block, Guardians, and the three automation-managed Free Upgrade locks.
-    Correct the candidate perk-ID labels exposed by the same-boundary compare
-    and retain the mapping as `candidate`.
-  - [x] Causally validate `currentPreset`, Poison Swamp Stun, and both card
-    recharge booleans through isolated app-pause flushes and restorations.
-    Allowlist the complete Cards preset and recharge-mode checks while keeping
-    the overall mapping `candidate`.
-  - [x] Reuse the accepted version-1073 calibration to implement all eligible
-    save-first configuration checks atomically. The guarded exact-target Home
-    acquisition now drives independent per-check UI omission/fallback, targeted
-    trusted-mismatch repair queues, exact-next-battle carry, and `save_first` /
-    `force_ui` / `comparison_audit` runtime policy without depending on the
-    observation collector. First Perk Choice is an independent Farm requirement;
-    Tournament invents no Perk requirement. The adopted scope is the ranked
-    Auto Pick prefix, the current three-lock Farm required subset, complete
-    exact Target Priority order, both Poison Stun polarities,
-    all-nine-primaries-on, Spotlight-Missiles-on, and the exact current
-    eight-slot Farm Module assignment. Tournament's unmapped Modules, Damage
-    Slider, Orb Distance, mixed/off primaries, and Spotlight Missiles off remain
-    UI-authoritative. This was code-only validation, not a repeated
-    live-preflight campaign.
-  - [x] Correct the deployed save-first fallbacks from the accepted first
-    rollout. Version 1073 now requires all 34 unique Auto Pick IDs with no
-    sentinel and maps `11=unlock_random_ultimate_weapon`; Target Priority uses
-    the complete accepted ten-ID permutation; Free Upgrade locks compare the
-    requested subset while reporting unmanaged extras such as `Health`; the
-    exact Farm Primary/Assist Module names are value-scoped; and the same Home
-    snapshot seeds source-tagged Activity Continuity before History UI. Direct
-    Retry passively accepts an advancing append or capacity-30 rollover from a
-    fresh stable exact-target save. This reused coordinator-supplied evidence,
-    performed no duplicate campaign, and was code-only; deployment and
-    ordinary-boundary observation remain coordinator work.
-  - [x] Correct save-first repair reconciliation after the first
-    Tournament-to-Farm production transition. A complete validated exact
-    mismatch is now explicit `save_mismatch` evidence that queues only its own
-    existing guarded UI path. Cards repair therefore preserves accepted First
-    Perk Choice, Bans, Auto Pick order, other Home decisions, and unrelated
-    exact-next-battle carry. Verified Home, Target Priority, Poison Stun,
-    Damage Slider, and Orb Distance repairs no longer cause blanket carry
-    invalidation; the repaired check remains UI-proven and is not promoted into
-    save carry. Save/UI contradictions plus acquisition, serialization,
-    freshness, version/structure, ownership, boundary, context, control,
-    requirement, launch, and binding failures still invalidate globally.
-    Mixed save-backed and UI-repaired final validation remains fail-closed for
-    every supplied UI screen. This correction used fakes and retained fixtures
-    only; deployment and ordinary-boundary observation remain coordinator work.
-  - [x] Consolidate every profile and runtime save claim into the authoritative
-    `data-9-game-1073` audit matrix. Implement the repository-local
-    normalized runtime foundation: guarded round identity, exact consistent
-    Perks (including ID `0` Max Health), and an exact 144-row completed-history
-    projection/fingerprint. Keep `App` and Game Over navigation unchanged.
-  - [x] Correct the revision-2 history-tail contract using retained saves:
-    separate structural tail identity from semantic More Stats publication,
-    trust source order across mixed DateTime kinds, preserve capped-rollover
-    change detection for unknown future cause IDs, and map cross-channel-proven
-    `3=Boss`, `6=Vampire`, and `99=Surrender`. Surrender carries no initiator
-    attribution. Keep malformed newest entries and unknown semantic causes on
-    UI fallback.
-  - [x] Reconcile the authorized Tier 22 natural-boundary audit against
-    `V1073-RUNTIME-003` through `V1073-RUNTIME-011`. The
-    [dated outcome and row-level evidence](../modules/player_save_import.md#2026-08-02-tier-22-natural-boundary-audit)
-    establish the core new-round, foreground-revision, final-Perk/clearing,
-    Game Over tail-candidate, complete 144-row projection, mapped Boss, and
-    optional coin-split observations. No additional purpose-built battle is
-    requested. Broader pause/background freshness, future unknown `killedBy`
-    values, Retry/Home timing, other runtime attachment consumers, and survival
-    repeated-event/timer semantics remain explicit independent extensions, not
-    blockers for `V1073-RUNTIME-013`; incomplete runtime claims still use UI
-    fallback.
-  - [x] Implement `V1073-RUNTIME-013`, the explicitly enabled read-only
-    natural-boundary audit collector defined in the runtime architecture. Its
-    allowlisted append-only receipts may record stable revision, active
-    identity/wave, complete Perk progression/clearing, structural tail change,
-    semantic availability, passive boundary timing, and strict confirmed
-    visual-event metadata. The collector is default-disabled, single-worker,
-    exact-target-bound, session-local, and fail-closed. It does not attach an
-    entry, write a battle record, decide Perks navigation, send input, change
-    lifecycle/dispatch, or suppress any UI path. The completed Tier 22 core
-    audit supplies its natural-boundary evidence prerequisite;
-    `V1073-RUNTIME-015`/`016` survival extensions remain manifest-disabled and
-    do not gate this collector.
-    - [x] The first master-owned enabled ordinary Tier 19 battle was observed
-      from exact Home `NEW_BATTLE` through `RUNNING`, stable revisions
-      `46418`–`46465` (waves 70–5091), and the natural wave-5182 Tank terminal
-      at revision `46467`. Its cleared Perks and structural/semantic tail
-      candidate were recorded, while the unchanged UI path still captured the
-      complete terminal evidence.
-    - [ ] Confirm the deployed direct-Retry repair on the next ordinary
-      `GAME_OVER -> RUNNING` pair. The first continuation exposed two
-      fail-closed gaps—old-identity retention and seven unmapped Perk IDs—now
-      fixed by `b137ea4`. The deployed fresh session has already accepted
-      counter 232 at revision `46521`, wave 290, with a complete mapped
-      two-pick checkpoint; it correctly did not inherit a pre-round baseline
-      from the terminal-only restart. The next same-process Retry should emit
-      `terminal_retry_baseline_carried` and accept the first advancing active
-      revision under the new identity. This is passive confirmation during
-      normal farming, not a request for a special battle.
+  - [ ] Confirm the deployed direct-Retry repair on the next ordinary
+    `GAME_OVER -> RUNNING` pair. The first continuation exposed old-identity
+    retention and seven unmapped Perk IDs, fixed by `b137ea4`. The fresh
+    session accepted counter 232 at revision `46521`, wave 290, without
+    inheriting a terminal-only pre-round baseline; the next same-process Retry
+    should emit `terminal_retry_baseline_carried` and accept the first
+    advancing revision under the new identity. Observe normal farming rather
+    than creating a special battle.
   - [ ] Extend the exact-version runtime projection with independently failing
     active-upgrade, survival-ability, and allowlisted live-tally components.
     For upgrades, map all three current-level arrays to their Workshop
@@ -148,21 +57,6 @@ checked-item detail remains in the
     leave `workshop_preset` explicitly deferred while the in-battle checks
     continue. This must not broaden attachment authority or reintroduce Exit
     Battle → Go Home → Resume Battle.
-  - [x] Add the narrow normal-runtime save consumer for replacement-process
-    Current-run continuity already at `RUNNING`. Under `save_first`, a
-    compatible save baseline uses same-source fingerprint/transition rules; a
-    UI baseline may enter only with parseable Tier/Wave/Battle Date and migrate
-    through exact shared-field corroboration with an unambiguous .NET `Local`
-    save date at UI minute precision. Fingerprints are never compared across
-    sources. Activity Continuity owns the guarded Android-Home serialization,
-    two-identical-read acquisition, exact active-round identity, and stable
-    source restoration. Unsupported, decode, invalid-transition, shared-field
-    mismatch, date-kind/timezone/parse ambiguity, and insufficient UI evidence
-    use UI only after restoration; process, target/generation, activity scope,
-    active identity, control, and restoration ambiguity block all later
-    input. This neither uses Force Cloud Save nor grants authority to passive
-    polling, Home `RESUME_BATTLE`, terminal records, Strategy, trackers, or
-    lifecycle input.
   - [ ] Add any other normal-runtime consumer of the observation-only polling
     and same-round audit cache only after its own matrix evidence is complete.
     The terminal report consumer is independent of that cache and uses its own
@@ -190,14 +84,6 @@ checked-item detail remains in the
   - [ ] Add the versioned raw-field disposition manifest and explicit
     validation status/provenance for every normalized profile group. Keep
     private, ignored, and unknown fields unpublished.
-  - [ ] Deploy the corrective and Tournament slot-decoder commits through the
-    coordinator-owned promotion path, then observe the first ordinary
-    save-first Home boundary, exact-next-battle bind, and natural direct Retry.
-    Confirm privacy-safe
-    per-check dispositions, the omitted versus fallback UI routes, advancing
-    source-tagged History continuity, and unchanged production authority. This
-    is ordinary rollout observation, not a request for a special battle or
-    duplicate field-validation campaign.
   - [ ] Use natural UI fallbacks and explicit/periodic `comparison_audit` runs
     for future privacy-safe candidates. Candidates never self-promote; mapping
     promotion remains a reviewed code/documentation change.
@@ -206,14 +92,6 @@ checked-item detail remains in the
       serialization-order confirmation only. The accepted complete Farm
       permutation is already sufficient for the current mapping; do not test
       all permutations.
-    - [x] Cross-validate Tournament's Project Funding and Harmony Conductor
-      `infoIndex`/typed-slot associations. The operator-authorized 2026-08-05
-      stable-save/UI pairing mapped generator Primary Project Funding `43` and
-      core Assist Harmony Conductor `39`; the same complete variation also
-      mapped armor Primary Anti-Cube Portal `20`, armor Assist Space Displacer
-      `19`, and core Primary Dimension Core `38`. Tournament remains
-      observation-only: a complete decoded variation is reported and never
-      enforced or repaired.
     - [ ] Extend exact-slot Module values only through future natural paired
       evidence. Magnetic Hook remains unmapped after the operator withdrew its
       identification; an unknown ID, unsupported requested name, or partial
@@ -249,33 +127,9 @@ checked-item detail remains in the
   recurrence, then distinguish a missed detail-open tap from unsettled
   Workshop scroll geometry or a detail-template miss before changing retry or
   stabilization behavior.
-- [x] Finish live validation of the No Strategy two-phase inventory at the next
-  natural Game Over. Do not Surrender or manufacture the boundary.
-  - [x] On the active Tier 18 Attack Dissonance battle, confirm automatic
-    Cards/Perks/UW/Modules/Bots/Guardians/Target Priority traversal, Attack
-    Dissonance Damage Slider unavailability, and guarded return to the battle.
-    The repaired pass completed at 17:26:49 and returned to `RUNNING` at wave
-    4120 under PID `3899024`.
-  - [x] At natural Game Over, confirm Attack Dissonance identity, the full
-    terminal record, forced verified Home `NEW_BATTLE`, read-only Workshop/Free
-    Upgrade lock pass, independently guarded automatic Perks opening, complete
-    First Perk/Ban/Auto Pick capture, update of the same battle record, and
-    release of the next-battle path. The natural Tier 18 boundary saved
-    `Battle20260722T185119-0700` at 18:52:25. Reload recovery retained that
-    record through the Home-only work; the completed lock and Perks evidence
-    was finalized back into the same record at 19:37:34, and WAIT continued to
-    hold verified `NEW_BATTLE` Home.
-- [ ] Complete live validation of guarded **Reload automation for current
-  battle**.
-  - [x] On the active No Strategy Attack Dissonance battle at wave 3314, the
-    original PID acknowledged Pause and published a fresh `RUNNING` frame; PID
-    `3787794` exited cleanly; replacement PID `3846802` acquired the refreshed
-    localhost:5555 lock, launched once with `next_run`, acknowledged Pause,
-    attached at wave 3315 without gates, and restored the prior `RUNNING`
-    intent. The configured cold-start policy returned to `immediate`.
-  - [ ] Confirm normal gate re-arming at the following authoritative run
-    boundary. This remaining check requires the next strategy to declare gates;
-    No Strategy itself has none.
+- [ ] Confirm normal gate re-arming after guarded **Reload automation for
+  current battle** at the next authoritative boundary under a Strategy that
+  declares gates; No Strategy itself has none.
 - [ ] Diagnose the unexpectedly early Tier 18 Farm ending recorded in
   [open issue dossier](../issues/open-2026.md#tier-18-farm-ended-at-wave-2644-without-completed-session-preflight).
   Reproduce a clean, fully validated Farm start at 720p before attributing the
@@ -285,16 +139,12 @@ checked-item detail remains in the
   The owners disappeared without a clean-shutdown record and left stale locks.
   Keep control `PAUSED` while distinguishing execution-session termination,
   an unlogged crash, and manual-player activity before restarting automation.
-- [ ] Diagnose the intermittent incomplete ADB screenshot frames recorded in
+- [ ] Diagnose the compositor or transport source of the intermittent
+  incomplete ADB screenshots recorded in the
   [open issue dossier](../issues/open-2026.md#direct-adb-screenshots-intermittently-returned-incomplete-black-frames).
-  - [x] Close the action-authority gap. A partial frame retaining narrow Game
-    Over strips still matched both state evidence and the visible Home control,
-    so capture now retries once and shared state/action boundaries reject
-    incomplete frames. Regression coverage is in
-    `test/test_incomplete_frame_authority.py` and `test/test_ss_capture.py`.
-  - [ ] Diagnose the compositor or transport source. The ignored retained
-    files no longer reproduce the recorded corruption: all four currently decode
-    as complete, and the Home failed/retry pair is byte-identical.
+  The ignored retained files no longer reproduce the corruption: all four
+  currently decode as complete, and the Home failed/retry pair is
+  byte-identical.
 - [ ] Live-revalidate the distinct Home Store-badge template at the next daily
   availability. The fixture is canonical, but the badge cleared before that
   template could be exercised live. The in-run badge, Store navigation, active
@@ -310,11 +160,14 @@ checked-item detail remains in the
   that sequence as fact. Distinguish an intentional claim-all convergence pass,
   a separate inventory pass, or another dispatch from redundant post-claim
   scanning; log the continuation reason and stop promptly once fresh evidence
-  proves that no additional claim is available.
+  proves that no additional claim is available. Track the investigation in
+  [`ISSUE-2026-009`](../issues/open-2026.md#event-mission-claim-appeared-to-repeat-the-complete-list-after-one-claim).
 - [ ] Diagnose the dropped Game Stats coin decimal retained for
   `Battle20260722T202039-0700`. The visible base value was `1.82T`, but OCR
   produced `182T`; the resulting split disagreed with the copied `2.72T` total,
-  correctly invalidated record quality, and retained source screenshots.
+  correctly invalidated record quality, and retained source screenshots. Track
+  evidence in
+  [`ISSUE-2026-007`](../issues/open-2026.md#game-stats-ocr-dropped-a-coin-value-decimal).
 
 ## Tournament Battle Condition evidence
 
@@ -322,11 +175,6 @@ checked-item detail remains in the
   record without depending on `thetower.lol`. Use the canonical alias mapping
   and source-precedence rules in
   [`../game_strategy.md`](../game_strategy.md#tournament-battle-condition-abbreviations).
-  - [x] Map current Legend Tournament identity through `playerInfo.dat`. On
-    exact version 1073, an active seed or a checked number bound to the matching
-    registry date and league drives the cross-channel-validated generator.
-    Tournaments 271–287 and the current UI set agree exactly; no raw save or
-    unmapped field is retained in record evidence.
   - [ ] Preserve a read-only UI fallback that inventories both Heat and
     Overheat tabs from a verified Tournament Heat panel, scrolls to both ends,
     deduplicates overlapping rows, and captures each displayed name, level,
@@ -337,11 +185,6 @@ checked-item detail remains in the
     stable IDs, names, aliases, provenance, game version, capture time, and
     explicit fallback state. The remaining UI reader must retain exact display
     text and unknown conditions losslessly instead of dropping or guessing.
-  - [x] Bind versioned save evidence to the matching Tournament run and merge
-    it into the eventual `Tournament*.json` record. A missing or incomplete
-    condition inventory must remain explicit and nonblocking; it must not risk
-    Tournament launch, interfere with an active run, or prevent terminal-result
-    capture.
   - [ ] Finish retained-fixture and synthetic-record coverage. Generator,
     version/league failure, post-run identity, provenance, attached-run,
     duplicate enrichment, terminal merge, and idempotent historical backfill
@@ -521,13 +364,6 @@ stages:
   [open issue dossier](../issues/open-2026.md#stopped-control-could-not-interrupt-an-in-progress-home-setup-guard).
   Preserve the current Pause behavior, but let Stop unwind the guarded route
   and release the runtime lock without requiring `KeyboardInterrupt`.
-- [ ] Finish the operator-control lifecycle.
-  - [x] Provide convenient CLI, browser, and native Windows pause/resume
-    interfaces over the authoritative control file so stopping the process
-    with `Ctrl-C` is unnecessary.
-  - [x] Make operator intent, runtime acknowledgement, and stale observation
-    visibly distinct.
-  - [ ] Ensure detected manual input automatically yields automation authority.
 - [ ] Detect likely manual player activity and automatically yield tap authority.
   - Treat unexpected Go Home/manual navigation during an active run as operator
     activity rather than an error to undo immediately.
@@ -535,140 +371,28 @@ stages:
   - After a configurable static grace period, warn before offering or performing
     a guarded return to the running battle.
   - Make the grace period interruptible and extendable through CLI/GUI controls.
-- [ ] Complete the native Windows GUI control surface described in
+- [ ] Finish the remaining native Windows GUI control-surface work described in
   [`../architecture/control_surface.md`](../architecture/control_surface.md).
-  - [x] Serve a responsive Windows-browser client from a loopback Linux
-    adapter over the same authoritative controls used by the CLI.
-  - [x] Add a self-contained native WPF client that can own the passwordless
-    OpenSSH tunnel.
-  - [x] Add the first constrained Strategy Profile Builder: dynamically list
-    bundled and custom profiles, clone/edit Farm Tier loadout policies, validate
-    through the shared builder, atomically publish source plus generated plan,
-    and keep activation as a separate existing strategy-lifecycle action.
-  - [x] Add durable custom-profile skips for Auto Pick enabled, Perk Bans, and
-    Auto Pick priority; add managed Ban and ordered Auto Pick editors; and
-    round-trip the complete Farm setup so unexposed settings are preserved.
-  - [x] Add specialized value editors for every currently registered setting.
-    Keep generated rules and executor actions protected rather than exposing
-    them as ordinary form data; treat any future raw-rule mode as a separately
-    reviewed advanced feature.
-  - [ ] Add profile-local loadout definitions without removing shared presets:
-    Module and slot definitions, an ordered Target Priority list, and an Orb
-    Distance relationship derived from observed Attack Range, Extra Orb
-    distance, and Workshop distance. Published Strategies must embed resolved
-    local data and remain independent of later mutable preset changes.
-    - [x] Implement sparse source schema 3, authoritative preset-or-local
-      normalization, retained effective-definition and Orb range-relationship
-      snapshots, immutable Base/Strategy publication evidence, history and
-      restore reuse, conservative schema-2 reading, and protected Farm-builder
-      support without changing bundled preset-only output.
-    - [x] Add an explicit additive API capability and metadata contract, then
-      implement managed WPF preset/local editors for Modules, complete ordered
-      Target Priority, and the three-field Orb Distance relationship. Preserve
-      preset-only round trips for revision-23 clients and treat definition
-      snapshots and fingerprints as server-owned review data. Revision 24 and
-      `strategy_authoring_local_loadout_editors_v1` now expose validated nested
-      local-editor metadata while retaining the old top-level preset contract;
-      the portable native suite covers exact values, malformed drafts,
-      duplicate prevention, ordering, and dormant form/source-state round
-      trips. Linux cross-publish passes.
-    - [x] Add managed installation-local custom Module presets without making
-      shared preset references mutable. Revision 25 and
-      `managed_custom_module_presets_v1` now expose one authoritative merged
-      bundled/custom catalog with full normalized eight-slot details, immutable
-      save-as-new creation from a selected preset or local definition, fixed
-      server-owned storage, collision/atomicity/concurrency protection, and
-      self-contained publication/history/restore regression coverage. The WPF
-      editor labels bundled/custom lifecycle, previews every slot, refreshes
-      options without transient selection loss, explicitly selects a created
-      preset, retains failed drafts, and leaves Validate → Review → Publish
-      pending. Linux cross-publish passes.
-    - [ ] Run the disposable-catalog Windows runtime smoke for Base and Strategy
-      preset/local editing, inheritance/override/Ignore, validation errors,
-      complete Module preset previews, bundled/custom labels, Create variant,
-      Save as preset, catalog refresh/explicit selection, collision/failure
-      retention, review/publish, history comparison, and restore-as-new. Make
-      only narrow repairs supported by that runtime evidence; preset creation
-      and publication must not activate or otherwise change automation state.
-      The 2026-08-03 attempt exposed the profile-local Module blank-selection
-      defect fixed by `7e4c7a2`; visible eight-slot revalidation with the
-      repaired revision-25 package remains required after changing a Module
-      choice and after creating each kind of custom preset.
-  - [x] Refine running-battle validation into an explicit strategy gate so
-    observation and allowlisted independent collectors can continue while
-    strategy and lifecycle actions are blocked. Validate this authority split
-    before newly editable settings rely on running-battle enforcement. The
-    typed four-class matrix, run-scoped transitions, guarded collector routes,
-    fresh runtime-owned status, revision-22 capability, and separate WPF banner
-    are implemented with focused authority/runtime/control-surface/native
-    regression coverage.
-  - [x] Retain immutable Strategy publication history and add safe fallback.
-    Every validated custom publication is now an append-only, complete retained
-    revision plus the unchanged latest-file compatibility facade. A journaled,
-    directory-synced transaction has deterministic reopen recovery and prevents
-    phantom/duplicate revisions while preserving the former latest on
-    pre-commit failure. History owns lineage/version allocation across
-    retirement; schema-1/schema-2 latest files and unambiguous retirement
-    evidence are adopted conservatively without rewriting the source evidence.
-    Revision 23 adds redacted newest-first history, current-code validation,
-    server-computed semantic comparisons, and fingerprint-bound restore-as-new
-    under `strategy_revision_history_v1`. WPF exposes active and retired
-    lineages, review, confirmation, conflicts, and catalog refresh without
-    file paths, expanded plans, deletion, selection, activation, restart,
-    Pause, or control mutation. Optional clone-from-revision was deliberately
-    not required for the safe restore path.
-  - [x] Add discoverable custom Strategy cloning and display-name renaming plus
-    recoverable deletion/retirement. Stable IDs and immutable bundled templates
-    remain protected; retirement requires the opened source fingerprint,
-    refuses the currently selected Strategy, moves the exact publication into
-    the server-owned archive, and changes neither selection nor activation.
-    Managed restoration remains coupled to the immutable Strategy-history and
-    safe-fallback item above rather than introducing a second rollback model.
-  - [x] Show directive/acknowledgement separately from primary state, menu,
-    overlays, run mode, pause status, runtime evidence, activity, and completed
-    battle records.
-  - [x] Provide indefinite/timed pause, resume, mode, and fixed-systemd-service
-    start/stop controls through an allowlisted versioned API.
-  - [x] Allow a stopped managed runtime to select and persist its localhost ADB
-    port for the next service start.
-  - [x] Allow an acknowledged paused runtime to hand off to a different
-    localhost ADB port without replacing the process or recreating strategy
-    startup/session gates. Retain Pause and the former target on validation
-    failure.
-  - [x] Keep the configured Linux ADB target registered across managed
-    automation stop/start cycles. The persistent control service owns exact-
-    target bounded reconnects; the managed runtime is observe-only, direct
-    launches retain a self-managed fallback, and an outdated installed unit is
-    rejected before a stopped managed start.
-  - [x] Allow a stopped managed start to attach to an existing battle without
-    replaying startup/session gates, then re-arm those gates at the next
-    authoritative run boundary without seeding completion state.
+  - [ ] Run the disposable-catalog Windows runtime smoke for Base and Strategy
+    preset/local editing, inheritance/override/Ignore, validation errors,
+    complete Module preset previews, bundled/custom labels, Create variant,
+    Save as preset, catalog refresh/explicit selection, collision/failure
+    retention, review/publish, history comparison, and restore-as-new. Make
+    only narrow repairs supported by that evidence; creation and publication
+    must not activate automation. Revalidate all eight Module slots with the
+    revision-25 package after changing a Module choice and after creating each
+    kind of custom preset; `7e4c7a2` fixed the earlier blank-selection defect.
   - [ ] Attribute and reduce Windows control-surface CPU use for passive
     performance collection. Retained 2026-07-30/31 aggregates measured
-    approximately `0.82%` process CPU clean and `1.9%` under contention,
+    approximately `0.83%` process CPU clean and `1.9%` under contention,
     exceeding the `<0.5%` non-frame telemetry target. Profile sampler work
     separately from UI and other process activity, retain complete evidence
-    cadence, and validate both clean and contended cases.
-  - [x] Add a guarded active-battle automation reload that pauses and obtains a
-    fresh runtime-owned `RUNNING` observation, replaces the fixed systemd unit
-    once with attachment semantics, verifies the new PID/lock/startup/control/
-    observation evidence, restores the configured cold-start policy, and
-    restores prior control intent only after readiness succeeds.
-  - [x] Merge Battle and Tournament history; classify Farm, Tournament, and
-    Milestone from strategy plus terminal evidence; and filter by type, Tier,
-    wave range, strategy, and capture quality.
-  - [x] Show Coins/hour and Cells/hour in the report banner, plus captured
-    perks, resolved settings, and observed preflight evidence.
-  - [x] Export the currently filtered completed-battle summaries as a local
-    UTF-8 CSV without expanding the Linux API authority surface.
-  - [x] Make structured completed records the canonical end-of-battle artifact:
-    include bounded Coins/min progression, Game Stats-only fields, derived
-    values, and runtime evidence; retain terminal screenshots only for problems.
-  - [ ] Validate single-instance behavior on Windows.
-    - [x] Add a per-session instance mutex and have a repeated launch restore and
-      foreground, or at least flash, the existing main window.
-    - [ ] Confirm that a second launch from the SMB publish path reaches the
-      guard without showing a host/runtime prompt and creates no second client.
+    cadence, and validate both clean and contended cases. Track evidence in
+    [`ISSUE-2026-003`](../issues/open-2026.md#windows-performance-telemetry-exceeded-its-client-cpu-budget).
+  - [ ] Confirm that a second launch from the SMB publish path reaches the
+    single-instance guard without showing a host/runtime prompt or creating a
+    second client, as tracked in
+    [`ISSUE-2026-013`](../issues/open-2026.md#a-second-native-client-launch-produced-a-misleading-runtime-prompt).
 
 ### Agreed operator-control sequence
 
@@ -676,22 +400,11 @@ The first implementation target is Battle History filter reliability. The
 remaining order is provisional and can change as operator use supplies better
 evidence.
 
-1. [ ] Stabilize Battle History filter input.
-   - [x] Do not clear and repopulate an unchanged record collection on every
-     poll. Apply genuine changes only while the filter menus are closed, retain
-     the selected battle by ID, and defer an update while any filter menu is
-     open.
-   - [x] Label the post-Strategy combo box as `Quality`, enlarge all three
-     combo-box hit targets, and retain native keyboard text search and
-     accessibility names.
-   - [x] Contain Battle History construction and initial-data failures at the
-     button boundary so an error is reported without terminating the main app.
-   - [x] Publish the self-contained Windows application successfully from
-     Linux after the change.
-   - [ ] On Windows, verify that the window opens without terminating the app,
-     a single click opens all three combo boxes, each popup remains usable across
-     multiple independent refreshes, and mouse and keyboard selection work
-     normally.
+1. [ ] Verify the repaired Battle History filter input on Windows: the window
+   opens without terminating the app, one click opens all three combo boxes,
+   each popup remains usable across independent refreshes, and mouse and
+   keyboard selection work normally. Track confirmation in
+   [`ISSUE-2026-014`](../issues/open-2026.md#battle-history-filter-dropdowns-required-repeated-clicks).
 2. [ ] Preserve an ineligible live ADB-port edit as an explicit draft instead
    of silently replacing it with the active port.
    - Explain that a live switch requires an acknowledged indefinite Pause and
@@ -713,58 +426,11 @@ evidence.
      representative prior runs. Define the comparison cohort and exclude
      configuration repairs, surrendered runs, and other non-representative
      outcomes from the estimate.
-4. [ ] Separate concise operational activity from diagnostic detail without
-   discarding either record.
-   - [x] The original split emitted operator-facing `ACTION` and `STATUS`
-     summaries for intent and outcome, with paired `DEBUG` detail where
-     coordinates, matches, retries, or `TAP_SAFE` evidence remained useful.
-   - [x] Retain both forms in the complete log, default Recent Activity to the
-     operational view, and keep diagnostics available through filters.
-     Commit `372cff3` implements the paired operator/diagnostic log stream.
-   - [x] Before a guarded or multi-step operation, log a human-readable intent
-     summary describing what automation is trying to accomplish and why, not
-     only the individual actions it performs. Commit `8bbd3eb` adds the shared
-     intent-header helper and adopts it across the primary session, setup,
-     reward, and terminal workflows.
-   - [x] Complete the next logging-taxonomy migration.
-     - [x] Define `ACTION` as one What/Why workflow notice, `RESULT` as its
-       terminal outcome, and `INPUT` as an individual device action. Preserve
-       status as a separate snapshot stream, reserve warnings for persistent
-       operator-relevant degradation, and add the logger primitives and
-       regression coverage.
-     - [x] Migrate centralized tap, swipe, and press emitters from `ACTION` to
-       `INPUT` while retaining paired `DEBUG` evidence.
-     - [x] Pair operator-meaningful workflows with exactly one `ACTION` and one
-       terminal `RESULT`; downgrade nested implementation notices. Commits
-       `5f7ef32`, `0620101`, `c975fa8`, `d35b8db`, `6b515d2`, and `110cd61`
-       migrate reward, terminal, in-battle setting, startup configuration,
-       Golden Combo, Tournament, auto-return, and nested Ultimate workflows.
-     - [x] Remove `STATUS` and general `INFO` from the default Operational
-       activity levels. Present the latest status and prior meaningful
-       transition separately while retaining complete status history. Commit
-       `bd7dd23` updates the Linux status adapter plus the browser and native
-       clients.
-     - [x] Audit recurring warnings in focused domain batches. Low-level
-       helpers should return structured outcomes; workflow owners decide when
-       persistent impact warrants a transition-based, rate-limited warning.
-       Commits `d98d67a` and `28b4a8a` move ordinary scrolling, transient
-       game-speed OCR misses, ADB retry detail, and Coins/min suffix repair out
-       of the warning stream while preserving persistent, rate-limited ADB and
-       game-speed degradation notices plus recovery records.
-     - [x] Verify that Operational reads as What/Why followed by Result,
-       Diagnostics preserves input and decision evidence, and All Levels
-       preserves complete ordering. Commit `0b18f20` adds the mixed-stream
-       audience regression. The final validation passed 817 sandbox-compatible
-       tests plus the host-loopback transport test, and the native Windows
-       publish completed successfully.
-   - [ ] Give every startup, session-preflight, and recovery check a concise
-     human-readable result that includes the requirement, expected and observed
-     state, and final disposition such as passed, failed, waived, or fallback.
-     - [x] Home preflight now emits concise passed, failed, waived, and deferred
-       results for every reached requirement. Commit `1629bb3`; live Farm T19
-       validation completed the full Home pass on 2026-07-25.
-     - [ ] Extend the same result contract to in-battle session-preflight and
-       recovery checks.
+   - Resolve the stale-running top-bar defect tracked in
+     [`ISSUE-2026-012`](../issues/open-2026.md#native-top-bar-retained-a-running-directive-after-automation-stopped).
+4. [ ] Extend concise human-readable requirement results to in-battle
+   session-preflight and recovery checks, including expected state, observed
+   state, and final disposition such as passed, failed, waived, or fallback.
 5. [ ] Publish and display Peak Coins/min for the active and completed run.
    - Maintain the active peak within an authoritative run boundary and expose
      it through the runtime snapshot; after a mid-battle attach, label a peak
@@ -782,39 +448,16 @@ evidence.
      countdown or Pause block in the runtime snapshot and GUI.
    - Add return-now, extend, and cancel only as explicit runtime directives
      with freshness and ownership checks.
-7. [ ] Support boundary-aware strategy changes without restarting automation.
-   - [x] Allow an active run to queue, replace, or cancel a pending strategy while
-     showing current strategy, pending strategy, and acknowledgement separately.
-   - [x] Finalize the current report with the current strategy, then apply the
-     pending strategy after the terminal boundary and before the next run's
-     first actionable observation.
-   - [x] Apply immediately when an authoritative no-battle Home boundary is
-     already established, including while paused for manual tournament setup;
-     do not treat a resumable Home battle as a new-run boundary.
-   - [x] Add an explicit active-battle adoption mode. After fresh `RUNNING` or
-     resumable-Home evidence, change normal behavior and completed-run strategy
-     identity without restarting, while deferring every new-run gate until the
-     next genuine boundary. Preserve boundary replacement when `NEW_BATTLE` is
-     observed first (`5cd9efe`).
-   - [x] Replace the command-like strategy buttons and adoption checkbox with a
-     strategy dropdown plus explicit queue/adopt actions. Preserve unsent
-     selection across refreshes and disable no-op adoption of the displayed
-     Current strategy (`88b603c`).
-   - [x] Advertise Linux API/revision/capability metadata, evaluate a generic
-     compiled client compatibility contract, disable dependent actions when
-     the server is stale, and offer a confirmed fixed-unit SSH restart that
-     verifies the whole contract after reconnection without touching main
-     automation (`2c06a66`, `ef8df58`).
-   - [ ] On Windows, verify immediate accepted-request feedback, current/pending
-     display, dropdown selection retention, pending replacement/cancellation
-     during a battle, stale-server warning and explicit reload, active-battle
-     adoption, and an acknowledged paused Workshop application without
-     changing Pause.
+7. [ ] Verify boundary-aware Strategy changes on Windows: immediate accepted-
+   request feedback, current/pending display, selection retention, pending
+   replacement/cancellation, stale-server warning and explicit reload,
+   active-battle adoption, and an acknowledged paused Workshop application
+   without changing Pause. Track confirmation in
+   [`ISSUE-2026-010`](../issues/open-2026.md#native-strategy-selection-did-not-report-acceptance-or-live-disposition)
+   and
+   [`ISSUE-2026-011`](../issues/open-2026.md#windows-client-could-not-identify-or-reload-a-stale-linux-control-service).
 8. [ ] Rework Battle History filters after the input defect is fixed and their
    real behavior can be evaluated.
-   - [x] Populate the Strategy dropdown with `All` plus distinct strategies
-     from the currently loaded records, use exact matching, and preserve the
-     selected or applied strategy across refreshes.
    - Prioritize useful distinctions such as type, Tier, strategy, outcome,
      quality, and date range. Retain wave range only if operator use justifies
      it, otherwise move it to an advanced view or remove it.
@@ -822,32 +465,15 @@ evidence.
      newest-record page.
 9. [ ] Define and implement report disposition for short, interrupted,
    configuration-repair, surrendered, and manually aborted battles.
-   - [x] Treat an automation-owned configuration-repair Surrender as a control
-     transition rather than a completed battle: bypass Perks/More Stats and
-     battle-record capture, then take the guarded Home route.
    - Classify these outcomes first and exclude non-representative runs from the
      normal history and analytics by default without erasing evidence.
    - If operator use still requires permanent discard, expose only a confirmed,
      audited exact-record operation through the versioned API. Never add
      arbitrary path or file-deletion authority and never delete automatically.
-10. [ ] Add configurable dashboard layout, covering panel placement and size
-    as well as splitter and top-level window geometry.
-    - [x] Persist the main and Battle History window positions, sizes, and
-      maximized states locally; reject unusable off-screen placement and never
-      reopen minimized.
-    - [x] Replace the four-card scrolling rail with full-height Controls,
-      Process, Setup, and Details tabs. Persist the selected tab, control-pane
-      width, and latest-battle height.
-    - [x] Make Previous Game Screen, Host Health, and the latest-battle summary
-      independently collapsible, persist their state, preserve minimum pane
-      sizes, and provide a Reset Layout action.
-    - [ ] Validate the revised layout on Windows at the minimum, default, and
-      maximized window sizes. Based on operator use, decide whether arbitrary
-      drag-to-reorder, hiding, or floating panes would add enough value beyond
-      the tabbed and collapsible layout.
-11. [ ] Make the optional connection Token field self-explanatory and advanced.
-    - [x] Move it to Setup, label it optional, and explain in tooltips that it
-      is an in-memory bearer credential which is never saved.
-    - [ ] Confirm on Windows that the tooltip and Setup placement make clear
-      that the field is only for an explicitly authenticated adapter or reverse
-      proxy and should remain blank for the normal loopback SSH tunnel.
+10. [ ] Validate the revised dashboard layout on Windows at minimum, default,
+    and maximized sizes. Based on operator use, decide whether drag-to-reorder,
+    hiding, or floating panes add enough value beyond the tabbed and
+    collapsible layout.
+11. [ ] Confirm on Windows that the optional Token tooltip and Setup placement
+    make clear that it is only for an explicitly authenticated adapter or
+    reverse proxy and should remain blank for the normal loopback SSH tunnel.

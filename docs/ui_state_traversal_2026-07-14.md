@@ -120,9 +120,10 @@ precedence over the fallback modal primary.
 
 ## Remaining traversal work
 
-- Continue the broader farm-lifecycle and transient-dialog audit tracked in
-  `PENDING_DEVELOPMENT.md`; this pass deliberately stayed within the safe
-  no-battle Home and initialization scope.
+- Continue the broader farm-lifecycle and transient-dialog audit in the
+  [state-coverage backlog](backlog/state-and-detection.md#state-coverage-and-recovery);
+  this pass deliberately stayed within the safe no-battle Home and
+  initialization scope.
 - Add explicit recovery policy for known non-running panels as part of the
-  planned interruptible non-running recovery work. Recognition alone does not
-  grant a handler tap authority.
+  [planned interruptible non-running recovery work](backlog/state-and-detection.md#state-coverage-and-recovery).
+  Recognition alone does not grant a handler tap authority.

@@ -130,6 +130,10 @@ Before editing:
    task. Do not accumulate several verified changes merely because the shared
    worktree contains unrelated modifications; report a real ownership or
    validation blocker if one prevents the commit.
+6. If a behavioral guard or assumption blocks the requested outcome, stop the
+   state-changing path, preserve the evidence, and present repair, redesign,
+   defer, and workaround options with their safety and maintenance tradeoffs.
+   Do not weaken the guard or substitute a blind action merely to finish.
 
 Run automated validation proportionate to the remaining uncertainty. Code-only
 work does not require ADB access or inspection of a live automation process.

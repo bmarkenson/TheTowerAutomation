@@ -7,23 +7,21 @@ Completed and superseded detail remains in the
 
 ## State coverage and recovery
 
-- [ ] Audit every reachable menu, popup, overlay, and transition.
+- [ ] Complete state-coverage auditing across every reachable menu, popup,
+  overlay, transition, and full Farm-run lifecycle.
   - Exercise each state on live supported `1080x1920` and `720x1280` devices
     and save representative screenshots/templates where appropriate.
-  - Ensure expected screens never resolve to `UNKNOWN`.
+  - Exercise Battle/Resume, Exit Battle, Game Stats, Store availability,
+    Modules, Cards, Workshop/Bot presets, Perks, Labs, and transient dialogs.
+  - Accept `UNKNOWN` only for genuinely unsupported states; add explicit state
+    definitions for expected screens.
   - Add regression fixtures for every recognized primary, secondary, menu, and
-    overlay state.
+    overlay state, including overlay coexistence and state transitions.
+  - Keep one canonical fixture per distinct screen state and compare the live
+    inventory with the recursive static template audit.
   - The active-battle, Home-with-Resume, and completed no-battle Home evidence
     is recorded in
     [`../ui_state_traversal_2026-07-14.md`](../ui_state_traversal_2026-07-14.md).
-- [ ] Perform a guided live traversal of every reachable screen and a complete
-  farm-run lifecycle to find missing or stale templates.
-  - Save one canonical fixture per distinct screen state, not routine gameplay
-    screenshots.
-  - Exercise Battle/Resume, Exit Battle, Game Stats, Store availability,
-    modules, cards, workshop/bot presets, perks, labs, and transient dialogs.
-  - Compare every fixture with the recursive static template audit and add
-    explicit state definitions for expected `UNKNOWN` results.
 - [ ] Replace non-running recovery with an interruptible five-minute timer.
   - Cancel or reset it immediately when `RUNNING` returns.
   - Warn at least twice before recovery.
@@ -36,7 +34,9 @@ Completed and superseded detail remains in the
 - [ ] Revalidate and harden Coins/min OCR for the case-sensitive `q` and `Q`
   magnitude suffixes. Retain the relevant crop and OCR candidates when a
   suffix is absent or ambiguous, cover both suffixes with fixtures, and verify
-  the accepted live value cannot silently lose or change its scale.
+  the accepted live value cannot silently lose or change its scale. Track the
+  evidence in
+  [`ISSUE-2026-024`](../issues/open-2026.md#coinsmin-visual-ocr-failed-to-recognize-q-or-q).
 - [ ] Harden runtime wave consumption against isolated OCR rollbacks.
   - Preserve stateless per-frame OCR; do not restore fixed progression-rate,
     digit-width, or wave-ceiling assumptions.
@@ -49,25 +49,13 @@ Completed and superseded detail remains in the
     [open issue dossier](../issues/open-2026.md#wave-ocr-dropped-the-leading-digits-from-wave-1180).
 - [ ] Finish matcher API and policy consolidation after fixture coverage is
   broad enough to make the compatibility decision safely.
-  - Migrate remaining `utils.template_matcher` shim callers to `core.matcher`.
+  - Migrate the remaining `utils.template_matcher` shim callers in
+    `core/floating_button_detector.py` and `core/state_detector.py` to
+    `core.matcher`.
   - Measure color/padding profiles against representative positive and negative
     fixtures.
   - Choose one canonical policy deliberately, then remove the compatibility
     shim and profile split.
-- [ ] Preserve the scheduled floating-gem intercept and add a fresh on-screen
-  `RUNNING` authorization check without delaying its cadence.
-  - Bob follows an approximately 180–190 px circular orbit around `(540,480)`;
-    the existing `(542,671)` bottom intercept is proven. Bob speed is static;
-    retrieval timestamps, buffering, skipped sequences, and manual labels are
-    not game-motion evidence.
-  - Historical directional templates and the magenta heuristic are unsafe as
-    single-frame detectors. Multi-frame tracking remains optional research.
-  - The positive and negative capture provenance is preserved in the
-    [`2026-07-14 architecture history`](../architecture/history/architecture_direction_2026-07-14.md#floating-gem-bob-conclusion).
-    Promote reviewed fixtures from `/tmp` before relying on them durably.
-  - Have an app-owned observer publish a short-lived `RUNNING` lease. The tapper
-    should make an O(1) check immediately before each tap and skip stale or
-    invalid leases without shifting the absolute monotonic schedule.
 - [ ] Add composite state-definition logic such as `all_of`, `any_of`, and
   explicit exclusions.
   - Preserve simple `match_keys` for straightforward states.
@@ -78,14 +66,16 @@ Completed and superseded detail remains in the
 - [ ] Add a `LAB_READY` overlay and handler after capturing stable evidence,
   then design optional Lab automation around a configured queue and explicit
   spending safeguards.
-- [ ] Add automated overlay-coexistence and state-transition regression tests as
-  part of the full live state-coverage audit.
-
 ## Capture and action architecture
 
-- [ ] Evaluate an app-owned low-latency frame source for scrolling and other
-  multi-frame decisions.
+- [ ] Build and validate an app-owned low-latency frame/state source for
+  multi-frame decisions and short-lived action authorization.
   - Define sequence, capture-time, freshness, and post-input frame semantics.
+  - Publish a thread-safe UI-state snapshot and short-lived `RUNNING` action
+    lease. Immediately before a scheduled floating-gem tap, make an O(1)
+    freshness check and skip stale authority without phase-shifting the
+    absolute monotonic cadence. Preserve Bob evidence in the
+    [`2026-07-14 architecture history`](../architecture/history/architecture_direction_2026-07-14.md#floating-gem-bob-conclusion).
   - Replace fixed post-swipe sleeps with bounded fresh-frame observation and
     require stable consecutive frames before declaring settle or edge.
   - Preserve source-screen guards and a guarded raw screenshot fallback.
@@ -95,8 +85,5 @@ Completed and superseded detail remains in the
     migrating callers.
   - Keep frame-source ownership at the App layer so handlers cannot start
     competing recording processes.
-- [ ] Review tap/action execution with the shared frame source.
-  - Decide whether a post-input frame barrier belongs in the action layer.
-  - Include a thread-safe UI-state snapshot and short-lived action lease.
-  - Preserve absolute monotonic schedules; a stale guard skips the current
-    action instead of phase-shifting later attempts.
+  - Decide whether a post-input fresh-frame barrier belongs in the action
+    layer while preserving source-screen guards and action ownership.
