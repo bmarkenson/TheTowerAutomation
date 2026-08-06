@@ -583,6 +583,15 @@ class RunBoundaryTests(unittest.TestCase):
 
 class DeferredStartupGateTests(unittest.TestCase):
     @staticmethod
+    def _report_evidence():
+        return {
+            "valid": True,
+            "failed_checks": [],
+            "deferred_checks": ["free_upgrade_locks"],
+            "configuration": {"cards": {"label": "Farm"}},
+        }
+
+    @staticmethod
     def _strategy():
         return YamlStrategy(
             {
@@ -633,6 +642,26 @@ class DeferredStartupGateTests(unittest.TestCase):
                 ],
             }
         )
+
+    @classmethod
+    def _v2_receipt(cls, strategy, *, run_id="current-run"):
+        fingerprint = strategy.session_preflight_fingerprint()
+        return {
+            "schema_version": 2,
+            "status": "completed",
+            "activity_scope_run_id": run_id,
+            "strategy": strategy.name,
+            "configuration_fingerprint": fingerprint,
+            "completed_at": "2026-08-06T12:34:56-07:00",
+            "evidence": {
+                "schema_version": 1,
+                "status": "available",
+                "activity_scope_run_id": run_id,
+                "strategy": strategy.name,
+                "configuration_fingerprint": fingerprint,
+                "payload": cls._report_evidence(),
+            },
+        }
 
     def test_existing_battle_skips_only_gate_rules(self):
         strategy = self._strategy()
@@ -685,8 +714,21 @@ class DeferredStartupGateTests(unittest.TestCase):
         manager = MissionManager(None, strategy)
         manager.start()
         manager.maybe_run_start({"state": "RUNNING"})
-        manager.ctx.data["mission_vars"]["session_gate_done"] = True
-        scope = {"run_id": "current-run"}
+        mission_vars = manager.ctx.data["mission_vars"]
+        mission_vars["session_gate_done"] = True
+        evidence = self._report_evidence()
+        mission_vars["gc_session_preflight_evidence"] = evidence
+        scope = {
+            "run_id": "current-run",
+            "session_preflight": {
+                "schema_version": 1,
+                "status": "completed",
+                "strategy": strategy.name,
+                "configuration_fingerprint": (
+                    strategy.session_preflight_fingerprint()
+                ),
+            },
+        }
 
         with (
             patch(
@@ -708,7 +750,38 @@ class DeferredStartupGateTests(unittest.TestCase):
             configuration_fingerprint=(
                 strategy.session_preflight_fingerprint()
             ),
+            evidence=evidence,
         )
+
+    def test_unsafe_completed_report_is_not_persisted_or_warned_each_tick(self):
+        strategy = self._strategy()
+        manager = MissionManager(None, strategy)
+        manager.start()
+        manager.maybe_run_start({"state": "RUNNING"})
+        mission_vars = manager.ctx.data["mission_vars"]
+        mission_vars["session_gate_done"] = True
+        mission_vars["gc_session_preflight_evidence"] = {
+            "valid": True,
+            "failed_checks": [],
+            "score": float("nan"),
+        }
+
+        with (
+            patch(
+                "automation.missions.manager.get_activity_scope",
+                return_value={"run_id": "current-run"},
+            ),
+            patch(
+                "automation.missions.manager."
+                "record_activity_scope_session_preflight"
+            ) as record,
+            patch("automation.missions.manager.log") as log,
+        ):
+            self.assertFalse(manager.persist_session_preflight_completion())
+            self.assertFalse(manager.persist_session_preflight_completion())
+
+        record.assert_not_called()
+        log.assert_called_once()
 
     def test_confirmed_same_battle_reuses_matching_session_receipt(self):
         strategy = self._strategy()
@@ -720,16 +793,15 @@ class DeferredStartupGateTests(unittest.TestCase):
         )
         manager.start()
         manager.maybe_run_start({"state": "RUNNING"})
+        placeholder = {
+            "free_upgrade_locks": {"status": "unavailable_deferred"}
+        }
+        manager.ctx.data["mission_vars"][
+            "gc_session_preflight_evidence"
+        ] = placeholder
         scope = {
             "run_id": "current-run",
-            "session_preflight": {
-                "schema_version": 1,
-                "status": "completed",
-                "strategy": strategy.name,
-                "configuration_fingerprint": (
-                    strategy.session_preflight_fingerprint()
-                ),
-            },
+            "session_preflight": self._v2_receipt(strategy),
         }
 
         with patch(
@@ -747,8 +819,190 @@ class DeferredStartupGateTests(unittest.TestCase):
         self.assertFalse(manager.attached_validation_requested())
         self.assertFalse(manager.session_preflight_pending())
         self.assertEqual(
+            manager.ctx.data["restored_session_preflight_report_evidence"],
+            self._report_evidence(),
+        )
+        self.assertEqual(
+            manager.ctx.data["mission_vars"][
+                "gc_session_preflight_evidence"
+            ],
+            placeholder,
+        )
+        self.assertFalse(
+            manager.ctx.data["mission_vars"].get(
+                "gc_session_preflight_completed",
+                False,
+            )
+        )
+        self.assertFalse(manager.ctx.data["mission_vars"]["session_gate_done"])
+        self.assertEqual(
             strategy.tick(manager.ctx, object(), {"state": "RUNNING"}),
             [{"type": "normal_action"}],
+        )
+
+    def test_two_replacements_restore_the_same_detailed_report(self):
+        strategy = self._strategy()
+        scope = {
+            "run_id": "current-run",
+            "session_preflight": self._v2_receipt(strategy),
+        }
+
+        for _ in range(2):
+            replacement_strategy = self._strategy()
+            manager = MissionManager(
+                None,
+                replacement_strategy,
+                defer_startup_gates_until_next_run=True,
+                validate_attached_battle=True,
+            )
+            manager.start()
+            manager.maybe_run_start({"state": "RUNNING"})
+            with patch(
+                "automation.missions.manager.get_activity_scope",
+                return_value=scope,
+            ):
+                reused = (
+                    manager.reuse_session_preflight_for_confirmed_attachment(
+                        "current-run"
+                    )
+                )
+
+            self.assertTrue(reused)
+            self.assertEqual(
+                manager.ctx.data[
+                    "restored_session_preflight_report_evidence"
+                ],
+                self._report_evidence(),
+            )
+
+    def test_legacy_receipt_reuse_reports_detailed_evidence_unavailable(self):
+        strategy = self._strategy()
+        manager = MissionManager(
+            None,
+            strategy,
+            defer_startup_gates_until_next_run=True,
+            validate_attached_battle=True,
+        )
+        manager.start()
+        manager.maybe_run_start({"state": "RUNNING"})
+        manager.ctx.data["mission_vars"][
+            "gc_session_preflight_evidence"
+        ] = {"free_upgrade_locks": {"status": "unavailable_deferred"}}
+        scope = {
+            "run_id": "current-run",
+            "session_preflight": {
+                "schema_version": 1,
+                "status": "completed",
+                "strategy": strategy.name,
+                "configuration_fingerprint": (
+                    strategy.session_preflight_fingerprint()
+                ),
+                "completed_at": "2026-08-05T12:34:56-07:00",
+            },
+        }
+
+        with patch(
+            "automation.missions.manager.get_activity_scope",
+            return_value=scope,
+        ):
+            reused = manager.reuse_session_preflight_for_confirmed_attachment(
+                "current-run"
+            )
+
+        self.assertTrue(reused)
+        report = manager.ctx.data[
+            "restored_session_preflight_report_evidence"
+        ]
+        self.assertEqual(report["status"], "unavailable")
+        self.assertEqual(
+            report["reason"],
+            "legacy_completed_receipt_has_no_report_evidence",
+        )
+        self.assertNotIn("free_upgrade_locks", report)
+
+    def test_malformed_v2_receipt_does_not_suppress_attached_checks(self):
+        strategy = self._strategy()
+        base_receipt = self._v2_receipt(strategy)
+        malformed_receipts = []
+        for mutation in (
+            lambda value: value.update(activity_scope_run_id="other-run"),
+            lambda value: value["evidence"].update(
+                activity_scope_run_id="other-run"
+            ),
+            lambda value: value["evidence"].update(strategy="other-strategy"),
+            lambda value: value["evidence"].update(schema_version=2),
+            lambda value: value["evidence"]["payload"].update(valid=False),
+            lambda value: value["evidence"]["payload"].update(
+                failed_checks=["cards_deck"]
+            ),
+            lambda value: value.update(completed_at="not-a-timestamp"),
+            lambda value: value.update(schema_version=3),
+        ):
+            receipt = copy.deepcopy(base_receipt)
+            mutation(receipt)
+            malformed_receipts.append(receipt)
+
+        for receipt in malformed_receipts:
+            with self.subTest(receipt=receipt):
+                manager = MissionManager(
+                    None,
+                    self._strategy(),
+                    defer_startup_gates_until_next_run=True,
+                    validate_attached_battle=True,
+                )
+                manager.start()
+                manager.maybe_run_start({"state": "RUNNING"})
+                with patch(
+                    "automation.missions.manager.get_activity_scope",
+                    return_value={
+                        "run_id": "current-run",
+                        "session_preflight": receipt,
+                    },
+                ):
+                    reused = (
+                        manager.reuse_session_preflight_for_confirmed_attachment(
+                            "current-run"
+                        )
+                    )
+
+                self.assertFalse(reused)
+                self.assertTrue(manager.attached_validation_requested())
+                self.assertTrue(manager.session_preflight_pending())
+
+    def test_restored_report_clears_at_the_next_battle_start(self):
+        strategy = self._strategy()
+        manager = MissionManager(
+            None,
+            strategy,
+            defer_startup_gates_until_next_run=True,
+            validate_attached_battle=True,
+        )
+        manager.start()
+        manager.maybe_run_start({"state": "RUNNING"})
+        scope = {
+            "run_id": "current-run",
+            "session_preflight": self._v2_receipt(strategy),
+        }
+        with patch(
+            "automation.missions.manager.get_activity_scope",
+            return_value=scope,
+        ):
+            self.assertTrue(
+                manager.reuse_session_preflight_for_confirmed_attachment(
+                    "current-run"
+                )
+            )
+
+        manager.maybe_run_start({"state": "GAME_OVER"})
+        self.assertIn(
+            "restored_session_preflight_report_evidence",
+            manager.ctx.data,
+        )
+        manager.maybe_run_start({"state": "RUNNING"})
+
+        self.assertNotIn(
+            "restored_session_preflight_report_evidence",
+            manager.ctx.data,
         )
 
     def test_same_battle_without_matching_receipt_still_runs_checks(self):
@@ -2054,16 +2308,24 @@ class GcFarmProfileTests(unittest.TestCase):
     def test_completed_farm_run_reports_new_battle_lock_evidence(self):
         strategy = get_strategy("farm_t18")
         boundary_evidence = _free_upgrade_lock_boundary_evidence()
+        restored_report = {
+            "valid": True,
+            "failed_checks": [],
+            "free_upgrade_locks": boundary_evidence,
+            "configuration": {"cards": {"label": "Farm"}},
+        }
         manager = MagicMock()
         manager.strategy = strategy
         manager.ctx = MissionContext(
             data={
+                "restored_session_preflight_report_evidence": restored_report,
                 "mission_vars": {
                     "gc_session_preflight_evidence": {
-                        "valid": True,
-                        "free_upgrade_locks": boundary_evidence,
+                        "free_upgrade_locks": {
+                            "status": "unavailable_deferred"
+                        },
                     }
-                }
+                },
             }
         )
         manager.session_preflight_repair_in_progress.return_value = False
@@ -2090,10 +2352,11 @@ class GcFarmProfileTests(unittest.TestCase):
 
             game_over.call_args.kwargs["after_retry_started"]()
 
-        reported = game_over.call_args.kwargs["battle_context"][
-            "session_preflight_evidence"
-        ]
+        battle_context = game_over.call_args.kwargs["battle_context"]
+        reported = battle_context["session_preflight_evidence"]
+        self.assertEqual(reported, restored_report)
         self.assertEqual(reported["free_upgrade_locks"], boundary_evidence)
+        self.assertNotIn("observed_run_configuration", battle_context)
         retry_scope.assert_called_once_with()
         manager.on_game_over.assert_called_once_with()
 

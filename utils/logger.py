@@ -18,6 +18,7 @@ DEFAULT_ACTION_LOG_PATH = os.path.join("logs", "actions.log")
 DEFAULT_ACTIVITY_SCOPE_FILENAME = "activity_scope.json"
 DEFAULT_ACTION_LOG_MAX_BYTES = 16 * 1024 * 1024
 DEFAULT_ACTION_LOG_BACKUP_COUNT = 5
+SESSION_PREFLIGHT_REPORT_EVIDENCE_MAX_BYTES = 64 * 1024
 ACTION_LOG_MAX_BYTES_ENV = "TOWER_ACTION_LOG_MAX_BYTES"
 ACTION_LOG_BACKUP_COUNT_ENV = "TOWER_ACTION_LOG_BACKUP_COUNT"
 _WRITE_LOCK = threading.Lock()
@@ -227,8 +228,9 @@ def record_activity_scope_session_preflight(
     run_id: str,
     strategy: str,
     configuration_fingerprint: str,
+    evidence: Mapping[str, object],
 ) -> Optional[dict[str, object]]:
-    """Attach a completed session-check receipt to the matching run scope."""
+    """Attach completed checks and their report evidence to a matching scope."""
 
     expected_run_id = str(run_id or "").strip()
     normalized_strategy = str(strategy or "").strip()
@@ -239,6 +241,9 @@ def record_activity_scope_session_preflight(
         raise ValueError("Session preflight strategy must not be empty")
     if not normalized_fingerprint:
         raise ValueError("Session preflight fingerprint must not be empty")
+    normalized_evidence = normalize_session_preflight_report_evidence(
+        evidence
+    )
 
     scope_path = get_activity_scope_path()
     with _WRITE_LOCK:
@@ -249,19 +254,85 @@ def record_activity_scope_session_preflight(
         ):
             return None
         payload["session_preflight"] = {
-            "schema_version": 1,
+            "schema_version": 2,
             "status": "completed",
+            "activity_scope_run_id": expected_run_id,
             "strategy": normalized_strategy,
             "configuration_fingerprint": normalized_fingerprint,
             "completed_at": datetime.now().astimezone().isoformat(
                 timespec="microseconds"
             ),
+            "evidence": {
+                "schema_version": 1,
+                "status": "available",
+                "activity_scope_run_id": expected_run_id,
+                "strategy": normalized_strategy,
+                "configuration_fingerprint": normalized_fingerprint,
+                "payload": normalized_evidence,
+            },
         }
         try:
             _write_json_atomic(scope_path, payload)
         except OSError:
             return None
     return dict(payload)
+
+
+def normalize_session_preflight_report_evidence(
+    evidence: Mapping[str, object],
+) -> dict[str, object]:
+    """Return one detached, finite, size-bounded JSON evidence mapping."""
+
+    if not isinstance(evidence, Mapping):
+        raise ValueError("Session preflight report evidence must be a mapping")
+    try:
+        _require_json_mapping_keys(evidence)
+        encoded = json.dumps(
+            dict(evidence),
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    except (OverflowError, RecursionError, TypeError, ValueError) as exc:
+        raise ValueError(
+            "Session preflight report evidence must contain only finite, "
+            "acyclic JSON values"
+        ) from exc
+    if len(encoded.encode("utf-8")) > SESSION_PREFLIGHT_REPORT_EVIDENCE_MAX_BYTES:
+        raise ValueError("Session preflight report evidence exceeds the size limit")
+    normalized = json.loads(encoded)
+    if not isinstance(normalized, dict) or not normalized:
+        raise ValueError("Session preflight report evidence must not be empty")
+    return normalized
+
+
+def _require_json_mapping_keys(
+    value: object,
+    ancestors: Optional[set[int]] = None,
+) -> None:
+    """Reject lossy JSON key coercion anywhere in retained report evidence."""
+
+    if not isinstance(value, (Mapping, list, tuple)):
+        return
+    ancestors = set() if ancestors is None else ancestors
+    marker = id(value)
+    if marker in ancestors:
+        raise ValueError("Session preflight report evidence must not contain cycles")
+    ancestors.add(marker)
+    try:
+        if isinstance(value, Mapping):
+            for key, nested in value.items():
+                if not isinstance(key, str):
+                    raise ValueError(
+                        "Session preflight report evidence keys must be strings"
+                    )
+                _require_json_mapping_keys(nested, ancestors)
+        else:
+            for nested in value:
+                _require_json_mapping_keys(nested, ancestors)
+    finally:
+        ancestors.remove(marker)
 
 
 def _scope_completed_battle(
