@@ -33,6 +33,30 @@ owner work. Complete the repository-change checklist before this procedure and
 | Interpreter or locked dependencies | Stop every affected service and retain the prior environment or a proven rebuild path through smoke validation. |
 | Installed unit or persistent-state format | Treat installation/migration as a separately reviewed operation with recovery recorded first. A checked-in unit change does not install itself. |
 
+## Retire promoted feature work
+
+The [repository topology](../architecture/development_isolation.md#repository-and-git-topology)
+keeps the `main` and `develop` branches and worktrees permanent; each feature
+branch and worktree is temporary. After promotion succeeds and the outcome's
+required validation and evidence are durable:
+
+1. Re-list every local branch and linked worktree. In each feature candidate,
+   recheck the branch and `HEAD`, staged and unstaged changes, nonignored
+   untracked files, ignored files that could contain operator work or required
+   evidence, and active ownership. Prove every accepted commit is integrated
+   into `main` and require the branch tip to be its ancestor; a merged label or
+   patch-equivalent cherry-pick does not override uncertainty or the
+   `git branch -d` ancestry guard.
+2. Present the exact worktree/branch pairs and obtain operator approval. Exclude
+   `main`, `develop`, rollback tags, remote branches, and every ambiguous item.
+3. Run `git worktree remove <exact-path>` and then
+   `git branch -d <exact-branch>` for each approved pair. Never recursively
+   delete a worktree or force-delete a branch; retain any refused pair for
+   review.
+4. Re-list branches and worktrees, verify the permanent refs and checkouts are
+   unchanged and clean, preserve rollback tags, and run proportionate
+   repository validation.
+
 ## Failed smoke test
 
 1. Stop the affected service before changing files or environments again.

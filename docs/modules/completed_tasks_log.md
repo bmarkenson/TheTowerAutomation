@@ -39,6 +39,28 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-06 post-promotion branch/worktree lifecycle cleanup
+
+- A fresh audit classified all 25 local feature branches and linked worktrees
+  by worktree cleanliness, ignored content, `main` integration, durable
+  validation/evidence, and active ownership. With exact operator approval, 11
+  qualifying worktrees were removed through `git worktree remove` and their
+  local branches through `git branch -d`; four active or unintegrated pairs and
+  ten ambiguous pairs were retained. The permanent `main` and `develop`
+  checkouts, rollback tags, remote branches, and user-owned or required
+  evidence were untouched.
+- The production-promotion operation now owns the executable cleanup procedure
+  and links the existing repository-topology contract. It requires fresh
+  per-candidate inspection, exact approval, ancestry compatible with the safe
+  branch-deletion guard, refusal-preserving Git commands, and final topology
+  validation without adding another document or mandatory startup path.
+- The complete isolated checkpoint passed compilation, state-definition
+  validation, clickmap integrity with zero errors and the 44 established orphan
+  candidates, and all 1,664 tests in 326.39 seconds. The changed local target
+  and anchor resolved and `git diff --check` passed. No runtime process,
+  service, ADB target, emulator, control state, or battle was inspected or
+  changed.
+
 ### 2026-08-06 version-1073 raw save-field disposition audit
 
 - `1d424f2` inventories all 739 exact `SaveLoad+PlayerData` decoded-root keys
