@@ -19,12 +19,14 @@ work. Historical checked detail remains in the
   - This is a concurrency guard, not a total-usage budget. Until it is
     compatible, the three-direct-subagent invariant in `AGENTS.md` remains
     authoritative.
-- [ ] Continue the full template audit begun on 2026-07-13.
+- [ ] Continue the full template audit begun on 2026-07-13 through the
+  [current template workflow](../tooling/template_workflow.md).
   - Resolve or classify the recursive validator's dated orphan list.
   - Add fixture-based match verification so a present template is also proven
     current against a canonical screen.
   - Require the recursive validator in the normal test/checkpoint workflow.
-- [ ] Build one recursive validator for clickmap and state-definition schema.
+- [ ] Build one recursive validator for the
+  [clickmap and state-definition schema](../reference/ui_detection_schema.md).
   - Validate entries, roles, regions, files, templates, taps, swipes,
     thresholds, and dangling YAML references.
   - Enforce or migrate toward one naming convention.
@@ -74,7 +76,7 @@ The implemented contract and deterministic validation are recorded in the
 ## Codebase maintenance
 
 - [ ] Resolve the compatibility and removal decisions from the
-  [2026-07-26 codebase maintenance audit](../codebase_maintenance_audit_2026-07-26.md).
+  [2026-07-26 codebase maintenance audit](history/codebase_maintenance_audit_2026-07-26.md).
   - Trace imports, runtime entry points, dynamic/YAML references, strategies,
     clickmap usage, and tests before classifying anything as dead.
   - Classify findings as active, generated, tooling, archival, or removable.

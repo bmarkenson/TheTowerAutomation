@@ -20,21 +20,26 @@ The runtime YAML is generated from a compact source file so you don’t have to 
 1. Update `config/strategies/blender.source.yaml` (ordered list of targets, settings).
 2. Regenerate the expanded strategy:
 
-   ```
-   python tools/strategy_builders/blender.py
+   ```bash
+   .venv/bin/python tools/strategy/build_strategy.py \
+     config/strategies/blender.source.yaml
    ```
 
-   (Use `--source` / `--output` flags to override paths if needed.)
+   The source is positional; use optional `--output` to override the generated
+   plan path.
 3. Commit both the source and regenerated `config/strategies/blender.strategy.yaml`.
 
-The builder lives in `tools/strategy_builders/lib.py` if you want to script other plans.
+The supported CLI is `tools/strategy/build_strategy.py`; its implementation is
+`tools/strategy_builders/build_strategy.py`, and reusable generation lives in
+`tools/strategy_builders/lib.py`. See the
+[YAML strategy reference](docs/reference/yaml_strategy.md) for plan ownership.
 
 Strategies can optionally declare `settings.ultimate_targets` (array of `{label, toggles}`) to specify which Ultimate Weapons should be enforced when the run starts; each toggle entry may be a string (implying `on`) or an object `{name, state: on|off}`. Individual phases may also include `ultimate_targets` to override the list once their conditions are met.
 
 Example command:
 
-```
-python main.py \
+```bash
+.venv/bin/python main.py \
   --strategy-config config/strategies/blender.strategy.yaml \
   --mission-log logs/blender_mission.log
 ```
@@ -181,65 +186,16 @@ target change or Pause is rechecked before the next input. Farm gives the
 urgent EHLS/EALS purchases first action priority; other profiles may enforce
 speed immediately after `RUNNING` is verified.
 
-### Validating Tournament setup
+### Tournament setup and observation
 
-Select the `tournament` strategy while the game is at verified Home **New
-Battle** to run the pre-start Tournament setup. The Home route selects
-Tournament Cards, Tourney Workshop, Amplify Bots, Attack/Ally/Scout Guardians,
-and the Tournament module inventory. Modules are observed against the
-`tournament_standard` reference without being changed or blocking a confident
-variation; the other settings remain enforced. It retains that evidence,
-leaves Tournament entry manual, and never presses the normal Battle control.
-Once the Tournament starts, session preflight consumes the Home evidence and
-checks only all nine Ultimate Weapons plus Spotlight missiles. Tournaments
-have no Perks.
-
-The standalone Tournament validator remains a read-only live test for an
-already active Tournament. It checks the same contract without changing it.
-
-Pause persistent automation intent before running the test, then restore the
-previous control state after it returns to the same battle:
-
-```bash
-.venv/bin/python tools/automation_ctl.py pause
-.venv/bin/python tools/validate_tournament_preflight.py
-.venv/bin/python tools/automation_ctl.py resume
-```
-
-The validator refuses to navigate unless the control file declares `PAUSED`
-and a fresh complete screenshot proves `RUNNING/TOURNAMENT`. It never selects a
-preset, equips a module, or Surrenders. Cards, Ultimate Weapons, Modules, Bots,
-and Guardians are inspected from the active battle. Only Workshop uses the
-guarded Exit Battle → Go Home route; the validator then requires verified
-Resume evidence. A confidently identified Module variation is recorded against
-the reference and passes; an enforced-setting mismatch or incomplete Module
-identity evidence exits nonzero. Pass
-`--capture-only --output-dir PATH` to retain the same guarded screens without
-evaluating them.
-
-To keep observing that Tournament after the check, start the passive profile:
-
-```bash
-.venv/bin/python main.py --adb-port 5555 --strategy tournament --no-restart
-```
-
-The Tournament profile attempts the same read-only validation once, records a
-conclusive pass or mismatch as session evidence, including when attaching to
-an already-running Tournament. A confident Module variation is named in the
-successful result and retained without warning. An attached invariant mismatch
-is logged and retained
-without publishing a gate decision, blocking observation, or repeating the
-inventory pass. The profile then limits runtime action authority to ad gems and
-the natural terminal handler. It does not buy upgrades, repair configuration,
-Surrender, auto-return Home, enter a Tournament, or start a normal battle.
-Terminal records identify Tournament from the distinct Tournament Results
-screen and retain the Tier observed in terminal stats even when no reliable
-strategy identity was attached. A standard Game Over with no strategy remains
-type `unknown` when Tier is the only identity evidence; Tier alone is not used
-to invent Farm or Milestone identity. A
-localized Attack Dissonance sword badge is independent observed identity
-evidence, so a no-strategy Game Over carrying that evidence is classified as
-`dissonance`.
+The `tournament` strategy enforces its Home setup, leaves Tournament entry
+manual, then performs read-only session validation and passive observation.
+It never buys upgrades, repairs an attached battle, Surrenders, auto-returns
+Home, or starts a battle. Use the
+[Tournament operation](docs/operations/tournament_validation.md) for a live
+validation or attachment and the
+[runtime architecture](docs/architecture/runtime.md#tournament-exclusive-validation-and-observer-profile)
+for the authority and evidence contract.
 
 ## Battle statistics
 
@@ -306,45 +262,15 @@ The `--strategy` option selects a bundled named strategy, while
 firings and executor actions are written to `logs/actions.log` and mirrored to
 the optional mission log path.
 
-## Runtime pause control
+## Runtime control
 
-Pause and resume the running process through its persistent control file:
-
-```bash
-.venv/bin/python tools/automation_ctl.py pause
-.venv/bin/python tools/automation_ctl.py pause --minutes 15
-.venv/bin/python tools/automation_ctl.py status
-.venv/bin/python tools/automation_ctl.py resume
-```
-
-A plain `pause` is indefinite and survives automation restarts. Pass
-`--minutes N` to request a timed pause instead. Its deadline is stored in the
-same authoritative control file, so the supervisor persists `RUNNING` before
-resuming and cannot race against a stale `PAUSED` directive.
-
-Select the persistent game-speed target independently of Pause:
-
-```bash
-.venv/bin/python tools/automation_ctl.py game-speed 4.0
-.venv/bin/python tools/automation_ctl.py game-speed max
-```
-
-Exact targets are available in `x0.5` increments from `x0.0` through `x6.0`;
-`max` selects the `x6.3` maximum-available policy. A custom exact target applies
-to current and future battles until changed. The runtime warns immediately and
-every 15 minutes while one remains active. Completed records retain the target,
-its semantics, and the per-battle target timeline alongside derived effective
-game speed.
-
-A standalone native Windows GUI now exposes these controls, managed automation
-start/stop, runtime health, recent activity, filters, and structured completed
-Battle/Tournament records through a loopback Linux service. It can own
-independent passwordless OpenSSH processes for the API tunnel and the
-loopback-only ADB reverse forward. The persistent Linux control service also
-keeps the selected exact ADB target registered across managed automation
-stop/start cycles; the browser client remains available as a fallback. See the
-[`native Windows control surface`](windows/TheTower.ControlSurface/README.md)
-procedure.
+Pause, terminal mode, game speed, and process replacement use the persistent
+control boundary described in
+[`docs/operations/process_control.md`](docs/operations/process_control.md).
+Managed start, target, and Strategy operations are routed through
+[`docs/runtime_operations.md`](docs/runtime_operations.md). The
+[native Windows control surface](windows/TheTower.ControlSurface/README.md)
+provides the primary GUI; the browser remains a fallback.
 
 ## Development backlog
 

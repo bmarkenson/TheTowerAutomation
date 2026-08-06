@@ -1,14 +1,13 @@
 # Starting a New TheTower Thread
 
 Codex automatically loads `AGENTS.md`; do not reopen it merely to start. Every
-TheTower thread reads this router, chooses the smallest applicable path, and
-adds another path only if scope expands.
+TheTower thread reads this router and chooses the smallest applicable path,
+adding another only if scope expands.
 
 ## Choose the startup path
 
-- **Read-only question:** inspect only the directly relevant current source,
-  configuration, callers, tests, or documentation. Skip worktree, backlog,
-  issue, environment, and runtime inspection unless the question needs them.
+- **Read-only question:** inspect relevant current source, configuration,
+  callers, tests, or documentation. Skip other preflight unless needed.
 - **Repository change, project Python, or tests:** complete the repository and
   development-environment sections below.
 - **Live work:** before process/device interaction, runtime diagnosis, live
@@ -22,12 +21,11 @@ adds another path only if scope expands.
 
 ## Outcome coordination
 
-Use one outcome coordinator for one feature, fix, or milestone, then archive
-the chat when that result completes. Keep trivial or tightly coupled work in
-the coordinator. When at least two substantial independent subtasks can run in
-parallel, spawn one bounded batch of at most three direct subagents, prohibit
-descendants unless the operator authorizes them, wait for the batch, and
-synthesize it. Avoid repeated steering and serial fan-out.
+Use one outcome coordinator per feature, fix, or milestone, then archive it at
+completion. Keep tightly coupled work in the coordinator. When at least two
+substantial independent subtasks can run in parallel, spawn one batch of at
+most three direct subagents; descendants require operator authorization. Wait
+for the batch and synthesize it without repeated steering or serial fan-out.
 
 Use separate top-level chats only for genuinely independent writing outcomes.
 
@@ -54,8 +52,8 @@ subagents, and report that the coordinator is ready to archive.
 3. Read the directly relevant source, configuration, callers, tests, and
    canonical documentation. Search for existing ownership before creating a
    parallel capability.
-4. Make one coherent change, review and selectively stage only owned files or
-   hunks, validate it, and commit it before beginning a different result.
+4. Make one coherent change; review and stage only owned files or hunks,
+   validate, and commit before beginning another result.
 5. If a guard or assumption blocks the outcome, stop state-changing work,
    preserve evidence, and present repair, redesign, defer, and workaround
    options. Do not weaken the guard or substitute blind action to finish.
@@ -105,6 +103,13 @@ Load only the matching owner:
   host-process, lock, systemd, ADB, socket, or long-lived-process evidence.
 - [`architecture/runtime.md`](architecture/runtime.md): the relevant runtime
   component or authority boundary.
+- [`architecture/player_save.md`](architecture/player_save.md): player-save
+  mapping, evidence, privacy, or fallback behavior.
+- [`reference/ui_detection_schema.md`](reference/ui_detection_schema.md) and
+  [`tooling/template_workflow.md`](tooling/template_workflow.md): clickmap,
+  state-definition, or template work; load the workflow only for assets.
+- [`reference/yaml_strategy.md`](reference/yaml_strategy.md): strategy source,
+  generated plan, conditions, or gate fields.
 - [`observed_issues.md`](observed_issues.md): global hazards before live work,
   then only a task-matching active entry and its conditionally linked dossier.
 - [`game_strategy.md`](game_strategy.md): Farm/Tournament strategy assumptions,

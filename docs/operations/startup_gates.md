@@ -3,7 +3,7 @@
 This procedure handles declared per-Strategy run requirements. Runtime
 architecture and exact save mappings live in
 [`architecture/runtime.md`](../architecture/runtime.md#farm-profiles-and-loadouts)
-and [`modules/player_save_import.md`](../modules/player_save_import.md); source
+and [`architecture/player_save.md`](../architecture/player_save.md); source
 YAML owns mutable profile values.
 
 ## Stage or resolve a decision

@@ -1,5 +1,10 @@
 # Codebase Maintenance Audit — 2026-07-26
 
+> Historical point-in-time evidence. Current tasks live in
+> [`../tooling-and-maintenance.md`](../tooling-and-maintenance.md); current
+> policy and ownership live in the linked canonical architecture, reference,
+> and tooling documents. Do not treat the findings below as current status.
+
 This is a repository-local maintainability and removal-proposal audit. It does
 not make claims about the current automation process, device, battle, or live
 screen, and it did not perform ADB or runtime interaction.

@@ -1,8 +1,7 @@
 # Documentation Maintenance
 
-Read this file only when changing tracked guidance, moving information between
-active and historical documents, or adding a documentation category. Keep one
-canonical statement and route other readers to it.
+Read this only when changing tracked guidance, moving active/history content,
+or adding a documentation category. Keep one canonical statement and links.
 
 ## Canonical ownership
 
@@ -17,6 +16,10 @@ canonical statement and route other readers to it.
 | One live operating workflow | The matching `docs/operations/*.md` chapter |
 | Sandbox-versus-host evidence | `docs/sandbox_boundaries.md` |
 | Current runtime contracts and boundaries | `docs/architecture/*.md` |
+| Player-save mapping, evidence matrix, and fallback contract | `docs/architecture/player_save.md` |
+| Clickmap and state-definition schema | `docs/reference/ui_detection_schema.md` |
+| YAML strategy plan shape and authoring route | `docs/reference/yaml_strategy.md` |
+| Headless template creation and review | `docs/tooling/template_workflow.md` |
 | Handoff fields and freshness | `docs/handoff_template.md` |
 | Priorities and domain routing | `PENDING_DEVELOPMENT.md` |
 | Detailed active work | One matching `docs/backlog/*.md` file |
@@ -28,13 +31,17 @@ canonical statement and route other readers to it.
 Keep automatically loaded `AGENTS.md` compact. Put conditional detail in its
 owner and expose one link with an exact load condition.
 
+Do not track or routinely load API summaries. Generate an explicitly requested
+one from source into `/tmp` with its revision; discover capabilities in
+source, configuration, callers, and tests.
+
 ## Lifecycle rules
 
 ### Work and completion
 
 - Put an actionable task in exactly one domain backlog. Change the root backlog
   only when domain routing or priority changes.
-- Keep evidence with an active task only while it constrains remaining work.
+- Keep active-task evidence only while it constrains remaining work.
 - At completion, remove the active item and record the outcome, commit, and
   validation in the completed-task log. Complete any related issue transition.
   Completed narrative is on-demand history, never active required reading.
@@ -46,8 +53,8 @@ dossier fields, resolution and unconfirmed transitions, lifecycle splits, and
 durable evidence. The issue index is a safety router, not a backlog or full
 evidence ledger. Link actionable work to exactly one domain backlog.
 
-When a cited generated artifact is subject to rolling cleanup, retain only the
-needed rows, fields, units, query window, and read-only extraction method under
+When cited generated evidence rolls off, retain only needed rows, fields,
+units, query window, and read-only extraction method under
 `docs/issues/evidence/`; prefer a regression fixture when tests need it. If an
 artifact must remain under a runtime cleanup root, add its narrow path to
 `config/protected_artifacts.txt` in the same change. A Markdown link alone does
@@ -69,14 +76,14 @@ not protect it.
 
 For each documentation change:
 
-1. Recheck status and every target diff immediately before editing, staging,
-   and committing; preserve unrelated work.
+1. Recheck status and target diffs before editing, staging, and committing;
+   preserve unrelated work.
 2. Search all current inbound references to a moved path or heading. Historical
    prose may retain old path text, but its navigation must reach the owner.
 3. Verify every changed local Markdown target and anchor.
 4. Account for every active task or open issue before deleting or archiving it.
-5. Verify that changed durable evidence is tracked, fixture-owned, or narrowly
-   protected as described above.
+5. Verify changed durable evidence is tracked, fixture-owned, or narrowly
+   protected.
 6. Run `git diff --check` plus proportionate tests for generated, executable,
    schema-defining, or behavior-coupled documentation.
 

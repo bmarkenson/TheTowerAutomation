@@ -12,7 +12,8 @@ The clickmap is a declarative catalog of UI facts, not the runtime control
 plane. It may own template identity, thresholds, search and action geometry,
 roles, and shared regions. It must not own current UI state, battle identity,
 action ordering, pause semantics, retries, handler ownership, or recovery
-policy.
+policy. Field and classification details are in the
+[UI detection schema](../reference/ui_detection_schema.md).
 
 | Layer | Responsibility |
 | --- | --- |
@@ -25,7 +26,8 @@ policy.
 
 Keep `YamlStrategy` and its evaluator generic. Strategy-specific behavior should
 come from compact configuration and explicit generated plans, not strategy-name
-conditionals or duplicated expanded YAML.
+conditionals or duplicated expanded YAML. Use the
+[YAML strategy reference](../reference/yaml_strategy.md) for plan ownership.
 
 ## Farm profiles and loadouts
 
@@ -250,7 +252,7 @@ fingerprint, and redacted session/target-generation provenance. Account
 identifiers, raw saves, decoded roots, arbitrary history, private values, and
 raw exception text are not copied into preflight evidence. The component
 contract and version-update procedure are
-in [`../modules/player_save_import.md`](../modules/player_save_import.md).
+in [`player_save.md`](player_save.md).
 
 #### Save-first active-round and terminal evidence
 
@@ -343,7 +345,7 @@ the terminal UI. This validates the natural-boundary causality and projection
 used by the guarded terminal-report consumer below; the observation alone does
 not attach an arbitrary terminal or relax current-process binding. The dated
 evidence and exact row-level promotions are recorded in
-[`player_save_import.md`](../modules/player_save_import.md#2026-08-02-tier-22-natural-boundary-audit).
+[`player_save.md`](player_save.md#2026-08-02-tier-22-natural-boundary-audit).
 
 Runtime adoption proceeds in bounded vertical slices with these ownership
 rules:
@@ -422,7 +424,7 @@ after same-run tail proof, Battle History record construction. The implemented
 audit sidecar remains observation-only and is not an authority source. Any
 additional normal-runtime runtime/history consumer remains a later slice gated
 by the versioned audit matrix in
-[`player_save_import.md`](../modules/player_save_import.md#versioned-audit-matrix-data-9-game-1073--revision-3).
+[`player_save.md`](player_save.md#versioned-audit-matrix-data-9-game-1073--revision-3).
 
 ##### Implemented terminal save attachment
 

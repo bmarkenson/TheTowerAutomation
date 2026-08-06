@@ -4,7 +4,7 @@ The `V1073-RUNTIME-013` collector is default-disabled and observation-only. It
 never sends input, backgrounds the app, navigates, changes lifecycle, attaches
 or creates a battle record, publishes Strategy facts, decides UI suppression,
 or supplies terminal authority. Its exact mapping and receipt semantics are in
-[`modules/player_save_import.md`](../modules/player_save_import.md#versioned-audit-matrix-data-9-game-1073--revision-3).
+[`architecture/player_save.md`](../architecture/player_save.md#versioned-audit-matrix-data-9-game-1073--revision-3).
 
 For a direct launch:
 

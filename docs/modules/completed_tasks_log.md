@@ -1,6 +1,8 @@
-# ✅ Completed Tasks Log
+# Completed Tasks Log
 
-This document tracks completed architectural, tooling, and refactor tasks for the "The Tower" automation project. Once a task is finalized and no longer belongs in the active roadmap, it should be moved here for historical reference.
+This on-demand history records completed outcomes, commits, and validation. It
+is not current policy, an active queue, or required startup reading; use the
+canonical document linked by an entry for current behavior.
 
 ---
 
@@ -178,7 +180,7 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Regression coverage is in `test/test_activity_continuity.py`,
   `test/test_player_save_history.py`, and
   `test/test_player_save_preflight.py`. The canonical contract is in
-  `docs/modules/player_save_import.md` and `docs/architecture/runtime.md`.
+  `docs/architecture/player_save.md` and `docs/architecture/runtime.md`.
 
 ### 2026-08-05 save-first targeted repair reconciliation
 
@@ -1042,7 +1044,7 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - The complete remaining field matrix, evidence standard, profile-validation
   scope, audit-only adoption, incremental navigation suppression, snapshot
   invalidation, and scheduled-audit plan are maintained in
-  [`player_save_import.md`](player_save_import.md#complete-validation-program)
+  [`player_save.md`](../architecture/player_save.md#complete-validation-program)
   and the active runtime backlog. The focused player-save/card suite passed 39
   tests, and the complete repository suite passed all 1,040 tests. The
   operator-owned raw save remained untracked and was not copied into
@@ -1763,7 +1765,7 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 ### 2026-07-26 codebase maintenance audit
 
 - Commit `75d181c` recorded the repository-local audit and reviewable removal
-  proposal in `docs/codebase_maintenance_audit_2026-07-26.md`. It traced
+  proposal in `docs/backlog/history/codebase_maintenance_audit_2026-07-26.md`. It traced
   imports, entry points, dynamic and YAML references, clickmap use, and tests,
   finding concentrated orchestration complexity rather than broad duplicate
   implementation.

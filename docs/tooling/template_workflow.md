@@ -1,5 +1,9 @@
 # Headless template workflow
 
+Read [`../new_thread.md`](../new_thread.md) first. Complete its repository-change
+path before `--commit`, and its live path before `--capture`; a dry run against
+an existing retained image needs neither live access nor device inspection.
+
 `tools/template_tool.py` is the preferred workflow for Codex-driven template
 creation and refreshes. It does not require an X11/Wayland session and defaults
 to a non-mutating dry run.

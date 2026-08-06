@@ -1,4 +1,4 @@
-# Player Save Import
+# Player-Save Architecture and Versioned Evidence
 
 `core/player_save.py` decodes The Tower's `playerInfo.dat` as an independent,
 read-only view of persistent profile configuration. It is intentionally not a
@@ -318,7 +318,7 @@ entry. The configuration coordinator remains a separate exact-Home consumer,
 and the V1073-RUNTIME-013 sidecar still polls and retains only audit state. A
 malformed newest entry publishes neither structural nor semantic tail evidence.
 The authoritative ownership and slice boundaries are in
-[`runtime.md`](../architecture/runtime.md#save-first-active-round-and-terminal-evidence).
+[`runtime.md`](runtime.md#save-first-active-round-and-terminal-evidence).
 
 ### 2026-08-02 Tier 22 natural-boundary audit
 
@@ -482,54 +482,19 @@ Profile groups broaden the diagnostic view but cannot influence automation
 until their own row is Shortcut-ready. Every published group carries mapping
 ID, source fields, capture time, and validation status.
 
-### Runtime adoption and future calibration
+### Runtime adoption and active work
 
-The guarded acquisition, atomic allowlisted adoption, independent per-check
-fallback/repair queue, contradiction invalidation, exact launch carry, and
-`save_first` / `force_ui` / `comparison_audit` policy are implemented. Prior
-version-1073 evidence was reused; no duplicate live-preflight campaign was
-performed. This code-only validation is not deployment or live validation.
-Deployment and observation at the first ordinary production boundary remain
-coordinator work.
+Guarded acquisition, allowlisted per-check adoption, independent fallback and
+repair, contradiction invalidation, exact launch carry, and the `save_first`,
+`force_ui`, and `comparison_audit` policies are implemented. The matrix above
+owns evidence maturity and current disposition; it is not a work queue.
 
-Future evidence comes from naturally occurring UI fallbacks or explicit/
-periodic comparison audits. A candidate remains privacy-safe and observational
-until a reviewed mapping/documentation change promotes it; no receipt or
-runtime comparison edits its own authority manifest.
-
-1. **Target Priority:** compare the distinct Farm T18 full order during an
-   ordinary future T18 start. A second nontrivial order confirms generic
-   sequence serialization; do not attempt all ten-factorial permutations.
-2. **Ultimate Weapons:** for future mixed primaries, change and restore one
-   weapon at a time and validate that index's off/on polarity. Validate
-   Spotlight Missiles off through one explicitly authorized reversible
-   transition. Retain normalized before/change/restore comparisons; never
-   enumerate every boolean combination.
-3. **Orb Distance:** prefer ordinary Farm (`30.00m`, Extra `30.00m`, Workshop
-   `39.00m`) → Tournament (`98.38m`, Extra `87.16m`, Workshop `80.37m`) → Farm
-   transitions. Pair authoritative UI evidence with guarded stable saves to
-   establish candidate fields, units/rounding, selected-preset versus derived
-   semantics, serialization timing, Home versus active behavior, and
-   restoration. Only if natural transitions are insufficient may a later
-   coordinator authorize one agent-owned bounded calibration.
-4. **Unknown versions, shapes, IDs, and values:** continue through UI. The
-   existing exact-evidence resolver may attempt only a unique fail-closed
-   mapping; ambiguity or conflict remains UI-required, and the observation-only
-   collector never becomes preflight authority.
-5. Add the versioned raw-field disposition manifest and validation metadata for
-   other profile groups. Unknown or unclassified fields remain unpublished.
-
-The next Perk-timeline phase is a normal-runtime checkpoint cache independent
-of collector opt-in. It will consume naturally serialized stable same-round
-revisions, preserve each exact saved `PerkPick` wave even when observation is
-later, and obtain a terminal stable save to close the final prefix. The UI
-timeline remains for unknown IDs, acquisition/continuity failure, explicit
-audits, or unresolved final state. It will not background an active battle
-merely to accelerate a Perk checkpoint. The separately implemented
-`save_first` replacement-process continuity boundary is the only current
-forced active-battle serialization policy and grants this future cache no
-authority. This phase is documented here and in the active backlog; it is not
-implemented by the continuity change.
+All remaining rollout, comparison, raw-field classification, Perk checkpoint,
+active-upgrade, survival, tally, and future-version work is owned by the
+[runtime backlog](../backlog/runtime-and-validation.md#current-validation-gates).
+Unknown versions, shapes, IDs, values, ambiguity, or conflict continue through
+the UI. Runtime evidence and receipts never edit or promote their own authority
+manifest.
 
 ## Authority and fallback
 
@@ -599,8 +564,8 @@ Inspect a local save and compare it with the Farm requirements:
   --requirements config/run_profiles/farm.yaml
 ```
 
-After completing the live-runtime checklist in
-[`../new_thread.md`](../new_thread.md), the same report can be built from the
+After completing [`../live_preflight.md`](../live_preflight.md), the same
+report can be built from the
 configured device:
 
 ```bash

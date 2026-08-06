@@ -13,6 +13,7 @@ load only the operation that matches the task.
 | Pause, change mode or game speed, replace a process, or recover a terminal run | [`operations/process_control.md`](operations/process_control.md) |
 | Hold automation for development or send one leased exact-target input | [`operations/interactive_development.md`](operations/interactive_development.md) |
 | Run the No Strategy observation profile | [`operations/no_strategy.md`](operations/no_strategy.md) |
+| Validate or passively observe an active Tournament | [`operations/tournament_validation.md`](operations/tournament_validation.md) |
 | Operate the natural-boundary player-save audit collector | [`operations/player_save_audit.md`](operations/player_save_audit.md) |
 | Retain, discard, or sweep generated runtime evidence | [`operations/evidence_retention.md`](operations/evidence_retention.md) |
 | Decide whether an input, Surrender, Exit Battle, test battle, or Pause is authorized | [`live_action_authority.md`](live_action_authority.md) |
