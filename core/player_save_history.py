@@ -192,8 +192,8 @@ def ui_history_bridge_eligible(metadata: Mapping[str, Any]) -> bool:
         and metadata.get("mapping_id") == BATTLE_HISTORY_UI_MAPPING_ID
         and metadata.get("identity_schema_version")
         == PLAYER_SAVE_HISTORY_IDENTITY_SCHEMA_VERSION
-        and _nonnegative_int(metadata.get("tier")) is not None
-        and _nonnegative_int(metadata.get("wave")) is not None
+        and _positive_int(metadata.get("tier")) is not None
+        and _positive_int(metadata.get("wave")) is not None
         and _parse_ui_battle_date(metadata.get("battle_date")) is not None
     )
 
@@ -216,10 +216,10 @@ def corroborate_ui_and_save_history(
     ):
         return _cross_source_ambiguous("save_history_identity_insufficient")
 
-    ui_tier = _nonnegative_int(ui_metadata.get("tier"))
-    ui_wave = _nonnegative_int(ui_metadata.get("wave"))
-    save_tier = _nonnegative_int(save_metadata.get("tier"))
-    save_wave = _nonnegative_int(save_metadata.get("wave"))
+    ui_tier = _positive_int(ui_metadata.get("tier"))
+    ui_wave = _positive_int(ui_metadata.get("wave"))
+    save_tier = _positive_int(save_metadata.get("tier"))
+    save_wave = _positive_int(save_metadata.get("wave"))
     if save_tier is None or save_wave is None:
         return _cross_source_ambiguous("save_history_tier_wave_ambiguous")
     if ui_tier != save_tier or ui_wave != save_wave:
@@ -597,16 +597,17 @@ def _safe_reason(value: Any) -> str:
     )
 
 
-def _nonnegative_int(value: Any) -> Optional[int]:
+def _positive_int(value: Any) -> Optional[int]:
     if isinstance(value, bool):
         return None
     if isinstance(value, int):
-        return value if value >= 0 else None
-    normalized = str(value or "").strip()
-    if not normalized or not normalized.isascii() or not normalized.isdigit():
+        return value if value > 0 else None
+    if (
+        not isinstance(value, str)
+        or re.fullmatch(r"[1-9][0-9]*", value) is None
+    ):
         return None
-    parsed = int(normalized)
-    return parsed if parsed >= 0 else None
+    return int(value)
 
 
 def _parse_ui_battle_date(value: Any) -> Optional[datetime]:

@@ -278,6 +278,61 @@ def test_cross_source_bridge_rejects_unknown_ui_identity_schema():
     assert result.reason == "ui_history_identity_insufficient"
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("tier", 0),
+        ("wave", "0"),
+        ("tier", False),
+        ("wave", -1),
+        ("tier", "01"),
+        ("wave", " 1899"),
+        ("tier", "+19"),
+        ("wave", "1899.0"),
+    ),
+)
+def test_cross_source_bridge_rejects_nonpositive_or_noncanonical_ui_values(
+    field,
+    value,
+):
+    result = corroborate_ui_and_save_history(
+        _ui_history_metadata(**{field: value}),
+        _save_history_metadata(),
+    )
+
+    assert result.status is CrossSourceHistoryStatus.AMBIGUOUS
+    assert result.reason == "ui_history_identity_insufficient"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("tier", 0),
+        ("wave", "0"),
+        ("tier", True),
+        ("wave", -1),
+        ("tier", "01"),
+        ("wave", " 1899"),
+        ("tier", "+19"),
+        ("wave", "1899.0"),
+    ),
+)
+def test_cross_source_bridge_rejects_nonpositive_or_noncanonical_save_values(
+    field,
+    value,
+):
+    save_metadata = _save_history_metadata()
+    save_metadata[field] = value
+
+    result = corroborate_ui_and_save_history(
+        _ui_history_metadata(),
+        save_metadata,
+    )
+
+    assert result.status is CrossSourceHistoryStatus.AMBIGUOUS
+    assert result.reason == "save_history_tier_wave_ambiguous"
+
+
 def test_reader_binds_stable_read_to_exact_target_scope_control_and_source():
     calls = {"target": 0, "capture": 0, "pull": 0}
 
@@ -757,4 +812,3 @@ def test_source_compatibility_and_capacity_rollover_are_explicit():
         before_append,
         {**append, "entry_count": 29},
     )
-    corroborate_ui_and_save_history,
