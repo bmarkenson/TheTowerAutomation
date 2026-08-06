@@ -339,9 +339,10 @@ completed entry is unavailable and terminal capture stays on UI evidence.
 
 The same Tier 22 audit changed its known pre-battle capped-tail baseline to a
 Tier 22, wave 751, Boss candidate whose complete 144-row projection agreed with
-the terminal UI. This validates the natural-boundary causality and projection,
-not runtime attachment. The dated evidence and exact row-level promotions are
-recorded in
+the terminal UI. This validates the natural-boundary causality and projection
+used by the guarded terminal-report consumer below; the observation alone does
+not attach an arbitrary terminal or relax current-process binding. The dated
+evidence and exact row-level promotions are recorded in
 [`player_save_import.md`](../modules/player_save_import.md#2026-08-02-tier-22-natural-boundary-audit).
 
 Runtime adoption proceeds in bounded vertical slices with these ownership
@@ -351,9 +352,10 @@ rules:
    serialized stable revisions without navigation or input and independently
    of collector opt-in. It must bind each complete checkpoint to the exact
    active identity.
-2. The completed new-round audit permits an implemented consumer to bind only
-   an exact active identity to a round without Battle History navigation; no
-   such consumer is implemented yet.
+2. Activity Continuity may bind an exact active identity to an owned round
+   without Battle History navigation. Terminal report attachment is separate:
+   it requires a bound terminal, the same activity-scope ID, and a compatible
+   save-sourced pre-terminal tail baseline.
 3. Perk strategy facts may advance only from a newer complete snapshot carrying
    that same identity; a stale, different-round, or incomplete snapshot cannot
    drive strategy. The saved `PerkPick` wave remains the exact event wave even
@@ -375,10 +377,11 @@ rules:
    active save, survive a save-field clear at Game Over, and refine a
    save-derived interval. It cannot reduce a save count or cause the same
    activation to be counted twice.
-8. Normal completed records may be built from a newly serialized history entry
-   only after the pre-boundary structural tail fingerprint changed at this Game
-   Over, the semantic entry is complete, and tier/time/wave evidence matches the
-   bound round.
+8. Normal and Tournament completed records are built from a newly serialized
+   history entry only after the pre-boundary structural tail advances by one
+   valid append or capacity-30 rollover, the semantic entry is complete, the
+   save is inactive, terminal kind matches, and available compact terminal
+   identity does not contradict the bound round.
 9. Terminal Battle History counts reconcile the cached save checkpoints and
    visual tail. Missing event timing remains explicitly unknown or bounded;
    count disagreement, impossible ordering, or an unbound snapshot forces the
@@ -390,9 +393,10 @@ rules:
     prefix. Game Over opens the Perks panel only when that complete final
     same-round prefix has not been proven, or when an ID, acquisition,
     continuity, audit, or final-state condition requires UI.
-12. The complete existing Game Stats/Perks/More Stats path remains the forced
-    audit and fallback for every missing, unknown, stale, changed, inconsistent,
-    or unbound save claim.
+12. Game Stats and Perks remain passive terminal evidence. More Stats remains
+    the guarded fallback for every missing, unknown, stale, changed,
+    inconsistent, or unbound save claim; clipboard validation and guarded OCR
+    retain their existing precedence on that route.
 13. Wait, Retry, Home, every setting mutation, post-action verification, and
     terminal transition confirmation remain owned by verified UI controls.
 
@@ -407,28 +411,41 @@ and lifecycle authority and grants no broader save consumer that permission.
 Save-tail causality does not relax the independent current-process
 `runtime.run_binding` boundary. A process that starts only on a terminal remains
 unbound and cannot inherit Strategy, run configuration, Perk history, survival
-events, or other process-local evidence. A future save-derived attachment may
-identify the completed round only through its own guarded evidence; it cannot
+events, or other process-local evidence. The save-derived terminal attachment
+identifies the completed round only through its own guarded evidence; it cannot
 manufacture active-process continuity.
 
-The runtime/history normalization foundation itself does not poll, cache, bind
-a process, build a persisted battle record, or alter `App`/Game Over dispatch.
-The profile-progression attachment below is a separate structural consumer; it
-does not promote active-round or Battle History semantics. The implemented
-audit sidecar polls and keeps only process-local audit state; it still does not
-bind a battle, construct or attach a record, or alter dispatch. Any future
-normal-runtime runtime/history consumer remains a later slice gated by the
-versioned audit matrix in
+The runtime/history normalization foundation itself does not poll, cache, or
+bind a process. The terminal attachment below is a separate guarded consumer;
+it reuses one stable terminal read for global profile progression and, only
+after same-run tail proof, Battle History record construction. The implemented
+audit sidecar remains observation-only and is not an authority source. Any
+additional normal-runtime runtime/history consumer remains a later slice gated
+by the versioned audit matrix in
 [`player_save_import.md`](../modules/player_save_import.md#versioned-audit-matrix-data-9-game-1073--revision-3).
 
-##### Implemented terminal profile-progression attachment
+##### Implemented terminal save attachment
 
 At a normal or Tournament terminal, `App` performs one fail-open stable read
 from the exact target generation already owned by its `AdbTargetSession`. It
-does not background the game or send input. A target handoff, unsupported
-mapping, malformed component, or acquisition failure cannot delay or replace
-the existing Game Stats/Perks/More Stats path; the record receives explicit
-unavailable/partial evidence instead.
+does not background the game or send input. The same decoded snapshot supplies
+profile progression, Tournament conditions when available, and the candidate
+completed report; no terminal consumer performs a second save read.
+
+The report is accepted only for a current-process `bound` terminal whose
+activity-scope ID still matches, whose retained pre-terminal baseline came from
+the same player-save history contract, and whose newest tail is exactly one
+valid append or capped rollover beyond that baseline. The terminal save must be
+inactive, the exact-version semantic entry must expose all 16 sections and 144
+rows with a mapped cause, and normal-versus-Tournament identity must match.
+Available compact Game Stats identity is a contradiction check and optional
+augmentation; missing compact values do not invalidate a complete save report.
+On success the handler persists the save-derived record without opening More
+Stats. A target handoff, unsupported mapping, malformed component, unbound
+terminal, absent or UI-sourced baseline, invalid tail transition, unknown
+cause, kind mismatch, or compact-identity contradiction follows the existing
+More Stats clipboard and guarded-OCR fallback. Game Stats and Perks capture,
+Wait/Retry/Home behavior, and every lifecycle action remain UI-owned.
 
 The exact-version profile manifest retains allowlisted primitive ownership,
 level, selected-preset, equipped-Module, Bot, Theme, relic, Research, Workshop,
@@ -439,7 +456,7 @@ effective multipliers, enforce a setting, or grant UI authority. Account IDs,
 balances, Module GUIDs/inventory records, purchase histories, and the raw save
 are excluded.
 
-The projection is placed at top-level `profile_progression`, outside
+The profile projection is placed at top-level `profile_progression`, outside
 `runtime`, because global profile state is not process-local battle evidence.
 It may therefore survive a terminal-only start without weakening
 `runtime.run_binding`: Strategy, configured intent, Perk/activation timelines,
@@ -541,9 +558,11 @@ reporting that a terminal-only restart supplied no pre-round baseline. The next
 ordinary same-process Retry remains the passive rollover confirmation. No
 replacement purpose-built battle is required. Upgrade, survival-ability, and
 other candidate components remain independently unavailable until their own
-matrix rows are promoted, but they do not gate the core collector. The complete
-Game Stats, Perks, More Stats, continuity, terminal-binding, and terminal
-lifecycle paths remain authoritative and unchanged.
+matrix rows are promoted, but they do not gate the core collector. The
+collector remains observation-only. The separate terminal consumer now makes a
+causally bound exact-version report primary while Game Stats and Perks remain
+passive evidence, More Stats remains the guarded fallback, and continuity,
+terminal binding, and lifecycle authority remain unchanged.
 
 Game speed is a global battle-only invariant with persistent operator intent
 independent of strategy and ADB target. Numeric selections from `x0.0` through

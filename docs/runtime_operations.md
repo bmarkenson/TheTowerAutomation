@@ -546,6 +546,19 @@ activity scope: they preserve terminal Game Stats, Perks, and More Stats, but
 mark the record unbound and omit process-local Strategy, configuration,
 timeline, activation, and sampling evidence.
 
+For a current-process bound normal or Tournament terminal, the runtime performs
+one stable exact-target player-save read. That snapshot supplies global profile
+progression, available Tournament conditions, and a candidate completed report.
+The save report replaces More Stats navigation only when the activity-scope ID
+still matches, the retained baseline is from the compatible player-save source,
+the newest History tail is exactly one valid append or capped rollover beyond
+it, the save is inactive, the semantic entry is complete and has a mapped
+cause, terminal kind matches, and available compact identity does not
+contradict it. Game Stats and Perks remain passive evidence. Any missing,
+unsupported, stale, changed, inconsistent, or unbound claim uses the existing
+More Stats clipboard and guarded-OCR route. Wait, Retry, Home, and Tournament
+lifecycle actions remain verified UI operations.
+
 To recover a preserved terminal after uncertain process continuity, keep the
 mode at `WAIT`, inspect the screen and current owner, stop that owner cleanly,
 and start the replacement in `PAUSED`. Confirm the new PID and target lock plus
@@ -1515,9 +1528,12 @@ The committed survival-checkpoint component is manifest-disabled.
 semantics remain unavailable rather than inferred. Audit tail changes are only
 candidates—even with a complete semantic fingerprint—and cannot make a
 terminal-only process bound or let it inherit Strategy, Perk history, tracker
-events, or any other process-local evidence. The existing complete Game Stats,
-Perks, More Stats, continuity, terminal-binding, and terminal-transition paths
-remain authoritative.
+events, or any other process-local evidence. The collector remains
+observation-only and cannot supply the separate terminal report consumer.
+Bound terminal reports may use the guarded save path described above; Game
+Stats and Perks remain passive evidence, More Stats remains the fallback, and
+continuity, terminal binding, and terminal-transition paths remain
+authoritative.
 
 `logs/` and `screenshots/` are ignored runtime evidence, not substitutes for a
 tracked issue entry. When an anomaly matters beyond the current thread, record

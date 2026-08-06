@@ -37,6 +37,35 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-06 save-first terminal battle reports
+
+- `069b1d9` makes the causally bound exact-version player-save report primary
+  at normal Game Over and Tournament Results. The one stable exact-target
+  terminal read is shared with profile progression and available Tournament
+  conditions instead of performing an additional save acquisition.
+- Attachment requires the current process's bound activity scope, a compatible
+  player-save baseline for that same scope, exactly one valid History append or
+  capacity-30 rollover, an inactive save, a complete mapped semantic entry,
+  matching normal/Tournament kind, and no contradiction from available compact
+  terminal identity. Terminal-only starts, UI-sourced or missing baselines,
+  unknown causes, changed shapes, stale or invalid transitions, handoffs, and
+  mismatches retain the existing More Stats route.
+- A successful save report supplies all 16 sections and 144 ordered rows with
+  exact decimal source values and derivation/provenance metadata. Normal battle
+  schema 6 and Tournament schema 4 preserve the established JSON/Markdown
+  contracts. Compact Game Stats remains optional augmentation and cross-source
+  evidence; Game Stats and Perks capture, Wait/Retry/Home behavior, and all
+  terminal lifecycle inputs remain unchanged.
+- The fallback still validates the complete clipboard report before guarded
+  scrolling OCR. Regression coverage includes append, capped rollover,
+  binding/source/tail/kind failures, one-read reuse, save-derived normal and
+  Tournament persistence, optional compact OCR, contradiction fallback, and
+  proof that More Stats is never tapped on the accepted save path.
+- The focused player-save, App, normal battle, Tournament, schema, and handler
+  suite passed all 412 tests. The complete isolated checkpoint passed
+  compilation, state validation, clickmap integrity with zero errors and 44
+  known orphans, and all 1,624 tests.
+
 ### 2026-08-05 completed-run profile progression snapshots
 
 - `0075349cba5537fe4d6dff1b582185e2cd210174` adds a versioned,
