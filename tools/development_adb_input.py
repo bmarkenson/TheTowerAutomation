@@ -55,7 +55,8 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "Exit status: 0 completed; 2 invalid CLI usage; 3 lease/status "
             "rejection; 4 ADB read/input failure; 5 required audit-log failure. "
-            "Uncertain input is never retried."
+            "A near-expiry rejection requires a separate heartbeat and a newly "
+            "acknowledged current window. Uncertain input is never retried."
         ),
     )
     parser.add_argument(

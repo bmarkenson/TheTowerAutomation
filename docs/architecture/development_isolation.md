@@ -348,14 +348,26 @@ not automatically reactivate a lease on Resume.
 
 Once production has acknowledged the lease, the worker may send bounded
 exact-target ADB input through `tools/development_adb_input.py`. The helper
-accepts one canonical-coordinate tap or swipe, validates the complete composite
-lease status, uses one bounded exact-target screenshot to establish supported
-native geometry, and rechecks the same lease/runtime/target binding immediately
-before one finite-timeout input command. It writes one `ACTION`, the attempted
-input plus coordinate/outcome detail, and one terminal `RESULT` to production's
-action log by default. Its purpose is to prevent cooperative threads from
-accidentally acting outside their window; it is not intended to resist
-deliberate bypass by the same Unix user.
+accepts one canonical-coordinate tap or swipe and requires the production-owned
+composite lease decision to be exactly active. The consumer separately binds
+only the fields needed by its command: supported API/capability, RUNNING
+operator control, requested/active lifecycle states, the supplied lease ID,
+matching request/acknowledgement runtime identity and exact target, and the
+acknowledged expiry window. It does not reconstruct the control surface's hold,
+typed-authority, freshness, or active-runtime derivation from their internal
+status fields.
+
+The helper uses one bounded exact-target screenshot to establish supported
+native geometry, then rechecks the unchanged lease/runtime/target/expiry
+binding immediately before one finite-timeout input command. That final status
+must report enough lease time for the selected subprocess timeout plus explicit
+server-timestamp and dispatch margins; otherwise the worker must heartbeat
+separately, wait for the renewed window to be acknowledged, and retry as a new
+invocation. It writes one `ACTION`, the attempted input plus coordinate/outcome
+detail, and one terminal `RESULT` to production's action log by default. Its
+purpose is to prevent cooperative threads from accidentally acting outside
+their window; it is not intended to resist deliberate bypass by the same Unix
+user.
 
 The helper does not request, heartbeat, revive, or release a lease. It does not
 wrap read-only screenshot helpers, which remain independently available under
@@ -444,10 +456,16 @@ Implementation proceeds in small reviewable steps:
 4. **Completed: add the lease-aware ADB input helper.** One canonical tap or
    swipe now requires the active acknowledged lease, exact-target geometry and
    final revalidation, paired action-log records, and no automatic replay.
-5. **Perform bounded live validation.** The master schedules one cooperative
-   lease, verifies Pause precedence and expiry, and confirms clean return to
-   production. Add Home or owned-battle behavior only in response to a concrete
-   development need.
+5. **Validate the combined coordination boundary.** Exercise bootstrap
+   recovery, atomic frame replacement, lease exclusion and acknowledgement,
+   Pause/Stop precedence, expiry, runtime/target/battle boundaries, stale
+   helper rejection, and clean release with repository-local unit and
+   fake-runtime/fake-ADB tests.
+6. **Perform bounded live validation.** After accepting the combined boundary,
+   the master may schedule one separately inspected cooperative lease, verify
+   Pause precedence and expiry, and confirm clean return to production. Add
+   Home or owned-battle behavior only in response to a concrete development
+   need.
 
 Do not implement a later step merely to make the current step look complete.
 Repository-local tests use fakes and retained or copied production frames;

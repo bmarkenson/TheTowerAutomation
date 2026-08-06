@@ -43,6 +43,17 @@ DEFAULT_ADB_READ_TIMEOUT_SECONDS = 10.0
 DEFAULT_ADB_INPUT_TIMEOUT_SECONDS = 5.0
 MAX_STATUS_RESPONSE_BYTES = 1024 * 1024
 MAX_SWIPE_DURATION_MS = 5000
+SWIPE_COMPLETION_MARGIN_SECONDS = 2.0
+MAX_ADB_INPUT_TIMEOUT_SECONDS = max(
+    DEFAULT_ADB_INPUT_TIMEOUT_SECONDS,
+    MAX_SWIPE_DURATION_MS / 1000 + SWIPE_COMPLETION_MARGIN_SECONDS,
+)
+SERVER_TIME_PRECISION_MARGIN_SECONDS = 1.0
+STATUS_RESPONSE_DISPATCH_MARGIN_SECONDS = 1.0
+LEASE_WINDOW_MARGIN_SECONDS = (
+    SERVER_TIME_PRECISION_MARGIN_SECONDS
+    + STATUS_RESPONSE_DISPATCH_MARGIN_SECONDS
+)
 
 EXIT_SUCCESS = 0
 EXIT_USAGE = 2
@@ -141,6 +152,21 @@ class DevelopmentInputRequest:
             f"canonical={self.coordinates!r} duration_ms={self.duration_ms!r}"
         )
 
+    def input_timeout_seconds(self) -> float:
+        """Return the bounded timeout reserved for this one ADB subprocess."""
+
+        if self.action != "swipe" or self.duration_ms is None:
+            return DEFAULT_ADB_INPUT_TIMEOUT_SECONDS
+        return max(
+            DEFAULT_ADB_INPUT_TIMEOUT_SECONDS,
+            self.duration_ms / 1000 + SWIPE_COMPLETION_MARGIN_SECONDS,
+        )
+
+    def minimum_remaining_lease_seconds(self) -> float:
+        """Return the server-reported window required immediately before input."""
+
+        return self.input_timeout_seconds() + LEASE_WINDOW_MARGIN_SECONDS
+
     def mapped_input_arguments(self, *, target: str) -> tuple[list[str], str]:
         if self.action == "tap":
             point = canonical_to_device_point(
@@ -179,21 +205,25 @@ class LeaseAuthority:
     """Validated status fields binding one helper invocation to production."""
 
     lease_id: str
-    owner_label: str
     runtime_id: str
     runtime_pid: int
     adb_target: str
-    requested_at: str
+    expires_at: float
+    server_time: float
 
     @property
-    def binding(self) -> tuple[str, str, int, str, str]:
+    def binding(self) -> tuple[str, str, int, str, float]:
         return (
             self.lease_id,
             self.runtime_id,
             self.runtime_pid,
             self.adb_target,
-            self.requested_at,
+            self.expires_at,
         )
+
+    @property
+    def remaining_seconds(self) -> float:
+        return self.expires_at - self.server_time
 
 
 @dataclass(frozen=True)
@@ -215,7 +245,13 @@ class AdbBoundary(Protocol):
     def acquire_geometry(self, target: str) -> ScreenSize:
         ...
 
-    def run_input(self, target: str, arguments: Sequence[str]) -> None:
+    def run_input(
+        self,
+        target: str,
+        arguments: Sequence[str],
+        *,
+        timeout_seconds: float,
+    ) -> None:
         ...
 
 
@@ -319,16 +355,11 @@ class SubprocessAdbBoundary:
         *,
         run: Callable[..., subprocess.CompletedProcess[bytes]] = subprocess.run,
         read_timeout_seconds: float = DEFAULT_ADB_READ_TIMEOUT_SECONDS,
-        input_timeout_seconds: float = DEFAULT_ADB_INPUT_TIMEOUT_SECONDS,
     ) -> None:
         self._run = run
         self.read_timeout_seconds = _positive_timeout(
             read_timeout_seconds,
             "ADB read timeout",
-        )
-        self.input_timeout_seconds = _positive_timeout(
-            input_timeout_seconds,
-            "ADB input timeout",
         )
 
     def acquire_geometry(self, target: str) -> ScreenSize:
@@ -369,10 +400,17 @@ class SubprocessAdbBoundary:
             raise AdbReadError("exact-target screenshot is incomplete")
         return native_width, native_height
 
-    def run_input(self, target: str, arguments: Sequence[str]) -> None:
+    def run_input(
+        self,
+        target: str,
+        arguments: Sequence[str],
+        *,
+        timeout_seconds: float,
+    ) -> None:
         normalized_arguments = [str(value) for value in arguments]
         if normalized_arguments[:2] not in (["input", "tap"], ["input", "swipe"]):
             raise ValueError("ADB boundary accepts only one tap or swipe")
+        timeout = _bounded_input_timeout(timeout_seconds)
         command = ["adb", "-s", _exact_target(target), "shell", *normalized_arguments]
         try:
             completed = self._run(
@@ -380,7 +418,7 @@ class SubprocessAdbBoundary:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 check=False,
-                timeout=self.input_timeout_seconds,
+                timeout=timeout,
             )
         except subprocess.TimeoutExpired as exc:
             raise AdbInputError(
@@ -447,7 +485,7 @@ def validate_active_lease_status(
     *,
     lease_id: str,
 ) -> LeaseAuthority:
-    """Return the exact target only when every composite lease guard agrees."""
+    """Consume the composite decision and validate command-binding fields."""
 
     if not isinstance(status, Mapping):
         raise LeaseStatusError("control status response is malformed")
@@ -486,23 +524,7 @@ def validate_active_lease_status(
         raise LeaseStatusError(
             f"lease request state is {request_state or 'missing'}{suffix}"
         )
-    owner_label = str(request.get("owner_label") or "").strip()
-    if not owner_label:
-        raise LeaseStatusError("lease request owner is missing")
     request_runtime = _runtime_identity(request.get("runtime"), "lease request")
-    requested_at = str(request.get("requested_at") or "").strip()
-    requested_timestamp = _timestamp(requested_at, "lease requested_at")
-    heartbeat_at = str(request.get("heartbeat_at") or "").strip()
-    heartbeat_timestamp = _timestamp(heartbeat_at, "lease heartbeat_at")
-    expires_at = str(request.get("expires_at") or "").strip()
-    expiry_timestamp = _timestamp(expires_at, "lease expires_at")
-    if not requested_timestamp <= heartbeat_timestamp < expiry_timestamp:
-        raise LeaseStatusError("lease request timestamps are contradictory")
-    if lease.get("request_expired") is not False:
-        raise LeaseStatusError("the server-evaluated heartbeat deadline has expired")
-    server_timestamp = _timestamp(status.get("server_time"), "server_time")
-    if server_timestamp >= expiry_timestamp:
-        raise LeaseStatusError("the server-evaluated heartbeat deadline has expired")
 
     acknowledgement = _required_mapping(
         lease.get("runtime_acknowledgement"),
@@ -521,9 +543,6 @@ def validate_active_lease_status(
             "runtime acknowledgement is "
             f"{acknowledgement.get('state') or 'missing'}, not active"
         )
-    acknowledgement_owner = str(acknowledgement.get("owner_label") or "").strip()
-    if acknowledgement_owner != owner_label:
-        raise LeaseStatusError("request and runtime acknowledgement owners differ")
     acknowledgement_runtime = _runtime_identity(
         acknowledgement.get("runtime"),
         "runtime acknowledgement",
@@ -532,81 +551,18 @@ def validate_active_lease_status(
         raise LeaseStatusError(
             "request and runtime acknowledgement ownership differ"
         )
-    for name, expected in (
-        ("requested_at", requested_at),
-        ("heartbeat_at", heartbeat_at),
-        ("expires_at", expires_at),
-    ):
-        if acknowledgement.get(name) != expected:
-            raise LeaseStatusError(
-                f"request and runtime acknowledgement {name} values differ"
-            )
-    _timestamp(acknowledgement.get("acknowledged_at"), "acknowledged_at")
-    _timestamp(acknowledgement.get("updated_at"), "acknowledgement updated_at")
-    if lease.get("acknowledgement_fresh") is not True:
-        raise LeaseStatusError("runtime acknowledgement is not fresh")
-    if lease.get("owner_matches_request") is not True:
-        raise LeaseStatusError("runtime ownership does not match the lease request")
-    if lease.get("external_hold_installed") is not True:
-        raise LeaseStatusError("external_development hold is not installed")
-
-    gate = _required_mapping(status.get("strategy_action_gate"), "runtime authority")
-    if gate.get("schema_version") != 1 or gate.get("available") is not True:
-        raise LeaseStatusError("structured runtime authority is unavailable")
-    if gate.get("stale") is not False or gate.get("runtime_active") is not True:
-        raise LeaseStatusError("structured runtime authority is stale or inactive")
-    if gate.get("owner_matches_active_runtime") is not True:
-        raise LeaseStatusError("structured runtime owner does not match the active runtime")
-    if gate.get("global_pause") is not False or gate.get("runtime_stopped") is not False:
-        raise LeaseStatusError("Pause or Stop takes precedence over development input")
-    gate_owner = _runtime_identity(gate.get("owner"), "structured runtime authority")
-    if gate_owner != request_runtime:
-        raise LeaseStatusError("structured runtime ownership differs from the lease")
-    gate_age = _nonnegative_number(gate.get("age_seconds"), "runtime authority age")
-    gate_stale_after = _positive_number(
-        gate.get("stale_after_seconds"),
-        "runtime authority stale deadline",
+    request_expiry = _timestamp(request.get("expires_at"), "lease expires_at")
+    acknowledgement_expiry = _timestamp(
+        acknowledgement.get("expires_at"),
+        "runtime acknowledgement expires_at",
     )
-    _timestamp(gate.get("observed_at"), "runtime authority observed_at")
-    if gate_age > gate_stale_after:
-        raise LeaseStatusError("structured runtime authority is stale")
-    holds = gate.get("holds")
-    if not isinstance(holds, list) or not any(
-        isinstance(item, Mapping) and item.get("hold") == "external_development"
-        for item in holds
-    ):
-        raise LeaseStatusError("published external_development hold is missing")
-    _require_authority(gate, "observation_authority", allowed=True)
-    _require_authority(gate, "auxiliary_collection_authority", allowed=False)
-    _require_authority(gate, "strategy_action_authority", allowed=False)
-    _require_authority(gate, "lifecycle_action_authority", allowed=False)
-    collectors = gate.get("allowed_auxiliary_collectors")
-    if not isinstance(collectors, list) or collectors:
-        raise LeaseStatusError("published authority is not fully suppressive")
-    published_acknowledgement = _required_mapping(
-        gate.get("interactive_development_lease"),
-        "published runtime acknowledgement",
-    )
-    if dict(published_acknowledgement) != dict(acknowledgement):
-        raise LeaseStatusError("published runtime acknowledgement is contradictory")
-
-    runtime = _required_mapping(status.get("runtime"), "authoritative runtime evidence")
-    instances = runtime.get("instances")
-    if runtime.get("active") is not True or not isinstance(instances, list):
-        raise LeaseStatusError("authoritative runtime ownership is inactive")
-    matching_instance = any(
-        isinstance(instance, Mapping)
-        and instance.get("active") is True
-        and instance.get("lock_held") is True
-        and instance.get("pid_alive") is True
-        and instance.get("pid") == request_runtime[1]
-        and instance.get("target") == request_runtime[2]
-        for instance in instances
-    )
-    if not matching_instance:
+    if acknowledgement_expiry != request_expiry:
         raise LeaseStatusError(
-            "authoritative runtime PID or exact ADB target differs from the lease"
+            "request and runtime acknowledgement expiry windows differ"
         )
+    server_timestamp = _timestamp(status.get("server_time"), "server_time")
+    if server_timestamp >= request_expiry:
+        raise LeaseStatusError("the server-evaluated heartbeat deadline has expired")
 
     if lease.get("active") is not True:
         reason = str(lease.get("reason") or "the composite lease is inactive")
@@ -614,11 +570,11 @@ def validate_active_lease_status(
 
     return LeaseAuthority(
         lease_id=normalized_lease_id,
-        owner_label=owner_label,
         runtime_id=request_runtime[0],
         runtime_pid=request_runtime[1],
         adb_target=request_runtime[2],
-        requested_at=requested_at,
+        expires_at=request_expiry,
+        server_time=server_timestamp,
     )
 
 
@@ -671,6 +627,8 @@ def execute_development_input(
             detail=str(exc),
             message=f"Rejected: {exc}",
         )
+    input_timeout_seconds = request.input_timeout_seconds()
+    minimum_remaining_lease_seconds = request.minimum_remaining_lease_seconds()
 
     try:
         initial_status = status_reader()
@@ -736,7 +694,16 @@ def execute_development_input(
         )
         if final_authority.binding != initial_authority.binding:
             raise LeaseStatusError(
-                "lease, runtime, or exact ADB target changed during geometry acquisition"
+                "lease, runtime, exact ADB target, or acknowledged expiry window "
+                "changed during geometry acquisition"
+            )
+        if final_authority.remaining_seconds < minimum_remaining_lease_seconds:
+            raise LeaseStatusError(
+                "lease window has only "
+                f"{_seconds_text(final_authority.remaining_seconds)} remaining; "
+                f"{_seconds_text(minimum_remaining_lease_seconds)} are required for "
+                "the bounded input timeout plus timing margin. Heartbeat the "
+                "lease, wait for the newly acknowledged current window, then retry"
             )
     except (LeaseStatusError, OSError, ValueError) as exc:
         return _finish(
@@ -764,7 +731,11 @@ def execute_development_input(
 
     input_error: Optional[AdbInputError] = None
     try:
-        adb.run_input(final_authority.adb_target, input_arguments)
+        adb.run_input(
+            final_authority.adb_target,
+            input_arguments,
+            timeout_seconds=input_timeout_seconds,
+        )
         input_outcome = "completed"
     except AdbInputError as exc:
         input_error = exc
@@ -896,18 +867,6 @@ def _runtime_identity(value: object, label: str) -> tuple[str, int, str]:
     return runtime_id, pid, target
 
 
-def _require_authority(
-    gate: Mapping[str, Any],
-    field: str,
-    *,
-    allowed: bool,
-) -> None:
-    authority = _required_mapping(gate.get(field), field.replace("_", " "))
-    expected_class = field.removesuffix("_authority")
-    if authority.get("action_class") != expected_class or authority.get("allowed") is not allowed:
-        raise LeaseStatusError("published runtime authority is not suppressive")
-
-
 def _normalize_lease_id(value: object) -> str:
     normalized = str(value or "").strip().lower()
     if _LEASE_ID_RE.fullmatch(normalized) is None:
@@ -931,23 +890,10 @@ def _timestamp(value: object, label: str) -> float:
         raise LeaseStatusError(f"{label} is missing or malformed") from exc
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise LeaseStatusError(f"{label} must include a timezone")
-    return parsed.timestamp()
-
-
-def _nonnegative_number(value: object, label: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise LeaseStatusError(f"{label} is missing or malformed")
-    numeric = float(value)
-    if not math.isfinite(numeric) or numeric < 0:
-        raise LeaseStatusError(f"{label} is missing or malformed")
-    return numeric
-
-
-def _positive_number(value: object, label: str) -> float:
-    numeric = _nonnegative_number(value, label)
-    if numeric <= 0:
-        raise LeaseStatusError(f"{label} is missing or malformed")
-    return numeric
+    try:
+        return parsed.timestamp()
+    except (OverflowError, OSError) as exc:
+        raise LeaseStatusError(f"{label} is missing or malformed") from exc
 
 
 def _positive_timeout(value: object, label: str) -> float:
@@ -962,6 +908,16 @@ def _positive_timeout(value: object, label: str) -> float:
     return numeric
 
 
+def _bounded_input_timeout(value: object) -> float:
+    timeout = _positive_timeout(value, "ADB input timeout")
+    if timeout > MAX_ADB_INPUT_TIMEOUT_SECONDS:
+        raise ValueError(
+            "ADB input timeout must not exceed "
+            f"{MAX_ADB_INPUT_TIMEOUT_SECONDS:g} seconds"
+        )
+    return timeout
+
+
 def _exact_target(target: object) -> str:
     normalized = str(target or "").strip()
     if not normalized or normalized == "unknown":
@@ -971,6 +927,11 @@ def _exact_target(target: object) -> str:
 
 def _point_text(values: Sequence[object]) -> str:
     return "(" + ",".join(_number_text(value) for value in values) + ")"
+
+
+def _seconds_text(value: float) -> str:
+    unit = "second" if value == 1 else "seconds"
+    return f"{value:g} {unit}"
 
 
 def _number_text(value: object) -> str:
@@ -1010,6 +971,8 @@ __all__ = [
     "InputExecutionResult",
     "LeaseAuthority",
     "LeaseStatusError",
+    "LEASE_WINDOW_MARGIN_SECONDS",
+    "MAX_ADB_INPUT_TIMEOUT_SECONDS",
     "MAX_SWIPE_DURATION_MS",
     "SubprocessAdbBoundary",
     "execute_development_input",

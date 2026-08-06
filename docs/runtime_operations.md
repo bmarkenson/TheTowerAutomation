@@ -423,11 +423,37 @@ active, send one canonical-coordinate action through the development helper:
 Tap and swipe coordinates use the canonical `1080x1920` space with half-open
 bounds (`0 <= x < 1080`, `0 <= y < 1920`). Swipe duration is an integer from 1
 through 5000 milliseconds. Each invocation queries the production-owned
-loopback status immediately, requires the advertised active lease and matching
-fresh suppressive runtime authority, acquires native geometry through one
-bounded screenshot against that exact target, and revalidates the same
-lease/runtime/target binding before attempting exactly one finite-timeout ADB
-input command. Supported native framebuffers are `1080x1920` and `720x1280`.
+loopback status immediately and requires its composite lease `active` value to
+be exactly true. That production-owned value is the canonical decision for the
+fresh suppressive hold and runtime authority. The helper itself checks the
+supported API/capability, RUNNING control state, supplied request and
+acknowledgement lease ID and lifecycle states, matching runtime identity and
+exact target, and one matching acknowledged expiry window. It does not
+recalculate the internal authority matrix, gate age, active runtime instances,
+or duplicated acknowledgement view.
+
+The helper then acquires native geometry through one bounded screenshot against
+that exact target and revalidates the unchanged
+lease/runtime/target/acknowledged-expiry binding. Its final status must leave at
+least:
+
+```text
+selected ADB subprocess timeout + 1s server timestamp precision
+  + 1s status-response/dispatch latency
+```
+
+using production `server_time` and the acknowledged `expires_at`; the worker
+host's wall clock is not consulted. A tap's subprocess timeout is 5 seconds. A
+swipe uses the larger of 5 seconds or its gesture duration plus 2 seconds, so a
+permitted 5000 ms swipe receives a bounded 7-second timeout. Consequently a tap
+needs at least 7 seconds remaining and a maximum-duration swipe needs at least
+9; equality is accepted and anything below the applicable threshold is denied
+before ADB input. On that rejection, send a separate heartbeat, wait until
+status shows the renewed matching acknowledgement as active, and invoke the
+helper again. The helper never heartbeats, extends, or revives the lease itself.
+
+After the final check it attempts exactly one finite-timeout ADB input command.
+Supported native framebuffers are `1080x1920` and `720x1280`.
 
 The default audit destination is the fixed production
 `/home/brianm/dev/python/TheTower/logs/actions.log`, even when the tool runs in a

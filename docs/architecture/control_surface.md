@@ -346,8 +346,16 @@ an `active` acknowledgement for the same lease, the
 auxiliary, strategy, lifecycle, and all allowlisted collector input. Pending,
 release-blocked, expired, stale, or mismatched evidence is visible but never
 active. The endpoint provides coordination state only. The separately delivered
-development-side lease-aware ADB helper consumes this composite status and does
-not add an input operation to the control-surface API.
+development-side lease-aware ADB helper consumes `active` as the canonical
+production policy decision and does not rederive it from
+`strategy_action_gate`, `runtime.instances`, duplicated acknowledgement views,
+or individual authority decisions. The helper still validates the supported
+schema/capability, RUNNING control state, supplied request/acknowledgement lease
+ID and lifecycle states, matching runtime identity and exact target, and the
+same acknowledged expiry window. Immediately before input, production
+`server_time` must leave the action's complete bounded subprocess timeout plus
+the documented timing margin. This consumer does not add an input operation to
+the control-surface API.
 
 ## Strategy profile publication
 
