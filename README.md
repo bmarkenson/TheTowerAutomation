@@ -4,11 +4,10 @@ This repository drives automated gameplay loops for *The Tower: Idle Tower Defen
 
 ## Starting a development thread
 
-Agents and developers should begin with [`AGENTS.md`](AGENTS.md) and the
-canonical [`docs/new_thread.md`](docs/new_thread.md) entrypoint. It links the
-runtime runbook, observed-issue ledger, architecture direction, and current
-backlog. Stable operational guidance belongs there; every handoff should add
-only freshly inspected volatile process and battle state.
+Codex loads [`AGENTS.md`](AGENTS.md) automatically. Every TheTower thread reads
+the [`docs/new_thread.md`](docs/new_thread.md) router and selects its smallest
+applicable path. Use a handoff only when responsibility moves to another
+top-level chat; stable state stays in its canonical repository owner.
 
 ## Running with YAML strategies
 
@@ -101,7 +100,7 @@ the Workshop preset and supported Free Upgrade locks without changing them,
 opens the guarded Home Perks configuration control itself, captures First Perk,
 Ban Perks, and Auto Pick order, updates the same battle JSON/Markdown, and
 releases Home. See
-[`docs/runtime_operations.md`](docs/runtime_operations.md#no-strategy-run-inventory)
+[`docs/operations/no_strategy.md`](docs/operations/no_strategy.md)
 for the exact workflow. The default remains `farm` when `--strategy` is
 omitted.
 
@@ -344,7 +343,7 @@ independent passwordless OpenSSH processes for the API tunnel and the
 loopback-only ADB reverse forward. The persistent Linux control service also
 keeps the selected exact ADB target registered across managed automation
 stop/start cycles; the browser client remains available as a fallback. See the
-[`native Windows control surface`](docs/runtime_operations.md#native-windows-control-surface)
+[`native Windows control surface`](windows/TheTower.ControlSurface/README.md)
 procedure.
 
 ## Development backlog

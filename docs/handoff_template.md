@@ -1,66 +1,54 @@
 # Preparing a Thread Handoff
 
-Read this file only when preparing or reviewing a handoff. A new development
-thread does not need it: Codex automatically loads `AGENTS.md`, and the handoff
-directs the new thread to `docs/new_thread.md`.
+Read this file only when responsibility must move to another top-level chat. A
+new thread otherwise needs no handoff: Codex loads `AGENTS.md`, and every
+TheTower thread reads `docs/new_thread.md`.
 
-## Minimal content
+A handoff is a delta, not a repository briefing. Include:
 
-A handoff is a delta, not a repository briefing. Normally it needs only:
+1. one concrete outcome;
+2. task-specific authority or scope boundaries;
+3. the assigned checkout and branch;
+4. links to only the active documents needed next; and
+5. retained evidence paths when non-obvious evidence constrains the task.
 
-1. one concrete task;
-2. scope or authority boundaries specific to that task;
-3. links to the exact active documentation the next thread needs; and
-4. retained evidence paths when the task depends on non-obvious evidence.
+Add these only when material:
 
-Omit a heading when it adds no information. Put durable anomalies in
-`docs/observed_issues.md`, actionable work in the relevant domain backlog, and
-stable architecture or procedure in its canonical document instead of copying
-those facts into the handoff.
+- **Repository note:** owned or parallel changes that create an overlap or
+  ordering concern. Do not paste a generic status; the next thread checks it.
+- **Validation:** current results the next thread may rely on. Do not present an
+  old test count as a current baseline.
+- **Fresh live state:** only after completing `docs/live_preflight.md` during
+  handoff preparation. Give timestamp and timezone. Otherwise omit it.
+- **Unrecorded follow-up:** only work absent from an active backlog.
 
-## Conditional additions
-
-Add these only when they materially change how the next thread can proceed:
-
-- **Repository note:** task-owned uncommitted or parallel work that creates a
-  real preservation, ordering, or overlap concern. Do not dump `git status`;
-  the next thread must inspect it freshly.
-- **Validation:** current-package results the next thread will rely on. Do not
-  reuse an older test count as a present baseline.
-- **Fresh live state:** only after completing the mandatory inspection in
-  `docs/new_thread.md` during handoff preparation. Include the timestamp and
-  timezone. If live state was not inspected, omit this section; the startup
-  instruction already requires fresh inspection before live work.
-- **Unrecorded follow-up:** only work not already present in an active backlog.
-
-List commits only when they are directly relevant to the task. Distinguish
-durable repository evidence from ephemeral `/tmp` material. Never repeat stable
-safety rules, broad architecture explanations, generic commit lists, or stale
-control/lock/PID/ADB/screen facts.
+Put durable anomalies in `docs/observed_issues.md`, work in its domain backlog,
+and stable contracts or procedures in their canonical owners. Do not repeat
+stable safeguards, architecture, routine logs, generic commit lists, or stale
+control, lock, PID, ADB, or screen facts.
 
 ## Template
 
 ```text
-Continue TheTower development in /home/brianm/dev/python/TheTower.
+Continue TheTower work in <assigned checkout> on <assigned branch>.
 
 Follow the automatically loaded AGENTS.md and read docs/new_thread.md. Choose
-the smallest applicable startup path, and complete its live-runtime path before
-any process/device interaction or claim about volatile runtime state.
+the smallest applicable startup path; complete docs/live_preflight.md before
+process/device interaction or a volatile-state claim.
 
-Task:
-<one concrete outcome>
+Outcome:
+<one concrete result>
 
 Boundaries:
 - <task-specific constraint or authority limit>
 
 Read:
-- <exact active backlog, architecture, issue, or runbook link>
+- <exact active backlog, architecture, issue, or procedure link>
 
 Evidence:
 - <durable path and what it proves>
-- <ephemeral path, clearly labeled, only when material>
+- <ephemeral path, labeled as such, only when material>
 ```
 
-After this core, add a short `Repository note`, `Validation`, `Fresh live
-state`, or `Unrecorded follow-up` paragraph only when its condition above is
-met. Do not emit empty headings, placeholder values, or `none` sections.
+Append only the applicable conditional paragraphs above. Omit empty headings,
+placeholder values, and `none` sections.

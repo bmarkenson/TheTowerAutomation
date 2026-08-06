@@ -125,7 +125,7 @@ extra ceremony merely because they will be tested in production. Rewriting
 what was deployed and why.
 
 The executable checklist is in
-[runtime operations](../runtime_operations.md#production-promotion-and-rollback).
+[the production procedure](../operations/production_promotion.md).
 Add a separate release/staging layer only after repeated direct-promotion
 failures demonstrate a concrete capability it would provide.
 
@@ -375,7 +375,7 @@ wrap read-only screenshot helpers, which remain independently available under
 the read-only ADB rules. Higher-level development code may still use existing
 project detectors and clickmap coordinates before calling this one-command
 boundary. The exact invocation and exit-status contract are in
-[runtime operations](../runtime_operations.md#lease-aware-exact-target-input).
+[the interactive-development procedure](../operations/interactive_development.md#one-exact-target-input).
 There is no production-published semantic action catalog, dependency digest,
 per-action capability token, idempotent replay protocol, or runtime mailbox.
 

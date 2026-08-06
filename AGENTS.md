@@ -1,144 +1,75 @@
 # TheTower Agent Instructions
 
-Before doing any work, read [`docs/new_thread.md`](docs/new_thread.md) and
-follow the applicable startup path defined there. A simple read-only source or
-documentation question may use its lightweight path. If the task requires code
-or documentation changes, complete the applicable
-repository/development checklist and run proportionate automated validation.
-Code-only work does not require live ADB access unless it includes process or
-device interaction, live validation, runtime diagnosis, or claims about
-volatile runtime state. Choose validation proportionate to the remaining
-uncertainty: retained live fixtures may be sufficient, while live interaction
-should be used when it materially resolves current-state, transition, timing,
-or device-integration uncertainty and is safe within the task's authority.
-Neither require nor defer live validation merely by default. If the task's
-scope expands, complete the newly applicable checklist before proceeding. Do
-not rely on a handoff's runtime facts until they have been verified against the
-current process and device.
+Before doing any work, read [`docs/new_thread.md`](docs/new_thread.md) and use
+its smallest applicable startup path. If scope expands, complete the newly
+applicable path before acting or making a current-state claim.
 
-## Project trust model
+## Universal safeguards
 
-TheTower is a trusted-single-user hobby project. The operator and Codex worker
-threads are cooperative participants running under the same account. Design
-safeguards for mistakes, concurrent work, stale runtime state, partial writes,
-and recoverable failures—not for malicious same-user behavior or data secrecy.
-Production screenshots, logs, and other runtime artifacts may be read or copied
-for development when the normal ownership and live-action rules are followed.
-Do not add authentication protocols, secret-token machinery, cryptographic
-audit, hostile-worktree defenses, or similar security complexity unless the
-operator explicitly changes this threat model. Locks, leases, and ordinary
-permissions in this repository are coordination tools, not security boundaries.
+TheTower is a trusted-single-user hobby project. Protect against mistakes,
+concurrent work, stale state, partial writes, and recoverable failures—not a
+malicious same-account user. Do not add authentication, cryptographic audit,
+hostile-worktree defenses, or similar security machinery unless the operator
+changes this model.
 
-## Non-negotiable rules
-
-- Production's `.venv` is production-owned. A development worktree must use
-  the supported bootstrap route in [`docs/new_thread.md`](docs/new_thread.md)
-  when its ignored `.venv` is absent or mismatched; it must never execute,
-  copy, symlink, or mutate production's environment.
-- `main` is production, `develop` is integration, and workers commit only to
+- Production's `.venv` is production-owned. Development worktrees must use the
+  supported bootstrap in `docs/new_thread.md` and must never execute, copy,
+  link, or mutate production's environment. Run project Python and tests only
+  through the selected `.venv/bin/python`.
+- `main` is production, `develop` is integration, and implementation belongs on
   feature branches. Only the operator or an explicitly assigned integration
-  owner updates `develop` or promotes to `main`, following the
-  [production promotion procedure](docs/runtime_operations.md#production-promotion-and-rollback).
-- Once the checkout's supported `.venv` is selected, run all project Python
-  through `.venv/bin/python`, including tests.
-- Follow [`docs/sandbox_boundaries.md`](docs/sandbox_boundaries.md) for host
-  process, PID-lock, user-systemd, ADB, local-socket, and long-lived-process
-  checks. Sandbox `ps`, `/proc`, `pgrep`, `kill -0`, or `systemctl --user`
-  failures cannot prove that a host process is absent or that a lock is stale;
-  use host-backed API or approved-host process evidence plus the OS lock.
-- Run ADB reads as bounded, exact-target commands. A normal sandbox may be used
-  for `get-state` or capture only when the current session explicitly provides
-  working project loopback access. Never use sandbox `adb connect`,
-  `start-server`, or `kill-server` as an availability probe; connection
-  management and any retry after an invocation-environment failure belong on
-  the approved host path. Such a failure is not evidence that the host ADB
-  server, tunnel, emulator, or target is unavailable.
-- Never Surrender a pre-existing or operator-owned battle merely to create a
-  development test boundary. A battle deliberately started by the agent for a
-  bounded test may be Surrendered only when the task author explicitly
-  authorizes it and the agent records that test-run ownership before starting
-  it. Runtime automation may Surrender only through an implemented,
-  profile-declared recovery that authoritatively detects a failed Home-only
-  configuration gate and owns the complete Home repair, restart, and
-  revalidation sequence. The only validation-only exception is one ordinary
-  `NEW_BATTLE` that a profile-declared exclusive-validation receipt claims
-  atomically before the verified Home tap. Only that same live runtime and ADB
-  target may Surrender it, only while fresh evidence still excludes Tournament
-  identity, and only as part of its bounded return-to-Home cleanup. A crash,
-  owner mismatch, resumed battle, or ambiguous identity fails closed without
-  Surrender. Leaving through the verified Exit Battle → Go Home route is
-  allowed only when the task authorizes it and the active run remains
-  resumable.
-- Before any live action, inspect the control file, lock/PID, ADB target,
-  current screen, and recent `logs/actions.log` entries.
-- Capture and detection may continue while paused, but pause blocks every
-  strategy and handler action.
-- If an agent sets a running battle to `PAUSED` to complete bounded work,
-  restore `RUNNING` when that work is complete after rechecking live state and
-  confirming that the pause is still agent-owned. Do not leave an agent-owned
-  work pause behind as a handoff state.
-- Prefer repairing broken dependencies and authority boundaries over bypassing
-  them with unguarded taps, seeded completion variables, or one-off aliases.
-- Treat existing untracked files as user-owned unless their ownership and scope
-  have been deliberately established. Do not delete, overwrite, stage, or
-  silently incorporate them.
-- Expect the operator and other agent threads to work in this shared workspace
-  concurrently. Treat tracked or untracked changes outside the current task as
-  owned by that parallel work; do not revert, overwrite, stage, or silently
-  incorporate them. Recheck status and the target-file diff immediately before
-  editing, staging, or committing. If a target changed since inspection, reread
-  and reconcile it; unrelated changes are not a blocker, but overlapping or
-  unclear ownership requires coordination with the user.
+  owner updates `develop` or promotes to `main` through the
+  [production procedure](docs/operations/production_promotion.md).
+- Treat unrelated tracked and untracked changes as another participant's work.
+  Do not overwrite, delete, stage, or incorporate them. Recheck status and each
+  target diff immediately before editing, staging, or committing; reconcile a
+  changed target, and stop only for overlapping or unclear ownership.
 - Before adding a function, class, module, command, configuration/schema path,
-  or workflow, search the directly relevant source, configuration, callers,
-  and tests for existing or closely related ownership. Reuse or extend the
-  existing owner when its contract and architectural boundary fit; create a new
-  owner only when they do not.
-- Write operator-facing logs for comprehension, not just internal mechanics:
-  state what automation is doing and why. Before a guarded or multi-step input
-  workflow, emit one `ACTION` through `log_action_intent(...)` before its first
-  input and one terminal `RESULT`. Record individual taps and swipes as `INPUT`
-  with coordinates, matches, and retries in paired `DEBUG` detail. Reserve
-  `WARN` for persistent, operator-relevant degradation rather than expected
-  negative searches or ordinary retries. During the staged logging migration,
-  untouched legacy workflows and input emitters may not yet conform; new or
-  modified logging must follow the target contract rather than extending the
-  legacy pattern. Follow the action-log contract in
-  [`docs/runtime_operations.md`](docs/runtime_operations.md#action-log-contract).
-- Keep `YamlStrategy` and the runtime evaluator generic. Prefer compact source
-  configuration plus explicit generated plans over strategy-name conditionals
-  or duplicated expanded YAML.
+  or workflow, search the relevant source, configuration, callers, and tests.
+  Reuse or extend the existing owner when its contract and boundary fit.
+- Repair dependency and authority boundaries instead of bypassing them with
+  unguarded input, seeded completion state, or one-off aliases.
+- For modified input workflows, follow the
+  [action-log contract](docs/action_log_contract.md): one `ACTION`/`RESULT`
+  pair, individual `INPUT` with diagnostic detail, and `WARN` only for
+  persistent operator-relevant degradation.
+- Keep `YamlStrategy` and its evaluator generic; express variation in compact
+  source configuration and generated plans, not strategy-name conditionals.
+
+## Live safeguards
+
+- Complete [`docs/live_preflight.md`](docs/live_preflight.md) before process or
+  device interaction, live validation or diagnosis, or any claim about
+  volatile runtime state. A handoff or old screenshot is not current evidence.
+- A sandbox-negative PID, process, systemd, socket, or ADB result is not proof
+  of host absence. Use the relevant
+  [sandbox boundary](docs/sandbox_boundaries.md) and host-backed evidence.
+- Use bounded, exact-target ADB commands. Never use sandbox `adb connect`,
+  `start-server`, or `kill-server` as an availability probe.
+- Never Surrender a pre-existing or operator-owned battle for a test boundary.
+  Exceptional owned-test and runtime-repair authority exists only under
+  [`docs/live_action_authority.md`](docs/live_action_authority.md); ambiguity
+  fails closed.
+- Pause blocks every strategy and handler action while capture and detection
+  may continue. Reconcile an agent-owned work Pause when finished, restoring
+  `RUNNING` only after fresh evidence proves the Pause is still agent-owned.
 
 ## Outcome coordination
 
-- Use one disposable outcome coordinator for each coherent feature, fix, or
-  milestone; do not establish a permanent repository-wide coordinator.
-  Delegate only when at least two substantial independent subtasks can proceed
-  usefully in parallel, to no more than three direct subagents. Descendant
-  delegation requires explicit operator authorization.
-- Within a shared checkout, the outcome coordinator is the sole implementation
-  writer. Subagents may explore, validate, analyze, or review. Parallel
-  implementation writers require separate feature branches/worktrees, explicit
-  ownership boundaries, and the repository's concurrency rules.
-- Repository artifacts—not chat history—hold durable state.
-  `PENDING_DEVELOPMENT.md` and its domain backlogs remain the work queue. Follow
-  [`docs/new_thread.md`](docs/new_thread.md#outcome-coordination) for the
-  conditional procedure, checkpointing, evidence summaries, and closure.
+Use one disposable outcome coordinator per coherent result. Delegate only when
+at least two substantial independent subtasks can proceed in parallel, to no
+more than three direct subagents; descendants require explicit operator
+authorization. In a shared checkout the coordinator is the sole writer.
+Parallel writers require separate feature worktrees and explicit ownership.
+Repository artifacts, not chats, hold durable state; use the checkpoint,
+evidence-summary, handoff, and closure procedure in `docs/new_thread.md`.
 
-## Documentation discipline
+## Documentation routing
 
-- Before changing documentation structure or moving information between active
-  and historical files, read and follow
-  [`docs/documentation_maintenance.md`](docs/documentation_maintenance.md).
-- Record newly observed runtime/tooling anomalies in
-  [`docs/observed_issues.md`](docs/observed_issues.md), including evidence and
-  whether they are confirmed, unresolved, or resolved.
-- When an issue is fixed, add the fixing commit and regression-test location,
-  then move the complete entry to the applicable archive under `docs/issues/`.
-  Do not erase the original symptom; recurrence history is useful.
-- Keep actionable work in `PENDING_DEVELOPMENT.md`. The issue ledger is evidence
-  and history, not a second backlog.
-- When responsibility actually moves to an independent top-level chat, the
-  handoff must follow `docs/handoff_template.md`, direct that chat to follow the
-  automatically loaded `AGENTS.md` and read `docs/new_thread.md`, and report
-  only freshly inspected volatile state.
+Use [`docs/documentation_maintenance.md`](docs/documentation_maintenance.md)
+for tracked guidance or lifecycle changes. `PENDING_DEVELOPMENT.md` and its
+domain backlogs own actionable work; `docs/observed_issues.md` is a compact
+issue router, with evidence and history under `docs/issues/`. A handoff is
+needed only when responsibility moves to another top-level chat and must follow
+[`docs/handoff_template.md`](docs/handoff_template.md) with freshly inspected
+volatile state only.

@@ -47,7 +47,7 @@ The unit also reads the separate optional
 `~/.config/thetower/player-save-audit.env`. It is intentionally not rewritten
 by the control surface. The file can explicitly enable the observation-only
 player-save collector and set its bounded cadence; see
-[`docs/runtime_operations.md`](../../docs/runtime_operations.md#player-save-natural-boundary-audit-collector)
+[`docs/operations/player_save_audit.md`](../../docs/operations/player_save_audit.md)
 for the exact interface, receipt path, and authority limits. Absence leaves the
 collector disabled.
 
