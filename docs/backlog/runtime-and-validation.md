@@ -187,9 +187,14 @@ checked-item detail remains in the
     history-tail attachment. Preserve passive compact Game Stats OCR, the More
     Stats UI fallback, and every verified
     Wait/Retry/Home/mutation/transition control.
-  - [ ] Add the versioned raw-field disposition manifest and explicit
-    validation status/provenance for every normalized profile group. Keep
-    private, ignored, and unknown fields unpublished.
+  - [x] Add the versioned raw-field disposition manifest and explicit
+    validation status/provenance for every normalized profile group.
+    `1d424f2` inventories all 739 version-1073 decoded-root keys exactly once,
+    rejects count/hash/category or decoded-root drift, attaches the governing
+    audit ID, evidence level, and provenance to all 12 profile components, and
+    keeps private, ignored, and unknown values unpublished. The complete
+    checkpoint passed all 1,654 tests; future exact versions must begin with a
+    separately reviewed manifest.
   - [ ] Deploy the corrective and Tournament slot-decoder commits through the
     coordinator-owned promotion path, then observe the first ordinary
     save-first Home boundary, exact-next-battle bind, and natural direct Retry.

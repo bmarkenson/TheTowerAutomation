@@ -372,6 +372,15 @@ currency, history, or other private values. The current redacted
 `profile_summary` is diagnostic until each semantic count or level group below
 is separately validated; array length alone proves structure, not meaning.
 
+The version-1073 manifest now inventories all 739 exact decoded-root keys: 13
+structural, 31 automation-gating, 51 profile-observation, 34 private, 69
+ignored-with-reason, and 541 unknown. The mapping loader validates the exact
+categories, disjoint membership, declared count, and canonical field-name
+hash. A decoded root must then match that complete name set before any mapped
+value is published. An added or removed member therefore invalidates the
+exact-version shape and restores the existing UI fallback; it never silently
+inherits a disposition or semantic claim.
+
 ### Evidence and promotion standard
 
 A versioned claim progresses through four evidence levels:
@@ -395,7 +404,7 @@ control fields; flush through a proven lifecycle boundary; visually verify the
 restoration; and finish at the original safe boundary. A new exact game
 version starts again at structural status even when its fields look unchanged.
 
-### Versioned audit matrix: `data-9-game-1073` / revision 3
+### Versioned audit matrix: `data-9-game-1073` / revision 4
 
 This is the single authoritative matrix for every normalized claim published
 or proposed for exact game version 1073. The evidence level names the highest
@@ -409,7 +418,7 @@ exact game version starts a new matrix at Structural level.
 
 | Audit ID and normalized claim | Version-1073 source | Evidence level and retained evidence | Required work / current runtime disposition |
 | --- | --- | --- | --- |
-| `V1073-RAW-001` raw-field disposition manifest | Exact root field names; no raw values | **Structural.** Root identity, selected array dimensions, and the current redacted summary are known. | Classify every raw field as structural, automation-gating, profile observation, private, ignored-with-reason, or unknown. Until complete, unclassified fields are unpublished. |
+| `V1073-RAW-001` raw-field disposition manifest | Exact decoded-root keys; no raw values | **Structural and complete for version-1073 field coverage.** Stable exact-target reads established the `SaveLoad+PlayerData` root and all 739 decoded keys. The versioned manifest classifies each name exactly once and is protected by count, canonical hash, loader validation, and strict decoded-root equality. | Disposition coverage is closed, but it is not semantic promotion: private, ignored, and unknown values remain unpublished, and indexed meanings, formulas, caps, and effective values remain in their separate rows. Every new exact version starts a new manifest; any field drift fails closed until reviewed. |
 | `V1073-CFG-001` Cards preset | `presetName`, `currentPreset` | **Shortcut-ready.** UI slot 2/1/2 caused raw `1/0/1`; restoration and unrelated controls were verified. | Audit runtime acquisition, then retain scheduled UI samples. |
 | `V1073-CFG-002` card recharge modes | `demonModeAutomateToggle`, `nukeAutomateToggle` | **Shortcut-ready.** Both booleans were independently flipped and restored; `true` means auto-reactivate. | Audit runtime acquisition, then retain scheduled UI samples. |
 | `V1073-CFG-003` Workshop preset | `workshopPresetName`, `currentWorkshopPreset` | **Shortcut-ready.** Exact selected-name/index agreement at a verified boundary; causality is not required for this non-polarity claim. | Do not manufacture a switch; force UI again on mapping/version audit. |
@@ -480,7 +489,8 @@ mapping and run evidence.
 
 Profile groups broaden the diagnostic view but cannot influence automation
 until their own row is Shortcut-ready. Every published group carries mapping
-ID, source fields, capture time, and validation status.
+ID, source fields, capture time, audit-row ID, evidence level, and explicit
+provenance from the exact-version mapping.
 
 ### Runtime adoption and future calibration
 
@@ -516,8 +526,11 @@ runtime comparison edits its own authority manifest.
    existing exact-evidence resolver may attempt only a unique fail-closed
    mapping; ambiguity or conflict remains UI-required, and the observation-only
    collector never becomes preflight authority.
-5. Add the versioned raw-field disposition manifest and validation metadata for
-   other profile groups. Unknown or unclassified fields remain unpublished.
+5. **Manifest maintenance:** every new exact game version must add its own
+   complete raw-field disposition manifest and per-component validation
+   metadata. A newly observed field requires reviewed classification plus a
+   count/hash update; unknown fields remain unpublished, and neither a runtime
+   receipt nor a matching name self-promotes semantics.
 
 The next Perk-timeline phase is a normal-runtime checkpoint cache independent
 of collector opt-in. It will consume naturally serialized stable same-round

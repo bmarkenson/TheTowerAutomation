@@ -37,6 +37,28 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-06 version-1073 raw save-field disposition audit
+
+- `1d424f2` inventories all 739 exact `SaveLoad+PlayerData` decoded-root keys
+  without retaining their values: 13 structural, 31 automation-gating, 51
+  profile-observation, 34 private, 69 ignored with an explicit reason, and 541
+  unknown. Exact categories, disjoint membership, declared count, and the
+  canonical field-name hash are mapping-load invariants.
+- Exact-version decoding now requires root-name equality with that manifest.
+  Added or removed fields invalidate the shape and restore the existing UI
+  fallback before mapped checks or profile values can be published. Private,
+  ignored, and unknown root values remain absent from snapshots.
+- Every one of the 12 normalized profile components now publishes its audit-row
+  ID, structural evidence level, and provenance. This closes disposition and
+  validation-metadata coverage without claiming names, formulas, caps, or
+  effective values for still-indexed data.
+- A stable read-only live import during the ordinary Tier 19 battle accepted
+  version 1073, the exact root class and 739-field manifest, and all 12 profile
+  components. It required no pause, Home transition, input, or retained raw
+  save. The focused cross-consumer set passed all 244 tests; the complete
+  isolated checkpoint passed compilation, state validation, clickmap integrity
+  with zero errors and 44 known orphans, and all 1,654 tests.
+
 ### 2026-08-06 combined production/development coordination boundary
 
 - `b2d2811975b80957159fe9da28cf7ba0d70f429c` (integrated as `073bf05`) adds
