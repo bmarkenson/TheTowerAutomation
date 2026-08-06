@@ -468,7 +468,8 @@ def _claim_daily_rewards(
     ordinary_claimed = 0
     weekly_checks = 0
     weekly_chests_claimed = 0
-    weekly_check_reason = "initial Daily Missions review"
+    weekly_check_reason = "Daily Mission claims were checked first"
+    ordinary_claim_limit_logged = False
     ordinary_claim_limit: Optional[int] = None
     if not claim_missions:
         capacity = _read_daily_mission_capacity(current)
@@ -497,6 +498,49 @@ def _claim_daily_rewards(
     for _ in range(MAX_DAILY_REWARDS):
         if not _is_state(current, "DAILY_MISSIONS"):
             return False, claimed
+
+        ordinary_claim_allowed = (
+            ordinary_claim_limit is None
+            or ordinary_claimed < ordinary_claim_limit
+        )
+        if ordinary_claim_allowed and is_visible(
+            DAILY_MISSION_CLAIM,
+            screenshot=current,
+        ):
+            if not _tap_if_visible_guarded(
+                DAILY_MISSION_CLAIM,
+                screenshot=current,
+                action_guard_fn=action_guard_fn,
+                expected_state="DAILY_MISSIONS",
+            ):
+                return False, claimed
+            current = _guarded_wait_for_state(
+                "DAILY_MISSIONS",
+                settle_s=0.6,
+                action_guard_fn=action_guard_fn,
+            )
+            if current is None:
+                return False, claimed
+            claimed += 1
+            ordinary_claimed += 1
+            weekly_check_reason = (
+                "all currently claimable Daily Mission rewards were claimed "
+                "first; checking for unlocked milestone chests"
+            )
+            continue
+
+        if (
+            ordinary_claim_limit is not None
+            and ordinary_claimed >= ordinary_claim_limit
+            and ordinary_claimed
+            and not ordinary_claim_limit_logged
+        ):
+            log(
+                "[MISSION_REWARDS] Sunday capacity relief complete: "
+                f"claimed {ordinary_claimed} ordinary Daily Mission rewards",
+                "DEBUG",
+            )
+            ordinary_claim_limit_logged = True
 
         weekly_checks += 1
         log(
@@ -552,40 +596,6 @@ def _claim_daily_rewards(
             return False, claimed
         if weekly_chest.screenshot is not None:
             current = weekly_chest.screenshot
-
-        if (
-            ordinary_claim_limit is not None
-            and ordinary_claimed >= ordinary_claim_limit
-        ):
-            if ordinary_claimed:
-                log(
-                    "[MISSION_REWARDS] Sunday capacity relief complete: "
-                    f"claimed {ordinary_claimed} ordinary Daily Mission rewards",
-                    "DEBUG",
-                )
-            break
-        if is_visible(DAILY_MISSION_CLAIM, screenshot=current):
-            if not _tap_if_visible_guarded(
-                DAILY_MISSION_CLAIM,
-                screenshot=current,
-                action_guard_fn=action_guard_fn,
-                expected_state="DAILY_MISSIONS",
-            ):
-                return False, claimed
-            current = _guarded_wait_for_state(
-                "DAILY_MISSIONS",
-                settle_s=0.6,
-                action_guard_fn=action_guard_fn,
-            )
-            if current is None:
-                return False, claimed
-            claimed += 1
-            ordinary_claimed += 1
-            weekly_check_reason = (
-                "the previous Daily Mission reward was claimed; checking "
-                "whether it unlocked a milestone chest"
-            )
-            continue
         break
     else:
         log("[MISSION_REWARDS] Daily reward claim bound reached", "WARN")

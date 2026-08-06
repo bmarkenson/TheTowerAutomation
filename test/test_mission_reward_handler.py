@@ -486,17 +486,16 @@ def test_scheduler_cooldown_does_not_straddle_weekly_reset():
     assert scheduler.should_attempt(alert_visible=True, now=110.0)
 
 
-def test_daily_claim_loop_revalidates_before_mission_and_chest_actions():
+def test_daily_claim_loop_drains_missions_before_searching_for_chests():
     initial = np.zeros((2, 2, 3), dtype=np.uint8)
-    after_mission = np.ones((2, 2, 3), dtype=np.uint8)
-    after_chest = np.full((2, 2, 3), 2, dtype=np.uint8)
+    after_first_mission = np.ones((2, 2, 3), dtype=np.uint8)
+    after_missions = np.full((2, 2, 3), 2, dtype=np.uint8)
+    after_chest = np.full((2, 2, 3), 3, dtype=np.uint8)
 
     def visible(label, *, screenshot):
         value = int(screenshot[0, 0, 0])
-        if label == rewards.WEEKLY_MISSION_CHEST:
-            return value == 1
         if label == rewards.DAILY_MISSION_CLAIM:
-            return value == 0
+            return value < 2
         return False
 
     with (
@@ -506,34 +505,40 @@ def test_daily_claim_loop_revalidates_before_mission_and_chest_actions():
             rewards,
             "_find_weekly_mission_chest",
             side_effect=[
-                _weekly_absent(initial),
-                _weekly_found(after_mission),
+                _weekly_found(after_missions),
                 _weekly_absent(after_chest),
             ],
-        ),
+        ) as find_weekly,
         patch.object(rewards, "tap_if_visible", return_value=True) as tap,
-        patch.object(rewards, "_wait_for_state", return_value=after_mission),
+        patch.object(
+            rewards,
+            "_wait_for_state",
+            side_effect=[after_first_mission, after_missions],
+        ),
         patch.object(rewards, "_dismiss_reward_reveal", return_value=after_chest),
         patch.object(rewards, "log") as reward_log,
     ):
         success, claimed = rewards._claim_daily_rewards(initial)
 
     assert success
-    assert claimed == 2
+    assert claimed == 3
     assert [call.args[0] for call in tap.call_args_list] == [
+        rewards.DAILY_MISSION_CLAIM,
         rewards.DAILY_MISSION_CLAIM,
         rewards.WEEKLY_MISSION_CHEST,
     ]
+    assert [
+        call.args[0] for call in find_weekly.call_args_list
+    ] == [after_missions, after_chest]
     debug_messages = [
         entry.args[0]
         for entry in reward_log.call_args_list
         if entry.args[1] == "DEBUG"
     ]
-    assert len(debug_messages) == 7
-    assert "initial Daily Missions review" in debug_messages[0]
-    assert "previous Daily Mission reward was claimed" in debug_messages[2]
-    assert "previous Weekly Mission chest was claimed" in debug_messages[4]
-    assert "Weekly chest review complete" in debug_messages[6]
+    assert len(debug_messages) == 5
+    assert "Daily Mission rewards were claimed first" in debug_messages[0]
+    assert "previous Weekly Mission chest was claimed" in debug_messages[2]
+    assert "Weekly chest review complete" in debug_messages[4]
     operational_messages = [
         entry.args
         for entry in reward_log.call_args_list
@@ -625,12 +630,8 @@ def test_sunday_full_capacity_claims_exactly_two_ordinary_rewards():
         patch.object(
             rewards,
             "_find_weekly_mission_chest",
-            side_effect=[
-                _weekly_absent(initial),
-                _weekly_absent(after_first),
-                _weekly_absent(after_second),
-            ],
-        ),
+            return_value=_weekly_absent(after_second),
+        ) as find_weekly,
         patch.object(rewards, "is_visible", side_effect=visible),
         patch.object(rewards, "tap_if_visible", return_value=True) as tap,
         patch.object(
@@ -651,6 +652,7 @@ def test_sunday_full_capacity_claims_exactly_two_ordinary_rewards():
         rewards.DAILY_MISSION_CLAIM,
         rewards.DAILY_MISSION_CLAIM,
     ]
+    find_weekly.assert_called_once_with(after_second, action_guard_fn=None)
 
 
 def test_sunday_weekly_chest_does_not_consume_full_capacity_claim_budget():
@@ -677,8 +679,6 @@ def test_sunday_weekly_chest_does_not_consume_full_capacity_claim_budget():
             "_find_weekly_mission_chest",
             side_effect=[
                 _weekly_found(initial),
-                _weekly_absent(after_chest),
-                _weekly_absent(after_first),
                 _weekly_absent(after_second),
             ],
         ),
