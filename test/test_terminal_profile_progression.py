@@ -96,3 +96,52 @@ def test_terminal_progression_is_nonblocking_without_an_owned_target():
 
     assert result["status"] == "unavailable"
     assert result["reason"] == "adb_target_session_unavailable"
+
+
+def test_terminal_save_capture_reuses_one_snapshot_for_progression_and_report():
+    target = AdbTargetSnapshot("localhost:5555", 4, True)
+    app = App.__new__(App)
+    app._adb_target_session = _StableSession(target, target)
+    decoded = SimpleNamespace(
+        profile_progression=_normalized_progression(),
+        mapping_id="data-9-game-1073",
+        save_revision=47316,
+        checks={},
+    )
+    report = {
+        "schema_version": 1,
+        "status": "complete",
+        "complete": True,
+        "completed_entry": {"schema_version": 1},
+        "ui_fallback": {"required": False},
+    }
+    binding = {
+        "schema_version": 1,
+        "status": "bound",
+        "activity_scope_run_id": "scope-1",
+    }
+    scope = {"schema_version": 1, "run_id": "scope-1"}
+
+    with (
+        patch("core.app.pull_player_save_bytes", return_value=b"save") as pull,
+        patch("core.app.decode_player_save_bytes", return_value=decoded),
+        patch("core.app.get_activity_scope", return_value=scope),
+        patch(
+            "core.app.terminal_save_report_from_snapshot",
+            return_value=report,
+        ) as report_from_snapshot,
+    ):
+        result = app._capture_terminal_player_save(
+            "GAME_OVER",
+            run_binding=binding,
+        )
+
+    assert result["profile_progression"]["status"] == "complete"
+    assert result["terminal_save_report"] is report
+    pull.assert_called_once()
+    report_from_snapshot.assert_called_once_with(
+        decoded,
+        terminal_state="GAME_OVER",
+        run_binding=binding,
+        activity_scope=scope,
+    )

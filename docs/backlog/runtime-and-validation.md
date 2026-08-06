@@ -165,10 +165,11 @@ checked-item detail remains in the
     lifecycle input.
   - [ ] Add any other normal-runtime consumer of the observation-only polling
     and same-round audit cache only after its own matrix evidence is complete.
-    Record construction, Perks-navigation decisions, Strategy facts,
-    lifecycle changes, and UI suppression remain outside
-    `V1073-RUNTIME-013` and must preserve the current-process terminal-binding
-    rule.
+    The terminal report consumer is independent of that cache and uses its own
+    bound activity scope plus same-source tail proof. Perks-navigation
+    decisions, Strategy facts, lifecycle changes, and further UI suppression
+    remain outside `V1073-RUNTIME-013` and must preserve the current-process
+    terminal-binding rule.
   - [ ] Replace the in-battle Perk UI timeline with a normal-runtime save
     checkpoint cache independent of collector opt-in. Consume naturally
     serialized stable revisions under the exact round identity; preserve the
@@ -180,10 +181,12 @@ checked-item detail remains in the
     boundary is the only current forced active-battle serialization policy and
     grants this cache no authority. This is a separate implementation phase,
     not part of the continuity fix.
-  - [ ] Add save-derived normal completed records and conditional terminal
-    Perks navigation only after history-tail attachment and final-Perk proofs
-    are complete. Preserve passive compact Game Stats OCR, forced full UI audit,
-    and every verified Wait/Retry/Home/mutation/transition control.
+  - [ ] Make terminal Perks navigation conditional after the normal-runtime
+    same-round checkpoint cache proves the complete final prefix. Save-derived
+    normal and Tournament reports are implemented independently with guarded
+    history-tail attachment. Preserve passive compact Game Stats OCR, the More
+    Stats UI fallback, and every verified
+    Wait/Retry/Home/mutation/transition control.
   - [ ] Add the versioned raw-field disposition manifest and explicit
     validation status/provenance for every normalized profile group. Keep
     private, ignored, and unknown fields unpublished.

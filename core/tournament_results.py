@@ -35,7 +35,7 @@ from utils.ocr_utils import ocr_text_and_conf
 Frame = np.ndarray
 SUMMARY_CROP = (100, 300, 880, 1380)
 DEFAULT_RECORDS_DIR = Path("logs/tournaments")
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 _REQUIRED_SUMMARY_FIELDS = {
     "league",
     "wave",
@@ -125,6 +125,7 @@ def build_tournament_result(
     summary_frame: Frame,
     clipboard_text: Optional[str] = None,
     *,
+    detailed_stats: Optional[Mapping[str, Any]] = None,
     detailed_reason: str = "not_captured",
     tournament_id: Optional[str] = None,
     captured_at: Optional[datetime] = None,
@@ -138,7 +139,9 @@ def build_tournament_result(
 
     when = captured_at or datetime.now().astimezone()
     summary = ocr_tournament_summary(summary_frame, text_fn=summary_text_fn)
-    if clipboard_text:
+    if detailed_stats is not None:
+        detailed = copy.deepcopy(dict(detailed_stats))
+    elif clipboard_text:
         detailed = parse_more_stats_clipboard(clipboard_text)
     else:
         detailed = {
@@ -502,6 +505,11 @@ def render_tournament_markdown(record: Mapping[str, Any]) -> str:
     if observed_tier is not None:
         lines.append(f"Observed tier: {observed_tier}")
     fields = record.get("summary", {}).get("fields", {})
+    detailed_source = record.get("detailed_stats", {}).get("source_method")
+    if detailed_source == "player_save_battle_history":
+        lines.append("Stats source: Player save Battle History")
+    elif detailed_source == "android_clipboard":
+        lines.append("Stats source: Android clipboard")
     lines.extend(["", "## Result", ""])
     for key, label in (
         ("league", "League"),

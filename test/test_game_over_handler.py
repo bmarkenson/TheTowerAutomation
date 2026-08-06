@@ -24,6 +24,17 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "test" / "fixtures"
 
 
+def _complete_terminal_save_report():
+    return {
+        "schema_version": 1,
+        "status": "complete",
+        "complete": True,
+        "mapping_id": "data-9-game-1073",
+        "completed_entry": {"schema_version": 1},
+        "ui_fallback": {"required": False},
+    }
+
+
 def test_game_stats_visibility_accepts_more_stats_when_title_is_degraded():
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
 
@@ -565,6 +576,69 @@ def test_clipboard_success_skips_more_stats_scrolling_and_keeps_perk_order():
         "buttons.more_stats:game_over",
         "buttons.close:more_stats",
         "buttons.home:game_over",
+    ]
+
+
+def test_player_save_success_never_opens_more_stats_and_keeps_perk_order():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    record = {
+        "quality": {
+            "valid": True,
+            "retain_source_images": False,
+            "warnings": [],
+        },
+        "more_stats": {"quality": {"row_count": 144}},
+    }
+    perks = {
+        "selected": [
+            {
+                "latest_selection_rank": 1,
+                "display_text": "Coins +1.98x, but Tower Max Health -70%",
+            }
+        ],
+        "quality": {"valid": True, "warnings": []},
+    }
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.HOME
+    try:
+        with (
+            patch("handlers.game_over_handler.capture_adb_screenshot", return_value=frame),
+            patch(
+                "handlers.game_over_handler._capture_game_over_perks",
+                return_value=(perks, [frame], True),
+            ),
+            patch(
+                "handlers.game_over_handler.build_battle_record_from_player_save",
+                return_value=record,
+            ) as build,
+            patch(
+                "handlers.game_over_handler._capture_clipboard_battle_record"
+            ) as clipboard,
+            patch("handlers.game_over_handler.tap_if_visible", return_value=True) as tap,
+            patch("handlers.game_over_handler.scroll_to_edge") as scroll,
+            patch("handlers.game_over_handler._persist_battle_stats_record") as persist,
+            patch("handlers.game_over_handler.time.sleep"),
+        ):
+            result = handle_game_over(
+                capture_stats=True,
+                battle_context={
+                    "strategy": "farm_t19",
+                    "terminal_state": "GAME_OVER",
+                    "terminal_save_report": _complete_terminal_save_report(),
+                },
+            )
+    finally:
+        AUTOMATION.mode = original_mode
+
+    assert result is record
+    assert record["perks"] == perks
+    assert build.call_args.kwargs["strategy_name"] == "farm_t19"
+    assert "terminal_save_report" not in build.call_args.kwargs["runtime_context"]
+    persist.assert_called_once()
+    clipboard.assert_not_called()
+    scroll.assert_not_called()
+    assert [call.args[0] for call in tap.call_args_list] == [
+        "buttons.home:game_over"
     ]
 
 

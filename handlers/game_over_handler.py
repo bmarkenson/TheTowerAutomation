@@ -18,10 +18,12 @@ from core.battle_stats import (
     attach_battle_perks,
     build_battle_record,
     build_battle_record_from_clipboard,
+    build_battle_record_from_player_save,
     make_battle_id,
     persist_battle_record,
 )
 from core.battle_perks import ocr_selected_perks
+from core.terminal_save_report import terminal_save_report_complete
 
 
 MORE_STATS_INDICATOR = "indicators.more_stats"
@@ -57,12 +59,12 @@ def handle_game_over(
     Workflow:
       1) Capture the initial Game Stats dialog in memory.
       2) Capture the complete ordered Selected Perks list and return to Game Stats.
-      3) Tap "More Stats"; if it fails, abort handler.
-      4) Copy the complete report through Android's clipboard service and
-         persist a structured JSON/Markdown record.
+      3) Prefer the causally bound, exact-version save History projection.
+      4) If save evidence is unavailable or contradicts Game Stats, open More
+         Stats and copy the complete report through Android's clipboard service.
       5) If clipboard acquisition or freshness validation fails, fall back to
          guarded overlapping screenshots and OCR.
-      6) Close "More Stats"; if it fails, abort handler.
+      6) Close More Stats only when the UI fallback was opened.
       7) Based on AUTOMATION.mode, unless a guarded post-run workflow requires Home:
          - WAIT: loop until mode changes.
          - HOME: tap the Game Stats Home button and return to the home screen.
@@ -75,7 +77,7 @@ def handle_game_over(
 
     Side effects:
         [adb] Captures screenshots in memory.
-        [clipboard][ocr][fs] Writes a structured record and optional evidence.
+        [save][clipboard][ocr][fs] Writes a structured record and optional evidence.
         [fs] Creates directories and files.
         [tap][swipe] Sends UI input.
         [log] Emits structured logs.
@@ -103,6 +105,8 @@ def handle_game_over(
     )
 
     if capture_stats:
+        context = dict(battle_context or {})
+        terminal_save_report = context.pop("terminal_save_report", None)
         # Keep source frames in memory. Routine successful captures persist only
         # structured data; screenshots are failure evidence.
         img_game_stats = capture_adb_screenshot()
@@ -113,16 +117,11 @@ def handle_game_over(
         if not perks_screen_restored:
             return _abort_handler("Close Perks", session_id)
 
-        # Tap "More Stats" after Perks capture has restored Game Stats.
-        if not tap_if_visible("buttons.more_stats:game_over", retries=1):
-            return _abort_handler("Tap More Stats", session_id)
-
-        time.sleep(1.5)
-
-        record, clipboard_reason = _capture_clipboard_battle_record(
+        record, save_reason = _capture_save_battle_record(
+            terminal_save_report,
             battle_id=battle_id,
             game_stats_frame=img_game_stats,
-            battle_context=battle_context,
+            battle_context=context,
             captured_at=captured_at,
         )
         if record is not None:
@@ -137,59 +136,90 @@ def handle_game_over(
             )
         else:
             log(
-                f"[BATTLE_STATS] Clipboard capture unavailable ({clipboard_reason}); "
-                "using guarded OCR fallback",
-                "WARN",
+                "[BATTLE_STATS] Save-backed report unavailable "
+                f"({save_reason}); using verified More Stats fallback",
+                "INFO",
             )
-            # Repeatedly swipe to the true top, verifying the Round Stats panel
-            # before and after every fallback gesture.
-            top = scroll_to_edge(
-                "gesture_targets.goto_top:more_stats",
-                source_label=MORE_STATS_INDICATOR,
-                progress_region=MORE_STATS_CONTENT_REGION,
-                max_swipes=8,
-                settle_s=1.2,
-            )
-            if top.screenshot is None:
-                return _abort_handler(f"Scroll More Stats to top ({top.reason})", session_id)
+            # Tap "More Stats" only after Perks capture has restored Game Stats.
+            if not tap_if_visible("buttons.more_stats:game_over", retries=1):
+                return _abort_handler("Tap More Stats", session_id)
 
-            if top.success:
-                capture = capture_scroll_to_edge(
-                    "gesture_targets.goto_pg2:more_stats",
+            time.sleep(1.5)
+
+            record, clipboard_reason = _capture_clipboard_battle_record(
+                battle_id=battle_id,
+                game_stats_frame=img_game_stats,
+                battle_context=context,
+                captured_at=captured_at,
+            )
+            if record is not None:
+                attach_battle_perks(record, perks)
+                completed_record = record
+                _persist_battle_stats_record(
+                    record,
+                    session_id=session_id,
+                    game_stats_frame=img_game_stats,
+                    more_stats_frames=[],
+                    perks_frames=perks_frames,
+                )
+            else:
+                log(
+                    f"[BATTLE_STATS] Clipboard capture unavailable ({clipboard_reason}); "
+                    "using guarded OCR fallback",
+                    "WARN",
+                )
+                # Repeatedly swipe to the true top, verifying the Round Stats panel
+                # before and after every fallback gesture.
+                top = scroll_to_edge(
+                    "gesture_targets.goto_top:more_stats",
                     source_label=MORE_STATS_INDICATOR,
-                    screenshot=top.screenshot,
                     progress_region=MORE_STATS_CONTENT_REGION,
-                    max_swipes=16,
+                    max_swipes=8,
                     settle_s=1.2,
                 )
-                more_stats_frames = list(capture.screenshots)
-                source_complete = capture.success
-                source_reason = capture.reason
-            else:
-                # Preserve incomplete evidence but do not strand the completed
-                # battle on a paging/OCR failure.
-                more_stats_frames = [top.screenshot]
-                source_complete = False
-                source_reason = f"top_{top.reason}"
+                if top.screenshot is None:
+                    return _abort_handler(
+                        f"Scroll More Stats to top ({top.reason})",
+                        session_id,
+                    )
 
-            completed_record = _save_battle_stats_record(
-                battle_id=battle_id,
-                session_id=session_id,
-                game_stats_frame=img_game_stats,
-                more_stats_frames=more_stats_frames,
-                source_complete=source_complete,
-                source_reason=source_reason,
-                battle_context=battle_context,
-                captured_at=captured_at,
-                perks=perks,
-                perks_frames=perks_frames,
-            )
+                if top.success:
+                    capture = capture_scroll_to_edge(
+                        "gesture_targets.goto_pg2:more_stats",
+                        source_label=MORE_STATS_INDICATOR,
+                        screenshot=top.screenshot,
+                        progress_region=MORE_STATS_CONTENT_REGION,
+                        max_swipes=16,
+                        settle_s=1.2,
+                    )
+                    more_stats_frames = list(capture.screenshots)
+                    source_complete = capture.success
+                    source_reason = capture.reason
+                else:
+                    # Preserve incomplete evidence but do not strand the completed
+                    # battle on a paging/OCR failure.
+                    more_stats_frames = [top.screenshot]
+                    source_complete = False
+                    source_reason = f"top_{top.reason}"
 
-        # Step 5: Close More Stats
-        if not tap_if_visible("buttons.close:more_stats", retries=1):
-            return _abort_handler("Close More Stats", session_id)
+                completed_record = _save_battle_stats_record(
+                    battle_id=battle_id,
+                    session_id=session_id,
+                    game_stats_frame=img_game_stats,
+                    more_stats_frames=more_stats_frames,
+                    source_complete=source_complete,
+                    source_reason=source_reason,
+                    battle_context=context,
+                    captured_at=captured_at,
+                    perks=perks,
+                    perks_frames=perks_frames,
+                )
 
-        time.sleep(1.2)
+            # Close More Stats only on the fallback route that opened it.
+            if not tap_if_visible("buttons.close:more_stats", retries=1):
+                return _abort_handler("Close More Stats", session_id)
+
+            time.sleep(1.2)
     else:
         log("[GAME_OVER] Fast mode enabled — skipping More Stats capture", "DEBUG")
 
@@ -446,6 +476,63 @@ def _wait_for_game_stats(*, timeout: float, poll: float = 0.25):
             return screenshot
         time.sleep(max(0.05, poll))
     return None
+
+
+def _capture_save_battle_record(
+    terminal_report: Any,
+    *,
+    battle_id: str,
+    game_stats_frame,
+    battle_context: Optional[Mapping[str, Any]],
+    captured_at: datetime,
+):
+    """Build one record without terminal UI input when save proof is complete."""
+
+    if not terminal_save_report_complete(terminal_report):
+        reason = (
+            terminal_report.get("reason")
+            if isinstance(terminal_report, Mapping)
+            else "terminal_save_report_not_captured"
+        )
+        return None, str(reason or "terminal_save_report_unavailable")
+
+    context = dict(battle_context or {})
+    strategy_name = context.pop("strategy", None)
+    run_configuration = context.pop("run_configuration", None)
+    try:
+        record = build_battle_record_from_player_save(
+            game_stats_frame,
+            terminal_report,
+            battle_id=battle_id,
+            captured_at=captured_at,
+            strategy_name=strategy_name,
+            run_configuration=run_configuration,
+            runtime_context=context,
+        )
+    except Exception as exc:
+        return None, f"save_record_build_failed:{exc}"
+
+    quality = record.get("quality", {})
+    if quality.get("valid") is not True:
+        identity = quality.get("identity", {})
+        mismatches = identity.get("mismatches", [])
+        if mismatches:
+            fields = ",".join(
+                str(item.get("field") or "unknown")
+                for item in mismatches
+                if isinstance(item, Mapping)
+            )
+            return None, f"save_identity_mismatch:{fields or 'unknown'}"
+        return None, "save_record_validation_failed"
+
+    row_count = record.get("more_stats", {}).get("quality", {}).get("row_count")
+    log(
+        f"[BATTLE_STATS] Loaded {row_count} exact Stats rows from the "
+        "causally bound terminal player save",
+        "INFO",
+        console=True,
+    )
+    return record, "terminal_player_save"
 
 
 def _capture_clipboard_battle_record(

@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import json
 from pathlib import Path
 import re
@@ -36,7 +36,8 @@ except Exception:  # pragma: no cover - exercised through the unavailable path
 Frame = np.ndarray
 OcrDataFn = Callable[[Frame], Mapping[str, Sequence[Any]]]
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
+PLAYER_SAVE_MORE_STATS_SOURCE = "player_save_battle_history"
 DEFAULT_RECORDS_DIR = Path("logs/battles")
 MORE_STATS_CROP = (140, 330, 800, 1370)
 GAME_STATS_CROP = (40, 400, 995, 1110)
@@ -506,6 +507,123 @@ def parse_more_stats_clipboard(text: str) -> dict[str, Any]:
     }
 
 
+def more_stats_from_terminal_save_report(
+    terminal_report: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Adapt one bound exact-save history projection to battle-record rows."""
+
+    if (
+        terminal_report.get("schema_version") != 1
+        or terminal_report.get("status") != "complete"
+        or terminal_report.get("complete") is not True
+        or terminal_report.get("ui_fallback", {}).get("required") is not False
+    ):
+        raise ValueError("terminal save report is unavailable")
+    completed = terminal_report.get("completed_entry")
+    if not isinstance(completed, Mapping) or completed.get("schema_version") != 1:
+        raise ValueError("terminal completed entry changed shape")
+    mapping_id = str(completed.get("mapping_id") or "")
+    if not mapping_id or mapping_id != str(terminal_report.get("mapping_id") or ""):
+        raise ValueError("terminal completed entry mapping mismatch")
+    source = completed.get("more_stats")
+    if (
+        not isinstance(source, Mapping)
+        or source.get("source_method") != PLAYER_SAVE_MORE_STATS_SOURCE
+        or source.get("source_complete") is not True
+        or source.get("row_count") != 144
+    ):
+        raise ValueError("terminal More Stats projection is incomplete")
+    raw_sections = source.get("sections")
+    if not isinstance(raw_sections, Sequence) or isinstance(raw_sections, (str, bytes)):
+        raise ValueError("terminal More Stats sections changed shape")
+
+    sections: list[dict[str, Any]] = []
+    seen_rows: set[tuple[str, str]] = set()
+    for raw_section in raw_sections:
+        if not isinstance(raw_section, Mapping):
+            raise ValueError("terminal More Stats section changed shape")
+        name = str(raw_section.get("name") or "").strip()
+        key = str(raw_section.get("key") or "").strip()
+        raw_rows = raw_section.get("rows")
+        if (
+            not name
+            or key != _slug(name)
+            or not isinstance(raw_rows, Sequence)
+            or isinstance(raw_rows, (str, bytes))
+        ):
+            raise ValueError("terminal More Stats section changed shape")
+        rows = []
+        for raw_row in raw_rows:
+            row = _battle_row_from_player_save(raw_row, section=name, section_key=key)
+            identity = (key, row["key"])
+            if identity in seen_rows:
+                raise ValueError("terminal More Stats row identity is duplicated")
+            seen_rows.add(identity)
+            rows.append(row)
+        sections.append({"name": name, "key": key, "rows": rows})
+
+    row_count = sum(len(section["rows"]) for section in sections)
+    present_sections = {section["key"] for section in sections}
+    if row_count != 144 or present_sections != _REQUIRED_MORE_STATS_SECTIONS:
+        raise ValueError("terminal More Stats coverage changed")
+    rows_by_key = _row_lookup(sections)
+    if not _REQUIRED_BATTLE_REPORT_ROWS <= {
+        row_key
+        for section_key, row_key in rows_by_key
+        if section_key == "battle_report"
+    }:
+        raise ValueError("terminal Battle Report rows are incomplete")
+    if not _REQUIRED_CURRENCY_ROWS <= {
+        row_key
+        for section_key, row_key in rows_by_key
+        if section_key == "currencies"
+    }:
+        raise ValueError("terminal Currencies rows are incomplete")
+
+    capture = terminal_report.get("capture")
+    transition = terminal_report.get("history_transition")
+    return {
+        "source_method": PLAYER_SAVE_MORE_STATS_SOURCE,
+        "page_count": 0,
+        "sections": sections,
+        "source": {
+            "mapping_id": mapping_id,
+            "completed_entry_fingerprint": completed.get("fingerprint"),
+            "captured_at": (
+                capture.get("captured_at") if isinstance(capture, Mapping) else None
+            ),
+            "save_revision": (
+                capture.get("save_revision") if isinstance(capture, Mapping) else None
+            ),
+            "source_fingerprint": (
+                capture.get("source_fingerprint")
+                if isinstance(capture, Mapping)
+                else None
+            ),
+            "history_transition": (
+                transition.get("status")
+                if isinstance(transition, Mapping)
+                else None
+            ),
+        },
+        "quality": {
+            "valid": True,
+            "source_complete": True,
+            "source_reason": "bound_terminal_history_tail_advance",
+            "source_method": PLAYER_SAVE_MORE_STATS_SOURCE,
+            "row_count": row_count,
+            "missing_required_sections": [],
+            "missing_required_rows": [],
+            "missing_currency_rows": [],
+            "low_confidence_rows": [],
+            "unparsed_numeric_rows": [],
+            "malformed_source_lines": [],
+            "warnings": [],
+            "retain_source_images": False,
+        },
+    }
+
+
 def build_battle_record(
     game_stats_frame: Frame,
     more_stats_frames: Sequence[Frame],
@@ -570,6 +688,33 @@ def build_battle_record_from_clipboard(
     )
 
 
+def build_battle_record_from_player_save(
+    game_stats_frame: Frame,
+    terminal_report: Mapping[str, Any],
+    *,
+    battle_id: Optional[str] = None,
+    captured_at: Optional[datetime] = None,
+    strategy_name: Optional[str] = None,
+    run_configuration: Optional[Mapping[str, Any]] = None,
+    runtime_context: Optional[Mapping[str, Any]] = None,
+    game_stats_text_fn: Callable[..., tuple[str, float]] = ocr_text_and_conf,
+) -> dict[str, Any]:
+    """Build a battle record from a causally bound save History entry."""
+
+    when = captured_at or datetime.now().astimezone()
+    game_stats = ocr_game_stats(game_stats_frame, text_fn=game_stats_text_fn)
+    more_stats = more_stats_from_terminal_save_report(terminal_report)
+    return _assemble_battle_record(
+        game_stats,
+        more_stats,
+        battle_id=battle_id or make_battle_id(when),
+        captured_at=when,
+        strategy_name=strategy_name,
+        run_configuration=run_configuration,
+        runtime_context=runtime_context,
+    )
+
+
 def _assemble_battle_record(
     game_stats: dict[str, Any],
     more_stats: dict[str, Any],
@@ -582,12 +727,17 @@ def _assemble_battle_record(
 ) -> dict[str, Any]:
     """Combine normalized source data and apply cross-source validation."""
 
+    save_authoritative = (
+        more_stats.get("source_method") == PLAYER_SAVE_MORE_STATS_SOURCE
+    )
     coin_breakdown = _reconcile_game_coin_breakdown(game_stats, more_stats)
     missing_game_fields = sorted(
         _REQUIRED_GAME_STATS_FIELDS - set(game_stats["fields"])
     )
     game_stats["quality"] = {
         "valid": not missing_game_fields and coin_breakdown["valid"],
+        "required_for_record": not save_authoritative,
+        "augmentation_complete": not missing_game_fields and coin_breakdown["valid"],
         "missing_required_fields": missing_game_fields,
         "coin_breakdown": coin_breakdown,
     }
@@ -640,10 +790,21 @@ def _assemble_battle_record(
     warnings = list(more_stats["quality"]["warnings"])
     if missing_game_fields:
         warnings.append(
-            "Missing required Game Stats fields: " + ", ".join(missing_game_fields)
+            (
+                "Optional Game Stats fields unavailable: "
+                if save_authoritative
+                else "Missing required Game Stats fields: "
+            )
+            + ", ".join(missing_game_fields)
         )
     if not coin_breakdown["valid"]:
-        warnings.extend(coin_breakdown["warnings"])
+        if save_authoritative:
+            warnings.extend(
+                "Optional Game Stats augmentation: " + warning
+                for warning in coin_breakdown["warnings"]
+            )
+        else:
+            warnings.extend(coin_breakdown["warnings"])
     if identity["mismatches"]:
         warnings.append(
             "Game Stats/More Stats identity mismatch: "
@@ -654,8 +815,8 @@ def _assemble_battle_record(
         warnings.append(run_binding_warning)
     valid = bool(
         more_stats["quality"]["valid"]
-        and not missing_game_fields
-        and coin_breakdown["valid"]
+        and (save_authoritative or not missing_game_fields)
+        and (save_authoritative or coin_breakdown["valid"])
         and not identity["mismatches"]
     )
     record["quality"] = {
@@ -859,8 +1020,12 @@ def derive_battle_stats(record: Mapping[str, Any]) -> dict[str, Any]:
     game_fields = record.get("game_stats", {}).get("fields", {})
 
     wave = _row_int(rows.get(("battle_report", "wave")))
-    game_seconds = parse_duration_seconds(_row_raw(rows.get(("battle_report", "game_time"))))
-    real_seconds = parse_duration_seconds(_row_raw(rows.get(("battle_report", "real_time"))))
+    game_seconds = _row_duration_seconds(
+        rows.get(("battle_report", "game_time"))
+    )
+    real_seconds = _row_duration_seconds(
+        rows.get(("battle_report", "real_time"))
+    )
     coins = _row_number(rows.get(("battle_report", "coins_earned")))
     cells = _row_number(rows.get(("battle_report", "cells_earned")))
 
@@ -2029,6 +2194,97 @@ def _add_parsed_value(row: dict[str, Any]) -> None:
     row["value"] = raw
 
 
+def _battle_row_from_player_save(
+    raw_row: Any,
+    *,
+    section: str,
+    section_key: str,
+) -> dict[str, Any]:
+    """Validate and render one exact numeric save row without claiming UI text."""
+
+    if not isinstance(raw_row, Mapping):
+        raise ValueError("terminal More Stats row changed shape")
+    if (
+        raw_row.get("section") != section
+        or raw_row.get("section_key") != section_key
+        or raw_row.get("source") != PLAYER_SAVE_MORE_STATS_SOURCE
+    ):
+        raise ValueError("terminal More Stats row source mismatch")
+    label = str(raw_row.get("label") or "").strip()
+    key = str(raw_row.get("key") or "").strip()
+    value_type = str(raw_row.get("value_type") or "").strip()
+    source_fields = raw_row.get("source_fields")
+    derivation = str(raw_row.get("derivation") or "").strip()
+    if (
+        not label
+        or key != _slug(label)
+        or not value_type
+        or not derivation
+        or not isinstance(source_fields, Sequence)
+        or isinstance(source_fields, (str, bytes))
+        or not source_fields
+        or any(not str(field).strip() for field in source_fields)
+    ):
+        raise ValueError("terminal More Stats row changed shape")
+
+    row = copy.deepcopy(dict(raw_row))
+    row["source"] = PLAYER_SAVE_MORE_STATS_SOURCE
+    if value_type == "text":
+        value = raw_row.get("value")
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("terminal More Stats text row is unavailable")
+        value_raw = value
+    else:
+        decimal_text = raw_row.get("value_decimal")
+        try:
+            decimal_value = Decimal(str(decimal_text))
+        except (InvalidOperation, TypeError, ValueError):
+            raise ValueError("terminal More Stats numeric row is unavailable") from None
+        if not decimal_value.is_finite():
+            raise ValueError("terminal More Stats numeric row is non-finite")
+        if value_type == "duration_seconds":
+            if decimal_value < 0:
+                raise ValueError("terminal More Stats duration is negative")
+            value_raw = _format_duration_seconds(decimal_value)
+        else:
+            value_raw = format_tower_number(decimal_value)
+
+    active_percent_text = raw_row.get("active_percent_decimal")
+    if active_percent_text is not None:
+        try:
+            active_percent = Decimal(str(active_percent_text))
+        except (InvalidOperation, TypeError, ValueError):
+            raise ValueError("terminal More Stats active percent is invalid") from None
+        if not active_percent.is_finite() or active_percent < 0:
+            raise ValueError("terminal More Stats active percent is invalid")
+        rendered_percent = format(
+            active_percent.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+            "f",
+        )
+        value_raw += f" ({rendered_percent}%)"
+        row["active_percent"] = float(active_percent)
+        row["value_type"] = "count_with_active_percent"
+    row["value_raw"] = value_raw
+    return row
+
+
+def _format_duration_seconds(value: Decimal) -> str:
+    total = int(value.to_integral_value(rounding=ROUND_HALF_UP))
+    days, remainder = divmod(total, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    parts = []
+    for amount, suffix in (
+        (days, "d"),
+        (hours, "h"),
+        (minutes, "m"),
+        (seconds, "s"),
+    ):
+        if amount or (suffix == "s" and not parts):
+            parts.append(f"{amount}{suffix}")
+    return " ".join(parts)
+
+
 def _row_score(row: Mapping[str, Any]) -> tuple[float, float, int]:
     raw = _normalize_ocr_value(str(row.get("value_raw") or ""))
     parsed_bonus = int(
@@ -2101,7 +2357,7 @@ def _sum_rows_by_key(
 def _currency_rates_per_real_hour(
     rows: Mapping[tuple[str, str], Mapping[str, Any]],
     *,
-    real_seconds: int,
+    real_seconds: float,
 ) -> dict[str, dict[str, str]]:
     """Calculate rates for Currencies rows lacking an in-game hourly peer."""
 
@@ -2128,8 +2384,8 @@ def _currency_rates_per_real_hour(
     return rates
 
 
-def _per_real_hour(value: Decimal, real_seconds: int) -> Decimal:
-    return value * Decimal(3600) / Decimal(real_seconds)
+def _per_real_hour(value: Decimal, real_seconds: float) -> Decimal:
+    return value * Decimal(3600) / Decimal(str(real_seconds))
 
 
 def _row_raw(row: Optional[Mapping[str, Any]]) -> str:
@@ -2141,6 +2397,25 @@ def _row_int(row: Optional[Mapping[str, Any]]) -> Optional[int]:
         return None
     value = row.get("value")
     return int(value) if isinstance(value, int) else None
+
+
+def _row_duration_seconds(row: Optional[Mapping[str, Any]]) -> Optional[float]:
+    if not row:
+        return None
+    if row.get("value_type") == "duration_seconds":
+        decimal_value = row.get("value_decimal")
+        if decimal_value is not None:
+            try:
+                value = Decimal(str(decimal_value))
+            except (InvalidOperation, TypeError, ValueError):
+                pass
+            else:
+                if value.is_finite() and value > 0:
+                    if value == value.to_integral_value():
+                        return int(value)
+                    return float(value)
+    parsed = parse_duration_seconds(_row_raw(row))
+    return parsed
 
 
 def _field_decimal(field: Optional[Mapping[str, Any]]) -> Optional[Decimal]:
@@ -2197,6 +2472,8 @@ def _display_key(key: str) -> str:
 
 
 def _display_source_method(source_method: str) -> str:
+    if source_method == PLAYER_SAVE_MORE_STATS_SOURCE:
+        return "Player save Battle History (exact versioned projection)"
     if source_method == "android_clipboard":
         return "Android clipboard (exact copied text)"
     return "scrolling screenshot OCR"
@@ -2267,6 +2544,8 @@ def _render_observed_value(field: str, value: Any) -> str:
 
 
 def _display_row_quality(row: Mapping[str, Any]) -> str:
+    if row.get("source") == PLAYER_SAVE_MORE_STATS_SOURCE:
+        return "exact player save"
     if row.get("source") == "android_clipboard":
         return "exact clipboard text"
     return f"OCR {float(row.get('confidence', -1.0)):.1f}"
@@ -2325,12 +2604,14 @@ __all__ = [
     "attach_observed_run_configuration",
     "build_battle_record",
     "build_battle_record_from_clipboard",
+    "build_battle_record_from_player_save",
     "compare_battle_identity",
     "derive_battle_stats",
     "format_tower_number",
     "make_battle_id",
     "ocr_game_stats",
     "ocr_more_stats",
+    "more_stats_from_terminal_save_report",
     "parse_more_stats_clipboard",
     "parse_duration_seconds",
     "parse_tower_number",

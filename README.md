@@ -244,25 +244,29 @@ evidence, so a no-strategy Game Over carrying that evidence is classified as
 
 ## Battle statistics
 
-At Game Over, the normal handler copies the complete **More Stats** battle
-report through Android's clipboard service and combines it with narrowly scoped
-OCR into one durable record. Each battle produces:
+At Game Over, the normal handler reuses the same stable exact-target player-save
+read that captures profile progression. When the newest `battleHistory` tail is
+one valid append or capped rollover beyond this run's same-source baseline, the
+terminal is bound to the current process, and compact terminal identity does
+not contradict it, the save's complete **More Stats** projection is primary.
+No More Stats panel is opened on that path. Each battle produces:
 
 - `logs/battles/Battle*.json` — the authoritative versioned source record,
-  including named sections/rows, exact copied text, OCR evidence, ordered
-  perks, strategy/runtime context, resolved run configuration, separately
-  sourced observed run configuration, derived values, and
+  including named sections/rows, exact versioned save values or explicit UI
+  fallback provenance, OCR evidence, ordered perks, strategy/runtime context,
+  resolved run configuration, separately sourced observed run configuration,
+  derived values, and
   timestamped/wave-indexed Coins/min progression samples;
 - `logs/battles/Battle*.md` — a human-readable view of the same battle,
   including the resolved loadout policies, presets, and values.
 
-Every copied label/value row is retained by section; the schema does not limit
-capture to a fixed shortlist. Validation currently requires all 16 known
-sections and all 14 known Currencies rows, so a partial clipboard report cannot
-silently become a valid record. The compact Game Stats dialog is OCRed only for
-values absent from the copy report, including Highest Wave and the base/ad coin
-breakdown. Its wave, tier, killed-by, and copied total provide cross-source
-identity and coin-suffix checks.
+The exact versioned projection requires all 16 known sections, all 144 report
+rows, and all 14 known Currencies rows; partial or changed shapes cannot
+silently become a valid record. The compact Game Stats dialog remains a passive
+augmentation for values absent from the save, including Highest Wave and the
+base/ad coin breakdown. Its available wave, tier, and killed-by values are also
+cross-source checks. Missing augmentation does not invalidate an otherwise
+authoritative save-derived report, while a contradiction forces the UI route.
 
 The ordered Selected Perks list is OCRed separately. Its stored order is latest
 selection first. Blue perks are recorded as leveled perks; green and purple
@@ -286,10 +290,14 @@ so there is no separate per-run Coins CSV or scheduled lifetime-total display
 toggle. An attached replacement process records the portion of the battle it
 observes.
 
-If clipboard acquisition or validation fails, the handler falls back to
-overlapping, guarded OCR viewports of the scrolling More Stats page. Source
-screenshots are written to `screenshots/matches/` only when capture, parsing,
-or OCR validation needs evidence.
+An unbound terminal, absent or UI-sourced baseline, unsupported version,
+unchanged or invalid tail transition, unknown death cause, changed shape, or
+identity contradiction preserves the existing More Stats fallback. That route
+copies and validates the complete report through Android's clipboard service;
+if clipboard acquisition also fails, it uses overlapping guarded OCR viewports.
+Tournament Results uses the same save-first/fallback policy. Source screenshots
+are written to `screenshots/matches/` only when capture, parsing, or OCR
+validation needs evidence.
 `--fast-game-over` is the explicit opt-out when a run intentionally should not
 create a record.
 
