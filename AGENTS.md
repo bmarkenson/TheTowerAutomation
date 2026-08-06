@@ -122,6 +122,12 @@ permissions in this repository are coordination tools, not security boundaries.
   Do not erase the original symptom; recurrence history is useful.
 - Keep actionable work in `PENDING_DEVELOPMENT.md`. The issue ledger is evidence
   and history, not a second backlog.
-- Every handoff must follow `docs/handoff_template.md`, direct the next thread
-  to follow the automatically loaded `AGENTS.md` and read
-  `docs/new_thread.md`, and report only freshly inspected volatile state.
+- A worker directly delegated by an active master coordination thread reports
+  its owned commits, validation, and remaining uncertainty back to that master.
+  It does not choose the next task, draft a prompt for another worker, or tell
+  the operator to move between threads unless the master explicitly requests a
+  formal handoff.
+- When work really is being transferred to an independent thread, the handoff
+  must follow `docs/handoff_template.md`, direct that thread to follow the
+  automatically loaded `AGENTS.md` and read `docs/new_thread.md`, and report
+  only freshly inspected volatile state.

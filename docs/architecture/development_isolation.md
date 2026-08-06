@@ -456,10 +456,16 @@ Implementation proceeds in small reviewable steps:
 4. **Completed: add the lease-aware ADB input helper.** One canonical tap or
    swipe now requires the active acknowledged lease, exact-target geometry and
    final revalidation, paired action-log records, and no automatic replay.
-5. **Perform bounded live validation.** The master schedules one cooperative
-   lease, verifies Pause precedence and expiry, and confirms clean return to
-   production. Add Home or owned-battle behavior only in response to a concrete
-   development need.
+5. **Validate the combined coordination boundary.** Exercise bootstrap
+   recovery, atomic frame replacement, lease exclusion and acknowledgement,
+   Pause/Stop precedence, expiry, runtime/target/battle boundaries, stale
+   helper rejection, and clean release with repository-local unit and
+   fake-runtime/fake-ADB tests.
+6. **Perform bounded live validation.** After accepting the combined boundary,
+   the master may schedule one separately inspected cooperative lease, verify
+   Pause precedence and expiry, and confirm clean return to production. Add
+   Home or owned-battle behavior only in response to a concrete development
+   need.
 
 Do not implement a later step merely to make the current step look complete.
 Repository-local tests use fakes and retained or copied production frames;
