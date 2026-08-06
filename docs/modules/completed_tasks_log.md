@@ -39,6 +39,30 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-06 paused Home manual-start continuity repair
+
+- Live read-only diagnosis found that an Attack Dissonance battle manually
+  started from paused Home advanced normally while Activity Continuity retried
+  its obsolete Home-only Battle History source. The safe retry loop sent no
+  input, but its exclusive hold prevented the No Strategy inventory from
+  starting.
+- `8cf5548` makes a pending Home continuity route follow a passively observed
+  `RUNNING` transition in the same activity scope, clear the obsolete Home
+  control expectation, and continue only after action authority returns. The
+  fix is generic to paused manual starts and does not add a No Strategy or
+  Dissonance conditional.
+- The regression proves paused Home setup, a paused manual battle start, zero
+  History reads or inputs while Paused, one running-source baseline after
+  Resume, preserved scope identity, and a single transition diagnostic. The
+  focused continuity, Battle History, and startup suites passed 155 tests.
+- The complete isolated checkpoint passed compilation, state-definition
+  validation, clickmap integrity with zero errors and the 44 established
+  orphan candidates, and all 1,665 tests in 324.86 seconds. Diagnosis did not
+  tap, stop, reload, Surrender, or otherwise mutate the production battle; live
+  confirmation remains routed through
+  [`ISSUE-2026-027`](../issues/open-2026.md#paused-home-continuity-did-not-follow-a-manually-started-battle)
+  after promotion.
+
 ### 2026-08-06 post-promotion branch/worktree lifecycle cleanup
 
 - A fresh audit classified all 25 local feature branches and linked worktrees

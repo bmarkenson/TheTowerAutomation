@@ -8,6 +8,11 @@ Tournament, Tier, or another expected profile.
 Complete [`live_preflight.md`](../live_preflight.md) before a live observation.
 Start or attach with Strategy `none`; Pause before manual navigation. Passive
 capture may continue while Paused, but every automated input remains blocked.
+From verified Home `NEW_BATTLE`, the operator may start the battle manually
+while Paused and then Resume after `RUNNING` is visible. The pending Home
+continuity baseline follows that observed start, records from the running
+battle, and releases the in-battle inventory; terminal mode does not repair or
+replace this continuity step.
 
 During `RUNNING`, the runtime owns one guarded read-only inventory across
 Cards, Perks, Ultimate Weapons, Modules, Event/Bots, Guild/Guardians, Target

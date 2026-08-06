@@ -350,6 +350,12 @@ stages:
 
 ## Runtime control
 
+- [ ] Promote and live-confirm the paused Home manual-start continuity repair
+  from `8cf5548`: from verified `NEW_BATTLE`, keep Pause through the manual
+  start, require passive `RUNNING`, then Resume and confirm one running-source
+  Battle History baseline releases No Strategy inventory without a retry loop
+  or any input while Paused. Track the original failure in
+  [ISSUE-2026-027](../issues/open-2026.md#paused-home-continuity-did-not-follow-a-manually-started-battle).
 - [ ] Close an owned exclusive-validation `cleanup` receipt when the same
   runtime has already proved that its validation battle reached Game Over and
   later observes `RUNNING` before verified Home cleanup. Fail closed, release

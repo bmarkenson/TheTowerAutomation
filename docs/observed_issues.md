@@ -259,3 +259,15 @@ current runtime state.
 - Load the [dossier](issues/open-2026.md#native-control-polling-reset-pending-mode-selections-and-delayed-activity)
   for Windows confirmation or recurrence. Next: verify mode retention and timely
   activity in the rebuilt client; [operator-control backlog](backlog/runtime-and-validation.md#agreed-operator-control-sequence).
+
+### Paused Home continuity did not follow a manually started battle
+
+**Stable ID:** `ISSUE-2026-027` · **Lifecycle:** `repair_awaiting_confirmation`
+
+- A manual `NEW_BATTLE -> RUNNING` transition left the
+  pending Home History baseline retrying its obsolete source and blocked No
+  Strategy inventory, although Pause correctly suppressed every input.
+- Load the [dossier](issues/open-2026.md#paused-home-continuity-did-not-follow-a-manually-started-battle)
+  before changing paused manual-start continuity or on recurrence. Next:
+  promote and observe one natural paused manual start complete its running
+  baseline and No Strategy inventory; [runtime backlog](backlog/runtime-and-validation.md#runtime-control).

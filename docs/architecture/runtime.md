@@ -1211,7 +1211,11 @@ development-lease authority from warning text in `actions.log`.
   `RESUME_BATTLE`, interrupted Battle History, and insufficient baselines
   retain the UI route. A readable identity is persisted with a run-ID
   compare-and-set so stale evidence cannot overwrite a newer lifecycle
-  boundary.
+  boundary. When Pause preserves a pending Home continuity source and the same
+  runtime then observes `RUNNING`, the coordinator keeps the scope, replaces
+  the obsolete Home/control expectation with the running source, and waits for
+  Resume before any History input. Other source, control, or ownership
+  ambiguity remains blocked.
 - A successful runtime-owned direct Retry passively polls fresh stable
   two-identical-read exact-target saves until the structural tail advances.
   Unchanged tails schedule another poll without UI input; one append or a
