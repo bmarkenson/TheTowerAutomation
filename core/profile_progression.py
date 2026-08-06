@@ -18,6 +18,9 @@ from typing import Any, Optional
 
 PROFILE_PROGRESSION_SCHEMA_VERSION = 1
 PROFILE_PROGRESSION_DELTA_SCHEMA_VERSION = 1
+PROFILE_EVIDENCE_LEVELS = frozenset(
+    {"structural", "cross_channel", "causal", "shortcut_ready"}
+)
 
 
 class ProfileProgressionError(ValueError):
@@ -46,6 +49,25 @@ def normalize_profile_progression(
     raw_components = specification.get("components")
     if not isinstance(raw_components, Mapping) or not raw_components:
         raise ProfileProgressionError("profile progression components are missing")
+    component_validation = specification.get("component_validation")
+    if not isinstance(component_validation, Mapping):
+        raise ProfileProgressionError(
+            "profile progression component validation is missing"
+        )
+    component_names = {str(name) for name in raw_components}
+    validation_names = {str(name) for name in component_validation}
+    if validation_names != component_names:
+        missing = sorted(component_names - validation_names)
+        unexpected = sorted(validation_names - component_names)
+        details: list[str] = []
+        if missing:
+            details.append("missing=" + ",".join(missing))
+        if unexpected:
+            details.append("unexpected=" + ",".join(unexpected))
+        raise ProfileProgressionError(
+            "profile progression component validation coverage changed: "
+            + "; ".join(details)
+        )
 
     components: dict[str, Any] = {}
     warnings: list[str] = []
@@ -58,6 +80,10 @@ def normalize_profile_progression(
         summaries: dict[str, Any] = {}
         component_reasons: list[str] = []
         source_fields: list[str] = []
+        validation = _normalize_component_validation(
+            component_name,
+            component_validation.get(component_name),
+        )
         for output_name, raw_spec in sorted(raw_fields.items()):
             if not isinstance(raw_spec, Mapping):
                 raise ProfileProgressionError(
@@ -84,6 +110,7 @@ def normalize_profile_progression(
         component = {
             "status": "structural" if complete else "partial",
             "complete": complete,
+            "validation": validation,
             "source_fields": source_fields,
             "values": values,
             "summary": summaries,
@@ -127,6 +154,36 @@ def normalize_profile_progression(
         ),
         "components": components,
         "warnings": warnings,
+    }
+
+
+def _normalize_component_validation(
+    component_name: Any,
+    raw_validation: Any,
+) -> dict[str, str]:
+    if not isinstance(raw_validation, Mapping):
+        raise ProfileProgressionError(
+            f"component {component_name!r} validation is invalid"
+        )
+    audit_id = str(raw_validation.get("audit_id") or "").strip()
+    evidence_level = str(raw_validation.get("evidence_level") or "").strip()
+    provenance = str(raw_validation.get("provenance") or "").strip()
+    if not audit_id:
+        raise ProfileProgressionError(
+            f"component {component_name!r} validation audit_id is missing"
+        )
+    if evidence_level not in PROFILE_EVIDENCE_LEVELS:
+        raise ProfileProgressionError(
+            f"component {component_name!r} validation evidence_level is invalid"
+        )
+    if not provenance:
+        raise ProfileProgressionError(
+            f"component {component_name!r} validation provenance is missing"
+        )
+    return {
+        "audit_id": audit_id,
+        "evidence_level": evidence_level,
+        "provenance": provenance,
     }
 
 

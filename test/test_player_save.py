@@ -14,12 +14,20 @@ import pytest
 from core.adb_utils import read_device_file
 from core.player_save import (
     PLAYER_SAVE_DEVICE_PATH,
+    PlayerSaveError,
     PlayerSavePullError,
+    _raw_field_manifest_names,
+    _raw_field_name_sha256,
+    _validate_raw_field_manifest,
     decode_player_save_bytes,
     pull_player_save_bytes,
     reconcile_requirements,
 )
-from core.profile_progression import diff_profile_progression
+from core.profile_progression import (
+    ProfileProgressionError,
+    diff_profile_progression,
+    normalize_profile_progression,
+)
 from core.runtime_save import runtime_with_perk_id_overrides
 
 
@@ -43,164 +51,226 @@ def test_default_device_path_matches_operator_adb_pull():
     )
 
 
+def test_raw_field_manifest_is_complete_disjoint_and_canonical():
+    manifest = VERSION_MAPPING["raw_field_manifest"]
+    names = _raw_field_manifest_names(VERSION_MAPPING)
+
+    _validate_raw_field_manifest(VERSION_MAPPING, source="test mapping")
+
+    assert manifest["schema_version"] == 1
+    assert manifest["audit_id"] == "V1073-RAW-001"
+    assert manifest["root_class"] == "SaveLoad+PlayerData"
+    assert manifest["field_count"] == len(names) == 739
+    assert manifest["field_name_sha256"] == _raw_field_name_sha256(names)
+    assert len(names) == len(set(names))
+
+    progression_sources = {
+        spec["source"]
+        for fields in VERSION_MAPPING["profile_progression"][
+            "components"
+        ].values()
+        for spec in fields.values()
+    }
+    assert progression_sources <= set(names)
+
+
+def test_raw_field_manifest_rejects_invalid_categories():
+    mapping = copy.deepcopy(VERSION_MAPPING)
+    dispositions = mapping["raw_field_manifest"]["dispositions"]
+    dispositions["unsupported"] = dispositions.pop("unknown")
+
+    with pytest.raises(
+        PlayerSaveError,
+        match="raw field disposition categories are invalid",
+    ):
+        _validate_raw_field_manifest(mapping, source="test mapping")
+
+
+def test_raw_field_manifest_rejects_duplicate_dispositions():
+    mapping = copy.deepcopy(VERSION_MAPPING)
+    dispositions = mapping["raw_field_manifest"]["dispositions"]
+    duplicate = dispositions["unknown"][0]
+    dispositions["structural"].append(duplicate)
+    dispositions["structural"].sort()
+
+    with pytest.raises(PlayerSaveError, match="duplicate dispositions"):
+        _validate_raw_field_manifest(mapping, source="test mapping")
+
+
+def test_raw_field_manifest_requires_ignored_field_reasons():
+    mapping = copy.deepcopy(VERSION_MAPPING)
+    mapping["raw_field_manifest"]["dispositions"][
+        "ignored_with_reason"
+    ][0]["reason"] = ""
+
+    with pytest.raises(PlayerSaveError, match="has no reason"):
+        _validate_raw_field_manifest(mapping, source="test mapping")
+
+
 def _decoded_save() -> dict:
     payload = {
-        "__class__": "SaveLoad+PlayerData",
-        "dataVersion": 9,
-        "versionNumber": 1073,
-        "saveRevision": 1234,
-        "roundActiveBool": True,
-        "currentTier": 19,
-        "currentWave": 450,
-        "roundSeed": 123456789,
-        "roundsStartedThisTier": [0] * 40,
-        "perkLevel": [0] * 50,
-        "perksPickedCount": 4,
-        "perksPicked": [
-            {"wave": 200, "perk": 10, "__class__": "PerkPick"},
-            {"wave": 290, "perk": 41, "__class__": "PerkPick"},
-            {"wave": 430, "perk": 10, "__class__": "PerkPick"},
-            {"wave": 430, "perk": 0, "__class__": "PerkPick"},
-        ],
-        "battleHistory": [_synthetic_battle_history_entry()],
-        "presetName": ["Farm", "Tournament", "Other", "Fourth", "Fifth"],
-        "workshopPresetName": ["Farm", "Tourney", "D1", "D2", "D3"],
-        "botPresetName": ["Farm", "Flame", "Amplify"],
-        "currentPreset": 0,
-        "currentWorkshopPreset": 0,
-        "currentBotPreset": 0,
-        "demonModeAutomateToggle": True,
-        "nukeAutomateToggle": False,
-        "slotsUnlocked": 22,
-        "autoPickPerk": True,
-        "bannedPerksIndex": [49, 43, 14, 5, 6, 13, -1, -1],
-        "autoPickOrder": [
-            10,
-            12,
-            41,
-            24,
-            27,
-            22,
-            3,
-            8,
-            7,
-            42,
-            40,
-            45,
-            48,
-            44,
-            25,
-            23,
-            1,
-            28,
-            0,
-            2,
-            4,
-            5,
-            6,
-            9,
-            13,
-            14,
-            20,
-            21,
-            26,
-            43,
-            46,
-            47,
-            49,
-            11,
-        ],
-        "firstPerkIndex": 10,
-        "targetPriorityList": [2, 7, 9, 5, 8, 6, 3, 0, 4, 1],
-        "ultimateWeaponUnlocked": [True] * 9,
-        "ultimateWeaponOn": [True] * 9,
-        "ultimateWeaponLevel": [0] * 27,
-        "poisonSwampStunOff": True,
-        "spotlightSmartMissilesOff": False,
-        "guardianChipSlot": [6, 7, 8],
-        "guardianSlotsUnlocked": 2,
-        "guardianChipUnlocked": [False] * 10,
-        "guardianChipLevel": [0] * 30,
-        "guardianUnlocked": True,
-        "tourneyConditionsSeed": 287,
-        "tournamentNumber": 287,
-        "tournamentCheckedNumber": 287,
-        "tournamentRecords": [
-            {
-                "tournamentNumber": 287,
-                "date": 0,
-                "leagueID": 5,
-                "wave": 1,
-                "rank": 0,
-            }
-        ],
-        "leagueID": 5,
-        "researchLevel": [0] * 250,
-        "upgradeWorkshopLevel": [0] * 20,
-        "upgradeWorkshopDefenseLevel": [0] * 20,
-        "upgradeWorkshopUtilityLevel": [0] * 20,
-        "enhancementLevel": [0] * 20,
-        "enhancementDefenseLevel": [0] * 20,
-        "enhancementUtilityLevel": [0] * 20,
-        "enhancementTierUnlocked": [False] * 20,
-        "enhancementDefenseTierUnlocked": [False] * 20,
-        "enhancementUtilityTierUnlocked": [False] * 20,
-        "cardLevel": [0] * 40,
-        "cardUnlocked": [True] * 31 + [False] * 9,
-        "cardMasteryUnlocked": [True] * 8 + [False] * 32,
-        "slotPresetCardInt": [0] * 140,
-        "slotPresetCardAssignedBool": [True] * 28 + [False] * 112,
-        "labLevel": [1] * 5,
-        "labsUnlocked": 5,
-        "profileRelics": [19, 18, 20, 21, 6],
-        "relicsUnlocked": [2] * 276 + [0] * 29,
-        "towerUnlocked": [True] * 74 + [False] * 26,
-        "backgroundUnlocked": [True] * 54 + [False] * 46,
-        "menuUnlocked": [True] * 11 + [False] * 89,
-        "diceTowers": [True] * 50 + [False] * 50,
-        "diceBackgrounds": [True] * 50 + [False] * 50,
-        "totalSkinsBought": 144,
-        "disableAdsUnlockedBool": True,
-        "starterPackUnlockedBool": True,
-        "epicPackUnlockedBool": True,
-        "eventBoostsBoughtTotal": 3,
-        "ultimateWeaponPlusLevel": [0] * 9,
-        "ultimateWeaponPlusOn": [True] * 9,
-        "ultimateWeaponPlusUnlocked": [False] * 9,
-        "flameBotLevelCooldownSelected": 25,
-        "thunderBotLevelCooldownSelected": 14,
-        "goldenBotLevelCooldownSelected": 25,
-        "amplifyBotLevelCooldownSelected": 20,
-        "botBotLevelCooldownSelected": 25,
-        "flameBotPresets": [_bot_preset() for _ in range(4)],
-        "thunderBotPresets": [_bot_preset() for _ in range(4)],
-        "goldenBotPresets": [_bot_preset() for _ in range(4)],
-        "amplifyBotPresets": [_bot_preset() for _ in range(4)],
-        "botBotPresets": [_bot_preset() for _ in range(4)],
-        "harmonyNodesUnlocked": [True] * 41 + [False] * 7,
-        "powerNodesLevel": [0] * 46,
-        "powerNodesMaxLevel": [0] * 46,
-        "powerNodesUnlocked": [True] * 10 + [False] * 36,
-        "synchronicityLevel": 0,
-        "synchronicityUnlocked": False,
-        "moduleEquipped": [
-            _module_item(45),
-            _module_item(46),
-            _module_item(27),
-            _module_item(37),
-        ],
-        "assistModuleSlots": [
-            _assist_module_slot(0, 9),
-            _assist_module_slot(1, 20),
-            _assist_module_slot(2, 30),
-            _assist_module_slot(3, 38),
-        ],
-        "upgradesLockedFreeUpgrades": [False] * 20,
-        "upgradesDefenseLockedFreeUpgrades": [False] * 20,
-        "upgradesUtilityLockedFreeUpgrades": [False] * 20,
-        "playerID": "must-not-leak-player-id",
-        "userName": "must-not-leak-user-name",
+        field_name: None
+        for field_name in _raw_field_manifest_names(VERSION_MAPPING)
     }
+    payload.update(
+        {
+            "__class__": "SaveLoad+PlayerData",
+            "dataVersion": 9,
+            "versionNumber": 1073,
+            "saveRevision": 1234,
+            "roundActiveBool": True,
+            "currentTier": 19,
+            "currentWave": 450,
+            "roundSeed": 123456789,
+            "roundsStartedThisTier": [0] * 40,
+            "perkLevel": [0] * 50,
+            "perksPickedCount": 4,
+            "perksPicked": [
+                {"wave": 200, "perk": 10, "__class__": "PerkPick"},
+                {"wave": 290, "perk": 41, "__class__": "PerkPick"},
+                {"wave": 430, "perk": 10, "__class__": "PerkPick"},
+                {"wave": 430, "perk": 0, "__class__": "PerkPick"},
+            ],
+            "battleHistory": [_synthetic_battle_history_entry()],
+            "presetName": ["Farm", "Tournament", "Other", "Fourth", "Fifth"],
+            "workshopPresetName": ["Farm", "Tourney", "D1", "D2", "D3"],
+            "botPresetName": ["Farm", "Flame", "Amplify"],
+            "currentPreset": 0,
+            "currentWorkshopPreset": 0,
+            "currentBotPreset": 0,
+            "demonModeAutomateToggle": True,
+            "nukeAutomateToggle": False,
+            "slotsUnlocked": 22,
+            "autoPickPerk": True,
+            "bannedPerksIndex": [49, 43, 14, 5, 6, 13, -1, -1],
+            "autoPickOrder": [
+                10,
+                12,
+                41,
+                24,
+                27,
+                22,
+                3,
+                8,
+                7,
+                42,
+                40,
+                45,
+                48,
+                44,
+                25,
+                23,
+                1,
+                28,
+                0,
+                2,
+                4,
+                5,
+                6,
+                9,
+                13,
+                14,
+                20,
+                21,
+                26,
+                43,
+                46,
+                47,
+                49,
+                11,
+            ],
+            "firstPerkIndex": 10,
+            "targetPriorityList": [2, 7, 9, 5, 8, 6, 3, 0, 4, 1],
+            "ultimateWeaponUnlocked": [True] * 9,
+            "ultimateWeaponOn": [True] * 9,
+            "ultimateWeaponLevel": [0] * 27,
+            "poisonSwampStunOff": True,
+            "spotlightSmartMissilesOff": False,
+            "guardianChipSlot": [6, 7, 8],
+            "guardianSlotsUnlocked": 2,
+            "guardianChipUnlocked": [False] * 10,
+            "guardianChipLevel": [0] * 30,
+            "guardianUnlocked": True,
+            "tourneyConditionsSeed": 287,
+            "tournamentNumber": 287,
+            "tournamentCheckedNumber": 287,
+            "tournamentRecords": [
+                {
+                    "tournamentNumber": 287,
+                    "date": 0,
+                    "leagueID": 5,
+                    "wave": 1,
+                    "rank": 0,
+                }
+            ],
+            "leagueID": 5,
+            "researchLevel": [0] * 250,
+            "upgradeWorkshopLevel": [0] * 20,
+            "upgradeWorkshopDefenseLevel": [0] * 20,
+            "upgradeWorkshopUtilityLevel": [0] * 20,
+            "enhancementLevel": [0] * 20,
+            "enhancementDefenseLevel": [0] * 20,
+            "enhancementUtilityLevel": [0] * 20,
+            "enhancementTierUnlocked": [False] * 20,
+            "enhancementDefenseTierUnlocked": [False] * 20,
+            "enhancementUtilityTierUnlocked": [False] * 20,
+            "cardLevel": [0] * 40,
+            "cardUnlocked": [True] * 31 + [False] * 9,
+            "cardMasteryUnlocked": [True] * 8 + [False] * 32,
+            "slotPresetCardInt": [0] * 140,
+            "slotPresetCardAssignedBool": [True] * 28 + [False] * 112,
+            "labLevel": [1] * 5,
+            "labsUnlocked": 5,
+            "profileRelics": [19, 18, 20, 21, 6],
+            "relicsUnlocked": [2] * 276 + [0] * 29,
+            "towerUnlocked": [True] * 74 + [False] * 26,
+            "backgroundUnlocked": [True] * 54 + [False] * 46,
+            "menuUnlocked": [True] * 11 + [False] * 89,
+            "diceTowers": [True] * 50 + [False] * 50,
+            "diceBackgrounds": [True] * 50 + [False] * 50,
+            "totalSkinsBought": 144,
+            "disableAdsUnlockedBool": True,
+            "starterPackUnlockedBool": True,
+            "epicPackUnlockedBool": True,
+            "eventBoostsBoughtTotal": 3,
+            "ultimateWeaponPlusLevel": [0] * 9,
+            "ultimateWeaponPlusOn": [True] * 9,
+            "ultimateWeaponPlusUnlocked": [False] * 9,
+            "flameBotLevelCooldownSelected": 25,
+            "thunderBotLevelCooldownSelected": 14,
+            "goldenBotLevelCooldownSelected": 25,
+            "amplifyBotLevelCooldownSelected": 20,
+            "botBotLevelCooldownSelected": 25,
+            "flameBotPresets": [_bot_preset() for _ in range(4)],
+            "thunderBotPresets": [_bot_preset() for _ in range(4)],
+            "goldenBotPresets": [_bot_preset() for _ in range(4)],
+            "amplifyBotPresets": [_bot_preset() for _ in range(4)],
+            "botBotPresets": [_bot_preset() for _ in range(4)],
+            "harmonyNodesUnlocked": [True] * 41 + [False] * 7,
+            "powerNodesLevel": [0] * 46,
+            "powerNodesMaxLevel": [0] * 46,
+            "powerNodesUnlocked": [True] * 10 + [False] * 36,
+            "synchronicityLevel": 0,
+            "synchronicityUnlocked": False,
+            "moduleEquipped": [
+                _module_item(45),
+                _module_item(46),
+                _module_item(27),
+                _module_item(37),
+            ],
+            "assistModuleSlots": [
+                _assist_module_slot(0, 9),
+                _assist_module_slot(1, 20),
+                _assist_module_slot(2, 30),
+                _assist_module_slot(3, 38),
+            ],
+            "upgradesLockedFreeUpgrades": [False] * 20,
+            "upgradesDefenseLockedFreeUpgrades": [False] * 20,
+            "upgradesUtilityLockedFreeUpgrades": [False] * 20,
+            "playfabID": "must-not-leak-player-id",
+            "userName": "must-not-leak-user-name",
+        }
+    )
     payload["upgradesLockedFreeUpgrades"][11] = True
     payload["upgradesLockedFreeUpgrades"][12] = True
     payload["upgradesDefenseLockedFreeUpgrades"][10] = True
@@ -399,6 +469,15 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
     progression = snapshot.profile_progression
     assert progression["status"] == "complete"
     assert progression["identity"]["save_revision"] == 1234
+    assert progression["components"]["bots"]["validation"] == {
+        "audit_id": "V1073-PROFILE-005",
+        "evidence_level": "structural",
+        "provenance": (
+            "Exact version-1073 source fields and component shapes; "
+            "unmapped indices, formulas, caps, and effective values remain "
+            "unpublished."
+        ),
+    }
     assert progression["components"]["themes"]["summary"] == {
         "background_dice": {"length": 100, "true_count": 50},
         "background_unlocked": {"length": 100, "true_count": 54},
@@ -441,6 +520,69 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
     assert "must-not-leak-module-effect" not in rendered
     assert "must-not-leak-module-inventory" not in rendered
     assert "/private/path" not in rendered
+
+
+def test_raw_field_manifest_rejects_an_unclassified_decoded_field(monkeypatch):
+    decoded = _decoded_save()
+    decoded["futureVersion1073Field"] = 1
+
+    snapshot = _snapshot(monkeypatch, decoded)
+
+    assert not snapshot.shape_valid
+    assert snapshot.checks == {}
+    assert snapshot.runtime_save is None
+    assert any(
+        "1 unclassified field(s) were decoded: futureVersion1073Field" in warning
+        for warning in snapshot.warnings
+    )
+
+
+def test_raw_field_manifest_rejects_a_missing_classified_field(monkeypatch):
+    decoded = _decoded_save()
+    del decoded["adGemsClaimedToday"]
+
+    snapshot = _snapshot(monkeypatch, decoded)
+
+    assert not snapshot.shape_valid
+    assert snapshot.checks == {}
+    assert snapshot.runtime_save is None
+    assert any(
+        "1 classified field(s) are missing: adGemsClaimedToday" in warning
+        for warning in snapshot.warnings
+    )
+
+
+def test_private_ignored_and_unknown_root_values_remain_unpublished(monkeypatch):
+    decoded = _decoded_save()
+    decoded["playfabID"] = "must-not-publish-private-root"
+    decoded["musicMutedBool"] = "must-not-publish-ignored-root"
+    decoded["adGemsClaimedToday"] = "must-not-publish-unknown-root"
+
+    snapshot = _snapshot(monkeypatch, decoded)
+    rendered = json.dumps(snapshot.as_dict())
+
+    assert snapshot.shape_valid
+    assert "must-not-publish-private-root" not in rendered
+    assert "must-not-publish-ignored-root" not in rendered
+    assert "must-not-publish-unknown-root" not in rendered
+
+
+def test_profile_component_validation_requires_exact_component_coverage():
+    mapping = copy.deepcopy(VERSION_MAPPING)
+    del mapping["profile_progression"]["component_validation"]["bots"]
+
+    with pytest.raises(
+        ProfileProgressionError,
+        match="component validation coverage changed",
+    ):
+        normalize_profile_progression(
+            _decoded_save(),
+            mapping,
+            capture={
+                "captured_at": CAPTURED_AT.isoformat(),
+                "source_sha256": "0" * 64,
+            },
+        )
 
 
 def test_profile_progression_diff_reports_exact_source_indices(monkeypatch):
@@ -513,7 +655,7 @@ def test_runtime_capture_and_history_projection_are_privacy_safe(monkeypatch):
     assert completed["status"] == "observed"
     assert completed["projection"]["more_stats"]["row_count"] == 144
     assert "raw_text" not in json.dumps(history)
-    assert "playerID" not in json.dumps(history)
+    assert "playfabID" not in json.dumps(history)
     assert "damageTakenWhileBerserked" not in json.dumps(history)
 
     rows = {
@@ -566,7 +708,7 @@ def test_runtime_fingerprints_separate_tail_identity_from_semantics(monkeypatch)
     first_decoded = _decoded_save()
     second_decoded = _decoded_save()
     second_decoded["saveRevision"] += 1
-    second_decoded["playerID"] = "different-private-id"
+    second_decoded["playfabID"] = "different-private-id"
 
     first = _snapshot(monkeypatch, first_decoded).runtime_save
     second = _snapshot(monkeypatch, second_decoded).runtime_save

@@ -40,6 +40,17 @@ PLAYER_SAVE_DEVICE_PATH = (
 MAX_PLAYER_SAVE_BYTES = 512 * 1024
 MAX_DECOMPRESSED_SAVE_BYTES = 4 * 1024 * 1024
 SNAPSHOT_SCHEMA_VERSION = 3
+RAW_FIELD_MANIFEST_SCHEMA_VERSION = 1
+RAW_FIELD_DISPOSITION_NAMES = frozenset(
+    {
+        "structural",
+        "automation_gating",
+        "profile_observation",
+        "private",
+        "ignored_with_reason",
+        "unknown",
+    }
+)
 SAVE_ACCEPTED_DISPOSITIONS = frozenset({"save_match", "save_observation"})
 SAVE_MISMATCH_DISPOSITION = "save_mismatch"
 SAVE_UI_REQUIRED_DISPOSITION = "ui_required"
@@ -551,6 +562,7 @@ def _load_mappings() -> tuple[dict[str, Any], ...]:
         payload = json.loads(path.read_text(encoding="utf-8"))
         if payload.get("schema_version") != 1:
             raise PlayerSaveError(f"unsupported mapping schema in {path}")
+        _validate_raw_field_manifest(payload, source=path)
         mappings.append(payload)
     return tuple(mappings)
 
@@ -581,6 +593,28 @@ def _validate_shape(
         warnings.append(
             f"root class changed: expected {expected_class!r}, got {actual_class!r}"
         )
+    non_string_fields = [key for key in decoded if not isinstance(key, str)]
+    if non_string_fields:
+        warnings.append(
+            "decoded root contains non-string field names: "
+            + _summarize_field_names(str(key) for key in non_string_fields)
+        )
+    actual_fields = {key for key in decoded if isinstance(key, str)}
+    expected_fields = set(_raw_field_manifest_names(mapping))
+    missing_fields = expected_fields - actual_fields
+    unexpected_fields = actual_fields - expected_fields
+    if missing_fields:
+        warnings.append(
+            "raw field manifest mismatch: "
+            f"{len(missing_fields)} classified field(s) are missing: "
+            + _summarize_field_names(missing_fields)
+        )
+    if unexpected_fields:
+        warnings.append(
+            "raw field manifest mismatch: "
+            f"{len(unexpected_fields)} unclassified field(s) were decoded: "
+            + _summarize_field_names(unexpected_fields)
+        )
     for field in mapping.get("required_fields") or []:
         if field not in decoded:
             warnings.append(f"required field is missing: {field}")
@@ -596,6 +630,206 @@ def _validate_shape(
                 f"{field} length changed: expected {expected_length}, got {len(value)}"
             )
     return warnings
+
+
+def _validate_raw_field_manifest(
+    mapping: Mapping[str, Any],
+    *,
+    source: Path | str,
+) -> None:
+    manifest = mapping.get("raw_field_manifest")
+    if not isinstance(manifest, Mapping):
+        raise PlayerSaveError(f"raw field manifest is missing in {source}")
+    if manifest.get("schema_version") != RAW_FIELD_MANIFEST_SCHEMA_VERSION:
+        raise PlayerSaveError(
+            f"unsupported raw field manifest schema in {source}"
+        )
+    audit_id = str(manifest.get("audit_id") or "").strip()
+    if not audit_id:
+        raise PlayerSaveError(f"raw field manifest audit_id is missing in {source}")
+    identity = mapping.get("identity") or {}
+    expected_class = str(identity.get("root_class") or "")
+    manifest_class = str(manifest.get("root_class") or "")
+    if manifest_class != expected_class:
+        raise PlayerSaveError(
+            "raw field manifest root_class does not match mapping identity "
+            f"in {source}"
+        )
+
+    dispositions = manifest.get("dispositions")
+    if not isinstance(dispositions, Mapping):
+        raise PlayerSaveError(f"raw field dispositions are missing in {source}")
+    actual_categories = {str(name) for name in dispositions}
+    if actual_categories != RAW_FIELD_DISPOSITION_NAMES:
+        missing = sorted(RAW_FIELD_DISPOSITION_NAMES - actual_categories)
+        unexpected = sorted(actual_categories - RAW_FIELD_DISPOSITION_NAMES)
+        details: list[str] = []
+        if missing:
+            details.append("missing=" + ",".join(missing))
+        if unexpected:
+            details.append("unexpected=" + ",".join(unexpected))
+        raise PlayerSaveError(
+            f"raw field disposition categories are invalid in {source}: "
+            + "; ".join(details)
+        )
+
+    seen: dict[str, str] = {}
+    for disposition in (
+        "structural",
+        "automation_gating",
+        "profile_observation",
+        "private",
+        "unknown",
+    ):
+        fields = dispositions.get(disposition)
+        _validate_sorted_field_names(
+            fields,
+            label=f"raw field disposition {disposition}",
+            source=source,
+        )
+        for field_name in fields:
+            _record_raw_field_disposition(
+                seen,
+                field_name,
+                disposition,
+                source=source,
+            )
+
+    ignored_groups = dispositions.get("ignored_with_reason")
+    if not isinstance(ignored_groups, list):
+        raise PlayerSaveError(
+            f"raw ignored-field groups must be an array in {source}"
+        )
+    ignored_reasons: set[str] = set()
+    for index, group in enumerate(ignored_groups):
+        if not isinstance(group, Mapping):
+            raise PlayerSaveError(
+                f"raw ignored-field group {index} is invalid in {source}"
+            )
+        reason = str(group.get("reason") or "").strip()
+        if not reason:
+            raise PlayerSaveError(
+                f"raw ignored-field group {index} has no reason in {source}"
+            )
+        if reason in ignored_reasons:
+            raise PlayerSaveError(
+                f"raw ignored-field reason is duplicated in {source}: {reason}"
+            )
+        ignored_reasons.add(reason)
+        fields = group.get("fields")
+        _validate_sorted_field_names(
+            fields,
+            label=f"raw ignored-field group {reason}",
+            source=source,
+        )
+        for field_name in fields:
+            _record_raw_field_disposition(
+                seen,
+                field_name,
+                "ignored_with_reason",
+                source=source,
+            )
+
+    expected_count = manifest.get("field_count")
+    if type(expected_count) is not int or expected_count < 1:
+        raise PlayerSaveError(f"raw field_count is invalid in {source}")
+    if expected_count != len(seen):
+        raise PlayerSaveError(
+            f"raw field_count mismatch in {source}: "
+            f"declared {expected_count}, classified {len(seen)}"
+        )
+    expected_hash = str(manifest.get("field_name_sha256") or "").strip()
+    actual_hash = _raw_field_name_sha256(seen)
+    if expected_hash != actual_hash:
+        raise PlayerSaveError(
+            f"raw field-name hash mismatch in {source}: "
+            f"declared {expected_hash or 'missing'}, calculated {actual_hash}"
+        )
+
+    for field_name in mapping.get("required_fields") or []:
+        if str(field_name) not in seen:
+            raise PlayerSaveError(
+                f"required field {field_name!r} is absent from the raw field "
+                f"manifest in {source}"
+            )
+    for field_name in (mapping.get("required_array_lengths") or {}):
+        if str(field_name) not in seen:
+            raise PlayerSaveError(
+                f"required array {field_name!r} is absent from the raw field "
+                f"manifest in {source}"
+            )
+    progression = mapping.get("profile_progression") or {}
+    for component_name, fields in (progression.get("components") or {}).items():
+        for output_name, field_spec in (fields or {}).items():
+            source_field = str((field_spec or {}).get("source") or "").strip()
+            if source_field not in seen:
+                raise PlayerSaveError(
+                    "profile progression source field is absent from the raw "
+                    f"field manifest in {source}: "
+                    f"{component_name}.{output_name} -> {source_field or 'missing'}"
+                )
+
+
+def _validate_sorted_field_names(
+    fields: Any,
+    *,
+    label: str,
+    source: Path | str,
+) -> None:
+    if not isinstance(fields, list):
+        raise PlayerSaveError(f"{label} must be an array in {source}")
+    if any(not isinstance(field, str) or not field for field in fields):
+        raise PlayerSaveError(f"{label} contains an invalid field name in {source}")
+    if fields != sorted(fields) or len(fields) != len(set(fields)):
+        raise PlayerSaveError(
+            f"{label} must contain unique sorted field names in {source}"
+        )
+
+
+def _record_raw_field_disposition(
+    seen: dict[str, str],
+    field_name: str,
+    disposition: str,
+    *,
+    source: Path | str,
+) -> None:
+    prior = seen.get(field_name)
+    if prior is not None:
+        raise PlayerSaveError(
+            f"raw field {field_name!r} has duplicate dispositions in {source}: "
+            f"{prior}, {disposition}"
+        )
+    seen[field_name] = disposition
+
+
+def _raw_field_manifest_names(mapping: Mapping[str, Any]) -> tuple[str, ...]:
+    dispositions = (mapping.get("raw_field_manifest") or {}).get(
+        "dispositions"
+    ) or {}
+    names: list[str] = []
+    for disposition in (
+        "structural",
+        "automation_gating",
+        "profile_observation",
+        "private",
+        "unknown",
+    ):
+        names.extend(str(field) for field in dispositions.get(disposition) or ())
+    for group in dispositions.get("ignored_with_reason") or ():
+        names.extend(str(field) for field in (group or {}).get("fields") or ())
+    return tuple(sorted(names))
+
+
+def _raw_field_name_sha256(field_names: Any) -> str:
+    canonical = "".join(f"{name}\n" for name in sorted(field_names))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _summarize_field_names(field_names: Any, *, limit: int = 8) -> str:
+    ordered = sorted(str(name) for name in field_names)
+    shown = ordered[:limit]
+    suffix = f", ... (+{len(ordered) - limit})" if len(ordered) > limit else ""
+    return ", ".join(shown) + suffix
 
 
 def _build_profile_summary(
