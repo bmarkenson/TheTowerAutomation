@@ -37,6 +37,39 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-06 bounded live production/development coordination validation
+
+- With separate operator authorization, the completed
+  [production/development coordination contract](../architecture/development_isolation.md)
+  was exercised against the production-owned runtime and its exact ADB target.
+  Preflight confirmed the control directive, host-backed runtime owner and
+  lock, ADB connection, current screen, recent action log, and absence of a
+  competing lease. The validation neither started nor Surrendered a battle and
+  performed no terminal or lifecycle action.
+- One no-input lease reached active acknowledgement and then expired normally.
+  Production retained its suppressive hold until a fresh known running-battle
+  observation, recorded terminal disposition `expired`, removed the hold, and
+  restored normal authority in the same battle.
+- A second lease was heartbeated and used by the lease-aware helper for exactly
+  one non-retried tap on the already-selected Attack tab. A subsequent owned
+  Pause made the lease unusable immediately, production recorded terminal
+  disposition `revoked`, observations continued while every action class was
+  blocked, and RUNNING was restored only after the unchanged Pause request ID
+  and same battle identity were verified.
+- A final no-input lease exercised explicit release. The release request made
+  the lease inactive while production remained suppressive; a fresh
+  post-release running-battle observation then recorded terminal disposition
+  `released`, removed the hold, and restored normal authority. An earlier
+  request made while the structured action-authority snapshot was stale was
+  rejected with HTTP 409 without creating a lease, and was retried only after
+  fresh matching ownership evidence appeared.
+- The production action log contains the request, acknowledgement, input,
+  Pause revocation, release-pending, and terminal-result records. No live defect
+  or uncertain input occurred, so no runtime implementation changed. The
+  repository-local coordination harness and its full checkpoint remain
+  recorded in the
+  [combined boundary completion](#2026-08-06-combined-productiondevelopment-coordination-boundary).
+
 ### 2026-08-06 combined production/development coordination boundary
 
 - `b2d2811975b80957159fe9da28cf7ba0d70f429c` (integrated as `073bf05`) adds
