@@ -11,7 +11,13 @@ from core.tournament_preflight import load_tournament_contract
 
 TOURNAMENT_RUNTIME_POLICY = {
     "player_save_preflight": "save_first",
-    "handlers": ["ad_gem", "game_over", "game_speed"],
+    "handlers": [
+        "ad_gem",
+        "daily_gem",
+        "mission_rewards",
+        "game_over",
+        "game_speed",
+    ],
     "auto_return": False,
     "game_over_mode": "wait",
     "home_preflight": True,

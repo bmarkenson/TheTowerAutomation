@@ -54,7 +54,13 @@ def test_tournament_strategy_declares_exclusive_validation_then_observes():
     assert strategy.name == "tournament"
     assert strategy.runtime_policy() == {
         "player_save_preflight": "save_first",
-        "handlers": ["ad_gem", "game_over", "game_speed"],
+        "handlers": [
+            "ad_gem",
+            "daily_gem",
+            "mission_rewards",
+            "game_over",
+            "game_speed",
+        ],
         "auto_return": False,
         "game_over_mode": "wait",
         "home_preflight": True,
@@ -450,16 +456,16 @@ def test_tournament_attachment_enforces_battle_loadout_before_preflight():
     assert actions[0]["validator"] == "tournament"
 
 
-def test_tournament_policy_suppresses_unrelated_runtime_handlers():
+def test_tournament_policy_allows_guarded_reward_collectors_only():
     app = App.__new__(App)
     app._mission_mgr = SimpleNamespace(strategy=get_strategy("tournament"))
 
     assert app._handler_enabled("ad_gem")
+    assert app._handler_enabled("daily_gem")
+    assert app._handler_enabled("mission_rewards")
     assert app._handler_enabled("game_over")
     assert app._handler_enabled("game_speed")
     assert not app._handler_enabled("floating_gem")
-    assert not app._handler_enabled("daily_gem")
-    assert not app._handler_enabled("mission_rewards")
     assert not app._handler_enabled("event_mission_warnings")
     assert not app._handler_enabled("home")
     assert not app._handler_enabled("auto_return")
@@ -611,6 +617,8 @@ def test_tournament_main_loop_collects_ad_gem_after_attached_gate_releases():
     app._advance_exclusive_validation = MagicMock(return_value=False)
     app._advance_exclusive_validation_launch = MagicMock(return_value=False)
     app._observe_strategy_request = MagicMock()
+    app._handle_daily_gem_if_due = MagicMock(return_value=False)
+    app._handle_mission_rewards_if_due = MagicMock(return_value=False)
     previous_mode = AUTOMATION.mode
 
     try:
@@ -642,20 +650,23 @@ def test_tournament_main_loop_collects_ad_gem_after_attached_gate_releases():
     )
 
 
-def test_tournament_running_handler_collects_only_visible_ad_gem():
+def test_tournament_running_handler_checks_guarded_rewards_before_visible_ad_gem():
     app = App.__new__(App)
     app._mission_mgr = SimpleNamespace(strategy=get_strategy("tournament"))
     frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
-    app._handle_daily_gem_if_due = lambda *_args: (_ for _ in ()).throw(
-        AssertionError("daily gem handler should be disabled")
-    )
-    app._handle_mission_rewards_if_due = lambda *_args: (_ for _ in ()).throw(
-        AssertionError("mission reward handler should be disabled")
-    )
+    app._handle_daily_gem_if_due = MagicMock(return_value=False)
+    app._handle_mission_rewards_if_due = MagicMock(return_value=False)
+    overlays = {"AD_GEMS_AVAILABLE", "DAILY_GEMS_AVAILABLE", "MENU_OPEN"}
 
     with patch("core.app.handle_ad_gem") as ad_gem:
-        app._handle_primary_states("RUNNING", {"AD_GEMS_AVAILABLE"}, frame)
+        app._handle_primary_states("RUNNING", overlays, frame)
 
+    app._handle_daily_gem_if_due.assert_called_once_with("RUNNING", overlays)
+    app._handle_mission_rewards_if_due.assert_called_once_with(
+        "RUNNING",
+        frame,
+        overlays,
+    )
     ad_gem.assert_called_once()
     assert callable(ad_gem.call_args.kwargs["action_guard_fn"])
     assert callable(ad_gem.call_args.kwargs["floating_action_guard_fn"])

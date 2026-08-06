@@ -49,6 +49,9 @@ def _app_for_pending_validation(tmp_path, *, home_preflight_complete=True):
     app = App.__new__(App)
     app._supervisor = supervisor
     app._mission_mgr = manager
+    app._daily_gem_scheduler = Mock()
+    app._mission_reward_scheduler = Mock()
+    app._mission_reward_scheduler.should_attempt.return_value = False
     app._active_exclusive_validation_request_id = None
     app._exclusive_validation_terminal_hold = None
     return app, store, manager

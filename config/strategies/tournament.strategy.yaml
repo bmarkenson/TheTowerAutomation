@@ -6,6 +6,8 @@ runtime_policy:
   player_save_preflight: save_first
   handlers:
   - ad_gem
+  - daily_gem
+  - mission_rewards
   - game_over
   - game_speed
   auto_return: false
@@ -323,6 +325,8 @@ run_configuration:
     player_save_preflight: save_first
     handlers:
     - ad_gem
+    - daily_gem
+    - mission_rewards
     - game_over
     - game_speed
     auto_return: false
