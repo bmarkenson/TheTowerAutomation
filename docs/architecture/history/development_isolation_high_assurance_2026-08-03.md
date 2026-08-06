@@ -21,8 +21,8 @@ current runtime and control service remain governed by the
 phase is complete.
 
 The contract uses **must**, **must not**, **should**, and **may** normatively.
-Implementation is tracked in the
-[tooling and maintenance backlog](../../backlog/tooling-and-maintenance.md#production-and-development-coordination-delivery).
+Implemented delivery is recorded in the
+[completion history](../../modules/completed_tasks_log.md#2026-08-06-bounded-live-productiondevelopment-coordination-validation).
 
 ## Outcomes and invariants
 

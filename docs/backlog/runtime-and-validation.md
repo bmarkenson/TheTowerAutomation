@@ -1,9 +1,9 @@
 # Runtime, Validation, and Farm Backlog
 
 This file contains active work only. Before live work, follow `AGENTS.md`,
-[`../new_thread.md`](../new_thread.md), and the complete
-[`../runtime_operations.md`](../runtime_operations.md) runbook. Historical
-checked-item detail remains in the
+[`../new_thread.md`](../new_thread.md), complete
+[`../live_preflight.md`](../live_preflight.md), and load only the selected
+[`operation`](../runtime_operations.md). Historical checked-item detail remains in the
 [`2026-07-16 backlog snapshot`](history/PENDING_DEVELOPMENT_2026-07-16.md).
 
 ## Current validation gates
@@ -11,7 +11,7 @@ checked-item detail remains in the
 - [ ] Cross-validate the `data-9-game-1073` player-save mapping against fresh
   UI inventory from the same version, and add a new exact candidate mapping if
   the current game reports a different identity. Execute the complete
-  [versioned audit matrix and rollout sequence](../modules/player_save_import.md#versioned-audit-matrix-data-9-game-1073--revision-3).
+  [versioned audit matrix and rollout sequence](../architecture/player_save.md#versioned-audit-matrix-data-9-game-1073--revision-3).
   Promote only fully cross-validated fields; retain scheduled audits and every
   existing UI checker as the fallback for unknown versions, shape changes,
   stale data, mismatches, and unmapped settings.

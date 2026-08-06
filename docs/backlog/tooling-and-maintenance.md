@@ -19,12 +19,14 @@ work. Historical checked detail remains in the
   - This is a concurrency guard, not a total-usage budget. Until it is
     compatible, the three-direct-subagent invariant in `AGENTS.md` remains
     authoritative.
-- [ ] Continue the full template audit begun on 2026-07-13.
+- [ ] Continue the full template audit begun on 2026-07-13 through the
+  [current template workflow](../tooling/template_workflow.md).
   - Resolve or classify the recursive validator's dated orphan list.
   - Add fixture-based match verification so a present template is also proven
     current against a canonical screen.
   - Require the recursive validator in the normal test/checkpoint workflow.
-- [ ] Build one recursive validator for clickmap and state-definition schema.
+- [ ] Build one recursive validator for the
+  [clickmap and state-definition schema](../reference/ui_detection_schema.md).
   - Validate entries, roles, regions, files, templates, taps, swipes,
     thresholds, and dangling YAML references.
   - Enforce or migrate toward one naming convention.
@@ -36,19 +38,8 @@ work. Historical checked detail remains in the
 - [ ] Extract duplicated handler helpers only after the unused-code audit
   establishes their actual call sites.
 
-## Documentation context reduction
+## Source and documentation discovery
 
-- [ ] Complete the documentation context-reduction audit.
-  - Remove completed work and duplicate completion narrative from active
-    backlogs after preserving any missing outcome, commit, and validation
-    evidence in the on-demand completion log.
-  - Slim startup, live-preflight, runtime, and documentation routing so each
-    task loads only its canonical owner and applicable safeguards.
-  - Audit and retire or relocate legacy API summaries, web-chat prompts, spec
-    packers, completed plans, and retired roadmaps after preserving any unique
-    active requirement or historical evidence.
-  - Finish with link/anchor, ownership, context-budget, and proportionate
-    repository validation, then move this checkpoint to the completion log.
 - [ ] Audit source capability and ownership discovery after retiring the legacy
   API summaries.
   - Verify representative feature work finds existing functions, classes,
@@ -57,24 +48,10 @@ work. Historical checked detail remains in the
   - Add tooling only for a demonstrated discovery gap; keep the universal
     reuse-first safeguard canonical in `AGENTS.md`.
 
-## Production and development coordination delivery
-
-The implemented contract and deterministic validation are recorded in the
-[coordination architecture](../architecture/development_isolation.md) and
-[completion log](../modules/completed_tasks_log.md#2026-08-06-combined-productiondevelopment-coordination-boundary).
-
-- [ ] Perform one bounded live coordination validation only when the operator
-  separately authorizes it.
-  - Inspect the current process, control, lease, ADB target, screen, and action
-    log first; acquire and release one lease without starting or surrendering a
-    battle or replaying uncertain input.
-  - Add Home queues, suspended continuation, or an owned validation battle only
-    if a later concrete test requires and separately authorizes that scope.
-
 ## Codebase maintenance
 
 - [ ] Resolve the compatibility and removal decisions from the
-  [2026-07-26 codebase maintenance audit](../codebase_maintenance_audit_2026-07-26.md).
+  [2026-07-26 codebase maintenance audit](history/codebase_maintenance_audit_2026-07-26.md).
   - Trace imports, runtime entry points, dynamic/YAML references, strategies,
     clickmap usage, and tests before classifying anything as dead.
   - Classify findings as active, generated, tooling, archival, or removable.

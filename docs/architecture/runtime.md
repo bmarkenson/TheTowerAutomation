@@ -12,7 +12,8 @@ The clickmap is a declarative catalog of UI facts, not the runtime control
 plane. It may own template identity, thresholds, search and action geometry,
 roles, and shared regions. It must not own current UI state, battle identity,
 action ordering, pause semantics, retries, handler ownership, or recovery
-policy.
+policy. Field and classification details are in the
+[UI detection schema](../reference/ui_detection_schema.md).
 
 | Layer | Responsibility |
 | --- | --- |
@@ -25,7 +26,8 @@ policy.
 
 Keep `YamlStrategy` and its evaluator generic. Strategy-specific behavior should
 come from compact configuration and explicit generated plans, not strategy-name
-conditionals or duplicated expanded YAML.
+conditionals or duplicated expanded YAML. Use the
+[YAML strategy reference](../reference/yaml_strategy.md) for plan ownership.
 
 ## Farm profiles and loadouts
 
@@ -250,7 +252,7 @@ fingerprint, and redacted session/target-generation provenance. Account
 identifiers, raw saves, decoded roots, arbitrary history, private values, and
 raw exception text are not copied into preflight evidence. The component
 contract and version-update procedure are
-in [`../modules/player_save_import.md`](../modules/player_save_import.md).
+in [`player_save.md`](player_save.md).
 
 #### Save-first active-round and terminal evidence
 
@@ -343,7 +345,7 @@ the terminal UI. This validates the natural-boundary causality and projection
 used by the guarded terminal-report consumer below; the observation alone does
 not attach an arbitrary terminal or relax current-process binding. The dated
 evidence and exact row-level promotions are recorded in
-[`player_save_import.md`](../modules/player_save_import.md#2026-08-02-tier-22-natural-boundary-audit).
+[`player_save.md`](player_save.md#2026-08-02-tier-22-natural-boundary-audit).
 
 Runtime adoption proceeds in bounded vertical slices with these ownership
 rules:
@@ -422,7 +424,7 @@ after same-run tail proof, Battle History record construction. The implemented
 audit sidecar remains observation-only and is not an authority source. Any
 additional normal-runtime runtime/history consumer remains a later slice gated
 by the versioned audit matrix in
-[`player_save_import.md`](../modules/player_save_import.md#versioned-audit-matrix-data-9-game-1073--revision-3).
+[`player_save.md`](player_save.md#versioned-audit-matrix-data-9-game-1073--revision-3).
 
 ##### Implemented terminal save attachment
 
@@ -769,10 +771,11 @@ match that observation. Starting directly on Game Over, or reaching a terminal
 after the scope changes without another active observation, is `unbound`.
 Terminal UI capture remains valid, but the record omits selected Strategy,
 resolved run configuration, last-wave and coin samples, game-speed history,
-session-preflight evidence, Perk timeline, and survival-ability observations.
-Any restored process-local Perk or activation state is reset so it cannot leak
-into a later record. The JSON and Markdown retain an explicit warning and a
-versioned `runtime.run_binding` reason.
+session-preflight evidence (including a continuity-restored report snapshot),
+Perk timeline, and survival-ability observations. Any restored process-local
+Perk or activation state is reset so it cannot leak into a later record. The
+JSON and Markdown retain an explicit warning and a versioned
+`runtime.run_binding` reason.
 
 This boundary is independent of a readable activity-scope ID. A process can be
 blocked inside an earlier Game Over `WAIT` handler while an operator manually
@@ -796,7 +799,11 @@ observation. Missing screens remain explicitly `not_observed`; authoritatively
 inaccessible controls are recorded as `unavailable` with a reason. Values are
 never copied from a Farm or Tournament profile. This evidence is stored under
 `observed_run_configuration`, separately from the configured-intent
-`run_configuration` field.
+`run_configuration` field. Configured profiles do not populate
+`observed_run_configuration`; an empty observation is omitted rather than
+implying that a No Strategy inventory pass occurred. Their declared intent and
+verified values remain under `run_configuration` and
+`runtime.session_preflight_evidence`, respectively.
 
 The fixed purple sword badge next to Tier is localized Attack Dissonance
 identity evidence. Standard Game Over plus that badge supports a high-confidence
@@ -856,7 +863,9 @@ cannot start before its Home-only evidence is attached.
 - The record retains copied Stats rows, compact Game Stats-only fields, perks,
   resolved configured intent, separately sourced observed run configuration,
   observed preflight/runtime evidence, and derived metrics. Consumers must read
-  these fields instead of relying on a terminal screenshot.
+  these fields instead of relying on a terminal screenshot. The observed run
+  configuration exists only for a non-empty No Strategy observation; configured
+  runs never serialize an empty placeholder there.
 - Tournament records also retain a normalized `battle_conditions` inventory.
   On exact version 1073, the terminal handler reads a stable save without UI
   input, cross-checks current event number, registry date, and Legend league,
@@ -1214,14 +1223,24 @@ development-lease authority from warning text in `actions.log`.
   only as the historical UI source. Unknown `killedBy` preserves structural
   continuity while semantic completed-record publication remains unavailable.
 - Completion of a session configuration gate writes a receipt into that same
-  run scope. The receipt identifies the strategy and fingerprints its exact
-  session assertions, requirements, fallbacks, and generated gate rules. Only
-  a run-ID-stable continuity result proving unchanged Battle History may reuse
-  an exact matching receipt on process attachment. Reuse structurally
-  suppresses the attached session rules without fabricating their in-memory
-  completion variables; a missing or mismatched receipt, later battle,
-  unreadable identity, or failed scope compare runs the declared attachment
-  checks normally.
+  run scope. Nested receipt schema 2 identifies the activity-scope run,
+  strategy, and fingerprint of its exact session assertions, requirements,
+  fallbacks, and generated gate rules. It also retains the existing normalized
+  report projection in a schema-1 evidence envelope. The snapshot is strict
+  finite JSON and capped at 64 KiB. Raw saves, screenshots, detection context,
+  and mission variables remain outside this report-projection contract.
+- Only a run-ID-stable continuity result proving unchanged Battle History may
+  reuse an exact matching receipt on process attachment. A valid schema-2
+  receipt restores its snapshot into a report-only context that the bound
+  terminal record prefers over the attachment's Home-lock placeholder. It does
+  not restore completion, failure, waiver, repair, or action-authority state;
+  rule suppression remains owned solely by continuity plus receipt identity.
+  A matching legacy schema-1 receipt keeps its historical suppression behavior
+  but reports detailed evidence as explicitly unavailable. A malformed or
+  unknown schema-2 receipt, missing or mismatched identity, later battle,
+  unreadable continuity, or failed scope compare runs the declared attachment
+  checks normally. The report-only snapshot survives terminal capture retries
+  and is discarded at the next genuine battle or strategy boundary.
 - Battle History continuity inspection has exclusive input authority while
   pending. Pause is checked before each input, all initialization, preflight,
   handler, and blind-tapper paths remain blocked, and restoration to the source

@@ -1,6 +1,8 @@
-# ✅ Completed Tasks Log
+# Completed Tasks Log
 
-This document tracks completed architectural, tooling, and refactor tasks for the "The Tower" automation project. Once a task is finalized and no longer belongs in the active roadmap, it should be moved here for historical reference.
+This on-demand history records completed outcomes, commits, and validation. It
+is not current policy, an active queue, or required startup reading; use the
+canonical document linked by an entry for current behavior.
 
 ---
 
@@ -58,6 +60,99 @@ This document tracks completed architectural, tooling, and refactor tasks for th
   save. The focused cross-consumer set passed all 244 tests; the complete
   isolated checkpoint passed compilation, state validation, clickmap integrity
   with zero errors and 44 known orphans, and all 1,654 tests.
+
+### 2026-08-06 documentation context-reduction audit
+
+- `4669547`, `860e747`, and `8132996` preserved narrow host-performance
+  evidence and replaced the 6,138-word active issue ledger with a 1,500-word
+  22-entry safety index plus conditionally loaded dossiers and separate
+  resolved/unconfirmed history. All 2,194 cited aggregate rows and eight
+  windows remained reproducible byte-for-byte.
+- `2474858` removed completed work from active backlogs after preserving missing
+  outcomes. At the audit base, the active root/domain backlogs plus issue ledger
+  contained 15,234 words; the final routed set contains 6,627, a 56.5%
+  reduction, with zero completed checkboxes in active files.
+- `30ed51a` established the disposable outcome-coordinator policy.
+  `a682ddc` reduced automatic startup from 2,422 to 1,231 words, replaced the
+  12,478-word runtime monolith with a 420-word selector and 249–474-word
+  operation chapters, and separated live preflight, action authority, and log
+  semantics into conditional owners.
+- `6e705e6` removed 60 stale duplicated API summaries, the obsolete spec
+  bundle, all legacy web-chat prompts, both spec packers, six superseded plans,
+  and two retired roadmaps. Player-save evidence, UI schema, YAML strategy, and
+  template workflow guidance moved to explicit architecture, reference, and
+  tooling owners. API summaries are now ephemeral, revision-labeled output
+  only when explicitly requested; capability discovery uses current source,
+  configuration, callers, and tests.
+- Across the audit range, tracked Markdown fell from 109 files/170,909 words to
+  48 files/153,775 words despite adding durable issue evidence and narrow
+  operation chapters. `docs/modules/` now contains only this on-demand history.
+  The separate source-capability discovery audit remains active, as does the
+  exact Codex concurrency-setting follow-up until the installed parser accepts
+  it.
+- The final merged checkpoint passed compilation, state-definition validation,
+  clickmap integrity with zero errors and the 44 established orphan candidates,
+  and all 1,656 tests. All 278 local Markdown targets and 119 linked anchors
+  across 48 files resolved, range whitespace checks passed, and current Codex
+  configuration loaded under strict parsing. The documentation audit used no
+  runtime process control, ADB command, device input, or volatile-state claim.
+
+### 2026-08-06 restart-stable session-preflight reporting
+
+- `4739cf3` upgrades the activity scope's nested session-preflight receipt to
+  schema 2. It retains the existing normalized evidence projection in a
+  run/strategy/configuration-bound schema-1 envelope after strict finite-JSON
+  normalization and a 64 KiB cap. Atomic compare-and-set scope persistence is
+  unchanged.
+- A continuity-confirmed replacement process restores that projection only to
+  terminal reporting. It does not seed completion, mismatch, waiver, repair,
+  or action-authority variables. Malformed current receipts run the declared
+  attachment checks; legacy schema-1 receipts keep compatibility while
+  reporting their detailed evidence as unavailable. The snapshot is replaced,
+  not merged with the attachment's Home-lock placeholder, remains available for
+  a terminal-capture retry, and clears at the next battle or strategy boundary.
+- Configured Game Over paths now omit `observed_run_configuration`, and record
+  assembly defensively drops any empty observation. Real No Strategy snapshots
+  remain separate from configured intent and continue to serialize normally.
+- Focused logger, lifecycle, terminal, No Strategy, Tournament, and battle
+  record coverage passed 179 tests. Compilation and whitespace checks passed,
+  followed by all 1,656 repository tests. Retained completed-record inspection
+  confirmed that a real full Farm projection is 5.8 KB with valid deferred
+  Free Upgrade-lock evidence. Validation used no ADB input, process replacement,
+  control mutation, or live battle action.
+
+### 2026-08-06 bounded live production/development coordination validation
+
+- With separate operator authorization, the completed
+  [production/development coordination contract](../architecture/development_isolation.md)
+  was exercised against the production-owned runtime and its exact ADB target.
+  Preflight confirmed the control directive, host-backed runtime owner and
+  lock, ADB connection, current screen, recent action log, and absence of a
+  competing lease. The validation neither started nor Surrendered a battle and
+  performed no terminal or lifecycle action.
+- One no-input lease reached active acknowledgement and then expired normally.
+  Production retained its suppressive hold until a fresh known running-battle
+  observation, recorded terminal disposition `expired`, removed the hold, and
+  restored normal authority in the same battle.
+- A second lease was heartbeated and used by the lease-aware helper for exactly
+  one non-retried tap on the already-selected Attack tab. A subsequent owned
+  Pause made the lease unusable immediately, production recorded terminal
+  disposition `revoked`, observations continued while every action class was
+  blocked, and RUNNING was restored only after the unchanged Pause request ID
+  and same battle identity were verified.
+- A final no-input lease exercised explicit release. The release request made
+  the lease inactive while production remained suppressive; a fresh
+  post-release running-battle observation then recorded terminal disposition
+  `released`, removed the hold, and restored normal authority. An earlier
+  request made while the structured action-authority snapshot was stale was
+  rejected with HTTP 409 without creating a lease, and was retried only after
+  fresh matching ownership evidence appeared.
+- The production action log contains the request, acknowledgement, input,
+  Pause revocation, release-pending, and terminal-result records. No live defect
+  or uncertain input occurred, so no runtime implementation changed. The
+  repository-local coordination harness and its full checkpoint remain
+  recorded in the
+  [combined boundary completion](#2026-08-06-combined-productiondevelopment-coordination-boundary).
 
 ### 2026-08-06 combined production/development coordination boundary
 
@@ -200,7 +295,7 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Regression coverage is in `test/test_activity_continuity.py`,
   `test/test_player_save_history.py`, and
   `test/test_player_save_preflight.py`. The canonical contract is in
-  `docs/modules/player_save_import.md` and `docs/architecture/runtime.md`.
+  `docs/architecture/player_save.md` and `docs/architecture/runtime.md`.
 
 ### 2026-08-05 save-first targeted repair reconciliation
 
@@ -1064,7 +1159,7 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - The complete remaining field matrix, evidence standard, profile-validation
   scope, audit-only adoption, incremental navigation suppression, snapshot
   invalidation, and scheduled-audit plan are maintained in
-  [`player_save_import.md`](player_save_import.md#complete-validation-program)
+  [`player_save.md`](../architecture/player_save.md#complete-validation-program)
   and the active runtime backlog. The focused player-save/card suite passed 39
   tests, and the complete repository suite passed all 1,040 tests. The
   operator-owned raw save remained untracked and was not copied into
@@ -1785,7 +1880,7 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 ### 2026-07-26 codebase maintenance audit
 
 - Commit `75d181c` recorded the repository-local audit and reviewable removal
-  proposal in `docs/codebase_maintenance_audit_2026-07-26.md`. It traced
+  proposal in `docs/backlog/history/codebase_maintenance_audit_2026-07-26.md`. It traced
   imports, entry points, dynamic and YAML references, clickmap use, and tests,
   finding concentrated orchestration complexity rather than broad duplicate
   implementation.

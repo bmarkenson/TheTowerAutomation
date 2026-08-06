@@ -558,7 +558,7 @@ changes Pause, or changes any control directive.
 
 The complete `logs/actions.log` remains the durable chronological stream. The
 canonical level semantics are defined by the
-[runtime action-log contract](../runtime_operations.md#action-log-contract).
+[action-log contract](../action_log_contract.md).
 The Operational view contains `ACTION`, `RESULT`, `WARN`, `ERROR`, and
 `FAIL`; individual device actions and their evidence remain available through
 `INPUT`, `DEBUG`, `MATCH`, and `STATE`.

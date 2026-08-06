@@ -1,6 +1,8 @@
 import json
 from datetime import datetime
 
+import pytest
+
 from utils import logger
 
 
@@ -224,27 +226,103 @@ def test_session_preflight_receipt_updates_only_the_matching_scope(
     monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(isolated_log))
     scope = logger.start_activity_scope(reason="new_battle_preflight")
     assert scope is not None
+    evidence = {
+        "valid": True,
+        "failed_checks": [],
+        "modules": {"names": ["Being Annihilator"]},
+    }
 
     rejected = logger.record_activity_scope_session_preflight(
         run_id="different-run",
         strategy="farm_t19",
         configuration_fingerprint="abc123",
+        evidence=evidence,
     )
     updated = logger.record_activity_scope_session_preflight(
         run_id=str(scope["run_id"]),
         strategy="farm_t19",
         configuration_fingerprint="abc123",
+        evidence=evidence,
     )
+    evidence["modules"]["names"].append("mutated later")
 
     assert rejected is None
     assert updated is not None
     receipt = updated["session_preflight"]
-    assert receipt["schema_version"] == 1
+    assert receipt["schema_version"] == 2
     assert receipt["status"] == "completed"
+    assert receipt["activity_scope_run_id"] == scope["run_id"]
     assert receipt["strategy"] == "farm_t19"
     assert receipt["configuration_fingerprint"] == "abc123"
     assert datetime.fromisoformat(str(receipt["completed_at"]))
+    assert receipt["evidence"] == {
+        "schema_version": 1,
+        "status": "available",
+        "activity_scope_run_id": scope["run_id"],
+        "strategy": "farm_t19",
+        "configuration_fingerprint": "abc123",
+        "payload": {
+            "valid": True,
+            "failed_checks": [],
+            "modules": {"names": ["Being Annihilator"]},
+        },
+    }
     assert logger.get_activity_scope() == updated
+
+
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        {"valid": True, "failed_checks": [], "score": float("nan")},
+        {"valid": True, "failed_checks": [], "raw": object()},
+        {
+            "valid": True,
+            "failed_checks": [],
+            "raw": "x" * logger.SESSION_PREFLIGHT_REPORT_EVIDENCE_MAX_BYTES,
+        },
+    ],
+)
+def test_session_preflight_receipt_rejects_unsafe_report_evidence(
+    tmp_path,
+    monkeypatch,
+    evidence,
+):
+    isolated_log = tmp_path / "logs" / "actions.log"
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(isolated_log))
+    scope = logger.start_activity_scope(reason="new_battle_preflight")
+    assert scope is not None
+
+    with pytest.raises(ValueError):
+        logger.record_activity_scope_session_preflight(
+            run_id=str(scope["run_id"]),
+            strategy="farm_t19",
+            configuration_fingerprint="abc123",
+            evidence=evidence,
+        )
+
+    assert "session_preflight" not in logger.get_activity_scope()
+
+
+def test_session_preflight_receipt_rejects_cyclic_report_evidence(
+    tmp_path,
+    monkeypatch,
+):
+    isolated_log = tmp_path / "logs" / "actions.log"
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(isolated_log))
+    scope = logger.start_activity_scope(reason="new_battle_preflight")
+    assert scope is not None
+    evidence = {"valid": True, "failed_checks": []}
+    evidence["cycle"] = evidence
+
+    with pytest.raises(ValueError, match="acyclic JSON values"):
+        logger.record_activity_scope_session_preflight(
+            run_id=str(scope["run_id"]),
+            strategy="farm_t19",
+            configuration_fingerprint="abc123",
+            evidence=evidence,
+        )
+
+    assert "session_preflight" not in logger.get_activity_scope()
 
 
 def test_retry_scope_waits_for_a_new_history_identity(tmp_path, monkeypatch):

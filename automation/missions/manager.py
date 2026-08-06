@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import copy
+from datetime import datetime
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional
 
 from utils.logger import (
     get_activity_scope,
     log,
     log_mission,
+    normalize_session_preflight_report_evidence,
     record_activity_scope_session_preflight,
     start_activity_scope,
 )
@@ -17,6 +19,86 @@ from core.action_executor import execute_actions
 
 
 Detection = Dict[str, Any]
+RESTORED_SESSION_PREFLIGHT_REPORT_KEY = (
+    "restored_session_preflight_report_evidence"
+)
+
+
+def _validated_complete_session_preflight_report(
+    raw: object,
+) -> Optional[dict[str, object]]:
+    """Validate the completed report projection without granting authority."""
+
+    if not isinstance(raw, Mapping):
+        return None
+    try:
+        normalized = normalize_session_preflight_report_evidence(raw)
+    except ValueError:
+        return None
+    failed_checks = normalized.get("failed_checks")
+    if normalized.get("valid") is not True or not isinstance(
+        failed_checks,
+        list,
+    ):
+        return None
+    if failed_checks:
+        return None
+    return normalized
+
+
+def _validated_session_preflight_receipt(
+    receipt: object,
+    *,
+    run_id: str,
+    strategy: str,
+    configuration_fingerprint: str,
+) -> Optional[tuple[int, Optional[dict[str, object]]]]:
+    """Return a matching receipt version and its report-only evidence."""
+
+    if not isinstance(receipt, Mapping):
+        return None
+    schema_version = receipt.get("schema_version")
+    if type(schema_version) is not int or schema_version not in {1, 2}:
+        return None
+    if not (
+        receipt.get("status") == "completed"
+        and str(receipt.get("strategy") or "") == strategy
+        and str(receipt.get("configuration_fingerprint") or "")
+        == configuration_fingerprint
+    ):
+        return None
+    if schema_version == 1:
+        return 1, None
+
+    completed_at = str(receipt.get("completed_at") or "").strip()
+    try:
+        parsed_completed_at = datetime.fromisoformat(completed_at)
+    except ValueError:
+        return None
+    if (
+        parsed_completed_at.tzinfo is None
+        or str(receipt.get("activity_scope_run_id") or "") != run_id
+    ):
+        return None
+    envelope = receipt.get("evidence")
+    if not isinstance(envelope, Mapping):
+        return None
+    if not (
+        type(envelope.get("schema_version")) is int
+        and envelope.get("schema_version") == 1
+        and envelope.get("status") == "available"
+        and str(envelope.get("activity_scope_run_id") or "") == run_id
+        and str(envelope.get("strategy") or "") == strategy
+        and str(envelope.get("configuration_fingerprint") or "")
+        == configuration_fingerprint
+    ):
+        return None
+    normalized = _validated_complete_session_preflight_report(
+        envelope.get("payload")
+    )
+    if normalized is None:
+        return None
+    return 2, normalized
 
 
 class MissionManager:
@@ -43,6 +125,9 @@ class MissionManager:
         self._new_battle_home_observed = False
         self._exclusive_validation_prepared_request_id: Optional[str] = None
         self._session_preflight_receipt_key: Optional[tuple[str, str]] = None
+        self._session_preflight_receipt_warning_key: Optional[
+            tuple[str, str]
+        ] = None
         self._battle_lifecycle = BattleLifecycle(
             adopt_initial_battle=self._startup_gates_deferred,
         )
@@ -83,6 +168,7 @@ class MissionManager:
             new_battle_home and not self._new_battle_home_observed
         )
         if starting_preflight_scope:
+            self._clear_restored_session_preflight_report()
             start_activity_scope(reason="new_battle_preflight")
         if self._startup_gates_deferred and (
             normalized_state in {"GAME_OVER", "TOURNAMENT_RESULTS"}
@@ -122,6 +208,7 @@ class MissionManager:
                 console=True,
             )
         if battle_started:
+            self._clear_restored_session_preflight_report()
             self._arm_startup_gates()
             self.set_exclusive_validation_battle(False)
             if self.mission:
@@ -159,6 +246,7 @@ class MissionManager:
         self.ctx.data["skip_attached_checks"] = False
         self.ctx.data["attached_session_preflight_reused"] = False
         self._session_preflight_receipt_key = None
+        self._session_preflight_receipt_warning_key = None
         mv = self.ctx.data.setdefault("mission_vars", {})
         mv["attached_validation_requested"] = False
         mv["gc_session_preflight_restart_available"] = False
@@ -199,28 +287,53 @@ class MissionManager:
         receipt_key = (run_id, fingerprint)
         if self._session_preflight_receipt_key == receipt_key:
             return False
-        existing = scope.get("session_preflight")
-        if (
-            isinstance(existing, Mapping)
-            and existing.get("schema_version") == 1
-            and existing.get("status") == "completed"
-            and str(existing.get("strategy") or "") == strategy_name
-            and str(existing.get("configuration_fingerprint") or "")
-            == fingerprint
-        ):
-            self._session_preflight_receipt_key = receipt_key
+        evidence = _validated_complete_session_preflight_report(
+            self.ctx.data.setdefault("mission_vars", {}).get(
+                "gc_session_preflight_evidence"
+            )
+        )
+        if evidence is None:
+            if self._session_preflight_receipt_warning_key != receipt_key:
+                log(
+                    "[SESSION_PREFLIGHT] Completed configuration checks did "
+                    "not produce persistable detailed report evidence; "
+                    "a replacement-process report cannot retain it",
+                    "WARN",
+                )
+                self._session_preflight_receipt_warning_key = receipt_key
             return False
-        updated = record_activity_scope_session_preflight(
+        existing = _validated_session_preflight_receipt(
+            scope.get("session_preflight"),
             run_id=run_id,
             strategy=strategy_name,
             configuration_fingerprint=fingerprint,
         )
+        if existing is not None and existing[0] == 2:
+            self._session_preflight_receipt_key = receipt_key
+            return False
+        try:
+            updated = record_activity_scope_session_preflight(
+                run_id=run_id,
+                strategy=strategy_name,
+                configuration_fingerprint=fingerprint,
+                evidence=evidence,
+            )
+        except ValueError as exc:
+            if self._session_preflight_receipt_warning_key != receipt_key:
+                log(
+                    "[SESSION_PREFLIGHT] Detailed report evidence could not "
+                    f"be retained for restart reuse: {exc}",
+                    "WARN",
+                )
+                self._session_preflight_receipt_warning_key = receipt_key
+            return False
         if updated is None:
             return False
         self._session_preflight_receipt_key = receipt_key
+        self._session_preflight_receipt_warning_key = None
         log(
-            "[SESSION_PREFLIGHT] Completed configuration-check receipt saved "
-            f"for current run scope={run_id}",
+            "[SESSION_PREFLIGHT] Completed configuration checks and detailed "
+            f"report evidence saved for current run scope={run_id}",
             "DEBUG",
         )
         return True
@@ -246,18 +359,17 @@ class MissionManager:
             or str(scope.get("run_id") or "") != expected_run_id
         ):
             return False
-        receipt = scope.get("session_preflight")
-        if not isinstance(receipt, Mapping):
-            return False
         strategy_name, fingerprint = identity
-        if not (
-            receipt.get("schema_version") == 1
-            and receipt.get("status") == "completed"
-            and str(receipt.get("strategy") or "") == strategy_name
-            and str(receipt.get("configuration_fingerprint") or "")
-            == fingerprint
-        ):
+        receipt = scope.get("session_preflight")
+        validated = _validated_session_preflight_receipt(
+            receipt,
+            run_id=expected_run_id,
+            strategy=strategy_name,
+            configuration_fingerprint=fingerprint,
+        )
+        if validated is None:
             return False
+        receipt_schema, restored_evidence = validated
 
         self.ctx.data["attached_session_preflight_reused"] = True
         self.ctx.data["attached_validation_requested"] = False
@@ -265,13 +377,40 @@ class MissionManager:
         mv["attached_validation_requested"] = False
         mv["gc_session_preflight_restart_available"] = False
         self._session_preflight_receipt_key = (expected_run_id, fingerprint)
+        if restored_evidence is not None:
+            self.ctx.data[RESTORED_SESSION_PREFLIGHT_REPORT_KEY] = (
+                restored_evidence
+            )
+            evidence_summary = "; detailed report evidence restored"
+        else:
+            legacy_report: dict[str, object] = {
+                "schema_version": 1,
+                "status": "unavailable",
+                "reason": "legacy_completed_receipt_has_no_report_evidence",
+                "source": "activity_scope_session_preflight",
+                "receipt_schema_version": receipt_schema,
+                "activity_scope_run_id": expected_run_id,
+                "strategy": strategy_name,
+                "configuration_fingerprint": fingerprint,
+            }
+            if isinstance(receipt, Mapping):
+                completed_at = str(receipt.get("completed_at") or "").strip()
+                if completed_at:
+                    legacy_report["completed_at"] = completed_at
+            self.ctx.data[RESTORED_SESSION_PREFLIGHT_REPORT_KEY] = legacy_report
+            evidence_summary = "; legacy receipt has no detailed report evidence"
         log(
             "[SESSION_PREFLIGHT] Reusing completed configuration checks for "
-            "the continuity-confirmed attached battle",
+            "the continuity-confirmed attached battle" + evidence_summary,
             "INFO",
             console=True,
         )
         return True
+
+    def _clear_restored_session_preflight_report(self) -> None:
+        """Drop report-only restart state at a genuine configuration boundary."""
+
+        self.ctx.data.pop(RESTORED_SESSION_PREFLIGHT_REPORT_KEY, None)
 
     def _free_upgrade_lock_requirements(self) -> list[Any]:
         if not self.strategy:
@@ -402,6 +541,7 @@ class MissionManager:
     def _replace_strategy(self, strategy: Optional[BaseStrategy]) -> None:
         """Replace strategy-owned variables without choosing boundary policy."""
 
+        self._clear_restored_session_preflight_report()
         old_vars = getattr(self.strategy, "vars", {}) if self.strategy else {}
         mission_vars = self.ctx.data.setdefault("mission_vars", {})
         if isinstance(old_vars, Mapping):

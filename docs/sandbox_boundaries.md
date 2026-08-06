@@ -8,9 +8,9 @@ not automatically evidence about the host runtime, service, ADB server,
 emulator, or code under test.
 
 Use this guide for process or lock diagnosis, user-service inspection, ADB work,
-localhost-socket tests, or a process that must survive an execution call. Use
-[`runtime_operations.md`](runtime_operations.md) as the live automation
-runbook and complete its safety inspection before device interaction.
+localhost-socket tests, or a process that must survive an execution call. Read
+only the matching section after completing
+[`live_preflight.md`](live_preflight.md) before device interaction.
 
 ## Evidence must stay within its boundary
 
