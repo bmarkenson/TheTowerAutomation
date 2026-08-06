@@ -11,7 +11,10 @@ import cv2
 import numpy as np
 
 from core.android_clipboard import read_battle_report_clipboard
-from core.battle_stats import parse_more_stats_clipboard
+from core.battle_stats import (
+    more_stats_from_terminal_save_report,
+    parse_more_stats_clipboard,
+)
 from core.input import tap_if_visible
 from core.label_tapper import is_visible
 from core.ss_capture import capture_adb_screenshot
@@ -27,6 +30,7 @@ from core.tournament_conditions import (
     tournament_conditions_complete,
     unavailable_tournament_conditions,
 )
+from core.terminal_save_report import terminal_save_report_complete
 from utils.logger import log
 
 
@@ -84,10 +88,44 @@ def handle_tournament_results(
         )
         return existing
 
+    context = dict(battle_context or {})
+    strategy_name = context.pop("strategy", None)
+    run_configuration = context.pop("run_configuration", None)
+    battle_conditions = context.pop("battle_conditions", None)
+    terminal_save_report = context.pop("terminal_save_report", None)
+
     clipboard_text = None
-    detailed_reason = "more_stats_not_opened"
+    detailed_stats = None
+    detailed_reason = "terminal_save_report_unavailable"
     detailed_frame = None
-    if tap_if_visible(
+    if terminal_save_report_complete(terminal_save_report):
+        try:
+            detailed_stats = more_stats_from_terminal_save_report(
+                terminal_save_report
+            )
+        except Exception as exc:
+            detailed_reason = f"save_record_build_failed:{exc}"
+        else:
+            detailed_reason = "terminal_player_save"
+            log(
+                "[TOURNAMENT_RESULTS] Loaded 144 exact Round Stats rows from "
+                "the causally bound terminal player save",
+                "INFO",
+                console=True,
+            )
+    elif isinstance(terminal_save_report, Mapping):
+        detailed_reason = str(
+            terminal_save_report.get("reason")
+            or "terminal_save_report_unavailable"
+        )
+
+    if detailed_stats is None:
+        log(
+            "[TOURNAMENT_RESULTS] Save-backed Round Stats unavailable "
+            f"({detailed_reason}); using verified More Stats fallback",
+            "INFO",
+        )
+    if detailed_stats is None and tap_if_visible(
         "buttons.more_stats:tournament",
         screenshot=summary,
         retries=1,
@@ -122,16 +160,13 @@ def handle_tournament_results(
                 ):
                     detailed_reason += ":summary_not_restored"
 
-    context = dict(battle_context or {})
-    strategy_name = context.pop("strategy", None)
-    run_configuration = context.pop("run_configuration", None)
-    battle_conditions = context.pop("battle_conditions", None)
     if not tournament_conditions_complete(battle_conditions):
         battle_conditions = _capture_battle_conditions(when)
     try:
         record = build_tournament_result(
             summary,
             clipboard_text,
+            detailed_stats=detailed_stats,
             detailed_reason=detailed_reason,
             tournament_id=result_id,
             captured_at=when,

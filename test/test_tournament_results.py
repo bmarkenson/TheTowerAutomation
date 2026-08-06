@@ -22,6 +22,17 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "test" / "fixtures"
 
 
+def _complete_terminal_save_report():
+    return {
+        "schema_version": 1,
+        "status": "complete",
+        "complete": True,
+        "mapping_id": "data-9-game-1073",
+        "completed_entry": {"schema_version": 1},
+        "ui_fallback": {"required": False},
+    }
+
+
 def _load(name: str):
     image = cv2.imread(str(FIXTURES / name))
     assert image is not None, name
@@ -133,7 +144,7 @@ def test_tournament_result_persists_summary_and_exact_detailed_report(tmp_path):
 
     assert record["quality"]["valid"]
     assert record["battle_type"] == "tournament"
-    assert record["schema_version"] == 3
+    assert record["schema_version"] == 4
     assert record["profile_progression"]["reason"] == (
         "test_snapshot_unavailable"
     )
@@ -257,6 +268,67 @@ def test_tournament_handler_uses_only_visible_detail_controls_and_never_ok():
     assert not any("ok" in item.args[0].lower() for item in tap.call_args_list)
 
 
+def test_tournament_handler_uses_bound_save_without_opening_more_stats():
+    summary = _load("tournament_stats_20260718.png")
+    detailed = {
+        "source_method": "player_save_battle_history",
+        "quality": {"valid": True, "row_count": 144, "warnings": []},
+        "sections": [],
+    }
+    record = {
+        "quality": {"valid": True, "retain_source_images": False},
+        "tournament_id": "TournamentSave",
+    }
+    conditions = derive_tournament_conditions(
+        283,
+        5,
+        data_version=9,
+        game_version=1073,
+    )
+
+    with (
+        patch(
+            "handlers.tournament_result_handler.is_visible",
+            return_value=True,
+        ),
+        patch(
+            "handlers.tournament_result_handler.find_recent_tournament_result",
+            return_value=None,
+        ),
+        patch(
+            "handlers.tournament_result_handler.more_stats_from_terminal_save_report",
+            return_value=detailed,
+        ) as adapt,
+        patch(
+            "handlers.tournament_result_handler.build_tournament_result",
+            return_value=record,
+        ) as build,
+        patch(
+            "handlers.tournament_result_handler.persist_tournament_result",
+            return_value=(Path("result.json"), Path("result.md")),
+        ),
+        patch("handlers.tournament_result_handler.tap_if_visible") as tap,
+        patch(
+            "handlers.tournament_result_handler.capture_current_tournament_conditions"
+        ) as capture_conditions,
+    ):
+        result = handle_tournament_results(
+            summary,
+            battle_context={
+                "strategy": "tournament",
+                "terminal_save_report": _complete_terminal_save_report(),
+                "battle_conditions": conditions,
+            },
+        )
+
+    assert result is record
+    adapt.assert_called_once()
+    assert build.call_args.kwargs["detailed_stats"] is detailed
+    assert build.call_args.kwargs["detailed_reason"] == "terminal_player_save"
+    tap.assert_not_called()
+    capture_conditions.assert_not_called()
+
+
 def test_round_stats_copy_control_is_matched_not_static():
     detailed = _load("tournament_more_stats_bottom_20260718.png")
 
@@ -341,7 +413,7 @@ def test_explicit_utc_date_backfill_is_dry_run_then_atomic_update(tmp_path):
 
     assert applied["summary"]["updated"] == 1
     stored = json.loads((tmp_path / f"{tournament_id}.json").read_text())
-    assert stored["schema_version"] == 3
+    assert stored["schema_version"] == 4
     assert stored["battle_conditions"]["tournament_number"] == 287
     assert stored["battle_conditions"]["source"]["event_date"] == "2026-08-01"
     markdown = (tmp_path / f"{tournament_id}.md").read_text(encoding="utf-8")

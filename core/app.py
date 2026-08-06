@@ -71,6 +71,10 @@ from core.player_save_history import (
 )
 from core.player_save_serialization import quiet_player_save_read
 from core.profile_progression import unavailable_profile_progression
+from core.terminal_save_report import (
+    terminal_save_report_from_snapshot,
+    unavailable_terminal_save_report,
+)
 from core.perk_timeline import PerkTimelineObserver
 from core.no_strategy_inventory import (
     NoStrategyInventoryStatus,
@@ -512,13 +516,21 @@ class App:
 
         terminal = str(terminal_state or "UNKNOWN").upper()
         binding = self._terminal_run_binding()
+        terminal_save = self._capture_terminal_player_save(
+            terminal,
+            run_binding=binding,
+        )
         context: dict[str, Any] = {
             "strategy": None,
             "terminal_state": terminal,
             "run_configuration": {},
             "run_binding": binding,
-            "profile_progression": self._capture_terminal_profile_progression(),
+            "profile_progression": terminal_save["profile_progression"],
+            "terminal_save_report": terminal_save["terminal_save_report"],
         }
+        battle_conditions = terminal_save.get("battle_conditions")
+        if isinstance(battle_conditions, Mapping):
+            context["battle_conditions"] = dict(battle_conditions)
         if binding["status"] != "bound":
             signature = (
                 terminal,
@@ -569,28 +581,41 @@ class App:
             )
         return context
 
-    def _capture_terminal_profile_progression(self) -> dict[str, Any]:
-        """Capture one exact-target progression snapshot without blocking stats."""
+    def _capture_terminal_player_save(
+        self,
+        terminal_state: str,
+        *,
+        run_binding: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Capture one stable save for progression and terminal battle stats."""
 
         captured_at = datetime.now(timezone.utc)
+        terminal = str(terminal_state or "UNKNOWN").upper()
+
+        def unavailable(reason: str, *, mapping_id: Optional[str] = None):
+            return {
+                "profile_progression": unavailable_profile_progression(
+                    reason,
+                    captured_at=captured_at.isoformat(),
+                    mapping_id=mapping_id,
+                ),
+                "terminal_save_report": unavailable_terminal_save_report(
+                    reason,
+                    terminal_state=terminal,
+                    captured_at=captured_at.isoformat(),
+                    mapping_id=mapping_id,
+                ),
+            }
+
         session = getattr(self, "_adb_target_session", None)
         if session is None:
-            return unavailable_profile_progression(
-                "adb_target_session_unavailable",
-                captured_at=captured_at.isoformat(),
-            )
+            return unavailable("adb_target_session_unavailable")
         try:
             target_before = session.snapshot()
         except Exception:
-            return unavailable_profile_progression(
-                "adb_target_snapshot_unavailable",
-                captured_at=captured_at.isoformat(),
-            )
+            return unavailable("adb_target_snapshot_unavailable")
         if not target_before.owned:
-            return unavailable_profile_progression(
-                "adb_target_not_owned",
-                captured_at=captured_at.isoformat(),
-            )
+            return unavailable("adb_target_not_owned")
 
         try:
             payload = pull_player_save_bytes(
@@ -607,24 +632,18 @@ class App:
             del payload
         except PlayerSaveError as exc:
             log(
-                "[PROFILE_PROGRESSION] Stable terminal save capture was "
+                "[TERMINAL_SAVE] Stable terminal save capture was "
                 f"unavailable without blocking battle stats: {exc}",
                 "WARN",
             )
-            return unavailable_profile_progression(
-                "stable_terminal_save_unavailable",
-                captured_at=captured_at.isoformat(),
-            )
+            return unavailable("stable_terminal_save_unavailable")
         except Exception as exc:
             log(
-                "[PROFILE_PROGRESSION] Terminal progression projection failed "
+                "[TERMINAL_SAVE] Terminal save projection failed "
                 f"without blocking battle stats: {exc}",
                 "WARN",
             )
-            return unavailable_profile_progression(
-                "terminal_progression_projection_failed",
-                captured_at=captured_at.isoformat(),
-            )
+            return unavailable("terminal_save_projection_failed")
 
         try:
             target_after = session.snapshot()
@@ -636,30 +655,81 @@ class App:
             or target_after.target != target_before.target
             or target_after.generation != target_before.generation
         ):
-            return unavailable_profile_progression(
+            return unavailable(
                 "adb_target_changed_during_terminal_capture",
-                captured_at=captured_at.isoformat(),
                 mapping_id=snapshot.mapping_id,
             )
 
         progression = snapshot.profile_progression
         if not isinstance(progression, Mapping) or not progression:
-            return unavailable_profile_progression(
+            normalized_progression = unavailable_profile_progression(
                 "exact_version_progression_projection_unavailable",
                 captured_at=captured_at.isoformat(),
                 mapping_id=snapshot.mapping_id,
             )
-        result = dict(progression)
-        source = dict(result.get("source") or {})
-        source["acquisition"] = "stable_terminal_player_save"
-        result["source"] = source
+        else:
+            normalized_progression = dict(progression)
+            source = dict(normalized_progression.get("source") or {})
+            source["acquisition"] = "stable_terminal_player_save"
+            normalized_progression["source"] = source
+
+        try:
+            scope = get_activity_scope()
+        except Exception:
+            scope = None
+        try:
+            terminal_report = terminal_save_report_from_snapshot(
+                snapshot,
+                terminal_state=terminal,
+                run_binding=run_binding,
+                activity_scope=scope,
+            )
+        except Exception as exc:
+            log(
+                "[TERMINAL_SAVE] Battle History attachment failed without "
+                f"blocking the More Stats fallback: {exc}",
+                "WARN",
+            )
+            terminal_report = unavailable_terminal_save_report(
+                "terminal_history_attachment_failed",
+                terminal_state=terminal,
+                captured_at=captured_at.isoformat(),
+                mapping_id=snapshot.mapping_id,
+                save_revision=snapshot.save_revision,
+            )
+        result = {
+            "profile_progression": normalized_progression,
+            "terminal_save_report": terminal_report,
+        }
+        if terminal == "TOURNAMENT_RESULTS":
+            checks = getattr(snapshot, "checks", {})
+            condition_evidence = (
+                checks.get("tournament_conditions")
+                if isinstance(checks, Mapping)
+                else None
+            )
+            condition_value = getattr(condition_evidence, "value", None)
+            if (
+                getattr(condition_evidence, "complete", False)
+                and isinstance(condition_value, Mapping)
+            ):
+                result["battle_conditions"] = dict(condition_value)
         log(
-            "[PROFILE_PROGRESSION] Captured terminal account snapshot "
+            "[TERMINAL_SAVE] Captured terminal account and battle projections "
             f"revision={snapshot.save_revision} "
-            f"status={result.get('status') or 'unknown'}",
+            f"progression={normalized_progression.get('status') or 'unknown'} "
+            f"report={terminal_report.get('status') or 'unknown'}",
             "DEBUG",
         )
         return result
+
+    def _capture_terminal_profile_progression(self) -> dict[str, Any]:
+        """Compatibility wrapper for callers that need only global progression."""
+
+        return self._capture_terminal_player_save(
+            "UNKNOWN",
+            run_binding={},
+        )["profile_progression"]
 
     def _get_action_authority(self) -> RuntimeActionAuthority:
         """Return the central authority, including for partial test instances."""

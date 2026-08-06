@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import json
 from pathlib import Path
+import re
 
 import numpy as np
 
@@ -10,6 +11,7 @@ from core.battle_stats import (
     attach_battle_perks,
     build_battle_record,
     build_battle_record_from_clipboard,
+    build_battle_record_from_player_save,
     format_tower_number,
     parse_more_stats_clipboard,
     parse_duration_seconds,
@@ -23,6 +25,127 @@ from utils.previous_wave import get_previous_run_wave
 
 
 CLIPBOARD_REPORT_PATH = Path(__file__).parent / "fixtures" / "battle_report_clipboard.txt"
+VERSION_MAPPING = json.loads(
+    (
+        Path(__file__).resolve().parents[1]
+        / "config/player_save_versions/data_9_game_1073.json"
+    ).read_text(encoding="utf-8")
+)
+
+
+def _terminal_save_report() -> dict:
+    history = VERSION_MAPPING["runtime_save"]["battle_history"]
+    values = {
+        "gameTime": 20599,
+        "realTime": 4244,
+        "tier": 19,
+        "wave": 2558,
+        "killedBy": "Scatter",
+        "coinsEarned": 872_380_000_000_000_000,
+        "cellsEarned": 204_600,
+        "totalEnemies": 160_757,
+    }
+    sections = []
+    for section_spec in history["more_stats_sections"]:
+        section_name = section_spec["name"]
+        section_key = _slug(section_name)
+        rows = []
+        for label, row_spec in section_spec["rows"]:
+            row = {
+                "section": section_name,
+                "section_key": section_key,
+                "label": label,
+                "key": _slug(label),
+                "source": "player_save_battle_history",
+            }
+            if isinstance(row_spec, str):
+                source_fields = [row_spec]
+                value = values.get(row_spec, 1)
+                row.update(
+                    {
+                        "value_type": "number",
+                        "value": value,
+                        "value_decimal": str(value),
+                        "source_fields": source_fields,
+                        "derivation": "direct",
+                    }
+                )
+            elif row_spec.get("kind") == "killed_by_enum":
+                row.update(
+                    {
+                        "value_type": "text",
+                        "value": "Scatter",
+                        "enum_id": 8,
+                        "source_fields": [row_spec["source"]],
+                        "derivation": "versioned_enum",
+                    }
+                )
+            elif row_spec.get("derive") == "per_real_hour":
+                amount = values.get(row_spec["amount"], 1)
+                rate = Decimal(amount) * Decimal(3600) / Decimal(values["realTime"])
+                row.update(
+                    {
+                        "value_type": "rate_per_real_hour_decimal",
+                        "value_decimal": str(rate),
+                        "source_fields": [row_spec["amount"], row_spec["seconds"]],
+                        "derivation": "amount_per_real_hour",
+                    }
+                )
+            else:
+                source = row_spec["source"]
+                value = values.get(source, 1)
+                row.update(
+                    {
+                        "value_type": row_spec.get("kind", "number"),
+                        "value": value,
+                        "value_decimal": str(value),
+                        "source_fields": [source],
+                        "derivation": "direct",
+                    }
+                )
+                active_field = row_spec.get("active_percent_of")
+                if active_field:
+                    row["source_fields"].append(active_field)
+                    row["derivation"] = "direct_with_active_percent"
+                    row["active_percent_decimal"] = "0.000622"
+            rows.append(row)
+        sections.append({"name": section_name, "key": section_key, "rows": rows})
+
+    return {
+        "schema_version": 1,
+        "status": "complete",
+        "complete": True,
+        "reason": "",
+        "terminal_state": "GAME_OVER",
+        "mapping_id": "data-9-game-1073",
+        "capture": {
+            "captured_at": "2026-08-06T11:00:00+00:00",
+            "save_revision": 48000,
+            "source_fingerprint": "d" * 64,
+        },
+        "history_transition": {"status": "capacity_rollover"},
+        "completed_entry": {
+            "schema_version": 1,
+            "mapping_id": "data-9-game-1073",
+            "identity": {
+                "tier": 19,
+                "wave": 2558,
+                "is_tournament": False,
+            },
+            "more_stats": {
+                "source_method": "player_save_battle_history",
+                "source_complete": True,
+                "row_count": 144,
+                "sections": sections,
+            },
+            "fingerprint": "c" * 64,
+        },
+        "ui_fallback": {"required": False, "reason": ""},
+    }
+
+
+def _slug(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
 
 
 def _frame(page: int) -> np.ndarray:
@@ -340,7 +463,7 @@ def _progression(revision: int, *, menu_unlocked: bool) -> dict:
 def test_battle_record_retains_resolved_run_configuration():
     record = _record()
 
-    assert record["schema_version"] == 5
+    assert record["schema_version"] == 6
     assert record["battle_type"] == "farm"
     assert record["battle_type_analysis"]["confidence"] == "high"
     assert record["runtime"]["observed_tier"] == 19
@@ -963,6 +1086,61 @@ def test_clipboard_record_is_identity_checked_and_drives_existing_derivations():
     assert record["derived"]["death_defies"] == 12
     assert record["derived"]["reroll_dice_per_real_hour_decimal"]
     assert record["derived"]["module_shards_per_real_hour_decimal"]
+
+
+def test_bound_player_save_report_drives_existing_record_and_derivations(tmp_path):
+    record = build_battle_record_from_player_save(
+        _frame(9),
+        _terminal_save_report(),
+        battle_id="BattlePlayerSave",
+        captured_at=datetime(2026, 8, 6, 4, 0, tzinfo=timezone.utc),
+        strategy_name="farm_t19",
+        runtime_context={"last_wave": 2558},
+        game_stats_text_fn=_clipboard_game_text,
+    )
+
+    assert record["schema_version"] == 6
+    assert record["quality"]["valid"]
+    assert record["quality"]["identity"] == {
+        "checked_fields": ["wave", "tier", "killed_by"],
+        "mismatches": [],
+        "valid": True,
+    }
+    stats = record["more_stats"]
+    assert stats["source_method"] == "player_save_battle_history"
+    assert stats["quality"]["row_count"] == 144
+    assert stats["source"]["history_transition"] == "capacity_rollover"
+    rows = {
+        (section["key"], row["key"]): row
+        for section in stats["sections"]
+        for row in section["rows"]
+    }
+    assert rows[("battle_report", "game_time")]["value_raw"] == "5h 43m 19s"
+    assert rows[("battle_report", "coins_earned")]["value_raw"] == "872.38q"
+    assert rows[("killed_with_effect_active", "golden_tower")][
+        "active_percent"
+    ] == 0.000622
+    assert record["derived"]["currency_rates_per_real_hour"]
+    assert "Player save Battle History" in render_battle_markdown(record)
+    json_path, markdown_path = persist_battle_record(record, records_dir=tmp_path)
+    assert json.loads(json_path.read_text(encoding="utf-8"))["quality"]["valid"]
+    assert "exact player save" in markdown_path.read_text(encoding="utf-8")
+
+
+def test_player_save_report_keeps_compact_game_stats_as_optional_augmentation():
+    record = build_battle_record_from_player_save(
+        _frame(9),
+        _terminal_save_report(),
+        game_stats_text_fn=lambda _frame, *, psm: ("", 0.0),
+    )
+
+    assert record["quality"]["valid"]
+    assert not record["game_stats"]["quality"]["augmentation_complete"]
+    assert not record["game_stats"]["quality"]["required_for_record"]
+    assert any(
+        warning.startswith("Optional Game Stats fields unavailable")
+        for warning in record["quality"]["warnings"]
+    )
 
 
 def test_unbound_terminal_record_is_valid_but_warns_about_omitted_run_evidence():
