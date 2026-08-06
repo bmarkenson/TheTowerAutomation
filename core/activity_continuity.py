@@ -15,11 +15,11 @@ from core.battle_lifecycle import HomeBattleControl
 from core.player_save_history import (
     BATTLE_HISTORY_UI_MAPPING_ID,
     BATTLE_HISTORY_UI_SOURCE,
+    CrossSourceHistoryStatus,
     PlayerSaveHistoryReadResult,
     PlayerSaveHistoryReadStatus,
     corroborate_ui_and_save_history,
     history_sources_compatible,
-    ui_history_bridge_eligible,
     valid_history_tail_advance,
 )
 from utils.logger import (
@@ -46,6 +46,7 @@ class ActivityContinuityOutcome:
     recapture: bool = False
     confirmed_same_battle_scope_id: Optional[str] = None
     confirmed_later_battle_scope_id: Optional[str] = None
+    validated_profile_observations: Optional[Mapping[str, Any]] = None
 
 
 @dataclass(frozen=True)
@@ -244,9 +245,12 @@ class ActivityContinuityCoordinator:
                 return ActivityContinuityOutcome()
             if state == "RUNNING":
                 self._pending_source = "RUNNING"
-                self._pending_mode = (
-                    "post_retry_baseline" if post_retry_pending else "compare"
-                )
+                if post_retry_pending:
+                    self._pending_mode = "post_retry_baseline"
+                elif _scope_battle_history(scope) is None:
+                    self._pending_mode = "attachment_baseline"
+                else:
+                    self._pending_mode = "compare"
             elif state == "BATTLE_HISTORY":
                 self._pending_source = "BATTLE_HISTORY"
                 self._pending_mode = (
@@ -283,6 +287,8 @@ class ActivityContinuityCoordinator:
         elif self._pending_source == "HOME_SCREEN" and state == "RUNNING":
             self._pending_source = "RUNNING"
             self._pending_home_control = HomeBattleControl.UNKNOWN
+            if self._pending_mode == "baseline":
+                self._pending_mode = "attachment_baseline"
             self._retry_at = 0.0
             log(
                 "[BATTLE_CONTINUITY] Pending Home continuity source advanced "
@@ -299,12 +305,17 @@ class ActivityContinuityCoordinator:
             )
 
         use_save = self._should_read_save(scope, player_save_mode)
+        validated_profile_observations = None
         if not self._action_logged:
             self._boundary = capture_activity_boundary()
             self._log_action(run_id, use_save=use_save)
             self._action_logged = True
 
         if use_save:
+            active_attachment = bool(
+                self._pending_source == "RUNNING"
+                and self._pending_mode in {"compare", "attachment_baseline"}
+            )
             force_ui_fallback = False
             fallback_reason = ""
             save_result = self._save_history_reader(
@@ -313,9 +324,13 @@ class ActivityContinuityCoordinator:
                 expected_scope_id=run_id,
                 action_guard_fn=action_guard_fn,
                 serialize_active_attachment=(
-                    self._pending_mode == "compare"
+                    self._pending_mode
+                    in {"compare", "attachment_baseline"}
                     and self._pending_source == "RUNNING"
                 ),
+            )
+            validated_profile_observations = (
+                save_result.validated_profile_observations
             )
             if save_result.status is PlayerSaveHistoryReadStatus.BLOCKED:
                 log_result(
@@ -365,6 +380,14 @@ class ActivityContinuityCoordinator:
                             fallback_reason = "history_tail_transition_invalid"
                         elif not force_ui_fallback:
                             return self._handle_metadata(scope, metadata)
+                    elif self._pending_mode == "attachment_baseline":
+                        return self._handle_metadata(
+                            scope,
+                            metadata,
+                            validated_profile_observations=(
+                                validated_profile_observations
+                            ),
+                        )
                     else:
                         baseline = _scope_battle_history(scope)
                         compatible = history_sources_compatible(
@@ -372,13 +395,24 @@ class ActivityContinuityCoordinator:
                             metadata,
                         )
                         if baseline is None:
-                            force_ui_fallback = True
-                            fallback_reason = "history_baseline_unavailable"
+                            return self._handle_metadata(
+                                scope,
+                                metadata,
+                                validated_profile_observations=(
+                                    validated_profile_observations
+                                ),
+                            )
                         elif compatible and (
                             baseline["fingerprint"]
                             == metadata["fingerprint"]
                         ):
-                            return self._handle_metadata(scope, metadata)
+                            return self._handle_metadata(
+                                scope,
+                                metadata,
+                                validated_profile_observations=(
+                                    validated_profile_observations
+                                ),
+                            )
                         elif compatible and not valid_history_tail_advance(
                             baseline,
                             metadata,
@@ -386,15 +420,25 @@ class ActivityContinuityCoordinator:
                             log(
                                 "[BATTLE_CONTINUITY] Attached save History "
                                 "tail changed without a valid append/rollover "
-                                "transition; restoring the guarded UI fallback",
+                                "transition; starting a conservative attachment "
+                                "scope from the fresh save tail",
                                 "INFO",
                             )
-                            force_ui_fallback = True
-                            fallback_reason = (
-                                "history_tail_transition_invalid"
+                            return self._handle_metadata(
+                                scope,
+                                metadata,
+                                validated_profile_observations=(
+                                    validated_profile_observations
+                                ),
                             )
                         elif compatible:
-                            return self._handle_metadata(scope, metadata)
+                            return self._handle_metadata(
+                                scope,
+                                metadata,
+                                validated_profile_observations=(
+                                    validated_profile_observations
+                                ),
+                            )
                         else:
                             corroboration = corroborate_ui_and_save_history(
                                 baseline,
@@ -405,17 +449,60 @@ class ActivityContinuityCoordinator:
                                     scope,
                                     metadata,
                                     reason=corroboration.reason,
+                                    validated_profile_observations=(
+                                        validated_profile_observations
+                                    ),
                                 )
-                            force_ui_fallback = True
-                            fallback_reason = corroboration.reason
+                            return self._handle_metadata(
+                                scope,
+                                metadata,
+                                validated_profile_observations=(
+                                    validated_profile_observations
+                                ),
+                                attachment_change_confirmed=(
+                                    corroboration.status
+                                    is CrossSourceHistoryStatus.MISMATCH
+                                ),
+                                attachment_incompatibility_reason=(
+                                    corroboration.reason
+                                ),
+                            )
                 else:
                     force_ui_fallback = True
                     fallback_reason = "save_history_metadata_invalid"
+            if active_attachment:
+                reason = fallback_reason or save_result.reason
+                log_result(
+                    "Attached battle continuity deferred — the guarded save "
+                    "did not provide a usable History tail, so Battle History "
+                    "UI was not opened",
+                    detail=(
+                        "[BATTLE_CONTINUITY] "
+                        "disposition=attachment_save_retry_required "
+                        f"reason={reason} scope_id={run_id}"
+                    ),
+                )
+                self._action_logged = False
+                self._boundary = None
+                self._retry_at = self._clock() + SOURCE_RETRY_INTERVAL_SECONDS
+                return ActivityContinuityOutcome(
+                    pending=True,
+                    recapture=True,
+                    validated_profile_observations=(
+                        validated_profile_observations
+                    ),
+                )
             if not force_ui_fallback and not save_result.safe_ui_fallback:
                 self._action_logged = False
                 self._boundary = None
                 self._retry_at = self._clock() + SOURCE_RETRY_INTERVAL_SECONDS
-                return ActivityContinuityOutcome(pending=True, recapture=True)
+                return ActivityContinuityOutcome(
+                    pending=True,
+                    recapture=True,
+                    validated_profile_observations=(
+                        validated_profile_observations
+                    ),
+                )
             log(
                 "[BATTLE_CONTINUITY] Stable save evidence could not establish "
                 "continuity "
@@ -430,7 +517,11 @@ class ActivityContinuityCoordinator:
             action_guard_fn=action_guard_fn,
         )
         if result.status is BattleHistoryReadStatus.PAUSED:
-            return ActivityContinuityOutcome(pending=True, recapture=True)
+            return ActivityContinuityOutcome(
+                pending=True,
+                recapture=True,
+                validated_profile_observations=validated_profile_observations,
+            )
         if result.status is BattleHistoryReadStatus.BATTLE_ENDED:
             log_result(
                 "Battle continuity check interrupted — the battle ended during "
@@ -442,9 +533,18 @@ class ActivityContinuityCoordinator:
             )
             self._checked_scope_id = run_id
             self._reset_pending()
-            return ActivityContinuityOutcome(recapture=True)
+            return ActivityContinuityOutcome(
+                recapture=True,
+                validated_profile_observations=validated_profile_observations,
+            )
         if not result.complete or result.identity is None:
-            return self._handle_failed_read(scope, result)
+            return self._handle_failed_read(
+                scope,
+                result,
+                validated_profile_observations=(
+                    validated_profile_observations
+                ),
+            )
         metadata = _normalize_history_metadata(result.identity.scope_metadata())
         if metadata is None:
             return self._handle_failed_read(
@@ -453,6 +553,9 @@ class ActivityContinuityCoordinator:
                     BattleHistoryReadStatus.FAILED,
                     "UI History metadata normalization failed",
                     source_restored=True,
+                ),
+                validated_profile_observations=(
+                    validated_profile_observations
                 ),
             )
         if self._pending_mode == "post_retry_baseline":
@@ -463,7 +566,11 @@ class ActivityContinuityCoordinator:
                 and previous["fingerprint"] == metadata["fingerprint"]
             ):
                 return self._handle_unchanged_post_retry(metadata)
-        return self._handle_metadata(scope, metadata)
+        return self._handle_metadata(
+            scope,
+            metadata,
+            validated_profile_observations=validated_profile_observations,
+        )
 
     def _handle_cross_source_migration(
         self,
@@ -471,6 +578,7 @@ class ActivityContinuityCoordinator:
         metadata: Mapping[str, Any],
         *,
         reason: str,
+        validated_profile_observations: Optional[Mapping[str, Any]] = None,
     ) -> ActivityContinuityOutcome:
         """Persist a UI-to-save bridge without comparing source fingerprints."""
 
@@ -492,7 +600,13 @@ class ActivityContinuityCoordinator:
             self._action_logged = False
             self._boundary = None
             self._retry_at = self._clock() + SOURCE_RETRY_INTERVAL_SECONDS
-            return ActivityContinuityOutcome(pending=True, recapture=True)
+            return ActivityContinuityOutcome(
+                pending=True,
+                recapture=True,
+                validated_profile_observations=(
+                    validated_profile_observations
+                ),
+            )
 
         log_result(
             "Attached battle continuity confirmed — UI identity corroborated "
@@ -508,6 +622,7 @@ class ActivityContinuityCoordinator:
         return ActivityContinuityOutcome(
             recapture=True,
             confirmed_same_battle_scope_id=run_id,
+            validated_profile_observations=validated_profile_observations,
         )
 
     def _should_read_save(
@@ -527,23 +642,15 @@ class ActivityContinuityCoordinator:
                 reference is not None
                 and reference.get("source") == PLAYER_SAVE_HISTORY_SOURCE
             )
-        elif (
-            self._pending_mode == "compare"
-            and self._pending_source == "RUNNING"
+        if (
+            self._pending_source == "RUNNING"
+            and self._pending_mode in {"compare", "attachment_baseline"}
         ):
-            # A save baseline is directly comparable. A retained UI baseline
-            # enters only when Tier/Wave/Battle Date can support the explicit
-            # cross-source bridge; fingerprints remain incomparable.
-            reference = _scope_battle_history(scope)
-        else:
-            return False
-        return bool(
-            reference is not None
-            and (
-                reference.get("source") == PLAYER_SAVE_HISTORY_SOURCE
-                or ui_history_bridge_eligible(reference)
-            )
-        )
+            # The guarded active-attachment serializer establishes a missing
+            # baseline directly. Existing UI baselines still use the explicit
+            # Tier/Wave/Battle Date bridge; source fingerprints never cross.
+            return True
+        return False
 
     def _log_action(self, run_id: str, *, use_save: bool) -> None:
         channel = "stable player save" if use_save else "Battle History UI"
@@ -554,6 +661,12 @@ class ActivityContinuityCoordinator:
             summary = "Polling the post-Retry Battle History baseline"
             reason = (
                 "wait until the finished battle becomes the newest History entry"
+            )
+        elif self._pending_mode == "attachment_baseline":
+            summary = "Recording the attached battle's last-completed baseline"
+            reason = (
+                "bind the current run to a guarded active-battle save without "
+                "opening Battle History"
             )
         else:
             summary = "Checking attached battle continuity"
@@ -586,6 +699,10 @@ class ActivityContinuityCoordinator:
         self,
         scope: Mapping[str, object],
         metadata: Mapping[str, Any],
+        *,
+        validated_profile_observations: Optional[Mapping[str, Any]] = None,
+        attachment_change_confirmed: Optional[bool] = None,
+        attachment_incompatibility_reason: str = "",
     ) -> ActivityContinuityOutcome:
         run_id = str(scope["run_id"])
         baseline = _scope_battle_history(scope)
@@ -609,12 +726,20 @@ class ActivityContinuityCoordinator:
                 or baseline["fingerprint"] != metadata["fingerprint"]
             )
         )
+        change_confirmed = bool(
+            changed
+            and (
+                attachment_change_confirmed
+                if attachment_change_confirmed is not None
+                else not source_incompatible_attachment
+            )
+        )
 
         if changed:
             reason = (
-                "battle_history_unavailable_on_attachment"
-                if source_incompatible_attachment
-                else "battle_history_changed_on_attachment"
+                "battle_history_changed_on_attachment"
+                if change_confirmed
+                else "battle_history_unavailable_on_attachment"
             )
             active_scope = start_activity_scope(
                 reason=reason,
@@ -631,7 +756,12 @@ class ActivityContinuityCoordinator:
                 )
                 self._checked_scope_id = run_id
                 self._reset_pending()
-                return ActivityContinuityOutcome(recapture=True)
+                return ActivityContinuityOutcome(
+                    recapture=True,
+                    validated_profile_observations=(
+                        validated_profile_observations
+                    ),
+                )
             run_id = str(active_scope["run_id"])
 
         updated = record_activity_scope_battle_history(
@@ -648,12 +778,26 @@ class ActivityContinuityCoordinator:
                 ),
             )
         elif changed:
+            if change_confirmed:
+                summary = (
+                    "Attached battle identified as a later run — Current run "
+                    "activity restarted conservatively"
+                )
+                disposition = "new_attachment_scope"
+            else:
+                summary = (
+                    "Attached battle could not be compared with the prior "
+                    "History source — Current run activity restarted "
+                    "conservatively from the fresh save"
+                )
+                disposition = "unverified_new_attachment_scope"
             log_result(
-                "Attached battle identified as a later run — Current run "
-                "activity restarted conservatively",
+                summary,
                 detail=(
-                    "[BATTLE_CONTINUITY] disposition=new_attachment_scope "
+                    f"[BATTLE_CONTINUITY] disposition={disposition} "
                     f"source_compatible={compatible} "
+                    "incompatibility_reason="
+                    f"{attachment_incompatibility_reason or 'none'} "
                     f"previous={_baseline_detail(baseline)} "
                     f"latest={_metadata_detail(metadata)} scope_id={run_id}"
                 ),
@@ -670,6 +814,17 @@ class ActivityContinuityCoordinator:
                 detail=(
                     f"[BATTLE_CONTINUITY] disposition={disposition} "
                     f"previous={_baseline_detail(pending_previous)} "
+                    f"latest={_metadata_detail(metadata)} scope_id={run_id}"
+                ),
+            )
+        elif self._pending_mode == "attachment_baseline":
+            log_result(
+                "Attached battle baseline recorded from the guarded player save "
+                "— latest completed battle is "
+                f"Tier {metadata.get('tier')}, wave {metadata.get('wave')}",
+                detail=(
+                    "[BATTLE_CONTINUITY] "
+                    "disposition=attachment_save_baseline_recorded "
                     f"latest={_metadata_detail(metadata)} scope_id={run_id}"
                 ),
             )
@@ -702,7 +857,7 @@ class ActivityContinuityCoordinator:
             and not changed
         ):
             confirmed_same_battle_scope_id = run_id
-        elif changed:
+        elif changed and change_confirmed:
             confirmed_later_battle_scope_id = run_id
 
         self._checked_scope_id = run_id
@@ -711,12 +866,15 @@ class ActivityContinuityCoordinator:
             recapture=True,
             confirmed_same_battle_scope_id=confirmed_same_battle_scope_id,
             confirmed_later_battle_scope_id=confirmed_later_battle_scope_id,
+            validated_profile_observations=validated_profile_observations,
         )
 
     def _handle_failed_read(
         self,
         scope: Mapping[str, object],
         result: BattleHistoryReadResult,
+        *,
+        validated_profile_observations: Optional[Mapping[str, Any]] = None,
     ) -> ActivityContinuityOutcome:
         run_id = str(scope["run_id"])
         if not result.source_restored:
@@ -731,7 +889,11 @@ class ActivityContinuityCoordinator:
             self._action_logged = False
             self._boundary = None
             self._retry_at = self._clock() + SOURCE_RETRY_INTERVAL_SECONDS
-            return ActivityContinuityOutcome(pending=True, recapture=True)
+            return ActivityContinuityOutcome(
+                pending=True,
+                recapture=True,
+                validated_profile_observations=validated_profile_observations,
+            )
 
         if self._pending_mode == "post_retry_baseline":
             log_result(
@@ -743,7 +905,10 @@ class ActivityContinuityCoordinator:
                 ),
             )
             self._defer_post_retry_poll()
-            return ActivityContinuityOutcome(recapture=True)
+            return ActivityContinuityOutcome(
+                recapture=True,
+                validated_profile_observations=validated_profile_observations,
+            )
 
         if self._pending_mode == "compare":
             replacement = start_activity_scope(
@@ -772,7 +937,10 @@ class ActivityContinuityCoordinator:
         )
         self._checked_scope_id = run_id
         self._reset_pending()
-        return ActivityContinuityOutcome(recapture=True)
+        return ActivityContinuityOutcome(
+            recapture=True,
+            validated_profile_observations=validated_profile_observations,
+        )
 
     def _defer_post_retry_poll(self) -> None:
         """Release action authority until the next bounded History poll."""

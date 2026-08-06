@@ -60,10 +60,13 @@ def test_no_strategy_observer_records_dissonance_as_observed_not_configured():
     assert snapshot["coverage"] == {
         "observed": 1,
         "evidence_captured": 0,
-        "unavailable": 0,
+        "unavailable": 1,
         "total": len(OBSERVED_FIELDS),
         "complete": False,
     }
+    damage = snapshot["fields"]["damage_slider"]
+    assert damage["status"] == "unavailable"
+    assert damage["source"] == "attack_dissonance_menu_constraint"
 
 
 def test_authoritatively_unavailable_field_counts_as_resolved_coverage():
@@ -106,6 +109,70 @@ def test_post_run_value_preserves_home_phase_and_observation_time():
     }
     assert snapshot["finalized"] is True
     assert snapshot["finalized_at"] == "2026-07-22T16:00:00+00:00"
+
+
+def test_guarded_attachment_save_records_only_normalized_observed_values():
+    observer = NoStrategyRunObserver(clock=_clock)
+    observations = {
+        "schema_version": 1,
+        "source": "guarded_active_attachment_player_save",
+        "mapping_id": "data-9-game-1073",
+        "mapping_maturity": "candidate",
+        "captured_at": "2026-08-06T23:31:05+00:00",
+        "checks": {
+            "cards_deck": {"value": "Farm"},
+            "workshop_preset": {"value": "Attack Disso"},
+            "free_upgrade_locks": {"value": ["Shockwave Size"]},
+            "bots_preset": {"value": "Farm"},
+            "guardian_chips": {"value": ["Fetch", "Summon", "Scout"]},
+            "modules": {"value": {"cannon_primary": "Amplifying Strike"}},
+            "target_priority": {"value": ["Fast", "Boss", "Closest"]},
+            "auto_pick_perks": {"value": True},
+            "perk_first_choice": {"value": "perk_wave_requirement"},
+            "perk_bans": {"value": ["swamp_radius"]},
+            "perk_auto_pick_order": {
+                "value": ["perk_wave_requirement", "game_speed"]
+            },
+            "ultimate_weapon_primaries": {
+                "value": {
+                    "Poison Swamp": {"primary": "on"},
+                    "Spotlight": {"primary": "on"},
+                }
+            },
+            "poison_swamp_stun": {"value": "off"},
+            "spotlight_missiles": {"value": "on"},
+        },
+    }
+
+    applied = observer.record_player_save_observations(observations)
+    snapshot = observer.snapshot()
+
+    assert set(applied) == set(OBSERVED_FIELDS).difference(
+        {"run_identity", "damage_slider"}
+    )
+    assert observer.unresolved_fields() == {"run_identity", "damage_slider"}
+    assert snapshot["fields"]["cards_deck"]["value"] == {"label": "Farm"}
+    assert snapshot["fields"]["auto_pick_perks"]["value"] == {
+        "enabled": True
+    }
+    ultimate = snapshot["fields"]["ultimate_weapons"]
+    assert ultimate["value"]["Poison Swamp"] == {
+        "primary": "on",
+        "stun": "off",
+    }
+    assert ultimate["value"]["Spotlight"] == {
+        "primary": "on",
+        "missiles": "on",
+    }
+    assert ultimate["phase"] == "in_battle_attachment_save"
+    assert ultimate["provenance"] == {
+        "mapping_id": "data-9-game-1073",
+        "save_checks": [
+            "ultimate_weapon_primaries",
+            "poison_swamp_stun",
+            "spotlight_missiles",
+        ],
+    }
 
 
 def test_unfinished_snapshot_can_be_restored_after_process_reload():

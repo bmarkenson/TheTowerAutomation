@@ -4,7 +4,7 @@ import pytest
 
 from core.adb_target_session import AdbTargetSnapshot
 from core.battle_lifecycle import HomeBattleControl
-from core.player_save import pull_player_save_bytes
+from core.player_save import SaveCheckEvidence, pull_player_save_bytes
 from core.player_save_history import (
     CrossSourceHistoryStatus,
     PlayerSaveAttachmentContext,
@@ -52,6 +52,7 @@ def _snapshot(
     semantic_reason: str = "",
     active: bool = True,
     battle_date=None,
+    profile_checks=None,
 ):
     identity = SimpleNamespace(
         mapping_id="data-9-game-1073",
@@ -89,6 +90,11 @@ def _snapshot(
         runtime_save=runtime,
         captured_at="2026-08-04T20:00:00+00:00",
         game_version=1073,
+        mapping_id="data-9-game-1073",
+        mapping_maturity="candidate",
+        validated_checks=tuple((profile_checks or {}).keys()),
+        shape_valid=True,
+        checks=dict(profile_checks or {}),
     )
 
 
@@ -493,6 +499,50 @@ def test_active_attachment_default_pull_uses_two_identical_reads(monkeypatch):
         }
         for _path, kwargs in reads
     )
+
+
+def test_active_attachment_returns_complete_allowlisted_profile_observations():
+    snapshot = _snapshot(
+        profile_checks={
+            "cards_deck": SaveCheckEvidence(
+                check_id="cards_deck",
+                status="observed",
+                value="Farm",
+                source_fields=("presetName", "currentPreset"),
+            ),
+            "unvalidated_check": SaveCheckEvidence(
+                check_id="unvalidated_check",
+                status="observed",
+                value="private candidate",
+                source_fields=("unvalidatedField",),
+            ),
+        }
+    )
+    snapshot.validated_checks = ("cards_deck",)
+
+    result = _read_active(
+        _reader(
+            attachment_context_fn=_attachment_context,
+            background_fn=lambda _target: True,
+            foreground_fn=lambda _target: True,
+            decode_fn=lambda _payload, **_kwargs: snapshot,
+        )
+    )
+
+    assert result.complete
+    assert result.validated_profile_observations == {
+        "schema_version": 1,
+        "source": "guarded_active_attachment_player_save",
+        "mapping_id": "data-9-game-1073",
+        "mapping_maturity": "candidate",
+        "captured_at": "2026-08-04T20:00:00+00:00",
+        "checks": {
+            "cards_deck": {
+                "value": "Farm",
+                "source_fields": ["presetName", "currentPreset"],
+            }
+        },
+    }
 
 
 @pytest.mark.parametrize(

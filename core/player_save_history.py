@@ -8,6 +8,7 @@ preflight.  Neither path navigates game UI or authorizes lifecycle input, and
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -77,6 +78,11 @@ class PlayerSaveHistoryReadResult:
     metadata: Optional[Mapping[str, Any]] = None
     safe_ui_fallback: bool = False
     active_round_identity_fingerprint: Optional[str] = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    validated_profile_observations: Optional[Mapping[str, Any]] = field(
         default=None,
         repr=False,
         compare=False,
@@ -180,6 +186,65 @@ def history_metadata_from_snapshot(
             "acquisition": str(acquisition),
         },
     )
+
+
+def validated_profile_observations_from_snapshot(
+    snapshot: PlayerSaveSnapshot,
+) -> Optional[dict[str, Any]]:
+    """Project only complete, allowlisted configuration observations.
+
+    This is an observation projection, not a requirement reconciliation.  It is
+    suitable for an attached No Strategy run because the guarded serializer has
+    already established snapshot freshness and active-round identity.  Unknown,
+    incomplete, or candidate checks outside the exact mapping's validation
+    allowlist are omitted rather than converted into UI claims.
+    """
+
+    mapping_id = str(getattr(snapshot, "mapping_id", None) or "").strip()
+    mapping_maturity = str(
+        getattr(snapshot, "mapping_maturity", None) or ""
+    ).strip()
+    captured_at = str(getattr(snapshot, "captured_at", None) or "").strip()
+    checks = getattr(snapshot, "checks", None)
+    validated = {
+        str(check_id)
+        for check_id in getattr(snapshot, "validated_checks", ()) or ()
+    }
+    if (
+        not mapping_id
+        or not captured_at
+        or getattr(snapshot, "shape_valid", False) is not True
+        or not isinstance(checks, Mapping)
+    ):
+        return None
+
+    projected: dict[str, Any] = {}
+    for check_id, evidence in checks.items():
+        normalized_id = str(check_id)
+        if mapping_maturity != "validated" and normalized_id not in validated:
+            continue
+        if (
+            getattr(evidence, "status", None) != "observed"
+            or getattr(evidence, "complete", None) is not True
+        ):
+            continue
+        projected[normalized_id] = {
+            "value": deepcopy(getattr(evidence, "value", None)),
+            "source_fields": [
+                str(value)
+                for value in getattr(evidence, "source_fields", ()) or ()
+            ],
+        }
+    if not projected:
+        return None
+    return {
+        "schema_version": 1,
+        "source": "guarded_active_attachment_player_save",
+        "mapping_id": mapping_id,
+        "mapping_maturity": mapping_maturity,
+        "captured_at": captured_at,
+        "checks": projected,
+    }
 
 
 def ui_history_bridge_eligible(metadata: Mapping[str, Any]) -> bool:
@@ -427,14 +492,16 @@ class PlayerSaveHistoryReader:
             snapshot,
             acquisition="forced_active_attachment_android_home_serialization",
         )
-        if not observed.complete:
-            return observed
+        profile_observations = validated_profile_observations_from_snapshot(
+            snapshot
+        )
         return PlayerSaveHistoryReadResult(
             observed.status,
             observed.reason,
             metadata=observed.metadata,
             safe_ui_fallback=observed.safe_ui_fallback,
             active_round_identity_fingerprint=active_identity.fingerprint,
+            validated_profile_observations=profile_observations,
         )
 
     def _same_attachment_context(
@@ -692,5 +759,6 @@ __all__ = [
     "history_metadata_from_snapshot",
     "history_sources_compatible",
     "ui_history_bridge_eligible",
+    "validated_profile_observations_from_snapshot",
     "valid_history_tail_advance",
 ]

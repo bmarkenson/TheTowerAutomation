@@ -26,7 +26,6 @@ from core.no_strategy_observer import detect_attack_dissonance_badge
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
 from core.upgrade_navigation import swipe_upgrade_menu
-from utils.logger import log
 
 
 Frame = np.ndarray
@@ -43,6 +42,18 @@ RECOVERABLE_INVENTORY_STATES = frozenset(
         "GUILD",
         "TARGET_PRIORITY",
         "DAMAGE_ADJUSTER",
+    }
+)
+IN_BATTLE_INVENTORY_FIELDS = frozenset(
+    {
+        "cards_deck",
+        "bots_preset",
+        "guardian_chips",
+        "modules",
+        "target_priority",
+        "damage_slider",
+        "auto_pick_perks",
+        "ultimate_weapons",
     }
 )
 
@@ -118,6 +129,19 @@ def run_no_strategy_in_battle_inventory(
         observer.observe(frame, detection, phase="in_battle")
         return detection
 
+    def unresolved_inventory_fields() -> set[str]:
+        unresolved_fn = getattr(observer, "unresolved_fields", None)
+        if callable(unresolved_fn):
+            try:
+                unresolved = unresolved_fn(IN_BATTLE_INVENTORY_FIELDS)
+            except (TypeError, ValueError):
+                unresolved = None
+            if isinstance(unresolved, (set, frozenset, list, tuple)):
+                return set(unresolved).intersection(IN_BATTLE_INVENTORY_FIELDS)
+        # Compatibility for observer doubles and older restored snapshots: a
+        # missing planning API must preserve the established full traversal.
+        return set(IN_BATTLE_INVENTORY_FIELDS)
+
     route_completed = False
     try:
         initial = _restore_running_view(
@@ -129,252 +153,262 @@ def run_no_strategy_in_battle_inventory(
         )
         observe(initial)
         attack_dissonance = detect_attack_dissonance_badge(initial)["observed"]
+        unresolved = unresolved_inventory_fields()
+        planned_fields = tuple(sorted(unresolved))
 
-        _ensure_running_side_menu_open(
-            capture_fn=guarded_capture,
-            detector=detector,
-            tap_visible_fn=guarded_visible_tap,
-            sleep_fn=sleep_fn,
-        )
-        _guarded_visible_tap(
-            "navigation.Cards",
-            allowed_states={"RUNNING"},
-            capture_fn=guarded_capture,
-            detector=detector,
-            tap_visible_fn=guarded_visible_tap,
-            sleep_fn=sleep_fn,
-        )
-        cards = _wait_for(
-            state="CARDS",
-            capture_fn=guarded_capture,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
-        observe(cards)
-        _return_to_game_from_section(
-            state="CARDS",
-            capture_fn=guarded_capture,
-            detector=detector,
-            tap_visible_fn=guarded_visible_tap,
-            sleep_fn=sleep_fn,
-        )
-
-        _guarded_static_tap(
-            "navigation.open_perks",
-            allowed_states={"RUNNING"},
-            capture_fn=guarded_capture,
-            detector=detector,
-            safe_tap_fn=guarded_safe_tap,
-        )
-        perks = _wait_for(
-            state="PERKS",
-            capture_fn=guarded_capture,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
-        observe(perks)
-        _guarded_visible_tap(
-            "buttons.close:perks",
-            allowed_states={"PERKS"},
-            capture_fn=guarded_capture,
-            detector=detector,
-            tap_visible_fn=guarded_visible_tap,
-            sleep_fn=sleep_fn,
-        )
-        _wait_for(
-            state="RUNNING",
-            capture_fn=guarded_capture,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
-
-        _select_running_menu(
-            "navigation.goto_uw",
-            "UW_MENU",
-            capture_fn=guarded_capture,
-            detector=detector,
-            tap_visible_fn=guarded_visible_tap,
-            sleep_fn=sleep_fn,
-        )
-        for _ in range(3):
-            frame = _wait_for(
-                state="RUNNING",
-                menu="UW_MENU",
+        if "cards_deck" in unresolved:
+            _ensure_running_side_menu_open(
+                capture_fn=guarded_capture,
+                detector=detector,
+                tap_visible_fn=guarded_visible_tap,
+                sleep_fn=sleep_fn,
+            )
+            _guarded_visible_tap(
+                "navigation.Cards",
+                allowed_states={"RUNNING"},
+                capture_fn=guarded_capture,
+                detector=detector,
+                tap_visible_fn=guarded_visible_tap,
+                sleep_fn=sleep_fn,
+            )
+            cards = _wait_for(
+                state="CARDS",
                 capture_fn=guarded_capture,
                 detector=detector,
                 sleep_fn=sleep_fn,
             )
-            observe(frame)
-            guarded_swipe("towards_top", "extended")
-            sleep_fn(0.5)
-        for position in range(6):
-            frame = _wait_for(
-                state="RUNNING",
-                menu="UW_MENU",
+            observe(cards)
+            _return_to_game_from_section(
+                state="CARDS",
                 capture_fn=guarded_capture,
                 detector=detector,
+                tap_visible_fn=guarded_visible_tap,
                 sleep_fn=sleep_fn,
             )
-            observe(frame)
-            if position < 5:
-                guarded_swipe("towards_bottom", "medium")
-                sleep_fn(0.5)
 
-        _capture_section(
-            observer,
-            open_key="navigation.menu_modules",
-            state="MODULES",
-            capture_fn=guarded_capture,
-            detector=detector,
-            tap_visible_fn=guarded_visible_tap,
-            sleep_fn=sleep_fn,
-        )
-
-        _ensure_running_side_menu_open(
-            capture_fn=guarded_capture,
-            detector=detector,
-            tap_visible_fn=guarded_visible_tap,
-            sleep_fn=sleep_fn,
-        )
-        _guarded_visible_tap(
-            "navigation.menu_event",
-            allowed_states={"RUNNING"},
-            capture_fn=guarded_capture,
-            detector=detector,
-            tap_visible_fn=guarded_visible_tap,
-            sleep_fn=sleep_fn,
-        )
-        _wait_for(
-            state="EVENT",
-            capture_fn=guarded_capture,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
-        _guarded_visible_tap(
-            "navigation.event:bots_tab",
-            allowed_states={"EVENT"},
-            capture_fn=guarded_capture,
-            detector=detector,
-            tap_visible_fn=guarded_visible_tap,
-            sleep_fn=sleep_fn,
-        )
-        bots = _wait_for(
-            state="EVENT",
-            capture_fn=guarded_capture,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
-        bots = _ensure_event_bots_top(
-            bots,
-            capture_fn=guarded_capture,
-            detector=detector,
-            event_swipe_fn=guarded_event_swipe,
-            sleep_fn=sleep_fn,
-        )
-        observe(bots)
-        _return_to_game_from_section(
-            state="EVENT",
-            capture_fn=guarded_capture,
-            detector=detector,
-            tap_visible_fn=guarded_visible_tap,
-            sleep_fn=sleep_fn,
-        )
-
-        _ensure_running_side_menu_open(
-            capture_fn=guarded_capture,
-            detector=detector,
-            tap_visible_fn=guarded_visible_tap,
-            sleep_fn=sleep_fn,
-        )
-        _guarded_visible_tap(
-            "navigation.menu_guild",
-            allowed_states={"RUNNING"},
-            capture_fn=guarded_capture,
-            detector=detector,
-            tap_visible_fn=guarded_visible_tap,
-            sleep_fn=sleep_fn,
-        )
-        _wait_for(
-            state="GUILD",
-            capture_fn=guarded_capture,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
-        _guarded_visible_tap(
-            "navigation.guild:guardian_tab",
-            allowed_states={"GUILD"},
-            capture_fn=guarded_capture,
-            detector=detector,
-            tap_visible_fn=guarded_visible_tap,
-            sleep_fn=sleep_fn,
-        )
-        guardians = _wait_for(
-            state="GUILD",
-            secondary="GUILD_GUARDIAN_SCREEN",
-            capture_fn=guarded_capture,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
-        observe(guardians)
-        _return_to_game_from_section(
-            state="GUILD",
-            capture_fn=guarded_capture,
-            detector=detector,
-            tap_visible_fn=guarded_visible_tap,
-            sleep_fn=sleep_fn,
-        )
-
-        _ensure_running_side_menu_open(
-            capture_fn=guarded_capture,
-            detector=detector,
-            tap_visible_fn=guarded_visible_tap,
-            sleep_fn=sleep_fn,
-        )
-        _guarded_static_tap(
-            "navigation.target_priority",
-            allowed_states={"RUNNING"},
-            capture_fn=guarded_capture,
-            detector=detector,
-            safe_tap_fn=guarded_safe_tap,
-        )
-        target_priority = _wait_for(
-            state="TARGET_PRIORITY",
-            capture_fn=guarded_capture,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
-        observe(target_priority)
-        _guarded_static_tap(
-            "buttons.close:target_priority",
-            allowed_states={"TARGET_PRIORITY"},
-            capture_fn=guarded_capture,
-            detector=detector,
-            safe_tap_fn=guarded_safe_tap,
-        )
-        _wait_for(
-            state="RUNNING",
-            capture_fn=guarded_capture,
-            detector=detector,
-            sleep_fn=sleep_fn,
-        )
-
-        if attack_dissonance:
-            observer.record_unavailable(
-                "damage_slider",
-                reason="Attack menu disabled by Attack Dissonance",
-                source="attack_dissonance_menu_constraint",
-                phase="in_battle",
-            )
-        else:
-            _capture_damage_slider(
-                observer,
+        if "auto_pick_perks" in unresolved:
+            _guarded_static_tap(
+                "navigation.open_perks",
+                allowed_states={"RUNNING"},
                 capture_fn=guarded_capture,
                 detector=detector,
                 safe_tap_fn=guarded_safe_tap,
-                tap_visible_fn=guarded_visible_tap,
-                swipe_fn=guarded_swipe,
+            )
+            perks = _wait_for(
+                state="PERKS",
+                capture_fn=guarded_capture,
+                detector=detector,
                 sleep_fn=sleep_fn,
             )
+            observe(perks)
+            _guarded_visible_tap(
+                "buttons.close:perks",
+                allowed_states={"PERKS"},
+                capture_fn=guarded_capture,
+                detector=detector,
+                tap_visible_fn=guarded_visible_tap,
+                sleep_fn=sleep_fn,
+            )
+            _wait_for(
+                state="RUNNING",
+                capture_fn=guarded_capture,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
+
+        if "ultimate_weapons" in unresolved:
+            _select_running_menu(
+                "navigation.goto_uw",
+                "UW_MENU",
+                capture_fn=guarded_capture,
+                detector=detector,
+                tap_visible_fn=guarded_visible_tap,
+                sleep_fn=sleep_fn,
+            )
+            for _ in range(3):
+                frame = _wait_for(
+                    state="RUNNING",
+                    menu="UW_MENU",
+                    capture_fn=guarded_capture,
+                    detector=detector,
+                    sleep_fn=sleep_fn,
+                )
+                observe(frame)
+                guarded_swipe("towards_top", "extended")
+                sleep_fn(0.5)
+            for position in range(6):
+                frame = _wait_for(
+                    state="RUNNING",
+                    menu="UW_MENU",
+                    capture_fn=guarded_capture,
+                    detector=detector,
+                    sleep_fn=sleep_fn,
+                )
+                observe(frame)
+                if position < 5:
+                    guarded_swipe("towards_bottom", "medium")
+                    sleep_fn(0.5)
+
+        if "modules" in unresolved:
+            _capture_section(
+                observer,
+                open_key="navigation.menu_modules",
+                state="MODULES",
+                capture_fn=guarded_capture,
+                detector=detector,
+                tap_visible_fn=guarded_visible_tap,
+                sleep_fn=sleep_fn,
+            )
+
+        if "bots_preset" in unresolved:
+            _ensure_running_side_menu_open(
+                capture_fn=guarded_capture,
+                detector=detector,
+                tap_visible_fn=guarded_visible_tap,
+                sleep_fn=sleep_fn,
+            )
+            _guarded_visible_tap(
+                "navigation.menu_event",
+                allowed_states={"RUNNING"},
+                capture_fn=guarded_capture,
+                detector=detector,
+                tap_visible_fn=guarded_visible_tap,
+                sleep_fn=sleep_fn,
+            )
+            _wait_for(
+                state="EVENT",
+                capture_fn=guarded_capture,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
+            _guarded_visible_tap(
+                "navigation.event:bots_tab",
+                allowed_states={"EVENT"},
+                capture_fn=guarded_capture,
+                detector=detector,
+                tap_visible_fn=guarded_visible_tap,
+                sleep_fn=sleep_fn,
+            )
+            bots = _wait_for(
+                state="EVENT",
+                capture_fn=guarded_capture,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
+            bots = _ensure_event_bots_top(
+                bots,
+                capture_fn=guarded_capture,
+                detector=detector,
+                event_swipe_fn=guarded_event_swipe,
+                sleep_fn=sleep_fn,
+            )
+            observe(bots)
+            _return_to_game_from_section(
+                state="EVENT",
+                capture_fn=guarded_capture,
+                detector=detector,
+                tap_visible_fn=guarded_visible_tap,
+                sleep_fn=sleep_fn,
+            )
+
+        if "guardian_chips" in unresolved:
+            _ensure_running_side_menu_open(
+                capture_fn=guarded_capture,
+                detector=detector,
+                tap_visible_fn=guarded_visible_tap,
+                sleep_fn=sleep_fn,
+            )
+            _guarded_visible_tap(
+                "navigation.menu_guild",
+                allowed_states={"RUNNING"},
+                capture_fn=guarded_capture,
+                detector=detector,
+                tap_visible_fn=guarded_visible_tap,
+                sleep_fn=sleep_fn,
+            )
+            _wait_for(
+                state="GUILD",
+                capture_fn=guarded_capture,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
+            _guarded_visible_tap(
+                "navigation.guild:guardian_tab",
+                allowed_states={"GUILD"},
+                capture_fn=guarded_capture,
+                detector=detector,
+                tap_visible_fn=guarded_visible_tap,
+                sleep_fn=sleep_fn,
+            )
+            guardians = _wait_for(
+                state="GUILD",
+                secondary="GUILD_GUARDIAN_SCREEN",
+                capture_fn=guarded_capture,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
+            observe(guardians)
+            _return_to_game_from_section(
+                state="GUILD",
+                capture_fn=guarded_capture,
+                detector=detector,
+                tap_visible_fn=guarded_visible_tap,
+                sleep_fn=sleep_fn,
+            )
+
+        if "target_priority" in unresolved:
+            _ensure_running_side_menu_open(
+                capture_fn=guarded_capture,
+                detector=detector,
+                tap_visible_fn=guarded_visible_tap,
+                sleep_fn=sleep_fn,
+            )
+            _guarded_static_tap(
+                "navigation.target_priority",
+                allowed_states={"RUNNING"},
+                capture_fn=guarded_capture,
+                detector=detector,
+                safe_tap_fn=guarded_safe_tap,
+            )
+            target_priority = _wait_for(
+                state="TARGET_PRIORITY",
+                capture_fn=guarded_capture,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
+            observe(target_priority)
+            _guarded_static_tap(
+                "buttons.close:target_priority",
+                allowed_states={"TARGET_PRIORITY"},
+                capture_fn=guarded_capture,
+                detector=detector,
+                safe_tap_fn=guarded_safe_tap,
+            )
+            _wait_for(
+                state="RUNNING",
+                capture_fn=guarded_capture,
+                detector=detector,
+                sleep_fn=sleep_fn,
+            )
+
+        if "damage_slider" in unresolved:
+            if attack_dissonance:
+                observer.record_unavailable(
+                    "damage_slider",
+                    reason="Attack menu disabled by Attack Dissonance",
+                    source="attack_dissonance_menu_constraint",
+                    phase="in_battle",
+                )
+            else:
+                _capture_damage_slider(
+                    observer,
+                    capture_fn=guarded_capture,
+                    detector=detector,
+                    safe_tap_fn=guarded_safe_tap,
+                    tap_visible_fn=guarded_visible_tap,
+                    swipe_fn=guarded_swipe,
+                    sleep_fn=sleep_fn,
+                )
 
         _wait_for(
             state="RUNNING",
@@ -383,14 +417,14 @@ def run_no_strategy_in_battle_inventory(
             sleep_fn=sleep_fn,
         )
         route_completed = True
-        log(
-            "[NO_STRATEGY] Automatic in-battle configuration inventory complete",
-            "INFO",
-            console=True,
-        )
         return NoStrategyInventoryResult(
             NoStrategyInventoryStatus.COMPLETE,
-            "all accessible in-battle configuration screens recorded",
+            (
+                "all in-battle fields were already resolved without UI navigation"
+                if not planned_fields
+                else "visited only the remaining UI fields: "
+                + ", ".join(planned_fields)
+            ),
         )
     except _InventoryPaused as exc:
         return NoStrategyInventoryResult(NoStrategyInventoryStatus.PAUSED, str(exc))
@@ -571,6 +605,7 @@ def _restore_running_view(
 
 
 __all__ = [
+    "IN_BATTLE_INVENTORY_FIELDS",
     "NoStrategyInventoryResult",
     "NoStrategyInventoryStatus",
     "RECOVERABLE_INVENTORY_STATES",

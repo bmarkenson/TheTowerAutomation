@@ -89,11 +89,12 @@ def _save_metadata(
     }
 
 
-def _save_complete(metadata):
+def _save_complete(metadata, *, observations=None):
     return PlayerSaveHistoryReadResult(
         PlayerSaveHistoryReadStatus.COMPLETE,
         "structural_history_tail_observed",
         metadata=metadata,
+        validated_profile_observations=observations,
     )
 
 
@@ -307,6 +308,104 @@ def test_paused_home_baseline_follows_manual_start_before_sending_input(
     assert contents.count(
         "Pending Home continuity source advanced to RUNNING"
     ) == 1
+
+
+def test_paused_manual_start_records_missing_baseline_from_guarded_save(
+    tmp_path,
+    monkeypatch,
+):
+    log_path = tmp_path / "logs" / "actions.log"
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(log_path))
+    scope = logger.start_activity_scope(reason="new_battle_preflight")
+    assert scope is not None
+    metadata = _save_metadata(wave=5140)
+    observations = {
+        "schema_version": 1,
+        "source": "guarded_active_attachment_player_save",
+        "mapping_id": "data-9-game-1073",
+        "captured_at": "2026-08-06T23:31:05+00:00",
+        "checks": {"cards_deck": {"value": "Farm"}},
+    }
+    save_reads = []
+
+    def save_reader(**kwargs):
+        save_reads.append(kwargs)
+        return _save_complete(metadata, observations=observations)
+
+    coordinator = ActivityContinuityCoordinator(
+        save_history_reader=save_reader,
+        history_reader=lambda **_kwargs: pytest.fail(
+            "a missing attachment baseline must not open Battle History UI"
+        ),
+    )
+
+    paused_home = coordinator.handle(
+        {
+            "state": "HOME_SCREEN",
+            "home_battle_control": "NEW_BATTLE",
+        },
+        actions_allowed=False,
+        action_guard_fn=lambda: False,
+        player_save_mode="save_first",
+    )
+    paused_running = coordinator.handle(
+        {"state": "RUNNING"},
+        actions_allowed=False,
+        action_guard_fn=lambda: False,
+        player_save_mode="save_first",
+    )
+    resumed = coordinator.handle(
+        {"state": "RUNNING"},
+        actions_allowed=True,
+        action_guard_fn=lambda: True,
+        player_save_mode="save_first",
+    )
+
+    current = logger.get_activity_scope()
+    assert paused_home.pending and paused_running.pending
+    assert resumed.recapture and not resumed.pending
+    assert resumed.validated_profile_observations == observations
+    assert current is not None
+    assert current["run_id"] == scope["run_id"]
+    assert current["latest_completed_battle"] == metadata
+    assert len(save_reads) == 1
+    assert save_reads[0]["source_state"] == "RUNNING"
+    assert save_reads[0]["serialize_active_attachment"] is True
+    contents = log_path.read_text(encoding="utf-8")
+    assert "channel=stable player save" in contents
+    assert "attachment_save_baseline_recorded" in contents
+    assert "Battle History UI" not in contents
+
+
+def test_missing_attachment_baseline_waits_for_save_without_history_ui(
+    tmp_path,
+    monkeypatch,
+):
+    log_path = tmp_path / "logs" / "actions.log"
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(log_path))
+    logger.start_activity_scope(reason="automation_started")
+    coordinator = ActivityContinuityCoordinator(
+        save_history_reader=lambda **_kwargs: PlayerSaveHistoryReadResult(
+            PlayerSaveHistoryReadStatus.UI_FALLBACK,
+            "save_history_acquisition_failed",
+            safe_ui_fallback=True,
+        ),
+        history_reader=lambda **_kwargs: pytest.fail(
+            "an attachment baseline must wait for its save, not open History"
+        ),
+    )
+
+    outcome = coordinator.handle(
+        {"state": "RUNNING"},
+        actions_allowed=True,
+        action_guard_fn=lambda: True,
+        player_save_mode="save_first",
+    )
+
+    assert outcome.pending and outcome.recapture
+    assert "attachment_save_retry_required" in log_path.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_post_retry_history_poll_waits_for_startup_gates(
@@ -718,7 +817,7 @@ def test_corroborated_ui_baseline_migrates_to_save_without_fingerprint_compare(
     "evidence_kind",
     ("tier_wave_mismatch", "date_mismatch", "ambiguous_date"),
 )
-def test_cross_source_mismatch_or_date_ambiguity_uses_restored_ui(
+def test_cross_source_mismatch_or_ambiguity_uses_save_without_history_ui(
     tmp_path,
     monkeypatch,
     evidence_kind,
@@ -755,13 +854,12 @@ def test_cross_source_mismatch_or_date_ambiguity_uses_restored_ui(
         battle_date=battle_date,
     )
     save_reads = []
-    ui_reads = []
     coordinator = ActivityContinuityCoordinator(
         save_history_reader=lambda **kwargs: (
             save_reads.append(kwargs) or _save_complete(save_metadata)
         ),
-        history_reader=lambda **kwargs: (
-            ui_reads.append(kwargs) or _complete(ui_identity)
+        history_reader=lambda **_kwargs: pytest.fail(
+            "a running attachment must not open Battle History UI"
         ),
     )
 
@@ -774,13 +872,10 @@ def test_cross_source_mismatch_or_date_ambiguity_uses_restored_ui(
 
     current = logger.get_activity_scope()
     assert outcome.recapture
-    assert outcome.confirmed_same_battle_scope_id == original["run_id"]
     assert current is not None
-    assert current["run_id"] == original["run_id"]
-    assert current["latest_completed_battle"]["source"] == (
-        "battle_history_ui"
-    )
-    assert len(save_reads) == len(ui_reads) == 1
+    assert current["run_id"] != original["run_id"]
+    assert current["latest_completed_battle"] == save_metadata
+    assert len(save_reads) == 1
     contents = log_path.read_text(encoding="utf-8")
     expected_reason = {
         "tier_wave_mismatch": "cross_source_tier_wave_mismatch",
@@ -788,9 +883,17 @@ def test_cross_source_mismatch_or_date_ambiguity_uses_restored_ui(
         "ambiguous_date": "cross_source_battle_date_ambiguous",
     }[evidence_kind]
     assert expected_reason in contents
+    if evidence_kind == "ambiguous_date":
+        assert outcome.confirmed_later_battle_scope_id is None
+        assert current["reason"] == "battle_history_unavailable_on_attachment"
+        assert "unverified_new_attachment_scope" in contents
+    else:
+        assert outcome.confirmed_later_battle_scope_id == current["run_id"]
+        assert current["reason"] == "battle_history_changed_on_attachment"
+        assert "disposition=new_attachment_scope" in contents
 
 
-def test_insufficient_ui_baseline_stays_on_ui_without_forced_save(
+def test_insufficient_ui_baseline_starts_conservative_save_scope_without_ui(
     tmp_path,
     monkeypatch,
 ):
@@ -807,13 +910,14 @@ def test_insufficient_ui_baseline_stays_on_ui_without_forced_save(
         run_id=str(scope["run_id"]),
         latest_completed_battle=metadata,
     )
-    ui_reads = []
+    save_reads = []
     coordinator = ActivityContinuityCoordinator(
-        save_history_reader=lambda **_kwargs: pytest.fail(
-            "insufficient UI identity must not force serialization"
+        save_history_reader=lambda **kwargs: (
+            save_reads.append(kwargs)
+            or _save_complete(_save_metadata(wave=9112))
         ),
-        history_reader=lambda **kwargs: (
-            ui_reads.append(kwargs) or _complete(identity)
+        history_reader=lambda **_kwargs: pytest.fail(
+            "an incomparable attachment baseline must not open History UI"
         ),
     )
 
@@ -825,7 +929,13 @@ def test_insufficient_ui_baseline_stays_on_ui_without_forced_save(
     )
 
     assert outcome.recapture
-    assert len(ui_reads) == 1
+    assert len(save_reads) == 1
+    assert save_reads[0]["serialize_active_attachment"] is True
+    current = logger.get_activity_scope()
+    assert current is not None
+    assert current["run_id"] != scope["run_id"]
+    assert current["latest_completed_battle"]["source"] == "player_save"
+    assert outcome.confirmed_later_battle_scope_id is None
 
 
 @pytest.mark.parametrize(
@@ -872,7 +982,7 @@ def test_valid_changed_save_tail_starts_later_running_attachment_scope(
     assert current["reason"] == "battle_history_changed_on_attachment"
 
 
-def test_invalid_attachment_save_transition_uses_ui_after_safe_restoration(
+def test_invalid_attachment_save_transition_starts_later_scope_without_ui(
     tmp_path,
     monkeypatch,
 ):
@@ -886,11 +996,10 @@ def test_invalid_attachment_save_transition_uses_ui_after_safe_restoration(
         entry_count=30,
         wave=2100,
     )
-    ui_reads = []
     coordinator = ActivityContinuityCoordinator(
         save_history_reader=lambda **_kwargs: _save_complete(invalid),
-        history_reader=lambda **kwargs: (
-            ui_reads.append(kwargs) or _complete(_identity(wave="2100"))
+        history_reader=lambda **_kwargs: pytest.fail(
+            "a valid fresh attachment save must not open History UI"
         ),
     )
 
@@ -902,8 +1011,45 @@ def test_invalid_attachment_save_transition_uses_ui_after_safe_restoration(
     )
 
     assert outcome.recapture
-    assert len(ui_reads) == 1
-    assert "history_tail_transition_invalid" in (
+    current = logger.get_activity_scope()
+    assert current is not None
+    assert current["latest_completed_battle"] == invalid
+    assert outcome.confirmed_later_battle_scope_id == current["run_id"]
+    assert "without a valid append/rollover" in (
+        tmp_path / "logs" / "actions.log"
+    ).read_text(encoding="utf-8")
+
+
+def test_active_attachment_save_failure_waits_without_history_ui(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "TOWER_ACTION_LOG_PATH",
+        str(tmp_path / "logs" / "actions.log"),
+    )
+    _scope_with_save_baseline(_save_metadata())
+    coordinator = ActivityContinuityCoordinator(
+        save_history_reader=lambda **_kwargs: PlayerSaveHistoryReadResult(
+            PlayerSaveHistoryReadStatus.UI_FALLBACK,
+            "save_history_acquisition_failed",
+            safe_ui_fallback=True,
+        ),
+        history_reader=lambda **_kwargs: pytest.fail(
+            "a running attachment must wait for save evidence"
+        ),
+    )
+
+    outcome = coordinator.handle(
+        {"state": "RUNNING"},
+        actions_allowed=True,
+        action_guard_fn=lambda: True,
+        player_save_mode="save_first",
+    )
+
+    assert outcome.pending
+    assert outcome.recapture
+    assert "attachment_save_retry_required" in (
         tmp_path / "logs" / "actions.log"
     ).read_text(encoding="utf-8")
 

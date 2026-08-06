@@ -7,7 +7,10 @@ from core.no_strategy_inventory import (
     NoStrategyInventoryStatus,
     run_no_strategy_in_battle_inventory,
 )
-from core.no_strategy_observer import ATTACK_DISSONANCE_BADGE_REGION
+from core.no_strategy_observer import (
+    ATTACK_DISSONANCE_BADGE_REGION,
+    NoStrategyRunObserver,
+)
 
 
 class _InventoryUi:
@@ -159,6 +162,106 @@ def test_pause_after_menu_open_blocks_every_following_inventory_action():
     assert result.status is NoStrategyInventoryStatus.PAUSED
     assert ui.visible_taps == ["navigation.menu_open_button"]
     assert ui.safe_taps == []
+
+
+def test_guarded_save_and_dissonance_badge_eliminate_redundant_ui_route():
+    ui = _InventoryUi()
+    observer = NoStrategyRunObserver()
+    observer.record_player_save_observations(
+        {
+            "schema_version": 1,
+            "source": "guarded_active_attachment_player_save",
+            "mapping_id": "data-9-game-1073",
+            "captured_at": "2026-08-06T23:31:05+00:00",
+            "checks": {
+                "cards_deck": {"value": "Farm"},
+                "bots_preset": {"value": "Farm"},
+                "guardian_chips": {"value": ["Fetch", "Summon", "Scout"]},
+                "modules": {
+                    "value": {"cannon_primary": "Amplifying Strike"}
+                },
+                "target_priority": {"value": ["Fast", "Boss", "Closest"]},
+                "auto_pick_perks": {"value": True},
+                "ultimate_weapon_primaries": {
+                    "value": {
+                        "Poison Swamp": {"primary": "on"},
+                        "Spotlight": {"primary": "on"},
+                    }
+                },
+                "poison_swamp_stun": {"value": "off"},
+                "spotlight_missiles": {"value": "on"},
+            },
+        }
+    )
+
+    result = run_no_strategy_in_battle_inventory(
+        observer,
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.safe_tap,
+        tap_visible_fn=ui.visible_tap,
+        swipe_fn=ui.swipe,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.status is NoStrategyInventoryStatus.COMPLETE
+    assert result.reason == (
+        "all in-battle fields were already resolved without UI navigation"
+    )
+    assert ui.safe_taps == []
+    assert ui.visible_taps == []
+    assert ui.swipes == []
+    assert observer.snapshot()["fields"]["damage_slider"]["status"] == (
+        "unavailable"
+    )
+
+
+def test_guarded_save_limits_ui_route_to_the_one_unresolved_section():
+    ui = _InventoryUi()
+    observer = NoStrategyRunObserver()
+    observer.record_player_save_observations(
+        {
+            "schema_version": 1,
+            "source": "guarded_active_attachment_player_save",
+            "mapping_id": "data-9-game-1073",
+            "captured_at": "2026-08-06T23:31:05+00:00",
+            "checks": {
+                "bots_preset": {"value": "Farm"},
+                "guardian_chips": {"value": ["Fetch", "Summon", "Scout"]},
+                "modules": {"value": {"cannon_primary": "Amplifying Strike"}},
+                "target_priority": {"value": ["Fast", "Boss", "Closest"]},
+                "auto_pick_perks": {"value": True},
+                "ultimate_weapon_primaries": {
+                    "value": {
+                        "Poison Swamp": {"primary": "on"},
+                        "Spotlight": {"primary": "on"},
+                    }
+                },
+                "poison_swamp_stun": {"value": "off"},
+                "spotlight_missiles": {"value": "on"},
+            },
+        }
+    )
+
+    result = run_no_strategy_in_battle_inventory(
+        observer,
+        capture_fn=ui.capture,
+        detector=ui.detect,
+        safe_tap_fn=ui.safe_tap,
+        tap_visible_fn=ui.visible_tap,
+        swipe_fn=ui.swipe,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result.status is NoStrategyInventoryStatus.COMPLETE
+    assert result.reason == "visited only the remaining UI fields: cards_deck"
+    assert ui.visible_taps == [
+        "navigation.menu_open_button",
+        "navigation.Cards",
+        "buttons.return_to_game",
+    ]
+    assert ui.safe_taps == []
+    assert ui.swipes == []
 
 
 def test_natural_terminal_state_aborts_inventory_without_input():
