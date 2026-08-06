@@ -1059,6 +1059,14 @@ def test_control_requests_are_allowlisted_and_audited(tmp_path):
         tmp_path / "logs" / "actions.log"
     ).read_text(encoding="utf-8")
 
+    legacy_mode_response = service.apply_control(
+        {"action": "mode", "mode": "RETRY"}
+    )
+    assert legacy_mode_response["control"]["mode"] == "NEXT_BATTLE"
+    assert "[CONTROL_SURFACE] Requested mode NEXT_BATTLE" in (
+        tmp_path / "logs" / "actions.log"
+    ).read_text(encoding="utf-8")
+
     mode_response = service.apply_control({"action": "mode", "mode": "HOME"})
     assert mode_response["control"]["mode"] == "HOME"
     assert service.status()["control"]["mode"] == "HOME"
@@ -1251,7 +1259,15 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert 'Text="PREVIOUS GAME SCREEN"' in native_xaml
     assert 'id="gameSpeedTargetSelect"' in html
     assert 'Content="x6.3 — Maximum available"' in native_xaml
-    assert "MinimumServerRevision = 25" in native_compatibility
+    assert 'Content="Next Battle"' in native_xaml
+    assert 'Tag="NEXT_BATTLE"' in native_xaml
+    assert 'Content="Stay Home"' in native_xaml
+    assert '<option value="NEXT_BATTLE">Next Battle</option>' in html
+    assert '<option value="HOME">Stay Home</option>' in html
+    assert "RetryModeButton" not in native_xaml
+    assert "MinimumServerRevision = 27" in native_compatibility
+    assert '"terminal_dispositions_v2"' in native_compatibility
+    assert "terminal_dispositions_v2" in CONTROL_SURFACE_CAPABILITIES
     assert '"managed_custom_module_presets_v1"' in native_compatibility
     assert '"strategy_authoring_local_loadout_editors_v1"' in native_compatibility
     assert '"strategy_revision_history_v1"' in native_compatibility

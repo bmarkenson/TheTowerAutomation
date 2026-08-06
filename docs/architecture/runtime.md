@@ -774,11 +774,17 @@ instead of manufacturing a structured value.
 Pause continues to block every inventory input. An interrupted pass resumes
 from a known read-only screen or restores verified Home before retrying its
 stage. Game Over `WAIT` must first receive an actionable direction; No Strategy
-then overrides Retry to Home so a new battle cannot start before its Home-only
-evidence is attached.
+then overrides `NEXT_BATTLE`'s direct Retry route to Home so a new battle
+cannot start before its Home-only evidence is attached.
 
 ## State and battle lifecycle
 
+- The persistent post-run dispositions are `NEXT_BATTLE`, `WAIT`, and `HOME`.
+  `NEXT_BATTLE` takes the next authorized direct Retry, Battle, or Resume Battle
+  route; `WAIT` holds the current terminal/Home boundary; `HOME` returns Home
+  after Game Over and never authorizes automatic Battle or Resume Battle input.
+  Legacy `RETRY` control values normalize to `NEXT_BATTLE` at the persistence
+  boundary.
 - Visible navigation and battle lifecycle are separate. Home
   `RESUME_BATTLE` preserves the current battle identity; `GAME_OVER`,
   `TOURNAMENT_RESULTS`, or a verified Home `NEW_BATTLE` ends it.

@@ -10,7 +10,7 @@ Commands:
   - pause --minutes N     → state=PAUSED until its persisted deadline
   - resume                → state=RUNNING
   - stop                  → state=STOPPED
-  - mode <retry|wait|home>→ set ExecMode
+  - mode <next-battle|wait|home> → set the terminal disposition
   - game-speed <target>   → enforce x0.0..x6.0, or x6.3/max available
   - gate                  → prompt for a pending startup-gate decision
   - gate <choice>         → resolve it non-interactively by choice id
@@ -19,7 +19,7 @@ Commands:
   - configure-run skip <check>
   - configure-run default <check>
   - set state <S>         → explicitly set state (RUNNING|PAUSED|STOPPED)
-  - set mode  <M>         → explicitly set mode  (RETRY|WAIT|HOME)
+  - set mode  <M>         → explicitly set mode  (NEXT_BATTLE|WAIT|HOME)
   - status                → print current file contents (or defaults)
 
 Writes atomically (tmp + os.replace) and preserves unspecified fields.
@@ -42,8 +42,8 @@ if str(PROJECT_ROOT) not in sys.path:
 from core.control_directives import (
     ControlDirectiveError,
     ControlDirectiveStore,
-    VALID_MODES,
     VALID_STATES,
+    normalize_automation_mode,
     normalize_game_speed_target,
 )
 from core.gate_decisions import (
@@ -67,14 +67,15 @@ def _set_state(path: str, state: str, *, resume_at: float | None = None) -> None
 
 
 def _set_mode(path: str, mode: str) -> None:
-    m = mode.upper()
-    if m not in VALID_MODES:
-        raise SystemExit(f"Invalid mode: {mode}. Use one of {sorted(VALID_MODES)}")
     try:
-        ControlDirectiveStore(path).set_mode(m, source="cli")
+        normalized = normalize_automation_mode(mode)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    try:
+        ControlDirectiveStore(path).set_mode(normalized, source="cli")
     except ControlDirectiveError as exc:
         raise SystemExit(f"Unable to update automation control: {exc}") from exc
-    print(f"[OK] Mode set to {m} @ {path}")
+    print(f"[OK] Mode set to {normalized} @ {path}")
 
 
 def _set_game_speed_target(path: str, target: str) -> None:
@@ -207,7 +208,9 @@ def _configure_run(path: str, command: list[str]) -> None:
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(description="Automation pause/mode controller")
+    p = argparse.ArgumentParser(
+        description="Automation state and terminal-disposition controller"
+    )
     p.add_argument(
         "command",
         nargs="+",

@@ -226,7 +226,7 @@ def test_guarded_preflight_repair_forces_home_after_control_allows_actions():
     original_state = AUTOMATION.state
     original_mode = AUTOMATION.mode
     AUTOMATION.state = RunState.RUNNING
-    AUTOMATION.mode = ExecMode.RETRY
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
     try:
         with (
             patch("handlers.game_over_handler.tap_if_visible", return_value=True) as tap,
@@ -348,7 +348,7 @@ def test_game_over_finalizes_boundary_before_terminal_navigation():
     original_state = AUTOMATION.state
     original_mode = AUTOMATION.mode
     AUTOMATION.state = RunState.RUNNING
-    AUTOMATION.mode = ExecMode.RETRY
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
     events = []
 
     def tap(*args, **kwargs):
@@ -388,7 +388,7 @@ def test_game_over_wait_polls_control_and_blocks_retry_while_paused():
         sync_calls += 1
         if sync_calls == 1:
             AUTOMATION.state = RunState.PAUSED
-            AUTOMATION.mode = ExecMode.RETRY
+            AUTOMATION.mode = ExecMode.NEXT_BATTLE
         else:
             AUTOMATION.state = RunState.RUNNING
 
@@ -399,7 +399,7 @@ def test_game_over_wait_polls_control_and_blocks_retry_while_paused():
         AUTOMATION.state = original_state
         AUTOMATION.mode = original_mode
 
-    assert direction is ExecMode.RETRY
+    assert direction is ExecMode.NEXT_BATTLE
     assert sync_calls == 2
     sleep.assert_called_once_with(1)
 
@@ -412,7 +412,7 @@ def test_game_over_wait_exits_when_control_stops_automation():
 
     def sync_control():
         AUTOMATION.state = RunState.STOPPED
-        AUTOMATION.mode = ExecMode.RETRY
+        AUTOMATION.mode = ExecMode.NEXT_BATTLE
 
     try:
         with patch("handlers.game_over_handler.time.sleep") as sleep:

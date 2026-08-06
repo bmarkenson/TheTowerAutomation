@@ -6,13 +6,17 @@ import pytest
 
 from automation.missions.manager import MissionManager
 from core.automation_supervisor import AutomationSupervisor
-from core.control_directives import ControlDirectiveError, ControlDirectiveStore
+from core.control_directives import (
+    ControlDirectiveError,
+    ControlDirectiveStore,
+    VALID_MODES,
+)
 from core.gate_decisions import (
     build_gate_decision_options,
     prompt_for_gate_decision,
     startup_gate_context_for_strategy,
 )
-from core.run_state import AUTOMATION
+from core.run_state import AUTOMATION, AutomationControl, ExecMode
 from tools.automation_ctl import main as automation_ctl_main
 
 
@@ -31,6 +35,48 @@ def _supervisor(control_file: Path) -> AutomationSupervisor:
     return AutomationSupervisor(
         control_file=str(control_file),
         auto_return_enabled=False,
+    )
+
+
+def test_next_battle_is_the_default_canonical_mode():
+    control = AutomationControl()
+
+    assert VALID_MODES == frozenset({"NEXT_BATTLE", "WAIT", "HOME"})
+    assert control.mode is ExecMode.NEXT_BATTLE
+
+
+def test_legacy_retry_mode_loads_and_rewrites_as_next_battle(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    control_file.write_text(
+        json.dumps({"state": "RUNNING", "mode": "RETRY"}),
+        encoding="utf-8",
+    )
+    store = ControlDirectiveStore(control_file)
+
+    assert store.read()["mode"] == "NEXT_BATTLE"
+
+    supervisor = _supervisor(control_file)
+    supervisor.apply_control()
+    assert AUTOMATION.mode is ExecMode.NEXT_BATTLE
+
+    store.set_state("PAUSED", source="test")
+    persisted = json.loads(control_file.read_text(encoding="utf-8"))
+    assert persisted["mode"] == "NEXT_BATTLE"
+
+
+def test_cli_accepts_next_battle_and_legacy_retry_alias(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+
+    assert automation_ctl_main(
+        ["--control-file", str(control_file), "mode", "next-battle"]
+    ) == 0
+    assert ControlDirectiveStore(control_file).read()["mode"] == "NEXT_BATTLE"
+
+    assert automation_ctl_main(
+        ["--control-file", str(control_file), "mode", "retry"]
+    ) == 0
+    assert json.loads(control_file.read_text(encoding="utf-8"))["mode"] == (
+        "NEXT_BATTLE"
     )
 
 
@@ -239,7 +285,7 @@ def test_default_runtime_configuration_has_no_global_pause_expiry_options():
 def test_runtime_owned_mode_transition_is_persisted_before_waiting(tmp_path):
     control_file = tmp_path / "automation_ctl.json"
     control_file.write_text(
-        json.dumps({"state": "RUNNING", "mode": "RETRY"}),
+        json.dumps({"state": "RUNNING", "mode": "NEXT_BATTLE"}),
         encoding="utf-8",
     )
     supervisor = _supervisor(control_file)
@@ -260,7 +306,7 @@ def test_paused_runtime_applies_adb_port_handoff(tmp_path):
         json.dumps(
             {
                 "state": "PAUSED",
-                "mode": "RETRY",
+                "mode": "NEXT_BATTLE",
                 "adb_port": 5565,
                 "adb_port_updated_at": "2026-07-20T04:00:00-07:00",
             }

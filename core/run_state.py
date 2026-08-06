@@ -17,7 +17,7 @@ spec_legend:
 defaults:
   thread_safety: property access is guarded by a threading.Lock
   initial_state: RUNNING
-  initial_mode: RETRY
+  initial_mode: NEXT_BATTLE
 """
 
 import threading
@@ -46,13 +46,13 @@ class ExecMode(str, Enum):
     spec:
       name: ExecMode
       kind: Enum[str]
-      members: [RETRY, WAIT, HOME]
+      members: [NEXT_BATTLE, WAIT, HOME]
       notes:
         - WAIT: pause on GAME OVER and similar screens until operator flips mode.
-        - HOME: navigate/idle on home screen (not all handlers implement this yet).
-        - RETRY: default auto-progression behavior.
+        - HOME: return to and stay on the home screen.
+        - NEXT_BATTLE: start or resume at the next authorized opportunity.
     """
-    RETRY = "RETRY"
+    NEXT_BATTLE = "NEXT_BATTLE"
     WAIT = "WAIT"
     HOME = "HOME"
 
@@ -68,7 +68,7 @@ class AutomationControl:
       purpose: Thread-safe holder for the automation's run state and execution mode.
       constructor:
         signature: AutomationControl() -> AutomationControl
-        r: New controller with state=RUNNING, mode=RETRY
+        r: New controller with state=RUNNING, mode=NEXT_BATTLE
         s: [state]
       attributes:
         _lock: threading.Lock (private)
@@ -82,7 +82,7 @@ class AutomationControl:
     def __init__(self) -> None:
         self._lock: Final = threading.Lock()
         self._state: RunState = RunState.RUNNING
-        self._mode: ExecMode = ExecMode.RETRY
+        self._mode: ExecMode = ExecMode.NEXT_BATTLE
 
     @property
     def state(self) -> RunState:
@@ -164,4 +164,3 @@ spec:
     - Handlers/loops read and set this.
     - Treat as process-local singleton; do not recreate per thread.
 """
-

@@ -36,8 +36,9 @@ from core.control_directives import (
     ControlDirectiveError,
     ControlDirectiveStore,
     MAXIMUM_GAME_SPEED_TARGET,
-    normalize_interactive_development_lease,
+    normalize_automation_mode,
     normalize_game_speed_target,
+    normalize_interactive_development_lease,
 )
 from core.strategy_profiles import is_configurable_strategy
 from utils.logger import log, log_action_intent, log_result
@@ -53,7 +54,6 @@ Frame = NDArray[np.uint8]
 
 
 _ALLOWED_STATES = {"RUNNING", "PAUSED", "STOPPED"}
-_ALLOWED_MODES = {"RETRY", "WAIT", "HOME"}
 
 
 class AutomationSupervisor:
@@ -827,12 +827,7 @@ class AutomationSupervisor:
     def persist_mode(self, mode: str) -> bool:
         """Persist and apply a runtime-owned terminal mode transition."""
 
-        normalized = str(mode).strip().upper()
-        if normalized not in _ALLOWED_MODES:
-            raise ValueError(
-                f"Unsupported automation mode {mode!r}; "
-                f"expected one of {sorted(_ALLOWED_MODES)}"
-            )
+        normalized = normalize_automation_mode(mode)
         try:
             self._control_store.set_mode(normalized, source="runtime")
         except ControlDirectiveError as exc:
@@ -1208,8 +1203,11 @@ class AutomationSupervisor:
     def _apply_mode(self, mode: object) -> None:
         if not isinstance(mode, str) or not mode:
             return
-        normalized = mode.upper()
-        if normalized not in _ALLOWED_MODES or normalized == self._last_applied_mode:
+        try:
+            normalized = normalize_automation_mode(mode)
+        except ValueError:
+            return
+        if normalized == self._last_applied_mode:
             return
         try:
             AUTOMATION.mode = normalized

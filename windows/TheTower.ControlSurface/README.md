@@ -218,10 +218,13 @@ wrong-runtime gate evidence is not displayed as an active gate. This structured
 presentation requires Linux revision 22 and `strategy_action_gate_v1`.
 
 The Automation Control panel uses selection highlights instead of permanently
-colored Pause and Resume actions. Cyan is the saved state or Game Over mode;
-amber means a live runtime has not acknowledged that directive yet. Mode buttons
-apply immediately, which prevents a periodic status refresh from replacing an
-unsaved combo-box selection. The strategy dropdown likewise preserves an
+colored Pause and Resume actions. Cyan is the saved state or terminal
+disposition; amber means a live runtime has not acknowledged that directive
+yet. **Next Battle** starts or resumes at the next authorized opportunity,
+**Wait** holds the terminal/Home boundary, and **Stay Home** returns Home after
+Game Over without automatically starting or resuming a battle. The disposition
+buttons apply immediately, which prevents a periodic status refresh from
+replacing an unsaved selection. The strategy dropdown likewise preserves an
 unsent choice across refreshes. For an active process, selection alone does not
 change the current or queued strategy: choose **Use next battle** to leave the
 current battle's strategy in place, or **Switch this battle** to request
@@ -654,8 +657,8 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current managed-Module-authoring build requires revision 25,
-`managed_custom_module_presets_v1`,
+current terminal-disposition build requires revision 27,
+`terminal_dispositions_v2`, `managed_custom_module_presets_v1`,
 `strategy_authoring_local_loadout_editors_v1`, and
 `strategy_revision_history_v1` while retaining all earlier required
 capabilities. The banner reports the actual revision/capability mismatch and

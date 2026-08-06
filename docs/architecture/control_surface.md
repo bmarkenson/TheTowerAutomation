@@ -676,9 +676,14 @@ Process request examples:
 
 - Persistent indefinite and timed pause, including replacing or extending an
   existing timed pause.
-- Resume and Game Over mode selection (`RETRY`, `WAIT`, or `HOME`). State and
-  mode controls highlight the saved selection; amber means a live runtime has
-  not yet acknowledged the latest directive.
+- Resume and terminal disposition selection (`NEXT_BATTLE`, `WAIT`, or `HOME`).
+  **Next Battle** takes the next authorized direct Retry/Battle/Resume route;
+  **Wait** holds the current terminal or Home boundary; **Stay Home** returns
+  Home after Game Over and suppresses automatic Battle/Resume input. State and
+  disposition controls highlight the saved selection; amber means a live
+  runtime has not yet acknowledged the latest directive. Legacy `RETRY`
+  requests normalize to `NEXT_BATTLE`. This contract requires server revision
+  27 and capability `terminal_dispositions_v2`.
 - A distinct running-battle Strategy Action Gate banner based only on fresh,
   owner-matched structured status. It reads “Strategy actions blocked —
   observation and safe collectors remain active.” and shows the reason, failed

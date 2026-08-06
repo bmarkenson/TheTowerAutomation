@@ -68,7 +68,8 @@ core/adb_utils.py
 
 core/automation_state.py
 - AutomationControl.state/mode properties — typed setters; E ValueError/TypeError.
-- Enums: RunState={RUNNING,PAUSED,STOPPED,UNKNOWN}; ExecMode={RETRY,WAIT,HOME}.
+- Enums: RunState={RUNNING,PAUSED,STOPPED,UNKNOWN};
+  ExecMode={NEXT_BATTLE,WAIT,HOME}.
 
 core/clickmap_access.py
 - get_clickmap()/get_clickmap_path()/save_clickmap() — R dict|str|None; S [fs].

@@ -2286,7 +2286,7 @@ public partial class MainWindow : Window
         _serverCompatibility = ControlSurfaceCompatibility.Evaluate(status);
         UpdateControlSurfaceCompatibility();
         DirectiveText.Text = FormatAutomationState(status.Control);
-        ModeText.Text = FormatStatusToken(status.Control.Mode);
+        ModeText.Text = FormatExecutionMode(status.Control.Mode);
         var strategyGate = status.StrategyActionGate;
         var strategyGateVisible = strategyGate is
             { Available: true, Active: true, Stale: false };
@@ -2514,8 +2514,11 @@ public partial class MainWindow : Window
             string.Equals(status.Control.State, "RUNNING", StringComparison.OrdinalIgnoreCase),
             statePending);
         SetSelectionStyle(
-            RetryModeButton,
-            string.Equals(status.Control.Mode, "RETRY", StringComparison.OrdinalIgnoreCase),
+            NextBattleModeButton,
+            string.Equals(
+                status.Control.Mode,
+                "NEXT_BATTLE",
+                StringComparison.OrdinalIgnoreCase),
             modePending);
         SetSelectionStyle(
             WaitModeButton,
@@ -2620,7 +2623,8 @@ public partial class MainWindow : Window
             : processActive ? "active" : "next start";
         ControlSelectionText.Text =
             $"State: {status.Control.State} ({stateDisposition}) | "
-            + $"Mode: {status.Control.Mode} ({modeDisposition}) | "
+            + $"Mode: {FormatExecutionMode(status.Control.Mode)} "
+            + $"({modeDisposition}) | "
             + $"ADB target: {requestedAdbTarget} ({adbDisposition}) | "
             + $"Startup gates: {service?.StartupGatePolicy ?? "unknown"} | "
             + $"One-run skips: {configuredSkips.Count} | "
@@ -3467,6 +3471,14 @@ public partial class MainWindow : Window
                 ? $"{state} · {FormatAge(control.RemainingSeconds)} left"
                 : state;
     }
+
+    private static string FormatExecutionMode(string? value) =>
+        value?.ToUpperInvariant() switch
+        {
+            "NEXT_BATTLE" => "Next Battle",
+            "HOME" => "Stay Home",
+            _ => FormatStatusToken(value),
+        };
 
     private static string FormatStrategyActionGate(
         StrategyActionGateStatus? gate)

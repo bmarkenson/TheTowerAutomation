@@ -525,9 +525,16 @@ the execution wrapper. Confirm the new host PID, refreshed lock metadata,
 startup log, control consumption, and first state report together before
 treating the replacement as live.
 
-The Game Over handler polls the same control file while waiting. `PAUSED`
-blocks Retry/Home, `STOPPED` exits without a terminal tap, and `WAIT` continues
-to wait for an explicit mode change.
+The Game Over handler polls the same control file while waiting. Its persistent
+terminal dispositions are `NEXT_BATTLE`, `WAIT`, and `HOME`. `NEXT_BATTLE`
+selects the game's direct Retry control after completed terminal work and may
+start or resume from Home at the next authorized opportunity. `WAIT` holds the
+current Game Over or Home boundary. `HOME` selects Home after Game Over and
+then suppresses automatic Battle and Resume Battle input so the runtime stays
+Home until the operator chooses another disposition. `PAUSED` blocks both
+terminal navigation choices, and `STOPPED` exits without a terminal tap.
+Legacy persisted or client-supplied `RETRY` values normalize to `NEXT_BATTLE`;
+new control writes use only the canonical name.
 
 That wait is still the already-dispatched handler for the battle it captured;
 it does not return to the main detector. Do not manually leave that terminal,
@@ -1271,7 +1278,7 @@ after deploying a new package; Linux validation cannot execute the WPF,
 Windows named-pipe security, Job Object, OpenSSH, or logoff lifecycle.
 
 The application uses the same persistent control file as
-`tools/automation_ctl.py`. The selected state, Game Over mode, and
+`tools/automation_ctl.py`. The selected state, terminal disposition, and
 numeric game-speed target are visibly highlighted; amber indicates that a live
 runtime has not acknowledged a new directive yet. Starting automation with a
 custom exact target requires confirmation, and its warning remains visible

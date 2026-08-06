@@ -5103,15 +5103,24 @@ class App:
                 ),
             )
             if home_handler_enabled:
+                terminal_mode = AUTOMATION.mode
                 restart_enabled = (
                     self._auto_start_enabled
-                    and AUTOMATION.mode is not ExecMode.WAIT
+                    and terminal_mode is ExecMode.NEXT_BATTLE
                 )
                 if self._auto_start_enabled and not restart_enabled:
-                    log(
-                        "[HOME] WAIT mode — holding Home without starting a battle",
-                        "INFO",
-                    )
+                    if terminal_mode is ExecMode.WAIT:
+                        log(
+                            "[HOME] WAIT mode — holding Home without starting "
+                            "a battle",
+                            "INFO",
+                        )
+                    elif terminal_mode is ExecMode.HOME:
+                        log(
+                            "[HOME] HOME mode — staying Home without starting "
+                            "or resuming a battle",
+                            "INFO",
+                        )
                 save_coordinator = getattr(
                     self,
                     "_player_save_preflight_coordinator",

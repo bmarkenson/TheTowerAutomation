@@ -29,6 +29,7 @@ from core.control_directives import (
     ControlDirectiveStore,
     INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS,
     MAXIMUM_GAME_SPEED_TARGET,
+    normalize_automation_mode,
 )
 from core.gate_decisions import startup_gate_context_for_strategy
 from core.exclusive_validation import (
@@ -55,7 +56,7 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 26
+CONTROL_SURFACE_REVISION = 27
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
@@ -81,6 +82,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "strategy_profile_catalog_v1",
     "strategy_profile_editor_v2",
     "strategy_revision_history_v1",
+    "terminal_dispositions_v2",
     "tournament_launch_confirmation",
 )
 ATTACHED_RESTART_TIMEOUT_SECONDS = 20.0
@@ -126,7 +128,8 @@ _STATE_ACK_RE = re.compile(
     r"^\[CTRL] State set to (?P<value>RUNNING|PAUSED|STOPPED) via control file$"
 )
 _MODE_ACK_RE = re.compile(
-    r"^\[CTRL] Mode set to (?P<value>RETRY|WAIT|HOME) via control file$"
+    r"^\[CTRL] Mode set to (?P<value>NEXT_BATTLE|RETRY|WAIT|HOME) "
+    r"via control file$"
 )
 _GAME_SPEED_TARGET_ACK_RE = re.compile(
     r"^\[CTRL] Game speed target set to "
@@ -949,8 +952,11 @@ class ControlSurfaceService:
                 audit = "Requested STOPPED"
             elif action == "mode":
                 mode = str(request.get("mode") or "").strip().upper()
-                self.control_store.set_mode(mode, source="control-surface")
-                audit = f"Requested mode {mode}"
+                saved = self.control_store.set_mode(
+                    mode,
+                    source="control-surface",
+                )
+                audit = f"Requested mode {saved['mode']}"
             elif action == "game_speed":
                 game_speed_target = request.get("target")
                 saved = self.control_store.set_game_speed_target(
@@ -2218,9 +2224,10 @@ class ControlSurfaceService:
                     state_updated_at or legacy_updated_at,
                 )
             if mode_ack is None and (match := _MODE_ACK_RE.fullmatch(entry["message"])):
+                mode_value = normalize_automation_mode(match.group("value"))
                 mode_ack = _ack_entry(
                     entry,
-                    match.group("value"),
+                    mode_value,
                     control.get("mode"),
                     mode_updated_at or legacy_updated_at,
                 )

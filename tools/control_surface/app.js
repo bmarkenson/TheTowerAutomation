@@ -95,9 +95,11 @@ function renderStatus(payload) {
   if (directive === "PAUSED") directiveDetail = `Paused ${formatRemaining(control.remaining_seconds)}`;
   if (control.error) directiveDetail = control.error;
   setText("directiveDetail", directiveDetail);
-  setText("currentMode", control.mode);
+  setText("currentMode", formatExecutionMode(control.mode));
   setText("controlUpdated", formatDate(control.updated_at));
-  byId("modeSelect").value = ["RETRY", "WAIT", "HOME"].includes(control.mode) ? control.mode : "RETRY";
+  byId("modeSelect").value = ["NEXT_BATTLE", "WAIT", "HOME"].includes(control.mode)
+    ? control.mode
+    : "NEXT_BATTLE";
   if (!state.attachmentPolicyDirty) {
     byId("attachmentPolicySelect").value =
       processService?.startup_gate_policy === "auto"
@@ -699,6 +701,12 @@ function humanize(value) {
   return String(value).replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function formatExecutionMode(value) {
+  if (value === "NEXT_BATTLE") return "Next Battle";
+  if (value === "HOME") return "Stay Home";
+  return humanize(value || dash);
+}
+
 function showAuthDialog() {
   const dialog = byId("authDialog");
   byId("tokenInput").value = state.token;
@@ -773,7 +781,7 @@ byId("customPauseForm").addEventListener("submit", (event) => {
 
 byId("applyModeButton").addEventListener("click", () => {
   const mode = byId("modeSelect").value;
-  sendControl({ action: "mode", mode }, `Mode set to ${mode}`);
+  sendControl({ action: "mode", mode }, `Mode set to ${formatExecutionMode(mode)}`);
 });
 
 byId("gameSpeedTargetSelect").addEventListener("change", () => {

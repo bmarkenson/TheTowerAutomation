@@ -30,7 +30,8 @@ from core.strategy_profiles import (
 
 
 VALID_STATES = frozenset({"RUNNING", "PAUSED", "STOPPED"})
-VALID_MODES = frozenset({"RETRY", "WAIT", "HOME"})
+VALID_MODES = frozenset({"NEXT_BATTLE", "WAIT", "HOME"})
+LEGACY_MODE_ALIASES = {"RETRY": "NEXT_BATTLE"}
 VALID_GAME_SPEED_TARGETS = tuple(
     [step / 2 for step in range(13)] + [6.3]
 )
@@ -57,6 +58,19 @@ INTERACTIVE_DEVELOPMENT_REQUEST_STATES = frozenset(
     {"requested", "release_requested", "terminal"}
 )
 _MAX_EXCLUSIVE_VALIDATION_RECEIPTS = 12
+
+
+def normalize_automation_mode(value: object) -> str:
+    """Return one canonical terminal disposition, accepting legacy Retry."""
+
+    normalized = str(value or "").strip().upper().replace("-", "_")
+    normalized = LEGACY_MODE_ALIASES.get(normalized, normalized)
+    if normalized not in VALID_MODES:
+        raise ValueError(
+            f"Unsupported automation mode {value!r}; "
+            f"expected one of {sorted(VALID_MODES)}"
+        )
+    return normalized
 
 
 class ControlDirectiveError(RuntimeError):
@@ -93,7 +107,7 @@ class ControlDirectiveStore:
 
         data = self.read()
         state = str(data.get("state") or "RUNNING").upper()
-        mode = str(data.get("mode") or "RETRY").upper()
+        mode = str(data.get("mode") or "NEXT_BATTLE").upper()
         resume_at = _finite_number(data.get("resume_at"))
         current_time = float(now) if now is not None else datetime.now().timestamp()
         remaining_seconds = None
@@ -382,12 +396,7 @@ class ControlDirectiveStore:
     def set_mode(self, mode: str, *, source: Optional[str] = None) -> dict[str, Any]:
         """Persist a validated execution mode while preserving state."""
 
-        normalized = str(mode).strip().upper()
-        if normalized not in VALID_MODES:
-            raise ValueError(
-                f"Unsupported automation mode {mode!r}; "
-                f"expected one of {sorted(VALID_MODES)}"
-            )
+        normalized = normalize_automation_mode(mode)
 
         def mutate(data: dict[str, Any]) -> dict[str, Any]:
             timestamp = _updated_at()
@@ -1576,7 +1585,15 @@ class ControlDirectiveStore:
             raise ControlDirectiveError(
                 f"Control file {self.path} must contain a JSON object"
             )
-        return dict(data)
+        normalized = dict(data)
+        if "mode" in normalized:
+            try:
+                normalized["mode"] = normalize_automation_mode(normalized["mode"])
+            except ValueError:
+                # Preserve unsupported values so the ordinary runtime validation
+                # can ignore them without silently rewriting operator input.
+                pass
+        return normalized
 
     def _write_unlocked(self, data: Mapping[str, Any]) -> None:
         temp_name: Optional[str] = None
@@ -2152,10 +2169,12 @@ __all__ = [
     "INTERACTIVE_DEVELOPMENT_LEASE_SCHEMA_VERSION",
     "INTERACTIVE_DEVELOPMENT_LEASE_TTL_SECONDS",
     "INTERACTIVE_DEVELOPMENT_REQUEST_STATES",
+    "LEGACY_MODE_ALIASES",
     "MAXIMUM_GAME_SPEED_TARGET",
     "VALID_GAME_SPEED_TARGETS",
     "VALID_MODES",
     "VALID_STATES",
-    "normalize_interactive_development_lease",
+    "normalize_automation_mode",
     "normalize_game_speed_target",
+    "normalize_interactive_development_lease",
 ]
