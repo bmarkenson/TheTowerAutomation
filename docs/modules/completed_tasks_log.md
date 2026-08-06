@@ -37,6 +37,39 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-05 completed-run profile progression snapshots
+
+- `0075349cba5537fe4d6dff1b582185e2cd210174` adds a versioned,
+  exact-save projection of 12 account components to every captured normal or
+  Tournament terminal. It covers pack/ad bonuses; Bots; Cards; Enhancements;
+  Guardian; Harmony/Power nodes; equipped Primary and Assist Modules; relics;
+  Research; Tower, Background, and Menu Themes; Ultimate Weapons; and
+  Workshop levels.
+- Terminal capture uses two byte-identical reads from the exact target
+  generation already owned by the runtime, sends no input, and fails open so
+  Game Stats capture remains authoritative. The raw save, account identifiers,
+  balances, purchase histories, Module GUIDs, and arbitrary inventory records
+  are not retained.
+- Normal battle schema 5 stores a top-level snapshot and an exact-path delta
+  against the newest earlier complete, mapping-compatible normal battle. The
+  first run establishes a baseline, and a partial capture is skipped when
+  selecting the next baseline. Tournament schema 3 retains its terminal
+  snapshot without affecting normal-battle comparisons.
+- The projection preserves source fields and indices instead of inventing
+  names, formulas, costs, or effective multipliers. Markdown reports Theme and
+  relic counts plus exact changes; JSON retains the complete structural
+  evidence and component fingerprints for later CPH/cell/survival analysis.
+- The focused player-save, terminal-capture, battle, Tournament, and run-
+  initialization suite passed all 216 tests. The complete isolated checkpoint
+  passed compilation, state validation, clickmap integrity with zero errors
+  and 44 known orphans, and all 1,612 tests. Changed whitespace and local
+  documentation anchors also passed validation.
+- One bounded read-only exact-target save normalized all 12 current components
+  without retaining the raw save. No device input, battle lifecycle change,
+  production code change, merge, deployment, or installation was performed;
+  the first post-deployment normal run will intentionally establish the
+  comparison baseline.
+
 ### 2026-08-05 save-first targeted repair reconciliation
 
 - `b9c229a77d2fbc5efe16a7cdcb6681d469751a0b` separates global snapshot
