@@ -37,6 +37,39 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-06 lease-aware development input boundary correction
+
+- `4d7af4b54ba00e387681e559cffe699bc3ca70bb` corrects the accepted
+  development-side input helper so its final production-status check reserves
+  the selected ADB subprocess timeout plus one second for server timestamp
+  precision and one second for status-response/dispatch latency. Taps retain a
+  5-second timeout; swipes use at least 5 seconds and otherwise their duration
+  plus 2 seconds, capped by the valid 5000 ms gesture at a bounded 7-second
+  timeout. The corresponding minimum lease windows are 7 and 9 seconds, with
+  equality accepted.
+- An insufficient final window rejects before mutating ADB input and directs
+  the operator to heartbeat separately, wait for the renewed matching runtime
+  acknowledgement, and invoke the non-replaying helper again. A changed lease,
+  runtime, target, or acknowledged expiry between geometry acquisition and the
+  final check still fails closed.
+- The helper now consumes the production-owned composite lease `active` value
+  as the canonical suppressive-authority decision. It retains only its own
+  command bindings and structural checks: supported API/capability, RUNNING
+  control, request/acknowledgement lease IDs and lifecycle states, matching
+  runtime identity and exact target, and one valid matching acknowledged
+  expiry. Duplicate acknowledgement-dictionary equality, authority-matrix and
+  gate-age reconstruction, and direct `runtime.instances` policy were removed
+  without changing the control surface's active calculation.
+- The focused development-input, control-surface, geometry, screenshot,
+  logger, and ADB-connection run passed all 150 tests. The complete non-live
+  checkpoint passed compilation, state-definition validation, clickmap
+  integrity with zero errors and 44 established orphans, and all 1,621 pytest
+  tests. Changed local links/anchors and feature-range whitespace also passed.
+  No live runtime, process, systemd unit, control socket, ADB server or target,
+  emulator, production log, screen, or battle was inspected. Combined
+  fake-runtime/fake-ADB coordination validation remains open, and a live lease
+  remains separately authorized master work.
+
 ### 2026-08-05 completed-run profile progression snapshots
 
 - `0075349cba5537fe4d6dff1b582185e2cd210174` adds a versioned,
