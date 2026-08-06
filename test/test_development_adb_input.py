@@ -14,13 +14,16 @@ from core.development_adb_input import (
     ActionLogAudit,
     AdbInputError,
     AdbReadError,
+    DEFAULT_ADB_INPUT_TIMEOUT_SECONDS,
     DevelopmentInputRequest,
     EXIT_ADB_FAILURE,
     EXIT_AUDIT_FAILURE,
     EXIT_REJECTED,
     EXIT_SUCCESS,
+    LEASE_WINDOW_MARGIN_SECONDS,
     LeaseAuthority,
     LeaseStatusError,
+    MAX_ADB_INPUT_TIMEOUT_SECONDS,
     SubprocessAdbBoundary,
     execute_development_input,
     fetch_control_status,
@@ -178,6 +181,19 @@ def _sync_published_ack(status: dict[str, Any]) -> None:
     )
 
 
+def _set_lease_window(
+    status: dict[str, Any],
+    *,
+    server_time: str,
+    expires_at: str,
+) -> None:
+    status["server_time"] = server_time
+    lease = status["interactive_development_lease"]
+    lease["request"]["expires_at"] = expires_at
+    lease["runtime_acknowledgement"]["expires_at"] = expires_at
+    _sync_published_ack(status)
+
+
 class SequenceStatusReader:
     def __init__(self, *statuses: Mapping[str, Any]) -> None:
         self.statuses = [deepcopy(status) for status in statuses]
@@ -202,6 +218,7 @@ class FakeAdb:
         self.input_error = input_error
         self.geometry_targets: list[str] = []
         self.input_calls: list[tuple[str, list[str]]] = []
+        self.input_timeouts: list[float] = []
 
     def acquire_geometry(self, target: str) -> tuple[int, int]:
         self.geometry_targets.append(target)
@@ -209,8 +226,15 @@ class FakeAdb:
             raise self.geometry_error
         return self.geometry
 
-    def run_input(self, target: str, arguments: Sequence[str]) -> None:
+    def run_input(
+        self,
+        target: str,
+        arguments: Sequence[str],
+        *,
+        timeout_seconds: float,
+    ) -> None:
         self.input_calls.append((target, list(arguments)))
+        self.input_timeouts.append(timeout_seconds)
         if self.input_error is not None:
             raise self.input_error
 
@@ -320,6 +344,7 @@ def test_active_lease_tap_uses_exact_target_and_one_1080p_input():
     assert reader.calls == 2
     assert adb.geometry_targets == [TARGET]
     assert adb.input_calls == [(TARGET, ["input", "tap", "540", "960"])]
+    assert adb.input_timeouts == [DEFAULT_ADB_INPUT_TIMEOUT_SECONDS]
     assert [event[0] for event in audit.events] == ["ACTION", "INPUT", "RESULT"]
     assert audit.events[1][1]["outcome"] == "completed"
 
@@ -339,20 +364,18 @@ def test_active_lease_swipe_maps_720p_and_attempts_exactly_one_input():
             ["input", "swipe", "180", "960", "540", "320", "260"],
         )
     ]
+    assert adb.input_timeouts == [DEFAULT_ADB_INPUT_TIMEOUT_SECONDS]
     assert audit.events[1][1]["mapped_coordinates"] == "(180,960)->(540,320)"
 
 
 def test_validator_returns_the_exact_authoritative_binding():
     authority = validate_active_lease_status(_active_status(), lease_id=LEASE_ID)
 
-    assert authority == LeaseAuthority(
-        lease_id=LEASE_ID,
-        owner_label="lease-aware helper test",
-        runtime_id="runtime-development-input",
-        runtime_pid=4312,
-        adb_target=TARGET,
-        requested_at="2026-08-05T12:00:00-07:00",
-    )
+    assert authority.lease_id == LEASE_ID
+    assert authority.runtime_id == "runtime-development-input"
+    assert authority.runtime_pid == 4312
+    assert authority.adb_target == TARGET
+    assert authority.remaining_seconds == 20
 
 
 def _pending(status: dict[str, Any]) -> None:
@@ -373,6 +396,12 @@ def _released(status: dict[str, Any]) -> None:
 def _expired(status: dict[str, Any]) -> None:
     status["interactive_development_lease"]["request_expired"] = True
     status["interactive_development_lease"]["active"] = False
+    status["interactive_development_lease"][
+        "reason"
+    ] = "the heartbeat deadline has expired"
+    status["server_time"] = status["interactive_development_lease"]["request"][
+        "expires_at"
+    ]
 
 
 def _terminal(status: dict[str, Any]) -> None:
@@ -439,6 +468,9 @@ def _missing_ack(status: dict[str, Any]) -> None:
 def _stale_ack(status: dict[str, Any]) -> None:
     status["interactive_development_lease"]["acknowledgement_fresh"] = False
     status["interactive_development_lease"]["active"] = False
+    status["interactive_development_lease"][
+        "reason"
+    ] = "fresh runtime acknowledgement is unavailable"
     status["strategy_action_gate"]["stale"] = True
 
 
@@ -446,7 +478,7 @@ def _stale_ack(status: dict[str, Any]) -> None:
     ("mutator", "message"),
     [
         (_missing_ack, "runtime acknowledgement is missing"),
-        (_stale_ack, "runtime acknowledgement is not fresh"),
+        (_stale_ack, "fresh runtime acknowledgement is unavailable"),
     ],
 )
 def test_missing_or_stale_runtime_ack_rejects_without_adb_input(mutator, message):
@@ -501,12 +533,18 @@ def _ack_target_mismatch(status: dict[str, Any]) -> None:
     _sync_published_ack(status)
 
 
-def _authority_owner_mismatch(status: dict[str, Any]) -> None:
-    status["strategy_action_gate"]["owner"]["runtime_id"] = "other-runtime"
+def _ack_runtime_mismatch(status: dict[str, Any]) -> None:
+    status["interactive_development_lease"]["runtime_acknowledgement"]["runtime"][
+        "runtime_id"
+    ] = "other-runtime"
+    _sync_published_ack(status)
 
 
-def _active_lock_target_mismatch(status: dict[str, Any]) -> None:
-    status["runtime"]["instances"][0]["target"] = "localhost:5575"
+def _ack_expiry_mismatch(status: dict[str, Any]) -> None:
+    status["interactive_development_lease"]["runtime_acknowledgement"][
+        "expires_at"
+    ] = "2026-08-05T12:00:41-07:00"
+    _sync_published_ack(status)
 
 
 @pytest.mark.parametrize(
@@ -514,8 +552,8 @@ def _active_lock_target_mismatch(status: dict[str, Any]) -> None:
     [
         (_ack_lease_mismatch, "different lease"),
         (_ack_target_mismatch, "acknowledgement ownership differ"),
-        (_authority_owner_mismatch, "runtime ownership differs"),
-        (_active_lock_target_mismatch, "exact ADB target differs"),
+        (_ack_runtime_mismatch, "acknowledgement ownership differ"),
+        (_ack_expiry_mismatch, "expiry windows differ"),
     ],
 )
 def test_request_ack_runtime_and_target_mismatches_reject_without_input(
@@ -533,6 +571,25 @@ def test_request_ack_runtime_and_target_mismatches_reject_without_input(
     assert result.exit_code == EXIT_REJECTED
     assert message in result.message
     assert adb.input_calls == []
+
+
+def test_active_composite_ignores_internal_policy_layout_and_additive_fields():
+    status = _active_status()
+    status.pop("strategy_action_gate")
+    status.pop("runtime")
+    status["unrelated_additive_status"] = {"revision": 99}
+    status["interactive_development_lease"]["runtime_acknowledgement"][
+        "unrelated_detail"
+    ] = "permitted"
+
+    result, reader, adb, _audit = _execute(
+        DevelopmentInputRequest.tap(100, 200),
+        initial=status,
+    )
+
+    assert result.exit_code == EXIT_SUCCESS
+    assert reader.calls == 2
+    assert len(adb.input_calls) == 1
 
 
 def test_wrong_supplied_lease_id_rejects_without_adb_read_or_input():
@@ -553,6 +610,8 @@ def _change_complete_binding(
     *,
     target: str | None = None,
     lease_id: str | None = None,
+    runtime_id: str | None = None,
+    expires_at: str | None = None,
 ) -> None:
     lease = status["interactive_development_lease"]
     request = lease["request"]
@@ -565,16 +624,30 @@ def _change_complete_binding(
     if lease_id is not None:
         request["lease_id"] = lease_id
         acknowledgement["lease_id"] = lease_id
+    if runtime_id is not None:
+        request["runtime"]["runtime_id"] = runtime_id
+        acknowledgement["runtime"]["runtime_id"] = runtime_id
+        status["strategy_action_gate"]["owner"]["runtime_id"] = runtime_id
+    if expires_at is not None:
+        request["expires_at"] = expires_at
+        acknowledgement["expires_at"] = expires_at
     _sync_published_ack(status)
 
 
-@pytest.mark.parametrize("change", ["target", "lease"])
-def test_target_or_lease_change_after_geometry_rejects_before_input(change):
+@pytest.mark.parametrize("change", ["target", "runtime", "lease", "expiry"])
+def test_binding_change_after_geometry_rejects_before_input(change):
     final = _active_status()
     if change == "target":
         _change_complete_binding(final, target="localhost:5575")
-    else:
+    elif change == "runtime":
+        _change_complete_binding(final, runtime_id="replacement-runtime")
+    elif change == "lease":
         _change_complete_binding(final, lease_id=OTHER_LEASE_ID)
+    else:
+        _change_complete_binding(
+            final,
+            expires_at="2026-08-05T12:00:50-07:00",
+        )
     adb = FakeAdb(geometry=(720, 1280))
 
     result, reader, adb, audit = _execute(
@@ -589,6 +662,100 @@ def test_target_or_lease_change_after_geometry_rejects_before_input(change):
     assert adb.geometry_targets == [TARGET]
     assert adb.input_calls == []
     assert [event[0] for event in audit.events] == ["ACTION", "RESULT"]
+
+
+def test_one_second_remaining_rejects_after_final_status_without_input():
+    status = _active_status()
+    _set_lease_window(
+        status,
+        server_time="2026-08-05T12:00:39-07:00",
+        expires_at="2026-08-05T12:00:40-07:00",
+    )
+
+    result, reader, adb, audit = _execute(
+        DevelopmentInputRequest.tap(100, 200),
+        initial=status,
+    )
+
+    assert result.exit_code == EXIT_REJECTED
+    assert "only 1 second remaining" in result.message
+    assert "Heartbeat the lease" in result.message
+    assert "newly acknowledged current window" in result.message
+    assert reader.calls == 2
+    assert adb.geometry_targets == [TARGET]
+    assert adb.input_calls == []
+    assert [event[0] for event in audit.events] == ["ACTION", "RESULT"]
+
+
+@pytest.mark.parametrize(
+    ("server_time", "expected_exit", "expected_input_count"),
+    [
+        ("2026-08-05T12:00:33-07:00", EXIT_SUCCESS, 1),
+        ("2026-08-05T12:00:34-07:00", EXIT_REJECTED, 0),
+    ],
+)
+def test_tap_minimum_remaining_window_boundary(
+    server_time,
+    expected_exit,
+    expected_input_count,
+):
+    status = _active_status()
+    _set_lease_window(
+        status,
+        server_time=server_time,
+        expires_at="2026-08-05T12:00:40-07:00",
+    )
+
+    result, _reader, adb, _audit = _execute(
+        DevelopmentInputRequest.tap(100, 200),
+        initial=status,
+    )
+
+    assert DevelopmentInputRequest.tap(100, 200).minimum_remaining_lease_seconds() == 7
+    assert result.exit_code == expected_exit
+    assert len(adb.input_calls) == expected_input_count
+
+
+def test_fresh_maximum_swipe_uses_sufficient_finite_bounded_timeout():
+    request = DevelopmentInputRequest.swipe(540, 1500, 540, 500, 5000)
+
+    result, _reader, adb, _audit = _execute(request)
+
+    assert result.exit_code == EXIT_SUCCESS
+    assert len(adb.input_calls) == 1
+    assert adb.input_timeouts == [MAX_ADB_INPUT_TIMEOUT_SECONDS]
+    assert MAX_ADB_INPUT_TIMEOUT_SECONDS == 7
+    assert request.minimum_remaining_lease_seconds() == (
+        MAX_ADB_INPUT_TIMEOUT_SECONDS + LEASE_WINDOW_MARGIN_SECONDS
+    )
+    assert request.minimum_remaining_lease_seconds() == 9
+
+
+@pytest.mark.parametrize(
+    ("server_time", "expected_exit", "expected_input_count"),
+    [
+        ("2026-08-05T12:00:31-07:00", EXIT_SUCCESS, 1),
+        ("2026-08-05T12:00:32-07:00", EXIT_REJECTED, 0),
+    ],
+)
+def test_maximum_swipe_minimum_remaining_window_boundary(
+    server_time,
+    expected_exit,
+    expected_input_count,
+):
+    status = _active_status()
+    _set_lease_window(
+        status,
+        server_time=server_time,
+        expires_at="2026-08-05T12:00:40-07:00",
+    )
+    request = DevelopmentInputRequest.swipe(540, 1500, 540, 500, 5000)
+
+    result, _reader, adb, _audit = _execute(request, initial=status)
+
+    assert request.minimum_remaining_lease_seconds() == 9
+    assert result.exit_code == expected_exit
+    assert len(adb.input_calls) == expected_input_count
 
 
 @pytest.mark.parametrize(
@@ -777,10 +944,14 @@ def test_subprocess_input_uses_exact_target_finite_timeout_and_no_retry(
             raise subprocess.TimeoutExpired(command, kwargs["timeout"])
         return subprocess.CompletedProcess(command, 1, b"", b"device offline")
 
-    boundary = SubprocessAdbBoundary(run=run, input_timeout_seconds=4)
+    boundary = SubprocessAdbBoundary(run=run)
 
     with pytest.raises(AdbInputError) as failure:
-        boundary.run_input(TARGET, ["input", "tap", "10", "20"])
+        boundary.run_input(
+            TARGET,
+            ["input", "tap", "10", "20"],
+            timeout_seconds=4,
+        )
 
     assert failure.value.outcome == outcome
     assert calls == [
@@ -878,6 +1049,8 @@ def test_cli_help_and_usage_errors_are_useful(capsys):
     normalized_help = " ".join(help_output.split())
     assert help_exit.value.code == 0
     assert "exactly one canonical-coordinate" in normalized_help
+    assert "near-expiry rejection" in normalized_help
+    assert "newly acknowledged current window" in normalized_help
     assert "Uncertain input is never retried" in normalized_help
     assert "tap" in help_output
     assert "swipe" in help_output

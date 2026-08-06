@@ -1102,7 +1102,12 @@ development-lease authority from warning text in `actions.log`.
   under that shared guard. A 30-second heartbeat deadline, Pause/Stop,
   runtime/PID/target replacement, or an authoritative battle boundary makes
   status inactive and terminates the lease. Resume never revives the terminal
-  request.
+  request. The development input helper consumes that composite `active`
+  decision instead of duplicating the production authority calculation, while
+  separately binding its one command to the matching lease, runtime, exact
+  target, and acknowledged expiry. Its final pre-input status check reserves
+  the complete selected subprocess timeout plus timestamp/dispatch margin from
+  production `server_time`.
 - A normal development release remains held through the first post-release
   capture and detection. A known same-battle screen permits the runtime to
   publish the terminal result and remove the hold. An ambiguous screen or
