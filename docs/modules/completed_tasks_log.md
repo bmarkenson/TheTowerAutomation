@@ -37,6 +37,30 @@ This document tracks completed architectural, tooling, and refactor tasks for th
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-06 restart-stable session-preflight reporting
+
+- `4739cf3` upgrades the activity scope's nested session-preflight receipt to
+  schema 2. It retains the existing normalized evidence projection in a
+  run/strategy/configuration-bound schema-1 envelope after strict finite-JSON
+  normalization and a 64 KiB cap. Atomic compare-and-set scope persistence is
+  unchanged.
+- A continuity-confirmed replacement process restores that projection only to
+  terminal reporting. It does not seed completion, mismatch, waiver, repair,
+  or action-authority variables. Malformed current receipts run the declared
+  attachment checks; legacy schema-1 receipts keep compatibility while
+  reporting their detailed evidence as unavailable. The snapshot is replaced,
+  not merged with the attachment's Home-lock placeholder, remains available for
+  a terminal-capture retry, and clears at the next battle or strategy boundary.
+- Configured Game Over paths now omit `observed_run_configuration`, and record
+  assembly defensively drops any empty observation. Real No Strategy snapshots
+  remain separate from configured intent and continue to serialize normally.
+- Focused logger, lifecycle, terminal, No Strategy, Tournament, and battle
+  record coverage passed 179 tests. Compilation and whitespace checks passed,
+  followed by all 1,656 repository tests. Retained completed-record inspection
+  confirmed that a real full Farm projection is 5.8 KB with valid deferred
+  Free Upgrade-lock evidence. Validation used no ADB input, process replacement,
+  control mutation, or live battle action.
+
 ### 2026-08-06 combined production/development coordination boundary
 
 - `b2d2811975b80957159fe9da28cf7ba0d70f429c` (integrated as `073bf05`) adds
