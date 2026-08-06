@@ -28,12 +28,27 @@ or adding a documentation category. Keep one canonical statement and links.
 | Completed implementation outcomes | `docs/modules/completed_tasks_log.md` |
 | Superseded reasoning or dated investigations | A clearly labeled history file |
 
-Keep automatically loaded `AGENTS.md` compact. Put conditional detail in its
-owner and expose one link with an exact load condition.
-
 Do not track or routinely load API summaries. Generate an explicitly requested
 one from source into `/tmp` with its revision; discover capabilities in
 source, configuration, callers, and tests.
+
+## Adding documentation
+
+Before adding a rule, section, or tracked file:
+
+- Search the ownership table and current guidance; extend the existing owner
+  unless the subject has a distinct contract or lifecycle.
+- Create a file only for an independently useful load or lifecycle boundary,
+  not for size or temporary convenience alone.
+- Name its audience and exact load condition, then link it from the nearest
+  conditional router. Never add default reading merely for discoverability.
+- Keep `AGENTS.md` and `new_thread.md` universally necessary, measure any
+  default-path increase, and leave task detail on demand.
+- Classify the content as current guidance, active work, issue evidence,
+  completion, or history, and define its transition when no longer current.
+
+Keep one canonical statement and link to it elsewhere. Add an ownership-table
+row only for a genuinely new information class.
 
 ## Lifecycle rules
 
@@ -84,7 +99,9 @@ For each documentation change:
 4. Account for every active task or open issue before deleting or archiving it.
 5. Verify changed durable evidence is tracked, fixture-owned, or narrowly
    protected.
-6. Run `git diff --check` plus proportionate tests for generated, executable,
+6. For every new current document, verify one intentional inbound route, its
+   stated load condition, and the absence of a new mandatory-reading cycle.
+7. Run `git diff --check` plus proportionate tests for generated, executable,
    schema-defining, or behavior-coupled documentation.
 
 Never put volatile runtime facts in durable guidance. They belong only in a
