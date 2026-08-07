@@ -39,6 +39,21 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-07 replacement-state runbook clarification
+
+- `b994f0a` clarifies
+  [managed process replacement](../operations/process_control.md#process-replacement-and-terminal-recovery):
+  an active-battle replacement uses an indefinite Pause only as a temporary
+  handoff boundary. After the replacement proves its PID, target lock, startup,
+  control acknowledgement, and fresh observation, the guarded reload restores
+  the prior `RUNNING`, indefinite `PAUSED`, or unexpired timed Pause; expiry
+  resolves to `RUNNING`, while a failed handoff remains `PAUSED`.
+- Exact integration candidate `611bb25` passed compilation, state-definition
+  validation, clickmap integrity with zero errors and the 44 established
+  orphan candidates, and all 1,703 tests in 358.33 seconds. The
+  documentation-only candidate was promoted without service or device action
+  behind rollback tag `production-before-20260807T104757-4b176dd`.
+
 ### 2026-08-07 incremental Auto Pick repair scans
 
 - Home Auto Pick repair now carries the one complete authoritative ranked
