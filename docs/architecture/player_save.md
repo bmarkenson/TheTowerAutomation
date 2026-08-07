@@ -164,6 +164,40 @@ authorize a setting change, classify a battle, or repair a loadout. It is safe
 to include on a terminal-only process because it describes global profile
 state and makes no process-local Strategy or run-binding claim.
 
+#### Bot preset representation and interpretation
+
+Version 1073 stores Bot configuration in parallel per-Bot preset arrays. The
+profile snapshot normalizes their shape but deliberately does not translate
+their four-position level vectors into UI stats:
+
+| Save field | Snapshot field | Supported interpretation |
+| --- | --- | --- |
+| `botPresetName` | `bots.preset_names` | Visible preset labels in source order. |
+| `currentBotPreset` | `bots.current_preset` | Zero-based selected preset position. |
+| `<bot>BotPresets[i]` | `bots.<bot>_presets[i]` | The same source-indexed preset record; each mapped Bot has four records. |
+| `levels[0..3]` | `levels[0..3]` | Four raw Bot-specific upgrade positions. They are not a universal tuple and must not be assumed to follow UI tile order. |
+| `selectedLevels[0..3]` | `selected_levels[0..3]` | Four raw Bot-specific selected positions. They are not effective durations, cooldowns, bonuses, reductions, or ranges. |
+| `unlocked`, `active` | same names | Structural per-Bot/per-preset booleans. |
+| `plusUnlocked`, `plusLevel` | `plus_unlocked`, `plus_level` | Structural Bot+ ownership and level fields, separate from the four-position vectors. |
+| `<bot>BotLevelCooldownSelected` | `bots.<bot>_cooldown_lab_level_selected` | A separate raw cooldown-lab selection; it does not by itself publish an effective cooldown. |
+
+The vector positions can differ between Bots and can differ from the visible
+tile sequence. One version-1073 cross-channel observation made the failure
+mode explicit: Flame Bot stored `levels=[0, 15, 15, 25]` while the UI showed
+Damage Reduction `95%` (Max), Cooldown `5s` (Max), Damage `x50.00` with no
+Damage upgrades, and Range `117.00m` (Max). Reading that vector as the visible
+order `[Damage Reduction, Cooldown, Damage, Range]` therefore reverses the
+base Damage and max Damage Reduction conclusion. Because both middle positions
+were `15`, that observation does not distinguish their individual meanings or
+publish any level-to-value formula.
+
+Treat a tuple mapping inferred for any one Bot as Bot-specific evidence, not a
+reusable ordering rule. Before naming any raw position or calculating an
+effective value, require authoritative UI evidence from the same version and
+boundary, and isolate the position when possible. Otherwise report the raw
+vector and visible UI values separately, with the position semantics explicitly
+unresolved.
+
 Normal battle records use schema 5 and Tournament records use schema 3. The
 JSON stores the complete normalized snapshot and component fingerprints; the
 Markdown view summarizes Theme/relic ownership and structural completeness.

@@ -19,6 +19,12 @@ universally optimal. Read each statement according to its evidence class:
   Reduction and other account upgrades can make live effects differ from a
   public base table.
 
+When a strategy analysis uses Bot values from a player-save profile snapshot,
+follow the canonical
+[Bot preset representation contract](architecture/player_save.md#bot-preset-representation-and-interpretation).
+Raw Bot level vectors are Bot-specific structural positions, not UI-order stat
+tuples or effective values.
+
 ## Build archetypes
 
 The most useful classification is how the tower expects to survive its terminal
