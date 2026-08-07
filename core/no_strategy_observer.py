@@ -68,6 +68,9 @@ OBSERVED_FIELDS = (
     "perk_auto_pick_order",
     "ultimate_weapons",
 )
+_RESOLVED_STATUSES = frozenset(
+    {"observed", "evidence_captured", "unavailable"}
+)
 
 
 def detect_attack_dissonance_badge(frame: Optional[Frame]) -> dict[str, Any]:
@@ -180,6 +183,13 @@ class NoStrategyRunObserver:
                     phase=phase,
                     confidence="high",
                 )
+                if not self.is_resolved("damage_slider"):
+                    self.record_unavailable(
+                        "damage_slider",
+                        reason="Attack menu disabled by Attack Dissonance",
+                        source="attack_dissonance_menu_constraint",
+                        phase=phase,
+                    )
             if menu == "UW_MENU":
                 self._observe_ultimate_weapons(frame, phase)
 
@@ -264,6 +274,128 @@ class NoStrategyRunObserver:
                     phase=phase,
                     confidence="high" if evidence.enabled else "medium",
                 )
+
+    def record_player_save_observations(
+        self,
+        observations: Mapping[str, Any],
+    ) -> tuple[str, ...]:
+        """Attach complete exact-mapping values from one guarded active save."""
+
+        if (
+            observations.get("schema_version") != 1
+            or observations.get("source")
+            != "guarded_active_attachment_player_save"
+        ):
+            raise ValueError("invalid active-attachment player-save observations")
+        mapping_id = str(observations.get("mapping_id") or "").strip()
+        captured_at = str(observations.get("captured_at") or "").strip()
+        checks = observations.get("checks")
+        if not mapping_id or not captured_at or not isinstance(checks, Mapping):
+            raise ValueError("incomplete active-attachment player-save observations")
+
+        def value_for(check_id: str) -> Any:
+            evidence = checks.get(check_id)
+            if not isinstance(evidence, Mapping) or "value" not in evidence:
+                return None
+            return deepcopy(evidence["value"])
+
+        applied: list[str] = []
+        direct_checks = {
+            "cards_deck": "cards_deck",
+            "workshop_preset": "workshop_preset",
+            "free_upgrade_locks": "free_upgrade_locks",
+            "bots_preset": "bots_preset",
+            "guardian_chips": "guardian_chips",
+            "modules": "modules",
+            "target_priority": "target_priority",
+            "auto_pick_perks": "auto_pick_perks",
+            "perk_first_choice": "perk_first_choice",
+            "perk_bans": "perk_bans",
+            "perk_auto_pick_order": "perk_auto_pick_order",
+        }
+        for field, check_id in direct_checks.items():
+            if check_id not in checks:
+                continue
+            value = value_for(check_id)
+            if field in {"cards_deck", "workshop_preset", "bots_preset"}:
+                value = {"label": value}
+            elif field == "auto_pick_perks":
+                value = {"enabled": value}
+            self._set(
+                field,
+                value,
+                source="guarded_active_attachment_player_save",
+                phase="in_battle_attachment_save",
+                confidence="high",
+                observed_at=captured_at,
+                provenance={
+                    "mapping_id": mapping_id,
+                    "save_checks": [check_id],
+                },
+            )
+            applied.append(field)
+
+        ultimate_check_ids = (
+            "ultimate_weapon_primaries",
+            "poison_swamp_stun",
+            "spotlight_missiles",
+        )
+        if all(check_id in checks for check_id in ultimate_check_ids):
+            primaries = value_for("ultimate_weapon_primaries")
+            poison_stun = value_for("poison_swamp_stun")
+            spotlight_missiles = value_for("spotlight_missiles")
+            if isinstance(primaries, Mapping):
+                ultimate_weapons = {
+                    str(weapon): dict(toggles)
+                    for weapon, toggles in primaries.items()
+                    if isinstance(toggles, Mapping)
+                }
+                required_components_present = bool(
+                    len(ultimate_weapons) == len(primaries)
+                    and "Poison Swamp" in ultimate_weapons
+                    and "Spotlight" in ultimate_weapons
+                )
+                if required_components_present:
+                    ultimate_weapons["Poison Swamp"]["stun"] = poison_stun
+                    ultimate_weapons["Spotlight"]["missiles"] = (
+                        spotlight_missiles
+                    )
+                    self._set(
+                        "ultimate_weapons",
+                        ultimate_weapons,
+                        source="guarded_active_attachment_player_save",
+                        phase="in_battle_attachment_save",
+                        confidence="high",
+                        observed_at=captured_at,
+                        provenance={
+                            "mapping_id": mapping_id,
+                            "save_checks": list(ultimate_check_ids),
+                        },
+                    )
+                    applied.append("ultimate_weapons")
+        return tuple(applied)
+
+    def is_resolved(self, field: str) -> bool:
+        """Return whether one observation has a terminal evidence status."""
+
+        if field not in self._fields:
+            raise ValueError(f"unknown No Strategy observation field {field!r}")
+        return str(self._fields[field].get("status") or "") in _RESOLVED_STATUSES
+
+    def unresolved_fields(
+        self,
+        candidates: Optional[set[str] | frozenset[str]] = None,
+    ) -> set[str]:
+        """Return unresolved fields, optionally restricted to one route."""
+
+        selected = set(OBSERVED_FIELDS if candidates is None else candidates)
+        unknown = selected.difference(self._fields)
+        if unknown:
+            raise ValueError(
+                "unknown No Strategy observation fields: "
+                + ", ".join(sorted(unknown))
+            )
+        return {field for field in selected if not self.is_resolved(field)}
 
     def record_post_run_value(
         self,
@@ -451,8 +583,9 @@ class NoStrategyRunObserver:
         phase: str,
         confidence: str,
         observed_at: Optional[str] = None,
+        provenance: Optional[Mapping[str, Any]] = None,
     ) -> None:
-        self._fields[field] = {
+        observation = {
             "status": "observed",
             "value": value,
             "source": source,
@@ -460,6 +593,9 @@ class NoStrategyRunObserver:
             "confidence": confidence,
             "observed_at": observed_at or self._timestamp(),
         }
+        if provenance is not None:
+            observation["provenance"] = deepcopy(dict(provenance))
+        self._fields[field] = observation
 
     def _timestamp(self) -> str:
         return self._clock().isoformat(timespec="seconds")

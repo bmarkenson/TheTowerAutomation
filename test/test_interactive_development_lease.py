@@ -577,6 +577,45 @@ def test_runtime_pid_session_or_target_mismatch_terminates_request(
     assert not app._external_development_hold_active
 
 
+def test_replacement_runtime_preserves_already_released_terminal_lease(
+    tmp_path,
+    monkeypatch,
+):
+    app, supervisor, store, lease = _runtime_app(
+        tmp_path,
+        monkeypatch,
+        runtime_override={"runtime_id": "prior-runtime"},
+    )
+    store.finish_interactive_development_lease(
+        str(lease["lease_id"]),
+        disposition="released",
+        reason="fresh post-release observation confirmed",
+        now=1_000.5,
+    )
+    supervisor.apply_control()
+
+    with (
+        patch.object(
+            app,
+            "_terminate_interactive_development_lease",
+            wraps=app._terminate_interactive_development_lease,
+        ) as terminate,
+        patch("core.app.stop_blind_gem_tapper", return_value=False),
+        patch("core.app.log") as lifecycle_log,
+        patch("core.app.log_result") as lifecycle_result,
+    ):
+        app._sync_interactive_development_control_boundary(now=1_001.0)
+
+    terminal = store.status()["interactive_development_lease"]
+    assert terminal["request_state"] == "terminal"
+    assert terminal["terminal_disposition"] == "released"
+    assert app._interactive_development_ack["state"] == "terminal"
+    assert app._interactive_development_ack["terminal_disposition"] == "released"
+    terminate.assert_not_called()
+    lifecycle_log.assert_not_called()
+    lifecycle_result.assert_not_called()
+
+
 def test_live_target_change_revokes_an_active_lease(tmp_path, monkeypatch):
     app, _supervisor, store, _lease = _runtime_app(tmp_path, monkeypatch)
     _activate(app)

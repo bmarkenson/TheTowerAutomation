@@ -1210,6 +1210,19 @@ class App:
             and acknowledgement.get("state") == "terminal"
         ):
             return
+        request_state = str(lease.get("request_state") or "")
+        if request_state == "terminal":
+            # A terminal directive is historical state, not authority owned by
+            # this process. Preserve its recorded disposition before comparing
+            # the request's former runtime binding with the replacement runtime.
+            self._set_interactive_development_ack(
+                lease,
+                state="terminal",
+                now=now,
+            )
+            self._remove_external_development_hold()
+            self._publish_action_authority()
+            return
         control_state = self._interactive_development_control_state()
         if control_state in {"PAUSED", "STOPPED"}:
             self._terminate_interactive_development_lease(
@@ -1230,16 +1243,6 @@ class App:
                 now=now,
                 abnormal=True,
             )
-            self._publish_action_authority()
-            return
-        request_state = str(lease.get("request_state") or "")
-        if request_state == "terminal":
-            self._set_interactive_development_ack(
-                lease,
-                state="terminal",
-                now=now,
-            )
-            self._remove_external_development_hold()
             self._publish_action_authority()
             return
         if not getattr(self, "_external_development_hold_active", False):
@@ -3240,6 +3243,36 @@ class App:
     def _apply_activity_continuity_outcome(self, outcome: object) -> None:
         """Apply run identity facts established by attachment continuity."""
 
+        save_observations = getattr(
+            outcome,
+            "validated_profile_observations",
+            None,
+        )
+        if (
+            isinstance(save_observations, Mapping)
+            and self._current_strategy_name() == "none"
+            and getattr(self, "_no_strategy_observation_active", False)
+        ):
+            try:
+                applied = self._no_strategy_observer.record_player_save_observations(
+                    save_observations
+                )
+            except (TypeError, ValueError) as exc:
+                log(
+                    "[NO_STRATEGY] Guarded attachment save observations were "
+                    f"rejected: {exc}",
+                    "WARN",
+                )
+            else:
+                if applied:
+                    log(
+                        "[NO_STRATEGY] Applied guarded attachment save "
+                        f"observations for {len(applied)} fields: "
+                        + ", ".join(applied),
+                        "INFO",
+                        console=True,
+                    )
+
         confirmed_scope_id = getattr(
             outcome,
             "confirmed_same_battle_scope_id",
@@ -4655,9 +4688,15 @@ class App:
         if stop_blind_gem_tapper():
             self._blind_tapper_suspended = True
 
-        log(
-            "[NO_STRATEGY] Starting automatic read-only in-battle inventory",
-            "INFO",
+        operation_id = new_operation_id()
+        log_action_intent(
+            "Collecting unresolved No Strategy configuration",
+            reason=(
+                "record actual battle settings while visiting only fields not "
+                "already resolved by guarded save or passive evidence"
+            ),
+            detail="[NO_STRATEGY] phase=in_battle_inventory status=pending",
+            operation_id=operation_id,
             console=True,
         )
         result = run_no_strategy_in_battle_inventory(
@@ -4668,24 +4707,50 @@ class App:
         if result.status is NoStrategyInventoryStatus.COMPLETE:
             self._no_strategy_inventory_complete = True
             self._no_strategy_inventory_retry_at = 0.0
+            log_result(
+                "No Strategy in-battle inventory complete — " + result.reason,
+                detail=(
+                    "[NO_STRATEGY] phase=in_battle_inventory "
+                    "status=complete"
+                ),
+                operation_id=operation_id,
+                console=True,
+            )
         elif result.status is NoStrategyInventoryStatus.PAUSED:
             self._no_strategy_inventory_retry_at = 0.0
-            log(
-                "[NO_STRATEGY] In-battle inventory paused; it will resume "
-                "without sending cleanup input",
-                "INFO",
+            log_result(
+                "No Strategy in-battle inventory interrupted by Pause — no "
+                "cleanup input was sent",
+                detail=(
+                    "[NO_STRATEGY] phase=in_battle_inventory status=paused "
+                    f"reason={result.reason}"
+                ),
+                operation_id=operation_id,
                 console=True,
             )
         elif result.status is NoStrategyInventoryStatus.BATTLE_ENDED:
             self._no_strategy_inventory_retry_at = 0.0
-            log(
-                "[NO_STRATEGY] Battle ended during in-battle inventory; "
-                "Home-only capture will continue at the natural boundary",
-                "INFO",
+            log_result(
+                "No Strategy in-battle inventory ended at the natural battle "
+                "boundary — Home evidence will continue there",
+                detail=(
+                    "[NO_STRATEGY] phase=in_battle_inventory "
+                    f"status=battle_ended reason={result.reason}"
+                ),
+                operation_id=operation_id,
                 console=True,
             )
         else:
             self._no_strategy_inventory_retry_at = time.time() + 60.0
+            log_result(
+                "No Strategy in-battle inventory failed safely — retry scheduled",
+                detail=(
+                    "[NO_STRATEGY] phase=in_battle_inventory status=failed "
+                    f"reason={result.reason} retry_seconds=60"
+                ),
+                operation_id=operation_id,
+                console=True,
+            )
             log(
                 f"[NO_STRATEGY] Automatic in-battle inventory failed: "
                 f"{result.reason}. It will retry after 60 seconds.",
@@ -4693,6 +4758,49 @@ class App:
                 console=True,
             )
         return True
+
+    @staticmethod
+    def _no_strategy_fields_resolved(
+        snapshot: object,
+        fields: Sequence[str],
+    ) -> bool:
+        if not isinstance(snapshot, Mapping):
+            return False
+        observations = snapshot.get("fields")
+        if not isinstance(observations, Mapping):
+            return False
+        resolved = {"observed", "evidence_captured", "unavailable"}
+        return all(
+            isinstance(observations.get(field), Mapping)
+            and str(observations[field].get("status") or "") in resolved
+            for field in fields
+        )
+
+    def _next_no_strategy_post_run_stage(
+        self,
+        snapshot: Optional[Mapping[str, Any]] = None,
+    ) -> str:
+        observed = (
+            snapshot
+            if snapshot is not None
+            else self._no_strategy_observer.snapshot()
+        )
+        if not self._no_strategy_fields_resolved(
+            observed,
+            ("workshop_preset", "free_upgrade_locks"),
+        ):
+            return "locks"
+        if not self._no_strategy_fields_resolved(
+            observed,
+            (
+                "cards_deck",
+                "perk_first_choice",
+                "perk_bans",
+                "perk_auto_pick_order",
+            ),
+        ):
+            return "perks"
+        return "finalize"
 
     def _persist_pending_no_strategy_record(self, *, finalized: bool) -> None:
         record = self._pending_no_strategy_record
@@ -4707,6 +4815,29 @@ class App:
             "INFO",
             console=True,
         )
+
+    def _finish_no_strategy_post_run(self) -> bool:
+        """Persist final evidence, then release or retain the Home boundary."""
+
+        self._persist_pending_no_strategy_record(finalized=True)
+        if AUTOMATION.mode is ExecMode.WAIT:
+            self._no_strategy_post_run_stage = "complete_wait"
+            self._no_strategy_post_run_retry_at = 0.0
+            log(
+                "[NO_STRATEGY] Post-run inventory complete; WAIT is holding "
+                "the verified Home boundary",
+                "INFO",
+                console=True,
+            )
+            return True
+        self._release_no_strategy_post_run()
+        log(
+            "[NO_STRATEGY] Post-run inventory complete; the next-battle path "
+            "is released",
+            "INFO",
+            console=True,
+        )
+        return True
 
     def _handle_no_strategy_post_run(
         self,
@@ -4757,11 +4888,33 @@ class App:
                     source="home_workshop_lock_details",
                 )
                 self._persist_pending_no_strategy_record(finalized=False)
-                self._no_strategy_post_run_stage = "perks"
+                current_snapshot = self._no_strategy_observer.snapshot()
+                self._no_strategy_post_run_stage = (
+                    "finalize"
+                    if self._no_strategy_fields_resolved(
+                        current_snapshot,
+                        (
+                            "cards_deck",
+                            "perk_first_choice",
+                            "perk_bans",
+                            "perk_auto_pick_order",
+                        ),
+                    )
+                    else "perks"
+                )
                 self._no_strategy_post_run_retry_at = 0.0
-                stage = "perks"
+                stage = self._no_strategy_post_run_stage
                 new_state = "HOME_SCREEN"
                 img = lock_result.home_screenshot
+
+            if stage == "finalize":
+                if new_state != "HOME_SCREEN":
+                    restore_post_run_home(
+                        img,
+                        action_guard_fn=self._no_strategy_action_guard,
+                    )
+                    return True
+                return self._finish_no_strategy_post_run()
 
             if stage == "perks":
                 if new_state == "HOME_SCREEN":
@@ -4810,25 +4963,7 @@ class App:
                             value,
                             source="home_perks_configuration_tabs",
                         )
-                self._persist_pending_no_strategy_record(finalized=True)
-                if AUTOMATION.mode is ExecMode.WAIT:
-                    self._no_strategy_post_run_stage = "complete_wait"
-                    self._no_strategy_post_run_retry_at = 0.0
-                    log(
-                        "[NO_STRATEGY] Post-run inventory complete; WAIT is "
-                        "holding the verified Home boundary",
-                        "INFO",
-                        console=True,
-                    )
-                    return True
-                self._release_no_strategy_post_run()
-                log(
-                    "[NO_STRATEGY] Post-run inventory complete; the next-battle "
-                    "path is released",
-                    "INFO",
-                    console=True,
-                )
-                return True
+                return self._finish_no_strategy_post_run()
         except NoStrategyPostRunPaused:
             self._no_strategy_post_run_retry_at = 0.0
             log(
@@ -4892,14 +5027,9 @@ class App:
                 console=True,
             )
             return
-        fields = observed.get("fields") if isinstance(observed, Mapping) else {}
-        lock_field = fields.get("free_upgrade_locks", {}) if isinstance(fields, Mapping) else {}
-        lock_status = lock_field.get("status") if isinstance(lock_field, Mapping) else None
         self._pending_no_strategy_record = record
-        self._no_strategy_post_run_stage = (
-            "perks"
-            if lock_status in {"observed", "evidence_captured", "unavailable"}
-            else "locks"
+        self._no_strategy_post_run_stage = self._next_no_strategy_post_run_stage(
+            observed if isinstance(observed, Mapping) else None
         )
         self._no_strategy_post_run_retry_at = 0.0
         self._no_strategy_observation_active = True
@@ -5103,11 +5233,18 @@ class App:
             finalize_run_boundary()
             if no_strategy_run and completed_record is not None:
                 self._pending_no_strategy_record = completed_record
-                self._no_strategy_post_run_stage = "locks"
+                self._no_strategy_post_run_stage = (
+                    self._next_no_strategy_post_run_stage(
+                        observed_run_configuration
+                        if isinstance(observed_run_configuration, Mapping)
+                        else None
+                    )
+                )
                 self._no_strategy_post_run_retry_at = 0.0
                 log(
-                    "[NO_STRATEGY] Battle record is awaiting read-only Home "
-                    "inventory before another battle may start",
+                    "[NO_STRATEGY] Battle record is awaiting its verified Home "
+                    f"{self._no_strategy_post_run_stage} stage before another "
+                    "battle may start",
                     "INFO",
                     console=True,
                 )

@@ -39,6 +39,60 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-06 paused Home manual-start continuity repair
+
+- Live read-only diagnosis found that an Attack Dissonance battle manually
+  started from paused Home advanced normally while Activity Continuity retried
+  its obsolete Home-only Battle History source. The safe retry loop sent no
+  input, but its exclusive hold prevented the No Strategy inventory from
+  starting.
+- `8cf5548` makes a pending Home continuity route follow a passively observed
+  `RUNNING` transition in the same activity scope, clear the obsolete Home
+  control expectation, and continue only after action authority returns. The
+  fix is generic to paused manual starts and does not add a No Strategy or
+  Dissonance conditional.
+- The regression proves paused Home setup, a paused manual battle start, zero
+  History reads or inputs while Paused, one running-source baseline after
+  Resume, preserved scope identity, and a single transition diagnostic. The
+  focused continuity, Battle History, and startup suites passed 155 tests.
+- The complete isolated checkpoint passed compilation, state-definition
+  validation, clickmap integrity with zero errors and the 44 established
+  orphan candidates, and all 1,665 tests in 324.86 seconds. Diagnosis did not
+  tap, stop, reload, Surrender, or otherwise mutate the production battle; live
+  confirmation remains routed through
+  [`ISSUE-2026-027`](../issues/open-2026.md#paused-home-continuity-did-not-follow-a-manually-started-battle)
+  after promotion.
+
+### 2026-08-06 save-only running attachment and lease replay correction
+
+- Fresh live diagnosis after the paused-source repair found three follow-on
+  defects: a missing running baseline still selected Battle History UI, the
+  guarded attachment reader discarded normalized save configuration checks,
+  and No Strategy unconditionally traversed every supported UI section. It
+  also traced the reported abnormal lease warning to replay of an already
+  released terminal directive after process replacement.
+- `cde691b` makes every `save_first` running attachment save-only. A fresh
+  structural tail records, compares, migrates, or conservatively replaces the
+  scope; failure waits without opening Battle History. The same accepted
+  exact-version snapshot supplies complete allowlisted observations to No
+  Strategy, whose in-battle and post-run routes now visit only unresolved
+  fields. The passive Attack Dissonance badge resolves its inaccessible Damage
+  Slider without probing the disabled Attack menu.
+- Terminal development directives are now recognized before former-runtime
+  binding checks. Their original release result remains the sole outcome after
+  restart; genuinely active leases that lose their runtime retain the abnormal
+  warning and paired result.
+- Focused save, continuity, No Strategy, lifecycle, and lease coverage passed
+  392 tests. The complete isolated checkpoint passed compilation,
+  state-definition validation, clickmap integrity with zero errors and the 44
+  established orphan candidates, and all 1,676 tests in 323.36 seconds.
+  Diagnosis added no device input, Surrender, lifecycle transition, or control
+  mutation. Natural confirmation remains routed through
+  [`ISSUE-2026-028`](../issues/open-2026.md#running-attachment-used-battle-history-and-repeated-save-backed-configuration-ui)
+  and
+  [`ISSUE-2026-029`](../issues/open-2026.md#terminal-development-lease-was-replayed-as-an-abnormal-runtime-change)
+  after promotion.
+
 ### 2026-08-06 post-promotion branch/worktree lifecycle cleanup
 
 - A fresh audit classified all 25 local feature branches and linked worktrees

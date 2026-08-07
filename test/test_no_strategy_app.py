@@ -10,6 +10,7 @@ from core.no_strategy_inventory import (
     NoStrategyInventoryResult,
     NoStrategyInventoryStatus,
 )
+from core.no_strategy_observer import NoStrategyRunObserver
 from core.no_strategy_post_run import NoStrategyPostRunPaused
 from core.run_state import AUTOMATION, ExecMode
 
@@ -107,6 +108,68 @@ def test_no_strategy_game_over_forces_full_capture_and_home_inventory():
     }
     assert app._pending_no_strategy_record is record
     assert app._no_strategy_post_run_stage == "locks"
+
+
+def test_save_resolved_post_run_fields_skip_home_configuration_navigation():
+    app = _app_without_strategy()
+    resolved = {
+        field: {"status": "observed", "value": "saved"}
+        for field in (
+            "cards_deck",
+            "workshop_preset",
+            "free_upgrade_locks",
+            "perk_first_choice",
+            "perk_bans",
+            "perk_auto_pick_order",
+        )
+    }
+    app._no_strategy_observer.snapshot.return_value = {"fields": resolved}
+    record = {"battle_id": "BattleSaveResolved"}
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+    with patch("core.app.handle_game_over", return_value=record):
+        app._handle_primary_states("GAME_OVER", set(), frame)
+
+    assert app._no_strategy_post_run_stage == "finalize"
+    app._persist_pending_no_strategy_record = MagicMock()
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.NEXT_BATTLE
+    try:
+        with (
+            patch(
+                "core.app.inspect_post_run_free_upgrade_locks",
+                side_effect=AssertionError("save-resolved locks must not open UI"),
+            ),
+            patch(
+                "core.app.open_perks_configuration_for_post_run_capture",
+                side_effect=AssertionError("save-resolved perks must not open UI"),
+            ),
+        ):
+            handled = app._handle_no_strategy_post_run("HOME_SCREEN", frame)
+    finally:
+        AUTOMATION.mode = original_mode
+
+    assert handled is True
+    app._persist_pending_no_strategy_record.assert_called_once_with(finalized=True)
+    assert app._pending_no_strategy_record is None
+
+
+def test_save_resolved_post_run_waits_for_verified_home_before_finalizing():
+    app = _app_without_strategy()
+    app._pending_no_strategy_record = {"battle_id": "BattleSaveResolved"}
+    app._no_strategy_post_run_stage = "finalize"
+    app._persist_pending_no_strategy_record = MagicMock()
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+
+    with patch("core.app.restore_post_run_home") as restore_home:
+        handled = app._handle_no_strategy_post_run("CARDS", frame)
+
+    assert handled is True
+    restore_home.assert_called_once_with(
+        frame,
+        action_guard_fn=app._no_strategy_action_guard,
+    )
+    app._persist_pending_no_strategy_record.assert_not_called()
 
 
 def test_post_run_home_records_locks_then_automatically_opens_perks():
@@ -309,6 +372,33 @@ def test_automatic_in_battle_inventory_is_exclusive_and_runs_once():
     assert repeated is False
     inventory.assert_called_once()
     assert app._no_strategy_inventory_complete is True
+
+
+def test_activity_continuity_applies_guarded_save_to_no_strategy_observer():
+    app = App.__new__(App)
+    app._mission_mgr = MagicMock()
+    app._mission_mgr.strategy = None
+    app._no_strategy_observer = NoStrategyRunObserver()
+    app._no_strategy_observation_active = True
+    app._exclusive_validation_ownership_hold = False
+    observations = {
+        "schema_version": 1,
+        "source": "guarded_active_attachment_player_save",
+        "mapping_id": "data-9-game-1073",
+        "captured_at": "2026-08-06T23:31:05+00:00",
+        "checks": {"cards_deck": {"value": "Farm"}},
+    }
+
+    with patch("core.app.log") as logged:
+        app._apply_activity_continuity_outcome(
+            SimpleNamespace(validated_profile_observations=observations)
+        )
+
+    cards = app._no_strategy_observer.snapshot()["fields"]["cards_deck"]
+    assert cards["status"] == "observed"
+    assert cards["value"] == {"label": "Farm"}
+    assert cards["source"] == "guarded_active_attachment_player_save"
+    assert "Applied guarded attachment save" in logged.call_args.args[0]
 
 
 def test_pending_post_run_inventory_blocks_normal_home_handler():

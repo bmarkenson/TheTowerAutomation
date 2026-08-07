@@ -790,14 +790,18 @@ its process-local Strategy evidence is omitted under the same binding rule.
 
 `No Strategy` supplies no configured run intent and owns no upgrade actions,
 startup initialization, or session-preflight gate. It is nevertheless an
-observation profile: after an active `RUNNING` frame establishes the battle, it
-owns one exclusive, guarded read-only traversal of Cards, Bots, Guardians,
-Modules, Target Priority, Damage Slider when accessible, Perks, and Ultimate
-Weapons. Every action is source-state guarded, every destination is verified,
-and Pause is synchronized before each input. Workshop remains a Home-boundary
-observation. Missing screens remain explicitly `not_observed`; authoritatively
-inaccessible controls are recorded as `unavailable` with a reason. Values are
-never copied from a Farm or Tournament profile. This evidence is stored under
+observation profile. At a `save_first` running attachment, Activity Continuity
+passes the same guarded snapshot's complete, exact-mapping configuration checks
+into the observer. The exclusive read-only route then visits only unresolved
+Cards, Bots, Guardians, Modules, Target Priority, Damage Slider, Perks, or
+Ultimate Weapon fields; a fully resolved save plus passive Dissonance evidence
+causes zero game-UI input. Every remaining action is source-state guarded,
+every destination is verified, and Pause is synchronized before each input.
+Workshop remains a Home-boundary observation when unresolved. Missing screens
+remain explicitly `not_observed`; authoritatively inaccessible controls are
+recorded as `unavailable` with a reason. Values are never copied from a Farm or
+Tournament profile. Save values retain their mapping/check provenance. This
+evidence is stored under
 `observed_run_configuration`, separately from the configured-intent
 `run_configuration` field. Configured profiles do not populate
 `observed_run_configuration`; an empty observation is omitted rather than
@@ -809,23 +813,23 @@ The fixed purple sword badge next to Tier is localized Attack Dissonance
 identity evidence. Standard Game Over plus that badge supports a high-confidence
 `dissonance` classification; Tier without the badge still remains `unknown`.
 The collector does not probe the disabled Attack menu or treat a failed action
-as identity evidence; on Attack Dissonance it records Damage Slider as
-unavailable because that control cannot be inspected during the run.
+as identity evidence. The first passive Attack Dissonance badge records Damage
+Slider as unavailable before UI-route planning because that control cannot be
+inspected during the run.
 
 Home-only facts use a second phase after natural completion. No Strategy forces
 full structured Game Over capture and the Home terminal action, even if the
 process was launched with fast Game Over capture. At verified Home
-`NEW_BATTLE`, the runtime reads the three currently supported Free Upgrade lock
-details with `enforce=False`, so checkbox state is observed but never changed.
-It records the Workshop preset, returns Home, opens Cards, expands the Home
-menu, independently verifies its Perks item, and opens the configuration panel
-itself. The runtime selects the read-only First Perk, Ban Perks, and Auto Pick
-tabs, scrolls each to its verified edge, OCRs the dark selected rows
-independently of the brighter available rows, closes the panel, and revalidates
-Home `NEW_BATTLE`. The same battle record is atomically updated after the lock
-phase and again after Perks capture. Each field retains its source, confidence,
-phase, and observation timestamp; uncertain parsing retains raw page images
-instead of manufacturing a structured value.
+`NEW_BATTLE`, it skips any Workshop, Free Upgrade-lock, Cards, First Perk, Ban
+Perks, or Auto Pick fields already resolved by the guarded attachment save. For
+unresolved fields, the runtime reads the three supported Free Upgrade lock
+details with `enforce=False`, records the Workshop preset, and uses the existing
+read-only Cards/Perks tabs. The same battle record is atomically updated after
+each required phase. A save-complete record finalizes directly at verified
+Home; it does not reopen those configuration screens. Each field retains its
+source, confidence, phase, observation timestamp, and save provenance where
+applicable; uncertain UI parsing retains raw page images instead of
+manufacturing a structured value.
 
 Pause continues to block every inventory input. An interrupted pass resumes
 from a known read-only screen or restores verified Home before retrying its
@@ -1193,25 +1197,27 @@ development-lease authority from warning text in `actions.log`.
   its source-tagged structural newest history-tail identity into the new scope
   before the guarded UI route may run; acquisition/shape failure safely falls
   back after Home setup, while target/control/scope/restoration loss authorizes
-  no input. At a replacement-process `RUNNING` attachment with either a
-  compatible save baseline or a UI baseline retaining parseable Tier, Wave,
-  and Battle Date, the continuity owner records the exact runtime/scope/target
-  and lifecycle state, requires stable `RUNNING` before and after the shared
-  Android-Home serializer, and accepts only two byte-identical reads with an
-  exact active-round identity. A save baseline uses its source-specific
-  fingerprint and valid append/rollover contract. A UI baseline bridges only
-  through independently normalized Tier/Wave/Battle Date: the save date must
-  be unambiguous .NET `Local` wall-clock evidence matching the UI's minute
-  precision. Agreement migrates the metadata while preserving scope; mismatch,
-  UTC/Unspecified/LocalAmbiguous kind, timezone, parse, or retained-field
-  ambiguity restores UI. Source fingerprints are never compared. Unsupported,
-  acquisition, or invalid-transition evidence reaches the guarded UI only
-  after safe restoration; any ownership, process, identity, control, source,
-  or restoration ambiguity blocks it. `force_ui`, `comparison_audit`, Home
-  `RESUME_BATTLE`, interrupted Battle History, and insufficient baselines
-  retain the UI route. A readable identity is persisted with a run-ID
+  no input. At a `RUNNING` attachment, including a missing baseline, the
+  continuity owner always uses the guarded save and never opens Battle History
+  UI. It binds the exact runtime/scope/target and lifecycle state, requires
+  stable `RUNNING` before and after the shared Android-Home serializer, and
+  accepts only two byte-identical reads with an exact active-round identity. A
+  save baseline uses its source-specific fingerprint and append/rollover
+  evidence. A UI baseline bridges only through normalized Tier/Wave/Battle
+  Date; agreement migrates it, explicit mismatch proves a later scope, and
+  ambiguous or insufficient evidence starts an unverified conservative scope
+  from the fresh save. An unusable attachment save waits and retries without
+  game-UI navigation. Source fingerprints are never compared across mappings.
+  Any ownership, process, identity, control, source, or restoration ambiguity
+  blocks later input. `force_ui`, `comparison_audit`, Home `RESUME_BATTLE`, and
+  interrupted Battle History retain the UI route. A readable identity is
+  persisted with a run-ID
   compare-and-set so stale evidence cannot overwrite a newer lifecycle
-  boundary.
+  boundary. When Pause preserves a pending Home continuity source and the same
+  runtime then observes `RUNNING`, the coordinator keeps the scope, replaces
+  the obsolete Home/control expectation with the running source, and waits for
+  Resume before any History input. Other source, control, or ownership
+  ambiguity remains blocked.
 - A successful runtime-owned direct Retry passively polls fresh stable
   two-identical-read exact-target saves until the structural tail advances.
   Unchanged tails schedule another poll without UI input; one append or a

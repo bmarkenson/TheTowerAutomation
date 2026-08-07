@@ -417,6 +417,14 @@ activation, heartbeat expiry, input intent/result, release, and abnormal
 termination in operator-readable form. A separate hash-chained audit ledger,
 long retention policy, token redaction system, and replay cache are unnecessary.
 
+A durable `request_state=terminal` directive is completed historical state.
+The runtime preserves its recorded disposition before considering the former
+runtime binding and does not emit a second warning or result after process
+replacement. The original release/expiry/revocation path owns the one terminal
+`RESULT`. Runtime/session mismatch remains an abnormal warning plus paired
+result only for a lease that was still active or pending when ownership
+changed.
+
 After a coordinator or runtime restart, any old lease is inactive. Fresh
 process, target, control, and screen inspection determines whether production
 can resume. The system does not attempt to prove continuity across a crash.
