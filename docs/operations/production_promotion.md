@@ -33,29 +33,59 @@ owner work. Complete the repository-change checklist before this procedure and
 | Interpreter or locked dependencies | Stop every affected service and retain the prior environment or a proven rebuild path through smoke validation. |
 | Installed unit or persistent-state format | Treat installation/migration as a separately reviewed operation with recovery recorded first. A checked-in unit change does not install itself. |
 
-## Retire promoted feature work
+## Retire feature work
 
 The [repository topology](../architecture/development_isolation.md#repository-and-git-topology)
 keeps the `main` and `develop` branches and worktrees permanent; each feature
-branch and worktree is temporary. After promotion succeeds and the outcome's
-required validation and evidence are durable:
+branch and worktree is temporary. Retirement has separate integrated and
+superseded dispositions; never describe patch-equivalent or selectively ported
+work as integrated.
 
-1. Re-list every local branch and linked worktree. In each feature candidate,
-   recheck the branch and `HEAD`, staged and unstaged changes, nonignored
-   untracked files, ignored files that could contain operator work or required
-   evidence, and active ownership. Prove every accepted commit is integrated
-   into `main` and require the branch tip to be its ancestor; a merged label or
-   patch-equivalent cherry-pick does not override uncertainty or the
+Before either disposition:
+
+1. Re-list every local branch and linked worktree. Recheck the candidate's
+   branch and `HEAD`, staged and unstaged changes, nonignored untracked files,
+   ignored files that could contain operator work or required evidence, and
+   active ownership.
+2. Record the exact worktree path, local branch, tip commit, disposition, and
+   replacement or integration target. Obtain operator approval for those exact
+   local objects. Exclude `main`, `develop`, rollback tags, remote branches, and
+   every ambiguous item; remote deletion is always a separate decision.
+
+### Integrated feature
+
+Use this disposition only after promotion succeeds and the outcome's required
+validation and evidence are durable:
+
+1. Prove the branch tip is an ancestor of `main`. A merged label or patch-
+   equivalent cherry-pick does not override uncertainty or the
    `git branch -d` ancestry guard.
-2. Present the exact worktree/branch pairs and obtain operator approval. Exclude
-   `main`, `develop`, rollback tags, remote branches, and every ambiguous item.
-3. Run `git worktree remove <exact-path>` and then
-   `git branch -d <exact-branch>` for each approved pair. Never recursively
-   delete a worktree or force-delete a branch; retain any refused pair for
-   review.
-4. Re-list branches and worktrees, verify the permanent refs and checkouts are
-   unchanged and clean, preserve rollback tags, and run proportionate
-   repository validation.
+2. Run `git worktree remove <exact-path>` and then
+   `git branch -d <exact-branch>`. Never recursively delete a worktree or use a
+   force option; retain any refused pair for review.
+
+### Explicitly superseded or abandoned feature
+
+Use this disposition only when the operator explicitly declares the exact
+local tip obsolete, rejected, or replaced and its disposition is already clear
+from durable repository history. It removes branch/worktree clutter without
+pretending the discarded commit was integrated:
+
+1. Create a uniquely named annotated `archive/...` tag at the exact branch tip
+   and verify that the tag object dereferences to that commit. Never move or
+   reuse the tag; pushing it is a separate operator decision. Deleting the
+   archive tag or making the commit unreachable is outside this procedure.
+2. Recheck that the branch, worktree, tip, ownership, and inspected content are
+   unchanged and that the verified archive tag still names the tip.
+3. Run `git worktree remove <exact-path>` without `--force`. If Git refuses,
+   retain the worktree and stop for review; never delete it recursively.
+4. Run `git branch -D <exact-branch>` only for the approved, now-unlinked local
+   branch and only while its verified archive tag remains. No other force-
+   deletion path is authorized.
+
+After either disposition, re-list branches and worktrees, verify `main` and
+`develop` and their permanent checkouts remain unchanged and clean, preserve
+rollback and archive tags, and run proportionate repository validation.
 
 ## Failed smoke test
 
