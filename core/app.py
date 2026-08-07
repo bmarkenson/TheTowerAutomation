@@ -77,6 +77,10 @@ from core.player_save_history import (
     PlayerSaveAttachmentContext,
     PlayerSaveHistoryReader,
 )
+from core.player_save_temporal import (
+    BoundRunningAttachmentSaveEvidence,
+    RunningAttachmentSaveObservations,
+)
 from core.profile_progression import unavailable_profile_progression
 from core.terminal_save_report import (
     terminal_history_transition_from_acquisition,
@@ -3354,33 +3358,71 @@ class App:
 
         save_observations = getattr(
             outcome,
-            "validated_profile_observations",
+            "running_attachment_observations",
             None,
         )
-        if (
-            isinstance(save_observations, Mapping)
-            and self._current_strategy_name() == "none"
-            and getattr(self, "_no_strategy_observation_active", False)
-        ):
+        attachment_context = None
+        if isinstance(save_observations, RunningAttachmentSaveObservations):
             try:
-                applied = self._no_strategy_observer.record_player_save_observations(
-                    save_observations
+                attachment_context = (
+                    self._current_player_save_attachment_context()
                 )
-            except (TypeError, ValueError) as exc:
-                log(
-                    "[NO_STRATEGY] Guarded attachment save observations were "
-                    f"rejected: {exc}",
-                    "WARN",
-                )
-            else:
-                if applied:
-                    log(
-                        "[NO_STRATEGY] Applied guarded attachment save "
-                        f"observations for {len(applied)} fields: "
-                        + ", ".join(applied),
-                        "INFO",
-                        console=True,
+            except Exception:
+                attachment_context = None
+        if (
+            isinstance(save_observations, RunningAttachmentSaveObservations)
+            and not save_observations.matches_context(attachment_context)
+        ):
+            log(
+                "[PLAYER_SAVE] Bound attachment observations were rejected "
+                "after the target or activity scope changed",
+                "WARN",
+            )
+            save_observations = None
+
+        if isinstance(save_observations, RunningAttachmentSaveObservations):
+            strategy_name = self._current_strategy_name()
+            if (
+                strategy_name == "none"
+                and getattr(self, "_no_strategy_observation_active", False)
+            ):
+                try:
+                    applied = (
+                        self._no_strategy_observer.record_player_save_observations(
+                            save_observations
+                        )
                     )
+                except (TypeError, ValueError) as exc:
+                    log(
+                        "[NO_STRATEGY] Guarded attachment save observations "
+                        f"were rejected: {exc}",
+                        "WARN",
+                    )
+                else:
+                    if applied:
+                        log(
+                            "[NO_STRATEGY] Applied guarded attachment save "
+                            f"observations for {len(applied)} fields: "
+                            + ", ".join(applied),
+                            "INFO",
+                            console=True,
+                        )
+            elif (
+                strategy_name == "tournament"
+                and save_observations.fact("workshop_preset") is not None
+            ):
+                self._mission_mgr.ctx.data[
+                    "player_save_attachment_evidence"
+                ] = BoundRunningAttachmentSaveEvidence(
+                    save_observations,
+                    self._current_player_save_attachment_context,
+                )
+                log(
+                    "[TOURNAMENT] Bound the active round's Workshop preset "
+                    "from the guarded attachment save",
+                    "INFO",
+                    console=True,
+                )
 
         confirmed_scope_id = getattr(
             outcome,

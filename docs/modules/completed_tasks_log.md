@@ -39,6 +39,32 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-07 player-save temporal authority
+
+- `feature/player-save-temporal-authority` adds typed temporal classes to the
+  running-attachment projection. Its private binding covers exact mapping,
+  target generation, source and final activity scopes, active-round identity,
+  and capture time. Activity Continuity publishes facts only after persisting
+  the final scope; App revalidates current process/target/scope before fan-out,
+  and retained provenance is redacted.
+- No Strategy now feeds save-backed Workshop preset, equipped Guardians,
+  selected Bot preset, and equipped Modules into its actual
+  `observed_run_configuration` as round-invariant facts. Identical claims
+  merge, a complete same-round conflict becomes sticky `unavailable`, and
+  partial Guardian/Module UI evidence cannot replace a complete save claim.
+  Cards remain point-in-time, and Bot progression is separate from the selected
+  preset.
+- The same observation supplies Tournament's existing in-battle Workshop seam
+  through a one-use carrier that rechecks process, target generation, scope,
+  and active-battle ownership. A valid value avoids a second save read and any
+  additional game-Home or Android lifecycle route; invalid evidence preserves
+  the explicit Workshop deferral.
+- Focused temporal, attachment, No Strategy, and Tournament regression passed
+  201 tests. The supported development checkpoint compiled the repository,
+  passed state-definition validation and clickmap integrity with zero errors
+  and the established 44 orphan candidates, and passed all 1,737 tests in
+  322.38 seconds. No live/device validation was needed.
+
 ### 2026-08-07 player-save terminal boundary handoff
 
 - `feature/player-save-boundary-handoff` splits the terminal structural History

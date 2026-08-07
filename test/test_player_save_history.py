@@ -22,6 +22,7 @@ from core.player_save_history import (
     history_sources_compatible,
     valid_history_tail_advance,
 )
+from core.player_save_temporal import PlayerSaveTemporalClass
 
 
 def _save_battle_date(
@@ -473,9 +474,8 @@ def test_active_attachment_forces_serialization_and_restores_same_running_source
     assert result.complete
     assert result.metadata is not None
     assert result.metadata["acquisition"]["type"] == "forced_serialization"
-    assert result.active_round_identity_fingerprint == (
-        "active-round-fingerprint"
-    )
+    observations = result.running_attachment_observations
+    assert observations is None  # the default snapshot has no profile facts
     assert calls == {
         "target": 4,
         "context": 5,
@@ -550,24 +550,21 @@ def test_active_attachment_returns_complete_allowlisted_profile_observations():
     )
 
     assert result.complete
-    observations = dict(result.validated_profile_observations or {})
-    acquisition = observations.pop("acquisition")
-    assert acquisition["type"] == "forced_serialization"
-    assert acquisition["status"] == "complete"
-    assert result.validated_profile_observations is not None
-    assert observations == {
-        "schema_version": 1,
-        "source": "guarded_active_attachment_player_save",
-        "mapping_id": "data-9-game-1073",
-        "mapping_maturity": "candidate",
-        "captured_at": "2026-08-04T20:00:00+00:00",
-        "checks": {
-            "cards_deck": {
-                "value": "Farm",
-                "source_fields": ["presetName", "currentPreset"],
-            }
-        },
-    }
+    observations = result.running_attachment_observations
+    assert observations is not None
+    assert observations.binding.mapping_id == "data-9-game-1073"
+    assert observations.binding.activity_scope_id is None
+    assert observations.binding.source_activity_scope_id == "scope-1"
+    assert observations.binding.active_round_identity_fingerprint == (
+        "active-round-fingerprint"
+    )
+    assert observations.binding.target_binding.fingerprint
+    assert len(observations.facts) == 1
+    fact = observations.facts[0]
+    assert fact.check_id == "cards_deck"
+    assert fact.temporal_class is PlayerSaveTemporalClass.POINT_IN_TIME
+    assert fact.copied_value() == "Farm"
+    assert fact.source_fields == ("presetName", "currentPreset")
 
 
 @pytest.mark.parametrize(

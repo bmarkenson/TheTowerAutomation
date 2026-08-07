@@ -56,7 +56,7 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
       The supported development checkpoint passed all 1,724 tests in 377.86
       seconds with state-definition and clickmap validation clean (the
       established 44 orphan candidates, zero errors).
-    - [ ] **Temporal loadout — `feature/player-save-temporal-authority`.** Add
+    - [x] **Temporal loadout — `feature/player-save-temporal-authority`.** Add
       temporal metadata and fact-specific merge rules to attachment
       projections. Treat Workshop preset, equipped Guardians, selected Bot
       preset, and equipped Modules as round-invariant after exact round
@@ -64,7 +64,16 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
       those classified facts into No Strategy's actual loadout, and bind the
       active Tournament Workshop preset without game-Home or Android-Home
       input. Same-round invariant conflicts fail closed rather than using the
-      newest value.
+      newest value. Implemented with typed per-fact temporal classes and a
+      private exact mapping/target-generation/final-scope/round binding that is
+      published only after continuity persistence. No Strategy's actual
+      loadout receives the four round invariants with sticky conflict handling;
+      Cards retain point-in-time capture provenance and Bot progression remains
+      separate. Tournament consumes the bound Workshop fact once, revalidating
+      target and scope without a second read or Home route. Focused regression
+      passed 201 tests; the supported development checkpoint passed all 1,737
+      tests in 322.38 seconds with state-definition and clickmap validation
+      clean (the established 44 orphan candidates, zero errors).
     - [ ] **Perks — `feature/save-backed-perk-monitoring-v2`.** Restart from
       the shared interface and selectively port the pure monitor/domain tests
       from `d1c3dec`. A normal scheduler independent of collector opt-in

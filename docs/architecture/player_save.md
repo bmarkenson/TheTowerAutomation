@@ -534,8 +534,9 @@ receipts never edit or promote their own authority manifest.
 This section defines the staged contract for the active acquisition-
 consolidation backlog. The acquisition foundation is implemented on
 `feature/player-save-acquisition-foundation`, and the lifecycle handoff is
-implemented on `feature/player-save-boundary-handoff`. Temporal merge and
-Perk-monitor integration remain owned by their later stacked phases.
+implemented on `feature/player-save-boundary-handoff`. Typed attachment
+temporal authority is implemented on `feature/player-save-temporal-authority`;
+Perk-monitor integration remains owned by its final stacked phase.
 
 `StablePlayerSaveAcquirer` owns one in-flight exact-target runtime
 read under the ADB target-operation lock: owned target/generation checks before
@@ -628,6 +629,34 @@ current/final completeness unavailable. An authoritative UI/save
 contradiction still fails closed. UI owns applying and verifying a change, and
 save-authoritative current state after that change requires another forced
 serialization.
+
+Running-attachment configuration projection now produces typed facts under a
+private exact process/target-generation/source-scope/round binding. Activity
+Continuity withholds those facts until it has atomically persisted the final
+activity scope; a replacement scope is rebound only by that continuity result.
+App revalidates the current target, generation, process session, active battle,
+and final scope before dispatch. Redacted actual-loadout provenance retains the
+exact mapping, target-generation fingerprint, scope fingerprint, round
+fingerprint, capture boundary, and temporal class without retaining the raw
+target or scope identifier.
+
+No Strategy treats Workshop preset, equipped Guardians, selected Bot preset,
+and equipped Modules as sticky round-invariant facts. Identical observations
+merge, but a differing complete save value or authoritative complete preset UI
+observation marks that field unavailable for the round; a later value cannot
+restore it. Partial Guardian or Module UI evidence cannot replace a complete
+save claim. Cards retain their point-in-time boundary and may legally differ at
+a later capture. Bot progression is neither projected into nor compared with
+the selected Bot preset. The resulting facts populate the existing
+`observed_run_configuration` actual loadout, never configured intent.
+
+The same typed attachment object supplies Tournament's existing in-battle
+Workshop evidence seam. Its one-use consumer accepts only a round-invariant
+fact and rechecks process, target generation, activity scope, and active-battle
+ownership at consumption time. A valid `Tourney` match therefore closes the
+Home-only deferral without a game-Home route, another Android lifecycle action,
+or another save read; missing, mismatched, or rebound evidence preserves the
+established explicit deferral.
 
 ## Authority and fallback
 

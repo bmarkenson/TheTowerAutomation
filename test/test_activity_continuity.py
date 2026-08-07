@@ -23,6 +23,9 @@ from core.player_save_acquisition import (
     PlayerSaveTargetBinding,
 )
 from utils import logger
+from test.player_save_temporal_fixtures import (
+    running_attachment_observations,
+)
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -102,7 +105,7 @@ def _save_complete(metadata, *, observations=None):
         PlayerSaveHistoryReadStatus.COMPLETE,
         "structural_history_tail_observed",
         metadata=metadata,
-        validated_profile_observations=observations,
+        running_attachment_observations=observations,
     )
 
 
@@ -393,13 +396,11 @@ def test_paused_manual_start_records_missing_baseline_from_guarded_save(
     scope = logger.start_activity_scope(reason="new_battle_preflight")
     assert scope is not None
     metadata = _save_metadata(wave=5140)
-    observations = {
-        "schema_version": 1,
-        "source": "guarded_active_attachment_player_save",
-        "mapping_id": "data-9-game-1073",
-        "captured_at": "2026-08-06T23:31:05+00:00",
-        "checks": {"cards_deck": {"value": "Farm"}},
-    }
+    observations = running_attachment_observations(
+        {"cards_deck": {"value": "Farm"}},
+        source_scope_id=str(scope["run_id"]),
+        bind_final=False,
+    )
     save_reads = []
 
     def save_reader(**kwargs):
@@ -438,7 +439,10 @@ def test_paused_manual_start_records_missing_baseline_from_guarded_save(
     current = logger.get_activity_scope()
     assert paused_home.pending and paused_running.pending
     assert resumed.recapture and not resumed.pending
-    assert resumed.validated_profile_observations == observations
+    assert resumed.running_attachment_observations is not None
+    assert resumed.running_attachment_observations.binding.activity_scope_id == (
+        scope["run_id"]
+    )
     assert current is not None
     assert current["run_id"] == scope["run_id"]
     assert current["latest_completed_battle"] == metadata
@@ -449,6 +453,88 @@ def test_paused_manual_start_records_missing_baseline_from_guarded_save(
     assert "channel=stable player save" in contents
     assert "attachment_save_baseline_recorded" in contents
     assert "Battle History UI" not in contents
+
+
+def test_attachment_observations_bind_to_replacement_scope_after_persistence(
+):
+    previous = _save_metadata(entry_count=29)
+    original = _scope_with_save_baseline(previous)
+    latest = _save_metadata(
+        fingerprint="b" * 64,
+        entry_count=30,
+        wave=2100,
+    )
+    observations = running_attachment_observations(
+        {"workshop_preset": "Farm"},
+        source_scope_id=str(original["run_id"]),
+        bind_final=False,
+    )
+    coordinator = ActivityContinuityCoordinator(
+        save_history_reader=lambda **_kwargs: _save_complete(
+            latest,
+            observations=observations,
+        ),
+        history_reader=lambda **_kwargs: pytest.fail(
+            "a complete attachment save must not open History UI"
+        ),
+    )
+
+    outcome = coordinator.handle(
+        {"state": "RUNNING"},
+        actions_allowed=True,
+        action_guard_fn=lambda: True,
+        player_save_mode="save_first",
+    )
+
+    current = logger.get_activity_scope()
+    assert current is not None
+    assert current["run_id"] != original["run_id"]
+    assert outcome.running_attachment_observations is not None
+    assert (
+        outcome.running_attachment_observations.binding.activity_scope_id
+        == current["run_id"]
+    )
+
+
+def test_attachment_observations_are_not_published_when_scope_write_fails(
+):
+    scope = logger.start_activity_scope(reason="new_battle_preflight")
+    assert scope is not None
+    metadata = _save_metadata(wave=5140)
+    observations = running_attachment_observations(
+        {"workshop_preset": "Farm"},
+        source_scope_id=str(scope["run_id"]),
+        bind_final=False,
+    )
+    coordinator = ActivityContinuityCoordinator(
+        save_history_reader=lambda **_kwargs: _save_complete(
+            metadata,
+            observations=observations,
+        ),
+        history_reader=lambda **_kwargs: pytest.fail(
+            "a running attachment must not open History UI"
+        ),
+    )
+    coordinator.handle(
+        {"state": "HOME_SCREEN", "home_battle_control": "NEW_BATTLE"},
+        actions_allowed=False,
+        action_guard_fn=lambda: False,
+        player_save_mode="save_first",
+    )
+
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(
+            "core.activity_continuity.record_activity_scope_battle_history",
+            lambda **_kwargs: None,
+        )
+        outcome = coordinator.handle(
+            {"state": "RUNNING"},
+            actions_allowed=True,
+            action_guard_fn=lambda: True,
+            player_save_mode="save_first",
+        )
+
+    assert outcome.running_attachment_observations is None
 
 
 def test_missing_attachment_baseline_waits_for_save_without_history_ui(

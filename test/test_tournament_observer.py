@@ -20,11 +20,15 @@ from core.gc_preflight_navigation import (
     GcLivePreflightResult,
     GcPreflightNavigationStatus,
 )
+from core.player_save_history import PlayerSaveAttachmentContext
 from core.run_state import AUTOMATION, ExecMode
 from core.tournament_preflight import (
     validate_tournament_session_preflight_screens,
 )
 from tools.strategy_builders.lib import build_strategy_yaml
+from test.player_save_temporal_fixtures import (
+    running_attachment_observations,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -336,6 +340,91 @@ def test_attached_tournament_executor_requests_an_in_battle_only_route():
         validate_fn=validate_tournament_session_preflight_screens,
         stay_in_battle=True,
     )
+
+
+def test_continuity_supplies_bound_workshop_evidence_to_attached_tournament():
+    strategy = get_strategy("tournament")
+    assert strategy is not None
+    ctx = MissionContext(
+        data={
+            "startup_gates_deferred": True,
+            "mission_vars": {"last_detection_state": "RUNNING"},
+        }
+    )
+    app = App.__new__(App)
+    app._mission_mgr = SimpleNamespace(strategy=strategy, ctx=ctx)
+    app._exclusive_validation_ownership_hold = False
+    app._current_player_save_attachment_context = lambda: (
+        PlayerSaveAttachmentContext(
+            runtime_session_id="runtime-1",
+            activity_scope_id="scope-1",
+            target="private-target",
+            target_generation=3,
+            active_battle_observed=True,
+        )
+    )
+    observations = running_attachment_observations(
+        {"workshop_preset": "Tourney"}
+    )
+
+    with patch("core.app.log"):
+        app._apply_activity_continuity_outcome(
+            SimpleNamespace(running_attachment_observations=observations)
+        )
+
+    bound = ctx.data["player_save_attachment_evidence"]
+    action = strategy.rules[0]["do"][0]
+    evidence = SimpleNamespace(
+        as_dict=lambda: {"valid": True},
+        deferred_checks=(),
+    )
+    result = GcLivePreflightResult(
+        GcPreflightNavigationStatus.COMPLETE,
+        "all requirements verified",
+        evidence,
+    )
+    with patch(
+        "core.action_executor.run_read_only_gc_preflight",
+        return_value=result,
+    ) as run_preflight:
+        execute_actions(object(), [{**action, "_strategy": True}], ctx)
+
+    kwargs = run_preflight.call_args.kwargs
+    assert kwargs["player_save_preflight"] is bound
+    assert kwargs["stay_in_battle"] is True
+    assert bound.consume("workshop_preset") == "Tourney"
+
+
+def test_tournament_attachment_rejects_scope_or_target_change_before_publish():
+    strategy = get_strategy("tournament")
+    assert strategy is not None
+    ctx = MissionContext(data={"mission_vars": {}})
+    app = App.__new__(App)
+    app._mission_mgr = SimpleNamespace(strategy=strategy, ctx=ctx)
+    app._exclusive_validation_ownership_hold = False
+    app._current_player_save_attachment_context = lambda: (
+        PlayerSaveAttachmentContext(
+            runtime_session_id="runtime-1",
+            activity_scope_id="scope-1",
+            target="private-target",
+            target_generation=4,
+            active_battle_observed=True,
+        )
+    )
+
+    with patch("core.app.log") as logged:
+        app._apply_activity_continuity_outcome(
+            SimpleNamespace(
+                running_attachment_observations=(
+                    running_attachment_observations(
+                        {"workshop_preset": "Tourney"}
+                    )
+                )
+            )
+        )
+
+    assert "player_save_attachment_evidence" not in ctx.data
+    assert "target or activity scope changed" in logged.call_args.args[0]
 
 
 def test_tournament_invariant_mismatch_is_nonblocking_but_warned():

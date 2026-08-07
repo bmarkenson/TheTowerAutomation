@@ -267,8 +267,9 @@ structural History transition, the candidate semantic report, and Tournament
 conditions. The valid transition is atomically staged and consumed once by the
 new Home or Retry activity scope, and baseline-only `save_first` Home
 acquisition no longer depends on a nonempty configuration-requirement set.
-Temporal actual-loadout merge and the shared Perk monitor remain assigned to
-their later stacked phases.
+Temporal actual-loadout merge is implemented on
+`feature/player-save-temporal-authority`; the shared Perk monitor remains
+assigned to the final phase.
 
 The target flow is one acquisition per coherent boundary and any number of
 independent projections:
@@ -780,10 +781,11 @@ exclusive validation receipt. Any still-pending pre-Tournament request is
 cancelled before attachment work begins. Without Home boundary evidence, the
 runtime inspects Cards, Ultimate Weapons, Modules, Bots, and Guardians in
 battle. It never invokes Exit Battle → Go Home → Resume Battle. Exact bound
-save evidence may satisfy the Home-only Workshop preset check; without that
-evidence, Workshop is recorded explicitly as deferred rather than observed or
-waived. A future attachment-safe save acquisition may fill that deferral
-without changing this in-battle-only authority. Once that inventory pass
+save evidence now satisfies the Home-only Workshop preset check through the
+same guarded attachment acquisition and a one-use temporal carrier; without
+that evidence, Workshop is recorded explicitly as deferred rather than
+observed or waived. This adds no game-Home route, Android lifecycle action, or
+second save read. Once that inventory pass
 reaches a conclusive result, the explicitly
 `run_when_attached` battle-only rules enforce Damage Slider `100%` and the
 configured Orb Distance for an authoritative configured Attack Range; a
@@ -851,7 +853,8 @@ its process-local Strategy evidence is omitted under the same binding rule.
 startup initialization, or session-preflight gate. It is nevertheless an
 observation profile. At a `save_first` running attachment, Activity Continuity
 passes the same guarded snapshot's complete, exact-mapping configuration checks
-into the observer. The exclusive read-only route then visits only unresolved
+through its persisted final scope and a typed temporal binding. The exclusive
+read-only route then visits only unresolved
 Cards, Bots, Guardians, Modules, Target Priority, Damage Slider, Perks, or
 Ultimate Weapon fields; a fully resolved save plus passive Dissonance evidence
 causes zero game-UI input. Every remaining action is source-state guarded,
@@ -867,6 +870,15 @@ evidence is stored under
 implying that a No Strategy inventory pass occurred. Their declared intent and
 verified values remain under `run_configuration` and
 `runtime.session_preflight_evidence`, respectively.
+
+The actual-loadout merge classifies Workshop, equipped Guardians, selected Bot
+preset, and equipped Modules as round-invariant. It keeps a complete save claim
+when later Guardian or Module UI evidence is partial, and any differing
+complete same-round invariant fails closed as `unavailable` instead of using
+the latest value. Cards remain point-in-time, while Bot progression remains a
+separate fact from the selected preset. Every published save field carries
+redacted exact mapping, target-generation, final-scope, round, capture, and
+temporal provenance.
 
 The fixed purple modifier badge next to Tier is localized Dissonance-family
 identity evidence. Its white icon supplies a separately validated subtype: the

@@ -35,6 +35,12 @@ from core.player_save_acquisition import (
     PlayerSaveAcquisitionType,
     StablePlayerSaveAcquirer,
 )
+from core.player_save_temporal import (
+    RunningAttachmentSaveFact,
+    RunningAttachmentSaveObservations,
+    RunningAttachmentTemporalBinding,
+    attachment_temporal_class,
+)
 from core.state_detector import detect_state_and_overlays
 from utils.logger import get_activity_scope, log, log_input
 
@@ -83,12 +89,9 @@ class PlayerSaveHistoryReadResult:
     reason: str
     metadata: Optional[Mapping[str, Any]] = None
     safe_ui_fallback: bool = False
-    active_round_identity_fingerprint: Optional[str] = field(
-        default=None,
-        repr=False,
-        compare=False,
-    )
-    validated_profile_observations: Optional[Mapping[str, Any]] = field(
+    running_attachment_observations: Optional[
+        RunningAttachmentSaveObservations
+    ] = field(
         default=None,
         repr=False,
         compare=False,
@@ -204,9 +207,12 @@ def history_metadata_from_acquisition(
     )
 
 
-def validated_profile_observations_from_acquisition(
+def running_attachment_observations_from_acquisition(
     acquisition: PlayerSaveAcquisitionBundle,
-) -> Optional[dict[str, Any]]:
+    *,
+    context: PlayerSaveAttachmentContext,
+    active_round_identity_fingerprint: str,
+) -> Optional[RunningAttachmentSaveObservations]:
     """Project only complete, allowlisted configuration observations.
 
     This is an observation projection, not a requirement reconciliation.  It is
@@ -218,6 +224,17 @@ def validated_profile_observations_from_acquisition(
 
     if not isinstance(acquisition, PlayerSaveAcquisitionBundle):
         raise TypeError("profile projection requires a typed acquisition")
+    if (
+        acquisition.acquisition_type
+        is not PlayerSaveAcquisitionType.FORCED_SERIALIZATION
+        or acquisition.binding is None
+        or acquisition.captured_at is None
+        or context.target != acquisition.binding.target
+        or context.target_generation != acquisition.binding.generation
+        or not context.valid_for(context.activity_scope_id)
+        or not str(active_round_identity_fingerprint or "").strip()
+    ):
+        return None
     snapshot = acquisition.snapshot
     if not acquisition.complete or snapshot is None:
         return None
@@ -225,7 +242,7 @@ def validated_profile_observations_from_acquisition(
     mapping_maturity = str(
         getattr(snapshot, "mapping_maturity", None) or ""
     ).strip()
-    captured_at = str(getattr(snapshot, "captured_at", None) or "").strip()
+    captured_at = acquisition.captured_at.isoformat()
     checks = getattr(snapshot, "checks", None)
     validated = {
         str(check_id)
@@ -239,7 +256,7 @@ def validated_profile_observations_from_acquisition(
     ):
         return None
 
-    projected: dict[str, Any] = {}
+    projected: list[RunningAttachmentSaveFact] = []
     for check_id, evidence in checks.items():
         normalized_id = str(check_id)
         if mapping_maturity != "validated" and normalized_id not in validated:
@@ -249,24 +266,33 @@ def validated_profile_observations_from_acquisition(
             or getattr(evidence, "complete", None) is not True
         ):
             continue
-        projected[normalized_id] = {
-            "value": deepcopy(getattr(evidence, "value", None)),
-            "source_fields": [
-                str(value)
-                for value in getattr(evidence, "source_fields", ()) or ()
-            ],
-        }
+        projected.append(
+            RunningAttachmentSaveFact(
+                check_id=normalized_id,
+                temporal_class=attachment_temporal_class(normalized_id),
+                value=deepcopy(getattr(evidence, "value", None)),
+                source_fields=tuple(
+                    str(value)
+                    for value in getattr(evidence, "source_fields", ()) or ()
+                ),
+            )
+        )
     if not projected:
         return None
-    return {
-        "schema_version": 1,
-        "source": "guarded_active_attachment_player_save",
-        "acquisition": acquisition.redacted_provenance(),
-        "mapping_id": mapping_id,
-        "mapping_maturity": mapping_maturity,
-        "captured_at": captured_at,
-        "checks": projected,
-    }
+    return RunningAttachmentSaveObservations(
+        binding=RunningAttachmentTemporalBinding(
+            runtime_session_id=context.runtime_session_id,
+            source_activity_scope_id=context.activity_scope_id,
+            target_binding=acquisition.binding,
+            mapping_id=mapping_id,
+            active_round_identity_fingerprint=(
+                active_round_identity_fingerprint
+            ),
+            captured_at=captured_at,
+            acquisition_type=acquisition.acquisition_type,
+        ),
+        facts=tuple(projected),
+    )
 
 
 def ui_history_bridge_eligible(metadata: Mapping[str, Any]) -> bool:
@@ -529,18 +555,23 @@ class PlayerSaveHistoryReader:
                 acquisition=acquisition,
             )
         try:
-            profile_observations = validated_profile_observations_from_acquisition(
-                acquisition
+            attachment_observations = (
+                running_attachment_observations_from_acquisition(
+                    acquisition,
+                    context=context,
+                    active_round_identity_fingerprint=(
+                        active_identity.fingerprint
+                    ),
+                )
             )
         except Exception:
-            profile_observations = None
+            attachment_observations = None
         return PlayerSaveHistoryReadResult(
             observed.status,
             observed.reason,
             metadata=observed.metadata,
             safe_ui_fallback=observed.safe_ui_fallback,
-            active_round_identity_fingerprint=active_identity.fingerprint,
-            validated_profile_observations=profile_observations,
+            running_attachment_observations=attachment_observations,
             acquisition=acquisition,
         )
 
@@ -778,6 +809,6 @@ __all__ = [
     "history_metadata_from_acquisition",
     "history_sources_compatible",
     "ui_history_bridge_eligible",
-    "validated_profile_observations_from_acquisition",
+    "running_attachment_observations_from_acquisition",
     "valid_history_tail_advance",
 ]

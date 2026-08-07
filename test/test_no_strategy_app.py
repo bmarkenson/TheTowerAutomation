@@ -12,7 +12,11 @@ from core.no_strategy_inventory import (
 )
 from core.no_strategy_observer import NoStrategyRunObserver
 from core.no_strategy_post_run import NoStrategyPostRunPaused
+from core.player_save_history import PlayerSaveAttachmentContext
 from core.run_state import AUTOMATION, ExecMode
+from test.player_save_temporal_fixtures import (
+    running_attachment_observations,
+)
 
 
 def _app_without_strategy():
@@ -381,17 +385,22 @@ def test_activity_continuity_applies_guarded_save_to_no_strategy_observer():
     app._no_strategy_observer = NoStrategyRunObserver()
     app._no_strategy_observation_active = True
     app._exclusive_validation_ownership_hold = False
-    observations = {
-        "schema_version": 1,
-        "source": "guarded_active_attachment_player_save",
-        "mapping_id": "data-9-game-1073",
-        "captured_at": "2026-08-06T23:31:05+00:00",
-        "checks": {"cards_deck": {"value": "Farm"}},
-    }
+    observations = running_attachment_observations(
+        {"cards_deck": {"value": "Farm"}}
+    )
+    app._current_player_save_attachment_context = lambda: (
+        PlayerSaveAttachmentContext(
+            runtime_session_id="runtime-1",
+            activity_scope_id="scope-1",
+            target="private-target",
+            target_generation=3,
+            active_battle_observed=True,
+        )
+    )
 
     with patch("core.app.log") as logged:
         app._apply_activity_continuity_outcome(
-            SimpleNamespace(validated_profile_observations=observations)
+            SimpleNamespace(running_attachment_observations=observations)
         )
 
     cards = app._no_strategy_observer.snapshot()["fields"]["cards_deck"]
