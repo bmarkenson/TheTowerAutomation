@@ -68,6 +68,15 @@ Completed and superseded detail remains in the
   spending safeguards.
 ## Capture and action architecture
 
+- [ ] Reduce Home Auto Pick order repair's repeated full-list scans while
+  preserving fresh row-level action authority.
+  - Capture and parse the ranked order once, skip already-correct keys without
+    returning to the top, and update or recapture the semantic order only after
+    a verified mutation, viewport loss, or OCR ambiguity.
+  - Preserve bounded confirmed-edge traversal, local moved-row reacquisition,
+    per-tap fresh-row verification, and one authoritative final 17-rank
+    read-back. The live `ISSUE-2026-031` confirmation proved correctness but
+    spent about seven minutes repeatedly re-anchoring and rescanning.
 - [ ] Build and validate an app-owned low-latency frame/state source for
   multi-frame decisions and short-lived action authorization.
   - Define sequence, capture-time, freshness, and post-input frame semantics.

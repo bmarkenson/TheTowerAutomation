@@ -55,6 +55,19 @@ canonical document linked by an entry for current behavior.
   tests, and complete isolated checkpoint passed; the checkpoint compiled the
   repository, passed maintained validators, and ran all 1,686 tests in 319.51
   seconds. `ISSUE-2026-031` records the diagnosis and production confirmation.
+- Exact integration candidate `a8483f4` passed another complete 1,686-test
+  checkpoint in 321.90 seconds and was promoted behind rollback tag
+  `production-before-20260807T071511Z-538d4e2`. Replacement PID `292872`
+  retained Farm T19, x2.0, and the original pending gate; its scoped retry
+  repaired and authoritatively verified all 17 Auto Pick ranks without a
+  waiver. The full Farm configuration then passed, Battle started, and steady
+  state was confirmed at waves 200, 240, and 290 at x2.0 with no Strategy
+  Action Gate. The expected boss-live Orb Distance path closed its greyed
+  controls, waited for combat to advance, then completed at 30.00m.
+- The successful repair also exposed a performance follow-up: it repeatedly
+  returned to a confirmed top and rescanned the list for already-correct later
+  ranks. That bounded but slow traversal is routed to the state/action backlog
+  with its row-authority and final-read-back safeguards intact.
 
 ### 2026-08-06 Ban Perks Selected/Available boundary repair
 
