@@ -61,6 +61,16 @@ canonical document linked by an entry for current behavior.
   and clickmap validators with zero errors and the 44 established orphan
   candidates, and ran all 1,689 tests in 329.33 seconds. No process or device
   interaction was used for this repository change.
+- Exact integration candidate `dd3a0fa` repeated compilation and both
+  maintained validators with zero errors and the same 44 established orphan
+  candidates, then passed all 1,703 tests in 328.22 seconds. It was promoted
+  behind rollback tag `production-before-20260807T171220Z-9db59e1` after PID
+  `425009` stopped cleanly. Replacement PID `1027338` acquired the held
+  `localhost:5555` lock, acknowledged `PAUSED` with `HOME`, `farm_t18`, and
+  x6.3 retained, and attached to the existing battle. After guarded Resume,
+  its continuity check confirmed the latest completed battle was unchanged;
+  a fresh unpaused observation then reported normal `RUNNING` operation at
+  wave 9393 with no Strategy Action Gate. No Surrender was used.
 
 ### 2026-08-07 Utility Dissonance subtype deployment and confirmation
 
