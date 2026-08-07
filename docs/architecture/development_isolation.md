@@ -474,16 +474,17 @@ Implementation proceeds in small reviewable steps:
    heartbeat expiry,
    runtime/target/battle boundaries, stale and near-expiry rejection, one
    bounded input, and fresh-observation release cleanup.
-6. **Perform bounded live validation.** After accepting the combined boundary,
-   the operator may explicitly authorize the outcome coordinator to schedule
-   one separately inspected cooperative lease, verify Pause precedence and
-   expiry, and confirm clean return to production. Add Home or owned-battle
-   behavior only in response to a concrete development need.
+6. **Completed: perform bounded live validation.** With explicit operator
+   authorization, the outcome coordinator separately inspected production,
+   exercised acknowledged expiry, one lease-aware exact-target no-op input,
+   Pause revocation, and explicit release, and confirmed clean return to
+   production. The evidence is recorded in the
+   [bounded live coordination completion](../modules/completed_tasks_log.md#2026-08-06-bounded-live-productiondevelopment-coordination-validation).
 
-Do not implement a later step merely to make the current step look complete.
-Repository-local tests use fakes and retained or copied production frames;
-live validation remains a separately inspected, operator-authorized outcome
-coordinator action.
+All six delivery steps are complete. Repository-local tests continue to use
+fakes and retained or copied production frames. Home queues, owned-battle
+behavior, or later live validation remain separate work that requires a
+concrete need and explicit operator authorization.
 
 ## Regression expectations
 
