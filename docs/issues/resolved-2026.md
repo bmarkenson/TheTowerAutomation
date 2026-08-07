@@ -8,6 +8,44 @@ and actionable work lives in
 
 ## Resolved issues
 
+### One ignored swipe truncated Auto Pick traversal before the real edge
+
+**Stable ID:** `ISSUE-2026-031` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-06 during the queued Tier 19 Farm retry that
+  followed the Ban Perks Selected/Available repair.
+- **Symptom:** Auto Pick repair made verified ordering progress, then captured
+  only 6–8 of 17 ranked perks and failed closed with inconsistent boundary
+  errors: a row had reached the top before its predecessor, a lower row
+  appeared above its target rank, or `Free Upgrade Chance` was not exposed.
+  Each failure followed a single successful ADB swipe dispatch whose settled
+  frame did not move.
+- **Safety response:** Every attempt stopped before Battle input. Diagnosis
+  reproduced the condition after a clean runtime restart, used only bounded
+  interactive-development leases for device inspection, closed the Perks
+  panel, and restored an agent-owned Pause at Tier 19 Home.
+- **Cause:** The shared scrolling primitives and four bespoke Perk/Auto Pick
+  traversal loops treated one low-difference post-swipe frame as a real edge.
+  A swipe can be accepted by ADB while the game ignores it, so one unchanged
+  frame was not sufficient boundary evidence.
+- **Resolution:** The three shared scrolling operations now require two
+  consecutive stable post-swipe frames before inferring an edge, reset that
+  confirmation on any movement, and preserve caller-proven boundary and action
+  guard semantics. Perk page capture, ranked Auto Pick capture, key location,
+  and local upward reacquisition now use the shared capture traversal instead
+  of maintaining single-frame edge loops.
+- **Regression:** Shared-helper tests cover an ignored swipe before later
+  movement for edge traversal, capture traversal, and target search. Auto Pick
+  tests reproduce the same ignored next/previous swipe during ranked capture,
+  key location, and local reacquisition. The 29 focused and 148 adjacent tests
+  passed.
+- **Validation:** The complete isolated checkpoint passed compilation, state
+  definitions, clickmap integrity with zero errors and the 44 established
+  orphan candidates, and all 1,686 tests in 319.51 seconds.
+- **Production confirmation:** Pending exact-candidate promotion and the
+  authorized Tier 19 Farm retry.
+- **Fixed by:** `6837c18`.
+
 ### Ban Perks verification treated Available rows as selected bans
 
 **Stable ID:** `ISSUE-2026-030` · **Lifecycle:** `resolved`
