@@ -31,6 +31,14 @@ from core.control_directives import (
     MAXIMUM_GAME_SPEED_TARGET,
     normalize_automation_mode,
 )
+from core.control_model import (
+    BATTLE_WORKFLOW_TERMINAL_STATUSES,
+    MANUAL_CONTROL_TERMINAL_STATUSES,
+    validate_battle_workflow,
+    validate_manual_control,
+    validate_observation,
+    workflow_evidence_from_authority,
+)
 from core.gate_decisions import startup_gate_context_for_strategy
 from core.exclusive_validation import (
     exclusive_validation_definition_for_strategy,
@@ -56,12 +64,11 @@ MAX_PAUSE_MINUTES = 7 * 24 * 60
 DEFAULT_STALE_AFTER_SECONDS = 180
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 27
+CONTROL_SURFACE_REVISION = 28
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
     "advisory_preflight_decisions",
-    "attached_automation_restart",
-    "automatic_battle_attachment",
+    "better_control_model_v1",
     "completed_battle_discard",
     "current_run_activity_scope",
     "exclusive_strategy_validation_status",
@@ -125,11 +132,13 @@ _STATUS_SUMMARY_RE = re.compile(
 )
 _STATUS_DETAIL_PREFIX = "[STATUS_DETAIL] "
 _STATE_ACK_RE = re.compile(
-    r"^\[CTRL] State set to (?P<value>RUNNING|PAUSED|STOPPED) via control file$"
+    r"^\[CTRL] State set to (?P<value>RUNNING|PAUSED|STOPPED) via control file"
+    r"(?: request_id=(?P<request_id>[A-Za-z0-9._:-]{1,128}))?$"
 )
 _MODE_ACK_RE = re.compile(
     r"^\[CTRL] Mode set to (?P<value>NEXT_BATTLE|RETRY|WAIT|HOME) "
-    r"via control file$"
+    r"via control file"
+    r"(?: request_id=(?P<request_id>[A-Za-z0-9._:-]{1,128}))?$"
 )
 _GAME_SPEED_TARGET_ACK_RE = re.compile(
     r"^\[CTRL] Game speed target set to "
@@ -578,7 +587,10 @@ class ControlSurfaceService:
                 "resume_at": None,
                 "remaining_seconds": None,
                 "updated_at": None,
+                "state_updated_at": None,
                 "state_request_id": None,
+                "mode_updated_at": None,
+                "mode_request_id": None,
                 "adb_port_updated_at": None,
                 "strategy": None,
                 "strategy_apply_mode": "next_boundary",
@@ -593,6 +605,10 @@ class ControlSurfaceService:
                 },
                 "interactive_development_lease": None,
                 "interactive_development_lease_error": None,
+                "battle_workflow": None,
+                "battle_workflow_error": None,
+                "manual_control": None,
+                "manual_control_error": None,
                 "exists": self.control_path.exists(),
             }
         control["path"] = self._display_path(self.control_path)
@@ -639,6 +655,14 @@ class ControlSurfaceService:
         )
         healthy = bool(runtime["active"] and observation and not observation["stale"])
         current_run = self._load_activity_scope()
+        control_model = self._better_control_model_status(
+            control=control,
+            acknowledgements=acknowledgements,
+            runtime=runtime,
+            process_service=process_service,
+            runtime_authority=strategy_action_gate,
+            now=current_time,
+        )
 
         return {
             "api_version": 1,
@@ -662,6 +686,7 @@ class ControlSurfaceService:
             ),
             "strategy_action_gate": strategy_action_gate,
             "interactive_development_lease": interactive_development_lease,
+            "control_model": control_model,
             "runtime": runtime,
             "process_service": process_service,
             "adb_connection": adb_connection,
@@ -912,9 +937,124 @@ class ControlSurfaceService:
     ) -> dict[str, Any]:
         """Apply a control mutation outside any process replacement window."""
 
-        action = str(request.get("action") or "").strip().lower()
+        requested_action = str(request.get("action") or "").strip().lower()
+        # Retain the pre-revision-28 API name for non-GUI coordination
+        # consumers. New clients present this authority transition as Enable.
+        action = "enable" if requested_action == "resume" else requested_action
+        disposition = "requested"
         try:
-            if action == "pause":
+            if action in {"start_battle", "attach_battle"}:
+                current = self.status()
+                availability = (
+                    current.get("control_model", {})
+                    .get("actions", {})
+                    .get(action, {})
+                )
+                if availability.get("available") is not True:
+                    raise ControlSurfaceRequestError(
+                        str(availability.get("reason") or "workflow unavailable"),
+                        status=409,
+                        code=str(availability.get("code") or "unavailable"),
+                        details={
+                            "action": action,
+                            "observation": current.get("control_model", {}).get(
+                                "observation"
+                            ),
+                        },
+                    )
+                evidence = current.get("control_model", {}).get(
+                    "workflow_evidence"
+                )
+                workflow = self.control_store.request_battle_workflow(
+                    action,
+                    evidence=evidence,
+                    strategy=(
+                        current.get("control_model", {})
+                        .get("strategy_scope", {})
+                        .get("startup_default")
+                        if action == "start_battle"
+                        else None
+                    ),
+                    source="control-surface",
+                )
+                audit = (
+                    "Requested explicit Start Battle intent"
+                    if action == "start_battle"
+                    else "Requested explicit Attach to Battle intent"
+                )
+            elif action == "take_manual_control":
+                current = self.status()
+                availability = (
+                    current.get("control_model", {})
+                    .get("actions", {})
+                    .get(action, {})
+                )
+                if availability.get("available") is not True:
+                    if availability.get("code") == "manual_control_active":
+                        disposition = "no_op"
+                        audit = "Manual control is already requested or active"
+                    else:
+                        raise ControlSurfaceRequestError(
+                            str(availability.get("reason") or "workflow unavailable"),
+                            status=409,
+                            code=str(availability.get("code") or "unavailable"),
+                        )
+                else:
+                    manual_control = self.control_store.request_manual_control(
+                        evidence=current["control_model"]["workflow_evidence"],
+                        source="control-surface",
+                    )
+                    audit = (
+                        "Requested Take Manual Control with an indefinite Pause"
+                    )
+            elif action == "return_control":
+                current = self.status()
+                availability = (
+                    current.get("control_model", {})
+                    .get("actions", {})
+                    .get(action, {})
+                )
+                manual = current.get("control_model", {}).get("manual_control")
+                if availability.get("available") is not True:
+                    raise ControlSurfaceRequestError(
+                        str(availability.get("reason") or "workflow unavailable"),
+                        status=409,
+                        code=str(availability.get("code") or "unavailable"),
+                    )
+                manual_control = self.control_store.request_return_control(
+                    str(manual.get("manual_control_id") or ""),
+                    evidence=current["control_model"]["workflow_evidence"],
+                    source="control-surface",
+                )
+                audit = (
+                    "Requested Return Control reconciliation; automation remains Paused"
+                )
+            elif action == "pause":
+                current = self.status()
+                availability = (
+                    current.get("control_model", {})
+                    .get("actions", {})
+                    .get("pause", {})
+                )
+                if availability.get("available") is not True:
+                    raise ControlSurfaceRequestError(
+                        str(availability.get("reason") or "Pause is unavailable"),
+                        status=409,
+                        code=str(availability.get("code") or "unavailable"),
+                    )
+                active_manual = current.get("control_model", {}).get(
+                    "manual_control"
+                )
+                if (
+                    isinstance(active_manual, Mapping)
+                    and active_manual.get("status")
+                    not in MANUAL_CONTROL_TERMINAL_STATUSES
+                ):
+                    raise ControlSurfaceRequestError(
+                        "Take/Return Control owns the indefinite Pause",
+                        status=409,
+                        code="manual_control_active",
+                    )
                 minutes = request.get("minutes")
                 resume_at = None
                 description = "indefinitely"
@@ -938,25 +1078,168 @@ class ControlSurfaceService:
                         )
                     resume_at = datetime.now().timestamp() + (parsed_minutes * 60)
                     description = f"for {parsed_minutes:g} minutes"
-                self.control_store.set_state(
-                    "PAUSED",
-                    resume_at=resume_at,
-                    source="control-surface",
+                if (
+                    minutes is None
+                    and current["control"].get("state") == "PAUSED"
+                    and current["control"].get("resume_at") is None
+                ):
+                    state_ack = current.get("acknowledgements", {}).get("state")
+                    if (
+                        isinstance(state_ack, Mapping)
+                        and state_ack.get("acknowledges_current") is True
+                    ):
+                        disposition = "no_op"
+                        audit = "Automation is already indefinitely Paused"
+                    else:
+                        disposition = "pending"
+                        audit = "Automation Pause is awaiting runtime acknowledgement"
+                else:
+                    self.control_store.set_state(
+                        "PAUSED",
+                        resume_at=resume_at,
+                        source="control-surface",
+                    )
+                    audit = f"Requested PAUSED {description}"
+            elif action == "enable":
+                current = self.status()
+                availability = (
+                    current.get("control_model", {})
+                    .get("actions", {})
+                    .get("enable", {})
                 )
-                audit = f"Requested PAUSED {description}"
-            elif action == "resume":
-                self.control_store.set_state("RUNNING", source="control-surface")
-                audit = "Requested RUNNING"
+                if availability.get("available") is not True:
+                    raise ControlSurfaceRequestError(
+                        str(
+                            availability.get("reason")
+                            or "Automation Enable is unavailable"
+                        ),
+                        status=409,
+                        code=str(availability.get("code") or "unavailable"),
+                    )
+                manual_error = current.get("control", {}).get(
+                    "manual_control_error"
+                )
+                if manual_error:
+                    raise ControlSurfaceRequestError(
+                        str(manual_error),
+                        status=409,
+                        code="manual_control_invalid",
+                    )
+                manual = current.get("control_model", {}).get("manual_control")
+                if (
+                    isinstance(manual, Mapping)
+                    and manual.get("status")
+                    not in MANUAL_CONTROL_TERMINAL_STATUSES
+                ):
+                    if manual.get("status") not in {
+                        "return_requested",
+                        "awaiting_enable",
+                    }:
+                        raise ControlSurfaceRequestError(
+                            "Use Return Control before enabling automated actions",
+                            status=409,
+                            code="return_control_required",
+                        )
+                    if manual.get("status") == "awaiting_enable":
+                        disposition = "pending"
+                        manual_control = dict(manual)
+                        audit = "Automation Enable is already pending acknowledgement"
+                    else:
+                        manual_control = (
+                            self.control_store.enable_after_return_control(
+                                str(manual.get("manual_control_id") or ""),
+                                source="control-surface",
+                            )
+                        )
+                        audit = (
+                            "Requested Automation Enabled; Return Control must "
+                            "refresh save evidence before ordinary input"
+                        )
+                else:
+                    state_ack = current.get("acknowledgements", {}).get("state")
+                    if current["control"].get("state") == "RUNNING":
+                        if (
+                            isinstance(state_ack, Mapping)
+                            and state_ack.get("acknowledges_current") is True
+                        ):
+                            disposition = "no_op"
+                            audit = "Automation actions are already Enabled"
+                        else:
+                            disposition = "pending"
+                            audit = (
+                                "Automation Enable is awaiting runtime "
+                                "acknowledgement"
+                            )
+                    else:
+                        self.control_store.set_state(
+                            "RUNNING", source="control-surface"
+                        )
+                        audit = "Requested Automation Enabled"
             elif action == "stop":
-                self.control_store.set_state("STOPPED", source="control-surface")
-                audit = "Requested STOPPED"
-            elif action == "mode":
-                mode = str(request.get("mode") or "").strip().upper()
-                saved = self.control_store.set_mode(
-                    mode,
-                    source="control-surface",
+                current = self.status()
+                state_ack = current.get("acknowledgements", {}).get("state")
+                if (
+                    current["control"].get("state") == "STOPPED"
+                    and isinstance(state_ack, Mapping)
+                    and state_ack.get("acknowledges_current") is True
+                ):
+                    disposition = "no_op"
+                    audit = "Automation input is already STOPPED"
+                else:
+                    self.control_store.interrupt_operator_workflows(
+                        "legacy STOPPED authority directive requested",
+                        source="control-surface",
+                    )
+                    self.control_store.set_state(
+                        "STOPPED", source="control-surface"
+                    )
+                    audit = (
+                        "Requested legacy STOPPED authority directive; process "
+                        "lifecycle is unchanged"
+                    )
+            elif action in {"terminal_policy", "mode"}:
+                raw_policy = request.get(
+                    "policy" if action == "terminal_policy" else "mode"
                 )
-                audit = f"Requested mode {saved['mode']}"
+                policy_aliases = {
+                    "continue_automatically": "NEXT_BATTLE",
+                    "next_battle": "NEXT_BATTLE",
+                    "wait": "WAIT",
+                    "return_or_stay_home": "HOME",
+                    "stay_home": "HOME",
+                    "home": "HOME",
+                }
+                raw_text = str(raw_policy or "").strip()
+                mode = policy_aliases.get(raw_text.lower(), raw_text.upper())
+                current = self.status()
+                mode_ack = current.get("acknowledgements", {}).get("mode")
+                normalized_mode = normalize_automation_mode(mode)
+                process_live = bool(
+                    current.get("control_model", {})
+                    .get("process", {})
+                    .get("live")
+                )
+                if (
+                    current["control"].get("exists") is True
+                    and current["control"].get("mode") == normalized_mode
+                ):
+                    if (
+                        not process_live
+                        or (
+                            isinstance(mode_ack, Mapping)
+                            and mode_ack.get("acknowledges_current") is True
+                        )
+                    ):
+                        disposition = "no_op"
+                    else:
+                        disposition = "pending"
+                    saved = current["control"]
+                else:
+                    saved = self.control_store.set_mode(
+                        mode,
+                        source="control-surface",
+                    )
+                audit = f"Set When this battle ends to {saved['mode']}"
             elif action == "game_speed":
                 game_speed_target = request.get("target")
                 saved = self.control_store.set_game_speed_target(
@@ -1018,7 +1301,7 @@ class ControlSurfaceService:
                         )
                     if current_status["control"].get("state") != "RUNNING":
                         raise ControlSurfaceRequestError(
-                            "Resume automation before starting Tournament",
+                            "Enable Automation before starting Tournament",
                             status=409,
                         )
                     if (
@@ -1099,8 +1382,10 @@ class ControlSurfaceService:
                 )
             else:
                 raise ControlSurfaceRequestError(
-                    "action must be pause, resume, stop, mode, game_speed, "
-                    "resolve_gate, resolve_tournament_launch, or configure_run"
+                    "action must be pause, enable, start_battle, attach_battle, "
+                    "take_manual_control, return_control, terminal_policy, "
+                    "game_speed, resolve_gate, resolve_tournament_launch, or "
+                    "configure_run (resume and stop remain compatibility aliases)"
                 )
         except ControlDirectiveError as exc:
             raise ControlSurfaceRequestError(str(exc), status=409) from exc
@@ -1111,7 +1396,30 @@ class ControlSurfaceService:
 
         audit_warning = self._append_audit(audit)
         response = self.status()
-        response["request"] = {"accepted": True, "action": action}
+        response["request"] = {"accepted": True, "action": requested_action}
+        if requested_action != action:
+            response["request"]["canonical_action"] = action
+        if action in {
+            "start_battle",
+            "attach_battle",
+            "take_manual_control",
+            "return_control",
+            "pause",
+            "enable",
+            "stop",
+            "terminal_policy",
+        } or disposition == "no_op":
+            response["request"]["disposition"] = disposition
+        if action in {"start_battle", "attach_battle"}:
+            response["request"]["request_id"] = workflow["request_id"]
+        elif action in {
+            "take_manual_control",
+            "return_control",
+            "enable",
+        } and "manual_control" in locals():
+            response["request"]["manual_control_id"] = manual_control[
+                "manual_control_id"
+            ]
         if action == "resolve_gate":
             response["request"]["request_id"] = directive["request_id"]
             response["request"]["decision_id"] = directive["decision_id"]
@@ -1157,11 +1465,19 @@ class ControlSurfaceService:
             )
 
         action = str(request.get("action") or "").strip().lower()
+        disposition = "completed"
         if action == "start":
-            requested_state = str(request.get("run_state") or "PAUSED").upper()
-            if requested_state not in {"PAUSED", "RUNNING"}:
+            obsolete = {
+                name
+                for name in ("run_state", "startup_gate_policy")
+                if name in request
+            }
+            if obsolete:
                 raise ControlSurfaceRequestError(
-                    "run_state must be PAUSED or RUNNING"
+                    "Start Automation no longer selects action authority or a "
+                    "battle workflow; remove " + ", ".join(sorted(obsolete)),
+                    status=409,
+                    code="obsolete_start_parameters",
                 )
             requested_strategy = None
             if "strategy" in request:
@@ -1192,30 +1508,11 @@ class ControlSurfaceService:
                     "strategy",
                     status=409,
                 )
-            requested_gate_policy = request.get(
-                "startup_gate_policy",
-                DEFAULT_STARTUP_GATE_POLICY,
-            )
-            if not isinstance(requested_gate_policy, str):
-                raise ControlSurfaceRequestError(
-                    "startup_gate_policy must be one of: "
-                    + ", ".join(STARTUP_GATE_POLICIES)
-                )
-            requested_gate_policy = requested_gate_policy.strip().lower()
-            if requested_gate_policy not in STARTUP_GATE_POLICIES:
-                raise ControlSurfaceRequestError(
-                    "startup_gate_policy must be one of: "
-                    + ", ".join(STARTUP_GATE_POLICIES)
-                )
-            if before.get("active") and (
-                before.get("startup_gate_policy") != requested_gate_policy
-            ):
-                raise ControlSurfaceRequestError(
-                    "Completely stop automation before changing startup gates",
-                    status=409,
-                )
+            requested_gate_policy = "operator"
             try:
-                if not before.get("active"):
+                if before.get("active"):
+                    disposition = "no_op"
+                else:
                     manager.set_startup_gate_policy(requested_gate_policy)
                     if requested_strategy is not None:
                         manager.set_strategy(requested_strategy)
@@ -1224,26 +1521,12 @@ class ControlSurfaceService:
                             apply_mode="next_boundary",
                             source="control-surface-process-start",
                         )
-                    else:
-                        effective_strategy = str(
-                            before.get("strategy") or ""
-                        ).strip().lower()
-                        if (
-                            self.profile_store.has_strategy(effective_strategy)
-                            and exclusive_validation_definition_for_strategy(
-                                effective_strategy
-                            )
-                            is not None
-                        ):
-                            # Pressing Start is an explicit authorization even
-                            # when a fallback client reuses the saved strategy.
-                            self.control_store.set_strategy(
-                                effective_strategy,
-                                apply_mode="next_boundary",
-                                source="control-surface-process-start",
-                            )
-                    # A new process always crosses its startup boundary paused.
-                    # RUNNING is persisted only after systemd proves it active.
+                    self.control_store.interrupt_operator_workflows(
+                        "a new automation process boundary started",
+                        source="control-surface-process-start",
+                    )
+                    # Process lifecycle and input authority are separate.  A
+                    # new process starts Paused and waits for explicit intent.
                     self.control_store.set_state(
                         "PAUSED", source="control-surface-process-start"
                     )
@@ -1253,10 +1536,6 @@ class ControlSurfaceService:
                             force=True,
                         )
                     manager.start()
-                self.control_store.set_state(
-                    requested_state,
-                    source="control-surface-process-start",
-                )
             except (
                 AutomationProcessError,
                 ControlDirectiveError,
@@ -1272,36 +1551,48 @@ class ControlSurfaceService:
                         pass
                 self._append_audit(f"Failed to start service: {exc}")
                 raise ControlSurfaceRequestError(str(exc), status=503) from exc
-            gate_description = requested_gate_policy
             audit = (
-                f"Started automation service with state {requested_state} "
-                f"and startup gates {gate_description}"
+                "Automation service is already live"
+                if disposition == "no_op"
+                else "Started automation service Paused for explicit battle intent"
             )
             if requested_strategy is not None:
                 audit += f" using selected strategy {requested_strategy}"
         elif action == "stop":
+            before = manager.status()
             try:
-                # Persist intent before systemd signals the process so any live
-                # loop that observes the transition stops dispatching actions.
-                self.control_store.set_state(
-                    "STOPPED", source="control-surface-process-stop"
-                )
-                stopped = manager.stop()
-                if self.adb_connection_manager is not None:
-                    self.adb_connection_manager.ensure_target(
-                        stopped.get("adb_target"),
-                        force=True,
+                if not before.get("active"):
+                    disposition = "no_op"
+                else:
+                    # Persist intent before systemd signals the process so any live
+                    # loop that observes the transition stops dispatching actions.
+                    self.control_store.interrupt_operator_workflows(
+                        "automation process stopped",
+                        source="control-surface-process-stop",
                     )
+                    self.control_store.set_state(
+                        "STOPPED", source="control-surface-process-stop"
+                    )
+                    stopped = manager.stop()
+                    if self.adb_connection_manager is not None:
+                        self.adb_connection_manager.ensure_target(
+                            stopped.get("adb_target"),
+                            force=True,
+                        )
             except (AutomationProcessError, ControlDirectiveError) as exc:
                 self._append_audit(f"Failed to stop service cleanly: {exc}")
                 raise ControlSurfaceRequestError(str(exc), status=503) from exc
-            audit = "Stopped automation service"
-        elif action == "restart_attached":
-            restart = self._restart_attached_automation(manager)
             audit = (
-                "Reloaded automation for the active battle "
-                f"(PID {restart['previous_pid']} -> {restart['replacement_pid']}); "
-                f"restored {restart['restored_state']}"
+                "Automation service is already stopped"
+                if disposition == "no_op"
+                else "Stopped automation service"
+            )
+        elif action == "restart_attached":
+            raise ControlSurfaceRequestError(
+                "Attached restart is no longer an implicit workflow; Stop and "
+                "Start Automation, then use explicit Attach to Battle",
+                status=409,
+                code="explicit_attach_required",
             )
         elif action in {"set_adb_port", "set_strategy"}:
             runtime_active = self._runtime_evidence()["active"]
@@ -1403,15 +1694,22 @@ class ControlSurfaceService:
                     audit = f"Configured next-start strategy {strategy}"
         else:
             raise ControlSurfaceRequestError(
-                "action must be start, stop, restart_attached, set_adb_port, "
-                "or set_strategy"
+                "action must be start, stop, set_adb_port, or set_strategy"
             )
 
         audit_warning = self._append_audit(audit)
         response = self.status()
         response["request"] = {"accepted": True, "action": action}
+        if action in {"start", "stop"} or disposition == "no_op":
+            response["request"]["disposition"] = disposition
         if action == "start":
-            response["request"]["startup_gate_policy"] = requested_gate_policy
+            response["request"]["action_authority"] = (
+                response.get("control_model", {})
+                .get("action_authority", {})
+                .get("effective", "unknown")
+                if disposition == "no_op"
+                else "paused"
+            )
         if action == "start" and requested_strategy is not None:
             response["request"]["strategy"] = requested_strategy
         elif action == "restart_attached":
@@ -1629,13 +1927,23 @@ class ControlSurfaceService:
             process = status.get("process_service") or {}
             runtime = status.get("runtime") or {}
             observation = status.get("observation") or {}
+            expected_state_request_id = status.get("control", {}).get(
+                "state_request_id"
+            )
             appended = _lines_from_offset(self.action_log, log_offset)
             parsed = [entry for line in appended if (entry := _parse_log_line(line))]
             pause_indices = [
                 index
                 for index, entry in enumerate(parsed)
-                if _STATE_ACK_RE.fullmatch(entry["message"])
-                and entry["message"].endswith("PAUSED via control file")
+                if (
+                    (match := _STATE_ACK_RE.fullmatch(entry["message"]))
+                    and match.group("value") == "PAUSED"
+                    and (
+                        expected_state_request_id is None
+                        or match.group("request_id")
+                        == expected_state_request_id
+                    )
+                )
             ]
             pause_consumed = bool(pause_indices)
             fresh_status = bool(
@@ -1687,6 +1995,9 @@ class ControlSurfaceService:
             status = self.status()
             process = status.get("process_service") or {}
             runtime = status.get("runtime") or {}
+            expected_state_request_id = status.get("control", {}).get(
+                "state_request_id"
+            )
             appended = _lines_from_offset(self.action_log, log_offset)
             parsed = [entry for line in appended if (entry := _parse_log_line(line))]
             matching_owner = any(
@@ -1701,8 +2012,15 @@ class ControlSurfaceService:
             pause_indices = [
                 index
                 for index, entry in enumerate(parsed)
-                if _STATE_ACK_RE.fullmatch(entry["message"])
-                and entry["message"].endswith("PAUSED via control file")
+                if (
+                    (match := _STATE_ACK_RE.fullmatch(entry["message"]))
+                    and match.group("value") == "PAUSED"
+                    and (
+                        expected_state_request_id is None
+                        or match.group("request_id")
+                        == expected_state_request_id
+                    )
+                )
                 and policy_indices
                 and index > policy_indices[-1]
             ]
@@ -2222,6 +2540,8 @@ class ControlSurfaceService:
                     match.group("value"),
                     control.get("state"),
                     state_updated_at or legacy_updated_at,
+                    acknowledged_request_id=match.group("request_id"),
+                    expected_request_id=control.get("state_request_id"),
                 )
             if mode_ack is None and (match := _MODE_ACK_RE.fullmatch(entry["message"])):
                 mode_value = normalize_automation_mode(match.group("value"))
@@ -2230,6 +2550,8 @@ class ControlSurfaceService:
                     mode_value,
                     control.get("mode"),
                     mode_updated_at or legacy_updated_at,
+                    acknowledged_request_id=match.group("request_id"),
+                    expected_request_id=control.get("mode_request_id"),
                 )
             if game_speed_target_ack is None and (
                 match := _GAME_SPEED_TARGET_ACK_RE.fullmatch(entry["message"])
@@ -2352,6 +2674,7 @@ class ControlSurfaceService:
                 },
                 "auxiliary_route": None,
                 "interactive_development_lease": None,
+                "control_model": None,
                 "path": self._display_path(self.strategy_action_gate_path),
             }
             if error:
@@ -2453,6 +2776,26 @@ class ControlSurfaceService:
                 payload.get("interactive_development_lease")
             )
         )
+        runtime_control_model = payload.get("control_model")
+        if not (
+            isinstance(runtime_control_model, Mapping)
+            and runtime_control_model.get("schema_version") == 1
+            and (
+                runtime_control_model.get("observation") is None
+                or validate_observation(
+                    runtime_control_model.get("observation")
+                )
+                is not None
+            )
+        ):
+            runtime_control_model = None
+        elif runtime_control_model.get("observation") is not None:
+            runtime_control_model = {
+                **dict(runtime_control_model),
+                "observation": validate_observation(
+                    runtime_control_model.get("observation")
+                ),
+            }
         return {
             "schema_version": 1,
             "available": True,
@@ -2520,6 +2863,11 @@ class ControlSurfaceService:
                 else None
             ),
             "interactive_development_lease": interactive_development_lease,
+            "control_model": (
+                dict(runtime_control_model)
+                if isinstance(runtime_control_model, Mapping)
+                else None
+            ),
             "path": self._display_path(self.strategy_action_gate_path),
         }
 
@@ -2730,6 +3078,496 @@ class ControlSurfaceService:
             "external_hold_installed": external_hold_installed,
             "active": active,
             "reason": reason,
+        }
+
+    def _better_control_model_status(
+        self,
+        *,
+        control: Mapping[str, Any],
+        acknowledgements: Mapping[str, Any],
+        runtime: Mapping[str, Any],
+        process_service: Optional[Mapping[str, Any]],
+        runtime_authority: Mapping[str, Any],
+        now: float,
+    ) -> dict[str, Any]:
+        """Project the five independent operator-control dimensions."""
+
+        process = (
+            process_service if isinstance(process_service, Mapping) else {}
+        )
+        process_live = bool(runtime.get("active") or process.get("active"))
+        process_available = bool(
+            runtime.get("active")
+            or not process
+            or process.get("available") is True
+        )
+        if process_live:
+            process_state = "live"
+        elif process_available:
+            process_state = "stopped"
+        else:
+            process_state = "unavailable"
+
+        state_request = str(control.get("state") or "UNKNOWN").upper()
+        state_ack = acknowledgements.get("state")
+        state_ack_current = bool(
+            isinstance(state_ack, Mapping)
+            and state_ack.get("acknowledges_current") is True
+        )
+        if not process_live:
+            effective_authority = "unavailable"
+        elif runtime_authority.get("stale") is True:
+            effective_authority = "unknown"
+        elif runtime_authority.get("global_pause") is True:
+            effective_authority = "paused"
+        elif state_request == "RUNNING" and state_ack_current:
+            effective_authority = "enabled"
+        elif state_request == "STOPPED" and state_ack_current:
+            effective_authority = "stopped"
+        else:
+            effective_authority = "pending"
+
+        control_error = str(control.get("error") or "")
+        evidence = workflow_evidence_from_authority(runtime_authority)
+        runtime_observation = None
+        runtime_lifecycle: Mapping[str, Any] = {}
+        runtime_model = runtime_authority.get("control_model")
+        if isinstance(runtime_model, Mapping):
+            runtime_observation = validate_observation(
+                runtime_model.get("observation")
+            )
+            raw_lifecycle = runtime_model.get("battle_lifecycle")
+            if isinstance(raw_lifecycle, Mapping):
+                runtime_lifecycle = raw_lifecycle
+        observation_age_seconds: Optional[int] = None
+        if runtime_observation is not None:
+            observed_at = _parse_timestamp(runtime_observation.get("observed_at"))
+            if observed_at is None:
+                evidence = None
+            else:
+                observation_age_seconds = max(
+                    0,
+                    int(float(now) - observed_at.timestamp()),
+                )
+                if observation_age_seconds > self.stale_after_seconds:
+                    evidence = None
+        if evidence is not None:
+            observation = {
+                **runtime_observation,
+                "freshness": "fresh",
+                "available": True,
+                "reason": "fresh exact runtime-owned observation",
+                "age_seconds": observation_age_seconds,
+            }
+        else:
+            nested_observation_stale = bool(
+                runtime_observation is not None
+                and observation_age_seconds is not None
+                and observation_age_seconds > self.stale_after_seconds
+            )
+            observation = {
+                **(runtime_observation or {}),
+                "game_state": (
+                    (runtime_observation or {}).get("game_state") or "unknown"
+                ),
+                "freshness": (
+                    "stale"
+                    if runtime_authority.get("available") is True
+                    else "unavailable"
+                ),
+                "available": False,
+                "age_seconds": observation_age_seconds,
+                "reason": (
+                    "runtime observation is stale even though the authority "
+                    "heartbeat is current"
+                    if nested_observation_stale
+                    else str(
+                        runtime_authority.get("reason")
+                        or "fresh exact runtime observation is unavailable"
+                    )
+                ),
+            }
+
+        workflow = validate_battle_workflow(control.get("battle_workflow"))
+        manual = validate_manual_control(control.get("manual_control"))
+        workflow_error = str(control.get("battle_workflow_error") or "")
+        manual_error = str(control.get("manual_control_error") or "")
+        workflow_busy = bool(
+            workflow is not None
+            and workflow.get("status") not in BATTLE_WORKFLOW_TERMINAL_STATUSES
+        )
+        manual_busy = bool(
+            manual is not None
+            and manual.get("status") not in MANUAL_CONTROL_TERMINAL_STATUSES
+        )
+
+        def action_availability(
+            action_key: str,
+            label: str,
+            allowed_states: set[str],
+        ) -> dict[str, Any]:
+            game_state = str(observation.get("game_state") or "unknown")
+            if control_error:
+                return {
+                    "available": False,
+                    "code": "control_invalid",
+                    "reason": control_error,
+                }
+            if not process_live:
+                return {
+                    "available": False,
+                    "code": "process_stopped",
+                    "reason": "Start Automation before requesting this workflow",
+                }
+            if evidence is None:
+                return {
+                    "available": False,
+                    "code": "fresh_observation_unavailable",
+                    "reason": "fresh runtime-owned game observation is required",
+                }
+            if workflow_error:
+                return {
+                    "available": False,
+                    "code": "battle_workflow_invalid",
+                    "reason": workflow_error,
+                }
+            if manual_error:
+                return {
+                    "available": False,
+                    "code": "manual_control_invalid",
+                    "reason": manual_error,
+                }
+            if manual_busy:
+                return {
+                    "available": False,
+                    "code": "manual_control_active",
+                    "reason": "Return Control before requesting a battle workflow",
+                }
+            if workflow_busy:
+                return {
+                    "available": False,
+                    "code": "workflow_busy",
+                    "reason": "another battle workflow request is in progress",
+                }
+            if game_state not in allowed_states:
+                return {
+                    "available": False,
+                    "code": "intent_mismatch",
+                    "reason": (
+                        f"{label} is unavailable for observed game state "
+                        f"{game_state}"
+                    ),
+                }
+            if (
+                action_key == "attach_battle"
+                and runtime_lifecycle.get("active_battle_adopted") is True
+            ):
+                return {
+                    "available": False,
+                    "code": "battle_already_adopted",
+                    "reason": (
+                        "automation already owns this battle; use Take/Return "
+                        "Control for an operator handoff"
+                    ),
+                }
+            return {
+                "available": True,
+                "code": "available",
+                "reason": "the explicit intent matches fresh observation",
+            }
+
+        take_manual_available = bool(
+            not control_error
+            and process_live
+            and evidence is not None
+            and not manual_busy
+            and not manual_error
+        )
+        take_manual = {
+            "available": take_manual_available,
+            "code": (
+                "available"
+                if take_manual_available
+                else (
+                    "control_invalid"
+                    if control_error
+                    else (
+                        "manual_control_invalid"
+                        if manual_error
+                        else (
+                            "manual_control_active"
+                            if manual_busy
+                            else (
+                                "fresh_observation_unavailable"
+                                if process_live
+                                else "process_stopped"
+                            )
+                        )
+                    )
+                )
+            ),
+            "reason": (
+                "requests an acknowledged indefinite Pause before yielding input"
+                if take_manual_available
+                else (
+                    control_error
+                    if control_error
+                    else (
+                        manual_error
+                        if manual_error
+                        else (
+                            "manual control is already in progress"
+                            if manual_busy
+                            else "fresh live observation is required"
+                        )
+                    )
+                )
+            ),
+        }
+        indefinite_pause_acknowledged = bool(
+            state_request == "PAUSED"
+            and control.get("resume_at") is None
+            and effective_authority == "paused"
+            and (
+                state_ack_current
+                or (
+                    isinstance(manual, Mapping)
+                    and isinstance(
+                        manual.get("pause_acknowledgement"), Mapping
+                    )
+                )
+            )
+        )
+        return_control_available = bool(
+            not control_error
+            and not manual_error
+            and manual is not None
+            and manual.get("status") == "active"
+            and evidence is not None
+            and indefinite_pause_acknowledged
+        )
+        return_control = {
+            "available": return_control_available,
+            "code": (
+                "available"
+                if return_control_available
+                else (
+                    "control_invalid"
+                    if control_error
+                    else (
+                        "manual_control_invalid"
+                        if manual_error
+                        else (
+                            "pause_not_acknowledged"
+                            if manual is not None
+                            and manual.get("status") == "active"
+                            and not indefinite_pause_acknowledged
+                            else "manual_control_not_acknowledged"
+                        )
+                    )
+                )
+            ),
+            "reason": (
+                "refresh observation and reconcile while Pause remains acknowledged"
+                if return_control_available
+                else (
+                    control_error
+                    if control_error
+                    else (
+                        manual_error
+                        if manual_error
+                        else (
+                            "the indefinite Pause must still be acknowledged"
+                            if manual is not None
+                            and manual.get("status") == "active"
+                            and not indefinite_pause_acknowledged
+                            else "acknowledged active manual control and fresh observation are required"
+                        )
+                    )
+                )
+            ),
+        }
+
+        configured_strategy = str(
+            control.get("strategy") or process.get("strategy") or "none"
+        )
+        strategy_ack = acknowledgements.get("strategy")
+        strategy_ack_current = bool(
+            isinstance(strategy_ack, Mapping)
+            and strategy_ack.get("acknowledges_current") is True
+        )
+        acknowledged_strategy = (
+            str(strategy_ack.get("value") or "").strip().lower()
+            if isinstance(strategy_ack, Mapping)
+            else ""
+        )
+        active_strategy = (
+            acknowledged_strategy
+            if observation.get("game_state")
+            in {"active_battle", "home_resume_battle"}
+            and acknowledged_strategy
+            else None
+        )
+        pending_strategy = (
+            configured_strategy
+            if control.get("strategy_apply_mode") == "next_boundary"
+            and (
+                not strategy_ack_current
+                or active_strategy != configured_strategy
+            )
+            else None
+        )
+        mode = str(control.get("mode") or "NEXT_BATTLE").upper()
+        terminal_labels = {
+            "NEXT_BATTLE": "continue_automatically",
+            "WAIT": "wait",
+            "HOME": "return_or_stay_home",
+        }
+        mode_ack = acknowledgements.get("mode")
+        terminal_policy_status = "selected"
+        terminal_policy_reason = "the selected policy applies at a supported terminal route"
+        if (
+            observation.get("game_state") == "tournament_results"
+            and mode != "WAIT"
+        ):
+            terminal_policy_status = "pending_verified_terminal_dismissal"
+            terminal_policy_reason = (
+                "Tournament Results is retained because no verified dismissal "
+                "control is available; the selected policy is preserved"
+            )
+
+        enable_available = bool(
+            not control_error
+            and process_live
+            and not manual_error
+            and (
+                not manual_busy
+                or manual.get("status") in {"return_requested", "awaiting_enable"}
+            )
+        )
+        if control_error:
+            enable_code = "control_invalid"
+            enable_reason = control_error
+        elif not process_live:
+            enable_code = "process_stopped"
+            enable_reason = "Start Automation before enabling actions"
+        elif manual_error:
+            enable_code = "manual_control_invalid"
+            enable_reason = manual_error
+        elif manual_busy and manual.get("status") not in {
+            "return_requested",
+            "awaiting_enable",
+        }:
+            enable_code = "return_control_required"
+            enable_reason = "Use Return Control before enabling automated actions"
+        else:
+            enable_code = "available"
+            enable_reason = "explicitly permit guarded actions"
+
+        pause_available = bool(
+            not control_error
+            and process_live
+            and not manual_error
+            and not manual_busy
+        )
+        if control_error:
+            pause_code = "control_invalid"
+            pause_reason = control_error
+        elif not process_live:
+            pause_code = "process_stopped"
+            pause_reason = "Start Automation before pausing action authority"
+        elif manual_error:
+            pause_code = "manual_control_invalid"
+            pause_reason = manual_error
+        elif manual_busy:
+            pause_code = "manual_control_active"
+            pause_reason = "Take/Return Control already owns action authority"
+        else:
+            pause_code = "available"
+            pause_reason = "request zero automated device input"
+
+        return {
+            "schema_version": 1,
+            "process": {
+                "state": process_state,
+                "live": process_live,
+                "available": process_available,
+            },
+            "action_authority": {
+                "requested": {
+                    "state": (
+                        "enabled"
+                        if state_request == "RUNNING"
+                        else state_request.lower()
+                    ),
+                    "request_id": control.get("state_request_id"),
+                    "requested_at": control.get("state_updated_at"),
+                },
+                "acknowledgement": (
+                    dict(state_ack) if isinstance(state_ack, Mapping) else None
+                ),
+                "acknowledged": state_ack_current,
+                "effective": effective_authority,
+                "observation_continues_while_paused": True,
+                "meaning": (
+                    "Paused means zero automated device input; observation may continue. "
+                    "Enabled permits guarded actions and does not assert that the game is RUNNING."
+                ),
+            },
+            "observation": observation,
+            "strategy_scope": {
+                "startup_default": str(process.get("strategy") or configured_strategy),
+                "active_battle": active_strategy,
+                "pending_next_boundary": pending_strategy,
+                "request_id": control.get("strategy_request_id"),
+            },
+            "when_battle_ends": {
+                "value": terminal_labels.get(mode, "unknown"),
+                "compatibility_value": mode,
+                "request_id": control.get("mode_request_id"),
+                "requested_at": control.get("mode_updated_at"),
+                "status": terminal_policy_status,
+                "reason": terminal_policy_reason,
+                "acknowledgement": (
+                    dict(mode_ack) if isinstance(mode_ack, Mapping) else None
+                ),
+                "acknowledged": bool(
+                    isinstance(mode_ack, Mapping)
+                    and mode_ack.get("acknowledges_current") is True
+                ),
+                "meaning": "future terminal policy; never an immediate battle action",
+            },
+            "home_behavior": {
+                "meaning": (
+                    "Home observation does not change automation action authority. "
+                    "Starting or resuming requires a matching explicit battle intent."
+                )
+            },
+            "battle_workflow": workflow,
+            "manual_control": manual,
+            "workflow_evidence": evidence,
+            "actions": {
+                "start_battle": action_availability(
+                    "start_battle", "Start Battle", {"home_new_battle"}
+                ),
+                "attach_battle": action_availability(
+                    "attach_battle",
+                    "Attach to Battle",
+                    {"home_resume_battle", "active_battle"},
+                ),
+                "take_manual_control": take_manual,
+                "return_control": return_control,
+                "pause": {
+                    "available": pause_available,
+                    "code": pause_code,
+                    "reason": pause_reason,
+                },
+                "enable": {
+                    "available": enable_available,
+                    "code": enable_code,
+                    "reason": enable_reason,
+                },
+            },
         }
 
     def _runtime_evidence(self) -> dict[str, Any]:
@@ -3099,11 +3937,20 @@ def _ack_entry(
     value: str,
     expected_value: object,
     expected_updated_at: object,
+    *,
+    acknowledged_request_id: object = None,
+    expected_request_id: object = None,
 ) -> dict[str, Any]:
     acknowledged_at = _parse_timestamp(entry.get("timestamp"))
     requested_at = _parse_timestamp(expected_updated_at)
+    observed_request_id = str(acknowledged_request_id or "").strip() or None
+    requested_id = str(expected_request_id or "").strip() or None
     is_current = value == expected_value
-    if requested_at is not None:
+    if requested_id is not None:
+        is_current = bool(
+            is_current and observed_request_id == requested_id
+        )
+    elif requested_at is not None:
         is_current = bool(
             is_current
             and acknowledged_at is not None
@@ -3114,6 +3961,7 @@ def _ack_entry(
         "at": acknowledged_at.isoformat(timespec="seconds")
         if acknowledged_at
         else entry.get("timestamp"),
+        "request_id": observed_request_id,
         "acknowledges_current": is_current,
     }
 

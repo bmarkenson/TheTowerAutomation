@@ -38,8 +38,10 @@ agnostic.
 
 - The persistent control file remains authoritative operator intent. The GUI
   does not maintain a second state store.
-- `PAUSED` blocks automation actions but continues capture, detection, lifecycle
-  observation, and status reporting.
+- Automation **Paused** blocks every automated device input while capture,
+  detection, lifecycle observation, and status reporting may continue.
+  Automation **Enabled** permits guarded actions; it does not assert that the
+  observed game state is `RUNNING`. Home observation changes neither state.
 - The GUI distinguishes a saved directive from runtime acknowledgement. It
   never presents a control-file write alone as proof that the runtime applied
   it.
@@ -61,7 +63,9 @@ agnostic.
   Tournament settings alone never decide between Tournament and Milestone.
   Terminal-observed Tier is shown independently, including for an ambiguous
   standard Game Over whose type remains `unknown`.
-- The allowlisted write surface is pause, timed pause, resume, mode,
+- The allowlisted write surface is pause, timed pause, explicit enable,
+  exact-evidence-bound Start Battle and Attach to Battle intent, Take Manual
+  Control and Return Control, future terminal policy,
   persistent numeric game-speed target selection,
   resolution of a runtime-published startup-gate decision,
   optional strategy-scoped one-run check configuration,
@@ -69,18 +73,18 @@ agnostic.
   release,
   bundled or validated custom-strategy selection, constrained custom Farm
   profile publication, stopped or
-  acknowledged-paused ADB-port
-  configuration, fixed managed-service start/stop, and one guarded active-
-  battle automation reload. Active strategy
+  acknowledged-paused ADB-port configuration, and fixed managed-service
+  start/stop. Active strategy
   requests are declarative runtime configuration, not direct tap authority.
   Profile publication writes only a fixed-name file beneath
   `config/strategies/custom`; it does not select, queue, adopt, start, restart,
-  stop, pause, resume, or otherwise apply that profile.
+  stop, pause, enable, or otherwise apply that profile.
   There is no arbitrary tap, shell command, process kill, direct Surrender,
   file-path, or ADB endpoint.
-- Complete stop persists `STOPPED` before asking the fixed systemd user service
-  to stop. Start always crosses the service boundary under `PAUSED`; a requested
-  `RUNNING` directive is saved only after systemd reports the unit active.
+- Complete Stop persists `STOPPED` before asking the fixed systemd user service
+  to stop. Start Automation launches the service under `PAUSED` with no battle
+  workflow selected. It does not enable actions, start a battle, or attach to
+  one. Repeating an already satisfied Start or Stop is an explicit no-op.
 - For managed launches, the long-lived Linux control service is the sole ADB
   reconnect owner. It reads the same persisted port, starts or reuses the ADB
   server inside its own service lifetime, and maintains only that exact
@@ -92,31 +96,20 @@ agnostic.
   covering a daemon that had originally been created inside its cgroup.
   Registration never grants frame or input authority; the runtime still
   requires its target lock and supported fresh capture.
-- Guarded active-battle reload never persists ordinary `STOPPED`. It refreshes
-  same-state Pause intent so the runtime acknowledges the request and forces a
-  new detection/status sample, requires fresh `RUNNING` evidence from the
-  matching MainPID/ADB-lock owner, and then replaces only the fixed automation
-  unit. The replacement must prove a distinct PID, refreshed lock ownership,
-  one-launch `next_run` policy, Pause consumption, and a first observation
-  before the prior control state is restored. Failure after preparation begins
-  remains paused; an initial precondition rejection does not mutate control.
-- A stopped start request automatically distinguishes verified Home
-  `NEW_BATTLE` from an already-active/resumable battle. Home always runs the
-  complete pre-battle gates. An existing battle is attached without inventing a
-  run boundary. `auto_validate` performs one read-only strategy validation; a
-  Home-repairable mismatch offers guarded restart/repair as an explicit
-  operator decision. If Battle History proves the Current-run scope still
-  identifies the same battle and that scope holds a matching completed-check
-  receipt, the attached session checks are reused instead of repeated.
-  Missing, stale, unreadable, or configuration-mismatched evidence retains the
-  declared attachment validation. Tournament attachment validation is strictly
-  in-battle and never invokes Exit Battle → Go Home → Resume Battle; its
-  Home-only Workshop check uses exact bound save evidence or remains explicitly
-  deferred. `auto` skips all strategy setup checks for only that attached
-  battle. A terminal result or verified Home `NEW_BATTLE` clears the attachment
-  choice, so the next battle runs its real gates without fabricated completion
-  state. `next_run` remains the guarded-reload policy and `immediate` is the
-  explicit forced-first-battle policy.
+- The public attached-reload action is retired. A process replacement is an
+  explicit Stop Automation followed by Start Automation, fresh observation,
+  and a separate matching battle intent; replacement never restores action
+  authority or chooses attachment implicitly.
+- Start Battle is available only from fresh, owner-matched Home `NEW_BATTLE`
+  evidence. The runtime revalidates the same PID, target, target generation,
+  activity scope, and boundary before acknowledging the request, then enters
+  the ordinary new-run lifecycle and its normal gates. Attach to Battle is
+  available only from fresh Home `RESUME_BATTLE` or active-battle evidence and
+  never falls back to Start Battle. Attachment stays input-blocked before
+  battle adoption while its save/configuration validation is unresolved.
+  The save-freshness integration that advances `validating_save` to `ready`
+  remains pending in the Better Control Model backlog; revision 28 therefore
+  does not claim a completed attachment or Return Control reconciliation.
 - An active strategy request persists the next-start setting and a versioned
   control directive. By default it remains pending during a battle. The
   current strategy first finalizes the terminal report and its Game Over hook;
@@ -174,6 +167,78 @@ Control writers use a companion advisory lock and atomic replacement. Timed
 pause expiry revalidates its exact deadline while holding that writer lock, so
 an operator extension or replacement with an indefinite pause wins over a stale
 expiry attempt.
+
+## Better Control Model
+
+Server revision 28 advertises `better_control_model_v1`. The additive
+`control_model` status object keeps five dimensions independent:
+
+| Dimension | Values and authority |
+| --- | --- |
+| Process lifecycle | `stopped`, `live`, or `unavailable`; only Start/Stop Automation changes it |
+| Action authority | requested directive, runtime acknowledgement, and effective `paused`, `enabled`, `pending`, `stopped`, `unknown`, or `unavailable` |
+| Observed game | fresh/stale/unavailable evidence classed as Home New Battle, Home Resume Battle, active battle, Game Over, Tournament Results, or unknown |
+| Strategy scope | startup default, active-battle Strategy, and pending next-boundary Strategy |
+| When this battle ends | continue automatically, wait, or return/stay Home; `NEXT_BATTLE`, `WAIT`, and `HOME` remain compatibility values only |
+
+The status also carries exact workflow evidence, durable battle/manual-control
+ledgers, and per-action `available`, stable `code`, and operator-facing
+`reason`. A client disables unavailable actions but the server independently
+rechecks every request. Missing, stale, wrong-owner, wrong-target, changed-
+generation, changed-scope, and mismatched-state evidence fails closed. A fresh
+authority heartbeat cannot renew the nested game observation: both timestamps
+must remain inside their freshness windows. Malformed control JSON makes every
+Better Control Model action unavailable with `control_invalid`.
+
+State and terminal-policy directives carry separate request IDs. Runtime log
+acknowledgements include the applied ID, and status considers an acknowledgement
+current only when both value and request ID match. Repeating an unacknowledged
+same-value request reports `pending` without rewriting its identity; a stopped
+or exactly acknowledged repeat is a visible no-op.
+
+### Command and transition matrix
+
+| Process | Effective authority | Fresh observed game | Explicit request | Result |
+| --- | --- | --- | --- | --- |
+| Stopped | unavailable/stopped | any | Start Automation | launch service Paused; await observation and battle intent |
+| Live | paused | Home New Battle | Start Battle | `requested` → `awaiting_enable`; explicit Enable revalidates and acknowledges normal new-run gates |
+| Live | enabled | Home New Battle | Start Battle | revalidate and acknowledge normal new-run gates |
+| Live | enabled | verified Home control was tapped | acknowledged Start or ready resumable Attach | record `action_dispatched`; keep unrelated automation suppressed until the same battle is adopted, a definitive mismatch interrupts, or the 20-second launch window fails |
+| Live | paused | Home Resume Battle or active battle | Attach to Battle | `requested` → `awaiting_enable`; explicit Enable enters `validating_save` without adopting the battle |
+| Live | enabled | Home Resume Battle or active battle | Attach to Battle | enter `validating_save` without adopting the battle |
+| Live | either | Game Over, Tournament Results, unknown, stale, or mismatched evidence | Start Battle or Attach to Battle | reject as unavailable/mismatched; never substitute the other workflow |
+| Live | enabled or paused | any fresh exact state | Take Manual Control | atomically request indefinite Pause; become `active` only after runtime acknowledgement |
+| Live | paused and manual control `active` | any fresh exact state | Return Control | remain Paused; record passive observation; await explicit Enable |
+| Live | paused, Return requested | refreshed observation | Enable | enter input-blocking `reconciling`; ordinary input remains unavailable until save/configuration reconciliation completes |
+| Live/stopped | already satisfied | any | repeated Pause, Enable, Start Automation, Stop Automation, terminal policy, or Take Manual Control where defined | return a visible no-op instead of fabricating a transition |
+
+An intent requested under Pause is pending, not acknowledged action authority.
+If the runtime, target, activity scope, or observed boundary changes before
+acknowledgement, the request becomes `rejected` or `interrupted`. Stop and a new
+process boundary interrupt unfinished workflows. Home alone never enables or
+pauses input.
+
+At Tournament Results, capture preserves the selected terminal policy and does
+not invent a dismissal control. `WAIT` is satisfied by retaining the screen;
+`NEXT_BATTLE` and `HOME` are reported as
+`pending_verified_terminal_dismissal` until a verified result-screen route is
+implemented. A failed supported Game Over navigation requests Automation
+Paused while retaining the selected future policy.
+
+The API retains `resume` as a deprecated alias for `enable` and the old
+directive-only `stop` for internal coordination compatibility. The latter sets
+authority `STOPPED` but does not manage the systemd process. Revision-28
+browser, native, and CLI clients do not expose either spelling; operator
+process lifecycle uses `/api/v1/process` Start/Stop Automation.
+
+Take Manual Control is not merely a label for Pause. Its durable request owns
+an indefinite Pause and exposes `pause_requested` until the runtime applies it.
+Return Control is also not Resume: it records a separate return request while
+Pause remains authoritative, then requires an explicit Enable request and an
+exclusive reconciliation hold. Unexpected active-battle → Home Resume Battle
+activity while Enabled enters the same safe Pause/manual-control ledger rather
+than competing for input. Broader manual-activity detection and grace-period
+controls remain separately backlogged.
 
 ## Transport and access
 
@@ -284,10 +349,10 @@ memory only. The API deliberately sends no CORS permission.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/v1/status` | Server revision/capabilities, control intent, acknowledgement, current-run identity, latest observation, structured Strategy Action Gate, and runtime evidence |
+| `GET` | `/api/v1/status` | Server revision/capabilities, Better Control Model dimensions/workflows, control intent, acknowledgement, current-run identity, latest observation, structured Strategy Action Gate, and runtime evidence |
 | `POST` | `/api/v1/control` | Allowlisted control mutation |
 | `POST` | `/api/v1/interactive-development-lease` | Request, heartbeat, or release the one cooperative development lease; never dispatch device input |
-| `POST` | `/api/v1/process` | Start/stop or guarded-reload the fixed systemd automation unit, select its startup-gate policy, save/queue/adopt a bundled or published custom strategy, or configure/safely hand off its ADB port |
+| `POST` | `/api/v1/process` | Start/stop the fixed systemd automation unit independently of battle intent, save/queue/adopt a bundled or published custom strategy, or configure/safely hand off its ADB port |
 | `POST` | `/api/v1/host-performance` | Bounded, idempotent batches of native Windows host/BlueStacks performance aggregates |
 | `GET` | `/api/v1/strategy-profiles` | Bundled/custom profile summaries plus the allowlisted Farm policy and preset catalogs |
 | `POST` | `/api/v1/strategy-profiles` | Validate a constrained Farm draft or atomically publish its source and generated plan |
@@ -658,8 +723,12 @@ Control request examples:
 ```json
 {"action": "pause"}
 {"action": "pause", "minutes": 30}
-{"action": "resume"}
-{"action": "mode", "mode": "WAIT"}
+{"action": "enable"}
+{"action": "start_battle"}
+{"action": "attach_battle"}
+{"action": "take_manual_control"}
+{"action": "return_control"}
+{"action": "terminal_policy", "policy": "WAIT"}
 {"action": "game_speed", "target": 4.0}
 {"action": "game_speed", "target": 6.3}
 {"action": "resolve_gate", "request_id": "...", "decision_id": "retry"}
@@ -671,10 +740,9 @@ Control request examples:
 Process request examples:
 
 ```json
-{"action": "start", "run_state": "PAUSED", "startup_gate_policy": "auto_validate"}
-{"action": "start", "run_state": "RUNNING", "startup_gate_policy": "auto"}
+{"action": "start"}
+{"action": "start", "strategy": "farm_t18"}
 {"action": "stop"}
-{"action": "restart_attached"}
 {"action": "set_adb_port", "adb_port": 5565}
 {"action": "set_strategy", "strategy": "tournament"}
 {"action": "set_strategy", "strategy": "farm_t18", "apply_to_active_run": true}
@@ -682,16 +750,20 @@ Process request examples:
 
 ## Current GUI capabilities
 
-- Persistent indefinite and timed pause, including replacing or extending an
-  existing timed pause.
-- Resume and terminal disposition selection (`NEXT_BATTLE`, `WAIT`, or `HOME`).
-  **Next Battle** takes the next authorized direct Retry/Battle/Resume route;
-  **Wait** holds the current terminal or Home boundary; **Stay Home** returns
-  Home after Game Over and suppresses automatic Battle/Resume input. State and
-  disposition controls highlight the saved selection; amber means a live
-  runtime has not yet acknowledged the latest directive. Legacy `RETRY`
-  requests normalize to `NEXT_BATTLE`. This contract requires server revision
-  27 and capability `terminal_dispositions_v2`.
+- Persistent indefinite and timed Pause, explicit Automation Enabled, and
+  requested-versus-acknowledged state. The text defines Paused as zero
+  automated input while observation continues and does not describe Enabled
+  as the game being in `RUNNING`.
+- Separate Start/Stop Automation, exact-state Start Battle/Attach to Battle,
+  and Take Manual Control/Return Control controls. Their availability and
+  pending/acknowledged/rejected/interrupted state comes from Linux, not local
+  GUI inference. Start Automation always leaves actions Paused. This contract
+  requires server revision 28 and capability `better_control_model_v1`.
+- **When this battle ends** selects continue automatically, wait, or
+  return/stay Home. The compatible `NEXT_BATTLE`, `WAIT`, and `HOME` values
+  remain visible only as runtime representation; none is presented as an
+  immediate battle command. Legacy `RETRY` normalizes to `NEXT_BATTLE`. This
+  contract retains capability `terminal_dispositions_v2`.
 - A distinct running-battle Strategy Action Gate banner based only on fresh,
   owner-matched structured status. It reads “Strategy actions blocked —
   observation and safe collectors remain active.” and shows the reason, failed
@@ -744,19 +816,9 @@ Process request examples:
   defaults; checked checks create strategy-bound one-run waivers. The dialog
   never opens automatically, saving does not start automation, and changing
   strategy clears staged exceptions.
-- Complete automation-service start (paused or running) and stop through a
-  fixed systemd user unit.
-- Guarded **Reload automation for current battle** in the native and browser
-  clients. It replaces the main Python process only after fresh owner and
-  `RUNNING` evidence, verifies the attached replacement, restores the prior
-  control state, and leaves failures paused.
-- Automatic attachment to an existing/resumable battle on process start. The
-  Process tab offers **Validate current battle if attached** or **Skip checks
-  for current battle**. Validation is read-only and a repairable mismatch asks
-  before the guarded battle restart/repair path is authorized. The choice has
-  no effect at verified Home **New Battle**, where normal pre-battle checks
-  always run. This requires server revision 15 and capability
-  `automatic_battle_attachment`.
+- Complete automation-service Start and Stop through a fixed systemd user unit,
+  independent of action authority and battle workflow. The earlier attached
+  reload and automatic-attachment controls are intentionally absent.
 - Target and observed game speed are separate fields. Selecting a target
   persists operator intent and immediately re-arms enforcement during
   `RUNNING`; every periodic status frame independently reads the visible game
@@ -843,8 +905,9 @@ These are the next useful additions, in approximate priority order:
 2. Add recovery-timer controls such as extend, cancel, and return-now only after
    those operations have explicit runtime directives and freshness/authority
    checks. The GUI must not implement them as direct taps.
-3. Detect likely manual-player activity, automatically yield tap authority, and
-   show the grace-period countdown and ownership in the GUI.
+3. Extend the implemented active-battle → Home Resume Battle safety yield to
+   broader likely manual-player activity, then show configurable grace-period
+   countdown and ownership in the GUI.
 4. Add targeted opt-in PresentMon frame telemetry through the existing
    in-memory host-performance aggregation path. Scope collection to the
    BlueStacks renderer, retain summaries rather than individual frames, and
@@ -862,3 +925,9 @@ These are the next useful additions, in approximate priority order:
 10. If access expands beyond an SSH tunnel and one trusted operator, add TLS,
    named users/roles, request IDs, and a durable control audit log before adding
    more write operations.
+
+The save-backed Attach/Return reconciliation and **Capture current setup
+as...** authoring work is tracked in the Better Control Model backlog. It is
+not part of revision 28's completed capability and must extend the existing
+player-save and Strategy-authoring owners rather than introducing a parallel
+schema.

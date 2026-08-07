@@ -51,6 +51,7 @@ def handle_game_over(
     control_sync: Optional[Callable[[], None]] = None,
     before_terminal_action: Optional[Callable[[], None]] = None,
     after_retry_started: Optional[Callable[[], None]] = None,
+    on_terminal_failure: Optional[Callable[[str], bool]] = None,
     return_home_after_battle: bool = False,
 ):
     """
@@ -87,7 +88,7 @@ def handle_game_over(
         Uses several sleeps between actions (≈1.2–1.5s), and a final 2s sleep.
 
     Errors:
-        Tap failures cause an early abort via _abort_handler(), which sets AUTOMATION.mode=WAIT.
+        Tap failures request Automation Paused without changing terminal policy.
     """
     captured_at = datetime.now().astimezone()
     session_id = _make_session_id(captured_at.timetuple())
@@ -111,11 +112,19 @@ def handle_game_over(
         # structured data; screenshots are failure evidence.
         img_game_stats = capture_adb_screenshot()
         if img_game_stats is None:
-            return _abort_handler("Capture Game Stats", session_id)
+            return _abort_handler(
+                "Capture Game Stats",
+                session_id,
+                on_terminal_failure=on_terminal_failure,
+            )
 
         perks, perks_frames, perks_screen_restored = _capture_game_over_perks()
         if not perks_screen_restored:
-            return _abort_handler("Close Perks", session_id)
+            return _abort_handler(
+                "Close Perks",
+                session_id,
+                on_terminal_failure=on_terminal_failure,
+            )
 
         record, save_reason = _capture_save_battle_record(
             terminal_save_report,
@@ -142,7 +151,11 @@ def handle_game_over(
             )
             # Tap "More Stats" only after Perks capture has restored Game Stats.
             if not tap_if_visible("buttons.more_stats:game_over", retries=1):
-                return _abort_handler("Tap More Stats", session_id)
+                return _abort_handler(
+                    "Tap More Stats",
+                    session_id,
+                    on_terminal_failure=on_terminal_failure,
+                )
 
             time.sleep(1.5)
 
@@ -181,6 +194,7 @@ def handle_game_over(
                     return _abort_handler(
                         f"Scroll More Stats to top ({top.reason})",
                         session_id,
+                        on_terminal_failure=on_terminal_failure,
                     )
 
                 if top.success:
@@ -217,7 +231,11 @@ def handle_game_over(
 
             # Close More Stats only on the fallback route that opened it.
             if not tap_if_visible("buttons.close:more_stats", retries=1):
-                return _abort_handler("Close More Stats", session_id)
+                return _abort_handler(
+                    "Close More Stats",
+                    session_id,
+                    on_terminal_failure=on_terminal_failure,
+                )
 
             time.sleep(1.2)
     else:
@@ -288,13 +306,21 @@ def handle_game_over(
         mode = ExecMode.HOME
     if mode == ExecMode.HOME:
         if not tap_if_visible("buttons.home:game_over", retries=1):
-            return _abort_handler("Go Home from Game Stats", session_id)
+            return _abort_handler(
+                "Go Home from Game Stats",
+                session_id,
+                on_terminal_failure=on_terminal_failure,
+            )
         route = "home"
         route_summary = "returned Home"
         log("[GAME_OVER] Mode HOME selected after Game Stats", "DEBUG")
     else:
         if not tap_if_visible("buttons.retry:game_over", retries=1):
-            return _abort_handler("Retry Game", session_id)
+            return _abort_handler(
+                "Retry Game",
+                session_id,
+                on_terminal_failure=on_terminal_failure,
+            )
         if after_retry_started is not None:
             after_retry_started()
         route = "retry"
@@ -737,12 +763,17 @@ def save_image(img, tag):
     log(f"[CAPTURE] Saved screenshot: {path}", "DEBUG")
 
 
-def _abort_handler(step, session_id):
+def _abort_handler(
+    step,
+    session_id,
+    *,
+    on_terminal_failure: Optional[Callable[[str], bool]] = None,
+):
     """
     Abort helper for the GAME OVER handler.
 
-    Logs an error, captures a debug screenshot, writes it to disk, and forces
-    AUTOMATION.mode to WAIT so the system pauses for manual intervention.
+    Logs an error, captures a debug screenshot, writes it to disk, and requests
+    Automation Paused without changing the future terminal policy.
 
     Args:
         step (str): Human-readable step name that failed.
@@ -753,17 +784,31 @@ def _abort_handler(step, session_id):
 
     Side effects:
         [adb][cv2][fs][log] Capture & persist debug screenshot; emit error.
-        [state] Sets AUTOMATION.mode = ExecMode.WAIT to pause automation.
+        [state] Requests or applies Automation Paused for safe intervention.
     """
     log(f"[ABORT] Game Over handler failed at: {step}", "ERROR")
     debug_img = capture_adb_screenshot()
     save_image(debug_img, f"{session_id}_ABORT_{step.replace(' ', '_')}")
-    AUTOMATION.mode = ExecMode.WAIT
+    terminal_policy = AUTOMATION.mode.value
+    pause_persisted = False
+    if on_terminal_failure is not None:
+        try:
+            pause_persisted = on_terminal_failure(step) is not False
+        except Exception as exc:
+            log(
+                "[ABORT] Could not persist Automation Paused after terminal "
+                f"failure: {exc}",
+                "ERROR",
+                console=True,
+            )
+    if not pause_persisted:
+        AUTOMATION.state = RunState.PAUSED
     log_result(
         f"Finished-battle handling failed — {step} did not complete",
         detail=(
             f"[GAME_OVER] result=failed session={session_id} "
-            f"failed_step={step} next_mode=WAIT"
+            f"failed_step={step} terminal_policy={terminal_policy} "
+            "action_authority=PAUSED"
         ),
     )
     return

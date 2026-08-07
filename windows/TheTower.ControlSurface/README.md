@@ -178,9 +178,10 @@ the popup and selected battle remain stable.
 
 The left workspace uses full-height **Controls**, **Process**, **Setup**, and
 **Details** tabs instead of dividing its height among several independently
-scrolling cards. Everyday Pause, Resume, game-speed, Game Over, strategy, and
-run-configuration actions remain on Controls. Service state, PID, ADB target,
-Start, Reload, and Stop are on Process. API and SSH fields are confined to the
+scrolling cards. Everyday Automation Paused/Enabled, explicit battle workflow,
+manual-control, game-speed, future terminal-policy, strategy, and run-
+configuration actions remain on Controls. Service state, PID, ADB target,
+Start Automation, and Stop Automation are on Process. API and SSH fields are confined to the
 Setup tab, which scrolls when its independent API and ADB tunnel controls do
 not fit; the optional bearer token remains memory-only. Detailed lock and
 runtime evidence is on Details.
@@ -200,10 +201,10 @@ the latest-battle summary can be collapsed independently. The battle-history
 window has a separate draggable divider between its battle list and
 selected-battle report. Data-grid columns remain directly resizable as well.
 
-The status strip distinguishes **Automation**—the requested control
-directive—from **Game Screen**, the observer's latest detected game context.
-For example, a normal active run displays `Running` and `Battle` instead of two
-unqualified `RUNNING` values. Wave and Coins/min remain prominent. Service and
+The status strip distinguishes effective **Automation** action authority from
+**Game Screen**, the observer's latest detected game context. For example, a
+normal active run displays `Automation Enabled` and `Active Battle` rather than
+two unqualified `RUNNING` values. Wave and Coins/min remain prominent. Service and
 PID evidence remains available on Process without occupying the always-visible
 status strip, and Previous Game Screen remains visible by default but can be
 collapsed.
@@ -217,22 +218,40 @@ only requested and acknowledged control state. Missing, stale, inactive, or
 wrong-runtime gate evidence is not displayed as an active gate. This structured
 presentation requires Linux revision 22 and `strategy_action_gate_v1`.
 
-The Automation Control panel uses selection highlights instead of permanently
-colored Pause and Resume actions. Cyan is the saved state or terminal
-disposition; amber means a live runtime has not acknowledged that directive
-yet. **Next Battle** starts or resumes at the next authorized opportunity,
-**Wait** holds the terminal/Home boundary, and **Stay Home** returns Home after
-Game Over without automatically starting or resuming a battle. The disposition
-buttons apply immediately, which prevents a periodic status refresh from
-replacing an unsaved selection. The strategy dropdown likewise preserves an
-unsent choice across refreshes. For an active process, selection alone does not
+The Automation Control panel uses selection highlights for requested and
+acknowledged authority. **Automation Paused** means zero automated device input
+while observation may continue. **Automation Enabled** permits guarded actions;
+it does not claim the game is Running. **When this battle ends** separately
+selects Continue automatically, Wait, or Return/stay Home; those choices never
+act as an immediate Start/Resume command. The buttons apply immediately, which
+prevents a periodic status refresh from replacing an unsaved selection.
+State and terminal-policy acknowledgements match an exact Linux request ID;
+same-value requests remain visibly pending without being rewritten.
+
+**Start Battle** is enabled only for fresh verified Home New Battle evidence;
+**Attach to Battle** is enabled only for fresh active or resumable evidence.
+Linux revalidates the exact runtime, target, activity scope, and boundary and
+reports unavailable, requested, awaiting-enable, acknowledged, rejected, or
+interrupted state. A verified Home tap appears as `action_dispatched` and keeps
+unrelated automation suppressed until battle adoption or a bounded failure.
+**Take Manual Control** first obtains an acknowledged
+indefinite Pause. **Return Control** stays Paused until an explicit Enable and
+exclusive reconciliation complete. The current revision-28 stage keeps Attach
+and Return input-blocked at their save-validation boundaries; do not treat
+either pending state as complete.
+
+Tournament Results remains visible after capture. Wait is satisfied there;
+Continue automatically and Return/stay Home are shown as pending because this
+revision does not invent an unverified result-screen dismissal control.
+
+The strategy dropdown likewise preserves an unsent choice across refreshes.
+For an active process, selection alone does not
 change the current or queued strategy: choose **Use next battle** to leave the
 current battle's strategy in place, or **Switch this battle** to request
 adoption after fresh running or resumable-Home evidence. For a stopped
-process, **Start paused** and **Start running** atomically save and launch the
-strategy that is visibly selected, so an older next-start value cannot win the
-process boundary. **Save startup default** is only needed to persist a stopped
-selection without starting. Adoption changes normal strategy behavior and
+process, **Start Automation** saves and launches the visibly selected Strategy,
+then leaves input Paused with no battle workflow selected. **Save startup
+default** persists a stopped selection without starting. Adoption changes normal strategy behavior and
 Battle End identity without a restart, while new-run initialization, session
 preflight, and Home-only gates wait for the next genuine boundary. Selecting
 the displayed Current strategy and queueing it cancels a different pending
@@ -626,20 +645,16 @@ without recreating its startup/session gates. Wait for target acknowledgement
 before resuming; a failed connection or capture leaves the runtime paused on
 its former target.
 
-Attachment is automatic when Start first finds an active battle or Home
-**Resume Battle**. The Process tab offers two explicit choices:
-**Validate current battle if attached** runs one read-only strategy check;
-**Skip checks for current battle** suppresses all strategy setup checks for
-that battle. Tournament validation on this attachment path never leaves the
-battle for the game Home screen; its Workshop preset check uses exact bound
-save evidence or remains explicitly deferred. A repairable validation mismatch
-offers **Restart battle and repair setup**, but does not restart or change
-configuration unless the operator chooses it. At verified Home **New Battle**,
-this choice is ignored and normal pre-battle checks always run. Game Over,
-Tournament Results, or a verified Home **New Battle** boundary clears the
-attached-battle choice so the following battle performs complete gates. Both
-Start actions persist the strategy currently visible in the Strategy dropdown
-before launching the Linux process.
+Attachment is never automatic. **Start Automation** changes only the managed
+process lifecycle and leaves action authority Paused. After a fresh
+observation, use the separately available **Start Battle** or **Attach to
+Battle** control. The first requires verified Home **New Battle** and runs
+normal gates. The second requires a verified active battle or Home **Resume
+Battle**, preserves the requested battle identity, and must complete save-
+backed validation before any unresolved allowlisted configuration UI may open.
+A mismatched intent is rejected rather than converted to the other workflow.
+The old Validate/Skip attachment radio buttons and attached-reload action are
+not part of revision 28.
 
 The managed runtime ADB port, bundled strategy, and startup-gate policy share
 the Linux environment file while remaining independent settings. The Process
@@ -657,8 +672,9 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current terminal-disposition build requires revision 27,
-`terminal_dispositions_v2`, `managed_custom_module_presets_v1`,
+current Better Control Model build requires revision 28,
+`better_control_model_v1`, `terminal_dispositions_v2`,
+`managed_custom_module_presets_v1`,
 `strategy_authoring_local_loadout_editors_v1`, and
 `strategy_revision_history_v1` while retaining all earlier required
 capabilities. The banner reports the actual revision/capability mismatch and

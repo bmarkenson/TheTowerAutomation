@@ -1048,9 +1048,14 @@ def test_battle_list_reports_terminal_tier_for_ambiguous_no_strategy_run(tmp_pat
 
 def test_control_requests_are_allowlisted_and_audited(tmp_path):
     service = _service(tmp_path)
-
+    lock_handle = _fresh_runtime_lock(tmp_path, state="RUNNING")
     response = service.apply_control({"action": "pause", "minutes": 15})
-    assert response["request"] == {"accepted": True, "action": "pause"}
+    lock_handle.close()
+    assert response["request"] == {
+        "accepted": True,
+        "action": "pause",
+        "disposition": "requested",
+    }
     control = service.control_store.read()
     assert control["state"] == "PAUSED"
     assert control["updated_by"] == "control-surface"
@@ -1063,7 +1068,7 @@ def test_control_requests_are_allowlisted_and_audited(tmp_path):
         {"action": "mode", "mode": "RETRY"}
     )
     assert legacy_mode_response["control"]["mode"] == "NEXT_BATTLE"
-    assert "[CONTROL_SURFACE] Requested mode NEXT_BATTLE" in (
+    assert "[CONTROL_SURFACE] Set When this battle ends to NEXT_BATTLE" in (
         tmp_path / "logs" / "actions.log"
     ).read_text(encoding="utf-8")
 
@@ -1259,13 +1264,17 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert 'Text="PREVIOUS GAME SCREEN"' in native_xaml
     assert 'id="gameSpeedTargetSelect"' in html
     assert 'Content="x6.3 — Maximum available"' in native_xaml
-    assert 'Content="Next Battle"' in native_xaml
+    assert 'Content="Continue automatically"' in native_xaml
     assert 'Tag="NEXT_BATTLE"' in native_xaml
-    assert 'Content="Stay Home"' in native_xaml
-    assert '<option value="NEXT_BATTLE">Next Battle</option>' in html
-    assert '<option value="HOME">Stay Home</option>' in html
+    assert 'Content="Return / stay Home"' in native_xaml
+    assert '<option value="NEXT_BATTLE">Continue automatically</option>' in html
+    assert '<option value="HOME">Return to / stay Home</option>' in html
+    assert "When this battle ends" in html
+    assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 27" in native_compatibility
+    assert "MinimumServerRevision = 28" in native_compatibility
+    assert '"better_control_model_v1"' in native_compatibility
+    assert "better_control_model_v1" in CONTROL_SURFACE_CAPABILITIES
     assert '"terminal_dispositions_v2"' in native_compatibility
     assert "terminal_dispositions_v2" in CONTROL_SURFACE_CAPABILITIES
     assert '"managed_custom_module_presets_v1"' in native_compatibility
@@ -1282,23 +1291,48 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert 'x:Name="StrategyActionGateCollectorsText"' in native_xaml
     assert "{ Available: true, Active: true, Stale: false }" in native_code
     assert (
-        "DirectiveText.Text = FormatAutomationState(status.Control);"
+        "DirectiveText.Text = FormatActionAuthority("
         in native_code
     )
     assert 'JsonPropertyName("strategy_action_gate")' in native_models
+    assert 'JsonPropertyName("control_model")' in native_models
     assert 'JsonPropertyName("failed_check_ids")' in native_models
     assert 'JsonPropertyName("allowed_auxiliary_collectors")' in native_models
     assert '"current_run_activity_scope"' in native_compatibility
     assert '"game_speed_target"' in native_compatibility
     assert '"host_performance_telemetry_v1"' in native_compatibility
     assert '"host_performance_gpu_v1"' in native_compatibility
-    assert '"automatic_battle_attachment"' in native_compatibility
+    assert '"automatic_battle_attachment"' not in native_compatibility
+    assert '"attached_automation_restart"' not in native_compatibility
     assert '"observed_game_speed"' in native_compatibility
     assert 'id="observedSpeed"' in html
     assert 'id="gameSpeedObserved"' in html
-    assert 'Content="Validate current battle if attached"' in native_xaml
-    assert 'Content="Skip checks for current battle"' in native_xaml
-    assert "AttachCurrentBattleBox" not in native_xaml
+    assert 'Content="Start Automation"' in native_xaml
+    assert 'Content="Start Battle"' in native_xaml
+    assert 'Content="Attach to Battle"' in native_xaml
+    assert 'Content="Take Manual Control"' in native_xaml
+    assert 'Content="Return Control"' in native_xaml
+    assert 'data-control-action="start_battle"' in html
+    assert 'data-control-action="attach_battle"' in html
+    assert 'data-control-action="take_manual_control"' in html
+    assert 'data-control-action="return_control"' in html
+    assert "availability.available !== true" in script
+    assert "BETTER_CONTROL_MINIMUM_REVISION = 28" in script
+    assert "(action === \"start\" && !betterControlCompatible)" in script
+    assert '"terminalPolicyStatus"' in script
+    assert "workflow.status" in script
+    assert "actions.enable?.available !== true" in script
+    assert 'model.Actions.TryGetValue(name, out var availability)' in native_code
+    assert "workflow.Status" in native_code
+    assert "enable.Available" in native_code
+    assert "_serverCompatibility?.IsCompatible != true" in native_code
+    assert "PauseButton.IsEnabled = pause.Available" in native_code
+    assert "terminalPolicyStatus.Status" in native_code
+    assert 'JsonPropertyName("status")' in native_models
+    assert 'JsonPropertyName("reason")' in native_models
+    assert "startup_gate_policy" not in script
+    assert "run_state" not in script
+    assert "restart_attached" not in script
     assert 'Content="Use next battle"' in native_xaml
     assert 'Content="Switch this battle"' in native_xaml
     assert 'Content="Strategy profiles..."' in native_xaml
@@ -1971,7 +2005,7 @@ def test_http_api_requires_token_but_static_gui_does_not(tmp_path):
         response.read()
         assert response.status == 404
 
-        body = json.dumps({"action": "resume"})
+        body = json.dumps({"action": "enable"})
         connection.request(
             "POST",
             "/api/v1/control",
@@ -1984,8 +2018,8 @@ def test_http_api_requires_token_but_static_gui_does_not(tmp_path):
         )
         response = connection.getresponse()
         payload = json.loads(response.read())
-        assert response.status == 200
-        assert payload["control"]["state"] == "RUNNING"
+        assert response.status == 409
+        assert payload["code"] == "process_stopped"
 
         process_body = json.dumps({"action": "start", "run_state": "PAUSED"})
         connection.request(

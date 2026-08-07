@@ -1,7 +1,7 @@
 # handlers/home_screen_handler.py
 
 import time
-from utils.logger import log
+from utils.logger import log, log_action_intent, log_result
 from core.input import TapVerification, safe_tap, tap_if_visible
 from core.battle_lifecycle import HomeBattleControl
 from core.home_battle import HOME_BATTLE_CONTROL_REGION, detect_home_battle_control
@@ -69,6 +69,10 @@ def handle_home_screen(
     restart_enabled: bool = True,
     *,
     require_new_battle: bool = False,
+    require_resume_battle: bool = False,
+    operation_id: str | None = None,
+    action_purpose: str | None = None,
+    action_reason: str | None = None,
 ) -> bool:
     """
     Handle the HOME_SCREEN state by optionally starting a battle.
@@ -93,10 +97,27 @@ def handle_home_screen(
     Errors:
         None material; tap failures (if any) are not explicitly handled here.
     """
+    if require_new_battle and require_resume_battle:
+        raise ValueError(
+            "Home battle control cannot require both New Battle and Resume Battle"
+        )
     if restart_enabled:
+        if operation_id is not None:
+            log_action_intent(
+                action_purpose or "Dispatching the Home battle control",
+                reason=(
+                    action_reason
+                    or "execute the operator-selected battle workflow"
+                ),
+                operation_id=operation_id,
+            )
         log("[HOME] Auto-start enabled — tapping 'Battle' button", "INFO")
         if require_new_battle:
             launched = tap_verified_new_battle()
+        elif require_resume_battle:
+            launched = _tap_verified_home_battle_control(
+                HomeBattleControl.RESUME_BATTLE
+            )
         elif tap_if_visible(
             "buttons.battle:home",
             retries=1,
@@ -115,6 +136,15 @@ def handle_home_screen(
             log(
                 "[HOME] Battle/Resume controls not verified; leaving handler",
                 "WARN",
+            )
+        if operation_id is not None:
+            log_result(
+                (
+                    "Verified Home battle control dispatched"
+                    if launched
+                    else "Verified Home battle control was not dispatched"
+                ),
+                operation_id=operation_id,
             )
         time.sleep(2)
         return launched

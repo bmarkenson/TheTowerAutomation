@@ -403,6 +403,44 @@ stages:
   game/battle state, Strategy scope, and terminal policy. Do not use one
   **Paused/Running** or **Next Battle** choice to imply more than one of those
   dimensions.
+  - Implementation checkpoint (2026-08-07, feature branch):
+    - [x] Linux status/API/runtime plus native, browser, and CLI clients expose
+      the five independent dimensions under server revision 28 and capability
+      `better_control_model_v1`. Start/Stop Automation, exact Start Battle,
+      exact Attach to Battle, future terminal policy, and Take/Return Control
+      have durable requested/acknowledged/error state. State and terminal-policy
+      acknowledgements are correlated by exact request identity rather than
+      same-value timestamps. Stale, mismatched,
+      unavailable, busy, pending, rejected, interrupted, acknowledged, and
+      no-op paths have repository regressions.
+    - [x] Managed Start launches Paused with no implicit battle workflow.
+      Start Battle revalidates exact runtime/target/scope/Home New Battle
+      evidence and enters normal new-run gates. Home does not toggle action
+      authority, and active-battle → Home Resume Battle activity yields through
+      an indefinite manual-control Pause rather than competing for input.
+      Verified Home input is recorded as `action_dispatched` and remains under
+      an exclusive workflow hold until battle adoption, interruption, or a
+      bounded failure.
+    - [ ] Implement a verified Tournament Results dismissal/navigation owner
+      for `continue automatically` and `return/stay Home`. Revision 28 retains
+      Tournament Results after capture, preserves all three selected policies,
+      and reports non-`WAIT` choices as
+      `pending_verified_terminal_dismissal`; it does not claim to execute an
+      unverified result-screen control.
+    - [ ] Attach is intentionally held at `validating_save` before battle
+      adoption, and Return Control is intentionally held at `reconciling`
+      before ordinary input. The complete save-freshness audit, approved
+      refresh/serialization receipts, same-battle/configuration reconciliation,
+      and proof that save validation precedes UI fallback are suspended here at
+      operator request because a conflicting parallel work slice is beginning.
+      Reconcile that slice before advancing either workflow.
+    - [ ] The save-backed **Capture current setup as...** preset/custom-Strategy
+      authoring workflow is part of the same suspended slice. No parallel
+      loadout schema or placeholder authoring endpoint has been added, and
+      saving must remain non-activating when that work resumes.
+    - [ ] Windows package build/usability smoke and natural-boundary live game
+      validation remain pending. No live/device action is authorized by this
+      checkpoint.
   - Begin with a command/transition matrix covering stopped and live services;
     acknowledged automation paused and enabled; Home New Battle and Resume
     Battle, active battle, Game Over, and Tournament Results; and current,

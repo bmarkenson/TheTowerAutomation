@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
 from automation.missions.manager import MissionManager
@@ -518,6 +519,95 @@ def test_each_validation_request_rearms_home_preflight_once():
 
     assert manager.prepare_exclusive_validation_request("request-two")
     assert manager.no_battle_setup_requirements()
+
+
+def test_explicit_start_owns_tournament_validation_launch_through_adoption(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    store.set_strategy("tournament", source="test")
+    store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(control_file))
+    supervisor.apply_control()
+    strategy = get_strategy("tournament")
+    assert strategy is not None
+    manager = MissionManager(
+        None,
+        strategy,
+        await_initial_battle_intent=True,
+    )
+    manager.start()
+    owner = supervisor.current_exclusive_validation_owner()
+    observed_at = datetime.now(timezone.utc).astimezone().isoformat(
+        timespec="seconds"
+    )
+    evidence = {
+        "schema_version": 1,
+        "runtime_id": owner["runtime_id"],
+        "pid": owner["pid"],
+        "adb_target": owner["adb_target"],
+        "observation_id": "tournament-workflow:home",
+        "observed_at": observed_at,
+        "primary_state": "HOME_SCREEN",
+        "home_battle_control": "NEW_BATTLE",
+        "game_state": "home_new_battle",
+        "active_battle": False,
+        "activity_scope_run_id": "tournament-preflight",
+        "target_generation": 1,
+    }
+    store.request_battle_workflow("start_battle", evidence=evidence)
+    supervisor.apply_control()
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = manager
+    app._active_exclusive_validation_request_id = None
+    app._exclusive_validation_terminal_hold = None
+    app._startup_gate_waivers = {}
+    app._control_observation = {
+        key: value
+        for key, value in evidence.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+
+    app._sync_operator_control_workflows({"state": "HOME_SCREEN"})
+    assert supervisor.battle_workflow["status"] == "acknowledged"
+    assert manager.maybe_run_start(
+        {
+            "state": "HOME_SCREEN",
+            "home_battle_control": "NEW_BATTLE",
+        }
+    ) is False
+    definition = app._exclusive_validation_definition()
+    assert definition is not None
+    assert app._prepare_exclusive_validation_home_request(definition) is True
+    manager.mark_no_battle_setup_complete({})
+
+    with (
+        patch("core.app.tap_verified_new_battle", return_value=True),
+        patch("core.app.log"),
+        patch("core.app.log_action_intent"),
+    ):
+        assert app._maybe_start_exclusive_validation(
+            home_control=HomeBattleControl.NEW_BATTLE
+        ) is True
+
+    assert supervisor.battle_workflow["status"] == "action_dispatched"
+    app._control_observation = {
+        **app._control_observation,
+        "observation_id": "tournament-workflow:running",
+        "primary_state": "RUNNING",
+        "home_battle_control": "UNKNOWN",
+        "game_state": "active_battle",
+        "active_battle": True,
+    }
+    app._sync_operator_control_workflows({"state": "RUNNING"})
+    battle_started = manager.maybe_run_start({"state": "RUNNING"})
+    assert battle_started is True
+    assert app._complete_started_battle_workflow(battle_started) is True
+    assert supervisor.battle_workflow["status"] == "completed"
 
 
 def test_validation_lifecycle_taps_one_new_battle_surrenders_and_returns_home(

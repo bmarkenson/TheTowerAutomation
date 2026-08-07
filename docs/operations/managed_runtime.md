@@ -6,40 +6,43 @@ belong to [`deploy/systemd/README.md`](../../deploy/systemd/README.md); native
 client operation belongs to the
 [`Windows README`](../../windows/TheTower.ControlSurface/README.md).
 
+## Start or stop automation
+
+**Start Automation** and **Stop Automation** change only the fixed managed
+process lifecycle. Start launches the service with Automation Paused and no
+battle workflow selected. Wait for fresh live observation, then choose a
+separate available **Start Battle** or **Attach to Battle** action. Do not
+interpret a live process as enabled input or a stopped process as a terminal
+policy.
+
+**Start Battle** is available only from fresh, owner-matched Home **New
+Battle** evidence. If requested while Paused it remains `awaiting_enable`;
+explicit **Enable Automation** revalidates the same runtime, target, activity
+scope, and boundary before normal new-run gates receive action authority.
+Once the verified Home control is tapped, status reports `action_dispatched`;
+the workflow continues to suppress unrelated input until lifecycle adoption or
+a visible interrupted/failed result.
+
+Stopping interrupts unfinished battle and manual-control workflows. Repeating
+an already satisfied Start or Stop is reported as a no-op. The old attached
+reload and Start-time attachment-policy controls are retired: after a process
+replacement, inspect fresh observation and issue a new exact battle intent.
+
 ## Attach to a current battle
 
-Before managed Start, choose **Validate current battle if attached** or **Skip
-checks for current battle**. Fresh active-battle or Home **Resume Battle**
-evidence creates the attachment. A matching completed session receipt may be
-reused only with unchanged Current-run identity and Strategy check fingerprint;
-missing or unreadable continuity, a changed battle, or changed checks reruns or
-defers them.
+**Attach to Battle** is available only from fresh active-battle or Home
+**Resume Battle** evidence. It never starts a new battle as a fallback and does
+not adopt the observed battle merely because the intent was accepted. The
+runtime first revalidates the exact PID, ADB target/generation, activity scope,
+and observed boundary.
 
-Attachment checks are read-only unless the profile explicitly declares a
-guarded battle-only `run_when_attached` action. They never select Home presets,
-equip loadouts, leave through Home, restart, or acquire Surrender authority.
-Home-only evidence unavailable from a bound save remains explicitly deferred.
-Attachment ends at Game Over, Tournament Results, or verified Home
-`NEW_BATTLE`, where ordinary gates rearm.
-
-## Reload automation for the current battle
-
-For a checked-in Python update, prefer the guarded control-surface reload over
-raw Stop/Start or `systemctl restart`:
-
-1. Persist indefinite Pause and wait for the current runtime acknowledgement.
-2. Require that same PID/lock owner to publish a fresh post-request `RUNNING`
-   observation while actions remain blocked.
-3. Stop the fixed automation unit; launch one replacement with
-   `startup_gates=next_run`; immediately restore the configured future policy.
-4. Require a distinct systemd `MainPID`, matching held target lock, attached-
-   policy startup evidence, Pause consumption, and first fresh observation.
-5. Restore the prior `RUNNING`, indefinite Pause, or unexpired timed Pause.
-
-An initial precondition failure changes nothing. Any failure after Pause
-preparation leaves control Paused. Reload does not fabricate completed gates;
-attachment suppression ends at the next authoritative boundary, and process-
-local samples restart as “since attachment.”
+The revision-28 implementation deliberately remains input-blocked in
+`validating_save`. Fresh-save identity/configuration validation and its
+allowlisted unresolved-field UI fallback are being delivered by a separate
+non-overlapping work slice. Until that integration advances the workflow to
+`ready`, do not use this feature branch for a live attachment and do not treat
+the pending status as attached. No automatic or skipped-check attachment path
+is available.
 
 ## Switch the live ADB target
 
@@ -48,7 +51,8 @@ local samples restart as “since attachment.”
 2. Move the emulator, enter the new exact localhost port, and select Switch.
 3. Require the new target lock, `device` transport, supported fresh frame, and
    runtime handoff acknowledgement before the old lock is released.
-4. Verify the fresh screen and Resume only when appropriate.
+4. Verify the fresh screen and select **Automation Enabled** only when
+   appropriate.
 
 A failed handoff remains Paused and retains the old runtime target while the
 control service may continue bounded registration retries for the saved next-

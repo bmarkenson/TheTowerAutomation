@@ -17,6 +17,15 @@ from core.gate_decisions import (
     STARTUP_GATE_CHECK_LABELS,
     VALID_GATE_DECISION_ACTIONS,
 )
+from core.control_model import (
+    BATTLE_INTENTS,
+    BATTLE_WORKFLOW_TERMINAL_STATUSES,
+    MANUAL_CONTROL_TERMINAL_STATUSES,
+    intent_matches_evidence,
+    validate_battle_workflow,
+    validate_manual_control,
+    validate_workflow_evidence,
+)
 from core.exclusive_validation import (
     exclusive_validation_definition_for_strategy,
 )
@@ -124,6 +133,7 @@ class ControlDirectiveStore:
             "state_updated_at": data.get("state_updated_at"),
             "state_request_id": data.get("state_request_id"),
             "mode_updated_at": data.get("mode_updated_at"),
+            "mode_request_id": data.get("mode_request_id"),
             "game_speed_target": _valid_game_speed_target(
                 data.get("game_speed_target")
             ),
@@ -161,9 +171,529 @@ class ControlDirectiveStore:
                 is None
                 else None
             ),
+            "battle_workflow": validate_battle_workflow(
+                data.get("battle_workflow")
+            ),
+            "battle_workflow_error": (
+                "battle workflow directive is malformed"
+                if data.get("battle_workflow") is not None
+                and validate_battle_workflow(data.get("battle_workflow")) is None
+                else None
+            ),
+            "manual_control": validate_manual_control(
+                data.get("manual_control")
+            ),
+            "manual_control_error": (
+                "manual control directive is malformed"
+                if data.get("manual_control") is not None
+                and validate_manual_control(data.get("manual_control")) is None
+                else None
+            ),
             "path": str(self.path),
             "exists": self.path.exists(),
         }
+
+    def request_battle_workflow(
+        self,
+        intent: str,
+        *,
+        evidence: Mapping[str, object],
+        strategy: Optional[str] = None,
+        source: Optional[str] = None,
+        now: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """Persist one exact-evidence-bound Start or Attach intent."""
+
+        normalized_intent = str(intent or "").strip().lower()
+        if normalized_intent not in BATTLE_INTENTS:
+            raise ValueError("Battle intent must be start_battle or attach_battle")
+        normalized_evidence = validate_workflow_evidence(evidence)
+        if normalized_evidence is None:
+            raise ValueError(
+                "Battle workflow requires fresh exact runtime observation evidence"
+            )
+        if not intent_matches_evidence(normalized_intent, normalized_evidence):
+            raise ValueError(
+                f"{normalized_intent} does not match observed game state "
+                f"{normalized_evidence['game_state']}"
+            )
+        normalized_strategy = (
+            str(strategy).strip().lower() if strategy is not None else None
+        )
+        if normalized_strategy is not None and not is_configurable_strategy(
+            normalized_strategy,
+            self.strategy_profile_dir,
+            allow_legacy_aliases=False,
+        ):
+            raise ValueError(
+                "Strategy must be one of: "
+                + ", ".join(
+                    configurable_strategy_ids(self.strategy_profile_dir)
+                )
+            )
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            raw_current = data.get("battle_workflow")
+            current = validate_battle_workflow(raw_current)
+            if raw_current is not None and current is None:
+                raise ValueError(
+                    "Existing battle workflow directive is malformed; it was preserved"
+                )
+            if (
+                current is not None
+                and current["status"] not in BATTLE_WORKFLOW_TERMINAL_STATUSES
+            ):
+                raise ValueError("A battle workflow request is already in progress")
+            raw_manual = data.get("manual_control")
+            manual = validate_manual_control(raw_manual)
+            if raw_manual is not None and manual is None:
+                raise ValueError(
+                    "Existing manual control directive is malformed; it was preserved"
+                )
+            if (
+                manual is not None
+                and manual["status"] not in MANUAL_CONTROL_TERMINAL_STATUSES
+            ):
+                raise ValueError(
+                    "Return control before requesting a battle workflow"
+                )
+            timestamp = _timestamp_at(now)
+            if normalized_intent == "start_battle":
+                effective_strategy = (
+                    normalized_strategy
+                    or self._valid_strategy(data.get("strategy"))
+                )
+                if effective_strategy is not None:
+                    previous = self._valid_strategy(data.get("strategy"))
+                    strategy_request_id = uuid4().hex
+                    data["strategy"] = effective_strategy
+                    data["strategy_apply_mode"] = "next_boundary"
+                    if previous != effective_strategy:
+                        data["startup_gate_waivers"] = {}
+                    data["strategy_updated_at"] = timestamp
+                    data["strategy_request_id"] = strategy_request_id
+                    self._replace_exclusive_validation_request(
+                        data,
+                        strategy=effective_strategy,
+                        strategy_request_id=strategy_request_id,
+                        timestamp=timestamp,
+                        superseded_reason=(
+                            "replaced by explicit Start Battle for "
+                            f"{effective_strategy}"
+                        ),
+                    )
+            workflow = {
+                "schema_version": 1,
+                "request_id": uuid4().hex,
+                "intent": normalized_intent,
+                "status": "requested",
+                "requested_at": timestamp,
+                "updated_at": timestamp,
+                "evidence": normalized_evidence,
+                "updated_by": source or "operator",
+            }
+            data["battle_workflow"] = workflow
+            data["updated_at"] = timestamp
+            if source:
+                data["updated_by"] = source
+            return data
+
+        saved = self.update(mutate)
+        return dict(saved["battle_workflow"])
+
+    def transition_battle_workflow(
+        self,
+        request_id: str,
+        status: str,
+        *,
+        reason: Optional[str] = None,
+        acknowledgement: Optional[Mapping[str, object]] = None,
+        save_receipt: Optional[Mapping[str, object]] = None,
+        configuration: Optional[Mapping[str, object]] = None,
+        source: str = "runtime",
+        now: Optional[float] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Advance only the matching workflow through an allowed transition."""
+
+        normalized_id = str(request_id or "").strip()
+        normalized_status = str(status or "").strip().lower()
+        transitions = {
+            "requested": {
+                "acknowledged",
+                "awaiting_enable",
+                "rejected",
+                "interrupted",
+                "failed",
+            },
+            "acknowledged": {
+                "awaiting_enable",
+                "validating_save",
+                "awaiting_configuration",
+                "ready",
+                "action_dispatched",
+                "completed",
+                "rejected",
+                "interrupted",
+                "failed",
+            },
+            "awaiting_enable": {
+                "acknowledged",
+                "validating_save",
+                "interrupted",
+                "rejected",
+                "failed",
+            },
+            "validating_save": {
+                "awaiting_configuration",
+                "ready",
+                "completed",
+                "interrupted",
+                "failed",
+            },
+            "awaiting_configuration": {
+                "validating_save",
+                "ready",
+                "completed",
+                "interrupted",
+                "failed",
+            },
+            "ready": {
+                "action_dispatched",
+                "completed",
+                "interrupted",
+                "failed",
+            },
+            "action_dispatched": {"completed", "interrupted", "failed"},
+        }
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            workflow = validate_battle_workflow(data.get("battle_workflow"))
+            if workflow is None or workflow["request_id"] != normalized_id:
+                return data
+            current_status = str(workflow["status"])
+            if current_status == normalized_status:
+                return data
+            if normalized_status not in transitions.get(current_status, set()):
+                raise ValueError(
+                    "Battle workflow cannot transition from "
+                    f"{current_status} to {normalized_status}"
+                )
+            timestamp = _timestamp_at(now)
+            workflow["status"] = normalized_status
+            workflow["updated_at"] = timestamp
+            workflow["updated_by"] = source
+            if reason:
+                workflow["reason"] = _bounded_text(reason, 512)
+            if acknowledgement is not None:
+                workflow["acknowledgement"] = dict(acknowledgement)
+            if save_receipt is not None:
+                workflow["save_receipt"] = dict(save_receipt)
+            if configuration is not None:
+                workflow["configuration"] = dict(configuration)
+            if normalized_status in {
+                "acknowledged",
+                "awaiting_enable",
+                "validating_save",
+            } and "acknowledged_at" not in workflow:
+                workflow["acknowledged_at"] = timestamp
+            if normalized_status in BATTLE_WORKFLOW_TERMINAL_STATUSES:
+                workflow["completed_at"] = timestamp
+            data["battle_workflow"] = workflow
+            data["updated_at"] = timestamp
+            data["updated_by"] = source
+            return data
+
+        saved = self.update(mutate)
+        workflow = validate_battle_workflow(saved.get("battle_workflow"))
+        if workflow is None or workflow["request_id"] != normalized_id:
+            return None
+        return workflow
+
+    def request_manual_control(
+        self,
+        *,
+        evidence: Mapping[str, object],
+        reason: str = "operator",
+        source: Optional[str] = None,
+        now: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """Request an indefinite Pause before yielding device input."""
+
+        normalized_evidence = validate_workflow_evidence(evidence)
+        normalized_reason = str(reason or "").strip().lower()
+        if normalized_evidence is None:
+            raise ValueError(
+                "Manual control requires fresh exact runtime observation evidence"
+            )
+        if normalized_reason not in {"operator", "unexpected_manual_activity"}:
+            raise ValueError("Unsupported manual-control reason")
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            raw_manual = data.get("manual_control")
+            current = validate_manual_control(raw_manual)
+            if raw_manual is not None and current is None:
+                raise ValueError(
+                    "Existing manual control directive is malformed; it was preserved"
+                )
+            if (
+                current is not None
+                and current["status"] not in MANUAL_CONTROL_TERMINAL_STATUSES
+            ):
+                raise ValueError("Manual control is already in progress")
+            timestamp = _timestamp_at(now)
+            workflow = validate_battle_workflow(data.get("battle_workflow"))
+            if (
+                workflow is not None
+                and workflow["status"] not in BATTLE_WORKFLOW_TERMINAL_STATUSES
+            ):
+                workflow.update(
+                    {
+                        "status": "interrupted",
+                        "reason": "manual control took input authority",
+                        "updated_at": timestamp,
+                        "completed_at": timestamp,
+                        "updated_by": source or "operator",
+                    }
+                )
+                data["battle_workflow"] = workflow
+            manual = {
+                "schema_version": 1,
+                "manual_control_id": uuid4().hex,
+                "status": "pause_requested",
+                "reason": normalized_reason,
+                "requested_at": timestamp,
+                "updated_at": timestamp,
+                "starting_evidence": normalized_evidence,
+                "refresh_status": "awaiting_pause_acknowledgement",
+                "updated_by": source or "operator",
+            }
+            data["manual_control"] = manual
+            data["state"] = "PAUSED"
+            data.pop("resume_at", None)
+            data["state_updated_at"] = timestamp
+            data["state_request_id"] = uuid4().hex
+            data["updated_at"] = timestamp
+            data["updated_by"] = source or "operator"
+            return data
+
+        saved = self.update(mutate)
+        return dict(saved["manual_control"])
+
+    def request_return_control(
+        self,
+        manual_control_id: str,
+        *,
+        evidence: Mapping[str, object],
+        source: Optional[str] = None,
+        now: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """Request reconciliation while preserving the acknowledged Pause."""
+
+        normalized_id = str(manual_control_id or "").strip()
+        normalized_evidence = validate_workflow_evidence(evidence)
+        if normalized_evidence is None:
+            raise ValueError(
+                "Return Control requires fresh exact runtime observation evidence"
+            )
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            manual = validate_manual_control(data.get("manual_control"))
+            if manual is None or manual["manual_control_id"] != normalized_id:
+                raise ValueError("Manual control request is no longer current")
+            if manual["status"] != "active":
+                raise ValueError(
+                    "Return Control requires acknowledged active manual control"
+                )
+            if str(data.get("state") or "").upper() != "PAUSED" or data.get(
+                "resume_at"
+            ) is not None:
+                raise ValueError(
+                    "Return Control requires the acknowledged indefinite Pause"
+                )
+            timestamp = _timestamp_at(now)
+            manual.update(
+                {
+                    "status": "return_requested",
+                    "return_requested_at": timestamp,
+                    "return_evidence": normalized_evidence,
+                    "refresh_status": "observation_refresh_requested",
+                    "updated_at": timestamp,
+                    "updated_by": source or "operator",
+                }
+            )
+            data["manual_control"] = manual
+            data["updated_at"] = timestamp
+            data["updated_by"] = source or "operator"
+            return data
+
+        saved = self.update(mutate)
+        return dict(saved["manual_control"])
+
+    def transition_manual_control(
+        self,
+        manual_control_id: str,
+        status: str,
+        *,
+        detail: Optional[str] = None,
+        refresh_status: Optional[str] = None,
+        pause_acknowledgement: Optional[Mapping[str, object]] = None,
+        save_receipt: Optional[Mapping[str, object]] = None,
+        configuration: Optional[Mapping[str, object]] = None,
+        source: str = "runtime",
+        now: Optional[float] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Advance only the matching Take/Return Control workflow."""
+
+        normalized_id = str(manual_control_id or "").strip()
+        normalized_status = str(status or "").strip().lower()
+        transitions = {
+            "pause_requested": {"active", "interrupted", "failed"},
+            "active": {"return_requested", "interrupted", "failed"},
+            "return_requested": {
+                "awaiting_enable",
+                "reconciling",
+                "interrupted",
+                "failed",
+            },
+            "awaiting_enable": {"reconciling", "interrupted", "failed"},
+            "reconciling": {"completed", "interrupted", "failed"},
+        }
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            manual = validate_manual_control(data.get("manual_control"))
+            if manual is None or manual["manual_control_id"] != normalized_id:
+                return data
+            current_status = str(manual["status"])
+            if current_status == normalized_status:
+                return data
+            if normalized_status not in transitions.get(current_status, set()):
+                raise ValueError(
+                    "Manual control cannot transition from "
+                    f"{current_status} to {normalized_status}"
+                )
+            timestamp = _timestamp_at(now)
+            manual["status"] = normalized_status
+            manual["updated_at"] = timestamp
+            manual["updated_by"] = source
+            if detail:
+                manual["detail"] = _bounded_text(detail, 512)
+            if refresh_status:
+                manual["refresh_status"] = _bounded_text(refresh_status, 128)
+            if pause_acknowledgement is not None:
+                manual["pause_acknowledgement"] = dict(pause_acknowledgement)
+            if save_receipt is not None:
+                manual["save_receipt"] = dict(save_receipt)
+            if configuration is not None:
+                manual["configuration"] = dict(configuration)
+            if normalized_status == "active":
+                manual["acknowledged_at"] = timestamp
+            if normalized_status in MANUAL_CONTROL_TERMINAL_STATUSES:
+                manual["completed_at"] = timestamp
+            data["manual_control"] = manual
+            data["updated_at"] = timestamp
+            data["updated_by"] = source
+            return data
+
+        saved = self.update(mutate)
+        manual = validate_manual_control(saved.get("manual_control"))
+        if manual is None or manual["manual_control_id"] != normalized_id:
+            return None
+        return manual
+
+    def enable_after_return_control(
+        self,
+        manual_control_id: str,
+        *,
+        source: Optional[str] = None,
+        now: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """Atomically request Enable and mark Return Control pending refresh."""
+
+        normalized_id = str(manual_control_id or "").strip()
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            manual = validate_manual_control(data.get("manual_control"))
+            if manual is None or manual["manual_control_id"] != normalized_id:
+                raise ValueError("Manual control request is no longer current")
+            if manual["status"] not in {"return_requested", "awaiting_enable"}:
+                raise ValueError(
+                    "Use Return Control before enabling automated actions"
+                )
+            if (
+                manual["status"] == "awaiting_enable"
+                and str(data.get("state") or "").upper() == "RUNNING"
+                and data.get("resume_at") is None
+            ):
+                return data
+            timestamp = _timestamp_at(now)
+            manual.update(
+                {
+                    "status": "awaiting_enable",
+                    "refresh_status": "save_refresh_pending_after_enable",
+                    "updated_at": timestamp,
+                    "updated_by": source or "operator",
+                }
+            )
+            data["manual_control"] = manual
+            data["state"] = "RUNNING"
+            data.pop("resume_at", None)
+            data["state_updated_at"] = timestamp
+            data["state_request_id"] = uuid4().hex
+            data["updated_at"] = timestamp
+            data["updated_by"] = source or "operator"
+            return data
+
+        saved = self.update(mutate)
+        return dict(saved["manual_control"])
+
+    def interrupt_operator_workflows(
+        self,
+        reason: str,
+        *,
+        source: str,
+        now: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """Make unfinished workflow ownership visibly terminal."""
+
+        normalized_reason = _bounded_text(reason, 512)
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            timestamp = _timestamp_at(now)
+            workflow = validate_battle_workflow(data.get("battle_workflow"))
+            if (
+                workflow is not None
+                and workflow["status"] not in BATTLE_WORKFLOW_TERMINAL_STATUSES
+            ):
+                workflow.update(
+                    {
+                        "status": "interrupted",
+                        "reason": normalized_reason,
+                        "updated_at": timestamp,
+                        "completed_at": timestamp,
+                        "updated_by": source,
+                    }
+                )
+                data["battle_workflow"] = workflow
+            manual = validate_manual_control(data.get("manual_control"))
+            if (
+                manual is not None
+                and manual["status"] not in MANUAL_CONTROL_TERMINAL_STATUSES
+            ):
+                manual.update(
+                    {
+                        "status": "interrupted",
+                        "detail": normalized_reason,
+                        "updated_at": timestamp,
+                        "completed_at": timestamp,
+                        "updated_by": source,
+                    }
+                )
+                data["manual_control"] = manual
+            data["updated_at"] = timestamp
+            data["updated_by"] = source
+            return data
+
+        return self.update(mutate)
 
     def request_interactive_development_lease(
         self,
@@ -403,6 +933,7 @@ class ControlDirectiveStore:
             data["mode"] = normalized
             data["updated_at"] = timestamp
             data["mode_updated_at"] = timestamp
+            data["mode_request_id"] = uuid4().hex
             if source:
                 data["updated_by"] = source
             return data
@@ -431,6 +962,88 @@ class ControlDirectiveStore:
 
         return self.update(mutate)
 
+    def _replace_exclusive_validation_request(
+        self,
+        data: dict[str, Any],
+        *,
+        strategy: str,
+        strategy_request_id: str,
+        timestamp: str,
+        superseded_reason: str,
+    ) -> None:
+        """Replace pending validation through the existing Strategy ledger."""
+
+        try:
+            validation_definition = (
+                exclusive_validation_definition_for_strategy(strategy)
+            )
+        except ValueError:
+            if strategy in BUILTIN_STRATEGY_IDS:
+                raise
+            # Constrained custom Farm profiles do not declare an exclusive
+            # validation battle. Their plan has already been validated at
+            # publication time, possibly through an injected test directory.
+            validation_definition = None
+        ledger = _valid_exclusive_validation_ledger(
+            data.get("exclusive_validation")
+        )
+        receipts = dict(ledger["receipts"])
+        for request_id, receipt in list(receipts.items()):
+            launch = receipt.get("launch")
+            if (
+                isinstance(launch, Mapping)
+                and launch.get("status") in {"awaiting_operator", "requested"}
+            ):
+                receipts[request_id] = {
+                    **receipt,
+                    "launch": {
+                        **dict(launch),
+                        "status": "cancelled",
+                        "reason": superseded_reason,
+                        "completed_at": timestamp,
+                        "updated_at": timestamp,
+                    },
+                }
+        for request_id, receipt in list(receipts.items()):
+            if receipt["status"] != "pending":
+                continue
+            receipts[request_id] = {
+                **receipt,
+                "status": "result",
+                "outcome": "cancelled",
+                "reason": superseded_reason,
+                "completed_at": timestamp,
+                "updated_at": timestamp,
+            }
+            if validation_definition is None:
+                ledger["current_request_id"] = request_id
+        if validation_definition is not None:
+            validation_request_id = uuid4().hex
+            receipts[validation_request_id] = {
+                "request_id": validation_request_id,
+                "strategy_request_id": strategy_request_id,
+                "strategy": strategy,
+                "configuration_fingerprint": (
+                    validation_definition.configuration_fingerprint
+                ),
+                "battle_kind": validation_definition.battle_kind,
+                "status": "pending",
+                "created_at": timestamp,
+                "updated_at": timestamp,
+            }
+            if validation_definition.operator_launch is not None:
+                launch = validation_definition.operator_launch
+                receipts[validation_request_id]["launch_policy"] = {
+                    "kind": launch.kind,
+                    "timeout_seconds": launch.timeout_seconds,
+                    "prompt_title": launch.prompt_title,
+                    "prompt_message": launch.prompt_message,
+                    "reminder": launch.reminder,
+                }
+            ledger["current_request_id"] = validation_request_id
+        ledger["receipts"] = _prune_exclusive_validation_receipts(receipts)
+        data["exclusive_validation"] = ledger
+
     def set_strategy(
         self,
         strategy: str,
@@ -458,17 +1071,6 @@ class ControlDirectiveStore:
                 "Strategy apply mode must be one of: "
                 + ", ".join(sorted(STRATEGY_APPLY_MODES))
             )
-        try:
-            validation_definition = (
-                exclusive_validation_definition_for_strategy(normalized)
-            )
-        except ValueError:
-            if normalized in BUILTIN_STRATEGY_IDS:
-                raise
-            # Constrained custom Farm profiles do not declare an exclusive
-            # validation battle. Their plan has already been validated at
-            # publication time, possibly through an injected test directory.
-            validation_definition = None
 
         def mutate(data: dict[str, Any]) -> dict[str, Any]:
             timestamp = _updated_at()
@@ -481,83 +1083,15 @@ class ControlDirectiveStore:
             data["updated_at"] = timestamp
             data["strategy_updated_at"] = timestamp
             data["strategy_request_id"] = strategy_request_id
-            ledger = _valid_exclusive_validation_ledger(
-                data.get("exclusive_validation")
+            self._replace_exclusive_validation_request(
+                data,
+                strategy=normalized,
+                strategy_request_id=strategy_request_id,
+                timestamp=timestamp,
+                superseded_reason=(
+                    f"superseded by explicit {normalized} strategy request"
+                ),
             )
-            receipts = dict(ledger["receipts"])
-            for request_id, receipt in list(receipts.items()):
-                launch = receipt.get("launch")
-                if (
-                    isinstance(launch, Mapping)
-                    and launch.get("status") in {"awaiting_operator", "requested"}
-                ):
-                    receipts[request_id] = {
-                        **receipt,
-                        "launch": {
-                            **dict(launch),
-                            "status": "cancelled",
-                            "reason": (
-                                f"superseded by explicit {normalized} "
-                                "strategy request"
-                            ),
-                            "completed_at": timestamp,
-                            "updated_at": timestamp,
-                        },
-                    }
-            if validation_definition is not None:
-                for request_id, receipt in list(receipts.items()):
-                    if receipt["status"] != "pending":
-                        continue
-                    receipts[request_id] = {
-                        **receipt,
-                        "status": "result",
-                        "outcome": "cancelled",
-                        "reason": (
-                            f"superseded by explicit {normalized} strategy request"
-                        ),
-                        "completed_at": timestamp,
-                        "updated_at": timestamp,
-                    }
-                validation_request_id = uuid4().hex
-                receipts[validation_request_id] = {
-                    "request_id": validation_request_id,
-                    "strategy_request_id": strategy_request_id,
-                    "strategy": normalized,
-                    "configuration_fingerprint": (
-                        validation_definition.configuration_fingerprint
-                    ),
-                    "battle_kind": validation_definition.battle_kind,
-                    "status": "pending",
-                    "created_at": timestamp,
-                    "updated_at": timestamp,
-                }
-                if validation_definition.operator_launch is not None:
-                    launch = validation_definition.operator_launch
-                    receipts[validation_request_id]["launch_policy"] = {
-                        "kind": launch.kind,
-                        "timeout_seconds": launch.timeout_seconds,
-                        "prompt_title": launch.prompt_title,
-                        "prompt_message": launch.prompt_message,
-                        "reminder": launch.reminder,
-                    }
-                ledger["current_request_id"] = validation_request_id
-            else:
-                for request_id, receipt in list(receipts.items()):
-                    if receipt["status"] != "pending":
-                        continue
-                    receipts[request_id] = {
-                        **receipt,
-                        "status": "result",
-                        "outcome": "cancelled",
-                        "reason": (
-                            f"superseded by explicit {normalized} strategy request"
-                        ),
-                        "completed_at": timestamp,
-                        "updated_at": timestamp,
-                    }
-                    ledger["current_request_id"] = request_id
-            ledger["receipts"] = _prune_exclusive_validation_receipts(receipts)
-            data["exclusive_validation"] = ledger
             if source:
                 data["updated_by"] = source
             return data

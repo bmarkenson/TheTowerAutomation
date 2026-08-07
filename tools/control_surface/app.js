@@ -7,11 +7,12 @@ const state = {
   lastStatus: null,
   lastGatePrompted: null,
   lastTournamentLaunchPrompted: null,
-  attachmentPolicyDirty: false,
 };
 
 const byId = (id) => document.getElementById(id);
 const dash = "—";
+const BETTER_CONTROL_MINIMUM_REVISION = 28;
+const BETTER_CONTROL_CAPABILITY = "better_control_model_v1";
 
 function authHeaders() {
   return state.token ? { Authorization: `Bearer ${state.token}` } : {};
@@ -87,6 +88,7 @@ function renderStatus(payload) {
   const observation = payload.observation;
   const runtime = payload.runtime || { instances: [] };
   const processService = payload.process_service;
+  const controlModel = payload.control_model || {};
   const directive = control.state || "UNKNOWN";
 
   setText("directiveState", directive);
@@ -95,17 +97,11 @@ function renderStatus(payload) {
   if (directive === "PAUSED") directiveDetail = `Paused ${formatRemaining(control.remaining_seconds)}`;
   if (control.error) directiveDetail = control.error;
   setText("directiveDetail", directiveDetail);
-  setText("currentMode", formatExecutionMode(control.mode));
+  setText("currentMode", formatTerminalPolicy(control.mode));
   setText("controlUpdated", formatDate(control.updated_at));
   byId("modeSelect").value = ["NEXT_BATTLE", "WAIT", "HOME"].includes(control.mode)
     ? control.mode
     : "NEXT_BATTLE";
-  if (!state.attachmentPolicyDirty) {
-    byId("attachmentPolicySelect").value =
-      processService?.startup_gate_policy === "auto"
-        ? "auto"
-        : "auto_validate";
-  }
   const gameSpeedTarget = Number(control.game_speed_target);
   const normalizedGameSpeedTarget = Number.isFinite(gameSpeedTarget)
     ? gameSpeedTarget
@@ -130,7 +126,12 @@ function renderStatus(payload) {
   );
 
   if (observation) {
-    setText("observedState", observation.state_label);
+    setText(
+      "observedState",
+      controlModel.observation?.available
+        ? humanize(controlModel.observation.game_state)
+        : observation.state_label,
+    );
     setText("observedWave", observation.wave);
     setText("observedCoins", observation.coins_per_minute);
     setText(
@@ -177,27 +178,91 @@ function renderStatus(payload) {
   document.querySelectorAll("[data-control-action]").forEach((button) => {
     button.disabled = Boolean(control.error);
   });
+  const betterControlCompatible =
+    payload.api_version === 1
+    && Number(payload.server_revision) >= BETTER_CONTROL_MINIMUM_REVISION
+    && (payload.capabilities || []).includes(BETTER_CONTROL_CAPABILITY);
   const processActive = Boolean(runtime.active || processService?.active);
-  byId("attachmentPolicySelect").disabled =
-    processActive || Boolean(control.error) || !processService?.available;
   document.querySelectorAll("[data-process-action]").forEach((button) => {
     const action = button.dataset.processAction;
     const unavailable = Boolean(control.error) || !processService?.available;
     button.disabled = unavailable
+      || (action === "start" && !betterControlCompatible)
       || (action === "start" && processActive)
-      || (action === "stop" && !processService?.active)
-      || (action === "restart_attached" && (
-        !processService?.active
-        || (observation?.stale === false
-          && !observation?.state_label?.startsWith("RUNNING"))
-      ));
+      || (action === "stop" && !processService?.active);
+    if (action === "start" && !betterControlCompatible) {
+      button.title = "Linux API revision 28 with better_control_model_v1 is required.";
+    }
   });
+  renderBetterControlModel(
+    controlModel,
+    betterControlCompatible,
+    control.error || "",
+  );
   renderRunConfiguration(
     control,
     processActive,
   );
   renderExclusiveValidation(control);
   renderGateDecision(control.gate_decision);
+}
+
+function renderBetterControlModel(model, compatible, controlError) {
+  const actions = model.actions || {};
+  const pause = actions.pause || {};
+  document.querySelectorAll('[data-control-action="pause"], #customPauseForm button').forEach((button) => {
+    button.disabled = !compatible || pause.available !== true;
+    button.title = compatible
+      ? pause.reason || ""
+      : "Linux API revision 28 with better_control_model_v1 is required.";
+  });
+  for (const [id, action] of [
+    ["startBattleButton", "start_battle"],
+    ["attachBattleButton", "attach_battle"],
+    ["takeManualControlButton", "take_manual_control"],
+    ["returnControlButton", "return_control"],
+  ]) {
+    const button = byId(id);
+    const availability = actions[action] || {};
+    button.disabled = !compatible || availability.available !== true;
+    button.title = compatible
+      ? availability.reason || ""
+      : "Linux API revision 28 with better_control_model_v1 is required.";
+  }
+  const enable = document.querySelector('[data-control-action="enable"]');
+  if (enable) {
+    enable.disabled = !compatible || actions.enable?.available !== true;
+    enable.title = compatible
+      ? actions.enable?.reason || ""
+      : "Linux API revision 28 with better_control_model_v1 is required.";
+  }
+  const applyTerminalPolicy = byId("applyModeButton");
+  applyTerminalPolicy.disabled = !compatible || Boolean(controlError);
+  applyTerminalPolicy.title = controlError
+    || (compatible
+      ? "Set future terminal behavior without dispatching an immediate battle action."
+      : "Linux API revision 28 with better_control_model_v1 is required.");
+  const workflow = model.battle_workflow;
+  setText(
+    "battleWorkflowSummary",
+    workflow
+      ? `${humanize(workflow.intent)} · ${humanize(workflow.status)}${workflow.reason ? ` — ${workflow.reason}` : ""}`
+      : `${humanize(model.observation?.game_state || "unknown")} — choose only an available matching intent.`,
+  );
+  const manual = model.manual_control;
+  setText(
+    "manualControlSummary",
+    manual
+      ? `${humanize(manual.status)}${manual.detail ? ` — ${manual.detail}` : ""}`
+      : "Automation retains control.",
+  );
+  const terminalPolicy = model.when_battle_ends || {};
+  setText(
+    "terminalPolicyStatus",
+    terminalPolicy.reason
+      ? `${humanize(terminalPolicy.status || "selected")} — ${terminalPolicy.reason}`
+      : "Future terminal policy status is unavailable.",
+  );
 }
 
 function renderExclusiveValidation(control) {
@@ -701,9 +766,9 @@ function humanize(value) {
   return String(value).replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function formatExecutionMode(value) {
-  if (value === "NEXT_BATTLE") return "Next Battle";
-  if (value === "HOME") return "Stay Home";
+function formatTerminalPolicy(value) {
+  if (value === "NEXT_BATTLE") return "Continue automatically";
+  if (value === "HOME") return "Return to / stay Home";
   return humanize(value || dash);
 }
 
@@ -737,22 +802,12 @@ document.addEventListener("click", (event) => {
         ).toFixed(1)}?`,
       )
     ) return;
-    if (action === "restart_attached" && !window.confirm(
-      "Reload the main Python automation process for this battle? Automation will pause, verify the attached replacement, and restore the current control state.",
-    )) return;
     const payload = { action };
-    if (process.dataset.runState) payload.run_state = process.dataset.runState;
-    if (action === "start") {
-      payload.startup_gate_policy = byId("attachmentPolicySelect").value;
-      state.attachmentPolicyDirty = false;
-    }
     sendProcess(
       payload,
       action === "stop"
         ? "Automation service stopped"
-        : action === "restart_attached"
-          ? "Automation reloaded for the current battle"
-        : `Automation service started ${payload.run_state.toLowerCase()}`,
+        : "Automation service started Paused",
     );
     return;
   }
@@ -781,7 +836,10 @@ byId("customPauseForm").addEventListener("submit", (event) => {
 
 byId("applyModeButton").addEventListener("click", () => {
   const mode = byId("modeSelect").value;
-  sendControl({ action: "mode", mode }, `Mode set to ${formatExecutionMode(mode)}`);
+  sendControl(
+    { action: "terminal_policy", policy: mode },
+    `When this battle ends: ${formatTerminalPolicy(mode)}`,
+  );
 });
 
 byId("gameSpeedTargetSelect").addEventListener("change", () => {
@@ -790,10 +848,6 @@ byId("gameSpeedTargetSelect").addEventListener("change", () => {
     { action: "game_speed", target },
     `Game speed target set to x${target.toFixed(1)}`,
   );
-});
-
-byId("attachmentPolicySelect").addEventListener("change", () => {
-  state.attachmentPolicyDirty = true;
 });
 
 byId("battleRows").addEventListener("click", (event) => {

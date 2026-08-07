@@ -43,7 +43,6 @@ public partial class MainWindow : Window
     private string? _activityEndCursor;
     private string? _activityClearCursor;
     private string? _activityScopeId;
-    private bool _startupGatePolicyDirty;
     private string _strategyRequestMessage = "";
     private bool _updatingStrategySelection;
     private bool _strategySelectionDirty;
@@ -66,7 +65,6 @@ public partial class MainWindow : Window
     private bool _controlSurfaceRestartInFlight;
     private bool _apiTunnelActionInFlight;
     private bool _adbTunnelRestartInFlight;
-    private bool _automationRestartInFlight;
     private bool _adbForwardStarting;
     private StartupGateContext? _startupGateContext;
     private IReadOnlyDictionary<string, StartupGateWaiverStatus> _startupGateWaivers
@@ -1457,7 +1455,7 @@ public partial class MainWindow : Window
         try
         {
             var response = await _api.PostControlAsync(
-                new { action = "mode", mode },
+                new { action = "terminal_policy", policy = mode },
                 CancellationToken.None);
             RenderStatus(response);
             await RefreshActivityAsync(force: true);
@@ -1753,7 +1751,7 @@ public partial class MainWindow : Window
         {
             return;
         }
-        if (tag.StartsWith("start:", StringComparison.Ordinal)
+        if (tag == "start"
             && _gameSpeedTarget < 6.3
             && MessageBox.Show(
                 this,
@@ -1769,29 +1767,21 @@ public partial class MainWindow : Window
         try
         {
             StatusResponse response;
-            if (tag.StartsWith("start:", StringComparison.Ordinal))
+            if (tag == "start")
             {
-                var runState = tag.Split(':')[1];
                 var strategy = SelectedStrategy()
                     ?? throw new InvalidOperationException(
                         "Select a strategy before starting automation.");
-                var startupGatePolicy =
-                    SkipAttachedBattleChecksRadio.IsChecked == true
-                        ? "auto"
-                        : "auto_validate";
                 response = await _api.PostProcessAsync(
                     new
                     {
                         action = "start",
-                        run_state = runState,
-                        startup_gate_policy = startupGatePolicy,
                         strategy,
                     },
                     CancellationToken.None);
-                _startupGatePolicyDirty = false;
                 _strategySelectionDirty = false;
                 _strategyRequestMessage =
-                    $"Started with selected {StrategyDisplayName(strategy)} strategy.";
+                    $"Started Paused with selected {StrategyDisplayName(strategy)} strategy.";
             }
             else
             {
@@ -1808,56 +1798,6 @@ public partial class MainWindow : Window
             await RefreshStatusAsync(force: true);
         }
     }
-
-    private async void ReloadAutomation_Click(object sender, RoutedEventArgs e)
-    {
-        if (MessageBox.Show(
-                this,
-                "Reload the main Python automation process for the current battle?\n\n"
-                + "Automation will pause, start a replacement in attachment mode, "
-                + "verify its PID, lock, startup policy, control acknowledgement, "
-                + "and first observation, then restore the current Running or "
-                + "Paused state. Startup and session gates remain deferred until "
-                + "the next battle boundary.",
-                "Reload automation",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Question) != MessageBoxResult.Yes)
-        {
-            return;
-        }
-
-        _automationRestartInFlight = true;
-        ReloadAutomationButton.IsEnabled = false;
-        ControlSelectionText.Text =
-            "Pausing and replacing the main automation process...";
-        try
-        {
-            using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(120));
-            var response = await _api.PostProcessAsync(
-                new { action = "restart_attached" },
-                cancellation.Token);
-            RenderStatus(response);
-            var request = response.Request;
-            ControlSelectionText.Text = request is null
-                ? "Automation reload completed."
-                : $"Automation reloaded: PID {request.PreviousPid} → "
-                    + $"{request.ReplacementPid}; restored {request.RestoredState}.";
-            await RefreshActivityAsync(force: true);
-        }
-        catch (Exception exc)
-        {
-            LastErrorText.Text = exc.Message;
-            ShowError(exc);
-            await RefreshStatusAsync(force: true);
-        }
-        finally
-        {
-            _automationRestartInFlight = false;
-        }
-    }
-
-    private void StartupGatePolicy_Click(object sender, RoutedEventArgs e) =>
-        _startupGatePolicyDirty = true;
 
     private async void SetAdbPort_Click(object sender, RoutedEventArgs e)
     {
@@ -2285,7 +2225,9 @@ public partial class MainWindow : Window
     {
         _serverCompatibility = ControlSurfaceCompatibility.Evaluate(status);
         UpdateControlSurfaceCompatibility();
-        DirectiveText.Text = FormatAutomationState(status.Control);
+        DirectiveText.Text = FormatActionAuthority(
+            status.ControlModel,
+            status.Control);
         ModeText.Text = FormatExecutionMode(status.Control.Mode);
         var strategyGate = status.StrategyActionGate;
         var strategyGateVisible = strategyGate is
@@ -2351,8 +2293,9 @@ public partial class MainWindow : Window
                 || (_gameSpeedTarget >= 6.3 && maximumSpeedReached)
                 ? new SolidColorBrush(Color.FromRgb(101, 230, 166))
                 : new SolidColorBrush(Color.FromRgb(241, 191, 91));
-        ObservedStateText.Text = FormatGameScreen(
-            status.Observation?.StateLabel);
+        ObservedStateText.Text = status.ControlModel?.Observation.Available == true
+            ? FormatStatusToken(status.ControlModel.Observation.GameState)
+            : FormatGameScreen(status.Observation?.StateLabel);
         WaveText.Text = status.Observation?.Wave?.ToString(CultureInfo.InvariantCulture) ?? "-";
         CoinsMinuteText.Text = status.Observation?.CoinsPerMinute ?? "-";
         HeartbeatText.Text = status.Observation is null
@@ -2394,31 +2337,15 @@ public partial class MainWindow : Window
         ProcessPidText.Text = processPid?.ToString(CultureInfo.InvariantCulture) ?? "-";
         var lifecycleAvailable = service?.Available == true;
         var processActive = service?.Active == true || status.Runtime.Active;
-        StartPausedButton.IsEnabled = lifecycleAvailable
+        StartAutomationButton.IsEnabled = lifecycleAvailable
             && !processActive
-            && _serverCompatibility.IsCompatible;
-        StartRunningButton.IsEnabled = lifecycleAvailable
-            && !processActive
+            && string.IsNullOrWhiteSpace(status.Control.Error)
             && _serverCompatibility.IsCompatible;
         var startBlocker = StartBlockerDescription(
             lifecycleAvailable,
             processActive);
-        StartPausedButton.ToolTip = startBlocker;
-        StartRunningButton.ToolTip = startBlocker;
-        ValidateAttachedBattleRadio.IsEnabled =
-            lifecycleAvailable && !processActive;
-        SkipAttachedBattleChecksRadio.IsEnabled =
-            lifecycleAvailable && !processActive;
+        StartAutomationButton.ToolTip = startBlocker;
         CompleteStopButton.IsEnabled = lifecycleAvailable && service?.Active == true;
-        ReloadAutomationButton.IsEnabled = lifecycleAvailable
-            && service?.Active == true
-            && _serverCompatibility?.IsCompatible == true
-            && (status.Observation is null
-                || status.Observation.Stale
-                || status.Observation.StateLabel.StartsWith(
-                    "RUNNING",
-                    StringComparison.OrdinalIgnoreCase))
-            && !_automationRestartInFlight;
         var pausedAndAcknowledged = processActive
             && string.Equals(
                 status.Control.State,
@@ -2487,14 +2414,6 @@ public partial class MainWindow : Window
         {
             AdbPortBox.Text = service.AdbPort.Value.ToString(CultureInfo.InvariantCulture);
         }
-        if (!_startupGatePolicyDirty && !processActive)
-        {
-            var skipAttachedChecks = service?.StartupGatePolicy is
-                "auto" or "next_run";
-            SkipAttachedBattleChecksRadio.IsChecked = skipAttachedChecks;
-            ValidateAttachedBattleRadio.IsChecked = !skipAttachedChecks;
-        }
-
         var statePending = processActive
             && status.Acknowledgements.State is not { AcknowledgesCurrent: true };
         var modePending = processActive
@@ -2513,6 +2432,12 @@ public partial class MainWindow : Window
             ResumeButton,
             string.Equals(status.Control.State, "RUNNING", StringComparison.OrdinalIgnoreCase),
             statePending);
+        RenderBetterControlModel(status.ControlModel, processActive);
+        var terminalPolicyAvailable = _serverCompatibility.IsCompatible
+            && string.IsNullOrWhiteSpace(status.Control.Error);
+        NextBattleModeButton.IsEnabled = terminalPolicyAvailable;
+        WaitModeButton.IsEnabled = terminalPolicyAvailable;
+        HomeModeButton.IsEnabled = terminalPolicyAvailable;
         SetSelectionStyle(
             NextBattleModeButton,
             string.Equals(
@@ -2615,6 +2540,13 @@ public partial class MainWindow : Window
         var modeDisposition = !processActive
             ? "saved for next terminal"
             : modePending ? "awaiting runtime" : "active directive";
+        var terminalPolicyStatus = status.ControlModel?.WhenBattleEnds;
+        var terminalPolicyDisposition = terminalPolicyStatus is null
+            ? modeDisposition
+            : $"{modeDisposition}; {FormatStatusToken(terminalPolicyStatus.Status)}"
+                + (string.IsNullOrWhiteSpace(terminalPolicyStatus.Reason)
+                    ? ""
+                    : $" — {terminalPolicyStatus.Reason}");
         var requestedAdbTarget = status.Control.AdbPort is not null
             ? $"localhost:{status.Control.AdbPort.Value}"
             : service?.AdbTarget ?? "unknown";
@@ -2622,11 +2554,11 @@ public partial class MainWindow : Window
             ? "handoff pending"
             : processActive ? "active" : "next start";
         ControlSelectionText.Text =
-            $"State: {status.Control.State} ({stateDisposition}) | "
-            + $"Mode: {FormatExecutionMode(status.Control.Mode)} "
-            + $"({modeDisposition}) | "
+            $"Action authority: {FormatActionAuthority(status.ControlModel, status.Control)} "
+            + $"({stateDisposition}) | When this battle ends: "
+            + $"{FormatExecutionMode(status.Control.Mode)} "
+            + $"({terminalPolicyDisposition}) | "
             + $"ADB target: {requestedAdbTarget} ({adbDisposition}) | "
-            + $"Startup gates: {service?.StartupGatePolicy ?? "unknown"} | "
             + $"One-run skips: {configuredSkips.Count} | "
             + $"Gate decision: {status.Control.GateDecision?.Status ?? "none"}";
 
@@ -2684,6 +2616,73 @@ public partial class MainWindow : Window
             ?? service?.StrategyError
             ?? service?.StartupGatePolicyError
             ?? "";
+    }
+
+    private void RenderBetterControlModel(
+        BetterControlModelStatus? model,
+        bool processActive)
+    {
+        static BetterControlActionAvailability Unavailable(string reason) =>
+            new() { Available = false, Reason = reason };
+
+        BetterControlActionAvailability Action(string name)
+        {
+            if (_serverCompatibility?.IsCompatible != true)
+            {
+                return Unavailable(
+                    "Linux API revision 28 with better_control_model_v1 is required."
+                );
+            }
+            if (model is not null
+                && model.Actions.TryGetValue(name, out var availability))
+            {
+                return availability;
+            }
+            return Unavailable("Better Control Model status is unavailable.");
+        }
+
+        var start = Action("start_battle");
+        StartBattleButton.IsEnabled = start.Available;
+        StartBattleButton.ToolTip = start.Reason;
+        var attach = Action("attach_battle");
+        AttachBattleButton.IsEnabled = attach.Available;
+        AttachBattleButton.ToolTip = attach.Reason;
+        var take = Action("take_manual_control");
+        TakeManualControlButton.IsEnabled = take.Available;
+        TakeManualControlButton.ToolTip = take.Reason;
+        var giveBack = Action("return_control");
+        ReturnControlButton.IsEnabled = giveBack.Available;
+        ReturnControlButton.ToolTip = giveBack.Reason;
+        var enable = Action("enable");
+        ResumeButton.IsEnabled = processActive && enable.Available;
+        ResumeButton.ToolTip = enable.Reason;
+        var pause = Action("pause");
+        PauseButton.IsEnabled = pause.Available;
+        Pause15Button.IsEnabled = pause.Available;
+        Pause30Button.IsEnabled = pause.Available;
+        PauseButton.ToolTip = pause.Reason;
+        Pause15Button.ToolTip = pause.Reason;
+        Pause30Button.ToolTip = pause.Reason;
+
+        BattleWorkflowText.Text = model?.BattleWorkflow is { } workflow
+            ? $"{FormatStatusToken(workflow.Intent)} · "
+                + $"{FormatStatusToken(workflow.Status)}"
+                + (string.IsNullOrWhiteSpace(workflow.Reason)
+                    ? ""
+                    : $" — {workflow.Reason}")
+            : model is null
+                ? "Waiting for Better Control Model status."
+                : $"{FormatStatusToken(model.Observation.GameState)} — choose "
+                    + "only an available matching intent.";
+        ManualControlText.Text = model?.ManualControl is { } manual
+            ? $"{FormatStatusToken(manual.Status)}"
+                + (string.IsNullOrWhiteSpace(manual.Detail)
+                    ? ""
+                    : $" — {manual.Detail}")
+                + (string.IsNullOrWhiteSpace(manual.RefreshStatus)
+                    ? ""
+                    : $" ({FormatStatusToken(manual.RefreshStatus)})")
+            : "Automation retains control.";
     }
 
     private void HostPerformance_SnapshotUpdated(
@@ -3211,7 +3210,7 @@ public partial class MainWindow : Window
 
         var problems = DescribeCompatibilityProblems(_serverCompatibility);
         var incompatibility =
-            "Start paused and Start running are disabled because the Linux control "
+            "Start Automation is disabled because the Linux control "
             + "API is older than or incompatible with this Windows client ("
             + problems
             + "). Restart the Linux API service to reload the current Linux code.";
@@ -3227,7 +3226,7 @@ public partial class MainWindow : Window
         CompatibilityBannerText.Text = destinationValid
             ? $"Connected Linux API is incompatible ({problems}). Select Restart "
                 + "Linux API service, wait for this banner to disappear, then use "
-                + "Start paused or Start running. This restarts only the control "
+                + "Start Automation. This restarts only the control "
                 + "API; it does not start automation or alter the game."
             : $"Connected Linux API is incompatible ({problems}). Enter a valid "
                 + "Linux SSH destination to enable the restart button, or run "
@@ -3472,11 +3471,34 @@ public partial class MainWindow : Window
                 : state;
     }
 
+    private static string FormatActionAuthority(
+        BetterControlModelStatus? model,
+        ControlStatus control)
+    {
+        if (model is null)
+        {
+            return FormatAutomationState(control);
+        }
+        var label = model.ActionAuthority.Effective.ToLowerInvariant() switch
+        {
+            "enabled" => "Automation Enabled",
+            "paused" => "Automation Paused",
+            "pending" => "Authority Pending",
+            "stopped" => "Automation Stopped",
+            "unavailable" => "Authority Unavailable",
+            _ => "Authority Unknown",
+        };
+        return model.ActionAuthority.Effective == "paused"
+            && control.RemainingSeconds is not null
+                ? $"{label} · {FormatAge(control.RemainingSeconds)} left"
+                : label;
+    }
+
     private static string FormatExecutionMode(string? value) =>
         value?.ToUpperInvariant() switch
         {
-            "NEXT_BATTLE" => "Next Battle",
-            "HOME" => "Stay Home",
+            "NEXT_BATTLE" => "Continue automatically",
+            "HOME" => "Return / stay Home",
             _ => FormatStatusToken(value),
         };
 

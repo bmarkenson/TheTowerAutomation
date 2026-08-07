@@ -183,7 +183,9 @@ def test_home_mode_taps_game_stats_home_instead_of_retry():
 
 
 def test_game_over_abort_emits_failed_terminal_result():
+    original_state = AUTOMATION.state
     original_mode = AUTOMATION.mode
+    AUTOMATION.state = RunState.RUNNING
     AUTOMATION.mode = ExecMode.HOME
     try:
         with (
@@ -196,13 +198,17 @@ def test_game_over_abort_emits_failed_terminal_result():
         ):
             handle_game_over(capture_stats=False)
     finally:
+        assert AUTOMATION.state is RunState.PAUSED
+        assert AUTOMATION.mode is ExecMode.HOME
+        AUTOMATION.state = original_state
         AUTOMATION.mode = original_mode
 
     result_log.assert_called_once_with(
         "Finished-battle handling failed — Go Home from Game Stats did not complete",
         detail=(
             "[GAME_OVER] result=failed session=test "
-            "failed_step=Go Home from Game Stats next_mode=WAIT"
+            "failed_step=Go Home from Game Stats terminal_policy=HOME "
+            "action_authority=PAUSED"
         ),
     )
 

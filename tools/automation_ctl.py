@@ -6,11 +6,14 @@ Small CLI to control automation state/mode via a JSON control file
 consumed by main.py (default: logs/automation_ctl.json).
 
 Commands:
-  - pause                 → state=PAUSED until an explicit resume
+  - pause                 → state=PAUSED until an explicit Enable
   - pause --minutes N     → state=PAUSED until its persisted deadline
-  - resume                → state=RUNNING
-  - stop                  → state=STOPPED
-  - mode <next-battle|wait|home> → set the terminal disposition
+  - enable                → explicitly permit guarded automation actions
+  - start-battle          → request only a verified new-run Home workflow
+  - attach-battle         → request only a verified active/resumable workflow
+  - take-manual-control   → request an acknowledged indefinite Pause
+  - return-control        → request paused observation reconciliation
+  - when-battle-ends <continue|wait|home> → set future terminal policy
   - game-speed <target>   → enforce x0.0..x6.0, or x6.3/max available
   - gate                  → prompt for a pending startup-gate decision
   - gate <choice>         → resolve it non-interactively by choice id
@@ -18,8 +21,6 @@ Commands:
   - configure-run         → interactively stage one-run check skips
   - configure-run skip <check>
   - configure-run default <check>
-  - set state <S>         → explicitly set state (RUNNING|PAUSED|STOPPED)
-  - set mode  <M>         → explicitly set mode  (NEXT_BATTLE|WAIT|HOME)
   - status                → print current file contents (or defaults)
 
 Writes atomically (tmp + os.replace) and preserves unspecified fields.
@@ -33,7 +34,6 @@ import json
 import math
 from pathlib import Path
 import sys
-import time
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -42,40 +42,16 @@ if str(PROJECT_ROOT) not in sys.path:
 from core.control_directives import (
     ControlDirectiveError,
     ControlDirectiveStore,
-    VALID_STATES,
-    normalize_automation_mode,
     normalize_game_speed_target,
 )
 from core.gate_decisions import (
     prompt_for_gate_decision,
     startup_gate_context_for_strategy,
 )
+from core.control_surface import ControlSurfaceRequestError, ControlSurfaceService
 
 
 DEFAULT_CTRL_PATH = "logs/automation_ctl.json"
-
-
-def _set_state(path: str, state: str, *, resume_at: float | None = None) -> None:
-    s = state.upper()
-    if s not in VALID_STATES:
-        raise SystemExit(f"Invalid state: {state}. Use one of {sorted(VALID_STATES)}")
-    try:
-        ControlDirectiveStore(path).set_state(s, resume_at=resume_at, source="cli")
-    except ControlDirectiveError as exc:
-        raise SystemExit(f"Unable to update automation control: {exc}") from exc
-    print(f"[OK] State set to {s} @ {path}")
-
-
-def _set_mode(path: str, mode: str) -> None:
-    try:
-        normalized = normalize_automation_mode(mode)
-    except ValueError as exc:
-        raise SystemExit(str(exc)) from exc
-    try:
-        ControlDirectiveStore(path).set_mode(normalized, source="cli")
-    except ControlDirectiveError as exc:
-        raise SystemExit(f"Unable to update automation control: {exc}") from exc
-    print(f"[OK] Mode set to {normalized} @ {path}")
 
 
 def _set_game_speed_target(path: str, target: str) -> None:
@@ -93,6 +69,35 @@ def _set_game_speed_target(path: str, target: str) -> None:
     except ControlDirectiveError as exc:
         raise SystemExit(f"Unable to update automation control: {exc}") from exc
     print(f"[OK] Game speed target set to x{normalized:.1f} @ {path}")
+
+
+def _better_control_service(path: str) -> ControlSurfaceService:
+    """Use the same fresh-owner validation as browser and native clients."""
+
+    control_path = Path(path)
+    parent = control_path.parent
+    return ControlSurfaceService(
+        repository_root=PROJECT_ROOT,
+        control_file=control_path,
+        action_log=parent / "actions.log",
+        strategy_action_gate_file=parent / "strategy_action_gate.json",
+    )
+
+
+def _apply_better_control(path: str, action: str, **values: object) -> None:
+    try:
+        response = _better_control_service(path).apply_control(
+            {"action": action, **values}
+        )
+    except ControlSurfaceRequestError as exc:
+        code = f" [{exc.code}]" if exc.code else ""
+        raise SystemExit(f"{action} unavailable{code}: {exc}") from exc
+    request = response.get("request") or {}
+    model = response.get("control_model") or {}
+    workflow = model.get("battle_workflow") or model.get("manual_control") or {}
+    disposition = str(request.get("disposition") or "requested")
+    status = str(workflow.get("status") or "pending")
+    print(f"[OK] {action}: {disposition}; runtime status={status} @ {path}")
 
 
 def _request_force_continue(path: str) -> None:
@@ -209,16 +214,18 @@ def _configure_run(path: str, command: list[str]) -> None:
 
 def main(argv=None):
     p = argparse.ArgumentParser(
-        description="Automation state and terminal-disposition controller"
+        description="Better Control Model authority and workflow controller"
     )
     p.add_argument(
         "command",
         nargs="+",
         help=(
-            "pause | resume | stop | mode <m> | gate [choice] | "
+            "pause | enable | start-battle | attach-battle | "
+            "take-manual-control | return-control | "
+            "when-battle-ends <continue|wait|home> | gate [choice] | "
             "game-speed <0.0..6.0|6.3|max> | "
             "force-continue | configure-run [skip|default <check>] | "
-            "set state <s> | set mode <m> | status"
+            "status"
         ),
     )
     p.add_argument(
@@ -235,23 +242,39 @@ def main(argv=None):
     ctrl = args.ctrl
 
     if cmd[0] == "pause" and len(cmd) == 1:
-        resume_at = None
         if args.minutes is not None:
             if not math.isfinite(args.minutes) or args.minutes <= 0:
                 p.error("--minutes must be a positive number")
-            resume_at = time.time() + (args.minutes * 60)
-        _set_state(ctrl, "PAUSED", resume_at=resume_at)
+            _apply_better_control(ctrl, "pause", minutes=args.minutes)
+        else:
+            _apply_better_control(ctrl, "pause")
         return 0
     if args.minutes is not None:
         p.error("--minutes is only valid with the pause command")
-    if cmd[0] == "resume" and len(cmd) == 1:
-        _set_state(ctrl, "RUNNING")
+    if cmd[0] == "enable" and len(cmd) == 1:
+        _apply_better_control(ctrl, "enable")
         return 0
-    if cmd[0] == "stop" and len(cmd) == 1:
-        _set_state(ctrl, "STOPPED")
+    if cmd[0] == "start-battle" and len(cmd) == 1:
+        _apply_better_control(ctrl, "start_battle")
         return 0
-    if cmd[0] == "mode" and len(cmd) == 2:
-        _set_mode(ctrl, cmd[1])
+    if cmd[0] == "attach-battle" and len(cmd) == 1:
+        _apply_better_control(ctrl, "attach_battle")
+        return 0
+    if cmd[0] == "take-manual-control" and len(cmd) == 1:
+        _apply_better_control(ctrl, "take_manual_control")
+        return 0
+    if cmd[0] == "return-control" and len(cmd) == 1:
+        _apply_better_control(ctrl, "return_control")
+        return 0
+    if cmd[0] == "when-battle-ends" and len(cmd) == 2:
+        aliases = {
+            "continue": "NEXT_BATTLE",
+            "continue-automatically": "NEXT_BATTLE",
+            "wait": "WAIT",
+            "home": "HOME",
+        }
+        policy = aliases.get(cmd[1].strip().lower(), cmd[1])
+        _apply_better_control(ctrl, "terminal_policy", policy=policy)
         return 0
     if cmd[0] == "game-speed" and len(cmd) == 2:
         _set_game_speed_target(ctrl, cmd[1])
@@ -264,12 +287,6 @@ def main(argv=None):
         return 0
     if cmd[0] == "configure-run":
         _configure_run(ctrl, cmd[1:])
-        return 0
-    if cmd[0] == "set" and len(cmd) == 3 and cmd[1] == "state":
-        _set_state(ctrl, cmd[2])
-        return 0
-    if cmd[0] == "set" and len(cmd) == 3 and cmd[1] == "mode":
-        _set_mode(ctrl, cmd[2])
         return 0
     if cmd[0] == "status" and len(cmd) == 1:
         try:

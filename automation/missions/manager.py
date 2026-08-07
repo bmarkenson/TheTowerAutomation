@@ -110,6 +110,7 @@ class MissionManager:
         defer_startup_gates_until_next_run: bool = False,
         validate_attached_battle: bool = False,
         skip_attached_checks: bool = False,
+        await_initial_battle_intent: bool = False,
         action_guard_fn: Optional[Callable[[], bool]] = None,
     ):
         self.mission = mission
@@ -121,6 +122,9 @@ class MissionManager:
         self._startup_gates_deferred = bool(defer_startup_gates_until_next_run)
         self._validate_initial_attachment = bool(validate_attached_battle)
         self._skip_initial_attachment_checks = bool(skip_attached_checks)
+        self._await_initial_battle_intent = bool(await_initial_battle_intent)
+        self._authorized_initial_battle_intent: Optional[str] = None
+        self._authorized_battle_workflow_request_id: Optional[str] = None
         self._action_guard_fn = action_guard_fn
         self._new_battle_home_observed = False
         self._exclusive_validation_prepared_request_id: Optional[str] = None
@@ -148,6 +152,9 @@ class MissionManager:
             "exclusive_validation_battle"
         ] = False
         self.ctx.data["startup_gates_deferred"] = self._startup_gates_deferred
+        self.ctx.data["awaiting_initial_battle_intent"] = (
+            self._await_initial_battle_intent
+        )
         self._clear_attached_check_state()
         if self._startup_gates_deferred:
             self._record_deferred_free_upgrade_lock_evidence()
@@ -160,6 +167,9 @@ class MissionManager:
         control = detection.get("home_battle_control", "UNKNOWN")
         normalized_state = str(state or "UNKNOWN").upper()
         parsed_control = HomeBattleControl.parse(control)
+        if self._await_initial_battle_intent:
+            self._last_state = state
+            return False
         new_battle_home = bool(
             normalized_state in {"HOME", "HOME_SCREEN"}
             and parsed_control is HomeBattleControl.NEW_BATTLE
@@ -207,6 +217,8 @@ class MissionManager:
                 "INFO",
                 console=True,
             )
+            self._authorized_initial_battle_intent = None
+            self._authorized_battle_workflow_request_id = None
         if battle_started:
             self._clear_restored_session_preflight_report()
             self._arm_startup_gates()
@@ -219,8 +231,83 @@ class MissionManager:
                     self._mission_was_complete = False
             if self.strategy:
                 self.strategy.on_run_start(self.ctx)
+            self._authorized_initial_battle_intent = None
+            self._authorized_battle_workflow_request_id = None
         self._last_state = state
         return battle_started
+
+    def awaiting_initial_battle_intent(self) -> bool:
+        """Return whether the runtime has no operator-selected first workflow."""
+
+        return self._await_initial_battle_intent
+
+    def authorize_initial_battle_intent(
+        self,
+        intent: str,
+        *,
+        request_id: Optional[str] = None,
+    ) -> bool:
+        """Select semantics for one not-yet-adopted battle boundary."""
+
+        normalized = str(intent or "").strip().lower()
+        if normalized not in {"start_battle", "attach_battle"}:
+            raise ValueError(
+                "Initial battle intent must be start_battle or attach_battle"
+            )
+        if self._battle_lifecycle.active_battle_observed:
+            return False
+        self._authorized_initial_battle_intent = normalized
+        self._authorized_battle_workflow_request_id = (
+            str(request_id).strip() if request_id else None
+        )
+        self._await_initial_battle_intent = False
+        self.ctx.data["awaiting_initial_battle_intent"] = False
+        if normalized == "attach_battle":
+            self._startup_gates_deferred = True
+            self._validate_initial_attachment = True
+            self._skip_initial_attachment_checks = False
+            self._battle_lifecycle.adopt_initial_battle = True
+            self.ctx.data["startup_gates_deferred"] = True
+            self._record_deferred_free_upgrade_lock_evidence()
+        else:
+            self._startup_gates_deferred = False
+            self._validate_initial_attachment = False
+            self._skip_initial_attachment_checks = False
+            self._battle_lifecycle.adopt_initial_battle = False
+            self.ctx.data["startup_gates_deferred"] = False
+            self._clear_attached_check_state()
+        return True
+
+    def revoke_initial_battle_intent(
+        self,
+        intent: str,
+        *,
+        request_id: Optional[str] = None,
+    ) -> bool:
+        """Restore the operator wait if an authorized boundary changes first."""
+
+        normalized = str(intent or "").strip().lower()
+        if (
+            self._authorized_initial_battle_intent != normalized
+            or (
+                request_id is not None
+                and self._authorized_battle_workflow_request_id
+                != str(request_id).strip()
+            )
+            or self._battle_lifecycle.active_battle_observed
+        ):
+            return False
+        self._authorized_initial_battle_intent = None
+        self._authorized_battle_workflow_request_id = None
+        self._await_initial_battle_intent = True
+        self.ctx.data["awaiting_initial_battle_intent"] = True
+        self._startup_gates_deferred = False
+        self._validate_initial_attachment = False
+        self._skip_initial_attachment_checks = False
+        self._battle_lifecycle.adopt_initial_battle = False
+        self.ctx.data["startup_gates_deferred"] = False
+        self._clear_attached_check_state()
+        return True
 
     def active_battle_observed(self) -> bool:
         """Return the lifecycle-owned same-battle precondition."""

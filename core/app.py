@@ -50,6 +50,13 @@ from core.daily_gem_scheduler import DailyGemScheduler
 from core.event_mission_tracker import EventMissionTracker, format_warning
 from core.home_battle import detect_home_battle_control
 from core.battle_lifecycle import HomeBattleControl
+from core.control_model import (
+    BATTLE_WORKFLOW_TERMINAL_STATUSES,
+    MANUAL_CONTROL_TERMINAL_STATUSES,
+    intent_matches_evidence,
+    observed_game_state,
+    validate_workflow_evidence,
+)
 from core.battle_stats import (
     attach_observed_run_configuration,
     persist_battle_record,
@@ -158,6 +165,7 @@ from utils.wave_detector import detect_wave_number_from_image
 
 Frame = NDArray[np.uint8]
 HOME_SETUP_MAX_ATTEMPTS = 3
+BATTLE_ACTION_DISPATCH_TIMEOUT_SECONDS = 20.0
 _BATTLE_SCOPE_UNSET = object()
 
 
@@ -209,6 +217,9 @@ class App:
             ),
             skip_attached_checks=(
                 config.startup_gate_policy == "auto"
+            ),
+            await_initial_battle_intent=(
+                config.startup_gate_policy == "operator"
             ),
             action_guard_fn=self._runtime_action_guard,
         )
@@ -365,6 +376,8 @@ class App:
         self._authority_holds: tuple[AuthorityHoldState, ...] = ()
         self._external_development_hold_active = False
         self._interactive_development_ack: Optional[Dict[str, Any]] = None
+        self._control_observation_sequence = 0
+        self._control_observation: Optional[Dict[str, Any]] = None
         self._watchdog_mutation_guard = CooperativeMutationGuard(
             lambda: self._runtime_action_guard(
                 action_class=RuntimeActionClass.LIFECYCLE_ACTION
@@ -892,6 +905,13 @@ class App:
             )
             else None
         )
+        manager = getattr(self, "_mission_mgr", None)
+        awaiting_intent = getattr(
+            manager, "awaiting_initial_battle_intent", None
+        )
+        active_battle_observed = getattr(
+            manager, "active_battle_observed", None
+        )
         return publisher.publish(
             self._get_action_authority().snapshot(),
             runtime_active=runtime_active,
@@ -901,7 +921,724 @@ class App:
                 "_interactive_development_ack",
                 None,
             ),
+            control_model={
+                "schema_version": 1,
+                "observation": copy.deepcopy(
+                    getattr(self, "_control_observation", None)
+                ),
+                "battle_lifecycle": {
+                    "awaiting_initial_intent": bool(
+                        awaiting_intent()
+                        if callable(awaiting_intent)
+                        else False
+                    ),
+                    "active_battle_adopted": bool(
+                        active_battle_observed()
+                        if callable(active_battle_observed)
+                        else False
+                    ),
+                },
+            },
         )
+
+    def _record_control_observation(
+        self,
+        detection: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        """Bind one passive game observation to this runtime and ADB target."""
+
+        sequence = int(getattr(self, "_control_observation_sequence", 0)) + 1
+        self._control_observation_sequence = sequence
+        state = str(detection.get("state") or "UNKNOWN").strip().upper()
+        if state not in {
+            "HOME",
+            "HOME_SCREEN",
+            "RUNNING",
+            "GAME_OVER",
+            "TOURNAMENT_RESULTS",
+            "WORKSHOP",
+        }:
+            state = "UNKNOWN"
+        home_control = HomeBattleControl.parse(
+            detection.get("home_battle_control", "UNKNOWN")
+        ).value
+        active_battle = self._observe_battle_authority_precondition(detection)
+        target_generation = None
+        session = getattr(self, "_adb_target_session", None)
+        if session is not None:
+            try:
+                target = session.snapshot()
+            except Exception:
+                target = None
+            if target is not None and target.owned:
+                target_generation = target.generation
+        observation = {
+            "schema_version": 1,
+            "observation_id": (
+                str(
+                    self._supervisor.current_exclusive_validation_owner().get(
+                        "runtime_id"
+                    )
+                    or "runtime"
+                )
+                + f":{sequence}"
+            ),
+            "observed_at": datetime.now(timezone.utc).astimezone().isoformat(
+                timespec="seconds"
+            ),
+            "primary_state": state,
+            "home_battle_control": home_control,
+            "game_state": observed_game_state(
+                state,
+                home_control,
+                active_battle=active_battle,
+            ),
+            "active_battle": active_battle,
+            "activity_scope_run_id": self._current_run_scope_id(),
+            "target_generation": target_generation,
+        }
+        self._prior_control_observation = getattr(
+            self,
+            "_control_observation",
+            None,
+        )
+        self._control_observation = observation
+        return dict(observation)
+
+    def _yield_on_unexpected_manual_activity(self) -> bool:
+        """Pause instead of competing after an unowned active-to-Home change."""
+
+        previous = getattr(self, "_prior_control_observation", None)
+        current = getattr(self, "_control_observation", None)
+        if not isinstance(previous, Mapping) or not isinstance(current, Mapping):
+            return False
+        if not (
+            previous.get("game_state") == "active_battle"
+            and current.get("game_state") == "home_resume_battle"
+            and self._supervisor.control_state == "RUNNING"
+        ):
+            return False
+        manual = self._supervisor.manual_control
+        if isinstance(manual, Mapping) and manual.get("status") not in (
+            MANUAL_CONTROL_TERMINAL_STATUSES
+        ):
+            return False
+        workflow = self._supervisor.battle_workflow
+        if isinstance(workflow, Mapping) and workflow.get("status") not in (
+            BATTLE_WORKFLOW_TERMINAL_STATUSES
+        ):
+            return False
+        evidence = self._current_control_workflow_evidence()
+        if evidence is None:
+            return False
+        yielded = self._supervisor.yield_to_unexpected_manual_activity(evidence)
+        if yielded is None:
+            return False
+        manual_id = str(yielded.get("manual_control_id") or "")
+        self._log_operator_workflow_result(
+            manual_id,
+            purpose="Yielding to unexpected manual activity",
+            reason=(
+                "Home now offers Resume Battle after an enabled active-battle "
+                "observation"
+            ),
+            result="Automation Paused — manual input authority has priority",
+        )
+        return True
+
+    def _current_control_workflow_evidence(self) -> Optional[Dict[str, Any]]:
+        """Return current observation bound to this exact runtime owner."""
+
+        observation = getattr(self, "_control_observation", None)
+        owner = self._supervisor.current_exclusive_validation_owner()
+        evidence = validate_workflow_evidence(
+            {
+                "schema_version": 1,
+                "runtime_id": owner.get("runtime_id"),
+                "pid": owner.get("pid"),
+                "adb_target": owner.get("adb_target"),
+                **(dict(observation) if isinstance(observation, Mapping) else {}),
+            }
+        )
+        return dict(evidence) if evidence is not None else None
+
+    def _workflow_evidence_matches_runtime(
+        self,
+        requested: Mapping[str, Any],
+        current: Mapping[str, Any],
+        *,
+        intent: str,
+        allow_new_run_scope: bool = False,
+    ) -> tuple[bool, str]:
+        """Revalidate target/session/battle evidence without changing intent."""
+
+        for field in ("runtime_id", "pid", "adb_target"):
+            if requested.get(field) != current.get(field):
+                return False, f"runtime evidence changed at {field}"
+        requested_generation = requested.get("target_generation")
+        current_generation = current.get("target_generation")
+        if (
+            requested_generation is not None
+            and current_generation != requested_generation
+        ):
+            return False, "ADB target generation changed"
+        scope_changed = requested.get("activity_scope_run_id") != current.get(
+            "activity_scope_run_id"
+        )
+        if scope_changed and not (
+            allow_new_run_scope
+            and intent == "start_battle"
+            and current.get("game_state") == "home_new_battle"
+        ):
+            return False, "battle activity scope changed"
+        if not intent_matches_evidence(intent, current):
+            return (
+                False,
+                f"{intent} no longer matches {current.get('game_state')}",
+            )
+        return True, "fresh runtime evidence still matches the explicit intent"
+
+    def _log_operator_workflow_result(
+        self,
+        operation_id: str,
+        *,
+        purpose: str,
+        reason: str,
+        result: str,
+    ) -> None:
+        """Emit exactly one ACTION/RESULT pair for a workflow acknowledgement."""
+
+        logged = getattr(self, "_logged_operator_workflows", None)
+        if logged is None:
+            logged = set()
+            self._logged_operator_workflows = logged
+        if operation_id in logged:
+            return
+        log_action_intent(
+            purpose,
+            reason=reason,
+            operation_id=operation_id,
+        )
+        log_result(
+            result,
+            operation_id=operation_id,
+            console=True,
+        )
+        logged.add(operation_id)
+
+    def _reconcile_dispatched_battle_workflow(
+        self,
+        workflow: Mapping[str, Any],
+        current: Mapping[str, Any],
+    ) -> None:
+        """Resolve a dispatched Home action without competing for input."""
+
+        request_id = str(workflow.get("request_id") or "")
+        intent = str(workflow.get("intent") or "")
+        dispatched = workflow.get("acknowledgement")
+        if not isinstance(dispatched, Mapping):
+            dispatched = workflow.get("evidence")
+        mismatch = None
+        if not isinstance(dispatched, Mapping):
+            mismatch = "dispatch evidence is unavailable"
+        else:
+            for field in ("runtime_id", "pid", "adb_target"):
+                if dispatched.get(field) != current.get(field):
+                    mismatch = f"runtime evidence changed at {field}"
+                    break
+            if (
+                mismatch is None
+                and dispatched.get("target_generation") is not None
+                and dispatched.get("target_generation")
+                != current.get("target_generation")
+            ):
+                mismatch = "ADB target generation changed"
+            if (
+                mismatch is None
+                and intent == "attach_battle"
+                and dispatched.get("activity_scope_run_id")
+                != current.get("activity_scope_run_id")
+            ):
+                mismatch = "battle activity scope changed"
+        game_state = str(current.get("game_state") or "unknown")
+        if mismatch is None and game_state == "active_battle":
+            return
+        expected_home = (
+            "home_new_battle"
+            if intent == "start_battle"
+            else "home_resume_battle"
+        )
+        if (
+            mismatch is None
+            and game_state not in {expected_home, "unknown"}
+        ):
+            mismatch = (
+                f"dispatched {intent} reached unexpected {game_state} "
+                "before battle adoption"
+            )
+
+        terminal_status = "interrupted"
+        reason = mismatch
+        if reason is None:
+            try:
+                dispatched_at = datetime.fromisoformat(
+                    str(workflow.get("updated_at") or "")
+                )
+                observed_at = datetime.fromisoformat(
+                    str(current.get("observed_at") or "")
+                )
+                elapsed = max(
+                    0.0,
+                    (observed_at - dispatched_at).total_seconds(),
+                )
+            except (TypeError, ValueError):
+                elapsed = 0.0
+            if elapsed < BATTLE_ACTION_DISPATCH_TIMEOUT_SECONDS:
+                return
+            terminal_status = "failed"
+            reason = (
+                f"dispatched {intent} did not reach an active battle within "
+                f"{int(BATTLE_ACTION_DISPATCH_TIMEOUT_SECONDS)} seconds"
+            )
+
+        self._mission_mgr.revoke_initial_battle_intent(
+            intent,
+            request_id=request_id,
+        )
+        self._supervisor.transition_battle_workflow(
+            request_id,
+            terminal_status,
+            reason=reason,
+            acknowledgement=current,
+        )
+        log(
+            f"[BATTLE_WORKFLOW] {reason}; automated input remains yielded",
+            "WARN",
+            console=True,
+        )
+
+    def _sync_operator_control_workflows(
+        self,
+        detection: Mapping[str, Any],
+    ) -> None:
+        """Acknowledge and revalidate Better Control Model directives."""
+
+        del detection  # the exact normalized observation is already recorded
+        current = self._current_control_workflow_evidence()
+        manual = self._supervisor.manual_control
+        if manual is not None and manual.get("status") not in (
+            MANUAL_CONTROL_TERMINAL_STATUSES
+        ):
+            manual_id = str(manual.get("manual_control_id") or "")
+            status = str(manual.get("status") or "")
+            starting = manual.get("starting_evidence")
+            if current is not None and isinstance(starting, Mapping):
+                owner_change = None
+                for field in ("runtime_id", "pid", "adb_target"):
+                    if starting.get(field) != current.get(field):
+                        owner_change = f"runtime evidence changed at {field}"
+                        break
+                if (
+                    owner_change is None
+                    and starting.get("target_generation") is not None
+                    and starting.get("target_generation")
+                    != current.get("target_generation")
+                ):
+                    owner_change = "ADB target generation changed"
+                if owner_change is not None:
+                    if (
+                        not self._supervisor.is_paused
+                        and not self._supervisor.persist_state("PAUSED")
+                    ):
+                        return
+                    self._supervisor.transition_manual_control(
+                        manual_id,
+                        "interrupted",
+                        detail=(
+                            "manual-control handoff cannot cross a runtime or "
+                            f"target boundary: {owner_change}"
+                        ),
+                        refresh_status="owner_boundary_changed",
+                    )
+                    log(
+                        "[MANUAL_CONTROL] Interrupted stale handoff after "
+                        f"{owner_change}; Automation remains Paused",
+                        "WARN",
+                        console=True,
+                    )
+                    return
+            if status == "pause_requested" and self._supervisor.is_paused:
+                acknowledgement = current or {
+                    "status": "observation_unavailable",
+                }
+                transitioned = self._supervisor.transition_manual_control(
+                    manual_id,
+                    "active",
+                    detail="runtime acknowledged the indefinite Pause",
+                    refresh_status="observation_continues_while_paused",
+                    pause_acknowledgement=acknowledgement,
+                )
+                if transitioned is not None:
+                    self._log_operator_workflow_result(
+                        manual_id,
+                        purpose="Taking manual control",
+                        reason="obtain an acknowledged indefinite Pause before yielding input",
+                        result="Manual control active — automated device input is blocked",
+                    )
+                manual = transitioned or manual
+                status = str(manual.get("status") or "")
+            if status == "return_requested" and self._supervisor.is_paused:
+                if current is None:
+                    return
+                configuration = {
+                    "schema_version": 1,
+                    "starting_game_state": (
+                        starting.get("game_state")
+                        if isinstance(starting, Mapping)
+                        else "unknown"
+                    ),
+                    "observed_game_state": current.get("game_state"),
+                    "battle_scope_preserved": bool(
+                        isinstance(starting, Mapping)
+                        and starting.get("activity_scope_run_id")
+                        == current.get("activity_scope_run_id")
+                    ),
+                }
+                self._supervisor.transition_manual_control(
+                    manual_id,
+                    "awaiting_enable",
+                    detail=(
+                        "fresh passive observation recorded; explicit Enable "
+                        "is required before reconciliation"
+                    ),
+                    refresh_status="save_validation_pending",
+                    configuration=configuration,
+                )
+                return
+            if status == "awaiting_enable" and not self._supervisor.is_paused:
+                transitioned = self._supervisor.transition_manual_control(
+                    manual_id,
+                    "reconciling",
+                    detail=(
+                        "Enable acknowledged; fresh save and configuration "
+                        "reconciliation owns the next action boundary"
+                    ),
+                    refresh_status="save_refresh_pending",
+                )
+                if transitioned is not None:
+                    self._log_operator_workflow_result(
+                        manual_id,
+                        purpose="Returning automation control",
+                        reason="refresh observation and save before ordinary input resumes",
+                        result="Return Control reconciliation started",
+                    )
+
+        workflow = self._supervisor.battle_workflow
+        if workflow is None:
+            return
+        if workflow.get("status") in {
+            "rejected",
+            "interrupted",
+            "failed",
+            "cancelled",
+        }:
+            intent = str(workflow.get("intent") or "")
+            if intent:
+                self._mission_mgr.revoke_initial_battle_intent(
+                    intent,
+                    request_id=str(workflow.get("request_id") or ""),
+                )
+            return
+        if workflow.get("status") == "completed":
+            return
+        request_id = str(workflow.get("request_id") or "")
+        intent = str(workflow.get("intent") or "")
+        status = str(workflow.get("status") or "")
+        if status == "action_dispatched":
+            if current is not None:
+                self._reconcile_dispatched_battle_workflow(workflow, current)
+            return
+        if status == "ready" and intent == "attach_battle":
+            if current is None:
+                return
+            requested = workflow.get("evidence")
+            if isinstance(requested, Mapping):
+                matches, reason = self._workflow_evidence_matches_runtime(
+                    requested,
+                    current,
+                    intent=intent,
+                )
+                if matches:
+                    if not self._mission_mgr.authorize_initial_battle_intent(
+                        intent,
+                        request_id=request_id,
+                    ):
+                        self._supervisor.transition_battle_workflow(
+                            request_id,
+                            "interrupted",
+                            reason=(
+                                "a different initial workflow already owns "
+                                "this process"
+                            ),
+                            acknowledgement=current,
+                        )
+                else:
+                    self._mission_mgr.revoke_initial_battle_intent(
+                        intent,
+                        request_id=request_id,
+                    )
+                    self._supervisor.transition_battle_workflow(
+                        request_id,
+                        "interrupted",
+                        reason=reason,
+                        acknowledgement=current,
+                    )
+            else:
+                self._mission_mgr.revoke_initial_battle_intent(
+                    intent,
+                    request_id=request_id,
+                )
+                self._supervisor.transition_battle_workflow(
+                    request_id,
+                    "interrupted",
+                    reason="attachment request evidence is unavailable",
+                    acknowledgement=current,
+                )
+            return
+        if status not in {"requested", "awaiting_enable", "acknowledged"}:
+            return
+        requested = workflow.get("evidence")
+        if current is None or not isinstance(requested, Mapping):
+            return
+        matches, reason = self._workflow_evidence_matches_runtime(
+            requested,
+            current,
+            intent=intent,
+            allow_new_run_scope=(
+                status == "acknowledged" and intent == "start_battle"
+            ),
+        )
+        if not matches:
+            self._mission_mgr.revoke_initial_battle_intent(
+                intent,
+                request_id=request_id,
+            )
+            rejected = self._supervisor.transition_battle_workflow(
+                request_id,
+                "rejected" if status == "requested" else "interrupted",
+                reason=reason,
+                acknowledgement=current,
+            )
+            if rejected is not None:
+                self._log_operator_workflow_result(
+                    request_id,
+                    purpose=(
+                        "Starting a new battle"
+                        if intent == "start_battle"
+                        else "Attaching automation to a battle"
+                    ),
+                    reason="honor only an exact matching operator intent",
+                    result=f"Workflow rejected — {reason}",
+                )
+            return
+        if self._supervisor.is_paused:
+            if status in {"requested", "acknowledged"}:
+                acknowledged = self._supervisor.transition_battle_workflow(
+                    request_id,
+                    "awaiting_enable",
+                    reason="intent matched; Automation remains Paused",
+                    acknowledgement=current,
+                )
+            return
+        if status == "acknowledged":
+            return
+        if intent == "attach_battle":
+            validating = self._supervisor.transition_battle_workflow(
+                request_id,
+                "validating_save",
+                reason=(
+                    "exact attachment intent acknowledged; fresh-save "
+                    "validation must complete before battle adoption"
+                ),
+                acknowledgement=current,
+            )
+            if validating is not None:
+                self._log_operator_workflow_result(
+                    request_id,
+                    purpose="Attaching automation to a battle",
+                    reason=(
+                        "bind the exact operator intent before any "
+                        "configuration fallback"
+                    ),
+                    result=(
+                        "Attachment accepted — save validation remains pending"
+                    ),
+                )
+            return
+        if not self._mission_mgr.authorize_initial_battle_intent(
+            intent,
+            request_id=request_id,
+        ):
+            self._supervisor.transition_battle_workflow(
+                request_id,
+                "rejected",
+                reason="a different initial workflow already owns this process",
+                acknowledgement=current,
+            )
+            return
+        self._supervisor.transition_battle_workflow(
+            request_id,
+            "acknowledged",
+            reason=reason,
+            acknowledgement=current,
+        )
+
+    def _complete_ready_attachment_after_adoption(self) -> bool:
+        """Complete Attach only after lifecycle adoption of the validated battle."""
+
+        workflow = self._supervisor.battle_workflow
+        current = self._current_control_workflow_evidence()
+        if not (
+            isinstance(workflow, Mapping)
+            and workflow.get("intent") == "attach_battle"
+            and workflow.get("status") in {"ready", "action_dispatched"}
+            and isinstance(current, Mapping)
+            and current.get("game_state") == "active_battle"
+            and self._mission_mgr.active_battle_observed()
+        ):
+            return False
+        completed = self._supervisor.transition_battle_workflow(
+            str(workflow.get("request_id") or ""),
+            "completed",
+            reason=(
+                "validated battle was adopted after the same active-battle "
+                "boundary was observed"
+            ),
+            acknowledgement=current,
+        )
+        return completed is not None and completed.get("status") == "completed"
+
+    def _mark_operator_battle_action_dispatched(self, launched: bool) -> bool:
+        """Persist the boundary between an explicit Home tap and adoption."""
+
+        workflow = self._supervisor.battle_workflow
+        if not (
+            launched is True
+            and isinstance(workflow, Mapping)
+            and (
+                (
+                    workflow.get("intent") == "start_battle"
+                    and workflow.get("status") == "acknowledged"
+                )
+                or (
+                    workflow.get("intent") == "attach_battle"
+                    and workflow.get("status") == "ready"
+                )
+            )
+        ):
+            return False
+        transitioned = self._supervisor.transition_battle_workflow(
+            str(workflow.get("request_id") or ""),
+            "action_dispatched",
+            reason=(
+                "the exact verified Home battle control was dispatched; "
+                "battle lifecycle adoption is pending"
+            ),
+            acknowledgement=(self._current_control_workflow_evidence() or {}),
+        )
+        return bool(
+            transitioned is not None
+            and transitioned.get("status") == "action_dispatched"
+        )
+
+    def _complete_started_battle_workflow(self, battle_started: bool) -> bool:
+        """Complete Start only after its dispatched launch becomes a run."""
+
+        workflow = self._supervisor.battle_workflow
+        if not (
+            battle_started is True
+            and isinstance(workflow, Mapping)
+            and workflow.get("intent") == "start_battle"
+            and workflow.get("status") == "action_dispatched"
+        ):
+            return False
+        completed = self._supervisor.transition_battle_workflow(
+            str(workflow.get("request_id") or ""),
+            "completed",
+            reason=(
+                "verified new-run Home launch crossed the normal battle "
+                "lifecycle boundary"
+            ),
+            acknowledgement=(self._current_control_workflow_evidence() or {}),
+        )
+        return completed is not None and completed.get("status") == "completed"
+
+    def _operator_workflow_authority_hold(
+        self,
+    ) -> Optional[AuthorityHoldState]:
+        """Return the exclusive hold imposed by an unfinished operator handoff."""
+
+        if self._supervisor.manual_control_error is True:
+            return AuthorityHoldState(
+                AuthorityHold.MANUAL_CONTROL_RETURN,
+                "malformed manual-control authority is blocking all input",
+            )
+        if self._supervisor.battle_workflow_error is True:
+            return AuthorityHoldState(
+                AuthorityHold.OPERATOR_WORKFLOW,
+                "malformed battle-workflow authority is blocking all input",
+            )
+        manual = self._supervisor.manual_control
+        if (
+            isinstance(manual, Mapping)
+            and manual.get("status") not in MANUAL_CONTROL_TERMINAL_STATUSES
+        ):
+            manual_status = str(manual.get("status") or "unknown")
+            return AuthorityHoldState(
+                AuthorityHold.MANUAL_CONTROL_RETURN,
+                (
+                    "Return Control owns fresh save and configuration reconciliation"
+                    if manual_status == "reconciling"
+                    else "manual-control handoff blocks automated device input "
+                    f"while status is {manual_status}"
+                ),
+            )
+        if self._awaiting_initial_battle_intent():
+            return AuthorityHoldState(
+                AuthorityHold.OPERATOR_WORKFLOW,
+                "runtime is waiting for explicit Start Battle or Attach to Battle intent",
+            )
+        workflow = self._supervisor.battle_workflow
+        if isinstance(workflow, Mapping) and workflow.get("status") in {
+            "requested",
+            "awaiting_enable",
+            "acknowledged",
+            "validating_save",
+            "awaiting_configuration",
+            "ready",
+            "action_dispatched",
+        }:
+            return AuthorityHoldState(
+                AuthorityHold.OPERATOR_WORKFLOW,
+                (
+                    "explicit attachment owns validation and configuration "
+                    "until battle adoption is authorized"
+                    if workflow.get("intent") == "attach_battle"
+                    else "explicit battle intent is awaiting runtime acknowledgement"
+                ),
+            )
+        return None
+
+    def _awaiting_initial_battle_intent(self) -> bool:
+        manager = getattr(self, "_mission_mgr", None)
+        method = getattr(manager, "awaiting_initial_battle_intent", None)
+        if not callable(method):
+            return False
+        try:
+            value = method()
+        except Exception:
+            return False
+        return value is True
 
     @staticmethod
     def _interactive_development_timestamp(
@@ -1288,7 +2025,10 @@ class App:
                     now=now,
                 )
         stop_blind_gem_tapper()
-        self._update_action_authority()
+        initial_workflow_hold = self._operator_workflow_authority_hold()
+        self._update_action_authority(
+            holds=(initial_workflow_hold,) if initial_workflow_hold else (),
+        )
         self._publish_action_authority()
 
     @staticmethod
@@ -1991,12 +2731,34 @@ class App:
             detail=f"[TOURNAMENT_VALIDATION] request_id={request_id}",
         )
         if tap_verified_new_battle():
+            self._mark_operator_battle_action_dispatched(True)
             log(
                 "[TOURNAMENT_VALIDATION] Ordinary NEW_BATTLE dispatched after "
                 f"durable ownership claim {request_id}",
                 "DEBUG",
             )
             return True
+        workflow = self._supervisor.battle_workflow
+        if (
+            isinstance(workflow, Mapping)
+            and workflow.get("intent") == "start_battle"
+            and workflow.get("status") == "acknowledged"
+        ):
+            self._mission_mgr.revoke_initial_battle_intent(
+                "start_battle",
+                request_id=str(workflow.get("request_id") or ""),
+            )
+            self._supervisor.transition_battle_workflow(
+                str(workflow.get("request_id") or ""),
+                "failed",
+                reason=(
+                    "the verified ordinary New Battle validation control "
+                    "could not be dispatched"
+                ),
+                acknowledgement=(
+                    self._current_control_workflow_evidence() or {}
+                ),
+            )
         self._finish_exclusive_validation_without_cleanup(
             claimed,
             "the verified ordinary NEW_BATTLE control could not be tapped; "
@@ -3373,7 +4135,14 @@ class App:
                 is_paused = self._supervisor.is_paused
                 if is_paused and stop_blind_gem_tapper():
                     self._blind_tapper_suspended = True
-                self._update_action_authority()
+                pre_capture_workflow_hold = (
+                    self._operator_workflow_authority_hold()
+                )
+                self._update_action_authority(
+                    holds=(pre_capture_workflow_hold,)
+                    if pre_capture_workflow_hold
+                    else (),
+                )
                 self._publish_action_authority()
 
                 img = self._capture_frame()
@@ -3388,6 +4157,18 @@ class App:
                         wave=self._last_wave_value,
                     )
                 self._annotate_home_battle_control(img, detection)
+                self._record_control_observation(detection)
+                self._yield_on_unexpected_manual_activity()
+                self._sync_operator_control_workflows(detection)
+                operator_workflow_hold = (
+                    self._operator_workflow_authority_hold()
+                )
+                if operator_workflow_hold is not None:
+                    self._update_action_authority(
+                        detection=detection,
+                        holds=(operator_workflow_hold,),
+                    )
+                    self._publish_action_authority()
 
                 # This passive sidecar sees exact Home NEW_BATTLE before any
                 # later setup or Home handler can dispatch an action. It never
@@ -3410,6 +4191,7 @@ class App:
                     detection
                 )
                 if battle_started is True:
+                    self._complete_started_battle_workflow(battle_started)
                     self._activation_tracker().reset()
                     self._perk_timeline().reset(fresh_battle=True)
                     self._reset_player_save_audit_perk_mapping_evidence()
@@ -3442,6 +4224,7 @@ class App:
                             self._mission_mgr.ctx.data[
                                 "player_save_preflight_coordinator"
                             ] = save_coordinator
+                self._complete_ready_attachment_after_adoption()
                 continuity_pending = False
                 activity_continuity = getattr(
                     self,
@@ -3531,13 +4314,22 @@ class App:
                         initialization_blocks_history
                         or session_preflight_blocks_history
                     )
-                    continuity_needed = activity_continuity.needs_check(
-                        detection,
-                        post_retry_poll_allowed=post_retry_poll_allowed,
-                        defer_home_baseline=home_save_preflight_pending,
+                    continuity_needed = bool(
+                        not self._awaiting_initial_battle_intent()
+                        and self._operator_workflow_authority_hold() is None
+                        and activity_continuity.needs_check(
+                            detection,
+                            post_retry_poll_allowed=post_retry_poll_allowed,
+                            defer_home_baseline=home_save_preflight_pending,
+                        )
+                    )
+                    operator_workflow_hold = (
+                        self._operator_workflow_authority_hold()
                     )
                     continuity_holds = (
-                        (
+                        (operator_workflow_hold,)
+                        if operator_workflow_hold is not None
+                        else (
                             AuthorityHoldState(
                                 AuthorityHold.ACTIVITY_CONTINUITY,
                                 "activity continuity owns its verification route",
@@ -3651,7 +4443,12 @@ class App:
                 self._sync_strategy_action_gate(
                     terminally_blocked=session_preflight_terminally_blocked
                 )
-                if continuity_pending:
+                operator_workflow_hold = (
+                    self._operator_workflow_authority_hold()
+                )
+                if operator_workflow_hold is not None:
+                    authority_holds = (operator_workflow_hold,)
+                elif continuity_pending:
                     authority_holds = (
                         AuthorityHoldState(
                             AuthorityHold.ACTIVITY_CONTINUITY,
@@ -3703,6 +4500,19 @@ class App:
                 lifecycle_action_allowed = self._action_decision(
                     RuntimeActionClass.LIFECYCLE_ACTION
                 ).allowed
+                operator_workflow_action_allowed = bool(
+                    operator_workflow_hold is not None
+                    and operator_workflow_hold.hold
+                    is AuthorityHold.OPERATOR_WORKFLOW
+                    and self._action_decision(
+                        RuntimeActionClass.STRATEGY_ACTION,
+                        owner=AuthorityHold.OPERATOR_WORKFLOW,
+                    ).allowed
+                    and self._action_decision(
+                        RuntimeActionClass.LIFECYCLE_ACTION,
+                        owner=AuthorityHold.OPERATOR_WORKFLOW,
+                    ).allowed
+                )
                 game_speed_guard = getattr(self, "_game_speed_guard", None)
                 if game_speed_guard is not None:
                     game_speed_guard.set_target(
@@ -3999,14 +4809,6 @@ class App:
                     # Allow missions to react immediately to overlays before general state handling.
                     self._mission_mgr.handle_overlays(detection)
 
-                    if "TOURNAMENT" in secondary:
-                        try:
-                            if AUTOMATION.mode != ExecMode.WAIT:
-                                AUTOMATION.mode = ExecMode.WAIT
-                                log("[CTRL] Tournament detected — ExecMode set to WAIT", "INFO")
-                        except Exception:
-                            pass
-
                     self._mission_mgr.on_state(detection)
 
                 self._state_tracker.update(state=new_state, menu=menu, secondary=secondary, overlays=overlays)
@@ -4057,6 +4859,27 @@ class App:
                     self._mission_mgr.tick(img, detection)
                 if strategy_action_allowed and lifecycle_action_allowed:
                     self._handle_primary_states(new_state, overlays, img)
+                elif (
+                    operator_workflow_action_allowed
+                    and new_state == "HOME_SCREEN"
+                ):
+                    previous_owner = getattr(
+                        self,
+                        "_active_action_authority_owner",
+                        None,
+                    )
+                    self._active_action_authority_owner = (
+                        AuthorityHold.OPERATOR_WORKFLOW
+                    )
+                    try:
+                        self._handle_primary_states(
+                            new_state,
+                            overlays,
+                            img,
+                            operator_workflow_only=True,
+                        )
+                    finally:
+                        self._active_action_authority_owner = previous_owner
                 elif (
                     getattr(self, "_pending_auxiliary_cleanup", None)
                     is not None
@@ -5056,6 +5879,8 @@ class App:
         new_state: str,
         overlays: Set[str],
         img: Frame,
+        *,
+        operator_workflow_only: bool = False,
     ) -> None:
         """Dispatch handlers for top-level UI states and overlay-driven events."""
         selector = getattr(self, "_run_perk_selector", None)
@@ -5065,12 +5890,15 @@ class App:
             self._exclusive_validation_terminal_hold = None
         if new_state != "HOME_SCREEN":
             self._last_home_policy_signature = None
-        self._recover_no_strategy_post_run(new_state, img)
-        if self._handle_no_strategy_post_run(new_state, img):
-            return
+        if not operator_workflow_only:
+            self._recover_no_strategy_post_run(new_state, img)
+            if self._handle_no_strategy_post_run(new_state, img):
+                return
         if new_state == "RUNNING":
             self._tournament_results_captured = False
         if (
+            not operator_workflow_only
+            and
             self._handler_enabled("daily_gem")
             and self._handle_daily_gem_if_due(new_state, overlays)
         ):
@@ -5078,6 +5906,8 @@ class App:
             # screen. Do not act on the stale pre-handler detection this tick.
             return
         if (
+            not operator_workflow_only
+            and
             self._handler_enabled("mission_rewards")
             and self._handle_mission_rewards_if_due(new_state, img, overlays)
         ):
@@ -5085,6 +5915,8 @@ class App:
             # dispatching against the frame captured before that navigation.
             return
         if (
+            not operator_workflow_only
+            and
             new_state == "HOME_SCREEN"
             and "HOME_AD_GEMS_AVAILABLE" in overlays
             and self._handler_enabled("ad_gem")
@@ -5101,13 +5933,18 @@ class App:
         ):
             if getattr(self, "_tournament_results_captured", False):
                 return
+            terminal_policy = AUTOMATION.mode.value
             operation_id = new_operation_id()
             log_action_intent(
                 "Capturing the finished Tournament",
                 reason=(
-                    "preserve its result before waiting for operator direction"
+                    "preserve its result without changing the selected "
+                    "post-terminal policy"
                 ),
-                detail="[TOURNAMENT_RESULTS] result=pending next_mode=WAIT",
+                detail=(
+                    "[TOURNAMENT_RESULTS] result=pending "
+                    f"terminal_policy={terminal_policy} screen=retained"
+                ),
                 operation_id=operation_id,
             )
             log(
@@ -5115,13 +5952,6 @@ class App:
                 "INFO",
                 console=True,
             )
-            if not self._supervisor.persist_mode("WAIT"):
-                AUTOMATION.mode = ExecMode.WAIT
-                log(
-                    "[CTRL] Could not persist Tournament Results WAIT; "
-                    "using in-memory WAIT",
-                    "WARN",
-                )
             record = handle_tournament_results(
                 img,
                 battle_context=self._terminal_battle_context(
@@ -5135,21 +5965,23 @@ class App:
                 self._strategy_boundary_confirmed = True
                 self._apply_pending_strategy()
                 log_result(
-                    "Tournament finished — result saved; automation is waiting "
-                    "on the Tournament Results screen (mode WAIT)",
+                    "Tournament finished — result saved; Tournament Results "
+                    f"remains visible (policy {terminal_policy} preserved)",
                     detail=(
                         "[TOURNAMENT_RESULTS] result=completed "
                         f"tournament_id={record.get('tournament_id')} "
-                        "next_mode=WAIT"
+                        f"terminal_policy={terminal_policy} screen=retained"
                     ),
                     operation_id=operation_id,
                 )
             else:
                 log_result(
-                    "Tournament result capture failed — automation remains on "
-                    "the Tournament Results screen in WAIT and will retry",
+                    "Tournament result capture failed — Tournament Results "
+                    f"remains visible (policy {terminal_policy} preserved) "
+                    "and capture will retry",
                     detail=(
-                        "[TOURNAMENT_RESULTS] result=failed next_mode=WAIT "
+                        "[TOURNAMENT_RESULTS] result=failed "
+                        f"terminal_policy={terminal_policy} screen=retained "
                         "retry=true"
                     ),
                     operation_id=operation_id,
@@ -5176,17 +6008,6 @@ class App:
                 if no_strategy_run
                 else None
             )
-            if self._runtime_policy().get("game_over_mode") == "wait":
-                if not self._supervisor.persist_mode("WAIT"):
-                    # Preserve the safe in-memory behavior even if the control
-                    # file cannot be updated. A later readable directive may
-                    # still give the handler explicit operator direction.
-                    AUTOMATION.mode = ExecMode.WAIT
-                    log(
-                        "[CTRL] Could not persist Tournament Game Over WAIT; "
-                        "using in-memory WAIT",
-                        "WARN",
-                    )
             repair_in_progress = (
                 self._mission_mgr.session_preflight_repair_in_progress()
             )
@@ -5224,6 +6045,9 @@ class App:
                 control_sync=sync_terminal_control,
                 before_terminal_action=finalize_run_boundary,
                 after_retry_started=mark_retry_started,
+                on_terminal_failure=lambda _step: (
+                    self._supervisor.persist_state("PAUSED")
+                ),
                 return_home_after_battle=(repair_in_progress or no_strategy_run),
                 battle_context=self._terminal_battle_context(
                     "GAME_OVER",
@@ -5459,10 +6283,29 @@ class App:
             )
             if home_handler_enabled:
                 terminal_mode = AUTOMATION.mode
-                restart_enabled = (
-                    self._auto_start_enabled
-                    and terminal_mode is ExecMode.NEXT_BATTLE
+                workflow = self._supervisor.battle_workflow
+                workflow_active = bool(
+                    isinstance(workflow, Mapping)
+                    and workflow.get("status")
+                    not in BATTLE_WORKFLOW_TERMINAL_STATUSES
                 )
+                explicit_start = bool(
+                    workflow_active
+                    and workflow.get("intent") == "start_battle"
+                    and workflow.get("status") in {"acknowledged", "ready"}
+                )
+                explicit_attach = bool(
+                    workflow_active
+                    and workflow.get("intent") == "attach_battle"
+                    and workflow.get("status") == "ready"
+                )
+                if workflow_active:
+                    restart_enabled = explicit_start or explicit_attach
+                else:
+                    restart_enabled = bool(
+                        self._auto_start_enabled
+                        and terminal_mode is ExecMode.NEXT_BATTLE
+                    )
                 save_coordinator = getattr(
                     self,
                     "_player_save_preflight_coordinator",
@@ -5495,14 +6338,60 @@ class App:
                     )
                     if not launch_authorized:
                         restart_enabled = False
-                launched = (
-                    handle_home_screen(
+                workflow_operation_id = None
+                workflow_action_purpose = None
+                workflow_action_reason = None
+                if explicit_start or explicit_attach:
+                    request_id = str(workflow.get("request_id") or "")
+                    observation = self._current_control_workflow_evidence()
+                    observation_id = str(
+                        (observation or {}).get("observation_id") or "unknown"
+                    )
+                    workflow_operation_id = (
+                        f"{request_id}:{observation_id}:home_dispatch"
+                    )
+                    if explicit_start:
+                        workflow_action_purpose = "Starting a new battle"
+                        workflow_action_reason = (
+                            "execute the exact verified New Battle intent after "
+                            "normal new-run gates"
+                        )
+                    else:
+                        workflow_action_purpose = (
+                            "Attaching automation to a resumable battle"
+                        )
+                        workflow_action_reason = (
+                            "execute the validated exact Resume Battle intent"
+                        )
+                if explicit_attach:
+                    launched = handle_home_screen(
+                        restart_enabled=restart_enabled,
+                        require_resume_battle=True,
+                        operation_id=workflow_operation_id,
+                        action_purpose=workflow_action_purpose,
+                        action_reason=workflow_action_reason,
+                    )
+                elif explicit_start:
+                    launched = handle_home_screen(
+                        restart_enabled=restart_enabled,
+                        require_new_battle=True,
+                        operation_id=workflow_operation_id,
+                        action_purpose=workflow_action_purpose,
+                        action_reason=workflow_action_reason,
+                    )
+                elif carry_pending:
+                    launched = handle_home_screen(
                         restart_enabled=restart_enabled,
                         require_new_battle=True,
                     )
-                    if carry_pending
-                    else handle_home_screen(restart_enabled=restart_enabled)
-                )
+                else:
+                    launched = handle_home_screen(
+                        restart_enabled=restart_enabled
+                    )
+                if explicit_start or explicit_attach:
+                    self._mark_operator_battle_action_dispatched(
+                        bool(launched)
+                    )
                 if carry_pending:
                     if restart_enabled:
                         save_coordinator.mark_runtime_launch(
@@ -5514,7 +6403,8 @@ class App:
                         save_coordinator.invalidate(
                             "wait_pause_stop_or_manual_launch_boundary"
                         )
-                self._mission_mgr.on_home()
+                if not operator_workflow_only:
+                    self._mission_mgr.on_home()
             else:
                 save_coordinator = getattr(
                     self,

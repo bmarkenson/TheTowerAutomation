@@ -19,7 +19,6 @@ TOURNAMENT_RUNTIME_POLICY = {
         "game_speed",
     ],
     "auto_return": False,
-    "game_over_mode": "wait",
     "home_preflight": True,
     "session_preflight_on_attach": True,
     "exclusive_validation": {

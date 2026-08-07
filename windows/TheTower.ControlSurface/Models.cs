@@ -35,6 +35,9 @@ public sealed class StatusResponse
     [JsonPropertyName("strategy_action_gate")]
     public StrategyActionGateStatus? StrategyActionGate { get; set; }
 
+    [JsonPropertyName("control_model")]
+    public BetterControlModelStatus? ControlModel { get; set; }
+
     [JsonPropertyName("runtime")]
     public RuntimeStatus Runtime { get; set; } = new();
 
@@ -108,6 +111,147 @@ public sealed class RuntimeActionAuthorityStatus
     public string Reason { get; set; } = "";
 }
 
+public sealed class BetterControlModelStatus
+{
+    [JsonPropertyName("process")]
+    public BetterControlProcessStatus Process { get; set; } = new();
+
+    [JsonPropertyName("action_authority")]
+    public BetterControlAuthorityStatus ActionAuthority { get; set; } = new();
+
+    [JsonPropertyName("observation")]
+    public BetterControlObservationStatus Observation { get; set; } = new();
+
+    [JsonPropertyName("strategy_scope")]
+    public BetterControlStrategyScopeStatus StrategyScope { get; set; } = new();
+
+    [JsonPropertyName("when_battle_ends")]
+    public BetterControlTerminalPolicyStatus WhenBattleEnds { get; set; } = new();
+
+    [JsonPropertyName("battle_workflow")]
+    public BetterControlBattleWorkflowStatus? BattleWorkflow { get; set; }
+
+    [JsonPropertyName("manual_control")]
+    public BetterControlManualStatus? ManualControl { get; set; }
+
+    [JsonPropertyName("actions")]
+    public Dictionary<string, BetterControlActionAvailability> Actions { get; set; } = [];
+}
+
+public sealed class BetterControlProcessStatus
+{
+    [JsonPropertyName("state")]
+    public string State { get; set; } = "unknown";
+
+    [JsonPropertyName("live")]
+    public bool Live { get; set; }
+}
+
+public sealed class BetterControlAuthorityStatus
+{
+    [JsonPropertyName("effective")]
+    public string Effective { get; set; } = "unknown";
+
+    [JsonPropertyName("acknowledged")]
+    public bool Acknowledged { get; set; }
+
+    [JsonPropertyName("meaning")]
+    public string Meaning { get; set; } = "";
+}
+
+public sealed class BetterControlObservationStatus
+{
+    [JsonPropertyName("available")]
+    public bool Available { get; set; }
+
+    [JsonPropertyName("game_state")]
+    public string GameState { get; set; } = "unknown";
+
+    [JsonPropertyName("freshness")]
+    public string Freshness { get; set; } = "unavailable";
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+}
+
+public sealed class BetterControlStrategyScopeStatus
+{
+    [JsonPropertyName("startup_default")]
+    public string? StartupDefault { get; set; }
+
+    [JsonPropertyName("active_battle")]
+    public string? ActiveBattle { get; set; }
+
+    [JsonPropertyName("pending_next_boundary")]
+    public string? PendingNextBoundary { get; set; }
+}
+
+public sealed class BetterControlTerminalPolicyStatus
+{
+    [JsonPropertyName("value")]
+    public string Value { get; set; } = "unknown";
+
+    [JsonPropertyName("compatibility_value")]
+    public string CompatibilityValue { get; set; } = "UNKNOWN";
+
+    [JsonPropertyName("request_id")]
+    public string? RequestId { get; set; }
+
+    [JsonPropertyName("requested_at")]
+    public string? RequestedAt { get; set; }
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "unknown";
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    [JsonPropertyName("acknowledgement")]
+    public DirectiveAcknowledgement? Acknowledgement { get; set; }
+}
+
+public sealed class BetterControlBattleWorkflowStatus
+{
+    [JsonPropertyName("request_id")]
+    public string RequestId { get; set; } = "";
+
+    [JsonPropertyName("intent")]
+    public string Intent { get; set; } = "";
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+}
+
+public sealed class BetterControlManualStatus
+{
+    [JsonPropertyName("manual_control_id")]
+    public string ManualControlId { get; set; } = "";
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    [JsonPropertyName("detail")]
+    public string? Detail { get; set; }
+
+    [JsonPropertyName("refresh_status")]
+    public string? RefreshStatus { get; set; }
+}
+
+public sealed class BetterControlActionAvailability
+{
+    [JsonPropertyName("available")]
+    public bool Available { get; set; }
+
+    [JsonPropertyName("code")]
+    public string Code { get; set; } = "unavailable";
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+}
+
 public sealed class CurrentRunStatus
 {
     [JsonPropertyName("run_id")]
@@ -169,6 +313,9 @@ public sealed class RequestStatus
 
     [JsonPropertyName("startup_gate_policy")]
     public string? StartupGatePolicy { get; set; }
+
+    [JsonPropertyName("manual_control_id")]
+    public string? ManualControlId { get; set; }
 }
 
 public sealed class DirectiveAcknowledgement
@@ -178,6 +325,9 @@ public sealed class DirectiveAcknowledgement
 
     [JsonPropertyName("at")]
     public string? At { get; set; }
+
+    [JsonPropertyName("request_id")]
+    public string? RequestId { get; set; }
 
     [JsonPropertyName("acknowledges_current")]
     public bool AcknowledgesCurrent { get; set; }
@@ -190,6 +340,18 @@ public sealed class ControlStatus
 
     [JsonPropertyName("mode")]
     public string Mode { get; set; } = "UNKNOWN";
+
+    [JsonPropertyName("state_updated_at")]
+    public string? StateUpdatedAt { get; set; }
+
+    [JsonPropertyName("state_request_id")]
+    public string? StateRequestId { get; set; }
+
+    [JsonPropertyName("mode_updated_at")]
+    public string? ModeUpdatedAt { get; set; }
+
+    [JsonPropertyName("mode_request_id")]
+    public string? ModeRequestId { get; set; }
 
     [JsonPropertyName("game_speed_target")]
     public double GameSpeedTarget { get; set; } = 6.3;

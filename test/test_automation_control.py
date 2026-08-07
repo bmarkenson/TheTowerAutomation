@@ -1,4 +1,6 @@
 import json
+from datetime import datetime
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -16,6 +18,7 @@ from core.gate_decisions import (
     prompt_for_gate_decision,
     startup_gate_context_for_strategy,
 )
+from core.control_surface import ControlSurfaceService
 from core.run_state import AUTOMATION, AutomationControl, ExecMode
 from tools.automation_ctl import main as automation_ctl_main
 
@@ -35,6 +38,35 @@ def _supervisor(control_file: Path) -> AutomationSupervisor:
     return AutomationSupervisor(
         control_file=str(control_file),
         auto_return_enabled=False,
+    )
+
+
+def _route_cli_to_live_service(monkeypatch, tmp_path) -> None:
+    def service_for(path: str) -> ControlSurfaceService:
+        control_path = Path(path)
+        service = ControlSurfaceService(
+            repository_root=tmp_path,
+            control_file=control_path,
+            action_log=control_path.parent / "actions.log",
+            strategy_action_gate_file=(
+                control_path.parent / "strategy_action_gate.json"
+            ),
+        )
+        service._runtime_evidence = lambda: {
+            "active": True,
+            "instances": [
+                {
+                    "active": True,
+                    "pid": os.getpid(),
+                    "target": "localhost:5555",
+                }
+            ],
+        }
+        return service
+
+    monkeypatch.setattr(
+        "tools.automation_ctl._better_control_service",
+        service_for,
     )
 
 
@@ -64,23 +96,24 @@ def test_legacy_retry_mode_loads_and_rewrites_as_next_battle(tmp_path):
     assert persisted["mode"] == "NEXT_BATTLE"
 
 
-def test_cli_accepts_next_battle_and_legacy_retry_alias(tmp_path):
+def test_cli_sets_explicit_future_terminal_policy(tmp_path):
     control_file = tmp_path / "automation_ctl.json"
 
     assert automation_ctl_main(
-        ["--control-file", str(control_file), "mode", "next-battle"]
+        [
+            "--control-file",
+            str(control_file),
+            "when-battle-ends",
+            "continue",
+        ]
     ) == 0
     assert ControlDirectiveStore(control_file).read()["mode"] == "NEXT_BATTLE"
 
-    assert automation_ctl_main(
-        ["--control-file", str(control_file), "mode", "retry"]
-    ) == 0
-    assert json.loads(control_file.read_text(encoding="utf-8"))["mode"] == (
-        "NEXT_BATTLE"
-    )
 
-
-def test_pause_remains_authoritative_until_explicit_resume(tmp_path):
+def test_pause_remains_authoritative_until_explicit_enable(
+    tmp_path, monkeypatch
+):
+    _route_cli_to_live_service(monkeypatch, tmp_path)
     control_file = tmp_path / "automation_ctl.json"
     supervisor = _supervisor(control_file)
 
@@ -96,7 +129,7 @@ def test_pause_remains_authoritative_until_explicit_resume(tmp_path):
     assert json.loads(control_file.read_text(encoding="utf-8"))["state"] == "PAUSED"
 
     assert automation_ctl_main(
-        ["--control-file", str(control_file), "resume"]
+        ["--control-file", str(control_file), "enable"]
     ) == 0
     supervisor.apply_control()
     assert not supervisor.is_paused
@@ -155,9 +188,38 @@ def test_repeated_state_directive_is_acknowledged_and_requests_fresh_status(
         call
         for call in runtime_log.call_args_list
         if call.args
-        and call.args[0] == "[CTRL] State set to PAUSED via control file"
+        and call.args[0].startswith(
+            "[CTRL] State set to PAUSED via control file request_id="
+        )
     ]
     assert len(acknowledgements) == 2
+
+
+def test_repeated_mode_directive_is_acknowledged_by_request_identity(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    first = store.set_mode("WAIT", source="test")
+    supervisor = _supervisor(control_file)
+
+    with patch("core.automation_supervisor.log") as runtime_log:
+        assert supervisor.apply_control()
+        second = store.set_mode("WAIT", source="test-repeat")
+        assert supervisor.apply_control()
+
+    acknowledgements = [
+        call.args[0]
+        for call in runtime_log.call_args_list
+        if call.args
+        and call.args[0].startswith(
+            "[CTRL] Mode set to WAIT via control file request_id="
+        )
+    ]
+    assert acknowledgements == [
+        "[CTRL] Mode set to WAIT via control file "
+        f"request_id={first['mode_request_id']}",
+        "[CTRL] Mode set to WAIT via control file "
+        f"request_id={second['mode_request_id']}",
+    ]
 
 
 def test_game_speed_target_is_persistent_and_applies_to_a_live_supervisor(
@@ -191,30 +253,39 @@ def test_game_speed_target_is_persistent_and_applies_to_a_live_supervisor(
     )
 
 
-def test_timed_pause_expiry_persists_resume_before_changing_memory(tmp_path):
+def test_timed_pause_expiry_persists_resume_before_changing_memory(
+    tmp_path, monkeypatch
+):
+    _route_cli_to_live_service(monkeypatch, tmp_path)
     control_file = tmp_path / "automation_ctl.json"
     supervisor = _supervisor(control_file)
 
-    with patch("tools.automation_ctl.time.time", return_value=1_000.0):
-        assert automation_ctl_main(
-            [
-                "--control-file",
-                str(control_file),
-                "pause",
-                "--minutes",
-                "5",
-            ]
-        ) == 0
+    before = datetime.now().timestamp()
+    assert automation_ctl_main(
+        [
+            "--control-file",
+            str(control_file),
+            "pause",
+            "--minutes",
+            "5",
+        ]
+    ) == 0
+    after = datetime.now().timestamp()
 
     saved = json.loads(control_file.read_text(encoding="utf-8"))
     assert saved["state"] == "PAUSED"
-    assert saved["resume_at"] == 1_300.0
+    assert before + 300 <= saved["resume_at"] <= after + 300
 
-    with patch("core.automation_supervisor.time.time", return_value=1_299.0):
+    deadline = saved["resume_at"]
+    with patch(
+        "core.automation_supervisor.time.time", return_value=deadline - 1
+    ):
         supervisor.apply_control()
     assert supervisor.is_paused
 
-    with patch("core.automation_supervisor.time.time", return_value=1_301.0):
+    with patch(
+        "core.automation_supervisor.time.time", return_value=deadline + 1
+    ):
         supervisor.apply_control()
     assert not supervisor.is_paused
     saved = json.loads(control_file.read_text(encoding="utf-8"))
@@ -225,19 +296,19 @@ def test_timed_pause_expiry_persists_resume_before_changing_memory(tmp_path):
     assert not supervisor.is_paused
 
 
-def test_indefinite_pause_replaces_existing_timed_pause(tmp_path):
+def test_indefinite_pause_replaces_existing_timed_pause(tmp_path, monkeypatch):
+    _route_cli_to_live_service(monkeypatch, tmp_path)
     control_file = tmp_path / "automation_ctl.json"
 
-    with patch("tools.automation_ctl.time.time", return_value=1_000.0):
-        assert automation_ctl_main(
-            [
-                "--control-file",
-                str(control_file),
-                "pause",
-                "--minutes",
-                "5",
-            ]
-        ) == 0
+    assert automation_ctl_main(
+        [
+            "--control-file",
+            str(control_file),
+            "pause",
+            "--minutes",
+            "5",
+        ]
+    ) == 0
     assert automation_ctl_main(
         ["--control-file", str(control_file), "pause"]
     ) == 0
