@@ -115,7 +115,7 @@ and actionable work lives in
 - **Observed:** On 2026-08-06, a replacement No Strategy runtime attached to a
   running battle then labeled Attack Dissonance by the purple-only detector.
   The badge was later established as Utility Dissonance in
-  [ISSUE-2026-030](open-2026.md#utility-dissonance-star-was-labeled-as-attack).
+  [ISSUE-2026-032](open-2026.md#utility-dissonance-star-was-labeled-as-attack).
 - **Symptom:** The runtime opened Battle History instead of using
   `playerInfo.dat`, then revisited every configuration screen even when the
   exact-version save already supplied complete normalized values.
@@ -142,7 +142,7 @@ and actionable work lives in
   `unsupported primary module infoIndex`. This confirmation did not validate
   the omitted Damage Slider read: the purple-only detector had incorrectly
   marked it unavailable for Utility Dissonance, now tracked by
-  [ISSUE-2026-030](open-2026.md#utility-dissonance-star-was-labeled-as-attack).
+  [ISSUE-2026-032](open-2026.md#utility-dissonance-star-was-labeled-as-attack).
   The exact action rows and projection are retained in
   [promotion evidence](evidence/no-strategy-attachment-promotion-2026-08-06.md).
 - **Fixed by:** `cde691b`; deployed by `ab84a3c`.
