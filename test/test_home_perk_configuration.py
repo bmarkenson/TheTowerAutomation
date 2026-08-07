@@ -21,7 +21,9 @@ from core.home_perk_configuration import (
     ensure_home_perk_configuration,
 )
 from core.perk_configuration import (
+    FARM_AUTO_PICK_ORDER,
     FARM_PERK_BANS,
+    PERK_CONFIGURATION_OCR_EXEMPLARS,
     classify_perk_configuration_text,
 )
 
@@ -48,7 +50,11 @@ LABELS = {
 
 
 def _row(key, index):
-    text = LABELS[key]
+    text = (
+        LABELS[key]
+        if key in LABELS
+        else PERK_CONFIGURATION_OCR_EXEMPLARS[key]
+    )
     return {
         "top": 430 + index * 172,
         "bottom": 587 + index * 172,
@@ -69,6 +75,15 @@ def test_auto_pick_repair_inserts_missing_coin_tradeoff_at_strategy_rank():
         "cash_bonus",
         "coin_tradeoff",
     ]
+    expected = [
+        "perk_wave_requirement",
+        "game_speed",
+        "coin_tradeoff",
+        "golden_tower_bonus",
+        "max_health",
+        "cash_bonus",
+    ]
+    observed = list(order)
 
     def rows(_frame):
         return [_row(key, index) for index, key in enumerate(order)]
@@ -88,14 +103,19 @@ def test_auto_pick_repair_inserts_missing_coin_tradeoff_at_strategy_rank():
             "core.home_perk_configuration._tap_configuration_row",
             side_effect=move_up,
         ) as tap,
+        patch(
+            "core.home_perk_configuration._locate_auto_pick_key",
+            wraps=_locate_auto_pick_key,
+        ) as locate,
+        patch(
+            "core.home_perk_configuration."
+            "_capture_ranked_order_with_ocr_retries",
+            wraps=_capture_ranked_order_with_ocr_retries,
+        ) as final_scan,
     ):
         _repair_auto_pick_order(
             frame,
-            [
-                "perk_wave_requirement",
-                "game_speed",
-                "coin_tradeoff",
-            ],
+            expected,
             capture_fn=lambda: frame,
             detector=lambda _frame: {"state": "PERKS"},
             safe_tap_fn=lambda *_args, **_kwargs: True,
@@ -103,23 +123,83 @@ def test_auto_pick_repair_inserts_missing_coin_tradeoff_at_strategy_rank():
             swipe_fn=lambda _key: True,
             row_fn=rows,
             row_near_fn=lambda *_args, **_kwargs: None,
-            observed_keys=[
-                "perk_wave_requirement",
-                "game_speed",
-                "golden_tower_bonus",
-            ],
+            observed_keys=observed,
             sleep_fn=lambda _seconds: None,
         )
 
-    assert order[:3] == [
-        "perk_wave_requirement",
-        "game_speed",
-        "coin_tradeoff",
-    ]
+    assert order == expected
     assert tap.call_count == 3
     assert tap.call_args.kwargs["action"] == "auto_pick_move_up:coin_tradeoff"
-    # One initial locate plus one final verification scroll. The repair does
-    # not return to list top between adjacent moves.
+    assert [call.args[1] for call in locate.call_args_list] == ["coin_tradeoff"]
+    assert final_scan.call_count == 1
+    # One initial re-anchor from the prior full scan and one final read-back.
+    # Correct suffix ranks do not trigger another trip to the top.
+    assert scroll_top.call_count == 2
+
+
+def test_auto_pick_repair_acquires_only_live_shaped_mismatches():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    expected = list(FARM_AUTO_PICK_ORDER)
+    order = [key for key in expected if key != "free_upgrade_chance"]
+    order.insert(12, "free_upgrade_chance")
+    order.insert(15, "max_health")
+    order.insert(16, "health_regen")
+    observed = list(order[: len(expected)])
+
+    assert order.index("free_upgrade_chance") + 1 == 13
+    assert order.index("inner_land_mines") + 1 == 18
+    assert order.index("damage") + 1 == 19
+
+    def rows(_frame):
+        return [_row(key, index) for index, key in enumerate(order)]
+
+    def move_up(current, row, **_kwargs):
+        key = classify_perk_configuration_text(row["display_text"])
+        index = order.index(key)
+        order[index - 1], order[index] = order[index], order[index - 1]
+        return current
+
+    with (
+        patch(
+            "core.home_perk_configuration._scroll_configuration_top",
+            side_effect=lambda current, **_kwargs: current,
+        ) as scroll_top,
+        patch(
+            "core.home_perk_configuration._tap_configuration_row",
+            side_effect=move_up,
+        ) as tap,
+        patch(
+            "core.home_perk_configuration._locate_auto_pick_key",
+            wraps=_locate_auto_pick_key,
+        ) as locate,
+        patch(
+            "core.home_perk_configuration."
+            "_capture_ranked_order_with_ocr_retries",
+            wraps=_capture_ranked_order_with_ocr_retries,
+        ) as final_scan,
+    ):
+        _repair_auto_pick_order(
+            frame,
+            expected,
+            capture_fn=lambda: frame,
+            detector=lambda _frame: {"state": "PERKS"},
+            safe_tap_fn=lambda *_args, **_kwargs: True,
+            visible_fn=lambda *_args, **_kwargs: True,
+            swipe_fn=lambda _key: True,
+            row_fn=rows,
+            row_near_fn=lambda *_args, **_kwargs: None,
+            observed_keys=observed,
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert order[: len(expected)] == expected
+    assert tap.call_count == 9
+    assert [call.args[1] for call in locate.call_args_list] == [
+        "free_upgrade_chance",
+        "inner_land_mines",
+        "damage",
+    ]
+    assert final_scan.call_count == 1
     assert scroll_top.call_count == 2
 
 
@@ -177,6 +257,11 @@ def test_auto_pick_repair_rechecks_rank_after_viewport_reflow():
             swipe_fn=lambda _key: True,
             row_fn=rows,
             row_near_fn=lambda *_args, **_kwargs: None,
+            observed_keys=[
+                "perk_wave_requirement",
+                "game_speed",
+                "golden_tower_bonus",
+            ],
             sleep_fn=lambda _seconds: None,
         )
 
@@ -185,6 +270,91 @@ def test_auto_pick_repair_rechecks_rank_after_viewport_reflow():
         "game_speed",
         "coin_tradeoff",
     ]
+
+
+def test_auto_pick_repair_resyncs_conflicting_context_before_input():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    expected = [
+        "perk_wave_requirement",
+        "game_speed",
+        "coin_tradeoff",
+        "golden_tower_bonus",
+    ]
+    order = [
+        "perk_wave_requirement",
+        "game_speed",
+        "golden_tower_bonus",
+        "coin_tradeoff",
+    ]
+    context_consistent = {"value": False}
+    events = []
+
+    def rows(_frame):
+        visible = (
+            order
+            if context_consistent["value"]
+            else [
+                "perk_wave_requirement",
+                "game_speed",
+                "max_health",
+                "coin_tradeoff",
+            ]
+        )
+        return [_row(key, index) for index, key in enumerate(visible)]
+
+    def resync(current, **_kwargs):
+        events.append("resync")
+        context_consistent["value"] = True
+        return current, list(order)
+
+    def move_up(current, row, **_kwargs):
+        events.append("tap")
+        key = classify_perk_configuration_text(row["display_text"])
+        index = order.index(key)
+        order[index - 1], order[index] = order[index], order[index - 1]
+        return current
+
+    final = {
+        "quality": {"valid": True},
+        "selected": [{"key": key} for key in expected],
+    }
+    with (
+        patch(
+            "core.home_perk_configuration._scroll_configuration_top",
+            side_effect=lambda current, **_kwargs: current,
+        ),
+        patch(
+            "core.home_perk_configuration._tap_configuration_row",
+            side_effect=move_up,
+        ) as tap,
+        patch(
+            "core.home_perk_configuration._recapture_auto_pick_semantic_order",
+            side_effect=resync,
+        ) as recapture,
+        patch(
+            "core.home_perk_configuration."
+            "_capture_ranked_order_with_ocr_retries",
+            return_value=([frame], frame, final),
+        ),
+    ):
+        _repair_auto_pick_order(
+            frame,
+            expected,
+            capture_fn=lambda: frame,
+            detector=lambda _frame: {"state": "PERKS"},
+            safe_tap_fn=lambda *_args, **_kwargs: True,
+            visible_fn=lambda *_args, **_kwargs: True,
+            swipe_fn=lambda _key: True,
+            row_fn=rows,
+            row_near_fn=lambda *_args, **_kwargs: None,
+            observed_keys=list(order),
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert events == ["resync", "tap"]
+    recapture.assert_called_once()
+    tap.assert_called_once()
+    assert order == expected
 
 
 def test_auto_pick_repair_refuses_move_without_one_rank_progress():
@@ -227,6 +397,11 @@ def test_auto_pick_repair_refuses_move_without_one_rank_progress():
                 swipe_fn=lambda _key: True,
                 row_fn=rows,
                 row_near_fn=lambda *_args, **_kwargs: None,
+                observed_keys=[
+                    "perk_wave_requirement",
+                    "game_speed",
+                    "golden_tower_bonus",
+                ],
                 sleep_fn=lambda _seconds: None,
             )
 
@@ -871,6 +1046,77 @@ def test_home_perk_repair_finishes_bans_before_opening_auto_pick():
     assert result_log.call_args.args[0] == (
         "Home Perk configuration complete — repaired and verified Ban Perks"
     )
+
+
+def test_home_perk_repair_reuses_its_authoritative_final_ranked_readback():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    expected = [
+        "perk_wave_requirement",
+        "game_speed",
+        "coin_tradeoff",
+    ]
+    observed = [
+        "perk_wave_requirement",
+        "coin_tradeoff",
+        "game_speed",
+    ]
+    captured_bans = {
+        "quality": {"valid": True},
+        "selected": [{"key": key} for key in FARM_PERK_BANS],
+    }
+    initial_auto = {
+        "quality": {"valid": True},
+        "selected": [{"key": key} for key in observed],
+    }
+    final_auto = {
+        "quality": {"valid": True},
+        "selected": [{"key": key} for key in expected],
+    }
+
+    with (
+        patch("core.home_perk_configuration._require_new_battle_home"),
+        patch(
+            "core.home_perk_configuration._open_configuration",
+            return_value=frame,
+        ),
+        patch(
+            "core.home_perk_configuration._select_and_scroll_top",
+            side_effect=lambda current, **_kwargs: current,
+        ),
+        patch(
+            "core.home_perk_configuration._capture_bans_with_ocr_retries",
+            return_value=(frame, captured_bans),
+        ),
+        patch(
+            "core.home_perk_configuration."
+            "_capture_ranked_order_with_ocr_retries",
+            return_value=([frame], frame, initial_auto),
+        ) as ranked_scan,
+        patch(
+            "core.home_perk_configuration._repair_auto_pick_order",
+            return_value=([frame], frame, final_auto),
+        ) as repair,
+        patch(
+            "core.home_perk_configuration._close_to_home",
+            return_value=frame,
+        ),
+        patch("core.home_perk_configuration.log_action_intent"),
+        patch("core.home_perk_configuration.log_result"),
+    ):
+        result = ensure_home_perk_configuration(
+            {
+                "perk_bans": list(FARM_PERK_BANS),
+                "perk_auto_pick_order": expected,
+            },
+            home_screenshot=frame,
+        )
+
+    assert result.valid
+    assert result.changed
+    ranked_scan.assert_called_once()
+    repair.assert_called_once()
+    assert repair.call_args.kwargs["observed_keys"] == observed
+    assert result.evidence["perk_auto_pick_order"]["observed"] == expected
 
 
 def test_home_perk_does_not_repair_an_incomplete_auto_pick_capture():

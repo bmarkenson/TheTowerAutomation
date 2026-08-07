@@ -1083,13 +1083,21 @@ development-lease authority from warning text in `actions.log`.
   while only missing required bans search the Available list. Each Ban toggle
   and Auto Pick move recaptures the panel immediately before input, uniquely
   reacquires the same semantic row at its settled coordinates, and requires
-  strict transition evidence. Auto Pick then rebuilds semantic rank from the
-  top and requires exactly one-rank upward progress after every tap. A final
-  exact comparison remains mandatory; ambiguous OCR, an unavailable perk, or
-  non-progress blocks New Battle. Persistent control is synchronized before
-  every Home setup tap or swipe. Pause holds the workflow action-free, and
-  Resume restores verified Home before a fresh setup pass. The setup retains
-  exact UI- or save-derived configuration evidence for session preflight.
+  strict transition evidence. Auto Pick repair starts from one complete
+  authoritative ranked-prefix capture, returns once to a confirmed top, and
+  keeps that semantic order only as planning state. It scans forward for each
+  currently misplaced key, skips ranks already made correct by prior moves,
+  and updates the ranked prefix only after the target reaches its guarded
+  predecessor through locally verified adjacent swaps; a key below the prefix
+  can enter while the displaced tail leaves. Cached frames never authorize an
+  input. Pre-input viewport loss, conflicting local adjacency, or OCR
+  ambiguity triggers a bounded full semantic resynchronization. One final
+  authoritative top-to-bottom comparison remains mandatory and is reused by
+  the caller; an unavailable perk, unresolved ambiguity, or non-progress
+  blocks New Battle. Persistent control is synchronized before every Home
+  setup tap or swipe. Pause holds the workflow action-free, and Resume restores
+  verified Home before a fresh setup pass. The setup retains exact UI- or
+  save-derived configuration evidence for session preflight.
   Save-derived sections, including the exact current eight-slot Farm Module
   assignment, are accepted there only after their typed carry binds to the
   exact launched battle; supplied UI screens still override omission
