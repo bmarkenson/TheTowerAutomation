@@ -4,6 +4,15 @@ This directory contains narrow, tracked evidence extracts used by issue
 dossiers when the production source is subject to rolling retention. It does
 not mirror runtime databases or make claims about current runtime state.
 
+## 2026-08-06 No Strategy attachment promotion
+
+[`no-strategy-attachment-promotion-2026-08-06.md`](no-strategy-attachment-promotion-2026-08-06.md)
+preserves the exact deployment boundary, bounded production action rows, and
+privacy-safe Module check used to close `ISSUE-2026-028` and
+`ISSUE-2026-029`. It also distinguishes the successful save-only attachment
+from the still-open paused-manual-start confirmation and the newly exposed
+unsupported primary Module index.
+
 ## 2026-07-30/31 host-performance windows
 
 [`host-performance-2026-07-30-31-aggregates.csv`](host-performance-2026-07-30-31-aggregates.csv)

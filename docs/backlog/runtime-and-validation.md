@@ -50,6 +50,15 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
     cost and staleness tolerance, then validate and adopt one independent claim
     at a time. Enforcement, mutation confirmation, and transition authority
     remain visual.
+  - [ ] Extend the version-1073 Module loadout mapping for the primary
+    `infoIndex` observed during the 2026-08-06 No Strategy attachment. The
+    current privacy-safe projection fails closed with
+    `unsupported primary module infoIndex`, so Modules correctly remains a UI
+    fallback. Identify the exact new index from bounded raw evidence, map it to
+    the independently verified Module identity, retain unknown-index failure,
+    and regress the full attachment path so a complete save skips Module UI.
+    See the
+    [promotion evidence](../issues/evidence/no-strategy-attachment-promotion-2026-08-06.md).
   - [ ] Bind exact-version Workshop-preset save evidence to an already-active
     Tournament attachment without game-Home or Android-Home input. Require a
     stable read, exact target/version, selected Strategy fingerprint, and
@@ -350,23 +359,16 @@ stages:
 
 ## Runtime control
 
-- [ ] Promote and live-confirm the paused Home manual-start attachment repairs
-  from `8cf5548` and `cde691b`: from verified `NEW_BATTLE`, keep Pause through
+- [ ] Live-confirm the deployed paused Home manual-start repair from `8cf5548`:
+  from verified `NEW_BATTLE`, keep Pause through
   the manual start, require passive `RUNNING`, then Resume. Confirm one guarded
   save records or validates the last completed battle without Battle History
   UI, releases No Strategy without a retry loop, and opens only genuinely
   unresolved configuration sections. Require zero input while Paused and no
-  Attack-menu probe under Dissonance. Track
-  [ISSUE-2026-027](../issues/open-2026.md#paused-home-continuity-did-not-follow-a-manually-started-battle)
-  and
-  [ISSUE-2026-028](../issues/open-2026.md#running-attachment-used-battle-history-and-repeated-save-backed-configuration-ui).
-- [ ] Promote and confirm terminal development-lease replay from `cde691b`:
-  after one normally released lease remains in the durable control directive,
-  replace the runtime and require the original release `RESULT` to remain the
-  only outcome. No false abnormal warning, duplicate result, or terminal-state
-  rewrite may occur; a genuinely active old-runtime lease must retain the
-  abnormal termination path. Track
-  [ISSUE-2026-029](../issues/open-2026.md#terminal-development-lease-was-replayed-as-an-abnormal-runtime-change).
+  Attack-menu probe under Dissonance. The generic replacement attachment and
+  terminal-lease replay were confirmed during promotion of `ab84a3c`; track
+  only
+  [ISSUE-2026-027](../issues/open-2026.md#paused-home-continuity-did-not-follow-a-manually-started-battle).
 - [ ] Close an owned exclusive-validation `cleanup` receipt when the same
   runtime has already proved that its validation battle reached Game Over and
   later observes `RUNNING` before verified Home cleanup. Fail closed, release

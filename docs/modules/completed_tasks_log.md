@@ -61,7 +61,10 @@ canonical document linked by an entry for current behavior.
   tap, stop, reload, Surrender, or otherwise mutate the production battle; live
   confirmation remains routed through
   [`ISSUE-2026-027`](../issues/open-2026.md#paused-home-continuity-did-not-follow-a-manually-started-battle)
-  after promotion.
+  after promotion. The combined candidate was deployed as `ab84a3c` on
+  2026-08-06; replacement attachment was confirmed, but that boundary did not
+  reproduce a paused Home manual start, so the issue remains open for one
+  natural confirmation.
 
 ### 2026-08-06 save-only running attachment and lease replay correction
 
@@ -87,11 +90,18 @@ canonical document linked by an entry for current behavior.
   state-definition validation, clickmap integrity with zero errors and the 44
   established orphan candidates, and all 1,676 tests in 323.36 seconds.
   Diagnosis added no device input, Surrender, lifecycle transition, or control
-  mutation. Natural confirmation remains routed through
-  [`ISSUE-2026-028`](../issues/open-2026.md#running-attachment-used-battle-history-and-repeated-save-backed-configuration-ui)
-  and
-  [`ISSUE-2026-029`](../issues/open-2026.md#terminal-development-lease-was-replayed-as-an-abnormal-runtime-change)
-  after promotion.
+  mutation.
+- Production candidate `ab84a3c` passed a fresh complete checkpoint of all
+  1,676 tests in 328.97 seconds and was promoted behind annotated rollback tag
+  `production-before-20260807T011012Z-d5ff68d`. A bounded replacement attached
+  through one guarded save serialization, opened no Battle History UI, applied
+  11 save-backed No Strategy fields, and visited only Modules. A privacy-safe
+  read proved Modules was genuinely unresolved because of an unsupported
+  primary `infoIndex`; that mapping remains in the validation backlog.
+- The same replacement preserved the previously released terminal lease
+  without an abnormal warning, duplicate result, or directive rewrite.
+  `ISSUE-2026-028` and `ISSUE-2026-029` are resolved with exact retained
+  [promotion evidence](../issues/evidence/no-strategy-attachment-promotion-2026-08-06.md).
 
 ### 2026-08-06 post-promotion branch/worktree lifecycle cleanup
 
