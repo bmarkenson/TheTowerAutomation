@@ -39,6 +39,23 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-06 confirmed scroll-edge and Auto Pick traversal repair
+
+- Live Farm T19 retries showed Auto Pick making real ordering progress and
+  then truncating its 17-row scan immediately after one accepted swipe left
+  the viewport unchanged. The resulting predecessor, target-rank, and missing
+  `Free Upgrade Chance` errors all failed closed before Battle input.
+- `6837c18` generalizes edge inference across the shared scroll-to-edge,
+  capture-scroll, and scroll-until-visible primitives: two consecutive stable
+  post-swipe frames are required, and any movement resets confirmation. Perk
+  page capture and the Auto Pick ranked scan, locator, and local reacquisition
+  now use that shared traversal.
+- Regression coverage reproduces one ignored swipe in all three primitives and
+  at each affected Auto Pick boundary. The 29 focused tests, 148 adjacent
+  tests, and complete isolated checkpoint passed; the checkpoint compiled the
+  repository, passed maintained validators, and ran all 1,686 tests in 319.51
+  seconds. `ISSUE-2026-031` records the diagnosis and production confirmation.
+
 ### 2026-08-06 Ban Perks Selected/Available boundary repair
 
 - Live diagnosis of the blocked Tier 19 Farm transition showed that repair had

@@ -78,6 +78,9 @@ Completed and superseded detail remains in the
     [`2026-07-14 architecture history`](../architecture/history/architecture_direction_2026-07-14.md#floating-gem-bob-conclusion).
   - Replace fixed post-swipe sleeps with bounded fresh-frame observation and
     require stable consecutive frames before declaring settle or edge.
+    The common scroll primitives gained consecutive edge confirmation in
+    `ISSUE-2026-031`; migrate the remaining bespoke stateful list traversals
+    only as their semantic stop boundaries are modeled.
   - Preserve source-screen guards and a guarded raw screenshot fallback.
   - Handle the device's 180-second `screenrecord` limit without exposing
     buffered or pre-action frames as current.
