@@ -48,6 +48,14 @@ and actionable work lives in
   clickmap integrity with zero errors and the 44 established orphan
   candidates, and all 1,680 tests in 322.42 seconds. Live input validation was
   unnecessary.
+- **Production confirmation:** Exact integration candidate `65b8fc5` passed a
+  second complete 1,680-test checkpoint and was promoted on 2026-08-06 behind
+  rollback tag `production-before-20260807T042659Z-efc190c`. Automation stopped
+  cleanly and replacement PID `104919` acquired the exclusive
+  `localhost:5555` lock, acknowledged `PAUSED` / `NEXT_BATTLE` / `farm_t19`,
+  and produced a fresh Tier 19 `HOME_SCREEN/PAUSED` observation. The existing
+  pending Perk Configuration gate and operator-owned Pause were preserved; the
+  promotion issued no device input and launched no battle.
 - **Fixed by:** `5cab87a`.
 
 ### Running attachment used Battle History and repeated save-backed configuration UI

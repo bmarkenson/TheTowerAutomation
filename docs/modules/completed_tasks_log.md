@@ -57,9 +57,13 @@ canonical document linked by an entry for current behavior.
   frames verified all three relevant states. The complete isolated checkpoint
   passed compilation, maintained validators, and all 1,680 tests in 322.42
   seconds; no development device input was required.
-- `ISSUE-2026-030` is resolved. The feature branch is ready for integration;
-  deployment and any production confirmation remain separate operator-owned
-  steps.
+- `ISSUE-2026-030` is resolved. Exact integration candidate `65b8fc5` passed a
+  second complete 1,680-test checkpoint and was promoted on 2026-08-06 behind
+  rollback tag `production-before-20260807T042659Z-efc190c`. Replacement PID
+  `104919` owns `localhost:5555` and reported a fresh Tier 19
+  `HOME_SCREEN/PAUSED` with `farm_t19` acknowledged; the pre-existing pending
+  gate and operator-owned Pause remained unchanged, and promotion sent no
+  device input or battle start.
 
 ### 2026-08-06 paused Home manual-start continuity repair
 
