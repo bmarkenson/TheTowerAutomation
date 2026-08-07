@@ -39,6 +39,29 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-07 incremental Auto Pick repair scans
+
+- Home Auto Pick repair now carries the one complete authoritative ranked
+  prefix into a mutable planning order. It skips ranks already correct or made
+  correct by an earlier insertion, scans forward only for a currently
+  misplaced target, and inserts a verified rank-18/19 target into the
+  top-17 prefix without expanding OCR authority into the unranked tail.
+- The input boundary remains local and fresh: the physical viewport is
+  re-anchored once after the initial read, every arrow tap still uniquely
+  reacquires its row and proves one adjacent swap, confirmed-edge and moved-row
+  traversal remain bounded, and a pre-input cache/context conflict performs at
+  most two full semantic resynchronizations. The repair's final authoritative
+  17-rank read-back is reused by its caller instead of scanning twice.
+- A synthetic reproduction of the production-confirmed shape places Free
+  Upgrade Chance, Inner Land Mines, and Damage at ranks 13, 18, and 19. The
+  repair makes the required nine verified swaps while acquiring only those
+  three targets, with no scans for the correct suffix. All 21 focused tests and
+  135 adjacent Home, Perk, setup, navigation, and clickmap tests passed. The
+  complete isolated checkpoint then compiled the repository, passed the state
+  and clickmap validators with zero errors and the 44 established orphan
+  candidates, and ran all 1,689 tests in 329.33 seconds. No process or device
+  interaction was used for this repository change.
+
 ### 2026-08-06 confirmed scroll-edge and Auto Pick traversal repair
 
 - Live Farm T19 retries showed Auto Pick making real ordering progress and
