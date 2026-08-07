@@ -370,16 +370,6 @@ stages:
   replacement attachment and terminal-lease replay were confirmed during
   promotion of `ab84a3c`; track only
   [ISSUE-2026-027](../issues/open-2026.md#paused-home-continuity-did-not-follow-a-manually-started-battle).
-- [ ] Live-confirm the deployed Utility Dissonance subtype repair from
-  `17e4e0c` (production merge `7029456`). On a complete `RUNNING` frame,
-  require the localized purple badge plus white star
-  to record `Utility Dissonance`, preserve generic Dissonance if icon shape is
-  unresolved, and keep Damage Slider available for the guarded Attack read.
-  At natural Game Over, require `battle_type=dissonance`, label
-  `Utility Dissonance`, and retain the badge signal. Separately correlate the
-  active save selector with completed `dissonanceType` before either raw field
-  is allowlisted; track
-  [ISSUE-2026-032](../issues/open-2026.md#utility-dissonance-star-was-labeled-as-attack).
 - [ ] Close an owned exclusive-validation `cleanup` receipt when the same
   runtime has already proved that its validation battle reached Game Over and
   later observes `RUNNING` before verified Home cleanup. Fail closed, release

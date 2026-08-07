@@ -273,16 +273,3 @@ current runtime state.
   replacement attachment and lease replay follow-ons are resolved in
   [2026 history](issues/resolved-2026.md#running-attachment-used-battle-history-and-repeated-save-backed-configuration-ui).
   [Runtime backlog](backlog/runtime-and-validation.md#runtime-control).
-
-### Utility Dissonance star was labeled as Attack
-
-**Stable ID:** `ISSUE-2026-032` · **Lifecycle:** `repair_awaiting_confirmation`
-
-- The subtype detector treated every localized purple
-  Dissonance badge as Attack, so a white Utility star also suppressed the
-  accessible Attack Damage Slider read.
-- Load the [dossier](issues/open-2026.md#utility-dissonance-star-was-labeled-as-attack)
-  before changing Dissonance identity, Damage Slider inventory routing, or
-  save-enum adoption. Next: confirm deployed merge `7029456` by observing the
-  star label and terminal record at a natural Utility boundary; [runtime
-  backlog](backlog/runtime-and-validation.md#runtime-control).
