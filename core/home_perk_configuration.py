@@ -28,7 +28,7 @@ from core.perk_configuration import (
     perk_entries_match,
     semantic_perk_entry,
 )
-from core.scrolling import guarded_swipe, scroll_to_edge
+from core.scrolling import capture_scroll_to_edge, guarded_swipe, scroll_to_edge
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
 from core.workshop_preset import measure_preset_slot_selection
@@ -992,25 +992,42 @@ def _reacquire_auto_pick_move_context(
 ]:
     """Reacquire a moving row locally, scrolling upward only as needed."""
 
-    for _attempt in range(MAX_AUTO_PICK_LOCAL_REACQUIRE_SWIPES + 1):
-        context = _visible_auto_pick_move_context(current, key, row_fn=row_fn)
+    found_context: tuple[
+        dict[str, Any],
+        dict[str, Any] | None,
+        dict[str, Any] | None,
+    ] | None = None
+
+    def context_stop(frame: Frame) -> Optional[str]:
+        nonlocal found_context
+        context = _visible_auto_pick_move_context(frame, key, row_fn=row_fn)
         if context is not None and (
             context[1] is not None or not require_previous
         ):
-            return current, *context, False
-        previous_frame = _swipe_configuration(
-            current,
-            "gesture_targets.goto_previous:perks",
-            capture_fn=capture_fn,
-            visible_fn=visible_fn,
-            swipe_fn=swipe_fn,
-            sleep_fn=sleep_fn,
-        )
-        if _content_difference(current, previous_frame) <= 1.0:
-            if context is not None:
-                return current, *context, True
-            break
-        current = previous_frame
+            found_context = context
+            return "auto_pick_move_context_visible"
+        return None
+
+    capture = capture_scroll_to_edge(
+        "gesture_targets.goto_previous:perks",
+        source_label=PERK_CONFIGURATION_INDICATOR,
+        screenshot=current,
+        progress_region=PERK_CONTENT_REGION,
+        max_swipes=MAX_AUTO_PICK_LOCAL_REACQUIRE_SWIPES + 1,
+        settle_s=0.8,
+        capture_fn=capture_fn,
+        visible_fn=visible_fn,
+        swipe_fn=swipe_fn,
+        sleep_fn=sleep_fn,
+        stop_fn=context_stop,
+    )
+    latest = capture.screenshots[-1] if capture.screenshots else current
+    if capture.reason == "auto_pick_move_context_visible" and found_context:
+        return latest, *found_context, False
+    if capture.success and capture.reason == "edge_reached":
+        context = _visible_auto_pick_move_context(latest, key, row_fn=row_fn)
+        if context is not None:
+            return latest, *context, True
     raise HomePerkConfigurationError(
         "Auto Pick local repair could not reacquire "
         f"{perk_configuration_label(key)} while scrolling upward"
@@ -1109,25 +1126,41 @@ def _locate_auto_pick_key(
         sleep_fn=sleep_fn,
     )
     ordered: list[dict[str, Any]] = []
-    for _page in range(MAX_AUTO_PICK_SCAN_SWIPES + 1):
-        for raw in row_fn(current):
+    located: tuple[int, dict[str, Any]] | None = None
+
+    def target_stop(frame: Frame) -> Optional[str]:
+        nonlocal located
+        for raw in row_fn(frame):
             row = semantic_perk_entry(raw)
             if any(perk_entries_match(existing, row) for existing in ordered):
                 continue
             ordered.append(row)
             if row.get("key") == key:
-                return len(ordered), current, row
-        next_frame = _swipe_configuration(
-            current,
-            "gesture_targets.goto_next:perks",
-            capture_fn=capture_fn,
-            visible_fn=visible_fn,
-            swipe_fn=swipe_fn,
-            sleep_fn=sleep_fn,
+                located = (len(ordered), row)
+                return "auto_pick_key_visible"
+        return None
+
+    capture = capture_scroll_to_edge(
+        "gesture_targets.goto_next:perks",
+        source_label=PERK_CONFIGURATION_INDICATOR,
+        screenshot=current,
+        progress_region=PERK_CONTENT_REGION,
+        max_swipes=MAX_AUTO_PICK_SCAN_SWIPES,
+        settle_s=0.8,
+        capture_fn=capture_fn,
+        visible_fn=visible_fn,
+        swipe_fn=swipe_fn,
+        sleep_fn=sleep_fn,
+        stop_fn=target_stop,
+    )
+    if capture.reason == "auto_pick_key_visible" and located is not None:
+        found_frame = capture.screenshots[-1] if capture.screenshots else current
+        return located[0], found_frame, located[1]
+    if not capture.success and capture.reason != "max_swipes_exceeded":
+        raise HomePerkConfigurationError(
+            f"Auto Pick list scan failed while locating "
+            f"{perk_configuration_label(key)}: {capture.reason}"
         )
-        if _content_difference(current, next_frame) <= 1.0:
-            break
-        current = next_frame
     raise HomePerkConfigurationError(
         f"Auto Pick list did not expose {perk_configuration_label(key)}"
     )
@@ -1365,22 +1398,25 @@ def _capture_configuration_pages(
 ) -> tuple[list[Frame], Frame, bool]:
     """Capture one complete configuration tab through a verified bottom edge."""
 
-    frames = [top]
-    current = top
-    for _page in range(MAX_AUTO_PICK_SCAN_SWIPES):
-        next_frame = _swipe_configuration(
-            current,
-            "gesture_targets.goto_next:perks",
-            capture_fn=capture_fn,
-            visible_fn=visible_fn,
-            swipe_fn=swipe_fn,
-            sleep_fn=sleep_fn,
+    capture = capture_scroll_to_edge(
+        "gesture_targets.goto_next:perks",
+        source_label=PERK_CONFIGURATION_INDICATOR,
+        screenshot=top,
+        progress_region=PERK_CONTENT_REGION,
+        max_swipes=MAX_AUTO_PICK_SCAN_SWIPES,
+        settle_s=0.8,
+        capture_fn=capture_fn,
+        visible_fn=visible_fn,
+        swipe_fn=swipe_fn,
+        sleep_fn=sleep_fn,
+    )
+    if not capture.success and capture.reason != "max_swipes_exceeded":
+        raise HomePerkConfigurationError(
+            f"Perks configuration page capture failed: {capture.reason}"
         )
-        if _content_difference(current, next_frame) <= 1.0:
-            return frames, current, True
-        frames.append(next_frame)
-        current = next_frame
-    return frames, current, False
+    frames = list(capture.screenshots)
+    current = frames[-1] if frames else top
+    return frames, current, capture.success and capture.reason == "edge_reached"
 
 
 def _first_choice_comparison(
@@ -1616,30 +1652,40 @@ def _capture_ranked_frames(
     row_fn: RowsFn,
     sleep_fn: Callable[[float], None],
 ) -> tuple[list[Frame], Frame]:
-    frames = [top]
-    current = top
-    for _ in range(MAX_AUTO_PICK_SCAN_SWIPES):
+    observed_frames: list[Frame] = []
+
+    def ranked_stop(frame: Frame) -> Optional[str]:
+        observed_frames.append(frame)
         captured = extract_ranked_auto_pick_order(
-            frames,
+            observed_frames,
             ranking_count=ranking_count,
             row_fn=row_fn,
         )
         if len(captured["selected"]) >= ranking_count:
-            return frames, current
+            return "auto_pick_ranking_count_reached"
         if captured["quality"].get("ranking_boundary_seen") is True:
-            return frames, current
-        next_frame = _swipe_configuration(
-            current,
-            "gesture_targets.goto_next:perks",
-            capture_fn=capture_fn,
-            visible_fn=visible_fn,
-            swipe_fn=swipe_fn,
-            sleep_fn=sleep_fn,
+            return "auto_pick_ranking_boundary_seen"
+        return None
+
+    capture = capture_scroll_to_edge(
+        "gesture_targets.goto_next:perks",
+        source_label=PERK_CONFIGURATION_INDICATOR,
+        screenshot=top,
+        progress_region=PERK_CONTENT_REGION,
+        max_swipes=MAX_AUTO_PICK_SCAN_SWIPES,
+        settle_s=0.8,
+        capture_fn=capture_fn,
+        visible_fn=visible_fn,
+        swipe_fn=swipe_fn,
+        sleep_fn=sleep_fn,
+        stop_fn=ranked_stop,
+    )
+    if not capture.success and capture.reason != "max_swipes_exceeded":
+        raise HomePerkConfigurationError(
+            f"Auto Pick ranked scan failed: {capture.reason}"
         )
-        if _content_difference(current, next_frame) <= 1.0:
-            break
-        frames.append(next_frame)
-        current = next_frame
+    frames = list(capture.screenshots)
+    current = frames[-1] if frames else top
     return frames, current
 
 

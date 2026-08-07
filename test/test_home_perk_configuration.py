@@ -9,8 +9,11 @@ from core.home_perk_configuration import (
     BAN_SELECTED_TOGGLE_X,
     HomePerkConfigurationError,
     _capture_bans_with_ocr_retries,
+    _capture_ranked_frames,
     _capture_ranked_order_with_ocr_retries,
     _close_to_home,
+    _locate_auto_pick_key,
+    _reacquire_auto_pick_move_context,
     _repair_auto_pick_order,
     _repair_bans,
     _scroll_ban_configuration_top,
@@ -323,10 +326,16 @@ def test_auto_pick_repair_scrolls_up_locally_when_moved_row_leaves_viewport():
         viewport_start["value"] = 3
         return current
 
-    def previous(current, key, **_kwargs):
+    def capture():
+        return np.full_like(frame, 10 * viewport_start["value"])
+
+    swipes = []
+
+    def previous(key):
         assert key == "gesture_targets.goto_previous:perks"
+        swipes.append(key)
         viewport_start["value"] = max(0, viewport_start["value"] - 1)
-        return np.full_like(current, 10 * viewport_start["value"])
+        return True
 
     with (
         patch(
@@ -337,10 +346,6 @@ def test_auto_pick_repair_scrolls_up_locally_when_moved_row_leaves_viewport():
             "core.home_perk_configuration._tap_configuration_row",
             side_effect=move_up,
         ),
-        patch(
-            "core.home_perk_configuration._swipe_configuration",
-            side_effect=previous,
-        ) as swipe,
         patch(
             "core.home_perk_configuration._scroll_configuration_top",
             return_value=frame,
@@ -365,11 +370,11 @@ def test_auto_pick_repair_scrolls_up_locally_when_moved_row_leaves_viewport():
                 "game_speed",
                 "coin_tradeoff",
             ],
-            capture_fn=lambda: frame,
+            capture_fn=capture,
             detector=lambda _frame: {"state": "PERKS"},
             safe_tap_fn=lambda *_args, **_kwargs: True,
             visible_fn=lambda *_args, **_kwargs: True,
-            swipe_fn=lambda _key: True,
+            swipe_fn=previous,
             row_fn=rows,
             row_near_fn=lambda *_args, **_kwargs: None,
             observed_keys=[
@@ -385,7 +390,10 @@ def test_auto_pick_repair_scrolls_up_locally_when_moved_row_leaves_viewport():
         "game_speed",
         "coin_tradeoff",
     ]
-    assert swipe.call_count == 2
+    assert swipes == [
+        "gesture_targets.goto_previous:perks",
+        "gesture_targets.goto_previous:perks",
+    ]
 
 
 def test_ban_ocr_retry_uses_fresh_capture_without_configuration_input():
@@ -471,6 +479,113 @@ def test_ban_top_scroll_requires_complete_selected_block_boundary():
     assert swipes == [
         "gesture_targets.goto_top:perks",
         "gesture_targets.goto_top:perks",
+    ]
+
+
+def test_auto_pick_ranked_scan_retries_one_ignored_next_swipe():
+    top = np.full((1920, 1080, 3), 1, dtype=np.uint8)
+    next_page = np.full((1920, 1080, 3), 2, dtype=np.uint8)
+    captures = iter((top, next_page))
+    swipes = []
+
+    def rows(frame):
+        keys = (
+            ("perk_wave_requirement", "game_speed")
+            if int(frame[0, 0, 0]) == 1
+            else ("game_speed", "coin_tradeoff")
+        )
+        return [_row(key, index) for index, key in enumerate(keys)]
+
+    frames, current = _capture_ranked_frames(
+        top,
+        ranking_count=3,
+        capture_fn=lambda: next(captures),
+        visible_fn=lambda *_args, **_kwargs: True,
+        swipe_fn=lambda key: swipes.append(key) or True,
+        row_fn=rows,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert frames == [top, next_page]
+    assert current is next_page
+    assert swipes == [
+        "gesture_targets.goto_next:perks",
+        "gesture_targets.goto_next:perks",
+    ]
+
+
+def test_auto_pick_key_locator_retries_one_ignored_next_swipe():
+    top = np.full((1920, 1080, 3), 1, dtype=np.uint8)
+    next_page = np.full((1920, 1080, 3), 2, dtype=np.uint8)
+    captures = iter((top, next_page))
+    swipes = []
+
+    def rows(frame):
+        keys = (
+            ("perk_wave_requirement", "game_speed")
+            if int(frame[0, 0, 0]) == 1
+            else ("game_speed", "coin_tradeoff")
+        )
+        return [_row(key, index) for index, key in enumerate(keys)]
+
+    with patch(
+        "core.home_perk_configuration._scroll_configuration_top",
+        return_value=top,
+    ):
+        rank, current, row = _locate_auto_pick_key(
+            top,
+            "coin_tradeoff",
+            capture_fn=lambda: next(captures),
+            visible_fn=lambda *_args, **_kwargs: True,
+            swipe_fn=lambda key: swipes.append(key) or True,
+            row_fn=rows,
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert rank == 3
+    assert current is next_page
+    assert row["key"] == "coin_tradeoff"
+    assert swipes == [
+        "gesture_targets.goto_next:perks",
+        "gesture_targets.goto_next:perks",
+    ]
+
+
+def test_auto_pick_local_reacquire_retries_one_ignored_previous_swipe():
+    current = np.full((1920, 1080, 3), 1, dtype=np.uint8)
+    previous_page = np.full((1920, 1080, 3), 2, dtype=np.uint8)
+    captures = iter((current, previous_page))
+    swipes = []
+
+    def rows(frame):
+        keys = (
+            ("coin_tradeoff",)
+            if int(frame[0, 0, 0]) == 1
+            else ("game_speed", "coin_tradeoff")
+        )
+        return [_row(key, index) for index, key in enumerate(keys)]
+
+    frame, row, predecessor, following, at_top = (
+        _reacquire_auto_pick_move_context(
+            current,
+            "coin_tradeoff",
+            capture_fn=lambda: next(captures),
+            visible_fn=lambda *_args, **_kwargs: True,
+            swipe_fn=lambda key: swipes.append(key) or True,
+            row_fn=rows,
+            sleep_fn=lambda _seconds: None,
+        )
+    )
+
+    assert frame is previous_page
+    assert row["key"] == "coin_tradeoff"
+    assert predecessor is not None
+    assert predecessor["key"] == "game_speed"
+    assert following is None
+    assert at_top is False
+    assert swipes == [
+        "gesture_targets.goto_previous:perks",
+        "gesture_targets.goto_previous:perks",
     ]
 
 

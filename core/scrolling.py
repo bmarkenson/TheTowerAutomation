@@ -95,6 +95,7 @@ def scroll_to_edge(
     max_swipes: int = 8,
     settle_s: float = 1.0,
     stable_threshold: float = 1.0,
+    stable_confirmations: int = 2,
     capture_fn: Callable[[], Optional[Frame]] = capture_adb_screenshot,
     visible_fn: Callable[..., bool] = is_visible,
     swipe_fn: Callable[[str], bool] = swipe_now,
@@ -104,9 +105,12 @@ def scroll_to_edge(
 ) -> ScrollResult:
     """Repeat a guarded swipe until a required boundary or stable edge.
 
-    When ``stop_fn`` is supplied, visual stability alone is not authoritative:
-    repeated list rows can produce a very small image delta away from the real
-    edge. The caller-provided boundary must be observed within ``max_swipes``.
+    Visual stability must be observed on ``stable_confirmations`` consecutive
+    swipes before it proves an edge, so one ignored gesture cannot terminate a
+    traversal. When ``stop_fn`` is supplied, visual stability alone is not
+    authoritative: repeated list rows can produce a very small image delta
+    away from the real edge. The caller-provided boundary must be observed
+    within ``max_swipes``.
     """
 
     current = screenshot if screenshot is not None else capture_fn()
@@ -123,6 +127,8 @@ def scroll_to_edge(
         return ScrollResult(True, current, 0, stop_reason)
 
     total_swipes = 0
+    stable_observations = 0
+    required_stability = max(1, int(stable_confirmations))
     for _ in range(max(1, int(max_swipes))):
         step = guarded_swipe(
             swipe_key,
@@ -154,12 +160,23 @@ def scroll_to_edge(
                     "DEBUG",
                 )
                 continue
+            stable_observations += 1
+            if stable_observations < required_stability:
+                log(
+                    f"[SCROLL] '{swipe_key}' looked stable after "
+                    f"{total_swipes} swipe(s) (difference={difference:.2f}); "
+                    f"confirming edge {stable_observations}/"
+                    f"{required_stability}",
+                    "DEBUG",
+                )
+                continue
             log(
                 f"[SCROLL] Reached edge with '{swipe_key}' after {total_swipes} swipe(s) "
                 f"(difference={difference:.2f})",
                 "DEBUG",
             )
             return ScrollResult(True, current, total_swipes, "edge_reached")
+        stable_observations = 0
 
     reason = (
         "required_boundary_not_reached"
@@ -183,6 +200,7 @@ def capture_scroll_to_edge(
     max_swipes: int = 16,
     settle_s: float = 1.0,
     stable_threshold: float = 1.0,
+    stable_confirmations: int = 2,
     capture_fn: Callable[[], Optional[Frame]] = capture_adb_screenshot,
     visible_fn: Callable[..., bool] = is_visible,
     swipe_fn: Callable[[str], bool] = swipe_now,
@@ -196,6 +214,8 @@ def capture_scroll_to_edge(
     encountered along the way.  Callers can therefore reconstruct long pages
     without writing routine screenshots to disk. A caller-supplied stop reason
     is a successful, bounded completion whose final proving frame is retained.
+    A visual edge requires ``stable_confirmations`` consecutive unchanged
+    swipes, preventing one ignored gesture from truncating a capture.
     """
 
     current = screenshot if screenshot is not None else capture_fn()
@@ -213,6 +233,8 @@ def capture_scroll_to_edge(
 
     screenshots = [current]
     total_swipes = 0
+    stable_observations = 0
+    required_stability = max(1, int(stable_confirmations))
     for _ in range(max(1, int(max_swipes))):
         step = guarded_swipe(
             swipe_key,
@@ -246,6 +268,16 @@ def capture_scroll_to_edge(
         difference = _mean_abs_difference(current, step.screenshot, progress_region)
         current = step.screenshot
         if difference <= max(0.0, stable_threshold):
+            stable_observations += 1
+            if stable_observations < required_stability:
+                log(
+                    f"[SCROLL] Capture with '{swipe_key}' looked stable after "
+                    f"{total_swipes} swipe(s) (difference={difference:.2f}); "
+                    f"confirming edge {stable_observations}/"
+                    f"{required_stability}",
+                    "DEBUG",
+                )
+                continue
             log(
                 f"[SCROLL] Captured edge with '{swipe_key}' after {total_swipes} "
                 f"swipe(s) ({len(screenshots)} distinct viewport(s), "
@@ -259,6 +291,7 @@ def capture_scroll_to_edge(
                 "edge_reached",
             )
 
+        stable_observations = 0
         screenshots.append(current)
 
     log(
@@ -284,6 +317,7 @@ def scroll_until_visible(
     max_swipes: int = 8,
     settle_s: float = 1.0,
     stable_threshold: float = 1.0,
+    stable_confirmations: int = 2,
     capture_fn: Callable[[], Optional[Frame]] = capture_adb_screenshot,
     visible_fn: Callable[..., bool] = is_visible,
     swipe_fn: Callable[[str], bool] = swipe_now,
@@ -296,7 +330,9 @@ def scroll_until_visible(
     ``stop_fn`` may return a non-empty reason when the current frame proves that
     scrolling should end without finding the target. This is useful for screens
     where an unavailable state is visually distinct from the actionable state.
-    The target check always wins when both are present.
+    The target check always wins when both are present. An inferred edge
+    requires ``stable_confirmations`` consecutive unchanged swipes so one
+    ignored gesture does not hide a later target.
     """
 
     current = screenshot if screenshot is not None else capture_fn()
@@ -315,6 +351,8 @@ def scroll_until_visible(
         return ScrollResult(False, current, 0, stop_reason)
 
     total_swipes = 0
+    stable_observations = 0
+    required_stability = max(1, int(stable_confirmations))
     for _ in range(max(1, int(max_swipes))):
         step = guarded_swipe(
             swipe_key,
@@ -339,11 +377,22 @@ def scroll_until_visible(
         difference = _mean_abs_difference(current, step.screenshot, progress_region)
         current = step.screenshot
         if difference <= max(0.0, stable_threshold):
+            stable_observations += 1
+            if stable_observations < required_stability:
+                log(
+                    f"[SCROLL] '{swipe_key}' looked stable before finding "
+                    f"'{target_label}' after {total_swipes} swipe(s) "
+                    f"(difference={difference:.2f}); confirming edge "
+                    f"{stable_observations}/{required_stability}",
+                    "DEBUG",
+                )
+                continue
             log(
                 f"[SCROLL] Reached an edge before finding '{target_label}'",
                 "DEBUG",
             )
             return ScrollResult(False, current, total_swipes, "edge_before_target")
+        stable_observations = 0
 
     log(
         f"[SCROLL] Target '{target_label}' not found after {total_swipes} swipe(s)",
