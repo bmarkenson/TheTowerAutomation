@@ -529,6 +529,76 @@ reviewed classification and count/hash update. Unknown versions, shapes, IDs,
 values, ambiguity, or conflict continue through the UI. Runtime evidence and
 receipts never edit or promote their own authority manifest.
 
+## Planned acquisition provenance and temporal authority
+
+This section defines the target contract for the active acquisition-
+consolidation backlog. It is not yet a description of one implemented runtime
+owner. The two-identical-read transport is already centralized, but forced
+serialization, History continuity, terminal capture, passive audit, and the
+standalone Tournament reader still reassemble target binding, pull, decode,
+timing, cleanup, and failure handling independently.
+
+The planned `StablePlayerSaveAcquirer` owns one in-flight exact-target runtime
+read under the ADB target-operation lock: owned target/generation checks before
+and after the read, the quiet stable transport, decode, immediate payload
+disposal, capture timing, sanitized reason codes, and redacted provenance. It
+returns one immutable in-memory acquisition bundle that any number of
+independent projectors may consume without another pull. The bundle is passed
+explicitly at its coherent lifecycle boundary; there is no global "latest
+snapshot" cache whose age or binding a later caller must guess.
+
+The acquisition owner does not own Android input, lifecycle policy, semantic
+projection, or UI fallback. `GuardedPlayerSaveSerializer` continues to own the
+background/restore sequence and may publish a forced bundle only after the
+original source, context, control authority, target, and generation are all
+reverified. A lifecycle owner, rather than a reader-selected string, issues a
+bound Game Over or Tournament Results token for natural-boundary evidence.
+Consumers retain their distinct fail-open, retry, UI-fallback, or input-blocking
+behavior.
+
+### Acquisition types
+
+| Type | How it is established | What it can establish | What it cannot establish |
+| --- | --- | --- | --- |
+| `forced_serialization` | A guarded Home or active-attachment lifecycle backgrounds the game, obtains one stable exact-target snapshot, restores the source, and revalidates every guard. | Authoritative mapped current configuration at that boundary; same-round facts whose separate temporal class permits a broader claim. | The result of a later UI input, an unvalidated mapping, or facts from another activity scope. |
+| `natural_boundary` | A current-process lifecycle token binds one stable read to Game Over or Tournament Results, where the game naturally publishes terminal state. | Mapped terminal facts, a causally advanced structural History tail, and other explicitly validated terminal projections. | The next battle's current configuration or an arbitrary read that merely happens to occur on a terminal-looking screen. |
+| `passive_stable_read` | One exact-target stable read occurs without forcing a game flush. | A transport-stable checkpoint, including positive same-round facts whose temporal class tolerates unknown observation lag. | Snapshot freshness, current configuration, negative evidence, or completeness merely from two identical reads, capture time, or `saveRevision`. |
+
+The typed bundle replaces free-form acquisition labels and the runtime
+`freshness_verified=True` assertion. It carries type, status, safe reason,
+private exact target/generation binding, a redacted binding fingerprint,
+acquisition/capture/completion times, transport stability, optional boundary
+kind/time, and the normalized `PlayerSaveSnapshot`. A target handoff discards
+the snapshot. Unsupported mappings, changed shapes, and unavailable semantic
+components are successful acquisitions followed by projection failures; they
+are not transport failures.
+
+### Temporal classes and merge rules
+
+Acquisition type and temporal meaning are separate dimensions. In particular,
+a passive read cannot prove that a checkpoint is current, but an append-only
+same-round projection can still prove the positive prefix already serialized.
+
+| Temporal class | Current examples | Required interpretation |
+| --- | --- | --- |
+| `current_configuration` | A mapped Home configuration check | Requires `forced_serialization`; it says nothing about a later input. |
+| `round_invariant` | Workshop preset, equipped Guardians, selected Bot preset, and equipped Modules | Once exact mapping and round binding prove the value belonged to the round, it applies to the whole round. Bot progression or medal-funded upgrades are separate point-in-time facts. |
+| `point_in_time` | Cards preset and Cards at an active attachment | Describes only the acquisition boundary. Different later evidence may represent a legal change rather than a contradiction. |
+| `monotonic_round_prefix` | Ordered saved Perk picks and their saved waves | Every published pick is historical positive evidence. A passive checkpoint cannot prove that no later pick exists. |
+| `terminal_final` | Causally attached Battle History / More Stats fields | Requires a bound natural terminal and a valid append or capped rollover. |
+| `boundary_clear` | Inactive, cleared terminal Perk fields | Closes the active checkpoint window; it is not the final Perk inventory and cannot erase the newest complete active prefix. |
+
+Every temporal claim requires the exact mapping plus compatible target
+generation, activity scope, and, where applicable, round identity. Differing
+`round_invariant` values for one round invalidate that claim instead of using
+last-write-wins. Point-in-time Card observations retain their individual
+boundaries. Perk checkpoints must be identical or strict prefix extensions;
+regression or reordering preserves already proved historical picks but makes
+current/final completeness unavailable. An authoritative UI/save
+contradiction still fails closed. UI owns applying and verifying a change, and
+save-authoritative current state after that change requires another forced
+serialization.
+
 ## Authority and fallback
 
 | Situation | Required behavior |
@@ -538,7 +608,7 @@ receipts never edit or promote their own authority manifest.
 | Candidate mapping, check not explicitly validated | Report comparison results and run the existing UI check. |
 | Explicitly validated check, complete exact match, and verified serialization boundary | The caller may accept save evidence for that check unless an audit is due. |
 | Explicitly validated check, complete exact mismatch, and globally trusted snapshot | Queue only that check's existing guarded UI verification/repair; preserve unrelated accepted decisions. |
-| No verified serialization boundary | Treat the pull as potentially stale and use the existing UI check. |
+| No verified serialization boundary for a current-configuration claim | Treat the pull as potentially stale and use the existing UI check. Positive facts with a separately declared lag-tolerant temporal class remain governed by that class. |
 | Missing, incomplete, stale, unsupported, or forced-audit value | Use the existing UI check for that setting without treating it as a trusted mismatch. |
 | UI automation changes a setting | Verify the result in the UI, record UI provenance, preserve unrelated carry, and do not treat the pre-action save as confirmation. |
 | Authoritative UI contradicts a save match or finds a trusted mismatch already matching | Invalidate the complete snapshot and fail closed. |

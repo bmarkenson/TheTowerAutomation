@@ -254,6 +254,54 @@ raw exception text are not copied into preflight evidence. The component
 contract and version-update procedure are
 in [`player_save.md`](player_save.md).
 
+#### Planned single-boundary acquisition fan-out
+
+The active backlog will replace the runtime's separately composed save reads
+with the typed acquisition bundle defined in
+[`player_save.md`](player_save.md#planned-acquisition-provenance-and-temporal-authority).
+This is a planned lifecycle change, not current behavior. Today the terminal
+read already feeds progression, the candidate report, and some Tournament
+conditions, but its structurally validated History tail is not handed to the
+new Home or Retry activity scope. Home acquisition is also coupled to a
+nonempty configuration-requirement set. A plain Home baseline can therefore
+open Battle History even though the same process just decoded the completed
+battle.
+
+The target flow is one acquisition per coherent boundary and any number of
+independent projections:
+
+| Boundary | Acquisition or reuse | Consumers | Failure policy |
+| --- | --- | --- | --- |
+| Home `NEW_BATTLE` under `save_first` | Consume a valid one-use terminal History handoff when present. If current configuration is requested, or an authoritative History baseline has no handoff, perform one guarded `forced_serialization` even when the configuration requirement set is empty. | Configuration reconciliation, structural History baseline, and every eligible Home projection. | A safely restored acquisition failure may use the existing guarded UI fallback. Restoration, ownership, context, or control ambiguity blocks later input. |
+| Replacement process attached at `RUNNING` | One guarded `forced_serialization`. | Active identity, structural History continuity, and temporally classified actual-loadout observations. | Defer and retry without opening Battle History or configuration UI. |
+| `GAME_OVER` or `TOURNAMENT_RESULTS` | One lifecycle-bound `natural_boundary` bundle. | Profile progression, structural terminal transition, semantic completed report, Tournament conditions, and later terminal Perk-window closure. | Projection or acquisition failure remains nonblocking and preserves the applicable Game Stats, Perks, or More Stats UI fallback. |
+| Ordinary monitoring | Scheduled `passive_stable_read`, independent of audit opt-in. | Audit receipts and consumers whose temporal class accepts a lagging positive checkpoint. | Drop or record the observation; never background the game or authorize input. |
+
+The terminal structural projector validates the newest tail once. A successful
+append or capacity rollover becomes a normalized, one-use handoff in
+`activity_scope.json`, carrying only source/mapping identity and redacted
+process, activity-scope, target-generation, and terminal-boundary provenance.
+It never persists the decoded snapshot or raw save. The next verified Home
+scope consumes that tail as `latest_completed_battle`; direct Retry seeds its
+new scope immediately; Tournament Results may retain it while waiting for
+Home. Process restart, target handoff, incompatible source/mapping, activity
+scope mismatch, invalid transition, or persistence failure rejects the
+handoff and preserves the existing fallback.
+
+Structural and semantic terminal outcomes remain independent. An unknown
+`killedBy` or incomplete More Stats mapping still forces the report UI, but it
+does not discard a structurally proven next-scope History baseline. Conversely,
+a terminal bundle never satisfies the next battle's current-configuration
+preflight: configuration may change after the terminal and still requires a
+forced Home boundary.
+
+No consumer reacquires data already represented by the bundle. In particular,
+the Tournament Results handler receives either complete or explicitly
+unavailable conditions from the terminal projection instead of performing a
+second save read. A restarted Perk monitor consumes the ordinary passive,
+already-forced attachment, and natural terminal bundles; it does not turn the
+optional audit collector into an acquisition service.
+
 #### Save-first active-round and terminal evidence
 
 The normalized runtime-save model is a second privacy boundary inside the
