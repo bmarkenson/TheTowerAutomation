@@ -96,6 +96,9 @@ class PlayerSaveHistoryReadResult:
         repr=False,
         compare=False,
     )
+    running_attachment_context: Optional[
+        "PlayerSaveAttachmentContext"
+    ] = field(default=None, repr=False, compare=False)
     acquisition: Optional[PlayerSaveAcquisitionBundle] = field(
         default=None,
         repr=False,
@@ -572,6 +575,7 @@ class PlayerSaveHistoryReader:
             metadata=observed.metadata,
             safe_ui_fallback=observed.safe_ui_fallback,
             running_attachment_observations=attachment_observations,
+            running_attachment_context=context,
             acquisition=acquisition,
         )
 

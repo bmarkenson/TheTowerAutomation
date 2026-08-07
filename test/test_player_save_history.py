@@ -476,6 +476,8 @@ def test_active_attachment_forces_serialization_and_restores_same_running_source
     assert result.metadata["acquisition"]["type"] == "forced_serialization"
     observations = result.running_attachment_observations
     assert observations is None  # the default snapshot has no profile facts
+    assert result.running_attachment_context == _attachment_context()
+    assert result.acquisition is not None
     assert calls == {
         "target": 4,
         "context": 5,

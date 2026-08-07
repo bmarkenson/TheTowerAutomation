@@ -256,20 +256,19 @@ in [`player_save.md`](player_save.md).
 
 #### Planned single-boundary acquisition fan-out
 
-The acquisition foundation and lifecycle handoff have replaced the runtime's
-separately composed save reads with the typed acquisition bundle defined in
+The completed acquisition stack has replaced the runtime's separately
+composed save reads with the typed acquisition bundle defined in
 [`player_save.md`](player_save.md#planned-acquisition-provenance-and-temporal-authority).
 `StablePlayerSaveAcquirer` now owns locking, exact target/generation checks,
 quiet stable transport, decode/disposal, timing, and redacted failure
 provenance for forced serialization, History, terminal, passive-audit, and
 standalone Tournament callers. One terminal bundle feeds progression, one
-structural History transition, the candidate semantic report, and Tournament
-conditions. The valid transition is atomically staged and consumed once by the
-new Home or Retry activity scope, and baseline-only `save_first` Home
-acquisition no longer depends on a nonempty configuration-requirement set.
-Temporal actual-loadout merge is implemented on
-`feature/player-save-temporal-authority`; the shared Perk monitor remains
-assigned to the final phase.
+structural History transition, the candidate semantic report, the Perk monitor,
+optional audit, and Tournament conditions. The valid transition is atomically
+staged and consumed once by the new Home or Retry activity scope, and
+baseline-only `save_first` Home acquisition no longer depends on a nonempty
+configuration-requirement set. Typed actual-loadout merge and the shared
+save-backed Perk monitor are implemented in the later stacked phases.
 
 The target flow is one acquisition per coherent boundary and any number of
 independent projections:
@@ -277,9 +276,9 @@ independent projections:
 | Boundary | Acquisition or reuse | Consumers | Failure policy |
 | --- | --- | --- | --- |
 | Home `NEW_BATTLE` under `save_first` | Consume a valid one-use terminal History handoff when present. If current configuration is requested, or an authoritative History baseline has no handoff, perform one guarded `forced_serialization` even when the configuration requirement set is empty. | Configuration reconciliation, structural History baseline, and every eligible Home projection. | A safely restored acquisition failure may use the existing guarded UI fallback. Restoration, ownership, context, or control ambiguity blocks later input. |
-| Replacement process attached at `RUNNING` | One guarded `forced_serialization`. | Active identity, structural History continuity, and temporally classified actual-loadout observations. | Defer and retry without opening Battle History or configuration UI. |
-| `GAME_OVER` or `TOURNAMENT_RESULTS` | One lifecycle-bound `natural_boundary` bundle. | Profile progression, structural terminal transition, semantic completed report, Tournament conditions, and later terminal Perk-window closure. | Projection or acquisition failure remains nonblocking and preserves the applicable Game Stats, Perks, or More Stats UI fallback. |
-| Ordinary monitoring | Scheduled `passive_stable_read`, independent of audit opt-in. | Audit receipts and consumers whose temporal class accepts a lagging positive checkpoint. | Drop or record the observation; never background the game or authorize input. |
+| Replacement process attached at `RUNNING` | One guarded `forced_serialization`. | Active identity, structural History continuity, temporally classified actual-loadout observations, Perk prefix, and optional audit projection. | Defer and retry without opening Battle History or configuration UI. A failed or rebound attachment never publishes authoritative monitor evidence. |
+| `GAME_OVER` or `TOURNAMENT_RESULTS` | One lifecycle-bound `natural_boundary` bundle. | Profile progression, structural terminal transition, semantic completed report, Perk-window closure, optional audit projection, and Tournament conditions. | Projection or acquisition failure remains nonblocking and preserves the applicable Game Stats, Perks, or More Stats UI fallback. |
+| Ordinary monitoring | Scheduled `passive_stable_read`, independent of audit opt-in. | The Perk monitor and, when enabled, audit receipts consume the same immutable bundle; other consumers require their own lag-tolerant temporal class. | Drop or record the observation; never background the game, claim freshness/absence, or authorize input. |
 
 The terminal structural projector validates the newest tail once. A successful
 append or capacity rollover becomes a normalized, one-use handoff in
@@ -302,9 +301,10 @@ forced Home boundary.
 No consumer reacquires data already represented by the bundle. In particular,
 the Tournament Results handler receives either complete or explicitly
 unavailable conditions from the terminal projection instead of performing a
-second save read. A restarted Perk monitor consumes the ordinary passive,
-already-forced attachment, and natural terminal bundles; it does not turn the
-optional audit collector into an acquisition service.
+second save read. The Perk monitor consumes ordinary passive, already-forced
+attachment, and natural terminal bundles. The optional audit collector also
+projects those shared objects and is neither an acquisition service nor an
+authority source.
 
 `ActivityContinuityCoordinator` owns handoff publication and validation;
 `utils.logger` owns only bounded JSON detachment and exact-run atomic mutation.
@@ -355,13 +355,16 @@ inconsistency publishes no Perk snapshot. A structurally consistent unknown ID
 retains a private numeric calibration projection for the audit sidecar, but it
 does not appear in the public runtime dictionary and does not create a partial
 semantic snapshot. An inactive zero/empty projection is explicitly `cleared`;
-later runtime ownership must retain the newest complete same-round snapshot
-rather than treating that cleared save as final-Perk evidence. At the Tier 22
+the normal monitor retains the newest complete same-round positive prefix and
+treats the clear only as closure from an exact natural terminal. At the Tier 22
 boundary, the last complete active snapshot contained 15 internally consistent
 ordered picks that exactly represented the terminal UI's 11 collapsed rows,
 and the immediate stable post-death projection was inactive/cleared. The
-normalized exact-version snapshot is therefore ready for a future fail-closed
-consumer, but that same-round cache and navigation decision do not exist yet.
+implemented navigation decision remains fail-closed: it requires exact
+process/scope/target/round binding, stable high-confidence `View Perks`
+exhaustion evidence, a nonempty complete checkpoint captured afterward whose
+saved wave includes the exhaustion wave, and a later bound natural Game Over
+clear. Otherwise the existing terminal Perks route runs unchanged.
 
 The same privacy boundary will expose additional active-round components only
 through exact-version manifests. In-battle Attack, Defense, and Utility levels
@@ -410,23 +413,26 @@ evidence and exact row-level promotions are recorded in
 Runtime adoption proceeds in bounded vertical slices with these ownership
 rules:
 
-1. A future normal-runtime Perk checkpoint cache may consume naturally
-   serialized stable revisions without navigation or input and independently
-   of collector opt-in. It must bind each complete checkpoint to the exact
-   active identity.
+1. The normal-runtime Perk monitor consumes shared passive revisions without
+   navigation or input and independently of collector opt-in. It binds each
+   complete checkpoint to the exact process, activity scope, target generation,
+   mapping, and active identity.
 2. Activity Continuity may bind an exact active identity to an owned round
    without Battle History navigation. Terminal report attachment is separate:
    it requires a bound terminal, the same activity-scope ID, and a compatible
    save-sourced pre-terminal tail baseline.
-3. Perk strategy facts may advance only from a newer complete snapshot carrying
-   that same identity; a stale, different-round, or incomplete snapshot cannot
-   drive strategy. The saved `PerkPick` wave remains the exact event wave even
-   when the stable revision is observed later.
+3. Perk evidence advances only from a later identical complete prefix or a
+   strict extension carrying that same identity; a predating, different-round,
+   incomplete, regressed, or reordered snapshot cannot prove current/final
+   completeness. The saved `PerkPick` wave remains the exact event wave even
+   when the stable revision is observed later. `saveRevision` is diagnostic,
+   not temporal authority.
 4. Upgrade and survival components advance independently. A malformed or
    unvalidated ability timer cannot erase valid Perks or upgrade evidence, and
    none of these components grants UI action authority.
-5. The observer retains the newest complete same-round Perk, upgrade, survival,
-   and allowlisted tally snapshots across post-run clearing.
+5. The implemented Perk monitor retains the newest complete same-round prefix
+   across post-run clearing. Future upgrade, survival, and allowlisted tally
+   owners must establish their own independent retention rules.
 6. Stable save checkpoints and passive visual events merge monotonically. A
    count increase establishes that one or more activations occurred in the
    half-open interval `(prior saved wave, current saved wave]`. It produces an
@@ -451,10 +457,11 @@ rules:
 10. One passive compact Game Stats capture remains for optional base/ad coin
     split augmentation. Its absence never invalidates otherwise authoritative
     save-derived battle stats.
-11. The future cache obtains a terminal stable save to close the final Perk
-    prefix. Game Over opens the Perks panel only when that complete final
-    same-round prefix has not been proven, or when an ID, acquisition,
-    continuity, audit, or final-state condition requires UI.
+11. The lifecycle's existing terminal stable read closes the Perk checkpoint
+    window through the same natural-boundary bundle; the monitor performs no
+    read. Game Over skips the Perks panel only when stable exhaustion, a later
+    nonempty checkpoint, exact round binding, and the later terminal clear prove
+    final completeness. Every other case opens the established panel route.
 12. Game Stats and Perks remain passive terminal evidence. More Stats remains
     the guarded fallback for every missing, unknown, stale, changed,
     inconsistent, or unbound save claim; clipboard validation and guarded OCR
@@ -462,13 +469,13 @@ rules:
 13. Wait, Retry, Home, every setting mutation, post-action verification, and
     terminal transition confirmation remain owned by verified UI controls.
 
-That future Perk-timeline phase is documented only; it is not implemented by
-the save-first configuration/history change. It does not background an active
-battle merely to accelerate a Perk checkpoint. The separate `save_first`
-Current-run attachment boundary may briefly use Android Home only for a
-replacement process already at `RUNNING`; it preserves process, activity
-scope, target generation, active-round identity, control, source restoration,
-and lifecycle authority and grants no broader save consumer that permission.
+The Perk-timeline phase is implemented without backgrounding an active battle
+to accelerate a checkpoint. Prompt and periodic reads remain passive. The
+separate `save_first` Current-run attachment boundary may briefly use Android
+Home only for a replacement process already at `RUNNING`; it preserves process,
+activity scope, target generation, active-round identity, control, source
+restoration, and lifecycle authority and grants no broader save consumer that
+permission.
 
 Save-tail causality does not relax the independent current-process
 `runtime.run_binding` boundary. A process that starts only on a terminal remains

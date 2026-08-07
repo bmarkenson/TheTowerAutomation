@@ -74,7 +74,7 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
       passed 201 tests; the supported development checkpoint passed all 1,737
       tests in 322.38 seconds with state-definition and clickmap validation
       clean (the established 44 orphan candidates, zero errors).
-    - [ ] **Perks — `feature/save-backed-perk-monitoring-v2`.** Restart from
+    - [x] **Perks — `feature/save-backed-perk-monitoring-v2`.** Restart from
       the shared interface and selectively port the pure monitor/domain tests
       from `d1c3dec`. A normal scheduler independent of collector opt-in
       consumes shared passive bundles; forced attachment and natural terminal
@@ -83,13 +83,27 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
       exists. Open terminal Perks unless the bound exhaustion/final-prefix and
       terminal-clear rules prove completeness; preserve compact Game Stats,
       More Stats fallback, and every UI-owned lifecycle action.
-    - [ ] Regress one-read/many-projector behavior, target/scope handoff
-      rejection, restoration ambiguity, semantic-report failure with retained
-      structural continuity, invariant conflicts, Perk prefix regression, and
-      every consumer fallback. After deployment, confirm on ordinary boundaries
-      that valid Game Over → Home and direct Retry transitions perform zero
-      Battle History navigation and no duplicate save read; do not create a
-      special battle.
+      Implemented as a pure typed-bundle monitor plus a normal passive
+      scheduler. The same immutable passive object reaches monitoring and the
+      optional audit projector; forced attachment and natural terminal bundles
+      use the same fan-out without reacquisition. Stable `View Perks` evidence,
+      a later nonempty same-round checkpoint, and a still-later bound natural
+      clear are all required before terminal Perks navigation is omitted.
+      Cleared fields never become inventory, `saveRevision` never establishes
+      freshness, and malformed, failed, lagging, regressed, reordered,
+      conflicted, rebound, empty, or terminal-only evidence retains the exact
+      UI fallback. Focused regression passed 301 tests.
+    - [x] Run the supported development checkpoint for the Perk phase and
+      retain its result with the phase commit. Automated coverage includes
+      one-read/many-projector identity, target/scope handoff rejection,
+      restoration ambiguity, structural/semantic independence, temporal and
+      prefix conflicts, malformed projections, and every consumer fallback.
+      The checkpoint passed all 1,774 tests in 330.07 seconds with
+      state-definition and clickmap validation clean (the established 44
+      orphan candidates, zero errors).
+    - [ ] After deployment, confirm on ordinary boundaries that valid Game
+      Over → Home and direct Retry transitions perform zero Battle History
+      navigation and no duplicate save read; do not create a special battle.
   - [ ] Confirm the deployed direct-Retry repair on the next ordinary
     `GAME_OVER -> RUNNING` pair. The first continuation exposed old-identity
     retention and seven unmapped Perk IDs, fixed by `b137ea4`. The fresh

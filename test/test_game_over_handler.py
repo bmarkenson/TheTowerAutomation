@@ -10,6 +10,7 @@ import numpy as np
 from handlers.game_over_handler import (
     _capture_game_over_perks,
     _game_stats_visible,
+    _resolve_game_over_perks,
     _save_battle_stats_record,
     _wait_for_game_over_direction,
     handle_game_over,
@@ -151,6 +152,119 @@ def test_perks_capture_retries_close_until_game_stats_is_restored():
         "buttons.close:perks",
         "buttons.close:perks",
     ]
+
+
+def test_proven_final_prefix_skips_terminal_perks_navigation():
+    checkpoint = {
+        "picked_count": 1,
+        "picks": [
+            {
+                "sequence": 1,
+                "saved_wave": 100,
+                "perk_id": 0,
+                "perk_key": "max_health",
+                "level_after": 1,
+            }
+        ],
+    }
+    inventory = {
+        "source_method": "player_save_perk_checkpoint",
+        "status": "complete_exact_saved_inventory",
+        "exact_saved_prefix": checkpoint,
+        "exact_saved_picks": checkpoint["picks"],
+        "quality": {"valid": True, "source_complete": True},
+    }
+    context = {
+        "perk_save_monitoring": {
+            "status": "complete_final_prefix",
+            "context_status": "bound",
+            "active_failure_reason": None,
+            "round_conflict_reason": None,
+            "checkpoint": checkpoint,
+            "exhaustion": {"binding_status": "active_round_identity_bound"},
+            "terminal_window": {
+                "status": "closed_by_inactive_cleared_projection"
+            },
+            "ui_fallback": {"required": False},
+            "final_inventory": inventory,
+        }
+    }
+
+    with patch(
+        "handlers.game_over_handler._capture_game_over_perks"
+    ) as capture_perks:
+        perks, frames, restored = _resolve_game_over_perks(context)
+
+    assert perks == inventory
+    assert frames == []
+    assert restored is True
+    capture_perks.assert_not_called()
+
+
+def test_malformed_complete_looking_inventory_preserves_terminal_perks_navigation():
+    terminal_ui = {
+        "selected": [],
+        "quality": {"valid": False, "source_complete": False},
+    }
+    context = {
+        "perk_save_monitoring": {
+            "status": "complete_final_prefix",
+            "context_status": "bound",
+            "checkpoint": {"picked_count": 0, "picks": []},
+            "exhaustion": {},
+            "terminal_window": {
+                "status": "closed_by_inactive_cleared_projection"
+            },
+            "ui_fallback": {"required": False},
+            "final_inventory": {
+                "source_method": "player_save_perk_checkpoint",
+                "status": "complete_exact_saved_inventory",
+                "exact_saved_prefix": {"picked_count": 0, "picks": []},
+                "exact_saved_picks": [],
+                "quality": {"valid": True, "source_complete": True},
+            },
+        }
+    }
+
+    with patch(
+        "handlers.game_over_handler._capture_game_over_perks",
+        return_value=(terminal_ui, ["frame"], True),
+    ) as capture_perks:
+        perks, frames, restored = _resolve_game_over_perks(context)
+
+    assert perks["selected"] == terminal_ui["selected"]
+    assert perks["quality"]["valid"] is False
+    assert perks["quality"]["retain_source_images"] is True
+    assert "monitoring_record_unavailable" in perks["quality"]["warnings"][0]
+    assert frames == ["frame"]
+    assert restored is True
+    capture_perks.assert_called_once_with()
+
+
+def test_missing_terminal_closure_preserves_existing_perks_navigation():
+    terminal_ui = {
+        "selected": [],
+        "quality": {"valid": False, "source_complete": False},
+    }
+    context = {
+        "perk_save_monitoring": {
+            "status": "fallback_required",
+            "reason": "terminal_checkpoint_window_unbound",
+            "checkpoint": None,
+            "ui_fallback": {"required": True},
+        }
+    }
+
+    with patch(
+        "handlers.game_over_handler._capture_game_over_perks",
+        return_value=(terminal_ui, ["frame"], True),
+    ) as capture_perks:
+        perks, frames, restored = _resolve_game_over_perks(context)
+
+    assert perks is terminal_ui
+    assert frames == ["frame"]
+    assert restored is True
+    capture_perks.assert_called_once_with()
 
 
 def test_home_mode_taps_game_stats_home_instead_of_retry():

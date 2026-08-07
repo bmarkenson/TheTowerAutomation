@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -13,6 +14,12 @@ from core.no_strategy_inventory import (
 from core.no_strategy_observer import NoStrategyRunObserver
 from core.no_strategy_post_run import NoStrategyPostRunPaused
 from core.player_save_history import PlayerSaveAttachmentContext
+from core.player_save_acquisition import (
+    PlayerSaveAcquisitionBundle,
+    PlayerSaveAcquisitionStatus,
+    PlayerSaveAcquisitionType,
+    PlayerSaveTargetBinding,
+)
 from core.run_state import AUTOMATION, ExecMode
 from test.player_save_temporal_fixtures import (
     running_attachment_observations,
@@ -408,6 +415,53 @@ def test_activity_continuity_applies_guarded_save_to_no_strategy_observer():
     assert cards["value"] == {"label": "Farm"}
     assert cards["source"] == "guarded_active_attachment_player_save"
     assert "Applied guarded attachment save" in logged.call_args.args[0]
+
+
+def test_attachment_bundle_reaches_perk_monitor_without_profile_facts():
+    app = App.__new__(App)
+    app._mission_mgr = MagicMock()
+    app._mission_mgr.strategy = None
+    app._no_strategy_observation_active = False
+    app._exclusive_validation_ownership_hold = False
+    app._perk_save_monitor = MagicMock()
+    app._perk_save_monitor.bind_context.return_value = True
+    app._player_save_audit_collector = MagicMock()
+    attachment_context = PlayerSaveAttachmentContext(
+        runtime_session_id="runtime-1",
+        activity_scope_id="scope-1",
+        target="private-target",
+        target_generation=3,
+        active_battle_observed=True,
+    )
+    app._current_player_save_attachment_context = lambda: attachment_context
+    captured = datetime(2026, 8, 7, 20, 0, tzinfo=timezone.utc)
+    acquisition = PlayerSaveAcquisitionBundle(
+        acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
+        status=PlayerSaveAcquisitionStatus.COMPLETE,
+        reason="save_acquired",
+        binding=PlayerSaveTargetBinding("private-target", 3),
+        acquisition_started_at=captured,
+        captured_at=captured,
+        acquisition_completed_at=captured,
+        transport_stable=True,
+        snapshot=object(),
+    )
+
+    app._apply_activity_continuity_outcome(
+        SimpleNamespace(
+            running_attachment_observations=None,
+            running_attachment_context=attachment_context,
+            running_attachment_acquisition=acquisition,
+        )
+    )
+
+    observed = app._perk_save_monitor.observe_bundle.call_args
+    assert observed.args == (acquisition,)
+    assert observed.kwargs["context"].target_binding == acquisition.binding
+    assert observed.kwargs["context"].activity_scope_id == "scope-1"
+    audit = app._player_save_audit_collector.observe_acquisition.call_args
+    assert audit.args == (acquisition,)
+    assert audit.kwargs == {"reason_code": "forced_running_attachment"}
 
 
 def test_pending_post_run_inventory_blocks_normal_home_handler():

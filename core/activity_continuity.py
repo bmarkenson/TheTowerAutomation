@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import time
 from typing import Any, Callable, Mapping, Optional
 
@@ -12,11 +12,16 @@ from core.battle_history import (
     read_latest_completed_battle,
 )
 from core.battle_lifecycle import HomeBattleControl
-from core.player_save_acquisition import PlayerSaveTargetBinding
+from core.player_save_acquisition import (
+    PlayerSaveAcquisitionBundle,
+    PlayerSaveAcquisitionType,
+    PlayerSaveTargetBinding,
+)
 from core.player_save_history import (
     BATTLE_HISTORY_UI_MAPPING_ID,
     BATTLE_HISTORY_UI_SOURCE,
     CrossSourceHistoryStatus,
+    PlayerSaveAttachmentContext,
     PlayerSaveHistoryReadResult,
     PlayerSaveHistoryReadStatus,
     corroborate_ui_and_save_history,
@@ -57,6 +62,10 @@ class ActivityContinuityOutcome:
     running_attachment_observations: Optional[
         RunningAttachmentSaveObservations
     ] = None
+    running_attachment_acquisition: Optional[
+        PlayerSaveAcquisitionBundle
+    ] = None
+    running_attachment_context: Optional[PlayerSaveAttachmentContext] = None
 
 
 @dataclass(frozen=True)
@@ -465,6 +474,8 @@ class ActivityContinuityCoordinator:
 
         use_save = self._should_read_save(scope, player_save_mode)
         attachment_observations = None
+        attachment_acquisition = None
+        attachment_bundle_context = None
         if not self._action_logged:
             self._boundary = capture_activity_boundary()
             self._log_action(run_id, use_save=use_save)
@@ -491,6 +502,18 @@ class ActivityContinuityCoordinator:
             attachment_observations = (
                 save_result.running_attachment_observations
             )
+            if active_attachment:
+                attachment_acquisition = save_result.acquisition
+                attachment_bundle_context = save_result.running_attachment_context
+                if (
+                    attachment_bundle_context is None
+                    and attachment_observations is not None
+                ):
+                    attachment_bundle_context = (
+                        _attachment_context_from_observations(
+                            attachment_observations
+                        )
+                    )
             if save_result.status is PlayerSaveHistoryReadStatus.BLOCKED:
                 log_result(
                     "Save-backed Battle History continuity paused without UI input",
@@ -544,6 +567,8 @@ class ActivityContinuityCoordinator:
                             scope,
                             metadata,
                             attachment_observations=attachment_observations,
+                            attachment_acquisition=attachment_acquisition,
+                            attachment_bundle_context=attachment_bundle_context,
                         )
                     else:
                         baseline = _scope_battle_history(scope)
@@ -556,6 +581,8 @@ class ActivityContinuityCoordinator:
                                 scope,
                                 metadata,
                                 attachment_observations=attachment_observations,
+                                attachment_acquisition=attachment_acquisition,
+                                attachment_bundle_context=attachment_bundle_context,
                             )
                         elif compatible and (
                             baseline["fingerprint"]
@@ -565,6 +592,8 @@ class ActivityContinuityCoordinator:
                                 scope,
                                 metadata,
                                 attachment_observations=attachment_observations,
+                                attachment_acquisition=attachment_acquisition,
+                                attachment_bundle_context=attachment_bundle_context,
                             )
                         elif compatible and not valid_history_tail_advance(
                             baseline,
@@ -581,12 +610,16 @@ class ActivityContinuityCoordinator:
                                 scope,
                                 metadata,
                                 attachment_observations=attachment_observations,
+                                attachment_acquisition=attachment_acquisition,
+                                attachment_bundle_context=attachment_bundle_context,
                             )
                         elif compatible:
                             return self._handle_metadata(
                                 scope,
                                 metadata,
                                 attachment_observations=attachment_observations,
+                                attachment_acquisition=attachment_acquisition,
+                                attachment_bundle_context=attachment_bundle_context,
                             )
                         else:
                             corroboration = corroborate_ui_and_save_history(
@@ -601,11 +634,15 @@ class ActivityContinuityCoordinator:
                                     attachment_observations=(
                                         attachment_observations
                                     ),
+                                    attachment_acquisition=attachment_acquisition,
+                                    attachment_bundle_context=attachment_bundle_context,
                                 )
                             return self._handle_metadata(
                                 scope,
                                 metadata,
                                 attachment_observations=attachment_observations,
+                                attachment_acquisition=attachment_acquisition,
+                                attachment_bundle_context=attachment_bundle_context,
                                 attachment_change_confirmed=(
                                     corroboration.status
                                     is CrossSourceHistoryStatus.MISMATCH
@@ -703,6 +740,8 @@ class ActivityContinuityCoordinator:
             scope,
             metadata,
             attachment_observations=attachment_observations,
+            attachment_acquisition=attachment_acquisition,
+            attachment_bundle_context=attachment_bundle_context,
         )
 
     def _handle_cross_source_migration(
@@ -714,6 +753,8 @@ class ActivityContinuityCoordinator:
         attachment_observations: Optional[
             RunningAttachmentSaveObservations
         ] = None,
+        attachment_acquisition: Optional[PlayerSaveAcquisitionBundle] = None,
+        attachment_bundle_context: Optional[PlayerSaveAttachmentContext] = None,
     ) -> ActivityContinuityOutcome:
         """Persist a UI-to-save bridge without comparing source fingerprints."""
 
@@ -751,15 +792,25 @@ class ActivityContinuityCoordinator:
         )
         self._checked_scope_id = run_id
         self._reset_pending()
+        bound_attachment = _bind_attachment_observations(
+            attachment_observations,
+            run_id,
+        )
+        bound_bundle_context = _bind_attachment_context(
+            attachment_bundle_context,
+            run_id,
+        )
         return ActivityContinuityOutcome(
             recapture=True,
             confirmed_same_battle_scope_id=run_id,
-            running_attachment_observations=(
-                _bind_attachment_observations(
-                    attachment_observations,
-                    run_id,
+            running_attachment_observations=bound_attachment,
+            running_attachment_acquisition=(
+                _matching_attachment_acquisition(
+                    attachment_acquisition,
+                    bound_bundle_context,
                 )
             ),
+            running_attachment_context=bound_bundle_context,
         )
 
     def _should_read_save(
@@ -840,6 +891,8 @@ class ActivityContinuityCoordinator:
         attachment_observations: Optional[
             RunningAttachmentSaveObservations
         ] = None,
+        attachment_acquisition: Optional[PlayerSaveAcquisitionBundle] = None,
+        attachment_bundle_context: Optional[PlayerSaveAttachmentContext] = None,
         attachment_change_confirmed: Optional[bool] = None,
         attachment_incompatibility_reason: str = "",
     ) -> ActivityContinuityOutcome:
@@ -998,18 +1051,34 @@ class ActivityContinuityCoordinator:
 
         self._checked_scope_id = run_id
         self._reset_pending()
+        bound_attachment = (
+            _bind_attachment_observations(
+                attachment_observations,
+                run_id,
+            )
+            if updated is not None
+            else None
+        )
+        bound_bundle_context = (
+            _bind_attachment_context(
+                attachment_bundle_context,
+                run_id,
+            )
+            if updated is not None
+            else None
+        )
         return ActivityContinuityOutcome(
             recapture=True,
             confirmed_same_battle_scope_id=confirmed_same_battle_scope_id,
             confirmed_later_battle_scope_id=confirmed_later_battle_scope_id,
-            running_attachment_observations=(
-                _bind_attachment_observations(
-                    attachment_observations,
-                    run_id,
+            running_attachment_observations=bound_attachment,
+            running_attachment_acquisition=(
+                _matching_attachment_acquisition(
+                    attachment_acquisition,
+                    bound_bundle_context,
                 )
-                if updated is not None
-                else None
             ),
+            running_attachment_context=bound_bundle_context,
         )
 
     def _handle_failed_read(
@@ -1187,6 +1256,54 @@ def _bind_attachment_observations(
         return None
     try:
         return observations.bind_final_scope(activity_scope_id)
+    except (TypeError, ValueError):
+        return None
+
+
+def _matching_attachment_acquisition(
+    acquisition: Optional[PlayerSaveAcquisitionBundle],
+    context: Optional[PlayerSaveAttachmentContext],
+) -> Optional[PlayerSaveAcquisitionBundle]:
+    """Carry the same forced bundle only with its final-scope projection."""
+
+    if (
+        not isinstance(acquisition, PlayerSaveAcquisitionBundle)
+        or context is None
+        or not acquisition.complete
+        or acquisition.acquisition_type
+        is not PlayerSaveAcquisitionType.FORCED_SERIALIZATION
+        or acquisition.binding is None
+        or acquisition.binding.target != context.target
+        or acquisition.binding.generation != context.target_generation
+    ):
+        return None
+    return acquisition
+
+
+def _bind_attachment_context(
+    context: Optional[PlayerSaveAttachmentContext],
+    activity_scope_id: str,
+) -> Optional[PlayerSaveAttachmentContext]:
+    if context is None or not context.valid_for(context.activity_scope_id):
+        return None
+    try:
+        return replace(context, activity_scope_id=str(activity_scope_id))
+    except (TypeError, ValueError):
+        return None
+
+
+def _attachment_context_from_observations(
+    observations: RunningAttachmentSaveObservations,
+) -> Optional[PlayerSaveAttachmentContext]:
+    binding = observations.binding
+    try:
+        return PlayerSaveAttachmentContext(
+            runtime_session_id=binding.runtime_session_id,
+            activity_scope_id=binding.source_activity_scope_id,
+            target=binding.target_binding.target,
+            target_generation=binding.target_binding.generation,
+            active_battle_observed=True,
+        )
     except (TypeError, ValueError):
         return None
 

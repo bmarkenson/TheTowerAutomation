@@ -17,6 +17,8 @@ from core.player_save_history import (
     PlayerSaveHistoryReadStatus,
 )
 from core.player_save_acquisition import (
+    PlayerSaveAcquisitionBundle,
+    PlayerSaveAcquisitionStatus,
     PlayerSaveAcquisitionType,
     PlayerSaveBoundaryKind,
     PlayerSaveNaturalBoundary,
@@ -100,12 +102,28 @@ def _save_metadata(
     }
 
 
-def _save_complete(metadata, *, observations=None):
+def _save_complete(metadata, *, observations=None, acquisition=None):
     return PlayerSaveHistoryReadResult(
         PlayerSaveHistoryReadStatus.COMPLETE,
         "structural_history_tail_observed",
         metadata=metadata,
         running_attachment_observations=observations,
+        acquisition=acquisition,
+    )
+
+
+def _forced_bundle(observations):
+    captured = datetime(2026, 8, 7, 20, 0, tzinfo=timezone.utc)
+    return PlayerSaveAcquisitionBundle(
+        acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
+        status=PlayerSaveAcquisitionStatus.COMPLETE,
+        reason="save_acquired",
+        binding=observations.binding.target_binding,
+        acquisition_started_at=captured,
+        captured_at=captured,
+        acquisition_completed_at=captured,
+        transport_stable=True,
+        snapshot=object(),
     )
 
 
@@ -469,10 +487,12 @@ def test_attachment_observations_bind_to_replacement_scope_after_persistence(
         source_scope_id=str(original["run_id"]),
         bind_final=False,
     )
+    acquisition = _forced_bundle(observations)
     coordinator = ActivityContinuityCoordinator(
         save_history_reader=lambda **_kwargs: _save_complete(
             latest,
             observations=observations,
+            acquisition=acquisition,
         ),
         history_reader=lambda **_kwargs: pytest.fail(
             "a complete attachment save must not open History UI"
@@ -494,6 +514,7 @@ def test_attachment_observations_bind_to_replacement_scope_after_persistence(
         outcome.running_attachment_observations.binding.activity_scope_id
         == current["run_id"]
     )
+    assert outcome.running_attachment_acquisition is acquisition
 
 
 def test_attachment_observations_are_not_published_when_scope_write_fails(

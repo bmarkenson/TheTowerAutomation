@@ -60,14 +60,18 @@ from core.player_save import (
     pull_player_save_bytes,
 )
 from core.player_save_acquisition import (
+    PlayerSaveAcquisitionBundle,
     PlayerSaveAcquisitionStatus,
     PlayerSaveAcquisitionType,
     PlayerSaveBoundaryKind,
     PlayerSaveNaturalBoundary,
+    PlayerSaveTargetBinding,
     StablePlayerSaveAcquirer,
     quiet_player_save_read,
 )
 from core.player_save_audit import PlayerSaveAuditCollector
+from core.player_save_passive_scheduler import PlayerSavePassiveScheduler
+from core.perk_save_monitor import PerkSaveMonitor, PerkSaveMonitorContext
 from core.player_save_preflight import (
     CarriedEvidenceState,
     PlayerSavePreflightContext,
@@ -242,6 +246,8 @@ class App:
         self._observe_strategy_request()
         ensure_activity_scope(reason="automation_started")
         self._player_save_runtime_session_id = new_operation_id()
+        self._perk_save_monitor_call_lock = threading.RLock()
+        self._perk_save_monitor = PerkSaveMonitor()
         self._player_save_preflight_session_id = ""
         self._player_save_preflight_result = None
         self._player_save_preflight_activity_scope_id = None
@@ -326,6 +332,7 @@ class App:
                     else None
                 ),
                 acquirer=self._player_save_acquirer,
+                acquire_internally=False,
             )
         except Exception:
             log(
@@ -349,6 +356,22 @@ class App:
         self._perk_timeline_observer = PerkTimelineObserver(
             state_path=perk_timeline_state
         )
+        self._last_requested_perk_checkpoint_signature = None
+        self._player_save_passive_scheduler = None
+        if self._player_save_acquirer is not None:
+            try:
+                self._player_save_passive_scheduler = PlayerSavePassiveScheduler(
+                    acquirer=self._player_save_acquirer,
+                    context_fn=self._current_perk_save_monitor_context,
+                    consumers=(self._consume_passive_player_save_bundle,),
+                    interval_seconds=config.player_save_audit_interval_seconds,
+                )
+            except Exception:
+                log(
+                    "[PLAYER_SAVE_PASSIVE] Normal passive scheduling was "
+                    "unavailable; terminal Perks UI fallback remains active",
+                    "WARN",
+                )
         self._blind_tapper_suspended = False
         self._tournament_results_captured = False
         self._no_strategy_observer = NoStrategyRunObserver()
@@ -477,6 +500,148 @@ class App:
                 "DEBUG",
             )
 
+    def _current_perk_save_monitor_context(
+        self,
+    ) -> Optional[PerkSaveMonitorContext]:
+        """Return the current exact active-round binding, or no authority."""
+
+        runtime_session_id = str(
+            getattr(self, "_player_save_runtime_session_id", "") or ""
+        ).strip()
+        scope_id = self._current_run_scope_id()
+        if (
+            not runtime_session_id
+            or not scope_id
+            or getattr(self, "_observed_active_battle_scope_id", None)
+            != scope_id
+        ):
+            return None
+        session = getattr(self, "_adb_target_session", None)
+        try:
+            target_snapshot = session.snapshot() if session is not None else None
+        except Exception:
+            return None
+        target_binding = PlayerSaveTargetBinding.from_snapshot(target_snapshot)
+        if target_binding is None:
+            return None
+        try:
+            return PerkSaveMonitorContext(
+                runtime_session_id=runtime_session_id,
+                activity_scope_id=scope_id,
+                target_binding=target_binding,
+            )
+        except (TypeError, ValueError):
+            return None
+
+    def _consume_passive_player_save_bundle(
+        self,
+        acquisition: PlayerSaveAcquisitionBundle,
+        context: PerkSaveMonitorContext,
+        reason_code: str,
+    ) -> None:
+        """Fan one scheduled passive read to monitoring and optional audit."""
+
+        monitor = getattr(self, "_perk_save_monitor", None)
+        if monitor is not None:
+            with self._perk_save_monitor_guard():
+                monitor.observe_bundle(acquisition, context=context)
+        self._observe_shared_acquisition_for_audit(
+            acquisition,
+            reason_code=reason_code,
+        )
+
+    def _observe_shared_acquisition_for_audit(
+        self,
+        acquisition: PlayerSaveAcquisitionBundle,
+        *,
+        reason_code: str,
+    ) -> None:
+        collector = getattr(self, "_player_save_audit_collector", None)
+        if collector is None:
+            return
+        try:
+            collector.observe_acquisition(
+                acquisition,
+                reason_code=reason_code,
+            )
+        except Exception:
+            log(
+                "[PLAYER_SAVE_AUDIT] Shared acquisition projection was "
+                "rejected; normal automation is unaffected",
+                "DEBUG",
+            )
+
+    def _bind_new_perk_monitor_activity(self) -> None:
+        monitor = getattr(self, "_perk_save_monitor", None)
+        context = self._current_perk_save_monitor_context()
+        if monitor is not None and context is not None:
+            with self._perk_save_monitor_guard():
+                monitor.bind_context(context, new_activity=True)
+
+    def _perk_save_monitor_guard(self) -> threading.RLock:
+        """Serialize domain-monitor calls at the App coordination boundary."""
+
+        guard = getattr(self, "_perk_save_monitor_call_lock", None)
+        if guard is None:
+            guard = threading.RLock()
+            self._perk_save_monitor_call_lock = guard
+        return guard
+
+    def _sync_perk_exhaustion_evidence(self) -> None:
+        monitor = getattr(self, "_perk_save_monitor", None)
+        context = self._current_perk_save_monitor_context()
+        if monitor is None or context is None:
+            return
+        evidence = self._perk_timeline().exhaustion_evidence()
+        if not isinstance(evidence, Mapping):
+            return
+        with self._perk_save_monitor_guard():
+            if not monitor.observe_exhaustion(evidence, context=context):
+                return
+            bound = monitor.bound_exhaustion_evidence(context)
+        identity = bound.get("active_round_identity") if bound else None
+        if isinstance(identity, Mapping):
+            self._perk_timeline().bind_exhaustion_identity(identity)
+
+    def _request_perk_checkpoint_for_passive_boundary(self) -> None:
+        """Coalesce stable top-bar events onto the normal passive scheduler."""
+
+        snapshot = self._perk_timeline().snapshot()
+        passive = snapshot.get("passive_top_bar")
+        if not isinstance(passive, Mapping):
+            return
+        raw_boundaries = passive.get("selection_boundaries")
+        boundary_waves = tuple(
+            item.get("scheduled_wave")
+            for item in raw_boundaries
+            if isinstance(item, Mapping)
+        ) if isinstance(raw_boundaries, Sequence) else ()
+        exhaustion = passive.get("exhaustion")
+        exhaustion_id = (
+            exhaustion.get("event_id")
+            if isinstance(exhaustion, Mapping)
+            else None
+        )
+        if not boundary_waves and not exhaustion_id:
+            return
+        signature = (boundary_waves, exhaustion_id)
+        if signature == getattr(
+            self,
+            "_last_requested_perk_checkpoint_signature",
+            None,
+        ):
+            return
+        scheduler = getattr(self, "_player_save_passive_scheduler", None)
+        if scheduler is None:
+            return
+        reason = (
+            "perk_exhaustion_boundary"
+            if exhaustion_id
+            else "perk_selection_boundary"
+        )
+        if scheduler.request_observation(reason):
+            self._last_requested_perk_checkpoint_signature = signature
+
     def _perk_timeline(self) -> PerkTimelineObserver:
         """Return the run-scoped perk observer, including in partial test apps."""
 
@@ -498,8 +663,17 @@ class App:
         if state == "RUNNING":
             if continuity_pending:
                 return
-            self._observed_active_battle_scope_id = self._current_run_scope_id()
+            scope_id = self._current_run_scope_id()
+            changed = (
+                scope_id is not None
+                and scope_id
+                != getattr(self, "_observed_active_battle_scope_id", None)
+            )
+            self._observed_active_battle_scope_id = scope_id
             self._last_unbound_terminal_signature = None
+            if changed:
+                self._last_requested_perk_checkpoint_signature = None
+                self._bind_new_perk_monitor_activity()
             return
         if state in {"HOME", "HOME_SCREEN"} and HomeBattleControl.parse(
             detection.get("home_battle_control", "UNKNOWN")
@@ -547,6 +721,8 @@ class App:
 
         terminal = str(terminal_state or "UNKNOWN").upper()
         binding = self._terminal_run_binding()
+        if terminal == "GAME_OVER" and binding["status"] == "bound":
+            self._sync_perk_exhaustion_evidence()
         terminal_save = self._capture_terminal_player_save(
             terminal,
             run_binding=binding,
@@ -559,6 +735,19 @@ class App:
             "profile_progression": terminal_save["profile_progression"],
             "terminal_save_report": terminal_save["terminal_save_report"],
         }
+        if terminal == "GAME_OVER":
+            monitor = getattr(self, "_perk_save_monitor", None)
+            monitor_context = (
+                self._current_perk_save_monitor_context()
+                if binding["status"] == "bound"
+                else None
+            )
+            if monitor is not None:
+                with self._perk_save_monitor_guard():
+                    context["perk_save_monitoring"] = monitor.terminal_evidence(
+                        context=monitor_context,
+                        terminal_state=terminal,
+                    )
         battle_conditions = terminal_save.get("battle_conditions")
         if isinstance(battle_conditions, Mapping):
             context["battle_conditions"] = dict(battle_conditions)
@@ -696,6 +885,26 @@ class App:
             acquisition = acquirer.acquire(
                 PlayerSaveAcquisitionType.PASSIVE_STABLE_READ
             )
+
+        self._observe_shared_acquisition_for_audit(
+            acquisition,
+            reason_code=(
+                "game_over"
+                if terminal == "GAME_OVER"
+                else "tournament_results"
+                if terminal == "TOURNAMENT_RESULTS"
+                else "terminal_capture"
+            ),
+        )
+        if terminal == "GAME_OVER" and run_binding.get("status") == "bound":
+            monitor_context = self._current_perk_save_monitor_context()
+            monitor = getattr(self, "_perk_save_monitor", None)
+            if monitor is not None and monitor_context is not None:
+                with self._perk_save_monitor_guard():
+                    monitor.observe_bundle(
+                        acquisition,
+                        context=monitor_context,
+                    )
 
         if not acquisition.complete or acquisition.snapshot is None:
             reason = (
@@ -3361,8 +3570,24 @@ class App:
             "running_attachment_observations",
             None,
         )
+        attachment_acquisition = getattr(
+            outcome,
+            "running_attachment_acquisition",
+            None,
+        )
+        attachment_bundle_context = getattr(
+            outcome,
+            "running_attachment_context",
+            None,
+        )
         attachment_context = None
-        if isinstance(save_observations, RunningAttachmentSaveObservations):
+        if (
+            isinstance(save_observations, RunningAttachmentSaveObservations)
+            or isinstance(
+                attachment_bundle_context,
+                PlayerSaveAttachmentContext,
+            )
+        ):
             try:
                 attachment_context = (
                     self._current_player_save_attachment_context()
@@ -3379,6 +3604,50 @@ class App:
                 "WARN",
             )
             save_observations = None
+            attachment_acquisition = None
+            attachment_bundle_context = None
+
+        if (
+            isinstance(attachment_bundle_context, PlayerSaveAttachmentContext)
+            and attachment_bundle_context == attachment_context
+        ):
+            if (
+                not isinstance(attachment_acquisition, PlayerSaveAcquisitionBundle)
+                or attachment_acquisition.binding
+                != PlayerSaveTargetBinding(
+                    attachment_bundle_context.target,
+                    attachment_bundle_context.target_generation,
+                )
+            ):
+                attachment_acquisition = None
+            else:
+                monitor_context = PerkSaveMonitorContext(
+                    runtime_session_id=(
+                        attachment_bundle_context.runtime_session_id
+                    ),
+                    activity_scope_id=(
+                        attachment_bundle_context.activity_scope_id
+                    ),
+                    target_binding=attachment_acquisition.binding,
+                )
+                monitor = getattr(self, "_perk_save_monitor", None)
+                if monitor is not None:
+                    with self._perk_save_monitor_guard():
+                        if monitor.bind_context(
+                            monitor_context,
+                            new_activity=True,
+                        ):
+                            monitor.observe_bundle(
+                                attachment_acquisition,
+                                context=monitor_context,
+                            )
+                self._observe_shared_acquisition_for_audit(
+                    attachment_acquisition,
+                    reason_code="forced_running_attachment",
+                )
+        else:
+            attachment_acquisition = None
+            attachment_bundle_context = None
 
         if isinstance(save_observations, RunningAttachmentSaveObservations):
             strategy_name = self._current_strategy_name()
@@ -4107,6 +4376,8 @@ class App:
                         actions_allowed=strategy_action_allowed,
                         action_guard_fn=self._runtime_action_guard,
                     )
+                    self._sync_perk_exhaustion_evidence()
+                    self._request_perk_checkpoint_for_passive_boundary()
                     self._observe_player_save_audit_perk_mapping_evidence()
                 if perk_timeline_handled:
                     # The observer owns its Perks modal route. Re-enter through
@@ -4269,6 +4540,12 @@ class App:
             self._update_action_authority(shutting_down=True)
             stop_blind_gem_tapper()
             self._publish_action_authority(runtime_active=False)
+            scheduler = getattr(self, "_player_save_passive_scheduler", None)
+            if scheduler is not None:
+                try:
+                    scheduler.close(wait=False)
+                except Exception:
+                    pass
             collector = getattr(self, "_player_save_audit_collector", None)
             if collector is not None:
                 try:
