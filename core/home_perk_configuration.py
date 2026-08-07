@@ -39,6 +39,7 @@ Frame = np.ndarray
 Capture = Callable[[], Optional[Frame]]
 Detector = Callable[[Frame], Mapping[str, Any]]
 RowsFn = Callable[[Frame], list[dict[str, Any]]]
+ScrollStopFn = Callable[[Frame], Optional[str]]
 
 PERK_CONFIGURATION_INDICATOR = "indicators.perks_configuration"
 PERK_CONTENT_REGION = (100, 420, 880, 1330)
@@ -228,6 +229,7 @@ def ensure_home_perk_configuration(
             safe_tap_fn=safe_tap_fn,
             visible_fn=visible_fn,
             swipe_fn=swipe_fn,
+            row_fn=row_fn,
             measure_selection_fn=measure_selection_fn,
             sleep_fn=sleep_fn,
         )
@@ -334,6 +336,7 @@ def ensure_home_perk_configuration(
             safe_tap_fn=safe_tap_fn,
             visible_fn=visible_fn,
             swipe_fn=swipe_fn,
+            row_fn=row_fn,
             measure_selection_fn=measure_selection_fn,
             sleep_fn=sleep_fn,
         )
@@ -395,6 +398,7 @@ def ensure_home_perk_configuration(
             safe_tap_fn=safe_tap_fn,
             visible_fn=visible_fn,
             swipe_fn=swipe_fn,
+            row_fn=row_fn,
             measure_selection_fn=measure_selection_fn,
             sleep_fn=sleep_fn,
         )
@@ -635,11 +639,12 @@ def _repair_bans(
                 "Ban Perks selected row did not disappear after deselection"
             )
 
-    current_top = _scroll_configuration_top(
+    current_top = _scroll_ban_configuration_top(
         current,
         capture_fn=capture_fn,
         visible_fn=visible_fn,
         swipe_fn=swipe_fn,
+        row_fn=row_fn,
         sleep_fn=sleep_fn,
     )
     captured = extract_configured_perk_bans(current_top, row_fn=row_fn)
@@ -725,11 +730,12 @@ def _repair_bans(
             "could not locate Ban Perks choices: " + ", ".join(labels)
         )
 
-    final_top = _scroll_configuration_top(
+    final_top = _scroll_ban_configuration_top(
         current,
         capture_fn=capture_fn,
         visible_fn=visible_fn,
         swipe_fn=swipe_fn,
+        row_fn=row_fn,
         sleep_fn=sleep_fn,
     )
     final_top, final = _capture_bans_with_ocr_retries(
@@ -1281,6 +1287,7 @@ def _select_and_scroll_top(
     safe_tap_fn: Callable[..., bool],
     visible_fn: Callable[..., bool],
     swipe_fn: Callable[[str], bool],
+    row_fn: RowsFn,
     measure_selection_fn: Callable[..., Any],
     sleep_fn: Callable[[float], None],
 ) -> Frame:
@@ -1330,6 +1337,15 @@ def _select_and_scroll_top(
             raise HomePerkConfigurationError(
                 f"{label} tab did not become selected"
             )
+    if field == "perk_bans":
+        return _scroll_ban_configuration_top(
+            current,
+            capture_fn=capture_fn,
+            visible_fn=visible_fn,
+            swipe_fn=swipe_fn,
+            row_fn=row_fn,
+            sleep_fn=sleep_fn,
+        )
     return _scroll_configuration_top(
         current,
         capture_fn=capture_fn,
@@ -1627,6 +1643,37 @@ def _capture_ranked_frames(
     return frames, current
 
 
+def _scroll_ban_configuration_top(
+    current: Frame,
+    *,
+    capture_fn: Capture,
+    visible_fn: Callable[..., bool],
+    swipe_fn: Callable[[str], bool],
+    row_fn: RowsFn,
+    sleep_fn: Callable[[float], None],
+) -> Frame:
+    """Reach the Ban tab's complete outlined Selected Perks block."""
+
+    def selected_block_stop(frame: Frame) -> Optional[str]:
+        captured = extract_configured_perk_bans(frame, row_fn=row_fn)
+        quality = captured.get("quality")
+        if (
+            isinstance(quality, Mapping)
+            and quality.get("selected_block_complete") is True
+        ):
+            return "ban_selected_block_complete"
+        return None
+
+    return _scroll_configuration_top(
+        current,
+        capture_fn=capture_fn,
+        visible_fn=visible_fn,
+        swipe_fn=swipe_fn,
+        sleep_fn=sleep_fn,
+        stop_fn=selected_block_stop,
+    )
+
+
 def _scroll_configuration_top(
     current: Frame,
     *,
@@ -1634,6 +1681,7 @@ def _scroll_configuration_top(
     visible_fn: Callable[..., bool],
     swipe_fn: Callable[[str], bool],
     sleep_fn: Callable[[float], None],
+    stop_fn: Optional[ScrollStopFn] = None,
 ) -> Frame:
     result = scroll_to_edge(
         "gesture_targets.goto_top:perks",
@@ -1646,6 +1694,7 @@ def _scroll_configuration_top(
         visible_fn=visible_fn,
         swipe_fn=swipe_fn,
         sleep_fn=sleep_fn,
+        stop_fn=stop_fn,
     )
     if not result.success or result.screenshot is None:
         raise HomePerkConfigurationError(

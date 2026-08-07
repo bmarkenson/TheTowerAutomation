@@ -52,6 +52,35 @@ def test_scroll_to_edge_stops_when_settled_content_is_stable():
     assert swipes == ["gesture.edge", "gesture.edge"]
 
 
+def test_scroll_to_edge_requires_caller_boundary_despite_false_stability():
+    current = _frame(10)
+    captures = iter((_frame(11), _frame(12), _frame(13)))
+    swipes = []
+
+    result = scroll_to_edge(
+        "gesture.edge",
+        source_label="indicators.expected",
+        screenshot=current,
+        progress_region=(1, 1, 10, 10),
+        max_swipes=5,
+        stable_threshold=1.0,
+        capture_fn=lambda: next(captures),
+        visible_fn=lambda _label, **_kwargs: True,
+        swipe_fn=lambda key: swipes.append(key) or True,
+        sleep_fn=lambda _seconds: None,
+        stop_fn=lambda frame: (
+            "selected_block_visible"
+            if int(frame[0, 0, 0]) == 13
+            else None
+        ),
+    )
+
+    assert result.success
+    assert result.reason == "selected_block_visible"
+    assert result.swipes == 3
+    assert swipes == ["gesture.edge", "gesture.edge", "gesture.edge"]
+
+
 def test_capture_scroll_to_edge_retains_each_distinct_viewport():
     captures = iter((_frame(20), _frame(30), _frame(30)))
     result = capture_scroll_to_edge(
