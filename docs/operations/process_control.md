@@ -46,11 +46,18 @@ Home, restart, or a new battle. See
 ## Process replacement and terminal recovery
 
 Before replacing a process, verify its current screen and let an in-flight
-guarded action reach a safe boundary. Stop the known owner cleanly, confirm its
-exit, and start a replacement under persisted Pause when validation is needed.
-A successful launch command is not readiness: require a distinct host PID,
-matching held target lock, startup evidence, control acknowledgement, and first
-fresh observation. Never kill a PID solely from possibly stale metadata.
+guarded action reach a safe boundary. For a managed active-battle replacement,
+use the [guarded control-surface reload](managed_runtime.md#reload-automation-for-the-current-battle)
+rather than raw `systemctl`. The reload records the prior control intent, then
+temporarily persists an indefinite Pause while it stops the known owner and
+starts the replacement. This handoff Pause is a safety boundary, not a change
+in the operator's intended state. Only after the replacement proves its
+distinct host PID, matching held target lock, startup evidence, control
+acknowledgement, and first fresh observation does the reload restore the prior
+`RUNNING`, indefinite `PAUSED`, or unexpired timed Pause. A timed Pause that
+expires during the handoff resolves to `RUNNING`; any failure after Pause
+preparation remains `PAUSED`. Never kill a PID solely from possibly stale
+metadata.
 
 To recover a preserved terminal after uncertain continuity:
 
