@@ -18,8 +18,9 @@ This file contains active work only. Before live work, follow `AGENTS.md`,
   - [ ] Complete implementation and ordinary-boundary validation of the
     [typed acquisition and temporal-authority contract](../architecture/player_save.md#acquisition-provenance-and-temporal-authority)
     through one outcome coordinator and sequential stacked feature branches.
-    Preserve committed Perk prototype `d1c3dec` as a reference until the shared
-    foundation is stable; do not merge its private integration path.
+    The deployed Perk phase uses the shared typed interface; its superseded
+    private prototype path is not runtime authority and must not be
+    reconstructed or merged.
     - [x] **Foundation — `feature/player-save-acquisition-foundation`.** Add
       the typed exact-target acquisition owner/result, normalized provenance,
       and focused lock/binding/privacy/failure tests. Migrate the guarded

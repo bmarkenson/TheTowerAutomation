@@ -39,6 +39,32 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-07 recoverable superseded feature retirement
+
+- `c23fe67` splits feature retirement into integrated and explicitly
+  superseded dispositions. Integrated tips retain the ancestry proof and safe
+  `git branch -d` guard. A superseded local tip requires exact operator
+  approval, inspected ownership and content, durable replacement history, and
+  a verified annotated archive tag before its unlinked local branch may be
+  force-deleted. Forced worktree removal, recursive deletion, remote deletion,
+  protected refs, and deletion of the recovery tag remain outside that path.
+- The documentation-only candidate passed compilation, state-definition
+  validation, clickmap integrity with zero errors and the 44 established orphan
+  candidates, and all 1,777 tests in 328.73 seconds. It was promoted without
+  service or device action behind rollback tag
+  `production-before-20260807T222100Z-e7df147`.
+- The operator declared exact prototype tip
+  `d1c3dece79f43ae044e1730110298779e30a1fb2` superseded by deployed shared-
+  interface v2 tip `33a325b7b3792181b24f8d569135f5f12ac74c82` and approved its retirement.
+  Its worktree had no tracked or nonignored changes; ignored content was limited
+  to the development environment link, generated caches, empty scratch
+  directories, and one zero-byte test lock. No matching remote branch existed.
+- Annotated tag `archive/20260807-save-backed-perk-monitoring-d1c3dec` now
+  preserves the exact prototype tip. Git removed the worktree without force,
+  then deleted local branch `feature/save-backed-perk-monitoring`; `main`,
+  `develop`, the deployed v2 branch/worktree, rollback tags, and every other
+  feature worktree remained unchanged.
+
 ### 2026-08-07 operator-authorized bounded passive stream
 
 - `735aa91` makes an explicit operator instruction sufficient authority for one
