@@ -39,6 +39,45 @@ canonical document linked by an entry for current behavior.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-07 operator-authorized bounded passive stream
+
+- `735aa91` makes an explicit operator instruction sufficient authority for one
+  task-bounded passive stream after live preflight. The exact target,
+  no-control boundary, finite host and device lifetime, coexistence checks, and
+  cleanup are canonical in the
+  [passive-stream procedure](../operations/passive_stream.md). Routine and
+  unattended capture remain production-owned, and the passive viewer grants no
+  input, lease, navigation, or ADB connection-management authority.
+- The policy separates transport evidence instead of treating the unsuccessful
+  Android `screenrecord` experiment as proof against `scrcpy`. Retained action
+  logs also show that headless scrcpy became current in three July 13 startup
+  runs, including while frequent guarded production inputs continued.
+- After fresh live preflight at 2026-08-07 14:20 PDT, one `scrcpy 3.3.1` viewer
+  ran for 60 seconds against the exact production target with `--no-control`,
+  `--no-audio`, 15 FPS, and a 2 Mbps video limit. Production published multiple
+  newer complete 1080x1920 frames during and after the viewer; control-surface
+  ADB evidence remained connected with zero failures and no warning, and no
+  new capture or connection error appeared in the action log. The active battle
+  continued without worker input or navigation.
+- The operator directly observed the emulator-side FPS counter fall from its
+  approximately 55–59 FPS baseline to 45 FPS during the stream. That counter is
+  outside the captured Android framebuffer, so the production screenshots do
+  not retain it; the direct observation establishes a real roughly 18–24%
+  renderer impact rather than only expected 15-FPS viewer choppiness. The
+  follow-up mitigation benchmark is retained in the
+  [capture backlog](../backlog/state-and-detection.md#capture-and-action-architecture),
+  and the procedure now starts with a lower-resolution profile and records
+  viewer versus emulator impact separately. Optional x2 preparation caps a
+  faster battle for general inspection, while x1 is reserved for close
+  inspection; neither raises an already slower battle, and both remain
+  separately authorized, restored control changes.
+- Scrcpy reached its own time limit and exited successfully. The task-owned
+  host process and device-side scrcpy server were both absent afterward, and a
+  fresh complete production frame on the unchanged target confirmed cleanup.
+  This validates bounded passive scrcpy coexistence without a capture or ADB
+  failure for ordinary observation; it does not establish zero performance
+  cost or close the separate app-owned low-latency frame/action-source backlog.
+
 ### 2026-08-07 player-save acquisition and freshness consolidation deployment
 
 - The reviewed contract, acquisition foundation, boundary handoff, temporal-

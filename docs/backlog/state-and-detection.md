@@ -93,3 +93,10 @@ Completed and superseded detail remains in the
     competing recording processes.
   - Decide whether a post-input fresh-frame barrier belongs in the action
     layer while preserving source-screen guards and action ownership.
+- [ ] Reduce and characterize emulator FPS degradation from the bounded passive
+  scrcpy viewer. The first full-resolution 15-FPS/2-Mbps run reduced the
+  emulator-side counter from approximately 55–59 FPS to 45 FPS. Compare the
+  1280/15-FPS/2-Mbps low-load profile with only the minimum useful alternatives
+  and retain production capture cadence, ADB health, scrcpy `--print-fps`, and
+  host-performance evidence. Game speed x1 or x2 may be tested for readability
+  and render headroom, but is not a substitute for transport-load measurement.

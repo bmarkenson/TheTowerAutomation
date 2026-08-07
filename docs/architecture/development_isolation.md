@@ -224,7 +224,10 @@ Capture transports are evaluated separately. A failure or contention result
 from Android `screenrecord` is not evidence that a no-control `scrcpy` viewer
 also fails, and success from either transport does not authorize the other.
 The project keeps the smallest relevant live evidence and revises the supported
-procedure when current behavior disproves an assumption.
+procedure when current behavior disproves an assumption. Passive does not mean
+resource-free: a bounded viewer may impose an operator-accepted renderer cost
+without taking input authority, but that cost must be reported and reduced when
+it becomes material to the battle or production observation.
 
 ### Shared latest frame
 
