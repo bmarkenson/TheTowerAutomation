@@ -46,6 +46,11 @@ changes this model.
   [sandbox boundary](docs/sandbox_boundaries.md) and host-backed evidence.
 - Use bounded, exact-target ADB commands. Never use sandbox `adb connect`,
   `start-server`, or `kill-server` as an availability probe.
+- An explicit operator instruction may authorize one bounded on-demand passive
+  stream after live preflight. Follow
+  [`docs/operations/passive_stream.md`](docs/operations/passive_stream.md): use
+  the exact target, disable control, keep cleanup attached, and grant no input
+  or ADB connection-management authority.
 - Never Surrender a pre-existing or operator-owned battle for a test boundary.
   Exceptional owned-test and runtime-repair authority exists only under
   [`docs/live_action_authority.md`](docs/live_action_authority.md); ambiguity

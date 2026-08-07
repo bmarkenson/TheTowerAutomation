@@ -1381,7 +1381,11 @@ interactive lease are governed by the canonical
 remains the sole long-lived runtime and normal input owner. Cooperative workers
 may read or copy production artifacts and, after the live startup inspection,
 run bounded exact-target ADB reads or captures without an interactive lease.
-Connection management and continuous capture remain production-owned.
+Connection management and routine continuous capture remain production-owned.
+One explicitly operator-authorized, task-bounded no-control stream is the
+documented exception for passive observation; it follows the
+[passive-stream procedure](../operations/passive_stream.md) and grants no input
+authority.
 
 Interactive development now uses the existing control-surface/directive path,
 one cooperative expiring request, and the distinct suppressive
@@ -1407,7 +1411,8 @@ invalidation state; an action should make an O(1) freshness check immediately
 before input. Navigation, non-running evidence, pause, capture failure, and
 staleness invalidate the lease.
 
-This is a planned package, not authority to add a second competing
-`screenrecord` process or bypass current screenshot guards. Requirements and
-benchmarks live in
+This planned package is required for automation decisions, shared low-latency
+frame publication, or unattended capture ownership. A bounded passive viewer
+does not implement that package and may not bypass current screenshot or input
+guards. Requirements and benchmarks live in
 [`../backlog/state-and-detection.md`](../backlog/state-and-detection.md#capture-and-action-architecture).

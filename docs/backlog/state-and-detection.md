@@ -70,6 +70,9 @@ Completed and superseded detail remains in the
 
 - [ ] Build and validate an app-owned low-latency frame/state source for
   multi-frame decisions and short-lived action authorization.
+  A task-bounded, operator-authorized no-control viewer is a separate passive
+  observation facility and does not complete or substitute for this runtime
+  architecture.
   - Define sequence, capture-time, freshness, and post-input frame semantics.
   - Publish a thread-safe UI-state snapshot and short-lived `RUNNING` action
     lease. Immediately before a scheduled floating-gem tap, make an O(1)

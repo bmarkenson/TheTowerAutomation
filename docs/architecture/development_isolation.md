@@ -210,9 +210,21 @@ operational, not a confidentiality boundary.
 Bounded exact-target read operations such as `get-state`, screenshots, and
 non-mutating shell/file reads do not require an interactive lease. Workers may
 perform them directly after the required live inspection. Production remains
-responsible for ADB connection management and long-lived capture processes;
-workers do not run `adb connect`, start/kill the ADB server, or start a second
-continuous screenrecord pipeline merely to answer a read-only question.
+responsible for ADB connection management and routine or unattended long-lived
+capture processes. An explicit operator instruction may also authorize one
+task-bounded, worker-owned passive stream under the
+[passive-stream procedure](../operations/passive_stream.md). That exception
+must use the exact production target, disable every control channel, retain an
+attached lifetime and cleanup boundary, and stop on observed production-capture
+or ADB degradation. It grants no input, lease, or connection-management
+authority. Without that explicit authorization, workers do not start a second
+continuous capture pipeline merely to answer a read-only question.
+
+Capture transports are evaluated separately. A failure or contention result
+from Android `screenrecord` is not evidence that a no-control `scrcpy` viewer
+also fails, and success from either transport does not authorize the other.
+The project keeps the smallest relevant live evidence and revises the supported
+procedure when current behavior disproves an assumption.
 
 ### Shared latest frame
 

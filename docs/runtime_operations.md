@@ -11,6 +11,7 @@ load only the operation that matches the task.
 | Start, resume, or resolve a startup decision | [`operations/startup_gates.md`](operations/startup_gates.md) |
 | Attach, reload, switch ADB targets, or change Strategy | [`operations/managed_runtime.md`](operations/managed_runtime.md) |
 | Pause, change mode or game speed, replace a process, or recover a terminal run | [`operations/process_control.md`](operations/process_control.md) |
+| Start a bounded read-only live stream for operator or worker observation | [`operations/passive_stream.md`](operations/passive_stream.md) |
 | Hold automation for development or send one leased exact-target input | [`operations/interactive_development.md`](operations/interactive_development.md) |
 | Run the No Strategy observation profile | [`operations/no_strategy.md`](operations/no_strategy.md) |
 | Validate or passively observe an active Tournament | [`operations/tournament_validation.md`](operations/tournament_validation.md) |
@@ -45,6 +46,10 @@ Use [`operations/production_promotion.md`](operations/production_promotion.md).
 
 Use the exact-target checks in [`live_preflight.md`](live_preflight.md) and the
 ADB evidence rules in [`sandbox_boundaries.md`](sandbox_boundaries.md).
+
+### On-demand passive stream
+
+Use [`operations/passive_stream.md`](operations/passive_stream.md).
 
 ## Mandatory runtime inspection
 
