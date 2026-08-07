@@ -271,3 +271,27 @@ current runtime state.
   before changing paused manual-start continuity or on recurrence. Next:
   promote and observe one natural paused manual start complete its running
   baseline and No Strategy inventory; [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
+
+### Running attachment used Battle History and repeated save-backed configuration UI
+
+**Stable ID:** `ISSUE-2026-028` · **Lifecycle:** `repair_awaiting_confirmation`
+
+- A `save_first` running attachment with no baseline
+  opened Battle History and then revisited configuration sections whose exact
+  values were already available in the guarded save.
+- Load the [dossier](issues/open-2026.md#running-attachment-used-battle-history-and-repeated-save-backed-configuration-ui)
+  before changing attachment/save or No Strategy inventory routing. Next:
+  promote and confirm one save-only attachment plus UI only for unresolved
+  fields; [runtime backlog](backlog/runtime-and-validation.md#runtime-control).
+
+### Terminal development lease was replayed as an abnormal runtime change
+
+**Stable ID:** `ISSUE-2026-029` · **Lifecycle:** `repair_awaiting_confirmation`
+
+- A replacement process evaluated the former runtime
+  binding of an already released terminal lease and emitted a false abnormal
+  warning after the real release result had already been recorded.
+- Load the [dossier](issues/open-2026.md#terminal-development-lease-was-replayed-as-an-abnormal-runtime-change)
+  before changing lease replay or terminal logging. Next: promote and observe
+  one replacement preserve terminal state without a duplicate warning/result;
+  [runtime backlog](backlog/runtime-and-validation.md#runtime-control).

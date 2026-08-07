@@ -251,29 +251,38 @@ Home acquisition. UI and save fingerprints are compared only within the same
 source/mapping contract; legacy schema-1 scopes are conservatively recognized
 as UI-derived.
 
-At a replacement-process attachment already showing `RUNNING`, `save_first`
-now prefers a fresh tail over Battle History navigation when the persisted
-scope has either a compatible player-save baseline or a UI baseline retaining
-parseable Tier, Wave, and Battle Date. The shared guarded Android-Home
-serializer requires the exact runtime session, activity scope,
-lifecycle-owned active-battle state, and target/generation to survive two stable
-pre-background `RUNNING` frames, `KEYCODE_HOME`, two byte-identical save reads,
-launcher restoration, and two stable post-restore `RUNNING` frames. The
-fresh exact-version snapshot must contain an active-round identity. A
-same-source unchanged tail preserves the scope; one valid append or capacity
-rollover starts a conservative later-battle scope. A UI baseline may migrate
-only through independently normalized Tier/Wave/Battle Date. Its save date must
-be unambiguous .NET `Local` wall-clock evidence matching the UI at minute
-precision. Source fingerprints are never compared. Shared-field mismatch,
-UTC/Unspecified/LocalAmbiguous kind, timezone or parse ambiguity, and an
-insufficient retained UI identity use guarded UI after safe restoration, as do
-unsupported/decode/invalid-transition evidence. Process, scope, target,
-control, source, active-identity, or restoration ambiguity blocks all later
-input. Home `RESUME_BATTLE`, interrupted History, insufficient baselines,
-`force_ui`, and `comparison_audit` retain UI. This path neither uses the
-unmapped Force Cloud Save control nor grants authority to passive polling,
-terminal record construction, Strategy, trackers, or any battle-lifecycle
-input.
+At an attachment already showing `RUNNING`, `save_first` always uses a fresh
+guarded save and never opens Battle History UI. This includes a missing
+baseline, an old UI-derived baseline, and a replacement-process comparison.
+The shared guarded Android-Home serializer requires the exact runtime session,
+activity scope, lifecycle-owned active-battle state, and target/generation to
+survive two stable pre-background `RUNNING` frames, `KEYCODE_HOME`, two
+byte-identical save reads, launcher restoration, and two stable post-restore
+`RUNNING` frames. The fresh exact-version snapshot must contain an active-round
+identity. With no prior identity, its newest completed tail becomes the
+baseline. A same-source unchanged tail preserves the scope; a changed tail
+starts a later scope. A UI baseline may migrate only through independently
+normalized Tier/Wave/Battle Date, whose save date must be unambiguous .NET
+`Local` wall-clock evidence matching at minute precision. An explicit mismatch
+proves a later scope; an ambiguous or insufficient cross-source comparison
+starts a clearly marked conservative scope from the fresh save. Source
+fingerprints are never compared across mappings. An unusable save waits and
+retries without UI navigation. Process, scope, target, control, source,
+active-identity, or restoration ambiguity blocks all later input.
+
+The same accepted active-attachment snapshot projects complete normalized
+checks from the exact mapping's validation allowlist. No Strategy consumes
+those values as source-tagged observations, not as repair or action authority,
+and visits only fields that remain unresolved. Attack Dissonance's passive
+badge resolves its inaccessible Damage Slider without probing the disabled
+menu. Save-resolved Workshop, Free Upgrade-lock, Cards, and Perk configuration
+also remove their post-run Home detail traversal; finalization still requires
+verified Home. No raw save, private field, incomplete check, or unvalidated
+candidate value enters the observation. Home `RESUME_BATTLE`, interrupted
+History, `force_ui`, and `comparison_audit` retain their declared UI behavior.
+This path neither uses the unmapped Force Cloud Save control nor grants
+authority to passive polling, terminal record construction, Strategy,
+trackers, or any battle-lifecycle input.
 
 Snapshot schema 2 contains the repository-local save-first runtime foundation;
 its runtime projection is schema 2. For the exact version-1073 mapping it

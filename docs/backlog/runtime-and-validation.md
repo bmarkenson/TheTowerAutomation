@@ -350,12 +350,23 @@ stages:
 
 ## Runtime control
 
-- [ ] Promote and live-confirm the paused Home manual-start continuity repair
-  from `8cf5548`: from verified `NEW_BATTLE`, keep Pause through the manual
-  start, require passive `RUNNING`, then Resume and confirm one running-source
-  Battle History baseline releases No Strategy inventory without a retry loop
-  or any input while Paused. Track the original failure in
-  [ISSUE-2026-027](../issues/open-2026.md#paused-home-continuity-did-not-follow-a-manually-started-battle).
+- [ ] Promote and live-confirm the paused Home manual-start attachment repairs
+  from `8cf5548` and `cde691b`: from verified `NEW_BATTLE`, keep Pause through
+  the manual start, require passive `RUNNING`, then Resume. Confirm one guarded
+  save records or validates the last completed battle without Battle History
+  UI, releases No Strategy without a retry loop, and opens only genuinely
+  unresolved configuration sections. Require zero input while Paused and no
+  Attack-menu probe under Dissonance. Track
+  [ISSUE-2026-027](../issues/open-2026.md#paused-home-continuity-did-not-follow-a-manually-started-battle)
+  and
+  [ISSUE-2026-028](../issues/open-2026.md#running-attachment-used-battle-history-and-repeated-save-backed-configuration-ui).
+- [ ] Promote and confirm terminal development-lease replay from `cde691b`:
+  after one normally released lease remains in the durable control directive,
+  replace the runtime and require the original release `RESULT` to remain the
+  only outcome. No false abnormal warning, duplicate result, or terminal-state
+  rewrite may occur; a genuinely active old-runtime lease must retain the
+  abnormal termination path. Track
+  [ISSUE-2026-029](../issues/open-2026.md#terminal-development-lease-was-replayed-as-an-abnormal-runtime-change).
 - [ ] Close an owned exclusive-validation `cleanup` receipt when the same
   runtime has already proved that its validation battle reached Game Over and
   later observes `RUNNING` before verified Home cleanup. Fail closed, release
