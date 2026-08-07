@@ -435,7 +435,9 @@ stages:
     observation, reconcile the same/new battle boundary and relevant
     configuration, and resume only by explicit operator intent. Unexpected
     manual activity while automation is enabled must yield through the existing
-    manual-activity safety outcome rather than competing for input.
+    manual-activity safety outcome rather than competing for input. Manual run
+    termination must use the report-disposition outcome in the agreed sequence
+    below without turning that declaration into Surrender authority.
   - Audit every path that claims to read a *new* or *current* save. Such a path
     must invoke the approved serialization/refresh operation, bind stable reads
     to the exact target and battle/session evidence, and report when Pause or
@@ -550,6 +552,22 @@ evidence.
      newest-record page.
 9. [ ] Define and implement report disposition for short, interrupted,
    configuration-repair, surrendered, and manually aborted battles.
+   - Prefer evidence-based inference. A causally bound terminal save whose
+     mapped `killedBy` value is `Surrender` identifies a surrendered run;
+     runtime-owned validation or repair receipts must distinguish their own
+     Surrenders from an operator action. Manual-control state or an unexpected
+     terminal screen alone is not sufficient evidence of Surrender.
+   - Offer an optional exact-run declaration such as **I ended this run
+     manually — exclude it from analytics** before or after the terminal
+     boundary. It records operator intent and may satisfy otherwise ambiguous
+     attribution, but sends no game input, grants no Surrender authority, is
+     consumed by only the bound activity/run, and fails closed rather than
+     applying to a later battle.
+   - When surrender or manual-abort disposition is known before full terminal
+     collection, require the fresh save/boundary evidence needed to identify
+     the completed run, retain a minimal durable record and provenance, and
+     skip stats UI plus optional enrichment. A later declaration reclassifies
+     only the exact completed record; it never deletes evidence.
    - Classify these outcomes first and exclude non-representative runs from the
      normal history and analytics by default without erasing evidence.
    - If operator use still requires permanent discard, expose only a confirmed,
